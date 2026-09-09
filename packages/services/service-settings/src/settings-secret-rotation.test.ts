@@ -9,8 +9,13 @@
  * (`packages/platform-objects/src/system/sys-setting.object.ts`), and the
  * engine strips author-declared read-only columns from a **non-system**
  * caller's UPDATE payload (`stripReadonlyFields`, gated on
- * `if (!opCtx.context?.isSystem)` in `packages/objectql/src/engine.ts`). The
- * INSERT path is deliberately exempt (#3413).
+ * `if (!opCtx.context?.isSystem)` in `packages/objectql/src/engine.ts`). On
+ * THIS object the INSERT path is outside that strip — not by the 2026-07-24
+ * "INSERT exempt" row (superseded by the 2026-09-03 ruling, #14147:
+ * `engine.insert` runs the same strip for a non-system caller) but because
+ * `sys_setting` is `sys_`-prefixed and `managedBy: 'engine-owned'`, which
+ * `staticReadonlyInsertSubject` leaves to the platform object's own guards
+ * while the UPDATE path applies no such carve-out (#15719).
  *
  * `SettingsService` wrote its rows through a plain, un-elevated
  * `engine.update`, so:
@@ -186,9 +191,14 @@ function makeMemoryDriver() {
  * That single omission is the whole hazard — `sys_setting.value_enc` is
  * declared `readonly: true` and the engine strips author-declared read-only
  * columns from a NON-system caller's UPDATE (`stripReadonlyFields`, gated on
- * `context.isSystem`), while the INSERT path is exempt (#3413). It is a
- * documented extension point, so the population that reaches it is real:
- * third-party adapter authors, who have no other discovery path.
+ * `context.isSystem`), while on THIS object the INSERT path is outside that
+ * strip — not by the superseded #3413 exemption (the 2026-09-03 ruling,
+ * #14147, put the same strip inside `engine.insert` for every non-system
+ * caller) but because `sys_setting` is `sys_`-prefixed and
+ * `managedBy: 'engine-owned'`, which `staticReadonlyInsertSubject` leaves to
+ * the platform object's own guards (#15719). It is a documented extension
+ * point, so the population that reaches it is real: third-party adapter
+ * authors, who have no other discovery path.
  */
 function wrapEngineDroppingContext(engine: any): SettingsEngine {
   const real = wrapEngineAsSettingsEngine(engine);
