@@ -18,7 +18,7 @@ SemVer 2.0.0 defines prerelease and build metadata as **parts of** a semantic ve
 
 **`@objectstack/spec` — a WIDENING of a published contract.** `Plugin.json`'s `pattern` in the shipped `json-schema/` tree changes from `^\d+\.\d+\.\d+$` to `^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$`. This is a strict superset — same three-segment core, two **optional** suffix groups — so every string that validated before still validates. A tool that mirrors this schema to validate plugin manifests should widen with it; one that does not will merely keep refusing prerelease versions the platform accepts.
 
-**`@objectstack/core` — `version` joins the enforced set, which NARROWS `LiteKernel`.** `assertPluginContract` filtered `version` issues out while the two spellings disagreed; that stopgap is gone. The full enforced set is now **NINE** keys, each refused with the offending key named in the message:
+**`@objectstack/core` — `version` joins the enforced set, which NARROWS `LiteKernel`.** **BREAKING** accept-set narrowing on a published runtime entry point, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). **A plugin object `LiteKernel` accepted before can be refused now.** `assertPluginContract` filtered `version` issues out while the two spellings disagreed; that stopgap is gone. The full enforced set is now **NINE** keys, each refused with the offending key named in the message:
 
 - **`id`** — a non-string, or the empty string.
 - **`type`** — any value outside the closed set `standard`, `ui`, `driver`, `server`, `app`, `theme`, `agent`, `objectql`.

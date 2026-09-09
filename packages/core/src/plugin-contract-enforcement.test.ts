@@ -521,7 +521,11 @@ describe('G — the SAME contract on LiteKernel.use() (#16721)', () => {
         expect((err as Error & { code?: string }).code).toBe('PLUGIN_CONTRACT_VIOLATION');
     });
 
-    it('a version-less plugin loads — `version` is not among the eight keys', () => {
+    it('a version-less plugin loads — `version` is among the nine keys, but it is `.optional()`', () => {
+        // Absence is not a violation. `version` became the ninth ENFORCED key at
+        // #16365, which judges the value an author writes; `.optional()` is what
+        // admits writing none. ⇒ this case survived that change unaltered, and
+        // says why rather than counting keys.
         const kernel = makeLiteKernel();
         const versionless: Plugin = { name: 'com.example.lite-versionless', init: () => {} };
         expect(kernel.use(versionless)).toBe(kernel);
