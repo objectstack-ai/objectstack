@@ -430,7 +430,16 @@ export class DatabaseLoader implements MetadataLoader {
       // nothing to compare against: a `data.id` spread over the id parameter
       // would retarget the write to a row no caller resolved. The separate
       // `id` parameter is the row address — do not let a payload outrank it.
-      return this.engine.update(table, { ...data, id });
+      // [#16231] `IDataEngine.update` now declares its dispatch union
+      // (`record | affected-count | null`). This call passes NO `where`, so
+      // the payload id is the only address the dispatch ladder sees and it
+      // resolves `by-id` — the limb that answers a record or `null`. The
+      // `number` limb is the predicate path (`driver.updateMany`'s affected
+      // count, #4639), which this call cannot reach; it is narrowed away here
+      // rather than cast, so a future dispatch change surfaces at THIS line
+      // instead of as a wrong-shaped row at the caller.
+      const updated = await this.engine.update(table, { ...data, id });
+      return typeof updated === 'number' ? null : updated;
     }
     return this.driver!.update(table, id, data);
   }
