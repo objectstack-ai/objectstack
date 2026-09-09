@@ -150,7 +150,7 @@ describe('[#16657] operatorFacingErrorText — the fallback channel when no caus
         expect(operatorFacingErrorText({})).toBe('[object Object]');
     });
 
-    it('answers prose for a declared envelope whose own message is empty', () => {
+    it('falls back to the `name` of a declared envelope whose own message is empty', () => {
         const empty = rawStatementFault(undefined, '');
         expect(operatorFacingErrorText(empty)).toBe('Error');
     });
