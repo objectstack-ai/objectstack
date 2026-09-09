@@ -103,6 +103,8 @@ function binding(timeRelative: unknown, overrides: Partial<FlowTriggerBinding> =
         flowName: 'renewal_alert',
         object: 'contracts',
         config: { timeRelative },
+        // [#16659] see the schedule trigger's fixture note.
+        organization: 'org_2mtx1w9d0k4bqf7v',
         ...overrides,
     };
 }

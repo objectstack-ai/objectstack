@@ -47,6 +47,9 @@ function binding(overrides: Partial<FlowTriggerBinding> = {}): FlowTriggerBindin
     return {
         flowName: 'nightly_health_sweep',
         schedule: { type: 'cron', expression: '0 1 * * *', timezone: 'UTC' },
+        // [#16659] A time-triggered binding carries its acting organization;
+        // a binding without one is refused, which is its own suite below.
+        organization: 'org_2mtx1w9d0k4bqf7v',
         ...overrides,
     };
 }

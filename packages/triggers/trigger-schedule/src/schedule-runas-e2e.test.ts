@@ -58,7 +58,10 @@ function scheduledDataFlow(name: string, runAs?: 'system' | 'user') {
     type: 'schedule',
     ...(runAs ? { runAs } : {}),
     nodes: [
-      { id: 'start', type: 'start', label: 'Start', config: { schedule: { type: 'interval', intervalMs: 1000 } } },
+      // [#16659] The acting organization a time-triggered flow declares. The
+      // engine lifts it onto the binding and the trigger threads it onto the
+      // run as `tenantId`; a flow without it is refused at bind.
+      { id: 'start', type: 'start', label: 'Start', config: { schedule: { type: 'interval', intervalMs: 1000 }, organization: 'org_2mtx1w9d0k4bqf7v' } },
       { id: 'mk', type: 'create_record', label: 'Create', config: { objectName: 'thing', fields: { a: 1 } } },
       { id: 'end', type: 'end', label: 'End' },
     ],
