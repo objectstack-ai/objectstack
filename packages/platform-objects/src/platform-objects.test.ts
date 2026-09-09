@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   SysAccount,
@@ -272,6 +274,50 @@ describe('@objectstack/platform-objects', () => {
       for (const name of survivors) {
         expect(actionNames, `${name} must survive the set_user_role retirement`).toContain(name);
       }
+    });
+
+    it('#15188 — the retired action survives only as HISTORY; no live sys_user prose points at it', () => {
+      // Two opposite dispositions inside one file, and the trap is treating
+      // them as one batch. The #9968 removal note is a TOMBSTONE written in
+      // the PAST tense ("…WAS a supported, one-user-at-a-time…"): it narrates
+      // what was removed and is true, so "correcting" it turns a true
+      // sentence false. The `role` field's description and its `readonly`
+      // comment were in the PRESENT tense, telling an operator to press a
+      // button retired in #9968 — those are the stale ones, and the field
+      // description surfaces in the admin UI and the i18n bundles.
+      //
+      // Pinned as OCCURRENCE COUNTS over the source text so both directions
+      // red: a search-and-replace that sweeps the history sentence away
+      // drops a count to 0, and re-introducing the retired action's name in
+      // live prose pushes one past 1.
+      const source = readFileSync(resolve(__dirname, 'identity/sys-user.object.ts'), 'utf8');
+
+      // History — must still be there, verbatim and past-tense.
+      expect(
+        source.split('`set_user_role` (target: /api/v1/auth/admin/set-role) retired').length - 1,
+        'the #9968 removal note must survive as a tombstone',
+      ).toBe(1);
+      expect(
+        source.split('was a supported, one-user-at-a-time').length - 1,
+        'the past-tense history sentence inside the removal note must survive unchanged',
+      ).toBe(1);
+
+      // Live prose — the retired names appear ONLY inside that removal note.
+      expect(
+        source.split('Set Platform Role').length - 1,
+        '"Set Platform Role" may appear only in the removal note',
+      ).toBe(1);
+      expect(
+        source.split('set_user_role').length - 1,
+        '`set_user_role` may appear only in the removal note',
+      ).toBe(1);
+
+      // …and the field points at the route that exists (ADR-0068 D2).
+      const role = SysUser.fields.role as { description?: unknown };
+      expect(typeof role.description).toBe('string');
+      expect(role.description).not.toContain('Set Platform Role');
+      expect(role.description).toContain('sys_user_permission_set');
+      expect(role.description).toContain('admin_full_access');
     });
   });
 
