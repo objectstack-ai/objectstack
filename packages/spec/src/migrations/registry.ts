@@ -5402,7 +5402,15 @@ const step18: MigrationStep = {
     'loader — so `cache: { enabled: false }` switched nothing off. All three are retiredKey ' +
     'tombstones registered in RETIRED_KEYS_BY_MAJOR[18] with one D3 semantic entry and no D2 ' +
     'conversion (a manager config is no stack collection member); the rename is folded into ' +
-    'the removal, so `cache.ttl` now prescribes deletion rather than a hop to a retired key.',
+    'the removal, so `cache.ttl` now prescribes deletion rather than a hop to a retired key. ' +
+    'It also retires the seven cron-typed positions nothing evaluated (#16320, the #15954 ' +
+    'ruling — option A per family, ADR-0049): the two export-schedule crons, ' +
+    '`ScheduleState.cronExpression`, `DataSyncConfig.schedule`, `CacheWarmup.schedule` and ' +
+    'the two disaster-recovery crons were parsed into the cron envelope and read by nothing ' +
+    '(the D7 ledger row `cron-declared-unwired`). All seven are retiredKey tombstones in ' +
+    'RETIRED_KEYS_BY_MAJOR[18]; only the connector one converts (`connector-sync-schedule-removed`), ' +
+    'because `stack.connectors[]` is the one carrier a manifest reaches — the other four ' +
+    'families take a D3 semantic entry each and no `os migrate meta` sentence.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5427,6 +5435,7 @@ const step18: MigrationStep = {
     'connector-health-and-trigger-durations-unit-in-key',
     'memory-persistence-auto-save-interval-to-ms',
     'turso-config-timeout-to-timeout-ms',
+    'connector-sync-schedule-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -5920,6 +5929,32 @@ const step18: MigrationStep = {
         + 'this entry. No authored metadata document ever embedded a branded '
         + 'value, so no source rewrite ships and `objectstack migrate meta` has '
         + 'nothing to visit.',
+    },
+    {
+      id: 'cache-warmup-schedule-retired',
+      surface: 'cache warmup cron: `CacheWarmup.schedule` (`system/cache.zod.ts`)',
+      replacement:
+        'nothing to re-declare — delete the key. No cache-warmup engine exists on the platform, so '
+        + 'there is no live mechanism to declare a warmup cadence to. The one cron slot the platform '
+        + 'evaluates is `Job.schedule.expression` (`system/job.zod.ts`): a warmup on a cadence is a '
+        + 'job whose handler you write. The `strategy` enum keeps its `scheduled` member — a value, '
+        + 'not a position the ruling names, and exactly as inert before',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-06 on #15954 (director decision '
+        + 'batch #56, option A — retire — per family), executed by #16320. The key was parsed into '
+        + 'the cron envelope and read by NOTHING: `CacheWarmupSchema` has no consumer outside '
+        + '`packages/spec` (the ADR-0058 D7 ledger row `cron-declared-unwired` recorded it '
+        + '`unevaluated`), so `strategy: \'scheduled\'` plus a cron warmed nothing. Why D3 semantic '
+        + 'and not a D2 conversion: a cache configuration is plugin TS configuration, never a stack '
+        + 'collection member or a `sys_metadata` row, so a conversion would be a transform with no '
+        + 'seam that ever runs (the `kernel/MetadataPluginConfig:additionalTypes` precedent). The '
+        + 'prescription therefore carries no `os migrate meta` sentence.',
+      acceptanceCriteria:
+        'No `CacheWarmup` literal — standalone or as `DistributedCacheConfig.warmup` — carries '
+        + '`schedule`. TypeScript authors get the refusal at compile time (the key is typed '
+        + '`never`); a value reaching the parse is refused with the prescription (`invalid_type` '
+        + 'at path `schedule`). ⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified '
+        + 'as such: nothing ever read the key, so removing it removes no behaviour.',
     },
     {
       id: 'cbp-master-detail-required-forced',
@@ -6689,6 +6724,35 @@ const step18: MigrationStep = {
         + 'exactly as `interval` did — the value and its unit are unchanged, only the key name moves.',
     },
     {
+      id: 'disaster-recovery-schedules-retired',
+      surface:
+        'backup / DR-testing cron positions: `BackupConfig.schedule` / '
+        + '`DisasterRecoveryPlan.testing.schedule` (`system/disaster-recovery.zod.ts`)',
+      replacement:
+        'nothing to re-declare — delete the keys. No backup engine and no DR-test runner exist on '
+        + 'the platform, so there is no live mechanism to declare a backup or test cadence to. The '
+        + 'one cron slot the platform evaluates is `Job.schedule.expression` (`system/job.zod.ts`): '
+        + 'a backup or DR test on a cadence is a job whose handler you write',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-06 on #15954 (director decision '
+        + 'batch #56, option A — retire — per family), executed by #16320. Both positions were '
+        + 'parsed into the cron envelope and read by NOTHING: neither `BackupConfigSchema` nor '
+        + '`DisasterRecoveryPlanSchema` has a consumer outside `packages/spec` (the ADR-0058 D7 '
+        + 'ledger row `cron-declared-unwired` recorded both `unevaluated`), so an operator who '
+        + 'wrote `schedule: \'0 2 * * *\'` held a nightly backup the platform never took. Why D3 '
+        + 'semantic and not a D2 conversion: a disaster-recovery plan is operator configuration, '
+        + 'never a stack collection member or a `sys_metadata` row, so a conversion would be a '
+        + 'transform with no seam that ever runs (the `kernel/MetadataPluginConfig:additionalTypes` '
+        + 'precedent). The prescriptions therefore carry no `os migrate meta` sentence.',
+      acceptanceCriteria:
+        'No `BackupConfig` literal — standalone or as `DisasterRecoveryPlan.backup` — carries '
+        + '`schedule`, and no `DisasterRecoveryPlan.testing` block does. TypeScript authors get the '
+        + 'refusal at compile time (each key is typed `never`); a value reaching the parse is '
+        + 'refused with the prescription (`invalid_type` at path `schedule` / `testing.schedule`). '
+        + '⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified as such: nothing '
+        + 'ever read the keys, so removing them removes no behaviour.',
+    },
+    {
       id: 'driver-options-timeout-to-timeout-ms',
       surface: '`DriverOptions.timeout` (data/driver.zod.ts) — the per-call options argument of every `IDataDriver` method',
       replacement: '`DriverOptions.timeoutMs` (milliseconds) — rename the key; the value is unchanged',
@@ -7267,6 +7331,44 @@ const step18: MigrationStep = {
         + 'no `branch` key; treat its `iteration` under `parallel-branch` as the '
         + 'legacy branch index only when the record predates the engine build that '
         + 'writes `branch`.',
+    },
+    {
+      id: 'export-schedule-cron-retired',
+      surface:
+        'export-schedule cron positions: `ScheduledExport.schedule.cronExpression` / '
+        + '`ScheduleExportRequest.schedule.cronExpression` (`api/export.zod.ts`)',
+      replacement:
+        'nothing to re-declare — delete the key. No export scheduler exists on the platform: '
+        + 'rest-server serves no `/api/v1/data/export` route, `IExportService` has no provider '
+        + 'binding, and nothing ever read the cron, so there is no live mechanism to declare an '
+        + 'export cadence to. The one cron slot the platform evaluates is `Job.schedule.expression` '
+        + '(`system/job.zod.ts`, evaluated by `croner` through service-job): a recurring export is a '
+        + 'job whose handler performs the export. The `schedule` block and its `timezone` stay on '
+        + 'both schemas — the ruling retires the cron position, not the block',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-06 on #15954 (director decision '
+        + 'batch #56, option A — retire — per family), executed by #16320. Two positions in the '
+        + 'declared export-job API contract carried a `CronExpressionInputSchema` slot that the parse '
+        + 'normalized into the `{ dialect: \'cron\', source }` envelope and NOTHING read: the whole '
+        + '`ExportJobApiContracts` family has zero consumers, rest-server serves no '
+        + '`/api/v1/data/export` route, and `IExportService` has no provider — so '
+        + '`POST /api/v1/data/export/schedules` is a declared contract nothing implements, and an '
+        + 'author who wrote `cronExpression: \'0 6 * * MON\'` reasonably expected a weekly export '
+        + 'that never ran (the ADR-0058 D7 ledger row `cron-declared-unwired` recorded exactly '
+        + 'this, `unevaluated`). Why D3 semantic and not a D2 conversion: the chain walks a '
+        + 'normalized STACK and `applyConversionsToStoredItem` maps a metadata type onto one of its '
+        + 'collections; an export schedule is an API request/response body and is neither, so a '
+        + 'conversion would be a transform with no seam that ever runs (the '
+        + '`kernel/MetadataPluginConfig:additionalTypes` precedent). The prescriptions therefore '
+        + 'carry no `os migrate meta` sentence.',
+      acceptanceCriteria:
+        'No `ScheduledExport` or `ScheduleExportRequest` literal carries `schedule.cronExpression`. '
+        + 'TypeScript authors get the refusal at compile time (the key is typed `never`); a value '
+        + 'reaching the parse is refused with the prescription (`invalid_type` at path '
+        + '`schedule.cronExpression`). `schedule.timezone` still parses and still defaults to '
+        + '`UTC`. ⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified as such: '
+        + 'nothing ever read the keys, so removing them removes no behaviour — no export ran on a '
+        + 'schedule before and none runs after.',
     },
     {
       id: 'field-master-detail-set-null-refused',
@@ -9060,6 +9162,36 @@ const step18: MigrationStep = {
         + '`@objectstack/spec/api` (TS2305 after upgrade).',
     },
     {
+      id: 'schedule-state-cron-expression-retired',
+      surface: 'flow schedule state cron: `ScheduleState.cronExpression` (`automation/execution.zod.ts`)',
+      replacement:
+        'nothing to re-declare — delete the key. A scheduled flow declares its cadence on the '
+        + 'flow\'s start node (`config.schedule`), which `trigger-schedule/schedule-trigger.ts` '
+        + '`normalizeSchedule` reads; `ScheduleState` never fed that path. The one cron slot the '
+        + 'platform evaluates is `Job.schedule.expression` (`system/job.zod.ts`)',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-06 on #15954 (director decision '
+        + 'batch #56, option A — retire — per family), executed by #16320. The schema\'s REQUIRED '
+        + 'cron was parsed into the envelope and read by NOTHING: `ScheduleStateSchema` has no '
+        + 'consumer outside `packages/spec`, and the schedule trigger that does run reads a flow '
+        + 'start node\'s `config.schedule` — a different shape this key never reached (the ADR-0058 '
+        + 'D7 ledger row `cron-declared-unwired` recorded it `unevaluated`). Because a '
+        + '`retiredKey()` accepts only absence, the requiredness leaves with the key: `timezone`, '
+        + '`status` and `nextRunAt` now describe a cadence the row no longer declares, and they '
+        + 'stay because the ruling retires the cron position, not the def. Why D3 semantic and not '
+        + 'a D2 conversion: runtime schedule state is not a stack collection member and no '
+        + 'metadata type, so a conversion would be a transform with no seam that ever runs (the '
+        + '`kernel/MetadataPluginConfig:additionalTypes` precedent). The prescription therefore '
+        + 'carries no `os migrate meta` sentence.',
+      acceptanceCriteria:
+        'No `ScheduleState` literal carries `cronExpression`, and none is REQUIRED to: a state '
+        + 'with `id`, `flowName` and `createdAt` alone parses. TypeScript authors get the refusal '
+        + 'at compile time (the key is typed `never`); a value reaching the parse is refused with '
+        + 'the prescription (`invalid_type` at path `cronExpression`). ⚠️ Runtime behaviour is '
+        + 'deliberately UNCHANGED and must be verified as such: nothing ever read the key, so '
+        + 'removing it removes no behaviour.',
+    },
+    {
       id: 'scim-provider-object-retired',
       surface:
         'the `sys_scim_provider` platform object (`SysScimProvider` in '
@@ -10774,6 +10906,51 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // advertises. Its three ledger child rows collapse into the one `overrides`
     // row. Closes #14365's question about `overrides.*.operations` — no record left.
     'api/RouteGenerationConfig:overrides',
+    // #16320 — the export-schedule family's second position,
+    // `ScheduleExportRequest.schedule.cronExpression`: the same cron slot on the
+    // request body of `POST /api/v1/data/export/schedules`, which no server route
+    // implements. Same reading, same route (a `retiredKey()` tombstone on a
+    // non-strict `z.object`, ADR-0104), same major, same absence of a D2
+    // conversion (an API request body is not a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` precedent), same nested
+    // spelling (no authorable-surface row of its own; `api/ScheduleExportRequest:schedule`
+    // is the row). See `18.api__ScheduledExport__schedule.cronExpression.ts` for
+    // the retirement record.
+    // D3 semantic entry: `export-schedule-cron-retired`.
+    'api/ScheduleExportRequest:schedule.cronExpression',
+    // #16320 — ADR-0049 enforce-or-remove on the seven cron-typed positions nothing
+    // reads (#15954 ruling, director decision batch #56, maintainer 「其他同意」,
+    // 2026-09-06: option A — retire — per family). Export-schedule family, first
+    // of two positions: `ScheduledExport.schedule.cronExpression`. Declared, parsed
+    // into the `{ dialect: 'cron', source }` envelope and read by NOTHING — the
+    // whole `ExportJobApiContracts` family has zero consumers, rest-server serves
+    // no `/api/v1/data/export` route, and `IExportService` has no provider binding
+    // (its own header records that), so `POST /api/v1/data/export/schedules` is a
+    // declared contract nothing implements and the cron inside it never fired.
+    // Tombstoned with `retiredKey()`: the schema is a non-strict `z.object`, so a
+    // bare deletion would be a silent strip (ADR-0104).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and `applyConversionsToStoredItem` maps a metadata
+    // type onto one of its collections; an export schedule is an API body and is
+    // neither, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription therefore carries no `os migrate meta` sentence (it
+    // must be true of the tool) and reaches authors through the tombstone (`tsc` +
+    // the parse) and the D3 semantic entry named below.
+    //
+    // A NESTED site: the authorable-surface ratchet walks top-level def
+    // properties only (`api/ScheduledExport:schedule` is the row), so no
+    // `[RETIRED]` row exists for the cron itself and gate (b) of
+    // `build-schemas.ts` neither demands nor refuses this entry — it is here for
+    // the spec-changes / upgrade-guide projection, spelled the way
+    // `api/BatchEndpointsConfig:operations.upsertMany` is.
+    // D3 semantic entry: `export-schedule-cron-retired`.
+    'api/ScheduledExport:schedule.cronExpression',
     // #14788 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-03, option
     // D). `SessionUserSchema.language` (`api/auth.zod.ts`) was declared with a
     // permanent default of `'en'` and described as "Preferred language", and had
@@ -10858,6 +11035,27 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // construction configuration, never a stored row; the semantic entry
     // `websocket-durations-unit-in-key` carries the prescription.
     'api/WebSocketServerConfig:heartbeatInterval',
+    // #16320 — ADR-0049 enforce-or-remove on the seven cron-typed positions nothing
+    // reads (#15954 ruling, decision batch #56, 2026-09-06: option A — retire — per
+    // family). Automation family: `ScheduleState.cronExpression`, the schema's
+    // REQUIRED cron, read by NOTHING — `ScheduleStateSchema` has no consumer outside
+    // `packages/spec`, and the schedule trigger that does run reads a flow start
+    // node's `config.schedule` through `trigger-schedule/schedule-trigger.ts`
+    // `normalizeSchedule`, a different shape this key never reached. Tombstoned
+    // with `retiredKey()` (non-strict `z.object`, ADR-0104); the requiredness
+    // leaves with the key, since a tombstone accepts only absence.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`: runtime schedule
+    // state is not a stack collection member and `scheduleState` is no metadata
+    // type, so a MetadataConversion would be a transform with no seam that ever
+    // runs (the `kernel/MetadataPluginConfig:additionalTypes` precedent). No
+    // `os migrate meta` sentence, for the same reason.
+    // D3 semantic entry: `schedule-state-cron-expression-retired`.
+    'automation/ScheduleState:cronExpression',
     // #15680 (stack card 5/6 of #14478) — ruling B, and the one key in this card
     // that the gate did NOT list. It is here because it is not a second key: the
     // `auto` persistence arm resolves to the same Node.js file adapter as the
@@ -11056,6 +11254,41 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // by it). The rename does not change that; it makes the declaration honest
     // about its unit for whoever implements the loop.
     'integration/ConnectorTrigger:interval',
+    // #16320 — ADR-0049 enforce-or-remove on the seven cron-typed positions nothing
+    // reads (#15954 ruling, decision batch #56, 2026-09-06: option A — retire — per
+    // family). Connector family: `DataSyncConfig.schedule`, the cron slot on
+    // connector-attached sync (`ConnectorSchema.syncConfig`). Declared, parsed into
+    // the cron envelope and read by NOTHING — `syncConfig` has no reader outside
+    // `packages/spec`, no engine schedules a connector sync, and
+    // `@objectstack/formula`'s cronEngine has zero consumers outside its package.
+    // Tombstoned with `retiredKey()` (non-strict `z.object`, ADR-0104); the
+    // tombstone reaches every carrier — `Connector.syncConfig`,
+    // `DeclarativeConnectorEntry` (`stack.connectors[]`) and the `/meta/connector`
+    // door — through the one `DataSyncConfigSchema` they all nest.
+    //
+    // THE ONE POSITION OF THE SEVEN A STACK MANIFEST REACHES (`stack.zod.ts`
+    // `connectors: z.array(DeclarativeConnectorEntrySchema)` → `syncConfig`), so
+    // unlike its six siblings this family takes the `connector-error-mapping-removed`
+    // shape: a D2 conversion, `connector-sync-schedule-removed` (one strip per
+    // `connectors[]` entry that authored the key, `retiredFromLoadPath`), wired
+    // into the step-18 chain, and the house `os migrate meta --from 17` sentence
+    // on the prescription — which must be true of the tool, and here is. No D3
+    // semantic entry: the strip is fully mechanical, and the chain's `semantic`
+    // list is the residue D2 cannot express.
+    //
+    // Measured author population (the only family whose entry owes one, since it
+    // is the only stack-collection member): zero in-repo authors — `examples/**`,
+    // `skills/**`, `content/docs/**` (generated references excluded) and every
+    // package outside `packages/spec` swept for `syncConfig` + `schedule`, with the
+    // declaring file lighting the control; objectui at the pinned sha
+    // `53ded82bf7a4` has no `syncConfig.schedule` (its `syncConfig` hits are the
+    // react offline hook's own key, `ui/offline.zod.ts`). Out-of-repo stacks are
+    // NOT MEASURABLE from this repo and are not claimed zero.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    'integration/DataSyncConfig:schedule',
     // #14676 — the same tombstone seen through the second carrier.
     // `DeclarativeConnectorEntrySchema` is `ConnectorSchema.superRefine(...)`, so the
     // `errorMapping` tombstone on the base is inherited by the shape that
@@ -11955,6 +12188,25 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // D2 conversion: not a stack collection member, not a stored row.
     // See `system-object-storage-durations-unit-in-key`.
     'system/AccessControlConfig:maxAge',
+    // #16320 — ADR-0049 enforce-or-remove on the seven cron-typed positions nothing
+    // reads (#15954 ruling, decision batch #56, 2026-09-06: option A — retire — per
+    // family). Backup / DR-testing family, first of two positions:
+    // `BackupConfig.schedule`. Declared, parsed into the cron envelope and read by
+    // NOTHING — `BackupConfigSchema` has no consumer outside `packages/spec`, so
+    // no automated backup ever ran on it. Tombstoned with `retiredKey()`
+    // (non-strict `z.object`, ADR-0104).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`: a disaster-recovery
+    // plan is operator configuration, never a stack collection member or a
+    // `sys_metadata` row, so a MetadataConversion would be a transform with no
+    // seam that ever runs (the `kernel/MetadataPluginConfig:additionalTypes`
+    // precedent). No `os migrate meta` sentence, for the same reason.
+    // D3 semantic entry: `disaster-recovery-schedules-retired`.
+    'system/BackupConfig:schedule',
     // #15679 (stack card 4/6 of #14478) — ruling B. `circuitBreaker.resetTimeout`
     // said "Seconds before half-open state" in prose only, while the `lockout` block
     // three lines down on the SAME schema already spelled `lockTimeoutMs`. One shape,
@@ -11973,6 +12225,26 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // never a stored metadata row, so the conversion chain has no seam that sees it.
     // See `system-cache-durations-unit-in-key`.
     'system/CacheTier:ttl',
+    // #16320 — ADR-0049 enforce-or-remove on the seven cron-typed positions nothing
+    // reads (#15954 ruling, decision batch #56, 2026-09-06: option A — retire — per
+    // family). Cache-warmup family: `CacheWarmup.schedule`. Declared, parsed into
+    // the cron envelope and read by NOTHING — `CacheWarmupSchema` has no consumer
+    // outside `packages/spec`, so no warmup ever ran on a schedule. Tombstoned with
+    // `retiredKey()` (non-strict `z.object`, ADR-0104). The `strategy` enum keeps
+    // its `scheduled` member: a value, not a position this ruling names, and
+    // exactly as inert before (nothing reads the def).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`: a cache config is
+    // plugin TS configuration, never a stack collection member or a
+    // `sys_metadata` row, so a MetadataConversion would be a transform with no
+    // seam that ever runs (the `kernel/MetadataPluginConfig:additionalTypes`
+    // precedent). No `os migrate meta` sentence, for the same reason.
+    // D3 semantic entry: `cache-warmup-schedule-retired`.
+    'system/CacheWarmup:schedule',
     // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
     // retire per family). One of the hour/minute/day-shaped deadline keys of the
     // incident-response / training / change-management families: declared on the
@@ -12047,6 +12319,21 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Tombstoned with `retiredKey()`. No D2 conversion, for its parent's reason.
     // See `system-collaboration-durations-unit-in-key`.
     'system/CollaborationSessionConfig:snapshot.interval',
+    // #16320 — the backup / DR-testing family's second position,
+    // `DisasterRecoveryPlan.testing.schedule`: the periodic DR-test cron, read by
+    // NOTHING (`DisasterRecoveryPlanSchema` has no consumer outside
+    // `packages/spec`). Same route (a `retiredKey()` tombstone on a non-strict
+    // `z.object`, ADR-0104), same major, same absence of a D2 conversion (see
+    // `18.system__BackupConfig__schedule.ts` for the retirement record).
+    //
+    // A NESTED site: the authorable-surface ratchet walks top-level def
+    // properties only (`system/DisasterRecoveryPlan:testing` is the row), so no
+    // `[RETIRED]` row exists for the cron itself and gate (b) of
+    // `build-schemas.ts` neither demands nor refuses this entry — it is here for
+    // the spec-changes / upgrade-guide projection, spelled the way
+    // `api/BatchEndpointsConfig:operations.upsertMany` is.
+    // D3 semantic entry: `disaster-recovery-schedules-retired`.
+    'system/DisasterRecoveryPlan:testing.schedule',
     // #15679 (stack card 4/6 of #14478) — ruling B. `FailoverConfig.healthCheckInterval`
     // said "Health check interval in seconds" in prose and nothing else. Renamed to
     // `healthCheckIntervalSeconds`; the value and the 30 default are unchanged.

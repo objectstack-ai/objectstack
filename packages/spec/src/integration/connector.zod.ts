@@ -1,7 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { CronExpressionInputSchema } from '../shared/expression.zod';
 import { WebhookSchema } from '../automation/webhook.zod';
 import { ConnectorAuthConfigSchema, ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
 import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.zod';
@@ -234,6 +233,35 @@ export const ConnectorConflictResolutionSchema = lazySchema(() => z.enum([
 export type ConnectorConflictResolution = z.input<typeof ConnectorConflictResolutionSchema>;
 
 /**
+ * `connector.syncConfig.schedule` — RETIRED (ADR-0049 enforce-or-remove;
+ * maintainer ruling 2026-09-06, option A per family, #15954 / #16320). The
+ * cron slot on connector-attached sync was declared, parsed into the
+ * `{ dialect: 'cron', source }` envelope and read by NOTHING: `syncConfig` has
+ * no reader outside `packages/spec`, no engine schedules a connector sync, and
+ * `@objectstack/formula`'s cronEngine has zero consumers outside its own
+ * package. `DataSyncConfigSchema` is not `.strict()`, so a bare deletion would
+ * be a silent strip (ADR-0104); the tombstone makes the removal audible in
+ * `tsc` (the input type is `never`) and at parse (this string is the issue
+ * message), and it reaches every carrier — `ConnectorSchema.syncConfig`,
+ * `DeclarativeConnectorEntrySchema` (`stack.connectors[]`) and the
+ * `/meta/connector` door. Registered as `integration/DataSyncConfig:schedule`
+ * in `RETIRED_KEYS_BY_MAJOR[18]`. This is the ONE position of the seven that a
+ * stack manifest reaches, so unlike its siblings it carries a D2 conversion,
+ * `connector-sync-schedule-removed` (one strip per `connectors[]` entry that
+ * authored the key), and the house `os migrate meta` sentence — which must be
+ * true of the tool, and here is. Measured population: zero in-repo authors
+ * (examples, docs, skills swept with controls; objectui at the pinned sha
+ * clean); out-of-repo stacks NOT MEASURED from this repo.
+ */
+const SYNC_SCHEDULE_RETIRED =
+  '`connector.syncConfig.schedule` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no engine schedules a connector sync, so the cron '
+  + 'was parsed and never fired. Delete the key; sync on a cadence is a `job` '
+  + '(`Job.schedule.expression`, the one cron slot the platform evaluates) whose handler drives '
+  + 'the connector, and `realtimeSync` is unchanged. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+/**
  * Data Synchronization Configuration
  */
 export const DataSyncConfigSchema = lazySchema(() => z.object({
@@ -251,10 +279,8 @@ export const DataSyncConfigSchema = lazySchema(() => z.object({
     'bidirectional',  // Both ways
   ]).optional().default('import').describe('Sync direction'),
   
-  /**
-   * Sync frequency (cron expression)
-   */
-  schedule: CronExpressionInputSchema.optional().describe('Cron expression for scheduled sync — cron`0 */15 * * *`'),
+  /** Tombstone (ADR-0049, #16320) — see `SYNC_SCHEDULE_RETIRED`; D2 `connector-sync-schedule-removed`. */
+  schedule: retiredKey(SYNC_SCHEDULE_RETIRED),
   
   /**
    * Enable real-time sync via webhooks

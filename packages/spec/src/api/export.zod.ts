@@ -1,8 +1,43 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { CronExpressionInputSchema } from '../shared/expression.zod';
+import { retiredKey } from '../shared/retired-key';
 import { BaseResponseSchema } from './contract.zod';
+
+/**
+ * The two export-schedule cron positions — RETIRED (ADR-0049 enforce-or-remove;
+ * maintainer ruling 2026-09-06, option A per family, #15954 / #16320).
+ * `ScheduledExport.schedule.cronExpression` and
+ * `ScheduleExportRequest.schedule.cronExpression` were declared, parsed and read
+ * by NOTHING: the whole `ExportJobApiContracts` family has zero consumers,
+ * rest-server serves no `/api/v1/data/export` route, and `IExportService` has no
+ * provider binding (its own header records that) — so `POST
+ * /api/v1/data/export/schedules` is a declared contract nothing implements and
+ * the cron inside it never fired. Neither schema is `.strict()`, so a bare
+ * deletion would be a silent strip (ADR-0104); the tombstone makes the removal
+ * audible in `tsc` (the input type is `never`) and at parse (this string is the
+ * issue message). Registered as `api/ScheduledExport:schedule.cronExpression`
+ * and `api/ScheduleExportRequest:schedule.cronExpression` in
+ * `RETIRED_KEYS_BY_MAJOR[18]` — nested spellings, since neither position has an
+ * authorable-surface row of its own; D3 semantic entry
+ * `export-schedule-cron-retired`. No D2 conversion and no `os migrate meta`
+ * sentence: an export schedule is an API request/response body, not a stack
+ * collection member or a `sys_metadata` row, so the chain has no seam that ever
+ * runs (the `kernel/MetadataPluginConfig:additionalTypes` precedent). The
+ * `schedule` block and its `timezone` stay — the ruling retires the cron
+ * position, not the block.
+ */
+const EXPORT_SCHEDULE_CRON_RETIRED_TAIL =
+  ' was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: '
+  + 'no export scheduler exists on the platform (`POST /api/v1/data/export/schedules` is a '
+  + 'declared contract no server route implements, and `IExportService` has no provider), so '
+  + 'the cron never fired. Delete the key; there is no replacement until an export scheduler '
+  + 'exists. The one cron slot the platform evaluates is `Job.schedule.expression` '
+  + '(`system/job.zod.ts`): a recurring export is a job whose handler you write.';
+const SCHEDULED_EXPORT_CRON_EXPRESSION_RETIRED =
+  '`ScheduledExport.schedule.cronExpression`' + EXPORT_SCHEDULE_CRON_RETIRED_TAIL;
+const SCHEDULE_EXPORT_REQUEST_CRON_EXPRESSION_RETIRED =
+  '`ScheduleExportRequest.schedule.cronExpression`' + EXPORT_SCHEDULE_CRON_RETIRED_TAIL;
 
 /**
  * Data Export & Import Protocol
@@ -559,7 +594,7 @@ export type UndoImportJobResponse = z.input<typeof UndoImportJobResponseSchema>;
  *   name: 'weekly_account_export',
  *   object: 'account',
  *   format: 'csv',
- *   schedule: { cronExpression: '0 6 * * MON', timezone: 'America/New_York' },
+ *   schedule: { timezone: 'America/New_York' },
  *   delivery: { method: 'email', recipients: ['admin@example.com'] },
  * }
  */
@@ -573,7 +608,8 @@ export const ScheduledExportSchema = lazySchema(() => z.object({
   filter: z.record(z.string(), z.unknown()).optional().describe('Record filter criteria'),
   templateId: z.string().optional().describe('Export template ID for field mappings'),
   schedule: z.object({
-    cronExpression: CronExpressionInputSchema.describe('Cron expression for schedule'),
+    /** Tombstone — see `EXPORT_SCHEDULE_CRON_RETIRED_TAIL` (ADR-0049, #16320). */
+    cronExpression: retiredKey(SCHEDULED_EXPORT_CRON_EXPRESSION_RETIRED),
     timezone: z.string().default('UTC').describe('IANA timezone'),
   }).describe('Schedule timing configuration'),
   delivery: z.object({
@@ -703,7 +739,8 @@ export const ScheduleExportRequestSchema = lazySchema(() => z.object({
   filter: z.record(z.string(), z.unknown()).optional().describe('Record filter criteria'),
   templateId: z.string().optional().describe('Export template ID for field mappings'),
   schedule: z.object({
-    cronExpression: CronExpressionInputSchema.describe('Cron expression for schedule'),
+    /** Tombstone — see `EXPORT_SCHEDULE_CRON_RETIRED_TAIL` (ADR-0049, #16320). */
+    cronExpression: retiredKey(SCHEDULE_EXPORT_REQUEST_CRON_EXPRESSION_RETIRED),
     timezone: z.string().default('UTC').describe('IANA timezone'),
   }).describe('Schedule timing configuration'),
   delivery: z.object({

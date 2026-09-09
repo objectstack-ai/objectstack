@@ -48,7 +48,8 @@ live declarations in `integration/connector.zod.ts` and `ui/offline.zod.ts` (the
 
 - **Connector-attached sync** — `ConnectorSchema.syncConfig`
   (`integration/connector.zod.ts`): the live, parsed sync-strategy surface
-  (strategy, direction, schedule, `conflictResolution`, batching, delete mode).
+  (strategy, direction, `conflictResolution`, batching, delete mode; the cron
+  `schedule` slot was retired at #16320 under ADR-0049 — nothing ever evaluated it).
 - **Transformation pipelines** — ~~`ETLPipeline` (`automation/etl.zod.ts`) for
   multi-source, multi-stage data movement~~ **also retired, at #6414** (ADR-0049), on
   the same reading this section applies to L1: zero execution-side consumers, no
@@ -96,7 +97,8 @@ ten-stage pipeline, get no error, and get no execution.
 
 - **Scheduled, connector-attached synchronisation** — `ConnectorSchema.syncConfig`
   (`integration/connector.zod.ts`), the live, parsed surface described under L3 below:
-  strategy, direction, cron schedule, `conflictResolution`, batching, delete mode.
+  strategy, direction, `conflictResolution`, batching, delete mode — no cron slot:
+  `syncConfig.schedule` was retired at #16320 under ADR-0049, nothing ever evaluated it.
 - **Per-field value conversion on import** — `mapping.fieldMapping[].transform`
   (`data/mapping.zod.ts`): a string enum (`none` / `constant` / `map` / `split` /
   `join` / `lookup`) with its settings in `params`, applied row by row by the REST
@@ -191,11 +193,11 @@ Complete, production-grade integration with external systems. Includes authentic
 > `strategy` / `direction` / `realtimeSync` / `conflictResolution` /
 > `batchSize` / `deleteMode`, a mapping's `required` / `syncMode`, a webhook's
 > `method` / `timeoutMs` / `isActive` / `signatureAlgorithm` — is optional when
-> you write a connector, and `syncConfig.schedule` takes the bare cron string
-> the schema wraps for you. Annotate the **result** of
+> you write a connector. (`syncConfig.schedule`, the cron slot the schema used
+> to wrap into an envelope, was retired at #16320 under ADR-0049: nothing ever
+> evaluated it.) Annotate the **result** of
 > `ConnectorSchema.parse(…)` with **`ConnectorParsed`**, which is `z.infer`:
-> there those keys are all present and `schedule` is already the
-> `{ dialect: 'cron', source }` envelope. The same convention held on L2's
+> there those keys are all present. The same convention held on L2's
 > `ETLPipeline` / `ETLPipelineParsed` before that layer was retired (#6414), and
 > **[ADR-0122](../../../docs/adr/0122-schema-type-alias-naming-convention.md)
 > is why**: the bare name is the author state and `XParsed` is the parsed state,
@@ -236,7 +238,6 @@ const sapConnector: Connector = {
   syncConfig: {
     strategy: 'incremental',
     direction: 'bidirectional',
-    schedule: '*/15 * * * *', // Every 15 minutes
     realtimeSync: true,
     timestampField: 'updated_at',
     conflictResolution: 'latest_wins',

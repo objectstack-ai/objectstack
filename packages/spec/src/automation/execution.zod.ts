@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { CronExpressionInputSchema } from '../shared/expression.zod';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * Automation Execution Protocol
@@ -510,6 +510,30 @@ export type ConcurrencyPolicy = z.input<typeof ConcurrencyPolicySchema>;
 // ==========================================
 
 /**
+ * `ScheduleState.cronExpression` — RETIRED (ADR-0049 enforce-or-remove;
+ * maintainer ruling 2026-09-06, option A per family, #15954 / #16320). It was
+ * this schema's REQUIRED cron and was read by NOTHING: `ScheduleStateSchema`
+ * has no consumer outside `packages/spec`, and the schedule trigger that does
+ * run reads a flow start node's `config.schedule` through
+ * `trigger-schedule/schedule-trigger.ts` `normalizeSchedule` — a different
+ * shape this key never reached. The schema is not `.strict()`, so a bare
+ * deletion would be a silent strip (ADR-0104); the tombstone makes the removal
+ * audible in `tsc` (the input type is `never`) and at parse (this string is
+ * the issue message). Registered as `automation/ScheduleState:cronExpression`
+ * in `RETIRED_KEYS_BY_MAJOR[18]`; D3 semantic entry
+ * `schedule-state-cron-expression-retired`; no D2 conversion and no
+ * `os migrate meta` sentence — runtime state is not a stack collection member
+ * or a `sys_metadata` row, so the chain has no seam that ever runs.
+ */
+const SCHEDULE_STATE_CRON_EXPRESSION_RETIRED =
+  '`ScheduleState.cronExpression` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no scheduler consumed a `ScheduleState` row, and '
+  + "the schedule trigger that does run reads a flow start node's `config.schedule`, a different "
+  + 'shape this key never reached. Delete the key; a scheduled flow declares its cadence on the '
+  + "flow's start node (`config.schedule`), and the one cron slot the platform evaluates is "
+  + '`Job.schedule.expression` (`system/job.zod.ts`).';
+
+/**
  * Schedule State Schema
  * Tracks the runtime state of scheduled flow executions.
  *
@@ -522,8 +546,14 @@ export const ScheduleStateSchema = lazySchema(() => z.object({
   /** Flow reference */
   flowName: z.string().describe('Flow machine name'),
 
-  /** Schedule configuration */
-  cronExpression: CronExpressionInputSchema.describe('Cron expression — cron`0 9 * * MON-FRI`'),
+  /**
+   * Tombstone (ADR-0049, #16320) — see `SCHEDULE_STATE_CRON_EXPRESSION_RETIRED`.
+   * The key was REQUIRED; a `retiredKey()` accepts only absence, so the
+   * requiredness leaves with it and `timezone` / `status` / `nextRunAt` now
+   * describe a cadence the row no longer declares. They stay: the ruling
+   * retires the cron position, not the def.
+   */
+  cronExpression: retiredKey(SCHEDULE_STATE_CRON_EXPRESSION_RETIRED),
   timezone: z.string().default('UTC').describe('IANA timezone for cron evaluation'),
 
   /** Runtime state */

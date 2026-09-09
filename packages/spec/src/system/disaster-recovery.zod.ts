@@ -1,7 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { CronExpressionInputSchema } from '../shared/expression.zod';
 
 /**
  * Backup Strategy Schema
@@ -16,7 +15,6 @@ import { CronExpressionInputSchema } from '../shared/expression.zod';
  * ```typescript
  * const backup: BackupConfig = {
  *   strategy: 'incremental',
- *   schedule: '0 2 * * *',
  *   retention: { days: 30, minCopies: 3 },
  *   encryption: { enabled: true, algorithm: 'AES-256-GCM' },
  * };
@@ -49,13 +47,41 @@ export type BackupRetention = z.input<typeof BackupRetentionSchema>;
 export type BackupRetentionParsed = z.infer<typeof BackupRetentionSchema>;
 
 /**
+ * The two disaster-recovery cron positions — RETIRED (ADR-0049
+ * enforce-or-remove; maintainer ruling 2026-09-06, option A per family,
+ * #15954 / #16320). `BackupConfig.schedule` and
+ * `DisasterRecoveryPlan.testing.schedule` were declared, parsed into the cron
+ * envelope and read by NOTHING: neither schema has a consumer outside
+ * `packages/spec`, so no backup and no DR test ever ran on a schedule. Neither
+ * is `.strict()`, so a bare deletion would be a silent strip (ADR-0104); the
+ * tombstones make the removal audible in `tsc` and at parse. Registered as
+ * `system/BackupConfig:schedule` and, by its nested spelling (no
+ * authorable-surface row of its own), `system/DisasterRecoveryPlan:testing.schedule`
+ * in `RETIRED_KEYS_BY_MAJOR[18]`; D3 semantic entry
+ * `disaster-recovery-schedules-retired`; no D2 conversion — a DR plan is
+ * plugin/operator configuration, not a stack collection member.
+ */
+const BACKUP_SCHEDULE_RETIRED =
+  '`BackupConfig.schedule` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
+  + 'nothing ever read it: no backup engine exists on the platform, so an automated backup never '
+  + 'ran on it. Delete the key. The one cron slot the platform evaluates is '
+  + '`Job.schedule.expression` (`system/job.zod.ts`): a backup on a cadence is a job whose handler '
+  + 'you write.';
+const DR_TESTING_SCHEDULE_RETIRED =
+  '`DisasterRecoveryPlan.testing.schedule` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no disaster-recovery test runner exists on the '
+  + 'platform, so a periodic DR test never ran. Delete the key. The one cron slot the platform '
+  + 'evaluates is `Job.schedule.expression` (`system/job.zod.ts`): a DR test on a cadence is a '
+  + 'job whose handler you write.';
+
+/**
  * Backup Configuration Schema
  */
 export const BackupConfigSchema = lazySchema(() => z.object({
   /** Backup strategy */
   strategy: BackupStrategySchema.default('incremental').describe('Backup strategy'),
-  /** Cron schedule for automated backups */
-  schedule: CronExpressionInputSchema.optional().describe('Cron expression for backup schedule — cron`0 2 * * *`'),
+  /** Tombstone (ADR-0049, #16320) — see `BACKUP_SCHEDULE_RETIRED`. */
+  schedule: retiredKey(BACKUP_SCHEDULE_RETIRED),
   /** Retention policy */
   retention: BackupRetentionSchema.describe('Backup retention policy'),
   /** Storage destination */
@@ -201,7 +227,6 @@ export type RTOParsed = z.infer<typeof RTOSchema>;
  *   rto: { value: 1, unit: 'hours' },
  *   backup: {
  *     strategy: 'incremental',
- *     schedule: '0 0,6,12,18 * * *',
  *     retention: { days: 90, minCopies: 5 },
  *     destination: { type: 's3', bucket: 'backup-bucket', region: 'us-east-1' },
  *   },
@@ -251,8 +276,8 @@ export const DisasterRecoveryPlanSchema = lazySchema(() => z.object({
   testing: z.object({
     /** Enable periodic DR testing */
     enabled: z.boolean().default(false).describe('Enable automated DR testing'),
-    /** Cron schedule for DR tests */
-    schedule: CronExpressionInputSchema.optional().describe('Cron expression for DR test schedule'),
+    /** Tombstone (ADR-0049, #16320) — see `DR_TESTING_SCHEDULE_RETIRED`. */
+    schedule: retiredKey(DR_TESTING_SCHEDULE_RETIRED),
     /** Notification channel for test results */
     notificationChannel: z.string().optional().describe('Notification channel for DR test results'),
   }).optional().describe('Automated disaster recovery testing'),
