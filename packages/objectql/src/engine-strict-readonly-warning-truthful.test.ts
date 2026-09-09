@@ -138,10 +138,11 @@ interface Observed {
  * assertions below that named `error` did, and they now assert the level the
  * door actually takes rather than the one it used to.
  */
+const isOperationFailedLine = (msg: string): boolean =>
+  /^(Update|Insert) operation failed$/.test(msg);
+
 function stripLineLevels(o: Observed): string[] {
-  return o.lines
-    .filter((l) => !/^(Update|Insert) operation failed$/.test(l.msg))
-    .map((l) => l.level);
+  return o.lines.filter((l) => !isOperationFailedLine(l.msg)).map((l) => l.level);
 }
 
 async function observeUpdate(data: unknown, options: Record<string, unknown>): Promise<Observed> {
@@ -155,7 +156,14 @@ async function observeUpdate(data: unknown, options: Record<string, unknown>): P
   return {
     refusedCode,
     driverWrites: writes.length,
-    warns: logger.lines.filter((l: any) => l.level === 'warn').map((l: any) => l.msg),
+    // [#17052] The operation-level entry is at `warn` now too, so the message
+    // isolation this suite has always performed has to hold HERE as well —
+    // `warns` is the accessor every strip assertion counts, and a second warn
+    // line that is not the strip's would make every `toHaveLength(1)` a
+    // statement about the engine's door instead of about the strip.
+    warns: logger.lines
+      .filter((l: any) => l.level === 'warn' && !isOperationFailedLine(l.msg))
+      .map((l: any) => l.msg),
     lines: logger.lines.filter((l: any) => l.level !== 'debug' && l.level !== 'info'),
   };
 }
@@ -171,7 +179,9 @@ async function observeInsert(data: unknown, options: Record<string, unknown> = {
   return {
     refusedCode,
     driverWrites: writes.filter((w) => w.fn === 'create').length,
-    warns: logger.lines.filter((l: any) => l.level === 'warn').map((l: any) => l.msg),
+    warns: logger.lines
+      .filter((l: any) => l.level === 'warn' && !isOperationFailedLine(l.msg))
+      .map((l: any) => l.msg),
     lines: logger.lines.filter((l: any) => l.level !== 'debug' && l.level !== 'info'),
   };
 }

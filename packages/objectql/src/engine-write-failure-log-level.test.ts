@@ -116,7 +116,10 @@ async function refuse(run: (e: ObjectQL) => Promise<unknown>) {
 const DOORS: ReadonlyArray<readonly [string, string, (e: ObjectQL) => Promise<unknown>]> = [
   ['insert', 'Insert operation failed', (e) => e.insert(OBJECT, { identifier: 'urn:x' } as any)],
   ['update', 'Update operation failed', (e) => e.update(OBJECT, { id: 'r1', identifier: 'urn:x' } as any)],
-  ['delete', 'Delete operation failed', (e) => e.delete(OBJECT, 'r1' as any)],
+  // `delete(object, options)` — the record is addressed through `where`; the
+  // engine rejects an unknown `id` key outright (#4371), which is how this
+  // spelling was measured rather than guessed.
+  ['delete', 'Delete operation failed', (e) => e.delete(OBJECT, { where: { id: 'r1' } } as any)],
 ];
 
 describe('#17052 — a refused write is reported at `warn`, and the caller is told', () => {
