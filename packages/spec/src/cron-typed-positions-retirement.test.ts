@@ -71,6 +71,12 @@ const STATE_WELL_FORMED = { id: 'sched_001', flowName: 'daily_report', createdAt
 const SYNC_WELL_FORMED = { strategy: 'incremental' as const, direction: 'bidirectional' as const, batchSize: 500 };
 const CONNECTOR_WELL_FORMED = { name: 'sap_erp', label: 'SAP ERP', type: 'saas' as const, syncConfig: SYNC_WELL_FORMED };
 const WARMUP_WELL_FORMED = { enabled: true, strategy: 'scheduled' as const, patterns: ['config:*'] };
+const CACHE_WELL_FORMED = {
+  enabled: true,
+  tiers: [{ name: 'l1', type: 'memory' as const }],
+  invalidation: [],
+  warmup: WARMUP_WELL_FORMED,
+};
 const BACKUP_WELL_FORMED = { retention: { days: 30 }, destination: { type: 's3' as const, bucket: 'backups' } };
 const DR_TESTING_WELL_FORMED = { enabled: true, notificationChannel: '#dr-alerts' };
 const DR_PLAN_WELL_FORMED = {
@@ -189,8 +195,8 @@ const CARRIERS: Array<Pick<RetiredSite, 'qualified' | 'schema' | 'wellFormed' | 
     via: 'DistributedCacheConfig.warmup',
     qualified: 'CacheWarmup.schedule',
     schema: DistributedCacheConfigSchema,
-    wellFormed: { warmup: WARMUP_WELL_FORMED },
-    authored: { warmup: { ...WARMUP_WELL_FORMED, schedule: CRON } },
+    wellFormed: CACHE_WELL_FORMED,
+    authored: { ...CACHE_WELL_FORMED, warmup: { ...WARMUP_WELL_FORMED, schedule: CRON } },
     issuePath: ['warmup', 'schedule'],
   },
 ];
@@ -378,6 +384,7 @@ describe('[#16320] the tsc channel: the input type of all seven keys is `never`'
       schedule: CRON,
     };
     const cache: DistributedCacheConfig = {
+      ...CACHE_WELL_FORMED,
       // @ts-expect-error — the tombstone reaches through the carrier.
       warmup: { ...WARMUP_WELL_FORMED, schedule: CRON },
     };
