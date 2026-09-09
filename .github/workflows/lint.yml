@@ -2503,6 +2503,7 @@ jobs:
           run_self_test node scripts/symbol-anchors.mjs --self-test
           run_self_test node scripts/check-adr-symbol-anchors.mjs --self-test
           run_self_test node scripts/check-scripts-symbol-anchors.mjs --self-test
+          run_self_test node scripts/check-spec-docblock-symbol-anchors.mjs --self-test
           if [ -n "$failed" ]; then
             echo ""
             echo "Symbol-anchor self-tests — the following FAILED:"
@@ -2520,6 +2521,20 @@ jobs:
       # harness plants and the count comes out 4/3.
       - name: scripts/** symbol anchors resolve (no line citations on tracked targets survive)
         run: node scripts/check-scripts-symbol-anchors.mjs
+
+      # The THIRD corpus (#17065) — `packages/spec/src/**` doc blocks, again a
+      # `defineCorpus` registration and ⛔ not a second resolver. Separate sweep
+      # step for the same `check-step-collectors` reason stated above.
+      #
+      # ⭐ Its exit contract is a PINNED DAY-ONE RESIDUAL, not a clean tree: the
+      # census (7 findings across 6 of 1,317 files, taken in reporting mode
+      # BEFORE any exit code was chosen) is enumerated in the gate's
+      # `CENSUS_RESIDUAL`, every finding outside it is a hard red, and a row
+      # whose citation gets repaired goes STALE and reds until it is deleted.
+      # Repairing those 7 edits `packages/spec/**` text, which is `domain:spec`
+      # work with its own cards — the registration does not do it.
+      - name: packages/spec/src/** doc-block symbol anchors resolve (no NEW line citations on tracked targets)
+        run: node scripts/check-spec-docblock-symbol-anchors.mjs
 
       # NOTE: the standing platform test checklist (docs/qa/platform-checklist/)
       # is validated by `pnpm check:platform-checklist`, but by MAINTAINER
