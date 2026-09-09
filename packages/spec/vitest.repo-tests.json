@@ -17,6 +17,7 @@
   "scripts/references-banner.test.ts",
   "scripts/root-index.test.ts",
   "scripts/schema-tree-freshness.test.ts",
+  "scripts/solution-blueprint-header-row.test.ts",
   "scripts/strictness-ledger-doc.test.ts",
   "scripts/strictness-ledger.test.ts",
   "src/api/error-catalog-docs.test.ts",
