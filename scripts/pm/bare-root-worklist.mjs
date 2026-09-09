@@ -119,6 +119,46 @@ const ROOT = new URL('../..', import.meta.url).pathname;
 const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|ROOTS|DIRS|POPULATION|[A-Z0-9_]*_SCOPE)$/;
 
 /**
+ * The same judgement call for a population declared as an object PROPERTY
+ * instead of as a module constant — `roots: [...]` inside a config literal.
+ *
+ * ⚠️ Admitted on 2026-09-09 (#17057), and the defect it repairs is the sharpest
+ * one this instrument can carry: a gate declares its scan population honestly,
+ * in a shape a reader recognises at a glance, and the tool whose entire job is
+ * to find undeclared populations cannot see it — not because the population is
+ * different but because it is SPELLED differently. `POPULATION_CONSTANT` reads
+ * NAMES of `const` declarations, so a lowercase property could never match it,
+ * and the miss left the sweep's own count wrong in a direction no reader of its
+ * output could infer. ⛔ The instance was NOT repaired by renaming it to a
+ * recognised constant: that makes today green and leaves the auditor exactly as
+ * blind, which is the shape this file exists to refuse.
+ *
+ * The alternatives MIRROR `POPULATION_CONSTANT` term for term, with the
+ * camelCase hump doing the work the literal underscore does there — that is
+ * what makes this a translation of the recorded judgement rather than a second,
+ * looser one:
+ *
+ *   [A-Z0-9_]*_ROOTS?  ↔  [a-z][A-Za-z0-9]*Roots?   (`scanRoots`, `docRoot`)
+ *   [A-Z0-9_]*_DIRS?   ↔  [a-z][A-Za-z0-9]*Dirs?    (`searchDirs`)
+ *   [A-Z0-9_]*_SCOPE   ↔  [a-z][A-Za-z0-9]*Scope
+ *   ROOTS · DIRS       ↔  roots · dirs              (bare, PLURAL only)
+ *   POPULATION         ↔  population
+ *
+ * ⛔ The bare singular `root` and `dir` stay OUT, for the reason `ROOT` and
+ * `DIR` stay out above and with more force at this casing: `root` is the
+ * commonest property name in this tree for a single repo-root path fragment,
+ * the exact thing the restriction exists to exclude. The self-test pins both
+ * directions, on the recogniser rather than on any row.
+ *
+ * Measured on 91f65c4ea, the tree this landed against: the property shape adds
+ * exactly ONE row — a real, recursively-walked population — and it is the
+ * instance the card was filed from. That is the positive control this widening
+ * owes and it is recorded here as a number rather than asserted: a sweep that
+ * finds nothing new has to prove it can still find the row it was built for.
+ */
+const POPULATION_PROPERTY = /^(?:[a-z][A-Za-z0-9]*Roots?|[a-z][A-Za-z0-9]*Dirs?|roots|dirs|population|[a-z][A-Za-z0-9]*Scope)$/;
+
+/**
  * The recorded triage — the half of this file that a human decided and the tree
  * cannot re-derive. Keys are `source-file constant word`; the row half of every
  * key is checked against the live sweep by the self-test, in BOTH directions, so
@@ -1513,9 +1553,52 @@ export function bareRootLiterals(maskedBody, dirs) {
 }
 
 /**
- * The `const NAME = …;` spans in a masked body whose NAME declares a population.
- * The scan walks to the `;` that closes the initializer, tracking quote state so
- * a semicolon inside a string cannot end the span early.
+ * The end of a property VALUE that starts at `from`, tracking quote state so a
+ * terminator inside a string cannot close the span early and BRACKET DEPTH so
+ * the commas separating an array's own members cannot either. It ends at a
+ * depth-zero `,` or `;`, or at the bracket that closes the enclosing object.
+ *
+ * ⚠️ This is deliberately NOT reused for the `const` scan below, whose stop is a
+ * bare `;` with no depth tracking. Folding the two would change which spans the
+ * ALREADY-RECOGNISED shape produces — an arrow body's internal `;` would stop
+ * ending a span — and that is a second, unmeasured widening riding along inside
+ * this one. The `const` half stays byte-for-byte what it was so the before/after
+ * on this change has exactly one variable in it.
+ */
+function propertyValueEnd(maskedBody, from) {
+  let depth = 0;
+  let quote = null;
+  let i = from;
+  for (; i < maskedBody.length; i++) {
+    const c = maskedBody[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+    if (c === '(' || c === '[' || c === '{') { depth += 1; continue; }
+    if (c === ')' || c === ']' || c === '}') {
+      if (depth === 0) break;
+      depth -= 1;
+      continue;
+    }
+    if (depth === 0 && (c === ',' || c === ';')) break;
+  }
+  return i;
+}
+
+/**
+ * The spans in a masked body that DECLARE a population — the two spellings an
+ * author uses for "this is what I walk", returned as one list so no caller has
+ * to hold a roster of them.
+ *
+ * 1. `const NAME = …;` whose NAME matches `POPULATION_CONSTANT`. The scan walks
+ *    to the `;` that closes the initializer, tracking quote state so a semicolon
+ *    inside a string cannot end the span early.
+ * 2. `name: …` object properties whose key matches `POPULATION_PROPERTY`
+ *    (#17057). The value is delimited by `propertyValueEnd`, so an array's own
+ *    commas do not close it.
  */
 export function populationSpans(maskedBody) {
   const spans = [];
@@ -1535,6 +1618,14 @@ export function populationSpans(maskedBody) {
       if (c === ';') break;
     }
     spans.push({ name, start: m.index, end: i });
+  }
+  // The property half. The key may be quoted — `'roots': [...]` is the same
+  // declaration — and the leading character class keeps `a ? roots : dirs` and
+  // a `foo.roots:` member expression from reading as one.
+  for (const m of maskedBody.matchAll(/(?:^|[\s,{[(])(?:(['"])([A-Za-z0-9_$]+)\1|([A-Za-z0-9_$]+))[ \t]*:/g)) {
+    const name = m[2] ?? m[3];
+    if (!POPULATION_PROPERTY.test(name)) continue;
+    spans.push({ name, start: m.index, end: propertyValueEnd(maskedBody, m.index + m[0].length) });
   }
   return spans;
 }
