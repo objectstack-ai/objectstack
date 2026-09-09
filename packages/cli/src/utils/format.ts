@@ -132,6 +132,31 @@ export function isExitSignal(error: unknown): boolean {
 }
 
 /**
+ * True for an error whose diagnostic was ALREADY written to stderr by the code
+ * that threw it — so a command's TEXT face must not render it a second time.
+ *
+ * `resolveConfigPath()` is the case this exists for (#15547). It refuses with a
+ * sentence plus hint lines no catch-all could reconstruct — the hints are the
+ * helper's, not the command's — so it writes them itself, on stderr, and
+ * throws. Without this predicate the text face would then print the same
+ * sentence again through `printError`, on **stdout**, and the operator would
+ * read one refusal twice across two streams.
+ *
+ * ⚠️ It gates the TEXT branch only. The `--json` branch sits above it and is
+ * unaffected: the envelope is the machine's copy of that failure and the prose
+ * on stderr is the human's, which is the split #15692 established and #15547
+ * kept.
+ *
+ * Structural, like {@link isExitSignal}, and deliberately not `instanceof`:
+ * this CLI runs from `dist/` in production and from `src/` under `tsx` in the
+ * gates, and a marker that depends on which copy of a class the error came from
+ * fails silently in exactly the tree the pins run in.
+ */
+export function isReportedError(error: unknown): boolean {
+  return (error as { reportedToStderr?: unknown } | null | undefined)?.reportedToStderr === true;
+}
+
+/**
  * [#13347] The ADR-0112 carriers a `--format json` failure envelope adds
  * beside its `error` sentence — `{ code, httpStatus }`, and only the ones the
  * thrown error actually carries.

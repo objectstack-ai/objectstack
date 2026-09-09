@@ -18,7 +18,7 @@ import type { FieldType } from '@objectstack/spec/data';
 // these, so the part that can be shared is shared and only the part that
 // genuinely lives on `driver-sql` is mirrored.
 import { isTenancyDisabled, isUniqueDeclared, numericColumnFor } from '@objectstack/spec/data';
-import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, CLI_ALIAS } from '../utils/format.js';
+import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, isReportedError, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
 import { findEmissionParseFailures } from '../utils/emitted-source-parses.js';
 
@@ -866,7 +866,9 @@ async function runTypesGeneration(configPath: string | undefined, flags: { outpu
       console.log('');
 
     } catch (error: any) {
-      printError(error.message || String(error));
+      // [#15547] `resolveConfigPath()` already reported its refusal on stderr
+      // before throwing; a second copy on stdout is what this guards.
+      if (!isReportedError(error)) printError(error.message || String(error));
       process.exit(1);
     }
 }
@@ -1007,7 +1009,9 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
       console.log('');
 
     } catch (error: any) {
-      printError(error.message || String(error));
+      // [#15547] `resolveConfigPath()` already reported its refusal on stderr
+      // before throwing; a second copy on stdout is what this guards.
+      if (!isReportedError(error)) printError(error.message || String(error));
       process.exit(1);
     }
 }
@@ -2143,7 +2147,9 @@ async function runMigrationGeneration(configPath: string | undefined, flags: { o
       console.log('');
 
     } catch (error: any) {
-      printError(error.message || String(error));
+      // [#15547] `resolveConfigPath()` already reported its refusal on stderr
+      // before throwing; a second copy on stdout is what this guards.
+      if (!isReportedError(error)) printError(error.message || String(error));
       process.exit(1);
     }
 }

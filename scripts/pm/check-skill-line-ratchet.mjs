@@ -1028,7 +1028,15 @@ export const CEILINGS = new Map([
   // convention as the entries above).
   // 86 → 41: the ownership excerpt rewritten by role in the same rules-only pass;
   // re-pinned at the landed count, headroom 0.
-  ['CLAUDE.md', 41],
+  // 41 → 5: the inlined never-miss digest left the file entirely — it is now a pure
+  // pointer at AGENTS.md, which carries every rule it used to restate. Maintainer
+  // ruling 2026-09-09, verbatim and untranslated: 「其次 claude.md 是不是直接让他阅读
+  // agents.md 即可，没必要维护两套。所有仓库都有类似的问题」 (program #17161, card
+  // #17162). A LOWERING, which needs no ruling of its own — quoted because the
+  // ruling is what emptied the file. Re-pinned at the landed count, headroom 0: the
+  // 36 lines of slack a shrink leaves behind are exactly the budget a future digest
+  // would re-accrete into, which is the growth this entry exists to price.
+  ['CLAUDE.md', 5],
 ]);
 
 /**

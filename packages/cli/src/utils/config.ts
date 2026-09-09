@@ -40,51 +40,118 @@ export const BUNDLE_REQUIRE_EXTERNALS: (string | RegExp)[] = [
 ];
 
 /**
+ * The refusal `resolveConfigPath()` throws when no config file can be resolved.
+ *
+ * Three fields, each with exactly one consumer, and the split is the point:
+ *
+ *   • `message` — PLAIN. It is what every `--json` catch-all copies into its
+ *     envelope, so it must not carry terminal decoration: `chalk.white(abs)`
+ *     in a payload is an ESC-bracket-37m / ESC-bracket-39m pair inside a JSON
+ *     string the moment
+ *     the run happens to have colour on.
+ *   • `display` — the same sentence WITH that decoration, for the stream a
+ *     human reads. Defaults to `message` where there is nothing to decorate.
+ *   • `hints` — the lines printed under the refusal. Carried on the error
+ *     rather than printed and forgotten, so the renderer below is the only
+ *     place that knows their shape.
+ *
+ * `reportedToStderr` is read structurally by {@link isReportedError}, never
+ * through `instanceof`: a command's catch-all must not print this refusal a
+ * second time on stdout, and a structural marker survives a tree where `dist/`
+ * and `src/` copies of this module can both be live.
+ *
+ * ⛔ No `code` and no `httpStatus` field, deliberately. `errorCodeFields()`
+ * reads exactly those two names off a thrown error, so adding either here
+ * would mint an ADR-0112 code for this refusal through the back door — the one
+ * thing the #15547 ruling forbids. What a bare `{ error }` with neither field
+ * should look like is #15549's question, not this file's.
+ */
+export class ConfigRefusalError extends Error {
+  /** The refusal sentence with the decoration the text face has always shown. */
+  readonly display: string;
+  /** The dim lines printed under the refusal, in order. */
+  readonly hints: readonly string[];
+  /** Already written to stderr at the throw site — do not render it twice. */
+  readonly reportedToStderr = true;
+
+  constructor(message: string, hints: readonly string[], display: string = message) {
+    super(message);
+    this.name = 'ConfigRefusalError';
+    this.display = display;
+    this.hints = hints;
+  }
+}
+
+/**
+ * Report a config refusal on stderr and throw it.
+ *
+ * The four writes are the ones this helper has always made, in the same order,
+ * on the same stream, byte for byte — they are just driven off the error object
+ * now instead of off four literals. Rendering here rather than in the ten
+ * catch-alls is what keeps the diagnostic in BOTH faces: a `--json` run still
+ * shows its operator the refusal on stderr while the machine reads the envelope
+ * on stdout, which is the shape #15692 established and this change must not
+ * undo.
+ */
+function refuseConfig(message: string, hints: readonly string[], display?: string): never {
+  const error = new ConfigRefusalError(message, hints, display);
+  printErrorToStderr(error.display);
+  console.error('');
+  for (const hint of error.hints) console.error(chalk.dim(hint));
+  throw error;
+}
+
+/**
  * Resolve the config file path. Supports:
  * - explicit path (objectstack.config.ts)
  * - auto-detection (searches for objectstack.config.{ts,js,mjs})
  *
- * ## Both refusals go to STDERR, and that is not cosmetic (#15547)
+ * ## Both refusals THROW, and go to stderr on the way out (#15547)
  *
  * This helper is reached by ten published `--json` faces — `os validate`,
  * `info`, `diff`, `lint`, `compile`, `build` (a subclass of `compile`),
  * `verify`, `migrate meta`, `i18n check`, `i18n extract` — and it has no way
  * to know which run is a `--json` run: the flag is parsed in the command, and
- * `loadConfig()` passes it nothing. It used to print through `printError` and
- * `console.log`, **both of which write to stdout**, and then call
- * `process.exit(1)`.
+ * `loadConfig()` passes it nothing.
  *
- * That put human text on the one stream `--json` reserves for the machine
- * (`utils/json-stdout.ts`). Measured on the published entry `bin/run.js` with
- * `NO_COLOR=1` and the streams captured separately: every one of the ten faces
- * answered a missing config with **exit 1, an unparseable stdout and an empty
- * stderr**, on both branches below. And because the exit is called directly,
- * nothing throws — so every command's catch-all `--json` error exit, which
- * sits downstream of a throw, never ran.
+ * It used to print through `printError` and `console.log` — **both stdout** —
+ * and then call `process.exit(1)`. #15692 moved the bytes to stderr; the exit
+ * stayed, and with it the real defect: **nothing was thrown**, so every
+ * command's catch-all `--json` error exit — all of which sit downstream of a
+ * throw — never ran, and ten faces answered a missing config with an EMPTY
+ * stdout where each of them has already declared it emits an envelope.
  *
- * ⚠️ Moving the bytes is the whole change. The exit code stays 1, the wording
- * stays identical, and no payload is invented here: what a `--json` consumer
- * should receive on this path is an envelope question that touches ten
- * published faces at once, and it is deliberately left open (see
- * {@link printErrorToStderr} and the PR for #15547). What is settled is that
- * the machine's channel no longer carries prose.
+ * ⇒ The refusals now throw {@link ConfigRefusalError}. That is not a new
+ * contract; it is this path being pulled back onto the contract its callers
+ * already published, which is why it adds **zero** accept-set members and
+ * **zero** error codes.
  *
- * ⛔ Do not "fix" this by making the helper throw without settling that
- * question first. Measured on the callers: `os verify` has no `try` around its
- * `loadConfig()` at all, so a throw becomes an oclif crash dump rather than a
- * payload; and `errorCodeFields()` deliberately mints no `code` for a plain
- * `Error`, so the other nine would emit a bare `{ error }` — the exact shape
- * #15549 is an open card about.
+ * Three properties hold it in place, and each has a pin:
+ *
+ *   1. **No face becomes a crash dump.** `os verify` had no `try` at all —
+ *      measured, a throw through it produced an oclif error line and no
+ *      payload — so it gained the catch-all its nine siblings already had, in
+ *      the same landing as the throw.
+ *   2. **The text face does not narrow.** The refusal and both hint lines are
+ *      still written here, to stderr, byte-identical; the catch-alls skip
+ *      re-printing via {@link isReportedError}.
+ *   3. **No code is minted.** The thrown error carries neither `code` nor
+ *      `httpStatus`, so `errorCodeFields()` contributes nothing and the
+ *      envelope is a bare `{ error }`. Whether that shape is right is
+ *      **#15549's** open question — ⛔ do not answer it by adding a field here.
  */
 export function resolveConfigPath(source?: string): string {
   if (source) {
     const abs = path.resolve(process.cwd(), source);
     if (!fs.existsSync(abs)) {
-      printErrorToStderr(`Config file not found: ${chalk.white(abs)}`);
-      console.error('');
-      console.error(chalk.dim('  Hint: Run this command from a directory with objectstack.config.ts'));
-      console.error(chalk.dim('  Or specify the path: objectstack <command> path/to/config.ts'));
-      process.exit(1);
+      refuseConfig(
+        `Config file not found: ${abs}`,
+        [
+          '  Hint: Run this command from a directory with objectstack.config.ts',
+          '  Or specify the path: objectstack <command> path/to/config.ts',
+        ],
+        `Config file not found: ${chalk.white(abs)}`,
+      );
     }
     return abs;
   }
@@ -101,10 +168,10 @@ export function resolveConfigPath(source?: string): string {
     if (fs.existsSync(abs)) return abs;
   }
 
-  printErrorToStderr('No objectstack.config.{ts,js,mjs} found in current directory');
-  console.error('');
-  console.error(chalk.dim('  Hint: Run `objectstack init` to create a new project'));
-  process.exit(1);
+  refuseConfig(
+    'No objectstack.config.{ts,js,mjs} found in current directory',
+    ['  Hint: Run `objectstack init` to create a new project'],
+  );
 }
 
 /**

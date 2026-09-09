@@ -4,7 +4,8 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import { AggregationFunction } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { IAnalyticsService, IDataDriver, IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { IAnalyticsService, IDataDriver, IDataEngine, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
+import { translateObject, type ObjectLike, type ObjectFieldLike, type TranslationBundle } from '@objectstack/spec/system';
 import { AnalyticsService } from './analytics-service.js';
 import type { AnalyticsServiceConfig } from './analytics-service.js';
 import type { AnalyticsDriverCapabilities } from './strategies/types.js';
@@ -732,6 +733,38 @@ export class AnalyticsServicePlugin implements Plugin {
         return svc && typeof svc.getObject === 'function' ? svc : undefined;
       } catch { return undefined; }
     };
+
+    // #16773 — a select option's `label` (`SelectOptionSchema.label`) is a
+    // PLAIN authored string; its translation, if any, lives in an i18n
+    // TRANSLATION BUNDLE, not on the field metadata `getObjectFields` reads.
+    // Resolved lazily, same as `dataEngine` above, so plugin-init order is
+    // free and a kernel with no i18n service configured degrades to exactly
+    // today's (locale-blind, authored-label) behaviour.
+    const i18nService = (): II18nService | undefined => {
+      try {
+        const svc = ctx.getService<II18nService>('i18n');
+        return svc && typeof svc.getTranslations === 'function' && typeof svc.getLocales === 'function'
+          ? svc
+          : undefined;
+      } catch { return undefined; }
+    };
+    // Mirrors `RestServer.buildTranslationBundle` (`packages/rest`) — this
+    // package has no dependency on `packages/rest`, so the ~10-line glue that
+    // turns an `II18nService` into a `TranslationBundle` is rebuilt here
+    // against the SAME public `II18nService` surface. This is NOT a second
+    // "translate a select option label" implementation: the actual lookup
+    // stays exactly one function, `translateObject` below, imported rather
+    // than reimplemented.
+    const buildTranslationBundle = (i18n: II18nService): TranslationBundle | undefined => {
+      const locales = i18n.getLocales();
+      if (!locales.length) return undefined;
+      const bundle: TranslationBundle = {};
+      for (const locale of locales) {
+        const data = i18n.getTranslations(locale);
+        if (data && typeof data === 'object') (bundle as Record<string, unknown>)[locale] = data;
+      }
+      return Object.keys(bundle).length ? bundle : undefined;
+    };
     const labelResolver: DimensionLabelDeps = {
       getObjectFields: (objectName) => dataEngine()?.getObject?.(objectName)?.fields,
       fetchRecordLabels: async (targetObject, ids, scope, context) => {
@@ -793,6 +826,42 @@ export class AnalyticsServicePlugin implements Plugin {
           }
         }
         return map;
+      },
+      // #16773 — route a select option label through the SAME translator the
+      // object-metadata REST endpoint uses (`GET /meta/object/:name`, which
+      // is where the console's list/kanban/grid renderers get theirs), so a
+      // chart's category/series labels match what those surfaces render for
+      // the identical field. `undefined` (no i18n service, no locales
+      // declared, or nothing in the bundle for this locale) leaves the
+      // caller's authored-label fallback untouched.
+      translateSelectOptions: (objectName, fieldName, options, locale) => {
+        if (!locale) return undefined;
+        const i18n = i18nService();
+        if (!i18n) return undefined;
+        const bundle = buildTranslationBundle(i18n);
+        if (!bundle) return undefined;
+        const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
+        const defaultLocale = typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+        // `value` here is `unknown` (an option's stored value, of whatever
+        // shape the field declares); `ObjectFieldLike.options[].value` narrows
+        // to `string | number | boolean` (`SelectOptionSchema.value`'s real
+        // runtime type). The cast is a type-only widening back to what this
+        // capability's own signature promises — no value is coerced.
+        const fields: Record<string, ObjectFieldLike> = {
+          [fieldName]: { name: fieldName, options: options as ObjectFieldLike['options'] },
+        };
+        const doc: ObjectLike = { name: objectName, fields };
+        const translated = translateObject(doc, bundle, {
+          locale,
+          fallbackChain: typeof fallback === 'string' && fallback.length > 0 ? [fallback] : undefined,
+          defaultLocale: typeof defaultLocale === 'string' && defaultLocale.length > 0 ? defaultLocale : undefined,
+        });
+        const translatedField = Array.isArray(translated.fields)
+          ? translated.fields.find((f) => f && f.name === fieldName)
+          : translated.fields?.[fieldName];
+        return Array.isArray(translatedField?.options)
+          ? (translatedField.options as typeof options)
+          : undefined;
       },
     };
 

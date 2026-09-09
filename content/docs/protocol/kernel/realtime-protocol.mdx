@@ -263,14 +263,21 @@ Subscribe to changes on a specific object:
 ```
 
 **Error Response:**
+
+Every `type: "error"` message on this page is one `ErrorMessageSchema` envelope
+(`packages/spec/src/api/websocket.zod.ts`): `messageId`, `type` and `timestamp` from
+`BaseWebSocketMessage`, then a **top-level** `code` and `message`, plus an optional `details` bag
+for anything else. There is no nested `error` object — a client that reads `msg.error.code` gets
+`undefined`.
+
 ```json
 {
+  "messageId": "550e8400-e29b-41d4-a716-446655440000",
   "type": "error",
-  "subscription_id": "sub_1",
-  "error": {
-    "code": "FORBIDDEN",
-    "message": "No permission to subscribe to 'task' object"
-  }
+  "timestamp": "2024-01-16T14:30:00Z",
+  "code": "FORBIDDEN",
+  "message": "No permission to subscribe to 'task' object",
+  "details": { "subscription_id": "sub_1" }
 }
 ```
 
@@ -667,13 +674,12 @@ Each connection consumes server resources.
 **Exceeding limits:**
 ```json
 {
+  "messageId": "6f1c2f3a-8b7d-4a1e-9c22-1a5f0d2b7e44",
   "type": "error",
-  "error": {
-    "code": "TOO_MANY_SUBSCRIPTIONS",
-    "message": "Maximum 50 subscriptions per connection",
-    "current": 50,
-    "max": 50
-  }
+  "timestamp": "2024-01-16T14:30:00Z",
+  "code": "TOO_MANY_SUBSCRIPTIONS",
+  "message": "Maximum 50 subscriptions per connection",
+  "details": { "current": 50, "max": 50 }
 }
 ```
 
@@ -1022,12 +1028,12 @@ Handle JWT expiration gracefully:
 
 ```json
 {
+  "messageId": "9a3f5d61-2c40-4f7b-b8e1-73d5a6c9f012",
   "type": "error",
-  "error": {
-    "code": "TOKEN_EXPIRED",
-    "message": "JWT token expired",
-    "expires_at": "2024-01-16T14:30:00Z"
-  }
+  "timestamp": "2024-01-16T14:30:00Z",
+  "code": "TOKEN_EXPIRED",
+  "message": "JWT token expired",
+  "details": { "expires_at": "2024-01-16T14:30:00Z" }
 }
 ```
 
@@ -1035,7 +1041,7 @@ Handle JWT expiration gracefully:
 ```javascript
 ws.onmessage = async (event) => {
   const msg = JSON.parse(event.data);
-  if (msg.error?.code === 'TOKEN_EXPIRED') {
+  if (msg.type === 'error' && msg.code === 'TOKEN_EXPIRED') {
     const newToken = await refreshToken();
     ws.close();
     reconnect(newToken);
@@ -1044,24 +1050,30 @@ ws.onmessage = async (event) => {
 ```
 
 ### Rate Limiting
-WebSocket messages are rate-limited:
+
+<Callout type="warn">
+  **Not implemented.** Nothing rate-limits WebSocket messages today. No producer anywhere in this
+  repository emits `RATE_LIMITED` on a realtime path, and there is no WebSocket transport for such
+  a message to arrive on (see the implementation-status callout at the top of this page). The
+  budget below is a **planned** one, and the envelope beside it is what `ErrorMessageSchema` would
+  require of a producer that eventually enforces it — not a shape any code emits today. HTTP
+  requests *are* rate-limited, under a different code and envelope: see
+  [Error Handling](/docs/protocol/kernel/error-handling) for `RATE_LIMIT_EXCEEDED`.
+</Callout>
+
+**Planned limits (not enforced):**
+- Max 100 messages per minute per connection
+- Max 10 subscriptions per minute per connection
 
 ```json
 {
+  "messageId": "c4e7b9d2-5a31-4c8f-9e60-2b8d41f7a305",
   "type": "error",
-  "error": {
-    "code": "RATE_LIMITED",
-    "message": "Too many messages",
-    "retry_after": 5,
-    "limit": 100,
-    "window": "1m"
-  }
+  "timestamp": "2024-01-16T14:30:00Z",
+  "code": "RATE_LIMITED",
+  "message": "Too many messages"
 }
 ```
-
-**Limits:**
-- Max 100 messages per minute per connection
-- Max 10 subscriptions per minute per connection
 
 ## Next Steps
 
