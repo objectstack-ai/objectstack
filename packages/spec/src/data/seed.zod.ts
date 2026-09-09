@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { LocaleSchema } from '../system/translation.zod';
 export const SeedMode = z.enum([
   'insert',    // Try to insert, fail on duplicate
   'update',    // Only update found records, ignore new
@@ -48,6 +49,9 @@ export const SeedSchema = lazySchema(() => strictObject({
     conflict: 'mode',
     environment: 'env',
     environments: 'env',
+    locales: 'locale',
+    language: 'locale',
+    languages: 'locale',
   },
 }, {
   /**
@@ -88,6 +92,35 @@ export const SeedSchema = lazySchema(() => strictObject({
    * - 'test': Only for CI/CD tests
    */
   env: z.array(z.enum(['prod', 'dev', 'test'])).default(['prod', 'dev', 'test']).describe('Applicable environments'),
+
+  /**
+   * Locale Scope
+   *
+   * Which locales this dataset applies to, as BCP-47 tags (`['zh-CN']`,
+   * `['en', 'en-GB']`). The loader drops a dataset whose scope does not include
+   * the locale it is loading for, so an app that ships one demo dataset per
+   * language market declares both and lets the runtime pick — rather than
+   * selecting between them while the config is assembled, which bakes the
+   * choice into `dist` and leaves the other market's rows resident in the
+   * database.
+   *
+   * **Omitted means every locale.** Unlike {@link SeedSchema.shape.env}, whose
+   * environments are a closed set of three and can therefore be spelled out as
+   * a default, locales are open-ended BCP-47 tags with no enumerable universe —
+   * so absence, not a default array, is what carries "unrestricted". An empty
+   * array is rejected rather than read as "no locale": a dataset that applies
+   * nowhere is an authoring mistake, and the same reasoning already governs a
+   * composite `externalId`.
+   *
+   * Tags are matched case-insensitively (`zh-cn` and `zh-CN` are the same tag
+   * per BCP-47) and otherwise exactly: `['zh']` does not match a runtime locale
+   * of `zh-CN`. Declare every tag the dataset is for.
+   *
+   * The platform translates nothing. This is the axis that SELECTS between
+   * record sets the app authored itself.
+   */
+  locale: z.array(LocaleSchema).min(1).optional()
+    .describe('Applicable locales (BCP-47 tags); omitted applies to every locale'),
 
   /**
    * The Payload

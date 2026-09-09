@@ -1035,9 +1035,14 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
 
       // Assert — items should be restored into the registry
       const registry = (kernel.getService('objectql') as any).registry;
+      // [#16702] `_provenance: 'org'` is the SERVER's own sentence about every
+      // `sys_metadata` row, stated by the shared hydrator — the same one the
+      // `object` branch has always made. Kept as an exact-shape assertion so an
+      // UNEXPECTED extra key on a restored app still reds this pin.
       expect(registry.getAllApps()).toContainEqual({
         name: 'custom_crm',
         label: 'Custom CRM',
+        _provenance: 'org',
       });
     });
 

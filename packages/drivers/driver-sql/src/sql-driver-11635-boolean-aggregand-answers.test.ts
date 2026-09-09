@@ -87,6 +87,9 @@ describe(`[#11635] driver-sql — boolean aggregands answer the ruled values (${
           region: { type: 'string' },
           stage: { type: 'string' },
           score: { type: 'number' },
+          // [#15546] The fixture rows carry a nullable `amount` too — declared
+          // so the verbatim seed below lands every column it carries.
+          amount: { type: 'number' },
           flag: { type: 'boolean' },
         },
       },

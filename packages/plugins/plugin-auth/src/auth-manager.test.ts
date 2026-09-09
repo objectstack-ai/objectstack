@@ -333,7 +333,15 @@ describe('AuthManager', () => {
       }));
     });
 
-    it('should return undefined (in-memory fallback) when no dataEngine is provided', async () => {
+    // ⛔ This used to assert `database === undefined` — "let better-auth build
+    // its own in-memory store". That store is keyed by the schema KEY while
+    // every read resolves by `modelName`, so on better-auth 1.7.2 EVERY model
+    // this package renames (`user`/`sys_user`, `oauthResource`/
+    // `sys_oauth_resource`, …) was unreachable on that path with
+    // "Model <name> not found". The old assertion could not see that: it read
+    // the value we passed, never what the value does. This one drives the
+    // factory and asks the adapter for a renamed model.
+    it('the no-dataEngine fallback yields an adapter that can resolve a RENAMED model', async () => {
       let capturedConfig: any;
       (betterAuth as any).mockImplementation((config: any) => {
         capturedConfig = config;
@@ -348,9 +356,17 @@ describe('AuthManager', () => {
       });
 
       await manager.getAuthInstance();
-
-      expect(capturedConfig.database).toBeUndefined();
       warnSpy.mockRestore();
+
+      // An AdapterFactory, not `undefined`.
+      expect(typeof capturedConfig.database).toBe('function');
+
+      const adapter = capturedConfig.database(capturedConfig);
+      // `sys_user` is `user` renamed via `modelName`; a store keyed by the
+      // schema key answers "Model sys_user not found" here instead of `null`.
+      await expect(
+        adapter.findOne({ model: 'sys_user', where: [{ field: 'id', value: 'nobody' }] }),
+      ).resolves.toBeNull();
     });
   });
 

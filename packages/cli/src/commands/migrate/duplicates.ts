@@ -578,14 +578,23 @@ export function answeringSeam(exec: SeedTenancyExec): SeedTenancyExec {
 /**
  * The canonical `createdAt` spelling for one holder row.
  *
- * `created_at` is a BUILTIN audit column: it is not in `datetimeFields`, and
- * `SqlDriver#formatOutput` repairs it only inside its `if (this.isSqlite)` arm —
- * and the holder probe reads through the raw-SQL seam anyway, so no presentation
- * runs on this path at all. The DIALECT therefore decides what lands in
- * `row.created_at`, and both sides of that asymmetry are pinned in
- * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`:
- * Postgres and MySQL materialise a JS `Date`, SQLite and its siblings hand back
- * canonical ISO-8601 UTC text.
+ * `created_at` is a BUILTIN audit column: it is not in `datetimeFields`, so no
+ * declared-field coercion reaches it — and the holder probe reads through the
+ * raw-SQL seam anyway, so `formatOutput` does not run on this path at all. The
+ * DIALECT therefore decides what lands in `row.created_at`: Postgres and MySQL
+ * materialise a JS `Date`, SQLite and its siblings hand back canonical ISO-8601
+ * UTC text. Pinned in
+ * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`
+ * §B3, which reads the same row raw through knex and still gets the dialect's
+ * `Date` on the live cells.
+ *
+ * ⚠️ The reason is the SEAM, ⛔ not an `if (this.isSqlite)` gate inside
+ * `formatOutput`. That gate is gone: #13973 ([ADR-0053 D-F1]) lifted both of
+ * `formatOutput`'s timestamp passes — the `AUDIT_TIMESTAMP_COLUMNS` pass and
+ * the `normalizeSqliteDatetimeOutput` pass over `datetimeFields` — out of it,
+ * and they run on EVERY dialect now, so the record read door presents the
+ * canonical text everywhere. This path simply never reaches that door, which is
+ * why the divergence survives HERE after the driver closed it there.
  *
  * `DuplicateHolder.createdAt` is declared `string | null`, so this leaf consumer
  * is the side that owes the canonical spelling — the same form the `occurredAt`

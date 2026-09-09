@@ -109,15 +109,30 @@ export interface RestRouteLedgerEntry {
    * SDK expressibility; none of them says whether a caller must be
    * authenticated, and `public` states INTENT for a handful of browser-facing
    * routes rather than measuring a gate. Deriving the answer from source
-   * syntax instead was measured and rejected: scanning all 80
-   * `this.routeManager.register(` sites in `rest-server.ts` for `enforceAuth`
-   * reads 50 gated / 30 ungated, and 22 of those 30 are FALSE — a wrapping
-   * `guardedRouteManager` gates 19 of them with no `enforceAuth` at the call
-   * site, and one registrar shares a handler const across its 3 mounts. A 73%
-   * false-ungated rate on the largest registrar is a written-down false
-   * assurance, which is strictly worse than an honest blank. So the posture is
-   * DECLARED at the producer, where a new route is already reviewed, instead of
-   * guessed at the consumer.
+   * syntax instead was measured and rejected: scanning all 80 registration
+   * sites in `rest-server.ts` for `enforceAuth` — TWO spellings, 72 direct
+   * `this.routeManager.register(` sites plus 8 `registerPerItemRoute(` calls
+   * through the per-item family's switch-carrying helper — reads 51 gated / 29
+   * ungated, and 22 of those 29 are FALSE: a wrapping `guardedRouteManager`
+   * gates 19 of them with no `enforceAuth` at the call site, and one registrar
+   * shares a handler const across its 3 mounts. A 76% false-ungated rate,
+   * concentrated on the largest registrar, is a written-down false assurance,
+   * which is strictly worse than an honest blank. So the posture is DECLARED at
+   * the producer, where a new route is already reviewed, instead of guessed at
+   * the consumer.
+   *
+   * ⚠️ RE-MEASURED 2026-09-08, and the two halves moved differently. The
+   * 22 = 19 + 3 decomposition did NOT move when the per-item helper landed —
+   * the same 19 routes, 11 still direct and 8 now helper-routed, all through
+   * the same wrapping registrar — and the population stayed 80. Only the
+   * headline split moved, earlier and for an unrelated reason: 50/30 became
+   * 51/29 when `registerUiEndpoints`, the one route in that file resolving no
+   * identity, was guarded. Recorded so the next reader does not re-derive a
+   * figure that has now been checked. ⛔ The rejection stands either way, and
+   * the second spelling strengthens it — a syntactic scanner has to know both
+   * before it can read the file even this badly. The full reading lives in
+   * `packages/qa/dogfood/test/authz-probe-blind-spot.census.ts`, the
+   * authority on this population.
    *
    * ABSENT MEANS "UNDECLARED", and that is the state of nearly the whole
    * surface. This field is filled INCREMENTALLY, exactly like `responseSchema`
@@ -444,15 +459,14 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'POST /api/v1/data/:object/updateMany', family: 'batch', source: 'route-manager', disposition: 'sdk', client: 'data.updateMany' },
   { route: 'POST /api/v1/data/:object/deleteMany', family: 'batch', source: 'route-manager', disposition: 'sdk', client: 'data.deleteMany' },
 
-  // ── packages (direct-mount registrar; the three `:id` rows service-gated) ──
+  // ── packages (direct-mount registrar) ──────────────────────────────────────
+  // ONE row since #14503: the three read/delete twins the registrar used to
+  // mount beside `publish` are gone, and `packages/runtime`'s `/packages`
+  // domain is the single implementation of `GET /packages`,
+  // `GET /packages/:id` and `DELETE /packages/:id` — their rows live in
+  // `packages/runtime/src/route-ledger.ts`.
   { route: 'POST /api/v1/packages/publish', family: 'packages', source: 'direct-mount', disposition: 'server-only',
     note: 'marketplace registry publish ({manifest, metadata}) — publisher tooling, not app-SDK surface. Moved off the bare POST /packages in #3610: that verb+path is the dispatcher install route, and REST registering it first swallowed every packages.install call with a 400. Mounted UNCONDITIONALLY since #7563 — it has no dispatcher twin, so while it was service-gated the path was absorbed by /packages/:id and answered 405 with THAT route\'s Allow set; it now resolves the `package` service per request and answers an honest 404 on a deployment that composes none.' },
-  { route: 'GET /api/v1/packages', family: 'packages', source: 'direct-mount', disposition: 'sdk', client: 'packages.list',
-    note: 'shadows the dispatcher twin (registered first); merges registry + database packages' },
-  { route: 'GET /api/v1/packages/:id', family: 'packages', source: 'direct-mount', disposition: 'sdk', client: 'packages.get',
-    note: 'shadows the dispatcher twin (registered first)' },
-  { route: 'DELETE /api/v1/packages/:id', family: 'packages', source: 'direct-mount', disposition: 'sdk', client: 'packages.uninstall',
-    note: 'shadows the dispatcher twin (registered first); full uninstall via protocol.deletePackage (#2747)' },
 
   // ── external datasource federation (ADR-0015 §6.2, direct-mount) ──────────
   { route: 'GET /api/v1/datasources/:name/external/tables', family: 'external-datasource', source: 'direct-mount', disposition: 'sdk', client: 'datasources.external.listTables' },

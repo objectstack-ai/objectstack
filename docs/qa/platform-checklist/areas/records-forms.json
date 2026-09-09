@@ -3030,7 +3030,7 @@
       "title": "Object lifecycle hooks fire on the write path with the right timing, gate, async and error semantics — driven over /api/v1/data/*, oracled by the record effect and the log line",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3168,7 +3168,7 @@
         "packages/objectql/src/hook-wrappers.ts#wrapDeclarativeHook (wrapDeclarativeHook wrapping order condition→async→retry→timeout→onError; pickRecordPayload #4770 record = stored ⊕ payload total over declared fields; pickPreviousPayload #4784 previous binding; HookConditionError #4775 fail-closed, raised OUTSIDE onError; fireAndForget = async && isAfterEvent)",
         "packages/objectql/src/hook-binder.ts#bindHooksToEngine (bindHooksToEngine: per-event × per-object engine.registerHook with priority; unresolved-body / empty-target skips)",
         "packages/runtime/src/sandbox/body-runner.ts#engineCtx (log: engineCtx.logger — the ['log'] capability routing that makes the audit/warn lines an observable log oracle)",
-        "packages/spec/liveness/hook.json#retryPolicy (object/events/body/priority/async/condition/retryPolicy/timeout/onError all 'live'; label/description 'dead' but kept as docs)",
+        "packages/spec/liveness/hook.json#retryPolicy (object/events/body/priority/async/condition/retryPolicy/timeoutMs/onError all 'live'; packages/spec/liveness/hook.json#timeout is 'dead' — the #14478 tombstone left when the key was renamed to timeoutMs, so a runner reads the wall-clock abort off the timeoutMs row; label/description 'dead' but kept as docs)",
         "examples/app-showcase/src/data/objects/{task,inquiry,project}.object.ts (task.done boolean + task.title required; inquiry.status select['new' default:true]/source text no-default; project.budget/spent currency + spent_within_budget rule rejecting spent > budget*1.2)",
         "examples/app-showcase/src/data/seed/index.ts#tasks (done tasks 'Audit current IA'/'App wireframes'; not-done 'Build homepage'; projects 'Data Platform' 600000/420000 and 'Website Relaunch' 150000/60000)",
         "packages/qa/dogfood/test/showcase-public-form.dogfood.test.ts + hook-error-format.dogfood.test.ts (the two existing dogfood pins this item cites)"
@@ -3179,6 +3179,12 @@
           "date": "2026-08-08",
           "change": "initial — the hook coverage.json waiver was STALE (showcase ships 4 observable hooks); authored a lifecycle+condition+async+onError+priority item",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-09",
+          "change": "citation only, no clause moved — the hook liveness citation asserted `timeout` 'live'; #14478 renamed it to `timeoutMs` and left `timeout` as a 'dead' tombstone row, so the ref sent a runner to a contradiction. Now names the live key and the tombstone.",
+          "ref": "#15839"
         }
       ]
     },

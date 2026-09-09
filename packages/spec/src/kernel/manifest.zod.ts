@@ -38,19 +38,33 @@ import { NavigationContributionSchema } from '../ui/app.zod';
  *   "network": ["api.acme.com"], "fs": [] }
  * ```
  */
-export const PluginPermissionsSchema = z
-  .object({
-    services: z.array(z.string()).optional()
-      .describe('Platform services the plugin may resolve (e.g. "object", "http")'),
-    hooks: z.array(z.string()).optional()
-      .describe('Lifecycle hooks the plugin may register (e.g. "record.beforeInsert")'),
-    network: z.array(z.string()).optional()
-      .describe('Network hosts the plugin may reach (e.g. "api.acme.com")'),
-    fs: z.array(z.string()).optional()
-      .describe('Filesystem paths the plugin may access'),
-  })
-  .strict()
-  .describe('Structured plugin permission grants (ADR-0025 §3.2)');
+export const PluginPermissionsSchema = strictObject({
+  surface: 'the `permissions` block of this package manifest',
+  history:
+    'This block has refused unknown keys since it was introduced, but through zod\'s own '
+    + 'bare message: a transposed `hoooks` was echoed back and nothing else — no surface, no '
+    + 'rename — while every neighbouring block on this manifest named all three. Reaching '
+    + 'the author one level down inside the `permissions` union made that the whole message, '
+    + 'and this block decides which services, hooks, network hosts and filesystem paths the '
+    + 'plugin may touch. The declared keys are `services`, `hooks`, `network` and `fs`.',
+  aliases: {
+    // Edit distance cannot reach a two-letter abbreviation from the word it
+    // abbreviates, and `fs` is the one key here an author is most likely to
+    // spell out in full.
+    filesystem: 'fs',
+    paths: 'fs',
+    hosts: 'network',
+  },
+}, {
+  services: z.array(z.string()).optional()
+    .describe('Platform services the plugin may resolve (e.g. "object", "http")'),
+  hooks: z.array(z.string()).optional()
+    .describe('Lifecycle hooks the plugin may register (e.g. "record.beforeInsert")'),
+  network: z.array(z.string()).optional()
+    .describe('Network hosts the plugin may reach (e.g. "api.acme.com")'),
+  fs: z.array(z.string()).optional()
+    .describe('Filesystem paths the plugin may access'),
+}).describe('Structured plugin permission grants (ADR-0025 §3.2)');
 
 export type PluginPermissions = z.input<typeof PluginPermissionsSchema>;
 

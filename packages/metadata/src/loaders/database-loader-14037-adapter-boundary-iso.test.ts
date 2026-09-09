@@ -13,15 +13,24 @@
  * casts — an assertion about a driver row, never a measurement of one — which
  * is why tsc reported nothing.
  *
- * On Postgres and MySQL the assertion is false for BOTH column classes:
- * `SqlDriver#formatOutput` repairs the builtin audit columns
- * (`repairNaiveUtcAuditTimestamp`) and folds declared `Field.datetime` columns
+ * When this landed, the assertion was false on Postgres and MySQL for BOTH
+ * column classes: `SqlDriver#formatOutput` repaired the builtin audit columns
+ * (`repairNaiveUtcAuditTimestamp`) and folded declared `Field.datetime` columns
  * (`normalizeSqliteDatetimeOutput`) only inside its `if (this.isSqlite)` arm,
- * and `withPostgresCalendarDayAsText` leaves `timestamptz` / `timestamp`
- * deliberately untouched. That dialect fact is pinned live in
- * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`.
- * `recorded_at` being a declared `Field.datetime` on `sys_metadata_history`
- * does NOT protect it — the fold is inside the SQLite arm too.
+ * so `recorded_at` being a declared `Field.datetime` on `sys_metadata_history`
+ * did not protect it either. #13973 ([ADR-0053 D-F1]) has since lifted both
+ * passes out of that gate — they run on EVERY dialect — and the pin that
+ * recorded the asymmetry now records the canonical-text contract
+ * (`packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`
+ * §B, inverted on purpose).
+ *
+ * ⚠️ `withPostgresCalendarDayAsText` is untouched by that ruling and still
+ * leaves `timestamptz` / `timestamp` deliberately alone ([ADR-0053 D-F2]) — the
+ * client still hands back a `Date`; the driver now folds it at its own read
+ * boundary. And the `Date` domain these cases pin did not close: an INVALID
+ * `Date` still leaves `driver-sql` unchanged ([ADR-0053 D-F3]), and non-SQL
+ * drivers materialise their own. So these cases pin a live adapter arm, not a
+ * historical one — what they own is the adapter's behaviour per input shape.
  *
  * All three declarations are `z.string().datetime()`
  * (`packages/spec/src/system/metadata-persistence.zod.ts`), a refinement a

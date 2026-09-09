@@ -171,7 +171,39 @@ const DOMAIN_MEMBERSHIP: Readonly<Record<ValueDomain, (value: string) => boolean
  * two code domains are exact uppercase). Element-wise iteration over a
  * multi-value carrier, and the prose a refusal message needs, are the
  * caller's: this function answers membership and nothing else.
+ *
+ * Total over the vocabulary AND closed outside it: a `domain` that is not a
+ * member — including one that names an `Object.prototype` member such as
+ * `toString`, `valueOf`, `constructor` or `__proto__` — answers `false`. It
+ * never throws and never answers a non-boolean, so a caller reaching this
+ * published export from plain JS or from metadata cannot get a membership
+ * false positive out of an unknown domain word. See the guard's own comment.
  */
 export function isValueDomainMember(domain: ValueDomain, value: string): boolean {
+  // ⛔ The own-property guard is load-bearing, not defensive noise. `domain` is
+  // typed, but this function is PUBLISHED (`api-surface/shared.json`), so a
+  // plain-JS consumer — or any caller handing over a domain string read from
+  // METADATA rather than written in source — arrives with no type checking at
+  // all, and metadata-sourced strings are exactly where `constructor` and
+  // `toString` show up. `DOMAIN_MEMBERSHIP` is an object literal, so it
+  // inherits `Object.prototype` and a bare `DOMAIN_MEMBERSHIP[domain]` resolves
+  // a prototype member for such a word: measured on the baseline, `toString`
+  // answered `'[object Object]'` (a truthy STRING), `valueOf` and `constructor`
+  // answered truthy OBJECTS, and `__proto__`, `nope` and `''` threw a
+  // `TypeError` off a non-callable. A predicate whose whole job is to refuse
+  // non-members therefore failed OPEN on three of them.
+  //
+  // The guard collapses every off-vocabulary domain onto one answer — `false`,
+  // never truthy and never a throw — whether it is prototype-resolvable or
+  // plainly absent. It narrows: nothing that was accepted before is refused
+  // now, because every accepted `domain` is an own key. It is the same
+  // spelling the `iso_4217_currency` definition above already uses.
+  //
+  // ⛔ Not `Object.create(null)` for the record: the null prototype would turn
+  // the truthy answers into throws rather than into `false`, and it would cost
+  // the `Readonly<Record<ValueDomain, …>>` annotation that makes a vocabulary
+  // member added without a definition fail to COMPILE — the guarantee the
+  // record's own doc comment above exists to state.
+  if (!Object.prototype.hasOwnProperty.call(DOMAIN_MEMBERSHIP, domain)) return false;
   return DOMAIN_MEMBERSHIP[domain](value);
 }

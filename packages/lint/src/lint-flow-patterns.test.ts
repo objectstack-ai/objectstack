@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { TimeRelativeTriggerSchema, LoopConfigSchema, ParallelConfigSchema, TryCatchConfigSchema, FlowSchema } from '@objectstack/spec/automation';
+import { TimeRelativeTriggerSchema, LoopConfigSchema, ParallelConfigSchema, TryCatchConfigSchema, HttpConfigSchema, FlowSchema } from '@objectstack/spec/automation';
 // [#5659] The shared identity reduction, asserted beside the rule that consumes
 // it — the rule's verdict and the drivers' verdict are one object now.
 import { reduceFilterVerdict } from '@objectstack/spec/data';
@@ -2271,5 +2271,186 @@ describe('per-iteration containment (#13681 / #14394)', () => {
     it('raises no finding from ANY flow rule — the page teaches a clean shape', () => {
       expect(lintFlowPatterns({ flows: [DOCUMENTED_FLOW] })).toHaveLength(0);
     });
+  });
+});
+
+/**
+ * #16405 — the two #1315 template rules reach an `http` node's REQUEST PAYLOAD.
+ *
+ * The recursive template scan read a region-stripped view of each node's config
+ * built from the FLAT UNION of every region key on ANY node type (`body`,
+ * `try`, `catch`, `branches`), rather than from the slots the node in hand
+ * actually owns. `body` is `loop`'s region slot AND the canonical request-payload
+ * key on an `http` node (`HttpConfigSchema.body`), so `config.body` was deleted
+ * from EVERY node's view before the scan read it — and the payload is the one
+ * place an uninterpolated token reaches a real outbound request, because
+ * `http-nodes.ts` interpolates the raw config wholesale.
+ *
+ * Measured on the parent commit, both directions: every case in this block
+ * returned ZERO findings for its rule before the call site passed
+ * `ownRegionKeys(node.type)`.
+ *
+ * The over-correction direction is pinned too, and it is the one that breaks if
+ * a repair strips NOTHING: the last case here keeps a payload token inside a
+ * `loop` body reported exactly ONCE, on the node carrying it.
+ */
+
+/** An `http` push node's config: a real URL, a real method, and the payload under test. */
+const httpPushConfig = (body: unknown) => ({
+  url: 'https://api.example.com/v1/incidents',
+  method: 'POST',
+  body,
+});
+
+/** A scheduled flow whose one `http` node carries the payload under test. */
+function httpFlow(body: unknown) {
+  return {
+    flows: [{
+      name: 'incident_push',
+      runAs: 'system',
+      nodes: [
+        { id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 3 * * *' } },
+        { id: 'push', type: 'http', label: 'POST incident', config: httpPushConfig(body) },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'push' }],
+    }],
+  };
+}
+
+/** The same `http` node, moved inside a `try_catch`'s `try` region. */
+function guardedHttpFlow(body: unknown) {
+  return {
+    flows: [{
+      name: 'incident_push',
+      runAs: 'system',
+      nodes: [
+        { id: 'start', type: 'start', config: { triggerType: 'schedule', schedule: 'cron:0 3 * * *' } },
+        {
+          id: 'guard', type: 'try_catch', label: 'Guard',
+          config: {
+            try: {
+              nodes: [{ id: 'push', type: 'http', label: 'POST incident', config: httpPushConfig(body) }],
+              edges: [],
+            },
+            catch: {
+              nodes: [{ id: 'log_failure', type: 'create_record', label: 'Log failure', config: { objectName: 'sync_error' } }],
+              edges: [],
+            },
+          },
+        },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'guard' }],
+    }],
+  };
+}
+
+describe('#16405 — an `http` node payload is not a region, and both #1315 rules read it', () => {
+  /**
+   * #5700's bar, applied here: a payload these rules judge has to be one an
+   * author can really write, or the pins prove a rule against metadata the
+   * schema refuses. `HttpConfigSchema` is a `strictObject`, so a misspelled key
+   * would surface as an `unrecognized_key` rather than being dropped.
+   */
+  it('pins the fixture payload as an authorable `http` config', () => {
+    const parsed = HttpConfigSchema.safeParse(httpPushConfig({ text: 'Incident {{record.title}}' }));
+    expect(parsed.success ? [] : parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`)).toEqual([]);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('pins the guarded fixture as an authorable `try_catch` config', () => {
+    const cfg = (guardedHttpFlow({ text: '{{record.title}}' }).flows[0].nodes[1] as { config: unknown }).config;
+    const parsed = TryCatchConfigSchema.safeParse(cfg);
+    expect(parsed.success ? [] : parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`)).toEqual([]);
+    expect(parsed.success).toBe(true);
+  });
+
+  describe('flow-double-brace-interpolation', () => {
+    it('flags a `{{ }}` token in a top-level `http` node payload', () => {
+      const fnds = lintFlowPatterns(httpFlow({ text: 'Incident {{record.title}}' }))
+        .filter((f) => f.rule === FLOW_DOUBLE_BRACE_INTERP);
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].where).toBe("flow 'incident_push' · node 'push' (http)");
+      expect(fnds[0].message).toContain('{{record.title}}');
+    });
+
+    it('flags the same token when the `http` node sits inside a region', () => {
+      const fnds = lintFlowPatterns(guardedHttpFlow({ text: 'Incident {{record.title}}' }))
+        .filter((f) => f.rule === FLOW_DOUBLE_BRACE_INTERP);
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].where).toBe("flow 'incident_push' · try_catch 'guard' try · node 'push' (http)");
+    });
+
+    it('reaches a token nested deep inside the payload, not only its top level', () => {
+      const fnds = lintFlowPatterns(httpFlow({ fields: [{ value: '{{record.amount}}' }] }))
+        .filter((f) => f.rule === FLOW_DOUBLE_BRACE_INTERP);
+      expect(fnds).toHaveLength(1);
+    });
+  });
+
+  describe('flow-bare-dollar-reference', () => {
+    it('flags a bare `$ref.field` in a top-level `http` node payload', () => {
+      const fnds = lintFlowPatterns(httpFlow({ ticket: '$source.id' }))
+        .filter((f) => f.rule === FLOW_BARE_DOLLAR_REF);
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].where).toBe("flow 'incident_push' · node 'push' (http)");
+      expect(fnds[0].message).toContain('$source.id');
+    });
+
+    it('flags the same reference when the `http` node sits inside a region', () => {
+      const fnds = lintFlowPatterns(guardedHttpFlow({ ticket: '$source.id' }))
+        .filter((f) => f.rule === FLOW_BARE_DOLLAR_REF);
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].where).toBe("flow 'incident_push' · try_catch 'guard' try · node 'push' (http)");
+    });
+  });
+
+  it('still raises nothing for a correct single-brace payload', () => {
+    const fnds = lintFlowPatterns(httpFlow({ id: '{record.id}', owner: '{$User.Id}', note: 'Total $5' }))
+      .filter((f) => f.rule === FLOW_DOUBLE_BRACE_INTERP || f.rule === FLOW_BARE_DOLLAR_REF);
+    expect(fnds).toEqual([]);
+  });
+
+  /**
+   * The over-correction guard, and the reason the second argument must be the
+   * node's OWN slots rather than nothing at all: a `loop`'s config physically
+   * CONTAINS its body, so a repair that stopped stripping would report this
+   * payload token twice — once on the `http` node that carries it, once on the
+   * `loop` that merely wraps it.
+   */
+  it('reports a payload token inside a `loop` body ONCE, on the node carrying it', () => {
+    const fnds = lintFlowPatterns(loopBodyFlow({
+      nodes: [{
+        id: 'push', type: 'http', label: 'POST incident',
+        config: httpPushConfig({ text: 'Lead {{lead.name}}' }),
+      }],
+      edges: [],
+    // Scoped to this rule: an `http` node in a bare loop body also trips the
+    // #14394 containment warning, a different finding about a different defect.
+    })).filter((f) => f.rule === FLOW_DOUBLE_BRACE_INTERP);
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].where).toBe(
+      "flow 'campaign_enrollment' · loop 'loop_leads' body · node 'push' (http)",
+    );
+    expect(fnds[0].where).not.toContain("node 'loop_leads'");
+  });
+
+  /**
+   * `try` / `catch` / `branches` — the rest of the flat union — for the same
+   * reason, on a node type that does not own them. No node type in the protocol
+   * declares these as ordinary config today (only `try_catch` and `parallel`
+   * own them, as regions), but `FlowNodeSchema.config` is an open `z.record`, so
+   * an authored key by any of those names on any other node type is metadata a
+   * rule must still read rather than silently delete.
+   */
+  it('reads a `try` / `catch` / `branches` key authored on a node that owns no region', () => {
+    const fnds = lintFlowPatterns(nodeFlow({
+      objectName: 'm',
+      fields: { try: '{{a}}', catch: '{{b}}', branches: '{{c}}' },
+    })).filter((f) => f.rule === FLOW_DOUBLE_BRACE_INTERP);
+    expect(fnds).toHaveLength(3);
+    // Top level too, not only nested under a declared key.
+    const top = lintFlowPatterns(nodeFlow({ objectName: 'm', try: '{{a}}', catch: '{{b}}', branches: '{{c}}' }))
+      .filter((f) => f.rule === FLOW_DOUBLE_BRACE_INTERP);
+    expect(top).toHaveLength(3);
   });
 });

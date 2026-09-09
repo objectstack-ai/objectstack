@@ -308,8 +308,8 @@ name has the same failure: the block skips the name and renders one column, one
 filter chip, or one form field short.
 
 ```jsx
-<ListView objectName="crm_account" columns={['name', 'revenue']} />
-//                                            ↑ not a crm_account field → warning
+<ListView data={{ provider: 'object', object: 'crm_account' }} columns={['name', 'revenue']} />
+//                                                                        ↑ not a crm_account field → warning
 ```
 
 Checked on every injected block: `<ListView>`'s
@@ -336,9 +336,9 @@ They are withdrawn from the react tier, and using one is an **error**
 (`react-block-needs-record-context`) — by tag, and through
 `<Block type="record:…">` alike. On a react page the parent record is ordinary
 React state, so bind it with a block that reads its own props: `<ListView
-objectName="<child>" filters={['<lookup>', '=', parentId]}>` for a related list,
-`<ObjectForm mode="view" recordId={…}>` for a field panel. To use the family
-itself, author the page as `type:'record'`.
+data={{ provider: 'object', object: '<child>' }} filters={['<lookup>', '=',
+parentId]}>` for a related list, `<ObjectForm mode="view" recordId={…}>` for a
+field panel. To use the family itself, author the page as `type:'record'`.
 
 On a **record page**, where these blocks do work, §5 checks their field-bearing
 props, and `<RecordRelatedList objectName>` is the **related (child)** object
@@ -349,8 +349,8 @@ there is the mistake that check was extended to catch.
 A **filter position** is the exception that gates:
 
 ```jsx
-<ListView objectName="crm_account" filters={['revenu', '=', stage]} />
-//                                            ↑ error, not a warning
+<ListView data={{ provider: 'object', object: 'crm_account' }} filters={['revenu', '=', stage]} />
+//                                                                        ↑ error, not a warning
 ```
 
 An unknown column in a predicate is not a skipped column — the predicate can
@@ -555,7 +555,7 @@ A clean run walks the registry and reports timing:
   Config: /path/to/support-desk/objectstack.config.ts
   Load time: 21ms
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (43)...
+  → Running author-time rules (44)...
   → Checking capability providers (#3366)...
   → Checking package docs (ADR-0046)...
 

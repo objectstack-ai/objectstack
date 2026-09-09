@@ -1,0 +1,13 @@
+---
+"@objectstack/spec": patch
+---
+
+Two spec docblocks now say what the tree does: `StrandedRunState` is no longer given a member list here, and the `navigationContributions[].group` JSDoc names the mis-aimed case (#16708, #16507)
+
+**`contracts/automation-service.ts`** — the `AutomationResult.status` docblock explains why plugin-approvals' `StrandedRunState` is deliberately *not* promoted to this status, and it did so through a parenthetical copy of that union's members, `'missing' | 'failed'`. The plugin has since split `'failed'` into `'repairable'`, `'snapshot_dropped'` and `'unrepairable'` (the #15358 discriminator), so the copy described a shape the type contradicted — a spec docblock telling a reader the type cannot express a distinction the platform had already published. The copy is **removed rather than refreshed**: the union is plugin-local, is declared and documented member by member on the type itself, and `automation-result-status.pin.test.ts` excludes it from its pins *on purpose*, so any member list restated in this package is unpinned prose with nothing to keep it honest. The docblock now names where the members live instead of counting them.
+
+**`ui/app.zod.ts`** — the JSDoc above `NavigationContributionSchema` documented only the case where `group` is **omitted**, while the `.describe()` a few lines below it (corrected in #14925) also names the case where `group` is **present and names no group the target app declares**. The two halves of one key's authoring-time documentation disagreed, and they disagreed on the case an author cannot detect from their own source — the target app belongs to another package. The JSDoc now carries that case in the spelling the `.describe()` and `content/docs/ui/setup-app.mdx` already use: not refused, items appended at the app top level anyway, a `nav_contribution_group_missing` diagnostic emitted by the runtime at `warn` and by `os build` and `os validate` at compile time.
+
+Prose only, in both files. No type, no schema, no accept set and no exported name moves; nothing that reaches a generated artefact changed, so the reference pages, the authorable surface and the JSON-Schema manifest are byte-identical. The changeset exists because both strings **ship**: `src/**/*.zod.ts` is in this package's `files[]`, and both docblocks are emitted into the published `dist/*.d.ts`.
+
+One private fixture comment rides along, outside any published package: `examples/app-multi-package/src/packages/orders/index.ts` credited only `os build` with the compile-time finding, where `findNavGroupDiagnostics` has been folded into both `os build` and `os validate` since #14920.

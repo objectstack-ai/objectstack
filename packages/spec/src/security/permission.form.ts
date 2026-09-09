@@ -5,10 +5,16 @@ import { defineForm } from '../ui/view.zod';
 /**
  * PermissionSet — canonical FormView layout.
  *
- * Used for both `permission` (additive permission grant bundles) and
- * `profile` (the base permission set assigned to every user). The only
- * flags are minimal (ADR-0090 D2 removed the Profile concept)
- * so admins can see and toggle it explicitly.
+ * Serves the `permission` metadata kind, and only that one. There is no
+ * Profile concept: ADR-0090 D2 removed it (`isProfile` deleted, not
+ * deprecated), leaving permission sets as the only capability container —
+ * union-merged and purely additive. So `METADATA_FORM_REGISTRY` has no
+ * `profile` key, `MetadataTypeSchema` admits no `profile` kind, and
+ * `PermissionSetSchema` answers an authored `isProfile` or `profiles` with a
+ * retirement tombstone rather than a silent strip.
+ *
+ * The form surfaces no flag: `isDefault` (ADR-0090 D5) is the schema's only
+ * boolean and it records a boot-time binding hint, not a grant.
  *
  * The object/field permission maps are intentionally kept as JSON for
  * now — they're typically managed via the dedicated permission matrix
@@ -21,7 +27,7 @@ export const permissionForm = defineForm({
     {
       label: 'Identity',
       description:
-        'Permission Sets stack on top of a Profile to grant additional access. Profiles are the base set assigned 1:1 to each user.',
+        'Permission sets are the only capability container: a user gets the union of every set they hold, so sets only ever add access. Positions distribute sets to people.',
       columns: 2,
       fields: [
         { field: 'name', required: true, colSpan: 1, helpText: 'Machine name (snake_case)' },

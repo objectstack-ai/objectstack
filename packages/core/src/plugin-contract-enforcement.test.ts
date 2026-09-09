@@ -1,7 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `kernel.use()` enforces the DECLARED plugin contract (#16049).
+ * `kernel.use()` enforces the DECLARED plugin contract (#16049) — on BOTH
+ * published kernels (#16721).
+ *
+ * WHICH KERNEL. Groups A–F drive `ObjectKernel.use()`, the path #16049 wired
+ * (`PluginLoader.validatePluginContract`). Group G drives `LiteKernel.use()`,
+ * which #16721 converged onto the SAME check — `assertPluginContract` in
+ * `plugin-contract.ts`, the one statement both kernels call. G is not a copy
+ * of A–F: it pins the cases whose answer DIFFERED between the kernels before
+ * #16721, the parity of the envelope for one input, and the two orderings
+ * `LiteKernel.use()` owes (state before contract, contract before registry).
  *
  * WHY THIS FILE EXISTS. `PluginSchema` (`@objectstack/spec`,
  * `kernel/plugin.zod.ts`) had zero runtime callers. The boot path ran three
@@ -32,6 +41,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ObjectKernel } from './kernel.js';
+import { LiteKernel } from './lite-kernel.js';
 import { PluginLoader } from './plugin-loader.js';
 import { ObjectLogger } from './logger.js';
 import { PLUGIN_UI_REQUIRED_KEY_MISSING } from '@objectstack/spec/kernel';
@@ -42,10 +52,29 @@ function makeKernel(): ObjectKernel {
     return new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
 }
 
-/** What `kernel.use()` left in the kernel's own plugin map. */
-function stored(kernel: ObjectKernel, name: string): Record<string, unknown> | undefined {
+/** A `LiteKernel` that registers plugins; it installs no signal handlers of its own. */
+function makeLiteKernel(): LiteKernel {
+    return new LiteKernel({ logger: { level: 'silent' } });
+}
+
+/** What `kernel.use()` left in the kernel's own plugin map — either kernel. */
+function stored(kernel: ObjectKernel | LiteKernel, name: string): Record<string, unknown> | undefined {
     return (kernel as unknown as { plugins: Map<string, Record<string, unknown>> })
         .plugins.get(name);
+}
+
+/**
+ * The synchronous twin of {@link refusal}: `LiteKernel.use()` throws rather
+ * than rejects. Same discipline — a case whose input STOPPED being refused
+ * reports "it loaded", never a property miss on a kernel.
+ */
+function refusalSync(register: () => unknown): Error & { code?: string } {
+    try {
+        register();
+    } catch (e) {
+        return e as Error & { code?: string };
+    }
+    throw new Error('expected LiteKernel.use() to refuse the plugin, but it loaded');
 }
 
 /**
@@ -344,5 +373,172 @@ describe('E — `version` is DELIBERATELY not enforced from the schema', () => {
         const err = await refusal(kernel.use(bad));
         expect(err.message).toContain('Invalid semantic version');
         expect(err.message).not.toContain('PLUGIN_CONTRACT_VIOLATION');
+    });
+});
+
+describe('G — the SAME contract on LiteKernel.use() (#16721)', () => {
+    /**
+     * Before #16721 every refusal above had an accepting twin on this kernel:
+     * `LiteKernel.use()` wrote the object straight into its registry, so the
+     * object group A refuses mounted routes here. `AGENTS.md` names this
+     * kernel for tests, so "green in vitest, refused at boot" was the shape
+     * of the trap. These cases pin the convergence — same code, same key,
+     * same message — and the two properties this kernel's `use()` owes that
+     * the loader path states elsewhere: the `code` PROPERTY survives (there
+     * is no re-wrap here), and a refused plugin never touches the registry.
+     */
+    it('refuses the legacy `ui-plugin` type, synchronously, with the code on the property AND at the head of the message', () => {
+        const kernel = makeLiteKernel();
+        const legacy = fixture({
+            name: '@os-fixture/lite-legacy-ui',
+            type: 'ui-plugin' as unknown as Plugin['type'],
+            staticPath: UI_STATIC_PATH,
+            slug: 'lite-legacy-ui',
+        });
+
+        const err = refusalSync(() => kernel.use(legacy));
+        expect(err.code).toBe('PLUGIN_CONTRACT_VIOLATION');
+        expect(err.message.startsWith('PLUGIN_CONTRACT_VIOLATION: ')).toBe(true);
+        expect(err.message).toContain('@os-fixture/lite-legacy-ui');
+        expect(err.message).toContain("at 'type'");
+
+        // …and nothing was stored, so no later seam can read it off the kernel.
+        expect(stored(kernel, '@os-fixture/lite-legacy-ui')).toBeUndefined();
+    });
+
+    it('CALIBRATION — the same fixture with the modern `ui` value loads, stored verbatim', () => {
+        const kernel = makeLiteKernel();
+        const modern = fixture({
+            name: '@os-fixture/lite-modern-ui',
+            type: 'ui',
+            staticPath: UI_STATIC_PATH,
+            slug: 'lite-modern-ui',
+        });
+
+        expect(kernel.use(modern)).toBe(kernel);
+        expect(stored(kernel, '@os-fixture/lite-modern-ui')).toBe(modern);
+    });
+
+    it.each([
+        ['staticPath', { name: '@os-fixture/lite-ui-no-static-path', type: 'ui', slug: 'lite-ui-no-static-path' }],
+        ['slug', { name: '@os-fixture/lite-ui-no-slug', type: 'ui', staticPath: UI_STATIC_PATH }],
+    ] as const)('refuses a `ui` plugin with no `%s`, naming the key and the spec code (#16334 reaches this kernel now)', (key, overrides) => {
+        // The two inputs #16721 was filed on: refused by `ObjectKernel` (group F),
+        // and until now stored verbatim here — the hono auto-discovery pin's
+        // group F carried the accepting readings and was rewritten with this.
+        const kernel = makeLiteKernel();
+        const bad = fixture({ ...overrides } as Partial<Fixture> & { name: string });
+
+        const err = refusalSync(() => kernel.use(bad));
+        expect(err.code).toBe('PLUGIN_CONTRACT_VIOLATION');
+        expect(err.message).toContain(`at '${key}'`);
+        expect(err.message).toContain(PLUGIN_UI_REQUIRED_KEY_MISSING);
+        expect(stored(kernel, overrides.name)).toBeUndefined();
+    });
+
+    it('refuses `null` on a declared key — `.optional()` admits absence, never `null`', () => {
+        const kernel = makeLiteKernel();
+        const bad = fixture({ name: '@os-fixture/lite-null-author', author: null as unknown as string });
+
+        const err = refusalSync(() => kernel.use(bad));
+        expect(err.code).toBe('PLUGIN_CONTRACT_VIOLATION');
+        expect(err.message).toContain("at 'author'");
+    });
+
+    it('a plugin declaring NO type still loads and no `type` is written back', () => {
+        const kernel = makeLiteKernel();
+        const untyped: Plugin = { name: 'com.example.lite-untyped', version: '1.0.0', init: () => {} };
+
+        expect(kernel.use(untyped)).toBe(kernel);
+        // The parse output is discarded on this kernel too: `.default('standard')`
+        // must NOT have been written back onto the stored object.
+        expect(stored(kernel, 'com.example.lite-untyped')).toBe(untyped);
+        expect(stored(kernel, 'com.example.lite-untyped')?.type).toBeUndefined();
+    });
+
+    it('⭐ a CLASS-BASED plugin keeps its identity, prototype and prototype methods', () => {
+        class LiteClassPlugin implements Plugin {
+            name = 'com.example.lite-class-based';
+            version = '2.3.4';
+            type = 'standard' as const;
+            async init(_ctx: PluginContext): Promise<void> { /* no services */ }
+            describeSelf(): string { return `class:${this.name}`; }
+        }
+
+        const kernel = makeLiteKernel();
+        const instance = new LiteClassPlugin();
+
+        expect(kernel.use(instance)).toBe(kernel);
+
+        const entry = stored(kernel, 'com.example.lite-class-based');
+        expect(entry).toBe(instance);
+        expect(Object.getPrototypeOf(entry)).toBe(LiteClassPlugin.prototype);
+        expect((entry as unknown as LiteClassPlugin).describeSelf()).toBe('class:com.example.lite-class-based');
+    });
+
+    it.each(['1.0.0-alpha.1', '1.0.0+20230101', '0.0.0-fixture'])(
+        '`version` stays excluded from the schema check here too — %s loads',
+        (version) => {
+            // The convergence is on the SCHEMA. `LiteKernel` has never judged
+            // `version` (that is `PluginLoader.validatePluginStructure`'s, on the
+            // other kernel) and still does not; the exclusion group E pins for the
+            // loader holds on this path for the same measured reason.
+            const kernel = makeLiteKernel();
+            expect(kernel.use(fixture({ name: `com.example.lite-v-${version}`, version }))).toBe(kernel);
+        },
+    );
+
+    it('a version-less plugin loads — `version` is not among the eight keys', () => {
+        const kernel = makeLiteKernel();
+        const versionless: Plugin = { name: 'com.example.lite-versionless', init: () => {} };
+        expect(kernel.use(versionless)).toBe(kernel);
+    });
+
+    it('PARITY — for one input, the ObjectKernel refusal IS the LiteKernel refusal behind the loader\'s prefix', async () => {
+        // "An author gets ONE refusal, with the same code and message shape,
+        // from either kernel." `ObjectKernel.use()` re-wraps a failed load as
+        // `Failed to load plugin: <name> - <message>` for EVERY load failure —
+        // its existing wrapper, untouched by #16721 — so the parity to pin is
+        // that the LiteKernel message is exactly what follows that prefix.
+        const make = () => fixture({ name: '@os-fixture/parity', type: 'ui', staticPath: UI_STATIC_PATH, slug: 'Not A Slug' });
+
+        const lite = refusalSync(() => makeLiteKernel().use(make()));
+        const object = await refusal(makeKernel().use(make()));
+
+        expect(lite.code).toBe('PLUGIN_CONTRACT_VIOLATION');
+        expect(lite.message).toContain("at 'slug'");
+        expect(object.message).toBe(`Failed to load plugin: @os-fixture/parity - ${lite.message}`);
+    });
+
+    it('ORDER — a refused plugin never reaches the registry, so it cannot supersede an earlier registration', () => {
+        // `registerPluginByName` is last-one-wins by declared contract (#9864).
+        // The contract check runs BEFORE it, so a refused object under an
+        // already-registered name leaves the earlier registration in place —
+        // identity, not equality — rather than displacing it and then failing.
+        const kernel = makeLiteKernel();
+        const first = fixture({ name: 'com.example.superseded', version: '1.0.0' });
+        const refused = fixture({ name: 'com.example.superseded', version: '2.0.0', homepage: 'not-a-url' });
+
+        kernel.use(first);
+        const err = refusalSync(() => kernel.use(refused));
+
+        expect(err.code).toBe('PLUGIN_CONTRACT_VIOLATION');
+        expect(stored(kernel, 'com.example.superseded')).toBe(first);
+    });
+
+    it('ORDER — state is checked before the contract: after bootstrap the refusal is the idle one', async () => {
+        // `validateIdle()` first, then the contract — the wiring #16721 step 1
+        // measured with. A kernel that can no longer register plugins says so,
+        // and does not run the schema over an object it would not store anyway.
+        const kernel = makeLiteKernel();
+        await kernel.bootstrap();
+        try {
+            const err = refusalSync(() => kernel.use(fixture({ name: 'com.example.late', homepage: 'not-a-url' })));
+            expect(err.message).toContain('Cannot register plugins after bootstrap has started');
+            expect(err.message).not.toContain('PLUGIN_CONTRACT_VIOLATION');
+            expect(err.code).toBeUndefined();
+        } finally {
+            await kernel.shutdown();
+        }
     });
 });

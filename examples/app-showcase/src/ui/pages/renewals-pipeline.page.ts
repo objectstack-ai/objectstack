@@ -133,8 +133,8 @@ function Page() {
           ))}
         </div>
         <ListView
-          objectName="showcase_account"
-          viewType="grid"
+          data={{ provider: 'object', object: 'showcase_account' }}
+          type="grid"
           filters={['status', '=', stage]}
           columns={['name', 'status']}
           searchableFields={['name']}
@@ -166,7 +166,7 @@ function Page() {
             <ObjectChart objectName="showcase_invoice" type="bar" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} xAxis={{ field: 'status' }} yAxis={[{ field: 'total', format: '$0,0' }]} series={[{ name: 'total', label: 'Invoice value' }]} title="Invoice value by status" showLegend={true} />
 
             <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'hsl(var(--foreground))' }}>Invoices</h3>
-            <ListView objectName="showcase_invoice" filters={['account', '=', sel]} columns={['name', 'status', 'total']} navigation={{ mode: 'none' }} />
+            <ListView data={{ provider: 'object', object: 'showcase_invoice' }} filters={['account', '=', sel]} columns={['name', 'status', 'total']} navigation={{ mode: 'none' }} />
 
             {editing ? (
               <ObjectForm objectName="showcase_account" mode="edit" recordId={sel}

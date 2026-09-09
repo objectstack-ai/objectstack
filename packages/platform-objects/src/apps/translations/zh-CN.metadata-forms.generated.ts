@@ -162,7 +162,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.reference": {
         label: "引用对象",
-        helpText: "目标对象（用于 lookup / master_detail）"
+        helpText: "目标对象名称。tree 字段可省略；若填写，必须是本对象自身（树是同一对象内部的层级 — 链接到其他对象请用 lookup）"
       },
       "fields.lookupFilters": {
         label: "Lookup Filters",
@@ -1456,11 +1456,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     description: "Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)"
   },
   permission: {
-    label: "权限集 / 配置文件",
+    label: "权限集",
     sections: {
       identity: {
         label: "身份",
-        description: "权限集叠加在配置文件之上，用于授予额外访问权限。配置文件是按 1:1 分配给每个用户的基础权限集。"
+        description: "权限集是唯一的能力容器：用户获得其持有的所有权限集的并集，因此权限集只会增加访问权限。岗位负责把权限集分配给人。"
       },
       system_permissions: {
         label: "系统权限",

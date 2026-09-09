@@ -1496,3 +1496,64 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 });
+
+/**
+ * ⛔ The registry must carry NO conversion that turns `required: true` into a
+ * column constraint (#16693, maintainer ruling, decision batch #85,
+ * 2026-09-08, option A).
+ *
+ * ADR-0113 split the pre-17 tri-binding: `required` is the write-time contract
+ * and NOT a column constraint, `storage.notNull` alone binds the column. A
+ * conversion that adds `storage.notNull` wherever it finds `required: true`
+ * asserts exactly the implication the ADR abolished — and it did not stay in
+ * `os migrate meta` where its docblock claimed: the artifact-ingestion door
+ * replays retired conversions (`includeRetired: true`), so every artifact
+ * declaring a floor below the running spec got the stamp, plus a boot warning
+ * telling its author to write the same tightening into the source. That
+ * instruction is a `destructive` `tighten_not_null` migration on a populated
+ * database, issued as the remedy for a deprecation notice.
+ *
+ * Written against the SEAM rather than the id, so re-adding the behaviour
+ * under a different id fails here too.
+ */
+describe('no conversion invents a NOT NULL column (ADR-0113, #16693)', () => {
+  const requiredOnly = () => ({
+    objects: [{
+      name: 'clm_party',
+      label: 'Party',
+      fields: {
+        name: { type: 'text', label: 'Name', required: true },
+        notes: { type: 'textarea', label: 'Notes' },
+      },
+    }],
+  });
+
+  it('leaves `required: true` alone in the load posture AND in the full replay', () => {
+    for (const includeRetired of [false, true]) {
+      const { stack, notices } = collectConversionNotices(requiredOnly(), { includeRetired });
+      const fields = (stack as ReturnType<typeof requiredOnly>).objects[0]!.fields as
+        Record<string, { required?: boolean; storage?: unknown }>;
+      expect(fields.name!.required, `required survives (includeRetired=${includeRetired})`).toBe(true);
+      expect(fields.name!.storage, `no NOT NULL invented (includeRetired=${includeRetired})`).toBeUndefined();
+      expect(notices, `nothing to report (includeRetired=${includeRetired})`).toHaveLength(0);
+    }
+  });
+
+  it('no registered conversion declares the storage.notNull surface at all', () => {
+    const offenders = ALL_CONVERSIONS.filter((c) => c.surface.includes('storage.notNull'));
+    expect(offenders.map((c) => c.id)).toEqual([]);
+    // ⭐ ANTI-VACUITY: `surface` is a populated field on a populated registry,
+    // so the empty list above is a verdict and not an empty scan.
+    expect(ALL_CONVERSIONS.length).toBeGreaterThan(0);
+    expect(ALL_CONVERSIONS.every((c) => c.surface.length > 0)).toBe(true);
+  });
+
+  it("`storage.notNull` is still the author's own way to bind the column", async () => {
+    const { FieldSchema } = await import('../data/field.zod.js');
+    const parsed = FieldSchema.safeParse({
+      name: 'name', type: 'text', label: 'Name', required: true, storage: { notNull: true },
+    });
+    expect(parsed.success, JSON.stringify(parsed.success ? '' : parsed.error.issues.slice(0, 3))).toBe(true);
+    expect(parsed.data!.storage).toEqual({ notNull: true });
+  });
+});
