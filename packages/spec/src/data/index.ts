@@ -219,6 +219,12 @@ export * from './aggregate-field-type-compatibility';
 // from field metadata so renderers never guess it from the value's magnitude.
 export * from './percent-scale';
 
+// The NUMERIC column family's physical representation (#16318) — the single
+// per-field-type table `SqlDriver.createColumn` and both `os generate
+// migration` formats read, so one declaration cannot produce three different
+// columns.
+export * from './numeric-column-representation';
+
 // Record display-name contract (ADR-0079) — title eligibility, primary-field
 // resolution/derivation, record display-name rendering, primary provisioning,
 // and title-completeness classification. Shared by authoring, display

@@ -326,8 +326,10 @@ export const ERROR_CODE_LEDGER = {
     // one code, one wording (`analyticsDateRangeRefusalMessage`, the #5240
     // convention); `VALIDATION_FAILED` would say "malformed body" at one
     // moment and nothing a driver could speak at the other. Registered under
-    // the door that names the wire vocabulary; each driver adds its own
-    // provenance row when its refusal lands.
+    // the door that names the wire vocabulary. #16322 landed that second
+    // moment as ONE shared constructor in `@objectstack/core` rather than a
+    // refusal per driver — so it carries a single PROVENANCE_WAIVERS entry for
+    // that package below, not a row under each backend.
     'ANALYTICS_DATE_RANGE_UNRECOGNIZED',
     // [#16293] The AI-facing action doors refuse a call against an action
     // whose AUTHOR declared `ai.requiresConfirmation: true` when the request
@@ -1618,5 +1620,19 @@ export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
       'the dependency-light package so BOTH doors recognise one shape; the throws are ' +
       'served under the emitting doors\' own registrations (runtime\'s dispatcher exits, ' +
       'rest\'s `mapDataError` — both packages list the code).',
+  },
+  {
+    package: '@objectstack/core',
+    code: 'ANALYTICS_DATE_RANGE_UNRECOGNIZED',
+    registeredUnder: '@objectstack/runtime',
+    reason: 'Shared constructor one package over, the #8016 shape (#16322): ' +
+      '`analyticsDateRangeUnrecognizedError` (utils/analytics-date-range.ts) spells the ' +
+      'string ONCE so driver-memory\'s cube face and BOTH service-analytics strategies ' +
+      'refuse identically — which is the property the card\'s shared conformance fixture ' +
+      'exists to hold, and which two independent refusals could not give. Core ships no ' +
+      'HTTP door; the wire emission stays runtime\'s, whose row names this exact second ' +
+      'moment. ⛔ Deliberately ONE waiver rather than a row per driver: with one ' +
+      'constructor there is one stamp site, and rows for packages that stamp nothing ' +
+      'would be the dead weight this file\'s gate refuses.',
   },
 ];
