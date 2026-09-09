@@ -554,10 +554,36 @@ export const HookContextSchema = lazySchema(() => z.object({
    *    context carries THE one payload, not a copy — `driver.updateMany` takes
    *    one SET clause for N rows — so a rewrite applies to the whole batch
    *    whichever row's dispatch made it, and rewrites accumulate in dispatch
-   *    order. A rewrite CONDITIONED on the row is therefore out of contract:
-   *    it widens to every matched row instead of scoping itself. Per-row
-   *    `previous` is supplied so a guard can REFUSE (throw), not so a rewrite
-   *    can be aimed.
+   *    order. A rewrite CONDITIONED on the row therefore cannot scope itself:
+   *    whatever one row's dispatch writes is written to every matched row.
+   *    Per-row `previous` is supplied so a guard can REFUSE (throw), and —
+   *    ruled on #16074 — so a `before*` hook can make a
+   *    ROW-INVARIANT-IN-EFFECT rewrite: one whose written KEY SET is the same
+   *    on every matched row, such as a provenance stamp that writes
+   *    `customized: true` on every row whose `previous.managed_by` is
+   *    package-seeded. What makes that shape
+   *    safe is not the hook but the engine's `MULTI_UPDATE_HOOK_KEY_DIVERGENCE`
+   *    refusal (#14099): the dispatch records, per row, the payload keys that
+   *    row's hook chain assigned, and if any two rows disagree the WHOLE batch
+   *    is refused before any write — nothing is written, not the first row.
+   *    To an operator that refusal is an ADR-0112 envelope with `status: 400`
+   *    and `code: 'MULTI_UPDATE_HOOK_KEY_DIVERGENCE'`, carrying `keys` — the
+   *    sorted keys some rows' hooks wrote and other rows' did not (for the
+   *    stamp above, `['customized']`) — and `rows` — how many rows the
+   *    predicate matched (`2` for a two-row batch) — plus `object` naming the
+   *    target and a message ending "Nothing was written". So a bulk edit over
+   *    rows that ALREADY disagree on the stamp's condition (one row still
+   *    package-managed, one already customized) is refused whole rather than
+   *    half-stamped; that is the engine working, not the hooks misbehaving,
+   *    and the remedy is the caller's: write those rows by id, or from inside
+   *    the handler through `ctx.api`. Two shapes this rule does NOT admit: a
+   *    rewrite whose written key set differs across rows (that IS the refusal
+   *    above), and a rewrite that writes the same key with a per-row VALUE —
+   *    the engine judges key sets, never values (the clock-reading audit stamp
+   *    must pass), so that shape clears the check and applies the LAST
+   *    dispatch's value to every row; it stays out of contract. The refusal's
+   *    class and both rejected value-comparison variants are recorded on
+   *    `packages/objectql/src/multi-update-hook-key-divergence.ts`.
    *  - `input.id` is NOT a reroute lever (D4). It used to be: on the batch
    *    dispatch `input.id` was present-but-`undefined`, and binding it moved
    *    the write onto the single-id path. A per-row context arrives with `id`
