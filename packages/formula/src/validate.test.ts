@@ -7,7 +7,7 @@ import {
   nearestName,
   CEL_STDLIB_FUNCTIONS,
 } from './validate';
-import { buildEnv, firstUndeclaredReference } from './cel-engine';
+import { buildEnv, firstUndeclaredReference, SCOPE_ROOTS } from './cel-engine';
 
 describe('validateExpression (ADR-0032)', () => {
   describe('predicates (CEL)', () => {
@@ -537,6 +537,141 @@ describe('validateExpression (ADR-0032)', () => {
 
     it('does not flag a null-guard on a record-qualified field (no type false-positive)', () => {
       expect(validateExpression('predicate', 'record.lead_score != null && record.lead_score > 100', { scope: 'record' }).ok).toBe(true);
+    });
+
+    /**
+     * ── #16412: a bare ref BEHIND a `SCOPE_ROOTS` name is judged ───────
+     *
+     * `firstUndeclaredReference` reads the ONE error cel-js's checker returns,
+     * and acts only on `Unknown variable: X`. The strict env used to declare
+     * `SCOPE_ROOTS` as `map` while the permissive compile env leaves the same
+     * names `dyn`, so `data == 'x'` — a root, or an object field sharing a
+     * root's name — compiled clean and then faulted `no such overload:
+     * map<dyn, dyn> == string` HERE. That fault took the single error slot and
+     * every bare reference behind it in the same source went unjudged: the
+     * helper answered `null`, which is also the value meaning "every reference
+     * is rooted", and this hard error was downgraded to silence.
+     *
+     * The roots are now `dyn` in both environments, so the class cannot arise.
+     * These pin the VERDICT, not the mechanism: they go red if the strict env's
+     * root declaration regresses to `map`, whatever the message then says.
+     */
+    describe('a bare ref behind a `SCOPE_ROOTS` name is still an error (#16412)', () => {
+      it.each([
+        ['data', "data == 'x' && status == 'qualified'"],
+        ['config', "config != null && status == 'qualified'"],
+        ['record', "record == 'x' && status == 'qualified'"],
+        ['result', "result > 1 && status == 'qualified'"],
+        ['item', "item == 'x' && status == 'qualified'"],
+      ])('%s as the FIRST operand does not mask `status`', (_root, source) => {
+        const r = validateExpression('predicate', source, { scope: 'record' });
+        expect(r.ok).toBe(false);
+        expect(r.errors).toHaveLength(1);
+        expect(r.errors[0].message).toMatch(/bare reference `status`/);
+        expect(r.errors[0].message).toMatch(/record\.status/);
+      });
+
+      it('gives the same verdict in both operand orders — the masking was POSITIONAL', () => {
+        // The pre-fix asymmetry, and the whole reason the defect was invisible:
+        // one order reported, the other published clean. Both must report now,
+        // and the second is the control that was already correct.
+        const masked = validateExpression('predicate', "data == 'x' && status == 'qualified'", { scope: 'record' });
+        const control = validateExpression('predicate', "status == 'qualified' && data == 'x'", { scope: 'record' });
+        expect(masked.ok).toBe(false);
+        expect(control.ok).toBe(false);
+        expect(masked.errors[0].message).toBe(control.errors[0].message);
+      });
+
+      it('reports the BARE name, never the root that used to mask it', () => {
+        const r = validateExpression('predicate', "config != null && status == 'qualified'", { scope: 'record' });
+        expect(r.errors[0].message).not.toMatch(/bare reference `config`/);
+        expect(r.errors[0].message).toMatch(/bare reference `status`/);
+      });
+
+      it('the flattened did-you-mean reaches a typo behind a root name too', () => {
+        // The same masking, one severity down: `validateExpression`'s flattened
+        // arm never saw the typo, so a misspelled field shipped unwarned.
+        const r = validateExpression('predicate', "config == 'y' && amont == 'x'", {
+          objectName: 'crm_opportunity', fields: ['amount', 'status'], scope: 'flattened',
+        });
+        expect(r.ok).toBe(true);
+        expect(r.warnings).toHaveLength(1);
+        expect(r.warnings[0].message).toMatch(/`amont` is not a field/);
+        expect(r.warnings[0].message).toMatch(/did you mean `amount`/);
+      });
+
+      /**
+       * ⛔ The narrowing this helper is built on is NOT relaxed. Every source
+       * here has every reference rooted, or is legitimate CEL the overload
+       * message cannot be told apart from — none may start reporting. This is
+       * the property a widening of the regex onto the overload message would
+       * destroy, and it is the one most easily broken while closing a false
+       * negative.
+       */
+      it.each([
+        ['record.status == "x"', 'the canonical dotted spelling'],
+        ['type(record.x) == string', 'legitimate CEL an overload-message widening would reject'],
+        ['record.a + record.b > 1', 'arithmetic over two rooted members'],
+        ['previous.status != record.status', 'two roots in one source'],
+        ['parent.type == "grid" && record.status == "x"', 'a declared root, then a rooted term'],
+        ['current_user.id != null', 'the ADR-0068 canonical user root'],
+        ["record.tags.all(t, t != '')", 'a comprehension macro'],
+        ['record.lines.exists(status, status.ok)', 'a macro variable shadowing a field name'],
+        ['size(record.tags) > 0', 'a cel-js built-in'],
+        ['record.?name.orValue("x") == "x"', 'optional chaining'],
+      ])('%s stays clean (%s)', (source) => {
+        const r = validateExpression('predicate', source, { scope: 'record' });
+        expect(r.ok).toBe(true);
+        expect(r.errors).toEqual([]);
+      });
+    });
+
+    /**
+     * ⛔ #16412 closes the `SCOPE_ROOTS` class ONLY. Every other first-error
+     * class still masks what is behind it, and pinning that keeps the next
+     * reader from mistaking a narrowed fix for a general one.
+     *
+     *  - a CEL TYPE name (`type`, `string`, `int`, …) is declared by CEL itself,
+     *    so no declaration this package makes can reach it. Measured on the
+     *    strict env: `type == 'grid' && …` faults `no such overload: type ==
+     *    string` under BOTH a `map` and a `dyn` root declaration — byte-identical
+     *    messages — which is why this row is out of the fix's reach by
+     *    construction rather than by omission.
+     *  - `has()` handed a non-select argument faults `has() invalid argument`.
+     *    `@objectstack/lint`'s visibility rule masks `has(…)` spans at its own
+     *    call site (#16118); nothing here does.
+     */
+    describe('the first-error classes #16412 does NOT close', () => {
+      it.each([
+        ["type == 'grid' && status == 'qualified'", 'a CEL type name — CEL declares it, not `SCOPE_ROOTS`'],
+        ["string == 'x' && status == 'qualified'", 'the same class, another type name'],
+        ['has(status) && other == "x"', 'the `has()` class — #16118 masks this at the lint call site'],
+      ])('%s is still masked (%s)', (source) => {
+        expect(firstUndeclaredReference(source)).toBeNull();
+      });
+
+      it('`type` is not a `SCOPE_ROOTS` member — read from the list, not copied', () => {
+        // Reads the published baseline so the claim above cannot go stale
+        // silently if the list ever gains the name.
+        expect(SCOPE_ROOTS as readonly string[]).not.toContain('type');
+      });
+
+      /**
+       * #16412's own five-row probe table, pinned whole rather than by its one
+       * interesting row. Rows 1 and 5 are what the helper already got right and
+       * must keep; rows 2 and 3 are the `has()` class, unchanged by this fix;
+       * row 4 is the positional control that made the defect legible (rows 3
+       * and 4 are the same two sub-expressions in the other order).
+       */
+      it.each([
+        ['status == "qualified"', 'status'],
+        ['has(status) && status == "qualified"', null],
+        ['has(status) && other == "x"', null],
+        ['other == "x" && has(status)', 'other'],
+        ['has(record.status) && status == "qualified"', 'status'],
+      ])('%s -> %s', (source, expected) => {
+        expect(firstUndeclaredReference(source)).toBe(expected);
+      });
     });
   });
 
