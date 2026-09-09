@@ -1213,11 +1213,58 @@ export interface SuspendedRun {
  * A terminal run summary persisted as durable run history (completed / failed)
  * for the "Runs" observability surface — distinct from a live {@link SuspendedRun}.
  */
+/**
+ * [#15223] The terminal states a run can be RECORDED in — the durable
+ * run-history vocabulary, declared ONCE because three sites have to agree on
+ * it: the writer ({@link AutomationEngine.recordLog}'s terminal predicate),
+ * the reader (`ObjectStoreSuspendedRunStore`'s row gate) and the stored
+ * column (`sys_automation_run.status`, whose `Field.select` options and
+ * retention `onlyWhen` scope enumerate the same four). A second copy of this
+ * list is how a widened writer ends up with rows a reader filters away.
+ *
+ * These are exactly the four `ExecutionStatus` members (`@objectstack/spec`)
+ * that mean "this run has stopped and will not resume". `paused`,
+ * `running`, `pending` and `retrying` are live states with no history row;
+ * `refused` is declared by the spec but no engine path produces it today, so
+ * adding it here would enumerate a value nothing can write.
+ */
+export const TERMINAL_RUN_STATUSES = ['completed', 'failed', 'cancelled', 'timed_out'] as const;
+
+/** One member of {@link TERMINAL_RUN_STATUSES}. */
+export type TerminalRunStatus = (typeof TERMINAL_RUN_STATUSES)[number];
+
+/** Whether `status` is one of {@link TERMINAL_RUN_STATUSES}. */
+export function isTerminalRunStatus(status: unknown): status is TerminalRunStatus {
+    return (TERMINAL_RUN_STATUSES as readonly unknown[]).includes(status);
+}
+
 export interface RunRecord {
     runId: string;
     flowName: string;
     flowVersion?: number;
-    status: 'completed' | 'failed';
+    /**
+     * The terminal state this run reached, as the engine observed it.
+     *
+     * [#15223] This declared `'completed' | 'failed'` — TWO members — while
+     * {@link AutomationEngine.recordLog}'s own terminal predicate admitted
+     * FOUR and `ExecutionStatus` (`@objectstack/spec`) declared them all.
+     * Both ends folded: the write mapped everything that was not `completed`
+     * to `failed`, and the read mapped everything that was not `failed` to
+     * `completed`. The information was not hidden by that, it was DESTROYED
+     * at write time, so the same run read `cancelled` in-process (`getRun`
+     * prefers the ring entry) and `failed` after a restart or a ring
+     * eviction.
+     *
+     * ⛔ The narrowing was INHERITED, not chosen — recorded here so the next
+     * reader does not re-derive it. Nothing was paying for it: the column is a
+     * `Field.select` that stores the string whatever its width, so there was
+     * no storage cost to buy, and neither file stated a reason. It is simply
+     * older than what it had to carry — the durable history row (#2585)
+     * predates `cancelRun` (ADR-0044), and `timed_out` was in the spec's
+     * vocabulary the whole time. ⛔ Do not re-narrow it to make a downstream
+     * `switch` exhaustive; widen the switch.
+     */
+    status: TerminalRunStatus;
     startedAt: string;
     startTime?: number;
     /** When the run reached its terminal state. */
@@ -4190,7 +4237,11 @@ export class AutomationEngine implements IAutomationService {
             id: r.runId,
             flowName: r.flowName,
             flowVersion: r.flowVersion,
-            status: r.status, // 'completed' | 'failed' — both valid ExecutionLog statuses
+            // [#15223] All four {@link TERMINAL_RUN_STATUSES} members, each a
+            // valid `ExecutionLog` status — the schema has declared the whole
+            // vocabulary since before this row existed, and it was the
+            // persistence layer, not the contract, that reported only two.
+            status: r.status,
             startedAt: r.startedAt,
             completedAt: r.finishedAt,
             durationMs: r.durationMs,
@@ -7374,11 +7425,13 @@ export class AutomationEngine implements IAutomationService {
         // store so "did it run / fail, and why?" survives a restart and the
         // in-memory ring-buffer eviction. Best-effort + fire-and-forget: a
         // history write must NEVER block or break the run that produced it.
-        const terminal =
-            entry.status === 'completed' ||
-            entry.status === 'failed' ||
-            entry.status === 'cancelled' ||
-            entry.status === 'timed_out';
+        // [#15223] ONE vocabulary, not a fourth copy of the list: this
+        // predicate decides both WHETHER a history row is written and WHAT its
+        // `status` says. Keeping the narrowed value in a `const` is what makes
+        // the record below type-check without a cast — and a cast is precisely
+        // how the fold this card is about survived four members for two.
+        const terminalStatus = isTerminalRunStatus(entry.status) ? entry.status : undefined;
+        const terminal = terminalStatus !== undefined;
 
         // The MVP of #4354, and the half that needs no console: one structured
         // line per terminal run. `selected=30 acted=0` in a log file is the
@@ -7413,13 +7466,20 @@ export class AutomationEngine implements IAutomationService {
             else this.logger.info(line, meta);
         }
 
-        if (terminal && this.store?.recordTerminal) {
+        if (terminalStatus && this.store?.recordTerminal) {
             const lastStep = entry.steps[entry.steps.length - 1];
             const record: RunRecord = {
                 runId: entry.id,
                 flowName: entry.flowName,
                 flowVersion: entry.flowVersion,
-                status: entry.status === 'completed' ? 'completed' : 'failed',
+                // [#15223] The status the run actually reached. This used to be
+                // `entry.status === 'completed' ? 'completed' : 'failed'` — a
+                // fold applied at WRITE time, so a cancelled or timed-out run's
+                // distinction was not merely unshown, it was never stored and
+                // could not be recovered afterwards. ⛔ Never re-introduce a
+                // conditional here: whatever the terminal predicate above
+                // admits is what the row must carry.
+                status: terminalStatus,
                 startedAt: entry.startedAt,
                 finishedAt: entry.completedAt,
                 durationMs: entry.durationMs,
