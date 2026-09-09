@@ -401,7 +401,7 @@ export const EnhancedApiErrorSchema = lazySchema(() => z.object({
   refusal: z.literal(true).optional().describe(
     'Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the '
     + 'producer declared it at throw time; a declared 5xx without it is a fault whose `message` '
-    + 'is withheld.',
+    + 'is withheld. Relay half: #16146 — until it lands, a declared refusal is still withheld.',
   ),
   category: ErrorCategory.optional().describe('Error category'),
   httpStatus: z.number().optional().describe('HTTP status code'),
