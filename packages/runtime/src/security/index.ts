@@ -45,3 +45,15 @@ export {
   type GeneratedApiKey,
   type ApiKeyPrincipal,
 } from './api-key.js';
+// The artifact→enforcer seam (ADR-0025 F4 / #13457): binds the install-time
+// GRANTED permission set an environment artifact carries to the packages that
+// artifact materializes. Published because the cloud control plane's
+// `ArtifactKernelFactory` boots the same artifacts through this package, and
+// because the ADR-0025 materialize seam that will QUERY the registry is a
+// different card in a different package.
+export {
+  carriedPackageIds,
+  resolveArtifactGrantBinding,
+  registerArtifactGrantedPermissions,
+  type ArtifactGrantBinding,
+} from './artifact-granted-permissions.js';
