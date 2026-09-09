@@ -190,7 +190,8 @@ describe.each(cases())('os %s --json, config missing', (key) => {
     // envelope must carry the PLAIN sentence: an escape sequence inside a JSON
     // string is a defect a consumer cannot see coming, and it would appear
     // only in runs that happen to have colour on.
-    expect(runOf().stdout).not.toContain('[');
+    // eslint-disable-next-line no-control-regex
+    expect(runOf().stdout).not.toMatch(/\u001b\[/);
   });
 
   it('keeps the human refusal off stdout entirely', () => {

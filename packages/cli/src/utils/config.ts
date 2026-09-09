@@ -46,7 +46,8 @@ export const BUNDLE_REQUIRE_EXTERNALS: (string | RegExp)[] = [
  *
  *   • `message` — PLAIN. It is what every `--json` catch-all copies into its
  *     envelope, so it must not carry terminal decoration: `chalk.white(abs)`
- *     in a payload is `[37m…[39m` inside a JSON string the moment
+ *     in a payload is an ESC-bracket-37m / ESC-bracket-39m pair inside a JSON
+ *     string the moment
  *     the run happens to have colour on.
  *   • `display` — the same sentence WITH that decoration, for the stream a
  *     human reads. Defaults to `message` where there is nothing to decorate.
