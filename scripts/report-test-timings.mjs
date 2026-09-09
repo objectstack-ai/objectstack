@@ -91,6 +91,15 @@
  *   `samplesFromSummary`, which already refuses cache REPLAYS and FAILED
  *   tasks: a replayed task's near-zero window is not a measurement. Those are
  *   counted and printed as `cached N / total M` rather than averaged in.
+ * - ⚠ THE FILE HALF TREATS A REPLAY DIFFERENTLY, ON PURPOSE, and says so in
+ *   the table. A cache HIT replays the stored LOG, so its file lines are true
+ *   durations measured by the run that filled the cache -- unlike the task's
+ *   near-zero execution window, which measures nothing. Dropping them would
+ *   empty this table on exactly the runs where the cache is working: measured
+ *   on this feature's own first CI run, all 529 file rows came from a replayed
+ *   `@objectstack/spec` log. So the rows are KEPT and every one carries a
+ *   `source` cell (`replayed log` / `measured here`), with a count beneath the
+ *   table. ⛔ Never print a replayed duration as this run's measurement.
  * - `samplesFromSummary` reads the `test` task only, so a package that also
  *   has a `test:repo` task contributes its `test` seconds here. That is the
  *   like-for-like comparison the pinned weights were measured in.
@@ -406,12 +415,18 @@ export function renderTable(merged, pinned, context = {}) {
   if (merged.files.length === 0) {
     out.push('_No file line was parsed on any shard._');
   } else {
-    out.push('| # | seconds | tests | file | package |');
-    out.push('|--:|--------:|------:|------|---------|');
+    out.push('| # | seconds | tests | file | package | source |');
+    out.push('|--:|--------:|------:|------|---------|--------|');
     merged.files.slice(0, TOP_FILES).forEach((f, i) => {
       const name = f.project ? `${f.file} _(${f.project})_` : f.file;
       const state = f.state === 'pass' ? '' : ` **${f.state}**`;
-      out.push(`| ${i + 1} | ${seconds(f.ms)} | ${f.tests} | \`${name}\`${state} | \`${f.pkg}\` |`);
+      // `replayed` = this shard read the duration out of a turbo cache REPLAY,
+      // so it is a true duration measured by the run that filled the cache,
+      // not by this one. Said per row because it is per package per shard.
+      const source = f.replayed ? 'replayed log' : 'measured here';
+      out.push(
+        `| ${i + 1} | ${seconds(f.ms)} | ${f.tests} | \`${name}\`${state} | \`${f.pkg}\` | ${source} |`,
+      );
     });
   }
   out.push('');
@@ -441,6 +456,10 @@ export function renderTable(merged, pinned, context = {}) {
   out.push('');
   out.push(
     `- file lines parsed: **${merged.files.length}** of **${merged.declaredFiles}** files declared by the run's own \`Test Files\` summaries`,
+  );
+  const replayedFiles = merged.files.filter((f) => f.replayed).length;
+  out.push(
+    `- of those, read out of a turbo cache **replay**: **${replayedFiles}** — true durations, measured by the run that filled the cache rather than by this one`,
   );
   out.push(`- packages measured: **${merged.packages.length}**`);
   out.push(
@@ -503,6 +522,18 @@ export function capture({ log, summaries, shard, out }) {
     ? readSummaries(summaryDir)
     : { packages: new Map(), cached: [], problems: [`no turbo run summary directory at ${summaryDir}`], summariesRead: 0 };
   problems.push(...pkgRead.problems);
+
+  // A cache HIT REPLAYS the stored log in milliseconds, so the file lines in it
+  // are real durations from the run that FILLED the cache, not from this one.
+  // That is still a measurement OF THE FILE -- unlike a replayed task's
+  // near-zero execution window, which is a measurement of nothing -- so these
+  // rows are kept and LABELLED rather than dropped. Dropping them would empty
+  // this table on exactly the runs where the cache is doing its job: on a
+  // typical affected-set PR every package in the log is a replay.
+  // Marked per shard, because the shard that replayed a package and the shard
+  // that measured it need not be the same shard.
+  const replayedHere = new Set(pkgRead.cached);
+  for (const f of files) f.replayed = replayedHere.has(f.pkg);
 
   const payload = {
     schema: CAPTURE_SCHEMA,
@@ -586,7 +617,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'file-line parsing': 22,
   'attribution and the naive-parser controls': 9,
   'package seconds, slices and cache replays': 11,
-  'refusals, rendering and exit codes': 15,
+  'refusals, rendering and exit codes': 19,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -885,6 +916,31 @@ function selfTest({ quiet = false } = {}) {
   // An unpinned package renders a named blank, never a zero drift.
   const unpinned = renderTable(merged, {});
   ok(unpinned.includes('not pinned'), 'an unpinned package did not say so');
+
+  // A file row read out of a cache REPLAY is kept but labelled, and counted.
+  // Measured on this PR's own first CI run, where every one of 529 file rows
+  // came from a replayed @objectstack/spec log while the package half had
+  // already refused that package's near-zero execution window: keeping the
+  // rows unlabelled let a replayed duration read as this run's measurement.
+  const replayMerged = mergeCaptures([
+    {
+      schema: CAPTURE_SCHEMA,
+      shard: '1/6',
+      files: [
+        { pkg: '@objectstack/spec', file: 'src/a.test.ts', project: null, tests: 1, ms: 900, state: 'pass', replayed: true },
+        { pkg: '@objectstack/client', file: 'src/b.test.ts', project: null, tests: 1, ms: 800, state: 'pass', replayed: false },
+      ],
+      packages: [{ pkg: '@objectstack/client', seconds: 21.91, sliceCount: null, parts: [] }],
+      cached: ['@objectstack/spec'],
+      problems: [],
+      coverage: { declaredFiles: 2, unattributed: 0 },
+    },
+  ]);
+  const replayTable = renderTable(replayMerged, {});
+  ok(replayTable.includes('replayed log'), 'a replayed file row was not labelled as such');
+  ok(replayTable.includes('measured here'), 'a genuinely measured file row was not labelled as such');
+  ok(replayTable.includes('**replay**: **1**'), 'the replayed-file counter is missing or wrong');
+  eq(replayMerged.files.length, 2, 'a replayed file row was dropped instead of labelled');
 
   // ⛔ No line of output may begin with a workflow-command marker, and none may
   // carry the legacy form anywhere -- the runner parses those out of prose.
