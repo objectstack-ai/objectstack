@@ -17,7 +17,7 @@ import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
-import { nextUtcCalendarDay } from '@objectstack/core';
+import { nextUtcCalendarDay, resolveAnalyticsDateRangeString } from '@objectstack/core';
 
 /**
  * The SQL wrapper for each aggregate a measure's `type` can name.
@@ -497,7 +497,19 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       for (const td of query.timeDimensions) {
         const colExpr = this.resolveFieldSql(cube, td.dimension, tableName, joins);
         if (td.dateRange) {
-          const range = Array.isArray(td.dateRange) ? td.dateRange : [td.dateRange, td.dateRange];
+          // [#16322] The STRING arm is the CLOSED preset vocabulary (#16041),
+          // lowered by the ONE shared resolver `driver-memory` and the ObjectQL
+          // strategy also call — so one dashboard's `last_30_days` opens on the
+          // same instant on every backend — and REFUSED with the ADR-0112
+          // `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` envelope when it is not a
+          // preset name. ⛔ It used to become the point window
+          // `col >= 'last_30_days' AND col <= 'last_30_days'` (measured), which
+          // is not a narrower query but a nonsense one whose answer depends on
+          // how the dialect compares a vocabulary word against a timestamp.
+          const resolved = Array.isArray(td.dateRange)
+            ? null
+            : resolveAnalyticsDateRangeString(td.dateRange, { timezone: query.timezone });
+          const range = resolved ? [resolved.start, resolved.end] : (td.dateRange as string[]);
           if (range.length === 2) {
             // Same epoch-vs-text root cause as buildFilterClause: a dateRange on a
             // SQLite `Field.datetime` column compares ISO TEXT against an INTEGER
@@ -514,16 +526,21 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
             // same `[gte, lt)` the drill ranges emit. Equivalent to the old
             // BETWEEN for a `date` column (plain `YYYY-MM-DD` ordering), which
             // is what lets this path stay column-type-blind.
-            const nextDay = nextUtcCalendarDay(range[1]);
+            //
+            // [#16322] A RESOLVED window already states its own upper reading
+            // and is never a bare day, so it never takes the widening branch:
+            // the ten calendar presets stop BEFORE their end instant (`<`), the
+            // three rolling ones end at NOW and reach it (`<=`). ⛔ An explicit
+            // `[a, b]` a CALLER wrote keeps the inclusive reading it has always
+            // had — the #16179 separation, on this side too.
+            const nextDay = resolved ? null : nextUtcCalendarDay(range[1]);
+            const upperExclusive = resolved ? resolved.endExclusive : nextDay != null;
             params.push(this.coerceTemporal(ctx, td2, range[0]));
             const lower = `${column} >= $${params.length}`;
-            if (nextDay != null) {
-              params.push(this.coerceTemporal(ctx, td2, nextDay));
-              whereClauses.push(`(${lower} AND ${column} < $${params.length})`);
-            } else {
-              params.push(this.coerceTemporal(ctx, td2, range[1]));
-              whereClauses.push(`(${lower} AND ${column} <= $${params.length})`);
-            }
+            params.push(this.coerceTemporal(ctx, td2, nextDay ?? range[1]));
+            whereClauses.push(
+              `(${lower} AND ${column} ${upperExclusive ? '<' : '<='} $${params.length})`,
+            );
           }
         }
       }
