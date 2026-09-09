@@ -987,4 +987,49 @@ describe('inferExpressionType — coarse value-type of a formula', () => {
     expect(inferExpressionType('no_such_fn(amount)', { fields })).toBe('unknown'); // no overload
     expect(inferExpressionType('undeclared_field + 1')).toBe('unknown'); // bare ref, no fields given
   });
+
+  // ## The #16412 widening, pinned on BOTH sides
+  //
+  // `inferCelType` shares `buildScopedEnv` with `firstUndeclaredReference`, so
+  // #16412's `SCOPE_ROOTS` `map` -> `dyn` move lands on THIS surface too — and
+  // this one is published: `inferExpressionType` is re-exported from the package
+  // root and read by `@objectstack/mcp` as `validate_expression.inferredType`.
+  // `map` had no `==` / `<` / `+` overload, so a root used as a DIRECT OPERAND
+  // failed to type-check at all and every such expression answered `'unknown'`;
+  // `dyn` propagates, so the answer is now the truthful CEL type. That is a
+  // WIDENING of a published answer — more expressions get a concrete type, none
+  // changes from one concrete type to another — and it is pinned here so it
+  // cannot drift back or drift further unnoticed.
+  it('types a namespace root used as a direct operand (#16412 widening)', () => {
+    // Every one of these answered `'unknown'` while the roots were `map`.
+    expect(inferExpressionType('result + 1')).toBe('number');
+    expect(inferExpressionType('record == "x"')).toBe('boolean');
+    expect(inferExpressionType('data == "x" ? "a" : "b"')).toBe('text');
+    expect(inferExpressionType('record > 1')).toBe('boolean');
+    expect(inferExpressionType('record ? 1 : 2')).toBe('number');
+    // It is a property of the DECLARATION, not of any one name, so it is uniform
+    // across the published list — sampled across its distinct provenance groups.
+    for (const root of ['config', 'item', 'event', 'input', 'user', 'parent', 'current_user']) {
+      expect(inferExpressionType(`${root} + 1`)).toBe('number');
+    }
+  });
+
+  it('moved nothing the root declaration does not govern (#16412 controls)', () => {
+    // A root that is only the BASE of a member access never consults the changed
+    // declaration: `record.amount` is `dyn` under `map` and under `dyn` alike.
+    expect(inferExpressionType('record.amount > 100')).toBe('boolean');
+    expect(inferExpressionType('record.amount + 1')).toBe('number');
+    // The other direction, which a widening-only reading would miss: the
+    // overloads `map` DID carry must not have narrowed to `unknown`.
+    expect(inferExpressionType('size(record)')).toBe('number');
+    expect(inferExpressionType('"a" in record')).toBe('boolean');
+    expect(inferExpressionType('has(record.a)')).toBe('boolean');
+    // `dyn` is undeclared-identifier-neutral — it changes what is legal ON a
+    // declared root, never whether an UNdeclared name faults. This is the
+    // property the whole #16412 change rests on, asserted on this surface.
+    expect(inferExpressionType('undeclared_field + 1')).toBe('unknown');
+    expect(inferExpressionType('undeclared_field == "x"')).toBe('unknown');
+    // And a root alone is still not a provable type: `dyn` maps to `'unknown'`.
+    expect(inferExpressionType('record')).toBe('unknown');
+  });
 });

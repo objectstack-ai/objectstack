@@ -55,6 +55,25 @@ What starts reporting, measured on each published surface:
   root name is warned. That rule's documented blind spot is now name-local, as
   its wording always claimed: the colliding name itself is still not reported.
 
+⚠️ One published answer also WIDENS, and it is not a reporting surface.
+`inferExpressionType` (`@objectstack/formula`, re-exported from the package
+root; read by `@objectstack/mcp` as `validate_expression.inferredType`) infers a
+formula's coarse value type through `inferCelType`, which shares this same
+strict environment. While the roots were `map` there was no `==`, `<` or `+`
+overload for them, so an expression using a namespace root as a DIRECT OPERAND
+did not type-check at all and the answer was `'unknown'`. With the roots `dyn`
+those expressions type-check and the answer is the truthful CEL type:
+`result + 1` and `record ? 1 : 2` → `'number'`, `record == "x"` → `'boolean'`,
+`data == "x" ? "a" : "b"` → `'text'`, uniformly for every name on the list. No
+answer changes from one concrete type to another and nothing narrows to
+`'unknown'` — `size(record)` and `"a" in record` still answer, and a root that
+is only the base of a member access (`record.amount > 100`) never consulted this
+declaration. A consumer that keys off a concrete type therefore sees strictly
+more expressions classified, never a different classification; for the
+motivating consumer that means a formula written as `data == "x" ? "a" : "b"` is
+now correctly seen as text rather than as unprovable. Pinned on both sides in
+`validate.test.ts`.
+
 ⛔ Two first-error classes are NOT closed by this, and both stay pinned. A CEL
 TYPE name (`type`, `string`, `int`, …) is declared by CEL itself, so no
 declaration this package makes can reach it; measured on the strict env, the
