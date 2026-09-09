@@ -46,9 +46,32 @@ export { dropProjectionTables, type DropProjectionResult } from './drop-projecti
  */
 
 
-export {
-    migrateSysNotificationToEvent,
-    type SysNotificationMigrationResult,
-    type SysNotificationMigrationOptions,
-    type SysNotificationMigrationReceipt,
-} from './migrate-sys-notification-to-event.js';
+/**
+ * ⚰️ TOMBSTONE — `migrateSysNotificationToEvent` /
+ * `migrate-sys-notification-to-event.ts` (with `SysNotificationMigrationResult`
+ * / `SysNotificationMigrationOptions` / `SysNotificationMigrationReceipt`) was
+ * REMOVED. ⛔ Do not reintroduce a runner for the ADR-0030 notification
+ * cut-over in this package.
+ *
+ * It had no way to be run. Re-measured on the tree this tombstone landed on:
+ * ZERO production callers anywhere in `packages` / `apps` / `examples` — the
+ * definition, its own usage docblock, this barrel line, one comment in
+ * `./driver-exec.ts`, the id's docblock in `@objectstack/spec` and three test
+ * files were every non-CHANGELOG occurrence there was. The instrument was live
+ * in the same run: the symbol was in 17 files.
+ *
+ * Two ways to give it one were considered and both refused. An
+ * `os migrate notification-event` sub-command shaped like its two
+ * `CREATION_ATTESTED_MIGRATION_IDS` siblings is a permanent operator surface
+ * for a migration with no measured demand; a boot-time invoker is an
+ * unattended data rewrite nobody asked for. Pre-ADR-0030 `sys_notification`
+ * rows are not carried by the platform on this line.
+ *
+ * ⚠️ Stated rather than papered over: nobody has measured whether any live
+ * deployment carries pre-ADR-0030 `sys_notification` rows. If a NAMED
+ * deployment turns out to hold rows it needs, the migration returns as an
+ * operator-runnable sub-command shaped exactly like `files-to-references` /
+ * `value-shapes`, under its own card — with the dry-run posture, the `--apply`
+ * gate and the documented consequence those two carry, none of which this one
+ * ever had.
+ */

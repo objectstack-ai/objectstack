@@ -26,23 +26,10 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
-// The engine double's write verbs route through the producer's OWN dispatch
-// predicates, so it cannot accept a call `ObjectQL.<verb>` would refuse — the
-// same pinning the sibling suite in this directory carries. Imported from
-// `@objectstack/metadata-core` (a `dependencies` entry here) and not from
-// `@objectstack/objectql`, which depends on this package: that edge would close
-// a cycle turbo rejects.
-import {
-    assertEngineDeleteDispatch,
-    assertEngineFindOnePredicate,
-    assertEngineUpdateDispatch,
-    type EngineFindOneQueryInput,
-} from '@objectstack/metadata-core';
 
 import { dropProjectionTables } from './drop-projection-tables.js';
 import { migrateEnvIdToProjectId } from './migrate-env-id-to-project-id.js';
 import { migrateProjectIdToEnvironmentId } from './migrate-project-id-to-environment-id.js';
-import { migrateSysNotificationToEvent } from './migrate-sys-notification-to-event.js';
 
 /** Every driver made here, torn down in `afterEach` (sql.js holds a WASM heap). */
 const live: SqliteWasmDriver[] = [];
@@ -58,43 +45,6 @@ async function realDriver(): Promise<SqliteWasmDriver> {
 function sql(driver: SqliteWasmDriver): (statement: string, bindings?: unknown[]) => Promise<any> {
     return (statement, bindings) => (driver as any).execute(statement, bindings ?? []);
 }
-
-/**
- * Engine double for the ONE helper that also needs an `IDataEngine`. The driver
- * under test is real; this stands in only for the structured-write half, which
- * is not what this file is about.
- */
-function recordingEngine() {
-    const inserts: Array<{ object: string; row: any }> = [];
-    const updates: Array<{ object: string; data: any }> = [];
-    return {
-        inserts,
-        updates,
-        engine: {
-            async insert(object: string, row: any) {
-                inserts.push({ object, row });
-                return { id: `${object}_${inserts.length}`, ...row };
-            },
-            async update(object: string, data: any, options?: Record<string, unknown>) {
-                assertEngineUpdateDispatch(data, options);
-                updates.push({ object, data });
-                return data;
-            },
-            async find() { return []; },
-            async findOne(object: string, query?: EngineFindOneQueryInput) {
-                assertEngineFindOnePredicate(object, query);
-                return null;
-            },
-            async delete(_object?: string, options?: Record<string, unknown>) {
-                assertEngineDeleteDispatch(options);
-                return {};
-            },
-            async count() { return 0; },
-            async aggregate() { return []; },
-        } as any,
-    };
-}
-
 afterEach(async () => {
     while (live.length > 0) {
         await live.pop()!.disconnect().catch(() => undefined);
@@ -192,56 +142,5 @@ describe('migrations against a driver this repo actually defines', () => {
         const names = tables.map((t: any) => t.name);
         expect(names).not.toContain('sys_object');
         expect(names).not.toContain('sys_view');
-    });
-
-    it('migrateSysNotificationToEvent carries legacy rows across on a real database', async () => {
-        const driver = await realDriver();
-        const run = sql(driver);
-        await run(
-            'CREATE TABLE "sys_notification" (' +
-                'id TEXT PRIMARY KEY, recipient_id TEXT, type TEXT, title TEXT, body TEXT, url TEXT, ' +
-                'actor_name TEXT, is_read INTEGER, read_at TEXT, created_at TEXT, organization_id TEXT, ' +
-                'topic TEXT, payload TEXT, severity TEXT)',
-        );
-        await run(
-            'INSERT INTO "sys_notification" ' +
-                '(id, recipient_id, type, title, body, url, actor_name, is_read, read_at, created_at, organization_id) ' +
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            ['n1', 'u1', 'mention', 'You were mentioned', 'hi', '/x', 'Ada', 0, null, '2026-01-01T00:00:00.000Z', 'org_1'],
-        );
-        const e = recordingEngine();
-
-        const result = await migrateSysNotificationToEvent({ driver, data: e.engine });
-
-        // This is the assertion the card is about: an operator following
-        // `docs/handoff/adr-0030-notification-convergence.md` step 2 with their
-        // platform driver used to get `{ status: 'error', migrated: 0 }` here.
-        expect(result.status).toBe('migrated');
-        expect(result.migrated).toBe(1);
-        expect(e.inserts.map((i) => i.object)).toEqual(['sys_inbox_message', 'sys_notification_receipt']);
-        expect(e.inserts[0]!.row).toMatchObject({ user_id: 'u1', notification_id: 'n1', action_url: '/x' });
-
-        // The legacy columns were really cleared, through the real driver, with
-        // the id passed as a BINDING — the one call site that binds a value.
-        const rows: any = await run('SELECT recipient_id, title FROM "sys_notification" WHERE id = ?', ['n1']);
-        const list: any[] = Array.isArray(rows) ? (Array.isArray(rows[0]) ? rows[0] : rows) : [];
-        expect(list[0]?.recipient_id).toBeNull();
-        expect(list[0]?.title).toBeNull();
-    });
-
-    it('migrateSysNotificationToEvent reports not_applicable on a real post-cut-over table', async () => {
-        const driver = await realDriver();
-        await sql(driver)(
-            'CREATE TABLE "sys_notification" (id TEXT PRIMARY KEY, topic TEXT, payload TEXT, severity TEXT, created_at TEXT)',
-        );
-        const e = recordingEngine();
-
-        const result = await migrateSysNotificationToEvent({ driver, data: e.engine });
-
-        // Distinguishes the repair from "accepts anything": a real driver whose
-        // table never held the inbox shape must still be told apart from one the
-        // migration could not drive at all.
-        expect(result.status).toBe('not_applicable');
-        expect(e.inserts).toHaveLength(0);
     });
 });

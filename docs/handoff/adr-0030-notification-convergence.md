@@ -98,12 +98,28 @@ error. **Do the objectui cut-over and the data migration together.**
 ### Cut-over sequence (avoid a blank bell)
 1. Deploy this framework change (objects + emit + producers). New notifications
    now land in `sys_inbox_message` + receipts.
-2. Run `migrateSysNotificationToEvent({ driver, data })` to carry existing
-   notifications into `sys_inbox_message` + receipts.
-3. Deploy the objectui bell repoint.
+2. Deploy the objectui bell repoint.
 
 (Step order tolerates a brief window where new rows exist but the UI hasn't
 flipped — the inbox is being populated the whole time.)
+
+> ⚰️ **The data-migration step is GONE.** This runbook used to carry a step 2,
+> `migrateSysNotificationToEvent({ driver, data })`, that carried pre-cut-over
+> `sys_notification` rows into `sys_inbox_message` + receipts. The runner has
+> been **retired** (#16194): it had zero production callers and no `os migrate`
+> sub-command, and both ways of giving it one were refused — an operator door is
+> a permanent surface for a migration with no measured demand, and a boot-time
+> invoker is an unattended data rewrite. **Pre-ADR-0030 `sys_notification` rows
+> are not carried by the platform on this line**: after the cut-over the bell
+> shows rows emitted from the new pipeline onward, and older per-user inbox rows
+> stay where they are, unread by the new UI.
+>
+> ⚠️ Nobody has measured whether any live deployment still holds pre-ADR-0030
+> `sys_notification` rows. If **your named deployment** does and needs them, do
+> not re-add the call — the migration returns as an operator-runnable
+> `os migrate` sub-command shaped exactly like `files-to-references` /
+> `value-shapes` (dry-run default, `--apply` gate, documented consequence),
+> under its own card. Say so on #16194.
 
 ---
 

@@ -167,26 +167,35 @@ describe('fresh-datastore attestation (ADR-0104, 2026-07-30 addendum)', () => {
   });
 
   /**
-   * #15710 ruling 3. The ADR-0030 cut-over id is attested at birth like the
-   * two ADR-0104 ids — a store created after the cut-over never held a legacy
-   * inbox row — and in the SAME uniform shape: `applied_at: null`,
-   * `blocking: 0`, `details.attested`, `verified_at` set for the birth fact.
-   * What a RUN of that migration may claim (never `verified_at`) lives on the
-   * id's docblock in `@objectstack/spec`; this pins that the writer treats it
-   * as one more member and invents no per-id shape. Named by symbol, not by
-   * iterating the array: the loop above would stay green with the member gone.
+   * [#16194] The ADR-0030 cut-over left this array. Its runner was retired
+   * whole — nothing can run the migration, so nothing may attest that it did.
+   *
+   * ⭐ Both halves, in one case. "No row for the retired id" alone cannot tell
+   * a correct removal from an attestation that wrote nothing at all, so the
+   * two survivors are asserted present, verified and in the uniform shape in
+   * the same run. Named by symbol, not by iterating the array: the loop above
+   * follows the array wherever it goes and would stay green either way.
    */
-  it('attests the ADR-0030 notification-event id at birth, in the uniform shape', async () => {
+  it('writes rows for the two survivors and NONE for the retired ADR-0030 id', async () => {
     const engine = fakeEngine();
 
     const attested = await attestFreshDatastore(engine);
 
-    expect(attested).toContain(NOTIFICATION_EVENT_MIGRATION_ID);
-    const row = engine.tables.sys_migration.find((r) => r.id === NOTIFICATION_EVENT_MIGRATION_ID)!;
-    expect(row).toMatchObject({ applied_at: null, blocking: 0, advisory: 0 });
-    expect(row.verified_at).toBeTruthy();
-    expect(JSON.parse(String(row.details))).toEqual(CREATION_ATTESTATION_DETAIL);
-    expect(await isDataMigrationVerified(engine, NOTIFICATION_EVENT_MIGRATION_ID)).toBe(true);
+    expect(attested).not.toContain(NOTIFICATION_EVENT_MIGRATION_ID);
+    expect(engine.tables.sys_migration.find((r) => r.id === NOTIFICATION_EVENT_MIGRATION_ID)).toBeUndefined();
+    expect(await isDataMigrationVerified(engine, NOTIFICATION_EVENT_MIGRATION_ID)).toBe(false);
+
+    // The control. Removal, not collapse: both ADR-0104 ids keep their rows.
+    for (const id of [FILE_REFERENCES_MIGRATION_ID, VALUE_SHAPES_MIGRATION_ID]) {
+      expect(attested).toContain(id);
+      const row = engine.tables.sys_migration.find((r) => r.id === id)!;
+      expect(row, `${id} lost its attestation row`).toBeDefined();
+      expect(row).toMatchObject({ applied_at: null, blocking: 0 });
+      expect(row.verified_at).toBeTruthy();
+      expect(JSON.parse(String(row.details))).toEqual(CREATION_ATTESTATION_DETAIL);
+      expect(await isDataMigrationVerified(engine, id)).toBe(true);
+    }
+    expect(engine.tables.sys_migration).toHaveLength(2);
   });
 
   /**
@@ -329,28 +338,42 @@ describe('fresh-datastore attestation (ADR-0104, 2026-07-30 addendum)', () => {
         [VALUE_SHAPES_MIGRATION_ID]: 'value-shapes',
       };
 
+      /**
+       * ⚰️ Re-fixtured. This case's subject used to be
+       * `adr-0030-notification-event`, the third creation-attested id, which
+       * has since been retired out of the array whole. Every SURVIVING member
+       * has a remedy row, so the array can no longer supply the case with a
+       * lookup MISS — and the miss is the entire branch #16067 landed. The id
+       * below is therefore a synthetic one handed in through `migrationIds`:
+       * ⛔ it must NOT be a member of {@link CREATION_ATTESTED_MIGRATION_IDS},
+       * or this case silently stops testing the branch it names.
+       */
+      const NO_REMEDY_ID = 'adr-0000-no-value-shape-contract';
+
       it('an id with NO value-shape contract is never-contradictable, and is told to run nothing', async () => {
+        expect(
+          (CREATION_ATTESTED_MIGRATION_IDS as readonly string[]).includes(NO_REMEDY_ID),
+          'the synthetic id joined the real array — pick another, or this case tests nothing',
+        ).toBe(false);
         const engine = fakeEngine();
-        engine.valueShapeViolationsAdmitted = () => ({
-          [NOTIFICATION_EVENT_MIGRATION_ID]: VIOLATED,
-        });
+        engine.valueShapeViolationsAdmitted = () => ({ [NO_REMEDY_ID]: VIOLATED });
         const logger = { info: vi.fn(), warn: vi.fn() };
 
-        const attested = await attestFreshDatastore(engine, { logger });
+        const attested = await attestFreshDatastore(engine, {
+          logger,
+          migrationIds: [...CREATION_ATTESTED_MIGRATION_IDS, NO_REMEDY_ID],
+        });
 
-        // A value-shape tally is evidence about value shapes. The ADR-0030
-        // cut-over's fact — no legacy per-user inbox row here — is not one, so
-        // this counterexample disproves nothing about it and the birth
+        // A value-shape tally is evidence about value shapes. An id whose fact
+        // is not a value-shape fact is not disproved by one, so the birth
         // observation still settles it.
-        expect(attested).toContain(NOTIFICATION_EVENT_MIGRATION_ID);
-        expect(await isDataMigrationVerified(engine, NOTIFICATION_EVENT_MIGRATION_ID)).toBe(true);
+        expect(attested).toContain(NO_REMEDY_ID);
+        expect(await isDataMigrationVerified(engine, NO_REMEDY_ID)).toBe(true);
 
         const warnings = logger.warn.mock.calls.map((c) => String(c[0] ?? '')).join('\n');
         // ⭐ The card's pin: the operator is NOT sent to `os migrate
-        // value-shapes`, which neither attests nor clears this id. There is no
-        // `os migrate notification-event` to send them to either — that
-        // cut-over is an operator call with no self-check — so the correct
-        // sentence here is no sentence.
+        // value-shapes`, which neither attests nor clears this id — the
+        // correct sentence for a lookup miss is no sentence.
         expect(warnings).not.toContain('value-shapes');
         expect(warnings).toBe('');
       });
