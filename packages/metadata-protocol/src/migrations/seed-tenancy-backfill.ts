@@ -136,7 +136,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { resolveTenancyPosture } from '@objectstack/types';
+import { operatorFacingErrorText, resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { DATA_MIGRATION_FLAG_OBJECT, type DataMigrationFlag } from '@objectstack/spec/system';
 import type { IndexMigrationLogger } from './partial-index-probe.js';
@@ -1256,7 +1256,7 @@ export async function backfillSeedTenancy(
         organizationLastValue: toNumber(r.organization_last_value),
       }));
   } catch (e) {
-    return { status: 'absent', ...empty, detail: (e as Error).message };
+    return { status: 'absent', ...empty, detail: operatorFacingErrorText(e) };
   }
   if (splits.length === 0) return { status: 'no-split', ...empty };
 
@@ -1302,7 +1302,7 @@ export async function backfillSeedTenancy(
       .map((r) => (r.id == null ? '' : String(r.id)))
       .filter((id) => id.length > 0);
   } catch (e) {
-    organizationProbeError = (e as Error).message || 'unknown error';
+    organizationProbeError = operatorFacingErrorText(e) || 'unknown error';
     organizationIds = [];
   }
   // 4a. NO organization yet — benign, and NOT the ambiguous case (#12395).
@@ -1385,7 +1385,7 @@ export async function backfillSeedTenancy(
         `[metadata-protocol] could not list already-minted duplicates for ${split.object}.${split.field} ` +
           `(#8686) — the backfill continues; verify manually with: ` +
           `${buildCollisionProbeSql(split.object, split.field, client)}`,
-        { error: (e as Error).message },
+        { error: operatorFacingErrorText(e) },
       );
     }
   }
@@ -1411,7 +1411,7 @@ export async function backfillSeedTenancy(
         `[metadata-protocol] seed tenancy backfill could not stamp ${object} (#8686) — its rows keep ` +
           `${ORGANIZATION_FIELD} = NULL and the counter merge below is SKIPPED for it, so the split ` +
           `survives and the next boot retries. Nothing was lost; nothing was repaired for this object.`,
-        { error: (e as Error).message },
+        { error: operatorFacingErrorText(e) },
       );
     }
   }
@@ -1444,7 +1444,7 @@ export async function backfillSeedTenancy(
         `[metadata-protocol] seed tenancy backfill could not merge the counter for ` +
           `${split.object}.${split.field} (#8686) — the '${GLOBAL_TENANT}' counter is left in ` +
           `place, so the high-water mark is intact and the next boot retries the repair`,
-        { error: (e as Error).message },
+        { error: operatorFacingErrorText(e) },
       );
     }
   }

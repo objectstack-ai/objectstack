@@ -69,6 +69,7 @@
  * first re-keying.
  */
 
+import { operatorFacingErrorText } from '@objectstack/types';
 import { isResultSet, normalizeRows } from './seed-tenancy-backfill.js';
 import type { IndexExec } from './partial-index-probe.js';
 import {
@@ -295,7 +296,7 @@ async function runProbe(exec: IndexExec, probe: RuntimeIndexProbe): Promise<Runt
         if (!isResultSet(result)) return unreadable(SEAM_NO_ANSWER_DETAIL);
         rows = normalizeRows(result);
     } catch (error) {
-        return unreadable(error instanceof Error ? error.message : String(error));
+        return unreadable(operatorFacingErrorText(error));
     }
 
     const groups: RuntimeIndexDuplicateGroup[] = rows.map((row) => {
@@ -334,7 +335,7 @@ export async function collectRuntimeIndexPreflight(
     try {
         if (!isResultSet(await exec(SEAM_LIVENESS_SQL))) seamFailure = SEAM_NO_ANSWER_DETAIL;
     } catch (error) {
-        seamFailure = error instanceof Error ? error.message : String(error);
+        seamFailure = operatorFacingErrorText(error);
     }
     if (seamFailure !== undefined) {
         return probes.map((probe) => ({

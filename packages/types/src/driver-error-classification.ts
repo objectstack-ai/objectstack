@@ -652,3 +652,117 @@ export function isSchemaAlreadyExistsError(error: unknown, depth = 0): boolean {
 export function isMissingTableError(error: unknown, readObject?: string, depth = 0): boolean {
     return matchesDriverError(error, MISSING_TABLE, depth, readObject);
 }
+
+// ---------------------------------------------------------------------------
+// Operator-facing text for a DECLARED driver fault (#16657)
+// ---------------------------------------------------------------------------
+
+/**
+ * [#16657] The ADR-0112 code a driver declares when the backend, not the
+ * caller, refused the work. Spelled as a literal for the same reason
+ * {@link declaresServerFault} spells `status`/`code` by hand: this package is
+ * the common dependency every consumer of the question already has, and reading
+ * one string field must not drag a schema module into it.
+ */
+const DECLARED_DATABASE_FAULT_CODE = 'DATABASE_ERROR';
+
+/**
+ * [#16657] The fragment that identifies `SqlDriver`'s RAW-path envelope, and
+ * only it.
+ *
+ * The raw terminal (`rawStatementFaultError`, `driver-sql/src/sql-driver.ts`;
+ * `TursoDriver` remote mode reaches the same composition through
+ * `SqlDriver.rawStatementFault`) COMPOSES its message on purpose — there is no
+ * cut of a dialect's text that keeps its words and reliably drops a caller's
+ * inlined literals, so the envelope discloses nothing and carries the dialect
+ * error whole under a non-enumerable `cause`. That is the disclosure clause of
+ * the raw path and ⛔ is not reverted here: the fix for an operator record is
+ * to read the `cause` the driver already attached, never to widen what the
+ * envelope discloses.
+ *
+ * ⚠️ Matching the sentence — rather than the declaration alone — is what keeps
+ * the READ-exit envelope (`backendStatementFaultError`, the #8931 / PR #9273
+ * half) untouched: it declares the very same code and status, composes a
+ * DIFFERENT sentence, and whether its prose should be unwrapped is a separate
+ * decision this helper deliberately does not take. An envelope that declares
+ * the code but does not carry this sentence is returned exactly as it arrived.
+ *
+ * The producer is pinned: `driver-error-classification.raw-statement-pin.test.ts`
+ * fails if `sql-driver.ts` stops composing a sentence this recognises.
+ */
+const RAW_STATEMENT_FAULT_SENTENCE = /refused to run a raw statement/;
+
+/**
+ * The message channel of one node of a `cause` chain, as text.
+ *
+ * Empty means "this node says nothing" — a caller distinguishes that from a
+ * node that speaks, and never records it. `String()` is the last resort so that
+ * a thrown non-Error still yields prose rather than `undefined`, which is the
+ * shape `(e as Error).message` produced at every site this helper replaces.
+ */
+function messageChannelOf(node: unknown): string {
+    if (typeof node === 'string') return node;
+    if (node === null || node === undefined) return '';
+    if (typeof node === 'object' || typeof node === 'function') {
+        const message = (node as { message?: unknown }).message;
+        return typeof message === 'string' ? message : '';
+    }
+    return String(node);
+}
+
+/**
+ * The text an OPERATOR should read for `error` — the dialect's own words when a
+ * driver composed over them, the error's own message otherwise (#16657).
+ *
+ * # The defect this closes
+ *
+ * Since #16019 the raw-SQL seam every migration probe, backfill and
+ * `os db clean` runs through no longer lets the dialect's error out: it
+ * declares `DATABASE_ERROR` / 500 with a composed sentence and keeps the
+ * dialect error under `cause`. Every consumer that embedded `error.message`
+ * into an operator-facing record therefore began storing *"the database refused
+ * to run a raw statement"* where it used to store *"no such column: foo"*.
+ *
+ * For a LIVE console that is cosmetic — the driver writes the statement and the
+ * dialect text to its warn sink one line earlier, so the operator has already
+ * read it. For a STORED record it is not: whoever reads a backfill's `detail`
+ * field a week later never had that console line, and for them the dialect's
+ * words are unrecoverable. This helper is for the second class.
+ *
+ * # What it does, and the two things that bound it
+ *
+ * It walks the `cause` chain to the first node that says something which is not
+ * the raw-path composed sentence, and returns that. Both narrowings matter:
+ *
+ *  - **only a DECLARED fault is reinterpreted.** An undeclared throw — anything
+ *    without `code: DATABASE_ERROR` — is returned on its own message channel,
+ *    byte for byte what the call site used to compute. Reading a `cause` chain
+ *    nobody declared would be sniffing, which is the mechanism #16019 removed;
+ *  - **only the raw-path sentence is walked through.** See
+ *    {@link RAW_STATEMENT_FAULT_SENTENCE}.
+ *
+ * The walk is bounded by the same {@link MAX_CAUSE_DEPTH} every predicate in
+ * this module uses, so a cyclic or absurdly deep chain terminates. Exhausting
+ * the bound — like finding no `cause` at all — falls back to the surface
+ * message, so a record always carries a sentence rather than `undefined` or an
+ * empty string.
+ *
+ * @param error - the thrown value, of any shape.
+ * @returns text for an operator; never `undefined`, never empty for a thrown
+ *          value that has any textual channel at all.
+ */
+export function operatorFacingErrorText(error: unknown): string {
+    const surface = messageChannelOf(error) || String(error);
+    if (typeof error !== 'object' || error === null) return surface;
+    const { code } = error as { code?: unknown };
+    if (code !== DECLARED_DATABASE_FAULT_CODE) return surface;
+
+    let node: unknown = error;
+    for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth += 1) {
+        const text = messageChannelOf(node);
+        if (text !== '' && !RAW_STATEMENT_FAULT_SENTENCE.test(text)) return text;
+        if (node === null || (typeof node !== 'object' && typeof node !== 'function')) break;
+        node = (node as { cause?: unknown }).cause;
+    }
+    return surface;
+}

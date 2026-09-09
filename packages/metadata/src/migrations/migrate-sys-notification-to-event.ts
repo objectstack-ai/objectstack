@@ -40,6 +40,8 @@
  */
 
 import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
+import { operatorFacingErrorText } from '@objectstack/types';
+
 import {
     DATA_MIGRATION_FLAG_OBJECT,
     NOTIFICATION_EVENT_MIGRATION_ID,
@@ -284,7 +286,7 @@ async function runNotificationEventMigration(
 
         return { status: 'migrated', migrated };
     } catch (err: any) {
-        return { status: 'error', migrated, error: err?.message ?? String(err) };
+        return { status: 'error', migrated, error: operatorFacingErrorText(err) };
     }
 }
 

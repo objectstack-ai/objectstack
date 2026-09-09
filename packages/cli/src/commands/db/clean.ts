@@ -3,6 +3,7 @@
 import { Command, Flags } from '@oclif/core';
 import { statSync, existsSync } from 'node:fs';
 import chalk from 'chalk';
+import { operatorFacingErrorText } from '@objectstack/types';
 import { printError } from '../../utils/format.js';
 import { resolveTelemetryDbPath } from '../../utils/telemetry-datasource.js';
 
@@ -112,7 +113,7 @@ export default class DbClean extends Command {
         );
       } catch (error: any) {
         failed = true;
-        printError(`VACUUM failed for ${file}: ${error?.message ?? error}`);
+        printError(`VACUUM failed for ${file}: ${operatorFacingErrorText(error)}`);
       }
     }
     if (failed) this.exit(1);

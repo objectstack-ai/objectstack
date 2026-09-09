@@ -57,6 +57,8 @@
  */
 
 import type { IDataDriver } from '@objectstack/spec/contracts';
+import { operatorFacingErrorText } from '@objectstack/types';
+
 
 import { type DriverExec, driverExecRefusal, resolveDriverExec } from './driver-exec.js';
 import { SysMetadataObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
@@ -155,7 +157,7 @@ export async function migrateProjectIdToEnvironmentId(
 
             results.push({ table, status: 'renamed' });
         } catch (err: any) {
-            results.push({ table, status: 'error', error: err?.message ?? String(err) });
+            results.push({ table, status: 'error', error: operatorFacingErrorText(err) });
         }
     }
 
