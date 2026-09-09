@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/metadata-core",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "Metadata Repository contracts: types, canonicalization, errors, interface (ADR-0008).",
   "type": "module",
@@ -58,7 +58,7 @@
     "fast-check": "^4.9.0",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "author": "ObjectStack",
   "repository": {

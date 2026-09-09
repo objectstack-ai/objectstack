@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-auth",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "Authentication & Identity Plugin for ObjectStack",
   "main": "dist/index.js",
@@ -47,10 +47,10 @@
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
     "@types/node": "^26.2.0",
-    "hono": "^4.13.2",
+    "hono": "^4.13.5",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "objectstack",
