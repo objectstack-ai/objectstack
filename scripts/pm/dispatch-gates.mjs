@@ -22077,7 +22077,11 @@ function selfTest() {
     'a job whose `if:` resolves to no filter output contributes no population at all — a schedule guessed at would fabricate',
     !jobRowNames.includes('Unresolvable') && jobFixture.counts.populations === 2,
   );
-  const suiteRow = jobFixture.rows.find((r) => r.job === 'Suite (1/2)');
+  // ⛔ Every reader below DEGRADES to a failing case rather than a TypeError. The
+  // ablation that proves these cases can fail removes the very row they read, and
+  // a battery that throws there stops before the LIVE controls underneath it are
+  // decided — turning "this pin can fail" into "this pin was never reached".
+  const suiteRow = jobFixture.rows.find((r) => r.job === 'Suite (1/2)') ?? { steps: [], hits: [], outputs: [] };
   const suiteSteps = suiteRow.steps.map((s) => s.step);
   t('the step CI runs that no family names IS listed — the whole point of the block', suiteSteps.includes('Run the package suite'));
   t(
@@ -22100,14 +22104,14 @@ function selfTest() {
       && suiteRow.hits[0].pattern === 'packages/**'
       && suiteRow.outputs.includes('filter.core'),
   );
-  const suiteRun = suiteRow.steps.find((s) => s.step === 'Run the package suite');
+  const suiteRun = suiteRow.steps.find((s) => s.step === 'Run the package suite') ?? { commands: [] };
   t(
     'a shell line-continuation is spliced, so a row is the command the shell sees rather than a fragment of its argv',
     suiteRun.commands.length === 1 && suiteRun.commands[0] === 'pnpm turbo run test --filter=@objectstack/dogfood',
   );
 
   const jobLines = jobFilteredStepLines(jobFixture.rows, jobFixture.counts);
-  t('the rendered block sizes itself against the jobs your paths schedule', jobLines[0].includes('1 job(s) CI runs because one of your paths'));
+  t('the rendered block sizes itself against the jobs your paths schedule', (jobLines[0] ?? '').includes('1 job(s) CI runs because one of your paths'));
   t('the rendered block refuses to be read as runnable', jobLines.some((l) => l.includes('NOT in --commands')));
   t('the rendered block refuses to classify its rows into tests, builds and setup', jobLines.some((l) => l.includes('NOT classified into tests, builds and setup')));
   t('the rendered block names the always-runs tail as the other half of one partition', jobLines.some((l) => l.includes('OTHER half of this partition')));
