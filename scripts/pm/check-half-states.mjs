@@ -10086,6 +10086,260 @@ export function h52OpenQuestionsUnrouted(issue, commentRows) {
 }
 
 // ---------------------------------------------------------------------------
+// H51 — an OPEN gated PR whose thread already holds a contract-review verdict
+// for the CURRENT head, with no label stroke behind it.
+//
+// ## The defect this row reads
+//
+// `needs:contract-review` is a DUAL-carrier gate, and a verdict on it is a
+// HANDOFF rather than a note: PASS clears both carriers, FAIL clears both and
+// leaves a handoff comment on the card. Either way the verdict's second act is
+// a LABEL STROKE, and the seats' sweeps read labels — not PR prose. So a
+// verdict recorded only as a comment reaches nobody: the PR keeps reading
+// 「真实待审」 to the enqueue path, to the board and to every candidate query,
+// while the review it is waiting on has already concluded on that exact head.
+//
+// Measured in one shift: twelve PRs across two repos took a verdict between
+// 03:59Z and 07:34Z and NO owning seat responded on any of them for 2–5 hours.
+// The maintainer noticed first (「已审 9 个 objectstack PR,为什么还是挂着待契约
+// 复审的 label」), and the repair was done by hand. Nothing mechanical could
+// have found it: H31 compares the two CARRIERS with each other and is perfectly
+// clean while both of them are on, which is exactly the state a written-but-
+// unstruck verdict leaves behind.
+//
+// ⛔ VERDICT-AGNOSTIC on purpose, and that is the whole shape of the row: it
+// never reads which verdict was given, only that one was given on this head.
+// Both branches owe a stroke inside the window — PASS ⇒ carriers off, FAIL ⇒
+// carriers off plus the handoff comment — so the row can ask for the stroke
+// without ever holding an opinion about the review. A row that parsed the
+// verdict would be issuing one, which is 自查放行 (H31's ⛔, one file over).
+//
+// ## The head-identity test, and why it is the whole negative side
+//
+// A gated PR whose review names an OLDER head is CLEAN, and this is not an
+// indulgence: the head moved, so the review that concluded is about a tree
+// nobody is being asked to land, and the carrier is genuinely live again —
+// 「head 后移或无结论才重挂」 (`references/contract-review.md` 载体纪律), read
+// from the other direction. Only a verdict on the CURRENT head is a verdict
+// that owed a stroke, so the row's subject is the pair (this head, a verdict on
+// it) and never the label's age.
+//
+// Live on the board this landed against, and both directions fired: of seven
+// gated open PRs, four carried a verdict on the current head aged 80–309
+// minutes (rows), two carried one naming a head that had since moved (clean),
+// and one had no verdict at all (clean).
+//
+// ## The anchor is MEASURED rather than quoted, and that is a correction
+//
+// The filing card states the title shape as one literal format and calls the
+// anchor structural on that basis. Measured over the live board it is not one
+// format — three dialects were in use on the same day, and a regex pinned to
+// the card's literal would have been silent on two of them while reporting a
+// clean board:
+//
+//   heading + `— PR #N @ \`sha\``        the card's cited form
+//   heading + `· head \`sha\``            the same fact, another separator
+//   heading with NO sha, the head named on the FIRST BODY LINE
+//
+// A fourth shape is the one that matters most: a director seat's ADOPTION
+// RECORD, whose own first line is the adoption and which carries the review —
+// heading and all — verbatim beneath it. That is a verdict on the head by every
+// reading the protocol has (「逐字采纳」 is one of the two legal acts on a
+// subagent verdict), so the marker is LINE-ANCHORED like H48's brief marker
+// rather than body-anchored like H52's report marker, and the adoption record
+// is IN.
+//
+// What all four share is exactly two things, so those two are what this row
+// reads: a level-2 heading whose line begins `## Contract review`, and the head
+// sha written as a code span somewhere in the comment. Neither is prose, and
+// neither is a verdict word.
+//
+// ## Cost — one thread per GATED open PR, and the cache is already there
+//
+// `prCommentCache` is H48's, and its own header says a future PR-comment reader
+// finds a thread it already bought and pays nothing for it. This is that
+// reader. The two populations overlap without being equal — governed and gated
+// are independent properties — so the marginal cost is one issue-comment walk
+// per gated open PR that is NOT governed. Measured: 7 gated of 16 open PRs, of
+// which H48 had already bought some; a bounded, single-page walk each.
+//
+// That purchase is stated rather than hidden because it is a decision: the
+// alternative (judge only the threads other rows happened to buy) would leave
+// the row's coverage a function of which PRs were governed that day, and a row
+// whose population silently shrinks is the shape #4690 refuses.
+// ---------------------------------------------------------------------------
+
+/**
+ * The contract-review verdict, as a HEADING line.
+ *
+ * H48's `MAINTAINER_BRIEF_MARKER` register, and the same three properties for
+ * the same reasons: the literal `## ` prefix (a `###` sub-heading and a bare
+ * mention inside a paragraph are both non-matches), an optional leading
+ * blockquote `>`, and no `g` flag — a shared regex carrying `lastIndex` between
+ * callers is a state bug waiting for its second reader.
+ *
+ * LINE-ANCHORED with `m` rather than anchored at the body start, and that is a
+ * MEASUREMENT rather than a habit: the director seat's adoption record opens
+ * with its own adoption sentence and carries the review's heading on a later
+ * line, and 「逐字采纳」 is one of the two legal acts on a subagent verdict — so
+ * a body-anchored marker would be silent on an entire, and entirely correct,
+ * shape of verdict.
+ *
+ * ⚠️ The looseness `m` admits — a comment that merely QUOTES a review heading —
+ * is answered by the SECOND gate rather than by this regex: a mention that does
+ * not also carry the PR's current head sha as a code span is not a verdict on
+ * this head, and this row never fires on the marker alone.
+ *
+ * CASE-SENSITIVE, `ACCEPT_VERDICT_MARKER`'s reason: every measured instance
+ * writes it this way, so there is no shipped dialect to accommodate, and a
+ * lowercase heading is a malformed verdict whose repair is on the WRITE side.
+ */
+export const CONTRACT_REVIEW_HEADING_MARKER = /^\s*>?\s*## Contract review\b/m;
+
+/**
+ * A hex code span long enough to be a commit id.
+ *
+ * SEVEN is git's own default abbreviation and the shortest spelling measured on
+ * the board (`c5935b2`); the longest is a full 40. Below seven a code span is
+ * not an abbreviated sha in this corpus — it is a field name, a status word or
+ * an error code — and admitting it would let an unrelated span decide the
+ * head-identity test.
+ */
+export const H51_SHA_MIN_HEX = 7;
+export const H51_SHA_SPAN = /`([0-9a-fA-F]{7,40})`/g;
+
+/**
+ * How long a verdict may sit on the current head before the stroke is late.
+ *
+ * Sixty minutes, and the number is the measured gap between the two
+ * distributions rather than a preference: a review-to-handoff stroke is two
+ * label writes and a comment, done in minutes by the seat that just finished
+ * reading the diff, while the misses this row exists for ran 2–5 HOURS. A
+ * threshold inside that gap separates them without pricing an ordinary
+ * hand-over as a defect.
+ */
+export const H51_HANDOFF_THRESHOLD_MINUTES = 60;
+
+/**
+ * Which head this comment says it reviewed — the matched span, or `null`.
+ *
+ * The test is PREFIX against the PR's head sha, case-insensitive, which answers
+ * the abbreviated and full spellings with one comparison. The whole body is
+ * scanned rather than a bounded prefix, deliberately: the head is written in
+ * the heading in two dialects, on the first body line in a third, and inside an
+ * adoption record's opening sentence in the fourth, so any prefix bound short
+ * enough to be worth having would miss one of them SILENTLY — a row reading
+ * clean on a verdict it could not see is the failure this file refuses.
+ *
+ * The direction is safe by construction: a span that is a prefix of THIS head
+ * can only have been written once this head existed, so a false positive would
+ * need a review to name a commit it could not yet have seen.
+ */
+export function contractReviewHeadMatch(body, headSha) {
+  const head = String(headSha ?? '').toLowerCase();
+  if (head.length < H51_SHA_MIN_HEX) return null;
+  const text = String(body ?? '');
+  // A fresh regex per call: the module-level source carries `g`, and a shared
+  // `g` regex hands its `lastIndex` to the next caller.
+  const spans = new RegExp(H51_SHA_SPAN.source, 'g');
+  let m;
+  while ((m = spans.exec(text))) {
+    const span = m[1].toLowerCase();
+    if (head.startsWith(span)) return m[1];
+  }
+  return null;
+}
+
+/**
+ * The NEWEST contract-review comment naming this PR's CURRENT head, or `null`.
+ *
+ * Filter-then-`latestMarkedComment`, never a second newest-of idiom: H47's
+ * resolution is this file's one answer to "which comment carries this marker",
+ * and a second implementation here is a drift waiting to happen. The filter is
+ * what makes the answer head-scoped — a thread holding a review of an older
+ * head and nothing else answers `null`, which is the row's whole clean side.
+ */
+export function latestContractReviewOnHead(commentRows, headSha) {
+  if (!Array.isArray(commentRows)) return null;
+  const onHead = commentRows.filter(
+    (row) =>
+      CONTRACT_REVIEW_HEADING_MARKER.test(String(row?.body ?? '')) &&
+      contractReviewHeadMatch(row?.body, headSha) !== null,
+  );
+  const newest = latestMarkedComment(onHead, CONTRACT_REVIEW_HEADING_MARKER);
+  if (!newest) return null;
+  const row = onHead[newest.index];
+  return { ...newest, id: row?.id ?? null, sha: contractReviewHeadMatch(row?.body, headSha) };
+}
+
+/**
+ * Which PRs this row can speak about AT ALL — exported for the reason every
+ * gathering policy here is: the predicate that decides what is even COUNTED is
+ * where a silent hole would live, and the summary's coverage pair reads
+ * `judged of these`.
+ *
+ * A DRAFT is IN. The gate governs enqueue, a draft is precisely where the
+ * carrier still has work to do, and every PR in the measured population was a
+ * draft — excluding drafts would have emptied the row on the board it was
+ * written against. A merged or closed PR is OUT: the stroke is moot once the
+ * PR is gone, and 「载体不迁移」 leaves nothing to repair.
+ */
+export function h51SpeaksAbout(pr) {
+  if (pr?.merged_at) return false;
+  if (String(pr?.state ?? 'open') === 'closed') return false;
+  if (!Array.isArray(pr?.labels)) return false;
+  return labelNames(pr).includes(CONTRACT_REVIEW_LABEL);
+}
+
+/**
+ * H51 — null when clean OR unjudged, else the finding sentence.
+ *
+ * Three input states, never two (#4690), the H48 contract verbatim:
+ *
+ *   undefined  the thread was never consulted. UNJUDGED.
+ *   null       consulted and unreadable — a failed request, or a walk that hit
+ *              the page ceiling. UNJUDGED.
+ *   rows       judged.
+ *
+ * @param {{ number?: number, state?: string, draft?: boolean, merged_at?: string|null,
+ *   labels?: any[], head?: { sha?: string } }} pr — an open-PR LIST row; `head.sha`
+ *   and `labels` both ride it, so the head-identity test costs no request.
+ * @param {{ id?: number, body?: string, created_at?: string }[]|null|undefined} commentRows
+ * @param {number} nowMs
+ */
+export function h51VerdictWithoutHandoff(pr, commentRows, nowMs = Date.now()) {
+  if (commentRows === undefined || commentRows === null) return null;
+  if (!h51SpeaksAbout(pr)) return null;
+  const head = String(pr?.head?.sha ?? '');
+  const verdict = latestContractReviewOnHead(commentRows, head);
+  if (!verdict) return null;
+  const parsed = verdict.stamp;
+  // An unreadable stamp must not read as FRESH (H18's direction): a verdict
+  // this row cannot date is one it cannot call late, so it declines.
+  if (parsed === null) return null;
+  const ageMinutes = (nowMs - parsed) / 60_000;
+  if (ageMinutes <= H51_HANDOFF_THRESHOLD_MINUTES) return null;
+  const named = verdict.id ? `comment ${verdict.id}` : 'a comment carrying no readable id';
+  return (
+    `open and carrying \`${CONTRACT_REVIEW_LABEL}\` while its own thread already holds a contract-review ` +
+    `verdict for the CURRENT head \`${head.slice(0, 10)}\` (${named}, ${verdict.createdAt}, ~` +
+    `${Math.round(ageMinutes)} minutes ago against a ${H51_HANDOFF_THRESHOLD_MINUTES}-minute threshold; ` +
+    `the comment names \`${verdict.sha}\`). A verdict is a HANDOFF rather than a note, and its second act ` +
+    'is a LABEL STROKE: PASS clears both carriers, FAIL clears both and leaves the handoff comment on the ' +
+    'card. The seats read LABELS, not PR prose — so with the stroke unwritten this PR still reads ' +
+    '「真实待审」 to the enqueue path, to the board and to every candidate query, while the review it is ' +
+    'waiting on concluded on this exact tree. ⛔ Verdict-agnostic by construction: this row does not read ' +
+    'WHICH verdict was given and holds no opinion about the review — a row that parsed the verdict would ' +
+    'be issuing one, which is 自查放行. Remedy: verdict recorded, handoff not written — apply the FAIL ' +
+    'end-state in `references/contract-review.md` 载体纪律 (同笔剥双载体 plus the handoff comment on the ' +
+    'card; PASS clears both and leaves the provenance comment), re-hanging both carriers when the patch ' +
+    'head lands. A review naming an OLDER head is NOT this row: the head moved, the carrier is genuinely ' +
+    'live again, and this row is silent on it. Report-only patrol INPUT: ⛔ never a label written from ' +
+    'this script — striking a review gate from a sweeper would be issuing the verdict.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -10282,6 +10536,13 @@ export const SWEEP_COUNT_KEYS = [
   'openQuestionCandidates',
   'openQuestionJudged',
   'openQuestionUnparsed',
+  // H51's coverage pair. `handoffCandidates` is how many GATED OPEN PRs the row
+  // could speak about and `handoffJudged` how many of those had a readable
+  // comment thread — this row BUYS that thread, so a shortfall means a failed or
+  // ceiling-bound walk rather than an unbought one, and either way a PR whose
+  // thread went unread must not render as one carrying no verdict.
+  'handoffCandidates',
+  'handoffJudged',
   'commits',
   'commitBindings',
   'commitBindingMessages',
@@ -10729,6 +10990,15 @@ export function summaryLine(counts, findingCount) {
     'its own, so a shortfall is a thread no other row bought, or one still full at its first page, and such a ' +
     'card is UNJUDGED rather than clean. A CLOSED card is out of this population entirely, and the ' +
     'residual-question rule is what carries a question past its own card. ' +
+    // H51's coverage pair. UNCONDITIONAL like every other window's, and it
+    // carries the one purchase this row makes: an issue-comment thread per GATED
+    // open PR, on H48's cache, so a PR that row already bought costs nothing.
+    `Contract-review handoffs (H51): ${counts.handoffJudged ?? 0} of ` +
+    `${counts.handoffCandidates ?? 0} gated open PR(s) had a readable issue-comment thread to judge the ` +
+    `newest contract-review verdict against (at most ${H48_COMMENT_PAGE_CEILING} page(s) of ` +
+    `${H48_COMMENTS_PAGE_SIZE}, shared with H48's cache). A thread that failed or reached that ceiling is ` +
+    'UNJUDGED rather than clean, and a verdict naming an OLDER head is CLEAN rather than quiet — the head ' +
+    'moved, so the carrier is genuinely live again. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -10784,6 +11054,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h49Partial', 'Partial landings (H49): '],
   ['h50ThreadRead', 'Thread-read fields (H50): '],
   ['h52OpenQuestions', 'Open questions (H52): '],
+  ['h51Handoff', 'Contract-review handoffs (H51): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -11153,6 +11424,17 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H48: 'state',
   H49: 'state',
   H50: 'state',
+
+  // H51 is a `state` and ⛔ NOT a `gate`, and the distinction is the gate band's
+  // own criterion rather than the subject's vocabulary. That band exists for the
+  // row that can tell a STRIPPED gate from an ungated card — an absence reading
+  // as a green light, where 「被剥」 and 「从未挂过」 are indistinguishable in the
+  // evidence. H51 reads the opposite direction: a gate still PRESENT, outliving
+  // the verdict that should have struck it, with both carriers agreeing (so H31
+  // is clean) and the whole repair on the board. That is `state`'s definition —
+  // a live PR contradicting itself, an aged state — and it is H48's band, the
+  // row this one is the contract-review half of.
+  H51: 'state',
 
   // H52 is a `stall` and not a `state` (#16662): the board is not contradicting
   // itself — every label on the card is correct — and no later sweep frees the
@@ -14476,6 +14758,28 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       const handoff = h48GovernedVerdictWithoutBrief(pr, governed, rows);
       if (handoff) findings.push([pr, 'H48', handoff]);
     }
+  }
+
+  // H51 — the contract-review verdict whose LABEL STROKE never happened.
+  //
+  // OUTSIDE the governed block above on purpose: this row's population is the
+  // GATED open PRs, and gated and governed are independent properties — a
+  // register that would not load silences H43 and H48 and must not silence
+  // this. It reads the same `prCommentCache`, whose header reserved exactly
+  // this: a later PR-comment reader pays nothing for a thread H48 already
+  // bought, and buys its own only for a gated PR that row never visited.
+  //
+  // The head-identity leg costs nothing at all: `head.sha` and `labels` both
+  // ride the open-PR LIST row this sweep already holds, so the question "is
+  // this verdict about the tree the PR is offering NOW" is answered without a
+  // request.
+  for (const pr of seenPrs.values()) {
+    if (!h51SpeaksAbout(pr)) continue;
+    stats.handoffCandidates = (stats.handoffCandidates ?? 0) + 1;
+    const rows = await prCommentRowsFor(pr.number);
+    if (rows !== null) stats.handoffJudged = (stats.handoffJudged ?? 0) + 1;
+    const unstruck = h51VerdictWithoutHandoff(pr, rows);
+    if (unstruck) findings.push([pr, 'H51', unstruck]);
   }
 
   // H8 — one bounded merged-PR listing (window note at the helper), matched
@@ -21837,7 +22141,10 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H52 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('H52 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   t('H52 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
-  t('H52 band: ⛔ no `H51` is invented here — the number is reserved elsewhere', 'H51' in HALF_STATE_FAMILY_BAND, false);
+  // ⚖️ This pin was the RESERVATION of H51 while #16836 held the number. The
+  // row has now landed, so the pin flips to its other side and keeps doing the
+  // same job: the number is not free, and nothing may re-use it.
+  t('H52 band: `H51` is the reserved row, now LANDED beside this one', HALF_STATE_FAMILY_BAND.H51, 'state');
   t('H52 band: a stall outranks a state row, so the trim eats this one last', familyRank('H52') < familyRank('H50'), true);
   t('H52: all three count keys ride the enumerated forwarding contract', ['openQuestionCandidates', 'openQuestionJudged', 'openQuestionUnparsed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   t('H52 summary: the coverage pair is reported', saidBy('h52OpenQuestions', summaryLine({ openQuestionJudged: 3, openQuestionCandidates: 4 }, 0)).includes('3 of 4 listed open card(s)'), true);
@@ -21847,6 +22154,134 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H52 summary: …and names the closed-card bound in the clause itself', saidBy('h52OpenQuestions', summaryLine({}, 0)).includes('A CLOSED card is out of this population entirely'), true);
   t('H52 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h52OpenQuestions', summaryLine({}, 0)).includes('0 of 0'), true);
   t('H52 summary: a bare line renders numbers, never `undefined`', saidBy('h52OpenQuestions', summaryLine({}, 0)).includes('undefined'), false);
+
+  // -- H51 — the contract-review verdict whose LABEL STROKE never happened ----
+  // The fixtures are SYNTHETIC (⛔ the self-test never touches GitHub), but every
+  // SHAPE in them was read off the live board first: four title dialects, the
+  // 7-to-40 hex spelling range, and both live negative cases (a verdict naming a
+  // head that had since moved, and a gated PR with no verdict at all).
+  const HEAD51 = 'ba3d95a4f3514243131a698f12589c23d49e6fcd';
+  const OLDHEAD51 = 'de0bd50469a6c5f20102f67e0901c43fe316567c';
+  const pr51 = (labels = [CONTRACT_REVIEW_LABEL], extra = {}) => ({
+    number: 17090,
+    state: 'open',
+    draft: true,
+    merged_at: null,
+    labels: labels.map((name) => ({ name })),
+    head: { sha: HEAD51 },
+    body: '',
+    title: '',
+    ...extra,
+  });
+  const cm51 = (id, body, at) => ({ id, body, created_at: at });
+  const T51 = '2026-09-09T08:36:49Z';
+  const NOW51 = Date.parse('2026-09-09T12:10:00Z');
+  // Dialect ①: the filing card's cited form — sha in the heading after `@`.
+  const DIALECT_A = (sha) =>
+    `## Contract review (\`CONTRACT_REVIEW_TIER\`, isolated seat) — PR #17090 @ \`${sha}\`\n\n**Verdict: PASS WITH FINDINGS**`;
+  // Dialect ②: the same fact, `· head` as the separator.
+  const DIALECT_B = (sha) =>
+    `## Contract review (clause ②) — **PASS WITH FINDINGS**, no blocking item · head \`${sha}\`\n\nbody`;
+  // Dialect ③: NO sha in the heading — it is on the first body line.
+  const DIALECT_C = (sha) =>
+    `## Contract review at \`CONTRACT_REVIEW_TIER\` — **Verdict: PASS WITH FINDINGS** (audit reading)\n\nPR #17090 · head \`${sha}\` (re-read at posting; unchanged).`;
+  // Dialect ④: a director seat's ADOPTION RECORD — its own first line, the
+  // review's heading verbatim beneath it. 「逐字采纳」 is a legal act on a
+  // subagent verdict, so this shape is a verdict on the head.
+  const DIALECT_D = (sha) =>
+    `**Director seat adoption record** — the verdict below is adopted **verbatim**. Head re-read at posting = \`${sha}\`, unchanged.\n\n---\n\n${DIALECT_A(sha)}`;
+  const onHead51 = [cm51(5598904803, DIALECT_A(HEAD51), T51)];
+  const h51 = (rows, pr = pr51(), now = NOW51) => h51VerdictWithoutHandoff(pr, rows, now);
+
+  // ⭐ The four ruled cases — the filing card's acceptance口径, as fixtures.
+  t('H51 fires: gated PR + a review comment on the CURRENT head, aged', typeof h51(onHead51), 'string');
+  t('H51 clean: a review comment on an OLDER head — the head moved, re-review genuinely pending', h51([cm51(1, DIALECT_A(OLDHEAD51), T51)]), null);
+  t('H51 clean: a gated PR whose thread holds NO review comment at all', h51([cm51(1, 'Triage: routing only.', T51)]), null);
+  t('H51 clean: an UNGATED PR carrying the same verdict is not this row', h51(onHead51, pr51([])), null);
+
+  // The four measured title dialects, each a verdict on the head.
+  t('H51 dialect ①: sha in the heading after `@` (the card\'s cited form)', typeof h51([cm51(1, DIALECT_A(HEAD51), T51)]), 'string');
+  t('H51 dialect ②: `· head` as the separator, same heading', typeof h51([cm51(1, DIALECT_B(HEAD51), T51)]), 'string');
+  t('H51 dialect ③: NO sha in the heading — it is on the first body line', typeof h51([cm51(1, DIALECT_C(HEAD51), T51)]), 'string');
+  t('H51 dialect ④: ⭐ a director ADOPTION RECORD carrying the review verbatim below its own first line', typeof h51([cm51(1, DIALECT_D(HEAD51), T51)]), 'string');
+  t('H51 marker: …so it is LINE-anchored, which is what admits dialect ④', CONTRACT_REVIEW_HEADING_MARKER.test('adoption\n\n## Contract review (clause ②) — PASS'), true);
+  t('H51 marker: a blockquoted heading reads', CONTRACT_REVIEW_HEADING_MARKER.test('> ## Contract review at `T`'), true);
+  t('H51 marker: ⛔ a `###` sub-heading is not the artefact', CONTRACT_REVIEW_HEADING_MARKER.test('### Contract review notes'), false);
+  t('H51 marker: ⛔ nor a bare mention inside a paragraph', CONTRACT_REVIEW_HEADING_MARKER.test('the ## Contract review comment is missing'), false);
+  t('H51 marker: ⛔ case-sensitive — no shipped dialect to accommodate', CONTRACT_REVIEW_HEADING_MARKER.test('## contract review (clause ②)'), false);
+  t('H51 marker: ⛔ carries no `g` flag — a shared `lastIndex` is a state bug', CONTRACT_REVIEW_HEADING_MARKER.global, false);
+  t('H51 marker: it answers the same twice, so no caller poisons the next', CONTRACT_REVIEW_HEADING_MARKER.test('## Contract review x') && CONTRACT_REVIEW_HEADING_MARKER.test('## Contract review x'), true);
+  // ⭐ The looseness `m` admits is answered by the SECOND gate, not the regex.
+  t('H51: ⭐ a comment MENTIONING a review heading with no head sha is not a verdict on this head', h51([cm51(1, '## Contract review is what this PR still owes.', T51)]), null);
+
+  // The head-identity test — prefix, case-insensitive, ≥7 hex.
+  t('H51 sha: the 7-char abbreviation measured on the board matches', contractReviewHeadMatch('head `ba3d95a`', HEAD51), 'ba3d95a');
+  t('H51 sha: …and the full 40', contractReviewHeadMatch('head `' + HEAD51 + '`', HEAD51), HEAD51);
+  t('H51 sha: an UPPERCASE spelling still matches its head', contractReviewHeadMatch('head `BA3D95A4F3`', HEAD51), 'BA3D95A4F3');
+  t('H51 sha: ⛔ a 6-char span is below the floor and is not a sha here', contractReviewHeadMatch('code `ba3d95`', HEAD51), null);
+  t('H51 sha: ⛔ a DIFFERENT commit is not a prefix of this head', contractReviewHeadMatch('head `' + OLDHEAD51 + '`', HEAD51), null);
+  t('H51 sha: ⛔ an unquoted sha is not a code span', contractReviewHeadMatch('head ba3d95a4f351', HEAD51), null);
+  t('H51 sha: a later span is found when the first does not match', contractReviewHeadMatch('base `deadbeef` head `ba3d95a4`', HEAD51), 'ba3d95a4');
+  t('H51 sha: an unreadable head answers null rather than matching everything', contractReviewHeadMatch('head `ba3d95a`', ''), null);
+  t('H51 sha: …and a missing body does not crash', contractReviewHeadMatch(undefined, HEAD51), null);
+
+  // Newest-of, and the one place it is resolved.
+  t('H51 newest: the NEWER of two on-head verdicts is the one dated', latestContractReviewOnHead([cm51(1, DIALECT_A(HEAD51), '2026-09-09T08:00:00Z'), cm51(2, DIALECT_B(HEAD51), '2026-09-09T09:00:00Z')], HEAD51).id, 2);
+  t('H51 newest: an on-head verdict is found past an older-head one', latestContractReviewOnHead([cm51(1, DIALECT_A(HEAD51), T51), cm51(2, DIALECT_A(OLDHEAD51), '2026-09-09T09:00:00Z')], HEAD51).id, 1);
+  t('H51 newest: a thread with only OLDER-head verdicts answers null', latestContractReviewOnHead([cm51(1, DIALECT_A(OLDHEAD51), T51)], HEAD51), null);
+  t('H51 newest: a non-array thread answers null, never a crash', latestContractReviewOnHead(undefined, HEAD51), null);
+  t('H51 newest: it reports WHICH spelling matched, for the sentence', latestContractReviewOnHead([cm51(1, DIALECT_B('ba3d95a4f3'), T51)], HEAD51).sha, 'ba3d95a4f3');
+
+  // The threshold, from both sides.
+  t('H51 threshold: 60 minutes, the gap between a stroke and the measured misses', H51_HANDOFF_THRESHOLD_MINUTES, 60);
+  t('H51 threshold: a verdict INSIDE the window is clean — an ordinary hand-over', h51(onHead51, pr51(), Date.parse(T51) + 59 * 60_000), null);
+  t('H51 threshold: …and one exactly AT it is clean too, so the bound is not off by one', h51(onHead51, pr51(), Date.parse(T51) + 60 * 60_000), null);
+  t('H51 threshold: one minute past it fires', typeof h51(onHead51, pr51(), Date.parse(T51) + 61 * 60_000), 'string');
+  t('H51 threshold: an unreadable stamp must not read as LATE either', h51([cm51(1, DIALECT_A(HEAD51), 'not-a-date')]), null);
+
+  // Population — exported because a silently shrinking one makes a thin corpus read clean.
+  t('H51 population: a gated open DRAFT is IN — every measured instance was one', h51SpeaksAbout(pr51()), true);
+  t('H51 population: an ungated open PR is OUT', h51SpeaksAbout(pr51([])), false);
+  t('H51 population: a MERGED PR is out — the stroke is moot', h51SpeaksAbout(pr51([CONTRACT_REVIEW_LABEL], { merged_at: '2026-09-09T09:00:00Z' })), false);
+  t('H51 population: a CLOSED PR is out too', h51SpeaksAbout(pr51([CONTRACT_REVIEW_LABEL], { state: 'closed' })), false);
+  t('H51 population: an UNREADABLE `labels` is excluded, never read as unlabelled (H31\'s rule)', h51SpeaksAbout(pr51([CONTRACT_REVIEW_LABEL], { labels: undefined })), false);
+  t('H51 population: a missing PR is out, never a crash', h51SpeaksAbout(undefined), false);
+  t('H51: the gate constant is the one H31 already owns, not a second spelling', CONTRACT_REVIEW_LABEL, 'needs:contract-review');
+
+  // Three input states, never two (#4690).
+  t('H51: an unconsulted thread is UNJUDGED, never clean', h51VerdictWithoutHandoff(pr51(), undefined), null);
+  t('H51: an unreadable or ceiling-bound thread is UNJUDGED too', h51VerdictWithoutHandoff(pr51(), null), null);
+  t('H51: a missing PR does not crash', h51VerdictWithoutHandoff(undefined, onHead51), null);
+
+  // The sentence carries its own contract.
+  t('H51 row: it names the remedy the filing card wrote', h51(onHead51).includes('verdict recorded, handoff not written'), true);
+  t('H51 row: …and points at the FAIL end-state\'s single source', h51(onHead51).includes('`references/contract-review.md` 载体纪律'), true);
+  t('H51 row: it declares itself VERDICT-AGNOSTIC rather than reading the verdict', h51(onHead51).includes('Verdict-agnostic by construction'), true);
+  t('H51 row: …naming the rule that forbids a sweeper issuing one', h51(onHead51).includes('自查放行'), true);
+  t('H51 row: report-only — never a label from this script', h51(onHead51).includes('never a label written from this script'), true);
+  t('H51 row: it states the clean side in the sentence, so a reader is not left guessing', h51(onHead51).includes('A review naming an OLDER head is NOT this row'), true);
+  t('H51 row: it dates the verdict it found', h51(onHead51).includes(T51), true);
+  t('H51 row: not a loud finding', isLoudFinding(h51(onHead51)), false);
+
+  // Adjacency — the state H31 cannot see, said in one case.
+  t('H51 adjacency: ⭐ H31 is CLEAN on this PR — both carriers agree, which is the state H51 reads', h31ContractReviewCarrierSplit({ number: 16335, state: 'open', labels: [{ name: CONTRACT_REVIEW_LABEL }] }, [pr51([CONTRACT_REVIEW_LABEL], { body: 'Fixes #16335' })]), null);
+  t('H51 adjacency: H48 is silent on it (no `**ACCEPT**` verdict on the thread)', h48GovernedVerdictWithoutBrief(pr51(), [{ glob: '.claude/**', files: ['x'] }], onHead51), null);
+
+  // Registry, counters and the clause.
+  t('H51 band: registered as a STATE row — the repair is on the board', familyBand('H51'), 'state');
+  t('H51 band: ⛔ NOT `gate` — that band is for a gate whose ABSENCE reads green', familyBand('H51') === 'gate', false);
+  t('H51 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H51'), true);
+  t('H51 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H51 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H51 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H51 band: a gate row still outranks it, so H31/H35 survive the trim longer', familyRank('H31') < familyRank('H51'), true);
+  t('H51: both count keys ride the enumerated forwarding contract', ['handoffCandidates', 'handoffJudged'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t('H51 summary: the coverage pair is reported', saidBy('h51Handoff', summaryLine({ handoffJudged: 5, handoffCandidates: 7 }, 0)).includes('5 of 7 gated open PR(s)'), true);
+  t('H51 summary: …and names the cache it shares rather than a second fetch class', saidBy('h51Handoff', summaryLine({}, 0)).includes("shared with H48's cache"), true);
+  t('H51 summary: …and says an unreadable thread is UNJUDGED, not clean', saidBy('h51Handoff', summaryLine({}, 0)).includes('UNJUDGED rather than clean'), true);
+  t('H51 summary: …and that an OLDER-head verdict is CLEAN rather than quiet', saidBy('h51Handoff', summaryLine({}, 0)).includes('CLEAN rather than quiet'), true);
+  t('H51 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h51Handoff', summaryLine({}, 0)).includes('0 of 0'), true);
+  t('H51 summary: a bare line renders numbers, never `undefined`', saidBy('h51Handoff', summaryLine({}, 0)).includes('undefined'), false);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.
