@@ -257,23 +257,69 @@ describe('#15825 defect 1 fences', () => {
         });
     });
 
-    // ⛔ RETIRED (#16041 → #16322). This fence fed `dateRange: 'not a range at
-    // all'` through `AnalyticsQuerySchema.parse` to pin that the `[range, range]`
-    // fallback's answer did not depend on the process zone. #16041 (maintainer
-    // ruling, decision batch #57) closed the string arm to the
-    // `date-range-presets.ts` vocabulary, so an unrecognised string is refused
-    // at the schema door (`400 ANALYTICS_DATE_RANGE_UNRECOGNIZED`, pinned in
-    // `packages/spec/src/data/analytics-date-range-closed-vocabulary.test.ts`
-    // and `packages/runtime/src/analytics-daterange-refusal-envelope.test.ts`)
-    // and never reaches the parser through any door. Retired rather than routed
-    // around the door: that would have kept a live pin on the silent-widening
-    // fallback this card exists to abolish.
+    // ⭐ REINSTATED under #16322, in the form the requirement named.
     //
-    // COVERAGE LOST until #16322: nothing a caller can reach — the fallback's
-    // zone-independence was a property of an answer that matched EVERY row.
-    // #16322 deletes the fallback and owes the DRIVER-side refusal pin in its
-    // place (memory and SQL refusing identically, one conformance fixture).
-    it.todo('the unrecognised-range fallback carries no calendar — same answer in every zone — retired by #16041 (input refused at the schema); #16322 replaces it with the driver-side refusal pin');
+    // The retired fence fed `dateRange: 'not a range at all'` through
+    // `AnalyticsQuerySchema.parse` to pin that the `[range, range]` fallback's
+    // answer did not depend on the process zone. #16041 closed the string arm
+    // to the `date-range-presets.ts` vocabulary, so that input is refused at
+    // the schema door (`400 ANALYTICS_DATE_RANGE_UNRECOGNIZED`) and the
+    // fallback it protected is GONE — this card deleted it rather than
+    // preserving a window that matched every row.
+    //
+    // ⛔ The old assertion was NOT re-spelled: "the fallback carries no
+    // calendar" is a claim about an answer that no longer exists. What replaces
+    // it is the same question asked of the REFUSAL — an unrecognised range is
+    // refused identically in every zone, with the ADR-0112 code and status,
+    // and it is refused rather than answered.
+    //
+    // The cross-driver half (memory and the SQL analytics path refusing with
+    // one envelope) is the shared conformance fixture this card owed:
+    // `packages/core/src/utils/analytics-date-range-conformance.ts`.
+    it('the unrecognised-range REFUSAL carries no calendar — same envelope in every zone', async () => {
+        const seen = new Set<string>();
+        for (const zone of ['UTC', 'Asia/Shanghai', 'America/Los_Angeles', 'Pacific/Chatham']) {
+            await at(zone, '2026-09-05T12:00:00Z', async () => {
+                const driver = new InMemoryDriver({
+                    initialData: {
+                        events: [
+                            { id: 1, probe: 'a', created_at: new Date('2020-01-01T00:00:00.000Z') },
+                            { id: 2, probe: 'b', created_at: new Date('2099-01-01T00:00:00.000Z') },
+                        ],
+                    },
+                });
+                await driver.connect();
+                const service = new MemoryAnalyticsService({ driver, cubes: [CUBE] });
+                // ⛔ Deliberately NOT through `asQuery`: the schema door refuses
+                // this first, and what this pins is the DRIVER's own answer for
+                // an in-process caller past that door — `/analytics/dataset/query`
+                // being the live example, since it types its selection from
+                // `AnalyticsQuery` and never Zod-parses it.
+                const err = await service.query({
+                    cube: 'events',
+                    measures: ['events.count'],
+                    dimensions: ['events.probe'],
+                    timeDimensions: [{ dimension: 'events.createdAt', dateRange: 'not a range at all' }],
+                } as unknown as AnalyticsQuery).then(
+                    (r) => ({ kind: 'answered' as const, rows: r.rows.length }),
+                    (e: Error & { code?: string; status?: number }) => ({
+                        kind: 'refused' as const, code: e.code, status: e.status, message: e.message,
+                    }),
+                );
+                // ⛔ The defect this replaces, named as the thing that must not
+                // happen: an unresolvable window answered, and answered with
+                // EVERY row — 2020 and 2099 both.
+                expect(err.kind, `${zone}: an unresolvable window must not be answered`).toBe('refused');
+                seen.add(JSON.stringify(err));
+            });
+        }
+        // One envelope, byte for byte, in all four zones — no calendar reaches
+        // a refusal, which is the durable half of what the retired fence said.
+        expect([...seen]).toHaveLength(1);
+        const only = JSON.parse([...seen][0]) as { code: string; status: number };
+        expect(only.code).toBe('ANALYTICS_DATE_RANGE_UNRECOGNIZED');
+        expect(only.status).toBe(400);
+    });
 
     it('the process timezone is restored after every case', () => {
         expect(process.env.TZ).toBe(REAL_TZ);

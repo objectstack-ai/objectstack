@@ -168,10 +168,35 @@ describe('[#13906] §0 — the two seams are LIVE on today\'s tree, by symbol', 
     //     expect(body).toMatch(/catch\s*\{\s*\n\s*tenancyPosture = undefined;/);
     // i.e. EVERY rejection became `undefined`. It now must not match, because
     // only the branded not-registered rejection may take that path.
-    expect(body).toMatch(/tenancyPosture = effectiveTenancyPosture\(await kernel\.getServiceAsync\('tenancy'\)/);
     expect(body).not.toMatch(/catch\s*\{\s*\n\s*tenancyPosture = undefined;/);
-    // The discriminator is the REGISTRY's brand, never message text (#13905).
-    expect(body).toMatch(/if \(!isServiceNotRegisteredError\(err\)\) \{\s*\n\s*throw new AuthzStoreUnavailableError\('tenancy', err\);/);
+    // SUPERSEDED PINS, quoted for the same reason. [#16013] folded the
+    // classification onto ONE shared function (`classifyAdmissionTenancyPosture`,
+    // @objectstack/core), so the two hand-written copies these matched are gone
+    // from this file:
+    //     expect(body).toMatch(/tenancyPosture = effectiveTenancyPosture\(await kernel\.getServiceAsync\('tenancy'\)/);
+    //     expect(body).toMatch(/if \(!isServiceNotRegisteredError\(err\)\) \{\s*\n\s*throw new AuthzStoreUnavailableError\('tenancy', err\);/);
+    //     expect(body).toMatch(/tenancyPosture = effectiveTenancyPosture\(\s*\n?\s*await this\.tenancyServiceProvider\(environmentId\)/);
+    // ⭐ RE-AIMED, not deleted. What this pin is ABOUT is unchanged: BOTH
+    // wirings classify, and neither absorbs. The classification's own two
+    // directions (branded ⇒ quiet, unbranded ⇒ loud) are now pinned where the
+    // decision lives — `packages/core/src/security/admission-tenancy-posture.test.ts`
+    // — and the behavioural §2/§3 drives below still measure this file's wire
+    // answer end to end. What stays THIS file's to hold is that each branch
+    // REACHES the shared classification, and that neither grew a `catch` of its
+    // own again. The discriminator is still the REGISTRY's brand, never message
+    // text (#13905); it is asserted at its new home.
+    expect(body).toMatch(/tenancyPosture = await classifyAdmissionTenancyPosture\(\s*\n?\s*\(\) => kernel\.getServiceAsync\('tenancy'\)/);
+    expect(body).toMatch(/tenancyPosture = await classifyAdmissionTenancyPosture\(\s*\n?\s*\(\) => this\.tenancyServiceProvider!\(environmentId\)/);
+    // ⛔ NARROWNESS CONTROL for the fold: the seam region itself holds NO
+    // `catch`. A local `catch` reappearing here is exactly the silent-`catch`
+    // degradation #13906 decision 1 option A forbids, and it would be invisible
+    // to the two delegation pins above.
+    const tenancySeam = body.slice(
+      body.indexOf('let tenancyPosture;'),
+      body.indexOf('const authz = await resolveAuthzContext('),
+    );
+    expect(tenancySeam.length).toBeGreaterThan(0);
+    expect(tenancySeam).not.toMatch(/catch/);
     // ⛔ And the WIRING fact is asked of `kernel`'s presence AND of the async
     // accessor's — never inferred from the returned value (the #13476
     // discipline this repair inherits). The accessor half matters on its own:
@@ -184,7 +209,6 @@ describe('[#13906] §0 — the two seams are LIVE on today\'s tree, by symbol', 
     // block, so on the single-kernel wiring `tenancyPosture` stayed the
     // declaration's `undefined` and no refusal could fire.
     expect(body).toMatch(/\} else if \(this\.tenancyServiceProvider\) \{/);
-    expect(body).toMatch(/tenancyPosture = effectiveTenancyPosture\(\s*\n?\s*await this\.tenancyServiceProvider\(environmentId\)/);
   });
 
   it('[#15256 / 1A] the withdrawn B-prime BOOT refusal is no longer cited as this seam\'s remedy', () => {

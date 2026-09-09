@@ -207,15 +207,29 @@ describe('#14829 — `multiple: true` is one answer across all three surfaces', 
     expect(tsColumn('multi_text')).toBe("table.jsonb('multi_text')");
   });
 
-  it('nullability still comes from `required`, not from the flag', () => {
-    const out = generateMigrationSql({
-      objects: { probe: { name: 'probe', fields: { tags_req: { type: 'lookup', multiple: true, required: true } } } },
-    });
-    expect(out).toContain('"tags_req" JSONB NOT NULL');
-    const ts = generateMigrationTs({
-      objects: { probe: { name: 'probe', fields: { tags_req: { type: 'lookup', multiple: true, required: true } } } },
-    });
-    expect(ts).toContain("table.jsonb('tags_req').notNullable();");
+  /**
+   * ⚠️ [#16318] The VEHICLE changed, the subject did not. This pin is about
+   * `multiple` not deciding nullability; `required` was merely how a NOT NULL
+   * was spelled when it was written. Both generators now take the physical NOT
+   * NULL from `storage.notNull` and never from `required` (ADR-0113, which took
+   * `SqlDriver.createColumn` off `required` because binding the DDL to it made
+   * every post-deploy tightening a destructive migration) — so the constrained
+   * case is spelled the new way, and the `required`-only case is asserted
+   * BESIDE it: it must now be nullable in both formats, which is the half that
+   * would have caught this change silently reverting.
+   */
+  it('nullability comes from `storage.notNull`, not from the flag and not from `required`', () => {
+    const constrained = { type: 'lookup', multiple: true, storage: { notNull: true } };
+    const writeOnly = { type: 'lookup', multiple: true, required: true };
+    const config = { objects: { probe: { name: 'probe', fields: { tags_nn: constrained, tags_req: writeOnly } } } };
+
+    const out = generateMigrationSql(config);
+    expect(out).toContain('"tags_nn" JSONB NOT NULL');
+    expect(out).toMatch(/"tags_req" JSONB(?! NOT NULL)/);
+
+    const ts = generateMigrationTs(config);
+    expect(ts).toContain("table.jsonb('tags_nn').notNullable();");
+    expect(ts).toContain("table.jsonb('tags_req').nullable();");
   });
 
   // ── The authority, read where it lives ──────────────────────────────────
