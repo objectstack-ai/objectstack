@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `--json` ⇒ nothing unparseable on stdout when the CONFIG FILE IS MISSING,
- * for the whole `resolveConfigPath` family (#15547).
+ * `--json` ⇒ ONE JSON DOCUMENT on stdout when the CONFIG FILE IS MISSING, for
+ * the whole `resolveConfigPath` family — and the text face unchanged (#15547).
  *
  * ## The blind spot this exists to close
  *
@@ -12,159 +12,63 @@
  * runs **before** any kernel boots, so that pin structurally cannot see this
  * path and stayed green through the whole defect.
  *
- * What it was green through: `resolveConfigPath()` printed its refusal through
- * `printError` and `console.log` — both stdout — and then called
- * `process.exit(1)` directly. Ten published `--json` faces therefore answered a
- * missing config with human text on the machine's channel, an EMPTY stderr, and
- * no payload; and because nothing was thrown, every command's catch-all
- * `--json` error exit — all of which sit downstream of a throw — never ran.
+ * What it was green through: `resolveConfigPath()` printed its refusal to
+ * stdout and then called `process.exit(1)` directly. Ten published `--json`
+ * faces therefore answered a missing config with human text on the machine's
+ * channel; and because nothing was thrown, every command's catch-all `--json`
+ * error exit — all of which sit downstream of a throw — never ran.
  *
- * ⇒ The instrument was as broken as the code. A fix that repaired the helper
- * without widening the discovery would leave the next pre-boot stdout leak just
- * as invisible, which is why this file exists rather than a fixture edit.
+ * ⇒ The instrument was as broken as the code, so the population is widened
+ * across a PAIR of files rather than left to one: the discovery lives in
+ * `helpers/config-miss-family.ts`, this file drives it, and the sibling pin
+ * reconciles against it. See that helper's header for why it is not inlined.
  *
- * ## Why the whole family, from one expectation
+ * ## What changed here when the refusals started throwing
  *
- * Same discipline as the sibling pin: the family is READ OFF THE SOURCE, not
- * remembered, and reconciled against {@link FAMILY}. Add a command that offers
- * `--json` and reaches the config helper and this file goes red until it is
- * listed here and passes; drop one and it goes red until it is removed.
+ * This file's first version asserted only that stdout carried nothing a
+ * machine could not read — empty passed, one JSON document passed, prose
+ * failed — because whether these faces should EMIT anything was still an open
+ * question then.
  *
- * The discovery has two halves because the reach has two shapes:
+ * That question is now ruled: the refusals throw, the ten catch-alls emit the
+ * envelopes they had already declared, and **empty stdout no longer passes**.
+ * The assertion is tightened to a bare `JSON.parse` accordingly — a face that
+ * regressed to exiting with no payload slipped straight through the old form.
  *
- *   • DIRECT — the module declares `json: Flags.boolean(` and imports from
- *     `utils/config.js`.
- *   • ALIAS — the module's default export `extends` a command in the direct
- *     set, so it inherits both the flag and the reach without naming either.
- *     `os build` is exactly this (`class Build extends Compile`), and a
- *     one-half discovery would have missed it: the original card's static
- *     reading listed nine modules, and `build` is the tenth face.
+ * ⛔ Still NOT pinned here: the envelope's SHAPE. The thrown error carries no
+ * `code` and no `httpStatus`, so `errorCodeFields()` contributes nothing and
+ * each face emits its own bare `{ error }`. Whether that is the right shape is
+ * **#15549**'s open question; this file asserts that a document arrives and
+ * that it names the refusal, never what else is in it, so settling #15549
+ * changes the payload without touching this file.
  *
- * ## What is asserted — and what is deliberately NOT
+ * ## The text face is pinned by BYTES, not by containment
  *
- * ⛔ This file does NOT pin an error-payload shape. Whether `--json` should
- * emit an envelope on this path is an open question touching ten published
- * faces at once, entangled with #15549 (`os lint --eval --json`'s bare
- * `{ error }` with no `code` and no `httpStatus`), and settling it is above
- * this pin's authority.
- *
- * So the assertion is the half that needs no ruling: **stdout carries nothing a
- * machine cannot read.** Empty passes, one JSON document passes, prose fails.
- * That holds under the shape shipped today AND under any future envelope, so
- * whoever settles the question changes the payload without touching this file.
- *
- * The other two halves are the ones a "just silence it" regression would break:
- * the diagnostic must still reach the operator, on **stderr**, and the exit
- * status must still be 1.
+ * The route ruled out for this card was "make it throw and let the catch-alls
+ * render it" — which deletes the helper's hint lines from all ten text faces,
+ * because a catch-all can only re-render `error.message`. A `toContain('Hint:')`
+ * assertion does not see that loss when one hint line survives and the other
+ * does not, so the whole stderr string is compared instead.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, rmSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve, relative, sep } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
+import {
+  CONFIG_MISS_FAMILY,
+  CONFIG_MISS_REFUSAL,
+  MISSING_CONFIG,
+  discoverConfigMissFamily,
+  expectedRefusalStderr,
+} from './helpers/config-miss-family.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
-const COMMANDS_DIR = resolve(HERE, '../src/commands');
-
-/** A path that cannot exist, driving the EXPLICIT-PATH branch of the helper. */
-const MISSING = './nope-does-not-exist.ts';
-
-/**
- * The family, and the argv each member needs to reach `resolveConfigPath()`.
- *
- * `autoDetect: false` marks the one member with no auto-detect branch to drive:
- * `os diff` requires two config paths, so there is no bare form that reaches
- * the helper without one.
- */
-interface Member {
-  /** argv that reaches the helper with an EXPLICIT missing path. */
-  explicit: string[];
-  /** argv that reaches the helper with NO path, or `null` when there is none. */
-  auto: string[] | null;
-}
-
-const FAMILY: Record<string, Member> = {
-  // `build` is `class Build extends Compile` — the alias half of the discovery.
-  build: { explicit: [MISSING], auto: [] },
-  compile: { explicit: [MISSING], auto: [] },
-  diff: { explicit: [MISSING, MISSING], auto: null },
-  'i18n check': { explicit: [MISSING], auto: [] },
-  'i18n extract': { explicit: [MISSING], auto: [] },
-  info: { explicit: [MISSING], auto: [] },
-  lint: { explicit: [MISSING], auto: [] },
-  // `--from` because `--stored` is its only other way past the flag parser, and
-  // `--stored` boots a kernel — a different family, already pinned elsewhere.
-  'migrate meta': { explicit: [MISSING, '--from', '4'], auto: ['--from', '4'] },
-  validate: { explicit: [MISSING], auto: [] },
-  // The config path is a FLAG here, not a positional.
-  verify: { explicit: ['--app', MISSING], auto: [] },
-};
-
-/** The refusal text, one line per branch — what must be on stderr, never stdout. */
-const REFUSAL = {
-  explicit: 'Config file not found',
-  auto: 'No objectstack.config.{ts,js,mjs} found in current directory',
-} as const;
-
-/** Every `.ts` under `src/commands`, excluding tests. */
-function commandFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const abs = join(dir, entry);
-    if (statSync(abs).isDirectory()) {
-      out.push(...commandFiles(abs));
-      continue;
-    }
-    if (!entry.endsWith('.ts') || entry.endsWith('.test.ts')) continue;
-    out.push(abs);
-  }
-  return out;
-}
-
-/** `src/commands/i18n/check.ts` → `i18n check`, the id oclif dispatches on. */
-function commandId(abs: string): string {
-  const rel = relative(COMMANDS_DIR, abs).replace(/\.ts$/, '');
-  return rel.split(sep).filter((p) => p !== 'index').join(' ');
-}
-
-/**
- * The family, read off the source rather than remembered: a command belongs iff
- * it offers a machine-readable mode AND reaches the config helper — directly,
- * or by extending a command that does.
- */
-function discoverFamily(): string[] {
-  const files = commandFiles(COMMANDS_DIR);
-  const sources = new Map(files.map((abs) => [abs, readFileSync(abs, 'utf-8')]));
-
-  const direct = new Set<string>();
-  for (const [abs, src] of sources) {
-    if (!/\bjson:\s*Flags\.boolean\(/.test(src)) continue;
-    if (!/from '(?:\.\.\/)+utils\/config\.js'/.test(src)) continue;
-    direct.add(abs);
-  }
-
-  // An alias inherits the flag and the reach from the class it extends, and
-  // names neither itself. Resolve `extends <Ident>` back to the module the
-  // identifier was imported from, and take the member if that module is in the
-  // direct set. One level is enough for the aliases in this tree and a deeper
-  // chain would show up as a discovery mismatch rather than pass silently.
-  const alias = new Set<string>();
-  for (const [abs, src] of sources) {
-    const ext = /export default class \w+ extends (\w+)\b/.exec(src);
-    if (!ext) continue;
-    const imported = new RegExp(`import ${ext[1]} from '(\\.[^']+)\\.js'`).exec(src);
-    if (!imported) continue;
-    const target = resolve(abs, '..', `${imported[1]}.ts`);
-    if (direct.has(target)) alias.add(abs);
-  }
-
-  return [...direct, ...alias].map(commandId).sort();
-}
 
 interface Run {
   key: string;
@@ -194,34 +98,23 @@ function runCli(argv: string[], cwd: string): Promise<Omit<Run, 'key'>> {
   });
 }
 
-/**
- * Whether stdout is something a program can read: nothing at all, or exactly
- * one JSON document. Prose is the failure — see the header for why the choice
- * between the two passing shapes is deliberately left open.
- */
-function stdoutIsMachineReadable(stdout: string): boolean {
-  if (stdout.trim() === '') return true;
-  try {
-    JSON.parse(stdout);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** `[key, argv]` for every branch of every member — 19 runs across 10 faces. */
 function cases(): [string, string[]][] {
   const out: [string, string[]][] = [];
-  for (const [id, member] of Object.entries(FAMILY)) {
+  for (const [id, member] of Object.entries(CONFIG_MISS_FAMILY)) {
     const argv = id.split(' ');
-    out.push([`${id} (explicit path)`, [...argv, ...member.explicit, '--json']]);
-    if (member.auto) out.push([`${id} (auto-detect)`, [...argv, ...member.auto, '--json']]);
+    out.push([`${id} (explicit path)`, [...argv, ...member.explicit]]);
+    if (member.auto) out.push([`${id} (auto-detect)`, [...argv, ...member.auto]]);
   }
   return out;
 }
 
+const branchOf = (key: string): 'explicit' | 'auto' =>
+  (key.endsWith('(auto-detect)') ? 'auto' : 'explicit');
+
 let dir: string;
-let runs: Run[];
+let jsonRuns: Run[];
+let textRuns: Run[];
 
 beforeAll(async () => {
   // Deliberately EMPTY — no `objectstack.config.*` here, so the auto-detect
@@ -229,11 +122,18 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-config-miss-e2e-'));
 
   // Sequential: nineteen `tsx` starts at once is the kind of load that makes a
-  // shared box report timeouts instead of verdicts.
-  runs = [];
+  // shared box report timeouts instead of verdicts. BOTH faces are driven —
+  // the `--json` half is the contract this card repaired, the text half is the
+  // one it had to leave untouched, and only driving the second proves it.
+  jsonRuns = [];
+  for (const [key, argv] of cases()) {
+    const { code, stdout, stderr } = await runCli([...argv, '--json'], dir);
+    jsonRuns.push({ key, code, stdout, stderr });
+  }
+  textRuns = [];
   for (const [key, argv] of cases()) {
     const { code, stdout, stderr } = await runCli(argv, dir);
-    runs.push({ key, code, stdout, stderr });
+    textRuns.push({ key, code, stdout, stderr });
   }
 }, 900_000);
 
@@ -243,51 +143,106 @@ afterAll(() => {
 
 describe('the family this contract has to hold across', () => {
   it('is exactly the set listed here — a new member goes red until it is driven too', () => {
-    expect(discoverFamily()).toEqual(Object.keys(FAMILY).sort());
+    expect(discoverConfigMissFamily()).toEqual(Object.keys(CONFIG_MISS_FAMILY).sort());
   });
 
-  it('includes the alias face, which declares neither the flag nor the import', () => {
-    // Guards the alias half specifically: a discovery that regressed to
-    // "grep the module" would still pass the reconciliation above only by
-    // ALSO dropping `build` from FAMILY, and this makes that a second red.
-    expect(discoverFamily()).toContain('build');
+  it('is TEN faces, and names the two a static reading loses', () => {
+    // The population is load-bearing rather than incidental: the original card
+    // reached nine modules by reading imports, and `os build` declares neither
+    // the flag nor the import. A discovery that quietly shrank back to nine
+    // would still satisfy the reconciliation above if FAMILY shrank with it,
+    // so the count and the two interesting members are asserted directly.
+    expect(discoverConfigMissFamily()).toHaveLength(10);
+    expect(discoverConfigMissFamily()).toContain('build');
+    expect(discoverConfigMissFamily()).toContain('verify');
+  });
+
+  it('drives both branches of the helper — 19 runs, not 10', () => {
+    expect(cases()).toHaveLength(19);
   });
 });
 
 describe.each(cases())('os %s --json, config missing', (key) => {
   const runOf = () => {
-    const run = runs.find((r) => r.key === key);
+    const run = jsonRuns.find((r) => r.key === key);
     if (!run) throw new Error(`no run captured for '${key}'`);
     return run;
   };
 
-  it('leaves nothing on stdout that a machine cannot read', () => {
+  it('emits ONE JSON document on stdout — a bare JSON.parse, no extraction', () => {
     const run = runOf();
-    // Under the defect this was 206 bytes of `  ✗ Config file not found: …`
-    // plus two hint lines — on the one stream `--json` reserves for the
-    // machine, with stderr completely empty.
-    expect(stdoutIsMachineReadable(run.stdout)).toBe(true);
+    // Under the original defect this was 296 bytes of prose; after #15692 it
+    // was ZERO bytes, which `JSON.parse` rejects just as loudly. Both are the
+    // failure this asserts against.
+    const payload = JSON.parse(run.stdout);
+    expect(payload).toBeTypeOf('object');
+    expect(payload).not.toBeNull();
+  });
+
+  it('names the refusal in the payload, so the machine is told WHY', () => {
+    const payload = JSON.parse(runOf().stdout) as { error?: unknown };
+    expect(payload.error).toBeTypeOf('string');
+    expect(String(payload.error)).toContain(CONFIG_MISS_REFUSAL[branchOf(key)]);
+  });
+
+  it('carries no terminal decoration into the payload', () => {
+    // The refusal line the operator reads wraps the path in `chalk.white`. The
+    // envelope must carry the PLAIN sentence: an escape sequence inside a JSON
+    // string is a defect a consumer cannot see coming, and it would appear
+    // only in runs that happen to have colour on.
+    // eslint-disable-next-line no-control-regex
+    expect(runOf().stdout).not.toMatch(/\u001b\[/);
   });
 
   it('keeps the human refusal off stdout entirely', () => {
     const run = runOf();
     // Asserted separately from the parse so a regression names its cause
-    // rather than only `Unexpected token`.
-    expect(run.stdout).not.toContain(REFUSAL.explicit);
-    expect(run.stdout).not.toContain(REFUSAL.auto);
+    // rather than only `Unexpected token`. The payload's `error` sentence is
+    // not this: `Hint:` and the glyph are prose only the text renderer writes.
     expect(run.stdout).not.toContain('Hint:');
+    expect(run.stdout).not.toContain('✗');
   });
 
-  it('still shows the operator the refusal — on stderr', () => {
-    const run = runOf();
-    // Diagnostics are MOVED, never destroyed: a regression toward silencing
-    // this path goes red here.
-    const expected = key.endsWith('(auto-detect)') ? REFUSAL.auto : REFUSAL.explicit;
-    expect(run.stderr).toContain(expected);
-    expect(run.stderr).toContain('Hint:');
+  it('still shows the operator the refusal — on stderr, byte for byte', () => {
+    // Diagnostics are MOVED, never destroyed: the envelope is the machine's
+    // copy of this failure and the prose is the human's, and a `--json` run
+    // keeps both. A regression toward silencing this path goes red here.
+    expect(runOf().stderr).toBe(expectedRefusalStderr(branchOf(key), resolve(dir, MISSING_CONFIG)));
   });
 
   it('still exits 1', () => {
+    expect(runOf().code).toBe(1);
+  });
+});
+
+describe.each(cases())('os %s (text face), config missing', (key) => {
+  const runOf = () => {
+    const run = textRuns.find((r) => r.key === key);
+    if (!run) throw new Error(`no text run captured for '${key}'`);
+    return run;
+  };
+
+  it('writes the refusal and every hint line to stderr, byte for byte', () => {
+    // Full-string equality, deliberately not `toContain`. The route ruled out
+    // for this card kept the first line and dropped the hints; every
+    // containment assertion anyone would reach for passes through that loss.
+    expect(runOf().stderr).toBe(expectedRefusalStderr(branchOf(key), resolve(dir, MISSING_CONFIG)));
+  });
+
+  it('does not print the refusal a SECOND time, on stdout', () => {
+    // The helper reports on stderr and throws. A catch-all that then rendered
+    // `error.message` through `printError` would put the same sentence on
+    // stdout, and the operator would read one failure twice, on two streams.
+    const run = runOf();
+    expect(run.stdout).not.toContain(CONFIG_MISS_REFUSAL[branchOf(key)]);
+    expect(run.stdout).not.toContain('✗');
+  });
+
+  it('still exits 1 — not 2', () => {
+    // `os compile` (and `os build`, which inherits its catch) ends its text
+    // branch in oclif's `this.error()`, which exits 2 and re-renders the
+    // sentence as a `›   Error:` block. Measured at 483 stderr bytes and exit
+    // 2 while that path was unguarded, against 296 and exit 1 everywhere else.
     expect(runOf().code).toBe(1);
   });
 });

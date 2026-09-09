@@ -42,6 +42,7 @@ import {
   emitJson,
   isExitSignal,
   errorCodeFields,
+  isReportedError,
 } from '../utils/format.js';
 import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
 // [#14553] The compile-time half of the navigation-contribution group ruling.
@@ -953,6 +954,16 @@ export default class Compile extends Command {
         await emitJson({ success: false, error: error.message, ...errorCodeFields(error), warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
         this.exit(1);
       }
+      // [#15547] `resolveConfigPath()` already wrote its refusal and hint lines
+      // to stderr before throwing, so this face has nothing left to render —
+      // and `this.error()` below is NOT a no-op for it: it re-renders the same
+      // sentence as an oclif `›   Error:` block AND raises this face's exit
+      // status from 1 to 2. Measured on the published entry, `os compile
+      // ./missing.ts` (and `os build`, which inherits this catch): exit 2 with
+      // 483 stderr bytes, where the other eight faces answer exit 1 with 296.
+      // `this.exit(1)` throws the ExitError the `--json` branch already relies
+      // on, so the status and the bytes both stay where they were.
+      if (isReportedError(error)) this.exit(1);
       console.log('');
       printError(error.message || String(error));
       this.error(error.message || String(error));
