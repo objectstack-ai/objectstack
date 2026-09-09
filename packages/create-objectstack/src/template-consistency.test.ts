@@ -503,11 +503,16 @@ describe('blank template peer-skew declarations (#10326)', () => {
   const allowed = /^ {2}allowedVersions:\n((?:[ \t]+.*\n?)*)/m.exec(settings)?.[1] ?? '';
 
   it('declares the stale better-auth > better-sqlite3 peer', () => {
-    // better-auth 1.7.1 peers `^12.0.0`; @objectstack/driver-sql resolves 13.x.
+    // better-auth peers `^12.0.0`; the tree resolves 13.x — @objectstack/cli's
+    // own optionalDependency, which is the copy pnpm names in the report on the
+    // cli -> runtime -> plugin-auth -> better-auth chain (#16813; this comment
+    // used to credit @objectstack/driver-sql, which is not the binding copy).
     // The peer is optional and governs only a raw better-sqlite3 `Database`
     // handed to better-auth's `database` option — a path ObjectStack never
     // takes (AuthManager passes an ObjectQL adapter factory). Measured on the
-    // path it does govern, 1.7.1 behaves identically on 13.0.3 and 12.11.1.
+    // path it does govern, 1.7.1 behaves identically on 13.0.3 and 12.11.1;
+    // re-measured on 1.7.2, the published package references better-sqlite3 in
+    // no file at all, so there is no call site to be incompatible.
     expect(
       /^\s*'better-auth>better-sqlite3':\s*'13'\s*$/m.test(allowed),
       "allowedVersions must widen better-auth's stale better-sqlite3 peer to 13",
