@@ -271,10 +271,28 @@ function consequence(clause: 'using' | 'check'): string {
  * by NOTHING — measured at the same site, in the same run, that reported the two
  * shape faults twice.
  *
- * Both miss directions fail CLOSED, which is why they survived: an unknown
- * field is what a column RENAME leaves behind, and an unresolved `current_user.*`
- * compiles to nothing — so the authored narrowing becomes a blanket refusal and
- * every holder of the permission set loses the object, with lint and CI green.
+ * Both were invisible, and they are NOT the same failure. The card measured
+ * both as fail-CLOSED and that reading is right for the shapes it measured; it
+ * does not generalise. An unresolved `current_user.*` really is refused by the
+ * compiler in every position, so that half always fails closed: the authored
+ * narrowing becomes a blanket refusal and every holder of the permission set
+ * loses the object. A missing FIELD takes its direction from POSITION, and one
+ * of the two is fail-OPEN:
+ *
+ *  - Leading `field ==` / `=` / `in` — the only shape `extractTargetField`
+ *    recognises — is dropped by the field-existence safety net and arms the
+ *    deny sentinel. Fail closed.
+ *  - A negation (`nope != "x"`, `!(nope == 1)`, `!(nope in ['a'])`) or any arm
+ *    after the first is NOT recognised, so the policy is KEPT and the phantom
+ *    column lowers to a negated constraint that a row without that column
+ *    SATISFIES (`noValueSatisfiesNegation`: `$ne` / `$nin` / `$notContains`).
+ *    The narrowing is DEFEATED — measured at 3 of 3 rows against a 1-of-3 real
+ *    narrowing and a 0-of-3 phantom positive, on the read path and on the
+ *    write path's `matchesFilterCondition` alike. ⛔ Not a cross-tenant leak:
+ *    tenancy is a separate layer and holds. The runtime half is #17042 and is
+ *    NOT this rule's to fix — this rule reports the miss, in both directions.
+ *
+ * Either way it is what a column RENAME leaves behind, with lint and CI green.
  *
  * ## Why this is a SECOND pair of ids and not a widening of the three above
  *
@@ -481,27 +499,65 @@ function filterFieldPaths(filter: Record<string, unknown> | null): Set<string> {
   return fields;
 }
 
-/** What a reference miss costs at request time, per clause. Measured, not inferred. */
+/**
+ * What a reference miss costs at request time, per clause. Measured, not inferred.
+ *
+ * ⚠️ The two KINDS do not have the same failure direction, and the field half
+ * does not have ONE direction. An unresolved variable is refused by the compiler
+ * in every position, so it always fails closed. A missing FIELD fails closed or
+ * fails OPEN depending on where in the predicate it sits, and the message says
+ * which — an author told "this denies everything" about a predicate that in fact
+ * matches everything would harden exactly the wrong thing.
+ */
 function referenceConsequence(clause: 'using' | 'check', kind: 'field' | 'variable'): string {
-  const dropped =
-    kind === 'field'
-      ? '`SecurityPlugin`\'s field-existence safety net DROPS the policy before the compiler sees it — it ' +
-        'reads the predicate\'s LEADING `field ==` / `=` / `in` and refuses a column the object lacks — and ' +
-        'a miss anywhere further along instead reaches the driver as a phantom column (`no such column`, or ' +
-        'zero rows with no error at all). '
-      : 'The pushdown compiler answers `unresolved-variable`, so `RLSCompiler` DROPS the policy at request ' +
-        'time — one WARN line is the only signal, and nothing reports it at authoring time. ';
-  return clause === 'using'
-    ? dropped +
-        'When it is the only applicable policy for that object and operation the layer falls back to the ' +
-        '`RLS_DENY_FILTER` sentinel, which is AND-ed onto the where clause: every select / update / delete ' +
-        'matches ZERO rows, so the object DISAPPEARS for every holder of this permission set — not because ' +
-        'they were denied, but because the narrowing they were granted resolves to nothing. When other ' +
-        'policies also apply, this one vanishes from the OR and grants none of the access it appears to.'
-    : dropped +
-        'On the ADR-0058 D4 write path the post-image `check` can then never be satisfied: every insert / ' +
-        'update the policy governs fails with `PermissionDeniedError`. The policy reads as a write rule and ' +
-        'behaves as a blanket refusal for every holder of this permission set.';
+  if (kind === 'variable') {
+    const dropped =
+      'The pushdown compiler answers `unresolved-variable` in EVERY position — including under `!` and in ' +
+      'a trailing `||` arm — so `RLSCompiler` DROPS the policy at request time, and one WARN line is the ' +
+      'only signal. ';
+    return clause === 'using'
+      ? dropped +
+          'When it is the only applicable policy for that object and operation the layer falls back to the ' +
+          '`RLS_DENY_FILTER` sentinel, which is AND-ed onto the where clause: every select / update / ' +
+          'delete matches ZERO rows, so the object DISAPPEARS for every holder of this permission set — ' +
+          'not because they were denied, but because the narrowing they were granted resolves to nothing. ' +
+          'When other policies also apply, this one vanishes from the OR and grants none of the access it ' +
+          'appears to.'
+      : dropped +
+          'On the ADR-0058 D4 write path that leaves the post-image `check` unsatisfiable: every insert / ' +
+          'update the policy governs fails with `PermissionDeniedError`. The policy reads as a write rule ' +
+          'and behaves as a blanket refusal for every holder of this permission set.';
+  }
+
+  // ── The FIELD half. Which direction it takes is decided by position, and one
+  // of the two is fail-OPEN (#17042).
+  const closed =
+    clause === 'using'
+      ? 'the field-existence safety net in `SecurityPlugin` DROPS the policy and, when it was the only ' +
+        'applicable one, arms the `RLS_DENY_FILTER` sentinel — every select / update / delete matches ZERO ' +
+        'rows and the object disappears for every holder of this permission set'
+      : 'the post-image can never satisfy the constraint, so every insert / update the policy governs ' +
+        'fails with `PermissionDeniedError` — a blanket refusal for every holder of this permission set';
+  const open =
+    clause === 'using'
+      ? 'every row inside the tenant wall SATISFIES the negated constraint, so the policy stops narrowing ' +
+        'and matches everything the wall admits'
+      : 'the post-image SATISFIES the negated constraint vacuously, so the check permits exactly the ' +
+        'writes it was written to refuse';
+  return (
+    'What it costs depends on WHERE the miss sits, and one of the two directions is fail-OPEN (#17042). ' +
+    'The safety net recognises only a LEADING `field ==` / `=` / `in` — `extractTargetField` is that ' +
+    `shape match — so a miss THERE fails CLOSED: ${closed}. A miss the net does NOT recognise — a ` +
+    'negation (`field != x`, `!(field == x)`, `!(field in [...])`), or any arm after the first — leaves ' +
+    'the policy KEPT, and a row that has no such column satisfies a negation: ' +
+    `${open}. The authored narrowing is then DEFEATED rather than enforced. ` +
+    'Measured on the driver-memory matcher and on `matchesFilterCondition` (the write path), each against ' +
+    'two controls: the real narrowing selects 1 of 3 rows, the SAME phantom column in a positive position ' +
+    'selects 0 of 3, and each negation shape selects 3 of 3. ⛔ It is NOT a cross-tenant leak — tenancy is ' +
+    'a separate layer and holds; what is defeated is the narrowing authored INSIDE the wall. ' +
+    'driver-mongodb follows the same shared ruling; driver-sql is NOT MEASURED and is expected to fail ' +
+    'closed by raising `no such column`. Fixing the runtime is #17042; this rule only reports the miss.'
+  );
 }
 
 /**
@@ -538,10 +594,12 @@ function referenceFindings(
         `${account.message} ` + referenceConsequence(clause, 'field'),
       hint:
         `${account.detail} Point the predicate at a column the object really declares, or delete the ` +
-        `policy if the narrowing is gone — a policy that can never match is not protection, it is an ` +
-        `outage. If the field was RENAMED, this policy has been denying since that rename; if it was ` +
-        `meant to live on another object, RLS cannot join to it (ADR-0055) — denormalise the value onto ` +
-        `"${object}" (a formula/rollup field) and test that column instead.`,
+        `policy if the narrowing is gone — a policy naming a column that does not exist is not ` +
+        `protection either way: it is an outage in one position and an open door in the other. If the ` +
+        `field was RENAMED, this policy has been wrong since that rename — check WHICH way before you ` +
+        `judge the blast radius, because a negated or non-leading miss has been granting, not denying. ` +
+        `If the value was meant to live on another object, RLS cannot join to it (ADR-0055) — ` +
+        `denormalise it onto "${object}" (a formula/rollup field) and test that column instead.`,
     });
   }
 

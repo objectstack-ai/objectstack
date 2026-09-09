@@ -623,10 +623,22 @@ describe('validateRlsPredicateEnforceability — the messages name the COST, not
     expect(f.where).toBe('permission set "sales_manager" policy "opportunity_private_owner_only" on object "crm_opportunity"');
     expect(f.path).toBe('permissions[0].rowLevelSecurity[0].using');
     expect(f.severity).toBe('error');
-    expect(f.message).toMatch(/field-existence safety net DROPS the policy/);
+    // ⚠️ BOTH directions, because they are not the same and the fail-OPEN one is
+    // the dangerous half: an author told "this denies everything" about a
+    // predicate that in fact matches everything hardens the wrong thing.
+    expect(f.message).toMatch(/one of the two directions is fail-OPEN/);
+    expect(f.message).toMatch(/#17042/);
+    // closed leg — the LEADING position the safety net recognises
+    expect(f.message).toMatch(/fails CLOSED/);
     expect(f.message).toMatch(/RLS_DENY_FILTER/);
     expect(f.message).toMatch(/ZERO rows/);
-    expect(f.message).toMatch(/DISAPPEARS for every holder of this permission set/);
+    // open leg — a negation or any arm after the first
+    expect(f.message).toMatch(/leaves the policy KEPT/);
+    expect(f.message).toMatch(/SATISFIES the negated constraint/);
+    expect(f.message).toMatch(/DEFEATED/);
+    // …and the limits, stated rather than overstated
+    expect(f.message).toMatch(/NOT a cross-tenant leak/);
+    expect(f.message).toMatch(/driver-sql is NOT MEASURED/);
     // …and the miss itself, with the platform's own "did you mean".
     expect(f.message).toMatch(/"is_private_nope" is not a field on object "crm_opportunity"/);
     expect(f.message).toMatch(/Did you mean "is_private"\?/);
@@ -640,7 +652,12 @@ describe('validateRlsPredicateEnforceability — the messages name the COST, not
     expect(f.rule).toBe(RLS_PREDICATE_UNKNOWN_USER_VARIABLE);
     expect(f.message).toMatch(/reads `current_user\.nope`, which nothing pre-resolves/);
     expect(f.message).toMatch(/scalar position, so no request can ever supply it/);
+    // The variable half really is fail-closed in EVERY position — the compiler
+    // refuses it under `!` and in a trailing `||` arm alike — so unlike the
+    // field half it may say so without qualification.
+    expect(f.message).toMatch(/unresolved-variable` in EVERY position/);
     expect(f.message).toMatch(/DISAPPEARS for every holder of this permission set/);
+    expect(f.message).not.toMatch(/fail-OPEN/);
     expect(f.hint).toMatch(/IRlsMembershipResolver/);
     expect(f.hint).toMatch(/never compared with `==`/);
   });
@@ -650,8 +667,11 @@ describe('validateRlsPredicateEnforceability — the messages name the COST, not
     expect(f.rule).toBe(RLS_PREDICATE_UNKNOWN_FIELD);
     expect(f.path).toBe('permissions[0].rowLevelSecurity[0].check');
     expect(f.message).toMatch(/PermissionDeniedError/);
-    expect(f.message).toMatch(/blanket refusal/);
-    expect(f.message).not.toMatch(/select \/ update \/ delete matches ZERO rows/);
+    // The write path has the SAME asymmetry, measured against the same controls:
+    // a positive phantom constraint refuses the post-image, a negated one is
+    // satisfied vacuously and permits the write the policy was written to refuse.
+    expect(f.message).toMatch(/permits exactly the writes it was written to refuse/);
+    expect(f.message).not.toMatch(/select \/ update \/ delete matches ZERO/);
   });
 });
 
@@ -670,14 +690,16 @@ describe('validateRlsPredicateEnforceability — the `current_user` set is DERIV
    * different, stale shape (`tenantId`, `department`, `attributes`) the RLS
    * compiler never binds — neither is the authority.
    */
-  it('accepts every kernel-resolved key, in the position that key supports', () => {
+  it('accepts every kernel-resolved key in BOTH positions', () => {
     expect(RESERVED_RLS_MEMBERSHIP_KEYS.length).toBeGreaterThan(0);
     for (const key of RESERVED_RLS_MEMBERSHIP_KEYS) {
-      // A scalar comparison and a membership test between them cover both
-      // positions, so the assertion does not need to know which kind each key is.
+      // ⚠️ BOTH, asserted separately. An `a.length === 0 || b.length === 0`
+      // here would pass on whichever position happened to be silent, and this
+      // rule is silent in both — so the disjunction pinned nothing about
+      // position at all and would have survived a position-blind rewrite.
       const scalar = ids(siteWith('using', `owner_id == current_user.${key}`));
       const member = ids(siteWith('using', `owner_id in current_user.${key}`));
-      expect({ key, silent: scalar.length === 0 || member.length === 0 }).toEqual({ key, silent: true });
+      expect({ key, scalar, member }).toEqual({ key, scalar: [], member: [] });
     }
   });
 
@@ -772,6 +794,41 @@ describe('validateRlsPredicateEnforceability — the reference pass never throws
       ],
     };
     expect(ids(stack)).toEqual([RLS_PREDICATE_UNKNOWN_FIELD]);
+  });
+});
+
+describe('validateRlsPredicateEnforceability — the fail-OPEN field shapes are reported too', () => {
+  /**
+   * The half the card's escalation clause did not name. It asked for a
+   * fail-OPEN *variable*, and the compiler refuses those in every position; the
+   * hole is field-shaped instead.
+   *
+   * `extractTargetField` matches only a LEADING `field ==` / `=` / `in`, so for
+   * each shape below the safety net returns `null`, the policy is KEPT, and the
+   * phantom column lowers to a negated constraint that a row without that
+   * column satisfies (`noValueSatisfiesNegation`). Measured: 3 of 3 rows,
+   * against 1 of 3 for the real narrowing and 0 of 3 for the same phantom
+   * column in a positive position — read path and write path alike.
+   *
+   * The runtime repair is #17042 and is deliberately NOT attempted here. What
+   * this rule owes is that the miss is REPORTED in these positions too, which
+   * is what these cases pin: a rule that only caught the leading position would
+   * satisfy the card and miss the dangerous half entirely.
+   */
+  it.each([
+    ['a bare negation', 'nope_a != "x"'],
+    ['a negated equality', '!(nope_b == 1)'],
+    ['a negated membership', "!(nope_c in ['a'])"],
+    ['a trailing `||` arm behind a REAL leading field', 'is_private == false || nope_d != "x"'],
+    ['a trailing `&&` arm behind a REAL leading field', 'is_private == false && nope_e != "x"'],
+  ])('%s is reported', (_label, source) => {
+    expect(ids(siteWith('using', source))).toEqual([RLS_PREDICATE_UNKNOWN_FIELD]);
+  });
+
+  it('the shipped predicate in the same shapes stays silent — the negative control', () => {
+    for (const source of ['is_private != true', '!(is_private == true)', 'is_private == false || owner_id != "x"']) {
+      expect(ids(siteWith('using', source))).toEqual([]);
+    }
   });
 });
 
