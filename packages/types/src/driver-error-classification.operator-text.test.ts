@@ -23,7 +23,10 @@
  * pinned as hard as the unwrap itself, because each one is a way this helper
  * could quietly become a message sniffer:
  *
- *  - an UNDECLARED throw is returned byte-for-byte on its own message channel;
+ *  - an UNDECLARED throw comes back as `messageChannelOf(e) || String(e)` — its
+ *    own string `message`, the string itself for a thrown string, `String(e)`
+ *    otherwise — with its `cause` never walked. A rule, not byte-identity with
+ *    whatever the call site used to compute;
  *  - a DECLARED envelope that is not the raw-path one — the read-exit terminal
  *    `backendStatementFaultError`, the #8931 / PR #9273 half — is left exactly
  *    as it arrived, which is what keeps that decision out of this change;

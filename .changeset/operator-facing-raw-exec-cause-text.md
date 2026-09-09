@@ -48,10 +48,17 @@ the raw-path one — the typed read exits' terminal, which composes a different 
 is left exactly as it arrived.
 
 That message channel is deliberately NOT byte-identical to what the replaced expressions
-computed. Two shapes read differently, and both read better: a thrown non-`Error` now
-yields prose where `(e as Error).message` yielded `undefined`, and an error whose message
-is EMPTY reads `Error` / `TypeError` — the `|| String(error)` last resort — where those
-expressions yielded `''`, or `unknown error` at the one site that ors in a default.
+computed. The RULE, rather than a catalogue of cases: an undeclared throw comes back as
+`messageChannelOf(error) || String(error)` — the thrown value's own string `message`, the
+string itself when a string was thrown, and `String(error)` when neither yields text. Every
+difference from the replaced expressions follows from that rule, so read the rule and not a
+list. Illustrations of it, not an exhaustive set: an empty-message `Error` reads its `name`,
+which for a named subclass is that subclass's name rather than `Error` / `TypeError`; a
+thrown non-`Error` reads its own text or `String(error)` where `(e as Error).message` read
+`undefined`, and where `null` / `undefined` threw a `TypeError` out of the catch, so no
+record was written at all and the operation aborted; an object carrying a string `message`
+reads it where `err instanceof Error ? … : String(err)` recorded `[object Object]`. A thrown
+EMPTY string reads `''`, so this channel is neither always prose nor never empty.
 
 ## The levels, and why they are not uniform
 
@@ -65,12 +72,13 @@ because this change moves its `src/**` — by one ADDED file, the `.test.ts` tha
 against a real `SqlDriver.execute()` refusal. Its published `dist/` is byte-unchanged by this
 PR: no entry point reaches a test file, and `files` packs `dist` only.
 
-**Not breaking, and deliberately not marked so.** Nothing is removed, renamed or made stricter.
-The only value that changes is the TEXT inside an operator-facing `detail` / `error` field, and
-only where the thrown error declares `DATABASE_ERROR` *and* its message is the raw path's
-composed sentence — the case where that text was the wrong text. Every other throw reaches
-these records on its own message channel — as before, save for the two shapes named above,
-where the text gets better rather than different in kind. The field names and types are
-unchanged, and the sentence being replaced is not a value any consumer can have been
-parsing: it is an opaque human diagnostic. A consumer reading these records gets the
-dialect's words back where it had been getting a placeholder.
+**Not breaking, and deliberately not marked so.** Nothing is removed, renamed or made stricter:
+what moves is the TEXT inside an operator-facing `detail` / `error` field, never a field name
+and never a type. The change these sites were made for is the declared raw-path fault, where
+the record gains the dialect's words in place of the driver's composed placeholder. Every
+other throw now reaches these records through the rule above rather than through the
+expression each site spelled out, so its text can move too — a consequence of the rule, not a
+bounded list of exceptions, and one shape (a thrown empty string) still records `''`. The
+sentence being replaced is not a value any consumer can have been parsing: it is an opaque
+human diagnostic. A consumer reading these records gets the dialect's words back where it had
+been getting a placeholder.

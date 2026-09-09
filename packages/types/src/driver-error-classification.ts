@@ -697,9 +697,12 @@ const RAW_STATEMENT_FAULT_SENTENCE = /refused to run a raw statement/;
  * The message channel of one node of a `cause` chain, as text.
  *
  * Empty means "this node says nothing" — a caller distinguishes that from a
- * node that speaks, and never records it. `String()` is the last resort so that
- * a thrown non-Error still yields prose rather than `undefined`, which is the
- * shape `(e as Error).message` produced at every site this helper replaces.
+ * node that speaks, and never records it. The channel is the node's own string
+ * `message` for an object or function, the string itself for a string, and
+ * `String()` for any other primitive; anything else reads `''`. So a non-Error
+ * node reads whatever text it carries rather than the `undefined` that
+ * `(e as Error).message` produced at every site this helper replaces — and a
+ * node whose own text is empty, a thrown empty string among them, reads `''`.
  */
 function messageChannelOf(node: unknown): string {
     if (typeof node === 'string') return node;
@@ -736,14 +739,19 @@ function messageChannelOf(node: unknown): string {
  * the raw-path composed sentence, and returns that. Both narrowings matter:
  *
  *  - **only a DECLARED fault is reinterpreted.** An undeclared throw — anything
- *    without `code: DATABASE_ERROR` — is returned on its own message channel and
- *    its `cause` is never walked. That channel is deliberately NOT byte-identical
- *    to what the call site used to compute: a thrown non-`Error` yields prose
- *    where `(e as Error).message` yielded `undefined`, and an error whose message
- *    is EMPTY reads `Error` / `TypeError` through the `|| String(error)` last
- *    resort where those expressions yielded `''` — or `unknown error`, at the one
- *    site that ors in a default. Reading a `cause` chain nobody declared would be
- *    sniffing, which is the mechanism #16019 removed;
+ *    without `code: DATABASE_ERROR` — comes back as `messageChannelOf(error) ||
+ *    String(error)`: the value's own string `message`, the string itself when a
+ *    string was thrown, and `String(error)` when neither yields text. Its `cause`
+ *    is never walked. That channel is deliberately NOT byte-identical to what
+ *    the call sites used to compute, and how it differs follows from that rule
+ *    rather than from a list of shapes: an empty-message `Error` reads its
+ *    `name`; a thrown non-`Error` reads its own text or `String(error)` where
+ *    `(e as Error).message` read `undefined`, and where `null` / `undefined`
+ *    threw out of the catch instead of recording anything; an object carrying a
+ *    string `message` reads it where `String(err)` recorded `[object Object]`. A
+ *    thrown EMPTY string reads `''`, so this channel is neither always prose nor
+ *    never empty. Reading a `cause` chain nobody declared would be sniffing,
+ *    which is the mechanism #16019 removed;
  *  - **only the raw-path sentence is walked through.** See
  *    {@link RAW_STATEMENT_FAULT_SENTENCE}.
  *
