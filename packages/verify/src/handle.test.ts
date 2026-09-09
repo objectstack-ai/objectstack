@@ -327,7 +327,27 @@ describe('tenancy — the service AuthPlugin registered', () => {
     expect(t.posture).toBe('single');
     expect(t.requestedPosture).toBe('single');
     expect(t.isolationActive).toBe(false);
+    expect(t.degraded).toBe(false);
   });
+
+  // The `single` case alone is satisfied by any stand-in that answers the
+  // constant `'single'` — which is exactly what the hand-written tenancy probe
+  // this method retires was. So the SAME reader is pointed at a stack booted
+  // under the other posture: a constant fails here, and the ablation that
+  // breaks the service's isolation probe turns this red while leaving the
+  // `single` case above green.
+  it('reports the walled posture a multi-tenant boot runs under — same reader, other stack', async () => {
+    const walled = await bootStack(handleFixtureStack, { multiTenant: 'posture-only' });
+    try {
+      const t = walled.tenancy();
+      expect(t.requestedPosture).toBe('isolated');
+      expect(t.isolationActive).toBe(true);
+      expect(t.posture).toBe('isolated');
+      expect(t.degraded).toBe(false);
+    } finally {
+      await walled.stop();
+    }
+  }, BOOT_TIMEOUT);
 });
 
 describe('bootStackOnce — one boot per (config, opts) identity', () => {
