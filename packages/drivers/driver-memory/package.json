@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/driver-memory",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "In-Memory Driver for ObjectStack (Reference Implementation)",
   "main": "dist/index.js",
@@ -29,7 +29,7 @@
     "@types/sql.js": "^1.4.11",
     "sql.js": "^1.14.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "objectstack",

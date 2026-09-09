@@ -302,6 +302,25 @@ export interface BootOptions {
    */
   databaseFile?: string;
   /**
+   * The default datasource's driver. Default `'sqlite-wasm'` — the pure-JS
+   * in-memory SQLite this harness has always booted, and the driver a real
+   * `objectstack dev` uses.
+   *
+   * `'memory'` boots `@objectstack/driver-memory` instead, which is the OTHER
+   * half of a two-driver equivalence measurement: the two drivers reach the
+   * analytics service through DIFFERENT strategies (`NativeSQLStrategy` compiles
+   * raw SQL on a SQL driver; the memory driver cannot run raw SQL, so the query
+   * falls through to `ObjectQLStrategy` and the engine's middleware). A gate
+   * that asserts the two doors reach ONE verdict cannot be written against one
+   * driver — asking on `sqlite-wasm` alone is exactly how the strategies were
+   * allowed to disagree about the security boundary.
+   *
+   * ⛔ It is NOT a general "run any fixture on memory" switch. The memory driver
+   * does not implement every SQL behaviour this harness's other gates depend
+   * on; use it where the DRIVER is the variable under test.
+   */
+  databaseDriver?: 'sqlite-wasm' | 'memory';
+  /**
    * Extra plugins to register between the app/service pairs and the
    * SecurityPlugin — the slot where `objectstack dev` auto-loads optional
    * service pairs the lean harness omits (e.g. `StorageServicePlugin` +
@@ -391,11 +410,14 @@ export async function bootStack(
   // §Risk mitigation the ADR promised), not the legacy pre-built DriverPlugin
   // escape hatch.
   await kernel.use(new ObjectQLPlugin());
+  const databaseDriver = opts.databaseDriver ?? 'sqlite-wasm';
   await kernel.use(new DefaultDatasourcePlugin({
-    driver: 'sqlite-wasm',
+    driver: databaseDriver,
     // `opts.databaseFile` makes the database outlive the kernel, so a second
     // boot over the same path is a real cold start (see BootOptions.databaseFile).
-    config: { filename: opts.databaseFile ?? ':memory:' },
+    // The memory driver holds no file — it takes no `filename` and a stray one
+    // would be config the driver silently ignores.
+    config: databaseDriver === 'memory' ? {} : { filename: opts.databaseFile ?? ':memory:' },
   }));
 
   // HTTP server (registers the `http-server` IHttpServer service the REST +

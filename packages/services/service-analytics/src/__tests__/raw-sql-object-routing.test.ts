@@ -254,7 +254,23 @@ describe('executeRawSql auto-bridge routes by object (#5033)', () => {
       { stage: 'won', deal_count: 2 },
       { stage: 'lost', deal_count: 1 },
     ]);
-    expect(warn).not.toHaveBeenCalled();
+    // The blanket `expect(warn).not.toHaveBeenCalled()` this replaces could no
+    // longer hold: the plugin reports at init when no `security` service is
+    // registered to answer the OBJECT-LEVEL read grant, and this fixture
+    // deliberately registers none.
+    //
+    // ⛔ But the replacement is not "anything except the routing phrase"
+    // either — that admits every OTHER new warning into a case whose whole job
+    // is to prove this object's routing did not regress. Every warning that
+    // fires here must BE the one deliberate report, named; a second one, of any
+    // wording, fails this case.
+    const warnings = warn.mock.calls.map((c) => String(c[0]));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(
+      /No admitObjectRead configured and no "security" service registered at init/,
+    );
+    // …and it is emphatically not the degradation this case is about.
+    expect(warnings[0]).not.toMatch(/is unavailable/);
   });
 });
 

@@ -1,5 +1,170 @@
 # @objectstack/formula
 
+## 17.4.0
+
+### Minor Changes
+
+- 098cbb7: `validateExpression` now refuses a non-string expression `source` through `errors[]`, instead of throwing a raw `TypeError` that wiped out the caller's located reporting.
+  
+  `validateExpression(role, input)` accepts `string | { dialect?, source? }`, and read the envelope's `source` unguarded — `if (!source.trim())`. `ExprInput` declares `source?: string`, but every production call site casts, because the value comes out of **metadata**, where a declaration is a claim about stored data and not a guarantee about it. An envelope whose `source` was present and not a string therefore threw `TypeError: source.trim is not a function` out of a validator whose own docblock promises it never throws.
+  
+  **The defect was not "it throws" — it was that it threw the wrong kind and bypassed a whole located-reporting contract.** `AutomationEngine.validateFlowExpressions` collects located findings and throws one assembled error naming the flow, the node, the slot and the source (ADR-0032 §1d); `@objectstack/lint`'s stack walk attributes every finding to the hook, sharing rule, action or field it came from. An exception raised *inside* the shared validator skipped both, so the author was handed an internal message naming none of them. Measured before the fix, on a stack whose `hooks[].condition` was `{ source: { nested: 1 } }`: the whole `objectstack validate` run died on `source.trim is not a function`. After: one located `error` reading ``hook 'gate_hook' (lead) condition``.
+  
+  The guard sits at `toSource`, the entry `validateExpression` and `inferExpressionType` share — **once**, not in each caller's own `try`/`catch`, which is the tolerant-consumer shape Prime Directive #12 forbids. `validateExpression` returns `ok: false` with one `ExprValidationError` naming what was found and both authorable forms; `inferExpressionType` answers `'unknown'`, its existing "cannot prove a type".
+  
+  **No exported symbol or signature moves** — measured by diffing the built `dist/index.d.ts` before and after: 39 exported declarations on both sides, and `validateExpression`'s declaration byte-identical. What changes is behaviour at a published entry, which is why this is `minor` rather than `patch`: an input that previously produced **no verdict at all** now produces a rejection.
+  
+  **What does not change.** Absent, `null`, empty and whitespace-only sources still read as "not authored" (`ok: true`), an `{ ast }` envelope carrying no `source` is still admitted (its admission is `ExpressionSchema`'s rule, not this entry's), and a malformed *string* still gets its own diagnostic — the brace trap, the dialect mismatch, the unknown function — never the shape refusal. No input that previously returned `ok: true` now returns `ok: false`, and none that returned `ok: false` now returns `ok: true`.
+  
+  A caller that relied on catching the `TypeError` would need to read `result.ok` instead. None does: all nine production call sites (`@objectstack/lint` ×4, its docs gate ×2, `@objectstack/service-automation` ×3) read `.errors`/`.warnings` directly, and the one call site inside a `try` (`@objectstack/mcp`'s `validate_expression` tool) has a handler-level catch that degrades to an error result and declares its `expression` parameter `z.string()`.
+
+### Patch Changes
+
+- 86c75f4: `firstUndeclaredReference` now documents the side of its contract it was silent about: it can false-NEGATIVE, and a `null` is "nothing was reported", not "every reference is rooted".
+  
+  The existing sentence — "Acts ONLY on cel-js's `Unknown variable: X` fault, so it cannot false-positive on arithmetic/comparison overloads" — is true, and stays. What it never said is what that narrowing costs. cel-js's checker returns exactly ONE error, so when the first one is of another class every undeclared reference behind it in the same source goes unjudged and the helper answers `null` — the same value that means the source is clean. A contract that declares only which error it cannot make reads as making neither.
+  
+  No behaviour changes. This is the contract text, and it ships: the amended block is JSDoc on a published export, so it is emitted into `@objectstack/formula`'s `dist/index.d.ts` and `dist/index.d.mts` (measured — the declaration file grew 53.45 KB to 55.99 KB) and is what a consumer reads on hover.
+  
+  What the amendment adds, all of it measured rather than reasoned:
+  
+  - **The masking is positional, not name-keyed.** The masked name is not the one that triggered the first error, so excluding the trigger's own name does not reach it. `data == 'x' && status == 'q'` answers `null`; the same two names in the other order answer `"status"`.
+  - **`celEngine.compile()` is not a gate against it.** `compile` type-checks in the permissive environment, where every unlisted name is `dyn`. The strict environment here declares `SCOPE_ROOTS` as `map`, so a root — or an object field sharing one of those names (`data`, `config`, `result`, `item`, `event`, `input`, `user`, …) — used as the operand of an operator with no `map` overload faults HERE and nowhere else. A caller that only reaches the helper on a clean compile is therefore not protected by its own gate.
+  - **The CEL type-name class is the same shape.** `type == 'grid'` is already pinned as a blind spot in `@objectstack/lint`'s `visibility-bare-identifier` suite, but pinned per NAME; the masking it causes is source-wide.
+  - **What closing it would take, and why that is not this change.** Widening the regex onto the overload message is the false positive the narrowing buys off (`type(record.x) == string` is legitimate CEL). Reporting past the first error needs a re-check loop over a neutralised source, or a checker entry returning more than one error — cel-js 8.0.0 has neither; its `TypeCheckResult` carries a single `error`. Both change what every consuming rule reports, so the oracle's shape is a design decision.
+  
+  `@objectstack/lint` carries a second comment-only correction, to `flow-variable-scope`'s account of the same oracle. Its "known, deliberate blind spot" note bounded the under-report to a flow variable named after a `SCOPE_ROOTS` member; measured, the bound does not hold — such a name in an operand position terminates the discovery loop on iteration 0 and every shadow in that source is lost, whatever it is named. That block sits on an internal function, so unlike the `formula` half it reaches no published declaration file; the entry is here because the package is touched and published.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+  - @objectstack/spec@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes
