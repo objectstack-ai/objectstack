@@ -187,10 +187,15 @@ function makeMemoryDriver() {
  * That single omission is the whole defect — `sys_setting.value_enc` is
  * declared `readonly: true` and the engine strips author-declared read-only
  * columns from a NON-system caller's UPDATE (`stripReadonlyFields`, gated on
- * `context.isSystem`), while the INSERT path is exempt (#3413). It is also
- * exactly the breakage `SettingsEngine`'s doc comment warns an adapter author
- * about ("⛔ An adapter over `IDataEngine` MUST forward this"), so reproducing
- * the orphan mechanism and pinning that warning are the same measurement.
+ * `context.isSystem`), while on THIS object the INSERT path is outside that
+ * strip — not by the superseded #3413 exemption (the 2026-09-03 ruling,
+ * #14147, put the same strip inside `engine.insert` for every non-system
+ * caller) but because `sys_setting` is `sys_`-prefixed and
+ * `managedBy: 'engine-owned'`, which `staticReadonlyInsertSubject` leaves to
+ * the platform object's own guards (#15719). It is also exactly the breakage
+ * `SettingsEngine`'s doc comment warns an adapter author about ("⛔ An adapter
+ * over `IDataEngine` MUST forward this"), so reproducing the orphan mechanism
+ * and pinning that warning are the same measurement.
  */
 function wrapEngineDroppingContext(engine: any): SettingsEngine {
   const real = wrapEngineAsSettingsEngine(engine);

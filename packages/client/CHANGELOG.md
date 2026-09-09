@@ -1,5 +1,479 @@
 # @objectstack/client
 
+## 17.4.0
+
+### Minor Changes
+
+- 68437d4: The automation resume route's `400 FLOW_FAILED` now says whether the run is stranded.
+  
+  `POST /api/v1/automation/:name/runs/:runId/resume` answers a run that consumed its pause and then failed with `400 FLOW_FAILED`, and until now its `error.details` carried the run's two artefacts only (`errorMessage`, `summary`). The engine's own verdict was dropped at the door: `AutomationResult.status: 'stranded'` — a run that is terminally failed *but* repairable by an explicit operator verb, because the pause a durable decision was waiting on is gone with the failure — reached the wire as the same `400` a plain terminal failure does, so an HTTP-only caller could not tell "beyond reach" from "repair waiting".
+  
+  - **`@objectstack/spec`** declares `ResumeFailureDetailsSchema` (`@objectstack/spec/api`): `{ runId, status?: 'failed' | 'stranded', repairable }` — the machine-readable shape of a resume failure told to the caller, declared once so every carrier of the family ruling spells the same members.
+  - **`@objectstack/runtime`**: the resume door's `400 FLOW_FAILED` details now carry that structure beside `errorMessage` / `summary`. `runId` is the run the resume was addressed to; `status` is the engine's own stamp, forwarded verbatim when it set one and never synthesised (the subflow-child-failed exit stamps none today); `repairable` is `status === 'stranded'` and is **always present on this arm** — present-and-false on a plain terminal failure, deliberately, so an absent member reads as an older server rather than as "not repairable". The code stays `FLOW_FAILED` (no `FLOW_STRANDED` sibling is minted), so a client that treats it as terminal keeps working and one that wants to offer a repair branches on `details.repairable`, never on the message text. The trigger door and `/actions` are unchanged: they never resume, so the member is absent there and absent means "not a resume".
+  - **`@objectstack/client`**: `automation.resume` documents the new members.
+- b1b978c: fix(client)!: the `auth.*` family declares the wire shapes better-auth actually sends — thirteen published `Promise< any >` returns narrowed (#14313)
+  
+  **BREAKING** for a typed caller, and it breaks nothing that ever worked at runtime. No request bytes, no URL and no response handling change: this is a declaration catching up with what the routes have always answered. It ships as `minor` under the lockstep launch-window convention (`scripts/check-changeset-no-major.mjs`) — the version number is not the migration signal here, this entry is.
+  
+  <!-- adr-0087: not-required (type-surface-only packages/client/src/index.ts#auth.updateUser, packages/client/src/index.ts#auth.changePassword, packages/client/src/index.ts#auth.setInitialPassword, packages/client/src/index.ts#auth.changeEmail, packages/client/src/index.ts#auth.sendVerificationEmail, packages/client/src/index.ts#auth.verifyEmail, packages/client/src/index.ts#auth.sessions.revoke, packages/client/src/index.ts#auth.sessions.revokeOthers, packages/client/src/index.ts#auth.sessions.revokeAll, packages/client/src/index.ts#auth.twoFactor.verifyTotp, packages/client/src/index.ts#auth.twoFactor.disable, packages/client/src/index.ts#auth.twoFactor.verifyBackupCode, packages/client/src/index.ts#auth.accounts.unlink) A published TYPE-SURFACE narrowing. Each of the thirteen members was UNANNOTATED at the merge base, so lib.dom's `Response.json()` published it as an erased `any`; each now declares the shape its route already answered, read off the wire against a real server. No method body changed, so no request or response byte moves, and the diff touches no `packages/spec` path and no ADR-0087 shape surface. The affected party is a TypeScript consumer and the compiler delivers the break at their own call site; `objectstack migrate meta`, `spec-changes.json` and the upgrade guide have nothing to rewrite, so a ledger entry would be false data in the one ledger this gate keeps true. The fourteenth member, `auth.deleteUser`, is deliberately left unannotated and is not named here. -->
+  
+  Card 2 of 3 of the #12104 family, under the maintainer's 2026-08-31 ruling: the wire contract is the only source of truth, better-auth's own `Date`-typed fields are the pre-serialization SERVER shape, and every timestamp is declared as the ISO-8601 `string` the wire carries — no `Date`, no revival layer.
+  
+  ## What changed
+  
+  Thirteen `auth.*` methods ended `return res.json()` with no return annotation, so `lib.dom`'s `Response.json(): Promise< any >` was their published type. Each now declares the shape its route serves, and its `exported-any-returns.json` entry is deleted in the same change (35 entries before, 22 after):
+  
+  | method | resolved to (before) | resolves to (now) |
+  |:--|:--|:--|
+  | `client.auth.updateUser(data)` | `any` | `AuthStatusReceipt` |
+  | `client.auth.changePassword(req)` | `any` | `AuthPasswordChangeResult` |
+  | `client.auth.setInitialPassword(req)` | `any` | `AuthSetInitialPasswordResult` |
+  | `client.auth.changeEmail(req)` | `any` | `AuthStatusReceipt` |
+  | `client.auth.sendVerificationEmail(req)` | `any` | `AuthStatusReceipt` |
+  | `client.auth.verifyEmail(params)` | `any` | `AuthEmailVerificationResult` |
+  | `client.auth.sessions.revoke(token)` | `any` | `AuthStatusReceipt` |
+  | `client.auth.sessions.revokeOthers()` | `any` | `AuthStatusReceipt` |
+  | `client.auth.sessions.revokeAll()` | `any` | `AuthStatusReceipt` |
+  | `client.auth.twoFactor.verifyTotp(req)` | `any` | `AuthTwoFactorVerificationResult` |
+  | `client.auth.twoFactor.disable(req)` | `any` | `AuthStatusReceipt` |
+  | `client.auth.twoFactor.verifyBackupCode(req)` | `any` | `AuthTwoFactorVerificationResult` |
+  | `client.auth.accounts.unlink(req)` | `any` | `AuthStatusReceipt` |
+  
+  `AuthWireUser`, `AuthStatusReceipt`, `AuthPasswordChangeResult`, `AuthEmailVerificationResult`, `AuthTwoFactorVerificationResult` and `AuthSetInitialPasswordResult` are newly exported from `@objectstack/client`. Twelve of these routes are served BARE by better-auth (`auth-route-ledger.ts` records them `source: 'better-auth'`) — there is no `{ success, data }` envelope to unwrap and none is introduced; `setInitialPassword` is ObjectStack's own mount and answers the platform's `{ success: true }` envelope.
+  
+  ## The exact reads that stop compiling
+  
+  Everything below compiled before only because `any` is assignable to, and indexable by, everything.
+  
+  ```ts
+  const r = await client.auth.updateUser({ name: 'Ada' });
+  r.user;                       // now TS2339 — the route answers `{ status: true }`, NOT the updated user
+  r.data;                       // now TS2339 — these routes carry NO envelope
+  
+  const cp = await client.auth.changePassword({ currentPassword, newPassword });
+  cp.user.createdAt.getTime();  // now TS2339 — the wire sends an ISO-8601 STRING, not a Date
+  new Date(cp.user.createdAt);  // the correct rewrite
+  cp.token.length;              // now TS18047 — `token` is `string | null` (null unless other sessions were revoked)
+  
+  const v = await client.auth.verifyEmail({ token });
+  v.user.email;                 // now TS18047 — `user` is `AuthWireUser | null` (null on a plain verification)
+  
+  const ok = await client.auth.setInitialPassword({ newPassword });
+  ok.status;                    // now TS2339 — ObjectStack's mount answers `{ success: true }`, not `{ status }`
+  
+  const t = await client.auth.twoFactor.verifyTotp({ code });
+  t.user.locale;                // now TS2339 — ObjectStack's own sys_user columns are not on better-auth's wire user
+  ```
+  
+  A caller that only read `status`, `success`, `token` (guarding `null`) or the base user columns needs no change.
+  
+  ## Timestamps: ISO-8601 `string`, never `Date`
+  
+  `AuthWireUser.createdAt` / `updatedAt` (and `banExpires`) are the vendor's `Date`-typed fields. The adapter is declared `supportsDates: false`, better-auth revives the stored string into a `Date` server-side, and `JSON.stringify` puts an ISO-8601 string back on the wire — measured `"createdAt":"2026-09-07T07:02:20.593Z"` on a real SQL driver. They are declared `string`, a type-level pin holds them there, and no revival layer exists in the SDK.
+  
+  ## Where the vendor's own declarations were the wrong answer
+  
+  - `updateUser`'s OpenAPI stub promises `{ user }`; its handler answers `{ status: true }` and puts the new fields into the session cookie. The receipt is what is declared.
+  - `verifyEmail`'s stub declares `user` required; the handler answers `user: null` on a plain verification and the updated user only on a change-email verification.
+  - A nullable column (`image`, `banReason`, `banExpires`) arrives as `null` on the SQL drivers and as an ABSENT key on a store that does not materialise unset columns — both measured — so each is `?: … | null`.
+  
+  ## `auth.deleteUser` is deliberately NOT bound
+  
+  The fourteenth method keeps its `Promise< any >` and its ledger entry. Its route is switched off by maintainer ruling (2026-08-12 on #7735; `auth-route-ledger.ts` books it `disabled`), and measured against a real server it answers HTTP 404 with a ZERO-BYTE body once the last-local-credential guard is satisfied — so `this.fetch` throws before `res.json()` ever runs and the method has no success path a caller can observe. No declared return type can be honest for a value the runtime never delivers. That the shrink-only ledger still carries exactly this one `auth.*` entry is the mechanism working.
+- 7beaaa3: fix(client)!: `oauth.applications.delete` resolves on the zero-byte 200 its route answers, instead of rejecting on every successful delete (#15451)
+  
+  **BREAKING** on two independent axes, and it makes a published method usable for the first time. Before this change `client.oauth.applications.delete(id)` **rejected on every successful delete** — there was no success path a caller could observe. It ships as `minor` under the lockstep launch-window convention (`scripts/check-changeset-no-major.mjs`); the version number is not the migration signal here, this entry is.
+  
+  <!-- adr-0087: registered client-oauth-applications-delete-void -->
+  
+  The fifth and last method of the `oauth.*` family, and the one #14312 / PR #15445 deliberately could not close: its ruling fenced that card to *narrowing published return types*, and no declared return type could be true while the `res.json()` call stood.
+  
+  ## The defect, measured end to end
+  
+  Real `betterAuth` + real `@better-auth/oauth-provider` over the real ObjectQL adapter on real SQLite, a real signed-up user and a real session, driven through the **real** `ObjectStackClient` with only the socket stood in for:
+  
+  ```
+  POST /api/v1/auth/oauth2/delete-client  ->  200 · 0 bytes
+                                              content-type: application/json
+                                              content-length: (absent)
+  through the client, BEFORE  ->  REJECTED: SyntaxError | Unexpected end of JSON input
+  the row, server-side        ->  ALREADY GONE (get-client answers 404 not_found)
+  through the client, AFTER   ->  RESOLVED | undefined
+  ```
+  
+  The handler returns nothing and the vendor declares the endpoint `void`. `res.json()` had nothing to parse, so the method rejected — *after* the delete had committed. A caller who did the obvious thing saw a failure, retried, and the retry failed **differently**, because the row no longer existed.
+  
+  ## What changes for a caller
+  
+  | | before | now |
+  |:--|:--|:--|
+  | a successful delete | rejects `SyntaxError` | resolves |
+  | the resolved value | `any` (unreachable — the promise never resolved) | `void` |
+  | deleting a client that is not there | rejects `not_found` | rejects `not_found` — unchanged |
+  | a malformed non-empty body | rejects `SyntaxError` | rejects `SyntaxError` — unchanged |
+  
+  ⚠️ **The `catch` you wrote around this call stops firing on success.** Code shaped like
+  
+  ```ts
+  try { await client.oauth.applications.delete(id); }
+  catch { /* the delete probably worked anyway */ }
+  ```
+  
+  still compiles and still runs, but its catch block was executing on **every** successful delete and now executes only on a real failure. Any workaround that lived in there is now inert and can be deleted. And because the promise never used to resolve, a read off its resolved value — `(await …delete(id)).deleted` — was dead code that has never executed; it now stops compiling (TS2339), which is the compiler delivering the change at the call site.
+  
+  ## Why `void`, and not `{ deleted: boolean }`
+  
+  "Deleted" and "was already gone" **are** distinguished by the route, but on the error channel: a missing client answers 404 `{ error: 'not_found' }`, which the client already raises as a throw. The 200 answer carries zero bytes and therefore zero information, so a synthesised `{ deleted: true }` would be a shape the wire never sends and strictly less informative than the 404 a caller already receives.
+  
+  ## Why the emptiness is detected by reading the body
+  
+  Both shortcuts were measured against the real route and both are unusable: the status is **200**, not the `204` five other delete surfaces in this client key off, and the response carries **no `content-length` header at all** — so a header test would never fire and would leave the defect in place while looking like a fix. The body itself is the only thing that answers.
+  
+  A non-empty body is still parsed and its failure still thrown, so **the only behaviour this change moves is the zero-byte case**: a malformed response stays loud, and the day this route grows a payload, surfacing it is a deliberate widening of the return type rather than a silent change of shape.
+  
+  `packages/client/exported-any-returns.json` loses this method's entry in the same change — the ledger is shrink-only, so the entry goes **with** the binding. Its last `oauth.*` entry is now gone; 35 sites remain open.
+- e944fdb: fix(client)!: the `oauth.*` family declares the wire shapes better-auth actually sends — four published `Promise< any >` returns narrowed (#14312)
+  
+  **BREAKING** for a typed caller, and it breaks nothing that ever worked at runtime. No request bytes, no URL and no response handling change: this is a declaration catching up with what the routes have always answered. It ships as `minor` under the lockstep launch-window convention (`scripts/check-changeset-no-major.mjs`) — the version number is not the migration signal here, this entry is.
+  
+  <!-- adr-0087: not-required (type-surface-only packages/client/src/index.ts#register, packages/client/src/index.ts#getPublic, packages/client/src/index.ts#consent) A published TYPE-SURFACE narrowing. Each member was UNANNOTATED at the merge base, so lib.dom's `Response.json()` published it as an erased `any`; each now declares the shape its route already answered. No method body changed, so no request or response byte moves, and the diff touches no `packages/spec` path and no ADR-0087 shape surface. The affected party is a TypeScript consumer and the compiler delivers the break at their own call site; `objectstack migrate meta`, `spec-changes.json` and the upgrade guide have nothing to rewrite, so a ledger entry would be false data in the one ledger this gate keeps true. DISCLOSURE, not an omission: the fourth narrowed member of this changeset is `oauth.applications.get` (index.ts line 3184; unannotated at base, `Promise` of `OAuthApplication` at HEAD). It satisfies this same predicate on a direct reading, but it is deliberately NOT named above, because the reference `packages/client/src/index.ts#get` does not address it: this file declares 13 members named `get`, predicate 4 reads the FIRST one (line 1928), and that member is unrelated and unannotated at both revs. Naming it would assert a verified fact about the wrong member; the ambiguity is filed as its own card. -->
+  
+  Card 1 of 3 of the #12104 family, under the maintainer's 2026-08-31 ruling: the wire contract is the only source of truth, and better-auth's own `Date`-typed fields are the pre-serialization SERVER shape, not the wire fact.
+  
+  ## What changed
+  
+  Four methods ended `return res.json()` with no return annotation, so `lib.dom`'s `Response.json(): Promise< any >` was their published type. Each now declares the shape its route serves, and its `exported-any-returns.json` entry is deleted in the same change:
+  
+  | method | resolved to (before) | resolves to (now) |
+  |:--|:--|:--|
+  | `client.oauth.applications.register(req)` | `any` | `OAuthApplicationRegistration` |
+  | `client.oauth.applications.get(id)` | `any` | `OAuthApplication` |
+  | `client.oauth.applications.getPublic(id)` | `any` | `OAuthApplicationPublic` |
+  | `client.oauth.consent(req)` | `any` | `OAuthConsentResult` |
+  
+  `OAuthApplication`, `OAuthApplicationRegistration`, `OAuthApplicationPublic` and `OAuthConsentResult` are newly exported from `@objectstack/client`. These four routes are served BARE by better-auth (`auth-route-ledger.ts` records them `source: 'better-auth'`) — there is no `{ success, data }` envelope to unwrap, and none is introduced.
+  
+  ## The exact reads that stop compiling
+  
+  Everything below compiled before only because `any` is assignable to, and indexable by, everything.
+  
+  ```ts
+  const app = await client.oauth.applications.get('c_1');
+  app.data;                     // was fine; now TS2339 — these routes carry NO envelope
+  app.anythingAtAll;            // was fine; now TS2339
+  
+  const pub = await client.oauth.applications.getPublic('c_1');
+  pub.client_secret;            // now TS2339 — the public projection hand-picks 7 columns
+  pub.grant_types;              // now TS2339 — same reason
+  pub.disabled;                 // now TS2339 — same reason
+  
+  const decision = await client.oauth.consent({ accept: true });
+  decision.client_id;           // now TS2339 — consent answers `{ redirect, url }`
+  
+  // Timestamps are RFC 7591 NUMBERS (Unix epoch seconds), so a caller that
+  // guessed `Date` or ISO `string` now fails:
+  new Date(app.client_id_issued_at!).toISOString();   // TS2769: number is not a Date arg
+  app.client_id_issued_at!.slice(0, 10);              // TS2339: not a string
+  new Date(app.client_id_issued_at! * 1000);          // the correct rewrite
+  ```
+  
+  A caller that only read `client_id`, `client_secret`, `redirect_uris` or `url` needs no change.
+  
+  ## Timestamps: `number`, not `Date` and not ISO-8601
+  
+  The ruling ordered every `Date`-typed field declared as an ISO `string` and forbade both a `Date` declaration and a runtime revival layer. **This family has no `Date` field to convert.** RFC 7591 carries `client_id_issued_at` and `client_secret_expires_at` as Unix-epoch SECONDS, and the provider converts its stored `Date` to a number before serialising, so the wire sends neither a `Date` nor an ISO string. Both are declared `number`, and a type-level pin holds them there. The ruling's prohibitions are satisfied: nothing declares a `Date`, and no revival layer exists.
+  
+  ## Two places better-auth's own types were the wrong answer
+  
+  Read off the wire against a real server, not off the vendor's `.d.ts`:
+  
+  - `getPublic` is declared `OAuthClient` — the full row — but its handler hand-picks seven columns. `OAuthApplicationPublic` is that projection, derived with `Pick` so it cannot drift from its parent. Its `redirect_uris` is always `[]` on this route and carries no information.
+  - `user_id` and `application_type` are declared nullable by the vendor, but the serialiser folds a null column to `undefined`, so `null` is unreachable and is not declared.
+  
+  ## `oauth.applications.delete` is deliberately NOT bound
+  
+  The fifth method of the family keeps its `Promise< any >` and its ledger entry. Its route answers HTTP 200 with a zero-byte body, so its `res.json()` rejects with a `SyntaxError` on every successful delete. No annotation can be honest while that call stands, and binding it needs a behaviour change — a decision beyond this card's type-narrowing scope. That the shrink-only ledger still carries exactly this one entry is the mechanism working.
+- 7092d63: fix(client)!: the `organizations.*` family declares the wire shapes better-auth actually sends — nineteen published `Promise< any >` returns narrowed, twenty ledger entries closed (#14314)
+  
+  **BREAKING** for a typed caller, and it breaks nothing that ever worked at runtime. No request bytes, no URL and no response handling change: this is a declaration catching up with what the routes have always answered. It ships as `minor` under the lockstep launch-window convention (`scripts/check-changeset-no-major.mjs`) — the version number is not the migration signal here, this entry is.
+  
+  <!-- adr-0087: not-required (type-surface-only packages/client/src/index.ts#organizations.setActive, packages/client/src/index.ts#organizations.get, packages/client/src/index.ts#organizations.invite, packages/client/src/index.ts#organizations.leave, packages/client/src/index.ts#organizations.updateMemberRole, packages/client/src/index.ts#organizations.getActiveMember, packages/client/src/index.ts#organizations.invitations.cancel, packages/client/src/index.ts#organizations.invitations.accept, packages/client/src/index.ts#organizations.invitations.reject, packages/client/src/index.ts#organizations.teams.create, packages/client/src/index.ts#organizations.teams.update, packages/client/src/index.ts#organizations.teams.delete, packages/client/src/index.ts#organizations.teams.addMember, packages/client/src/index.ts#organizations.teams.removeMember) A published TYPE-SURFACE narrowing. Each of the nineteen members was UNANNOTATED at the merge base, so lib.dom's `Response.json()` published it as an erased `any`; each now declares the shape its route already answered, read off the wire against a real server. The fourteen refs above are the ones the dotted-path walker can resolve. The other FIVE members narrowed by this same change — organizations.create, organizations.update, organizations.listMembers, organizations.delete and organizations.removeMember — are direct members of `organizations` whose names recur inside its nested `teams` / `invitations` literals, and the walker counts nested same-named definitions inside the region, so they have no resolvable spelling today (filed as #16571); they carry the same annotation change, are pinned by the same type-level test and are judged by check:exported-any-returns on the built dist. No method body changed, so no request or response byte moves, and the diff touches no `packages/spec` path and no ADR-0087 shape surface. The affected party is a TypeScript consumer and the compiler delivers the break at their own call site; `objectstack migrate meta`, `spec-changes.json` and the upgrade guide have nothing to rewrite, so a ledger entry would be false data in the one ledger this gate keeps true. The twentieth ledger entry, `organizations.invitations.resend`, carries no annotation of its own and closes because it delegates to the now-bound `invite`; it is not named here because its site is unchanged. -->
+  
+  Card 3 of 3 of the #12104 family, under the maintainer's 2026-08-31 ruling: the wire contract is the only source of truth, better-auth's own `Date`-typed fields are the pre-serialization SERVER shape, and every timestamp is declared as the ISO-8601 `string` the wire carries — no `Date`, no revival layer.
+  
+  ## What changed
+  
+  Nineteen `organizations.*` methods ended `return res.json()` with no return annotation, so `lib.dom`'s `Response.json(): Promise< any >` was their published type. Each now declares the shape its route serves, and its `exported-any-returns.json` entry is deleted in the same change — together with the entry for `organizations.invitations.resend`, which has no annotation of its own and inherits `invite`'s (22 entries before, 2 after):
+  
+  | method | resolved to (before) | resolves to (now) |
+  |:--|:--|:--|
+  | `client.organizations.create(req)` | `any` | `OrganizationCreateResult` |
+  | `client.organizations.update(id, data)` | `any` | `OrganizationEchoWire` |
+  | `client.organizations.setActive(id)` | `any` | `OrganizationWire \| null` |
+  | `client.organizations.get(id)` | `any` | `OrganizationFullWire \| null` |
+  | `client.organizations.listMembers(id)` | `any` | `OrganizationMembersPage` |
+  | `client.organizations.invite(req)` | `any` | `OrganizationInvitationWire<'pending'>` |
+  | `client.organizations.leave(id)` | `any` | `OrganizationMemberWithUserWire` |
+  | `client.organizations.delete(id)` | `any` | `OrganizationWire` |
+  | `client.organizations.removeMember(id, params)` | `any` | `OrganizationRemoveMemberResult` |
+  | `client.organizations.updateMemberRole(id, params)` | `any` | `OrganizationMemberWire` |
+  | `client.organizations.getActiveMember(id)` | `any` | `OrganizationMemberWithUserWire` |
+  | `client.organizations.invitations.cancel(id)` | `any` | `OrganizationInvitationWire<'canceled'>` |
+  | `client.organizations.invitations.accept(id)` | `any` | `OrganizationInvitationAcceptResult` |
+  | `client.organizations.invitations.reject(id)` | `any` | `OrganizationInvitationRejectResult` |
+  | `client.organizations.invitations.resend(inv)` | `any` (inherited) | `OrganizationInvitationWire<'pending'>` (inherited from `invite`) |
+  | `client.organizations.teams.create(req)` | `any` | `OrganizationTeamWire` |
+  | `client.organizations.teams.update(params)` | `any` | `OrganizationTeamWire` |
+  | `client.organizations.teams.delete(params)` | `any` | `OrganizationTeamRemovedReceipt` |
+  | `client.organizations.teams.addMember(params)` | `any` | `OrganizationTeamMemberWire` |
+  | `client.organizations.teams.removeMember(params)` | `any` | `OrganizationTeamMemberRemovedReceipt` |
+  
+  `OrganizationWire`, `OrganizationEchoWire`, `OrganizationCreateResult`, `OrganizationFullWire`, `OrganizationMemberWire`, `OrganizationMemberUserWire`, `OrganizationMemberWithUserWire`, `OrganizationMembersPage`, `OrganizationRemoveMemberResult`, `OrganizationInvitationWire`, `OrganizationInvitationAcceptResult`, `OrganizationInvitationRejectResult`, `OrganizationTeamWire`, `OrganizationFullTeamWire`, `OrganizationTeamMemberWire`, `OrganizationTeamRemovedReceipt` and `OrganizationTeamMemberRemovedReceipt` are newly exported from `@objectstack/client`. Every one of these routes is served BARE by better-auth (`auth-route-ledger.ts` records them `source: 'better-auth'`) — there is no `{ success, data }` envelope to unwrap and none is introduced. `@objectstack/spec/identity`'s `Organization` / `Member` / `Invitation` are deliberately NOT relayed: each declares `updatedAt` required, and the wire never carries it (the adapter's output transform walks better-auth's own schema, which has no such column); `InvitationStatus` IS relayed, narrowed to the literal each handler pins.
+  
+  ## The exact reads that stop compiling
+  
+  Everything below compiled before only because `any` is assignable to, and indexable by, everything.
+  
+  ```ts
+  const org = await client.organizations.setActive(id);
+  org.id;                          // now TS18047 — `setActive` (and `get`) answer `null` for an empty id with no active organization
+  if (org?.metadata) JSON.parse(org.metadata);   // fine — on the READ routes `metadata` is the stored JSON text, `null`/absent when unset
+  (await client.organizations.get(id))!.metadata.plan;   // now TS2339 — it is a string here, not an object
+  
+  const echo = await client.organizations.update(id, { metadata: { plan: 'pro' } });
+  JSON.parse(echo.metadata);       // now TS2345 — the two WRITE routes (`create`, `update`) echo `metadata` already decoded
+  
+  const deleted = await client.organizations.delete(id);
+  deleted.length;                  // now TS2339 — the route answers the organization ROW, not the id string the vendor's OpenAPI stub declares
+  deleted.updatedAt;               // now TS2339 — `sys_organization.updated_at` never reaches the wire
+  deleted.createdAt.getTime();     // now TS2339 — ISO-8601 STRING, not a Date; `new Date(deleted.createdAt)` is the rewrite
+  
+  const m = await client.organizations.updateMemberRole(id, { memberId, role: 'admin' });
+  m.member.role;                   // now TS2339 — the row is answered BARE, not as `{ member }` (the vendor's stub is wrong)
+  
+  const removed = await client.organizations.removeMember(id, { memberIdOrEmail });
+  removed.member.user.email;       // now TS18048 — `user` is joined on ONLY when the member was addressed by email
+  
+  const inv = await client.organizations.invite({ email, organizationId: id });
+  if (inv.status === 'accepted') { /* now TS2367 — `invite` answers the literal `'pending'` */ }
+  
+  (await client.organizations.listMembers(id)).data;   // now TS2339 — no envelope on any route of this family
+  ```
+  
+  A caller that read `id`, `name`, `slug`, `role`, `email`, `members`, `total` or `message` off these values, or narrowed `null` where it can arrive, needs no change.
+  
+  ## Timestamps: ISO-8601 `string`, never `Date`
+  
+  `createdAt` on every row type, `updatedAt` on teams and `expiresAt` on invitations are the vendor's `Date`-typed fields. The adapter is declared `supportsDates: false`, better-auth revives the stored string into a `Date` server-side, and `JSON.stringify` puts an ISO-8601 string back on the wire — measured `"createdAt":"2026-09-07T09:27:01.545Z"` on a real SQL driver. They are declared `string`, a type-level pin holds them there, and no revival layer exists in the SDK.
+  
+  ## Where the vendor's own declarations were the wrong answer
+  
+  - `delete`'s OpenAPI stub declares the deleted id as a `string`; the handler answers the organization row.
+  - `updateMemberRole`'s stub declares `{ member }`; the handler answers the membership row bare, without `user`.
+  - `metadata` is one column with two wire forms: `create` and `update` decode it, every read route answers the stored JSON text (`setActive`, `get`, `delete`, `list`).
+  - `removeMember` joins `user` on only when the member was addressed by email; the by-id path strips it.
+  - Inside `get(...).teams` the vendor's `memberCount` is NOT stripped (it is on `teams.create` / `teams.update`). `teams.update` writes no timestamp of its own — `updatedAt` there comes from better-auth's team schema (`onUpdate` default, applied on every update) with the platform's `sys_team.updated_at` stamping behind it, measured on a real SQL driver; the default team minted at organization creation is written without `updatedAt` by the vendor and carries the platform's stamp, so `get(...).teams[].updatedAt` is declared optional as the safe direction.
+  
+  ## Not a behaviour change
+  
+  `getActiveMember(organizationId)` keeps sending its query parameter; the measured fact that the server ignores it and answers the session's ACTIVE organization is recorded in the method's JSDoc and filed separately — a body change is outside this family's ruled narrowing scope.
+- e08892d: `cloneData` reports `droppedFields` like every other create face: `CloneDataResponseSchema` (`@objectstack/spec/api`) gains an optional `droppedFields` member of the same shape as `CreateDataResponseSchema`'s, and the `POST /data/:object/:id/clone` 201 body carries it whenever the engine stripped a static `readonly` column from the clone.
+  
+  A clone IS a create, and it is the one create shape that can carry a read-only column without the caller typing it: the source row is copied whole (`approval_status: 'approved'` included), `overrides` are applied on top, and the copy is inserted. Since the create-side strip moved into `engine.insert` that column has been stripped and logged at `warn` — but the 201 body said nothing, so a caller that cloned an approved record and read `record.approval_status: 'draft'` back had no field in the response telling it why, while `createData`, `createManyData`, `insertManyData` and every `batchData` row that created already answered on the wire. Maintainer ruling 2026-09-08 (option 1 on #15703): report it, the same way.
+  
+  - **`@objectstack/spec`** — `CloneDataResponseSchema.droppedFields`: `DroppedFieldsEvent[]`, optional, omit-when-empty — present ONLY when ≥1 field was dropped, and the clone still succeeded without them (status unchanged). The schema is declared AS PRODUCED, so the member and the producer land in one change. Additive: a client that reads only `object` / `id` / `sourceId` / `record` sees no difference.
+  - **`@objectstack/metadata-protocol`** — `cloneData` passes the engine the same `onFieldsDropped` listener `createData` wires and spreads the collected events onto its return as `droppedFields`. The strip itself is unchanged and still the engine's (`isSystem`-gated, `defaultValue` re-derived); what is new is that a copied-in or overridden readonly key is now named in the body instead of only in the server log.
+  - **`@objectstack/client`** — `CloneDataResult` (the declared mirror of `CloneDataResponseSchema`, the return type of `client.data.clone`) gains the same optional `droppedFields?: DroppedFieldsEvent[]`, so a TypeScript caller reads the member without a cast; its docblock no longer states that the clone producer emits no write-observability event.
+  
+  Body only, deliberately: the clone route relays the producer verbatim and sets no `X-ObjectStack-Dropped-Fields` header (the single-record `POST /data/:object` and `PATCH /data/:object/:id` mounts do); the schema's `.describe()` says so rather than promising a header the route does not send.
+- 61b4eb3: `client.meta.getHistory` answers the published `HistoryMetaItemResponse` on **both** of its exits, and the route ledger names the schema.
+  
+  **BREAKING (types):** the unscoped `client.meta.getHistory` declared a hand-written inline shape whose `actor` member was `string`. The door answers `null` there for every system-initiated write — boot sync, migration, a scheduled job — and the published schema declares it "never a sentinel string", so consumers that resolve the actor against `sys_user` must be able to tell "nobody" from "a user id". Reading `actor` without a null check compiled against a promise the door has never made; it no longer compiles. The same rebind closes the vocabulary of `op` (the ADR-0008 §2.4 change-log verbs, previously a plain `string`).
+  
+  Three members the inline shape omitted become reachable in the same move: `version` (the per-`(org,type,name)` lineage counter that `rollbackItem({ toVersion })` pins against), `previousName` (set on `op: "rename"`), and `ref.version`. `ref.org` was declared optional and is now what the producer always writes.
+  
+  The scoped twin — `client.environments.use(id).meta.getHistory` — carried no declaration at all: no return annotation, and the SDK's internal unwrap called with no type argument, so the published method resolved to `Promise<unknown>` and every caller had to narrow by hand against nothing. It is the SAME mount as the unscoped exit, replayed against `/environments/:environmentId`, so it answers a byte-identical body; the two now name one type. Binding only one exit would have relocated that divergence rather than removed it, and the equality of the two declared types is pinned rather than left to review.
+  
+  `@objectstack/rest` is `patch`: the route-ledger row for `GET /api/v1/meta/:type/:name/history` now names `HistoryMetaItemResponseSchema`. Data only, in a package-internal module — no route, handler or emitted byte changes. The row could not name the schema before because the declaration (#12005) landed after the row was written.
+  
+  No wire byte moves anywhere in this change. `HistoryMetaItemResponseSchema` is a describe-only transcription of what `historyMetaItem` already returned, and the SDK's runtime path is untouched — only what the compiler knows about it.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing here is reachable by `objectstack migrate meta`: no spec property, metadata key, accepted value or exported symbol is retired, `packages/spec` is not touched at all, and no stored metadata changes shape. The affected party is a TypeScript consumer and the delivery channel is the compiler at their own call site; the remedy is a null check on `actor`, which is application code rather than a metadata migration. `type-surface-only` is deliberately NOT claimed: its predicate 4 admits a narrowing that starts from `any`, `unknown` or no annotation, and while the scoped exit is exactly that case, the unscoped exit starts from a CONCRETE inline object type whose members change — the case that category's header names as outside its class. -->
+
+### Patch Changes
+
+- cf74a11: The client SDK reads the CRUD data prefix off the discovery document instead of restating `/data` as a literal, so a deployment that sets a non-default `crud.dataPrefix` is reachable through the scoped surface.
+  
+  `crud.dataPrefix` moves two things together: REST mounts every CRUD route under `${basePath}${crud.dataPrefix}`, and the discovery handler advertises the same value as `routes.data = ${realBase}${crud.dataPrefix}`. The SDK is the third surface describing those same paths, and its scoped half was not reading the value — it wrote `/data` into all seventeen of its data methods. On a deployment that moved the prefix, that half called paths the server does not mount, while the unscoped half of the *same* SDK called the right ones: the unscoped methods build `${baseUrl}${getRoute('data')}` and `routes.data` already carries the prefix. One SDK disagreed with itself about where the data routes are.
+  
+  - **`_dataPrefix()` recovers the prefix from the advertised routes.** `routes.data` is one string carrying two unknowns (`{realBase}{dataPrefix}`) and no discovery key carries either half alone, so the split is recovered in two steps. A value that already ends with the conventional `/data` *is* the default prefix — taken first, which is what makes the change unable to regress any deployment that works today: every later rule can only run in the branch where the previous single-literal code was already wrong. Otherwise `routes.metadata` supplies the missing equation, being `{realBase}{metadata.prefix}` over the same base, so the two advertised routes share exactly `realBase` plus whatever their prefixes share; cutting that common run back to its last `/` lands on the boundary. This also covers a document served from the environment-scoped mount, where both routes carry the same `/environments/{id}` segment.
+  - **It declines rather than guess.** Where the document does not determine the split — no advertised routes, no `routes.metadata`, or a derived prefix of `/` or empty — the derivation returns the conventional `/data`, which is byte-identical to the previous behaviour. This follows the rule the neighbouring `_apiBase()` already sets in this file, and it is why an unconnected client is unaffected.
+  - **`_apiBase()` strips the advertised prefix instead of the literal `/data`.** It previously declined whenever the prefix was non-default, because the only suffix it knew how to strip was `/data`. It now strips whatever `_dataPrefix()` read, so the base and the prefix are derived by one rule and cannot disagree. On every default-prefix deployment the result is unchanged.
+  
+  No new client option and no new configuration: the value is read from the server that already publishes it. A client that never calls `connect()` builds exactly the URLs it built before.
+- 92dc937: The README's analytics and automation examples read the resolved payload.
+  
+  `client.analytics.query` / `analytics.meta` and `client.automation.trigger` stopped handing back the dispatcher's `{ success, data }` envelope in 17.0.0: each resolves to the payload itself. The README's namespace tour still showed all three as bare `await` calls with nothing reading the resolved value, so the package's own front page taught nothing about which shape comes back — neither wrong nor useful. Each of the three now assigns its result and reads one member of it: `report.rows` / `report.fields[0].name` (`AnalyticsResult`), `cubes[0].name` (the bare `CubeMeta[]`), `run.status` (`AutomationResult`) — the members those contracts actually declare, read off the payload rather than off a `data` wrapper.
+  
+  No behaviour changes; this is the README that ships inside the package. The docs site's Client SDK and Data API pages take the same treatment in the same PR.
+- 31e7542: The README's namespace tour calls `approvals.approve` / `approvals.reject` with the decision object they declare, and `auth.register` with the field its schema requires.
+  
+  `approve` and `reject` take `(requestId: string, decision?: { actorId?: string; comment?: string; attachments?: string[] })`. The tour passed the comment as a bare string — `approve(requestId, 'LGTM')` — which a TypeScript reader hits as `TS2559` and a JavaScript reader does not hit at all: the string goes out as the request body where the route reads the decision object's fields, so the approval is recorded and its **reason is silently dropped**. In an approvals surface a lost reason is not a typo. The calls now read `{ comment: 'LGTM' }` / `{ comment: 'Incomplete' }`, the spelling the docs site's Client SDK page already carried.
+  
+  Type-checking the whole fence against the package's own built `dist/index.d.ts` found one more call in the same defect class — a live method given the wrong argument shape. `auth.register` takes `RegisterRequest`, whose schema declares `name: z.string()` as required (and pins the rejection of a request without it); the tour passed only `{ email, password }`, failing `TS2345`. It now passes `name` as well, again matching the Client SDK page. All 35 calls in the fence type-check clean against the built declarations after this change.
+  
+  No behaviour changes and no source change: this is the README, and `files` ships `README.md` inside the tarball, so correcting it moves what `@objectstack/client` publishes — it is the package's npm front page.
+- 29bef09: The README's namespace tour documents the `ai` surface that exists, not the three methods v17 removed.
+  
+  `client.ai.nlq` / `.suggest` / `.insights` were deleted in 17.0.0 (#3718) — and no server in any repo ever mounted `/api/v1/ai/{nlq,suggest,insights}`, so they 404ed for the whole life of the namespace. The README's "AI Services" example still showed all three. Because `files` ships `README.md` inside the tarball, that example is the package's npm front page: a TypeScript reader copying it gets TS2339 on three properties that are not on `client.ai`, and a JavaScript reader gets a runtime `TypeError`.
+  
+  The block now shows the surface the client really exposes — `ai.chat` (with a read of `answer.content` / `answer.usage`), `ai.complete`, `ai.models`, `ai.conversations.list`, `ai.agents.chat`, `ai.pendingActions.list` — every call type-checked against the package's own published `dist/index.d.ts`. It also names the condition a reader will otherwise hit unexplained: the AI routes are served by `service-ai` (a Cloud/EE package), and an environment without it answers 501 rather than 404, with the remedy discovery reports under `services.ai`.
+  
+  No behaviour changes. `patch` rather than no changeset because the README is a published file of this package, so correcting it changes what `@objectstack/client` ships; the docs site's Client SDK page already carried this correction and is untouched here.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [51ae731]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [4771bd9]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f89812e]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+  - @objectstack/spec@17.4.0
+  - @objectstack/core@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

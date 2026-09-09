@@ -753,9 +753,15 @@ export const NavigationItemSchema: z.ZodType<NavigationItem, NavigationItemInput
  * The runtime merges all contributions into the owning app's `navigation`
  * tree by **target group id + priority** (lower priority applied first,
  * mirroring object extender ordering). When `group` is omitted the items are
- * appended at the app's top level. Contributed items keep the normal nav
- * gating fields (`requiresObject` / `requiredPermissions` / `visible`), so an
- * uninstalled capability simply contributes nothing and its slot stays empty.
+ * appended at the app's top level. Naming a group the target app does not
+ * declare is not refused either: the items are appended at the app top level
+ * anyway and a `nav_contribution_group_missing` diagnostic is emitted — by the
+ * runtime at `warn`, and by `os build` and `os validate` at compile time. That
+ * second case is the one an author cannot detect from their own source,
+ * because the target app belongs to another package. Contributed items keep
+ * the normal nav gating fields (`requiresObject` / `requiredPermissions` /
+ * `visible`), so an uninstalled capability simply contributes nothing and its
+ * slot stays empty.
  *
  * @example
  * {

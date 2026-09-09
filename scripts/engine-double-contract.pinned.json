@@ -2657,6 +2657,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/bootstrap-platform-admin-promotion-selection.test.ts",
+      "verb": "update",
+      "pinned": 3
+    },
+    {
       "file": "packages/plugins/plugin-security/src/bootstrap-platform-admin-walled-owner.test.ts",
       "verb": "update",
       "pinned": 1
@@ -3333,6 +3338,11 @@
     },
     {
       "file": "packages/runtime/src/action-governance-scope-divergence.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/app-plugin.seed-locale-producer.test.ts",
       "verb": "findOne",
       "pinned": 1
     },

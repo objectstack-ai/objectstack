@@ -18,6 +18,10 @@ export {
   MULTI_TENANT_UNSUPPORTED_CODE,
   assertSingleTenantPosture,
   assertObjectsNotTenantScoped,
+  // [#16589] Seam 3 — the per-call refusal. Exported on the same reasoning as
+  // the two boot seams above: a consumer asserting this driver's behaviour under
+  // a tenant scope needs the refusal's identity, not its message text.
+  assertCallNotTenantScoped,
   declaresTenantScope,
 } from './memory-tenancy-guard.js';
 export type { TenancyAwareSchema } from './memory-tenancy-guard.js';

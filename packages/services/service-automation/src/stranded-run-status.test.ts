@@ -38,7 +38,10 @@
  *  6. **The recorded `ExecutionStatus` stays `failed`** — the ruling widened
  *     the RESULT vocabulary; the run-row vocabulary is `@objectstack/spec`'s
  *     (`automation/execution.zod.ts`) and is untouched, in the log and in the
- *     durable history row.
+ *     durable history row. [#15223] Still true of a STRANDED run, which is
+ *     recorded `failed`. What changed under this file is a different run: a
+ *     CANCELLED one, whose durable row used to be folded to `failed` on the
+ *     way in and now carries `cancelled`. See case 4's second test.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -334,10 +337,23 @@ describe('#13937 — a re-armed run is not double-runnable', () => {
 
         const stale = await a.restoreConsumedSuspension(runId);
         expect(stale.restored).toBe(false);
-        // A's own log still says `failed` for this run and the durable row
-        // records a cancelled run as `failed` too, so A cannot name the
-        // cancellation — what it CAN say, honestly, is that no snapshot is
-        // held any more. ⛔ Never `RUN_SUSPENDED`, and never `restored: true`.
+        // A's own log still says `failed` for this run, and `getRun` prefers
+        // the ring entry — so A cannot name the cancellation and says,
+        // honestly, that no snapshot is held any more. ⛔ Never
+        // `RUN_SUSPENDED`, and never `restored: true`.
+        //
+        // [#15223] ⚠️ The REASON narrowed here, and the assertion is kept to
+        // pin the half that did not move. It used to hold for two reasons —
+        // A's stale ring entry AND a durable row that recorded every
+        // cancellation as `failed`. The row carries `cancelled` now
+        // (`suspended-run-store.test.ts`, "the persisted terminal status
+        // distinction"), and a replica with NO ring entry for this run answers
+        // `RUN_CANCELLED` from it. What still produces `NO_CONSUMED_SUSPENSION`
+        // is only A's own stale hot copy shadowing the row: the ladder tests
+        // `cancelled` against `getRun` (ring first) while consulting the
+        // durable row for `completed` alone. ⛔ Deliberately NOT changed by
+        // #15223 — triage ruled the ladder honest and the row the defect; this
+        // is the measured residue, recorded so it is not mistaken for a fix.
         expect(stale.refusal).toBe('NO_CONSUMED_SUSPENSION');
         expect(await store.list()).toHaveLength(0);
         expect((await a.resume(runId)).code).toBe('RUN_NOT_FOUND');

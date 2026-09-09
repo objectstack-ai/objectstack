@@ -12,6 +12,7 @@ REST API endpoint schemas for package lifecycle management.
 Base path: /api/v1/packages
 
 **Endpoints**
+```
 POST   /api/v1/packages/install              — Install a package
 POST   /api/v1/packages/upgrade              — Upgrade a package
 POST   /api/v1/packages/resolve-dependencies — Resolve dependencies
@@ -20,6 +21,7 @@ GET    /api/v1/packages                      — List installed packages
 GET    /api/v1/packages/:packageId           — Get package details
 POST   /api/v1/packages/:packageId/rollback  — Rollback a package
 DELETE /api/v1/packages/:packageId           — Uninstall a package
+```
 
 <Callout type="info">
 **Source:** `packages/spec/src/api/package-api.zod.ts`

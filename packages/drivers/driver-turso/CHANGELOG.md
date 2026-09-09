@@ -1,5 +1,393 @@
 # @objectstack/driver-turso
 
+## 17.4.0
+
+### Minor Changes
+
+- 6d4d5d3: `SqlDriver.aggregate` answers `0` — not `null` — for a `sum` over a group whose aggregand is NULL in every row, matching the engine's in-memory aggregate tier and the identity `emptyGroupValueFor` already declares (#15546; maintainer ruling 2026-09-07, option A: a non-empty group whose aggregand is absent and an empty group are the SAME case for `sum`, and the SQL face is the one that moves).
+  
+  SQL `SUM` skips NULLs and answers NULL once it has skipped everything, so on every dialect this driver targets (measured on better-sqlite3, live PostgreSQL 16.13 and live MySQL 8.0.46) a grouped list view with a `sum` summary on a nullable number or currency column rendered a BLANK total for a group whose column was empty in every row — while the same view on a deployment whose query took the engine's in-memory path rendered `0`. Which path answered was decided by a driver capability bit the caller never sees. The fold is part of the driver's aggregate presentation (`foldEmptyAggregateAnswers`): the compiled statement is unchanged (no `COALESCE`), the answer is the JS number `0` on every dialect, and `avg`/`min`/`max` — which have no identity over nothing — still answer `null`. The identity is read from `emptyGroupValueFor` rather than restated, so the two faces cannot drift apart on it again.
+  
+  `@objectstack/driver-turso`: the REMOTE transport's `aggregate` carries the same fold (`RemoteTransport.foldEmptyAggregateAnswers`). `TursoDriver` picks the remote compiler or the local `SqlDriver` one from `url`, so without it the same driver would have answered the all-NULL `sum` as `0` locally and `null` remotely — one query, two answers, decided by a connection string, the seam the shared conformance table exists to close. Measured `null` on the enrolled remote face before the fold.
+  
+  `@objectstack/spec`: the aggregate-vocabulary conformance fixture gains a NULLABLE numeric column. `AggregationRow.amount` (`number | null`) is NULL in every row of the `east` group and in two of the four `west` rows, and `AGGREGATION_CASES` gains the three cases that pin the ruled answer on every enrolled face — `sum(amount)` grouped by region (`east` 0 / `west` 40), its `count(amount)` reachability control (`east` 0 / `west` 2, which is what proves the nulls were stored as nulls), and the ungrouped partial-null control (40). A harness that runs the table MUST declare `amount` as a nullable numeric column and seed its nulls AS nulls, exactly as it already must for `stage`; a `0` written in place of a null turns the cell green for the wrong reason.
+- e9fcd6b: feat(driver-turso)!: the published connection config names its timeout's unit (#15682, ruling B on #14478)
+  
+  <!-- adr-0087: registered turso-config-timeout-to-timeout-ms -->
+  <!-- The protocol-18 conversion above is registered by card 5/6 of the #14478 stack; relative to
+       `main` this combined diff is what adds it, so `registered` is the honest disposition at this
+       level even though `already-registered` was honest per-card. -->
+  
+  **BREAKING** — `TursoConfigSchema`'s `timeout` is renamed to **`timeoutMs`**. The
+  value is unchanged: the same milliseconds, the same `min(0)` bound, the same
+  optionality.
+  
+  `@objectstack/spec`'s own turso contract renamed the same authored key in
+  #15680. This package publishes a parallel schema for the same connection config
+  — the Spec / Studio metadata a host reads to expose Turso configuration UI — so
+  until now the two declarations of one setting disagreed on its spelling. They
+  agree again.
+  
+  The unit was never in the key name, only in the describe prose, while
+  `sync.intervalSeconds` — the same shape, three keys above — already spelled its
+  own. One published config carrying both conventions is what made the bare name
+  dangerous rather than untidy: an author who has just written
+  `intervalSeconds: 30` has no reason to read `timeout: 30` as milliseconds, and
+  nothing in the schema, the type or the parse would have told them otherwise.
+  
+  The old spelling is not dropped in silence. `TursoConfigSchema` is a plain
+  `z.object`, so a bare deletion would have STRIPPED `timeout` and parsed
+  successfully. The key stays declared as a tombstone instead: `tsc` refuses it on
+  anything typed `TursoConfig`, and a value that reaches the parse raises a
+  message naming `timeoutMs` rather than a generic unrecognised-key error.
+  
+  ```diff
+  - TursoConfigSchema.parse({ url: 'libsql://app.turso.io', timeout: 30000 })
+  + TursoConfigSchema.parse({ url: 'libsql://app.turso.io', timeoutMs: 30000 })
+  ```
+  
+  `TursoDriverConfig` — this package's TypeScript constructor option, a separate
+  declaration — keeps its `timeout` spelling and is untouched here.
+- ed5d557: feat(driver-turso)!: `timeout` bounds remote operations; `localPath` and `wasm` leave the published config schema (#16024, ADR-0049 enforce-or-remove)
+  
+  <!-- adr-0087: registered driver-turso-config-local-path-wasm-retired -->
+  
+  Three keys on this package's published Turso configuration were declared with a
+  describe promising behaviour that no code delivered — ADR-0049's
+  declared-but-unenforced shape, sitting beside `concurrency`, which was declared
+  the same way and IS forwarded. The maintainer ruled per key: forward `timeout`;
+  remove `localPath` and `wasm`. Not a rename for any of the three — an inert key
+  with a better name is what ADR-0049 exists to prevent.
+  
+  **`TursoDriverConfig.timeout` now does what its docblock has always said.** It
+  never reached `@libsql/client`. It still does not reach that client's own
+  `Config.timeout`, and deliberately: measured against `@libsql/client@0.17.4`,
+  that option is the busy timeout for lock contention on local `file:` databases
+  ("remote clients ignore it"), so forwarding to it would have left remote mode
+  exactly as inert as before. Instead:
+  
+  - **Remote mode over HTTP** (`libsql://`, `https://`, `http://`): the driver
+    hands the client a `fetch` that aborts every request once the window elapses,
+    and the operation fails as `TIMEOUT` / 504 (the ADR-0112 envelope) instead of
+    hanging on a stalled endpoint. `wss://` / `ws://` URLs ride the WebSocket
+    transport, which exposes no such seam in this client version — they are not
+    bounded, and the docblock says so.
+  - **Replica mode**: `sync()` — the one remote operation on that arm — rejects
+    with the same envelope when it has not completed within the window. The native
+    binding's sync is not cancelled, only no longer awaited.
+  - `0` or unset means no bound, as the published schema already documented.
+  
+  A datasource authors this as `config.timeoutMs`; the datasource seam maps it
+  onto the driver's `timeout`, so a `timeoutMs` that used to be silently dropped
+  now bounds the connection it describes.
+  
+  **BREAKING** — `TursoConfigSchema` refuses `localPath` and `wasm`. Neither was
+  read by any code: the replica arm names its local file via `url` (forwarding
+  `localPath` would have created a second way to say the same thing), and nothing
+  selects a WASM build of libSQL (forwarding `wasm` would have meant building
+  one). The shape is a plain `z.object`, so a bare deletion would have stripped
+  both keys in silence; they stay declared as `z.never()` tombstones instead —
+  `tsc` refuses them on anything typed `TursoConfig`, and a value reaching the
+  parse raises the prescription below rather than a generic unrecognised-key
+  error. The same treatment this package's `timeout` → `timeoutMs` rename took.
+  
+  ## Migration
+  
+  | Wrote | Write instead |
+  | --- | --- |
+  | `localPath: './replica.db'` beside `url: 'file:./replica.db'` | delete `localPath` — `url` names the replica's local file, `syncUrl` the remote primary; a path that differed from `url` belongs in `url` |
+  | `wasm: true` | delete `wasm` — no WASM build was ever selected; a runtime that cannot load native bindings uses the remote arm (`libsql://` / `https://`), which needs none |
+  
+  `@objectstack/spec`'s own turso contract never declared either key, so no stack
+  source or stored datasource row that passed the spec door can carry them; the
+  ADR-0087 ledger records the removal as the D3 entry
+  `driver-turso-config-local-path-wasm-retired` (no D2 conversion — there is no
+  lossless rewrite for a value that never did anything), which is the
+  `@objectstack/spec` `minor` here — the entry is a new member of the published migration
+  registry (`packages/spec/src/migrations/registry.ts`), an additive widening of that package's
+  surface, and the act sets the floor.
+- 7862fb7: `TursoDriver.initObjects` now declares every key `SqlDriver.initObjects` declares — `tenancy`, `indexes` and `lifecycle` — so a caller of this package can spell them in a **fresh object literal** instead of hoisting the object to a variable to get past the type.
+  
+  `TursoDriver` OVERRIDES `initObjects`, and an override does not inherit the base's parameter type. Its own literal read `Array<{ name: string; fields?: Record<string, any> }>`, which is what every consumer of `@objectstack/driver-turso` saw — so when #4311 declared `tenancy` on the base in August, that fix did not exist from outside this package, and stayed invisible for five weeks with nothing red anywhere. #16570's `indexes` fix would have escaped by the identical route.
+  
+  The type face was the only thing refusing the keys. The remote arm forwards the whole object through as `schema`, and `registerRemoteFieldMetadata` reads `tenancy` straight back off it, so the runtime carried both keys the entire time. `tenancy.enabled: false` is the key that decides whether a UNIQUE partitions globally or per organization — an author who hit the refusal and dropped it silently got the other answer.
+  
+  - `registerRemoteFieldMetadata(obj)` declares `tenancy?: any` and reads it directly; its `(obj as any).tenancy` cast is gone.
+  - The boundary is intact: a misspelling on a fresh literal is still `TS2353`, pinned in `src/turso-driver-16711-init-objects-param.test.ts`.
+  - `scripts/check-object-def-param-keys.mjs` now fails the build if this override — or any other subclass override in the workspace — declares fewer keys than the method it shadows, or erases the base's shape with an opaque type or an index signature.
+- a646120: The remote transport compiles a text operator over a declared numeric or boolean column to the contract's declared answer, in step with the local transport.
+  
+  `RemoteTransport.buildWhereSQL` compiles filters independently of `SqlDriver` and keeps no schema, so a text operator over a `Field.number` used to compile `"col" GLOB ?` and coerce the REAL in the storage class's spelling (`5` as `'5.0'`). `TursoDriver` now hands the transport its declared-type rule (`setNonTextColumnResolver`, the same shape as the temporal `setFilterColumnSql` rule), answered from the registries `registerRemoteFieldMetadata` already fills at schema sync — so a positive text operator over such a column compiles to `1 = 0` and `$notContains` to `1 = 1` on BOTH transports (`FILTER_TEXT_CASES`' `score` rows, maintainer ruling 2026-09-05), instead of a dialect accident. A transport nobody handed the rule to compiles exactly as before, and every comparand refusal still runs ahead of the constant.
+- 5071310: fix(driver-turso)!: `timeout` beside a pre-configured `client` in remote mode is refused at construction instead of being accepted and never delivered (ADR-0049 enforce-or-remove)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing performed at the driver constructor: no key, spec symbol, Zod schema, object definition or stored representation is added, removed or renamed — `TursoDriverConfig.timeout` and `TursoDriverConfig.client` keep their names and types, and the published `turso` config schema is untouched (it never declared `client`, which is a live object rather than authorable metadata). What moves is which CONFIGURATIONS `new TursoDriver()` accepts, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The refusal itself names both keys, the mode and both ways out, and which of the two an author wants is authoring intent no ledger line can decide. -->
+  
+  `TursoDriverConfig.timeout` bounds remote operations over HTTP by installing a `fetch` that aborts at the window — and it installs it in exactly one place, while the driver is CREATING its `@libsql/client`. A pre-configured `TursoDriverConfig.client` arrives with its transport already built, and both remote sites that consume it (`connect()` and the lazy connect factory the transport self-heals through) skip the builder entirely. So on that one composition the window reached nothing: the driver constructed, connected, and ran every request unbounded, while `timeout`'s contract promised "every request the client's HTTP transport makes" and `client`'s said nothing about the key ceasing to apply.
+  
+  **BREAKING** accept-set narrowing on a published driver option, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). **The constructor now refuses a configuration it accepted before**: a non-zero `timeout` beside a supplied `client` in remote mode throws at `new TursoDriver()` — ahead of the Knex base and of any client, so no half-built driver exists — with the ADR-0112 envelope `code: 'VALIDATION_ERROR'`, `status: 400`, and a message that names both keys, the window, the mode and both ways out:
+  
+  ```
+  `TursoDriverConfig.timeout` (30000 ms) is set beside `TursoDriverConfig.client` in
+  remote mode, and on that pair it bounds nothing: the window is the `fetch` this
+  driver hands @libsql/client while CREATING the remote client, and a pre-configured
+  client is already built — its transport is not the driver's to replace … Either drop
+  `client` and let the driver create the remote client, where every request IS bounded
+  and a stalled endpoint fails as TIMEOUT / 504, or keep `client` and omit `timeout`,
+  building the bound into that client yourself when you call `createClient({ fetch })`.
+  Replica mode is unaffected: there `sync()` is bounded whatever client is in use.
+  ```
+  
+  **Who can reach this, measured on this tree.** The datasource seam cannot: `buildTursoDriverConfig` emits nine keys (`url`, `authToken`, `encryptionKey`, `concurrency`, `syncUrl`, `sync`, `timeout`, `mode`, `schemaMode`) and `client` is not among them — it is a live object, not authorable metadata, and the published `turso` schema documents its absence deliberately. So no datasource, environment variable or `sys_metadata` row can produce this pair; only code calling `new TursoDriver(...)` / `createTursoDriver(...)` directly. Across the 138 construction sites in this repository, the only one pairing the two keys outside the new pin file is a replica-arm test fixture, which stays accepted. Whether any out-of-repo host composes them is NOT measured and is not claimed to be zero.
+  
+  **What stays accepted — the refusal is no wider than the gap**, pinned by controls:
+  
+  - a supplied `client` with no `timeout`, and an explicit `client: undefined`, which the `??` at both sites treats as absent;
+  - `timeout` with no `client` — the client the driver builds IS bounded;
+  - `timeout: 0` beside a client, the documented "no bound", which asks for nothing;
+  - the whole REPLICA arm, where `sync()` is bounded by the driver around the awaited promise whatever client is in use, so the key is not inert there and the pair is still accepted.
+  
+  **What is deliberately NOT done**: wrapping or re-creating the caller's client so the window rides after all. A client handed in for custom caching, connection pooling or testing is the caller's object, and replacing its transport because `timeout` is set would discard the configuration it was built to carry, behind the author's back — the same reason a `wss://` url is not silently re-routed over HTTP.
+  
+  **What an affected author does.** The refusal text says which two: drop `client` and let the driver create the remote client, which bounds every request; or keep `client` and drop `timeout`, building the bound into that client where it is created, since `@libsql/client` reads its `fetch` at creation. Which of the two is wanted is authoring intent, and the choice is made in place at the driver config.
+- 2200f8e: feat(driver-turso): the `update()` override publishes its honest type — `Record<string, unknown> | null`, not `any` (#14438)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, shipped as `minor` under the launch-window convention. `TursoDriver` overrides `update()` rather than inheriting it, and the override was written out with its own explicit `Promise<any>` — so this package's emitted `.d.ts` re-declared the door as `any` on its own and would not have picked up the `@objectstack/driver-sql` narrowing. Both of its branches already answered the contract's type: the local branch forwards to `SqlDriver.update()` (narrowed alongside, #14438) and the remote branch passes `RemoteTransport.update()`'s `Record<string, unknown> | null` (#14428) through the generic `formatRemoteRow`. The override now declares what it answers. A caller that read fields off the result through the `any` now narrows the `null` arm first. No runtime behaviour changes.
+  
+  <!-- adr-0087: not-required (type-surface-only packages/drivers/driver-turso/src/turso-driver.ts#update) A published driver method's declared return moves off an explicit `any` onto the contract's own shape; no metadata key moves, `packages/spec` is untouched, and the obligation is a TypeScript narrowing at the consumer's own call site, delivered by the compiler. -->
+- 0145680: fix(driver-turso)!: `timeout` beside an UPPERCASE `WSS://` / `WS://` url in forced remote mode is refused at construction, closing the last corner of the same gap (ADR-0049 enforce-or-remove)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing performed at the driver constructor: no key, spec symbol, Zod schema, object definition or stored representation is added, removed or renamed — `TursoDriverConfig.timeout`, `url` and `mode` keep their names and types, and `TursoConfigSchema` is untouched. What moves is which CONFIGURATIONS `new TursoDriver()` accepts — one predicate now compares the url's scheme case-insensitively, exactly as `@libsql/client` itself does before routing — so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The refusal is the one the lowercase spelling already produces, naming the key, the scheme it met and both ways out; which of the two an author wants is authoring intent no ledger line can decide. -->
+  
+  The refusal that closed `timeout` beside a `wss://` / `ws://` url matched the two schemes **literally**, so one composition still constructed with a window that reaches nothing:
+  
+  ```ts
+  new TursoDriver({ url: 'WSS://db.example.turso.io', mode: 'remote', timeout: 30000 })
+  ```
+  
+  Reading `@libsql/client`'s routing switch alone says that cannot happen — the switch really does match the literal lowercase (`lib-esm/node.js`: `config.scheme === "wss" || config.scheme === "ws"`). But the switch never sees the url as the author spelled it. The node entry is `_createClient(expandConfig(config, true))`, and `expandConfig` has already lowercased the scheme by then — `@libsql/core@0.17.4`, `lib-esm/config.js`: `const originalUriScheme = uri.scheme.toLowerCase();`. Executed against that version: `expandConfig({ url: 'WSS://db.example.turso.io' }, true).scheme === 'wss'`, and `'Ws://127.0.0.1:8080'` → `'ws'`. So an uppercase `WSS://` url does reach the WebSocket client, which takes no `fetch` and no timeout option of its own — the driver constructed, connected, and ran unbounded.
+  
+  **BREAKING** accept-set narrowing on a published driver option, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). **The constructor now refuses a configuration it accepted before**: a non-zero `timeout` beside an uppercase-or-mixed-case `wss://` / `ws://` `url` in remote mode throws at `new TursoDriver()` — ahead of the Knex base and of any client, so no half-built driver exists — with the ADR-0112 envelope `code: 'VALIDATION_ERROR'`, `status: 400`, and **the same message the lowercase spelling already produced**, echoing the scheme in the caller's own casing so an operator can grep their config for what they actually typed.
+  
+  **The explicit `mode: 'remote'` is load-bearing.** Without it an uppercase url falls through `TursoDriver.detectMode` to `'local'` — behaviour that predates the refusal entirely and is **unchanged here**. Only the window predicate folds case; the mode detector is deliberately left case-sensitive, and the code says so at the predicate, because folding it there too would delete that fall-through: a mode-detection change on a published driver, which must be argued on its own rather than slipped in as a tidy-up.
+  
+  **What stays accepted — the refusal is no wider than the gap**, pinned by controls:
+  
+  - an uppercase url with **no** explicit `mode` still detects as `'local'`, with or without a `timeout`;
+  - the uppercase WebSocket url with no `timeout`, or with `timeout: 0` (the documented "no bound");
+  - `https://` / `HTTPS://` / `LIBSQL://` / `HTTP://` remote urls **with** a window — the HTTP arm is bounded, so every casing of every HTTP-side scheme keeps the key;
+  - the existing lowercase refusals, unchanged in code, message and envelope.
+  
+  **What an affected author does.** Unchanged from the lowercase case, and the refusal text says it: keep the window and spell the url `libsql://` or `https://` (bounded — the client resolves `libsql://` to HTTPS), or drop the window and run the WebSocket remote unbounded, as it always did.
+  
+  Blast radius, measured on this tree: no in-repo deployment, example, test or doc pairs an uppercase remote scheme with a window; the host boot path (`OS_DATABASE_URL`) forwards only `url` and `authToken`, and the datasource seam's `buildTursoDriverConfig` normalises no casing either — so the pair is reachable in principle from both and is not observed in this repository. Whether any out-of-repo deployment spells a Turso url with an uppercase scheme is NOT measured and is not claimed to be zero.
+- bc0ac1d: fix(driver-turso)!: `timeout` beside a `wss://` / `ws://` url is refused at construction instead of being accepted and never delivered (ADR-0049 enforce-or-remove)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing performed at the driver constructor: no key, spec symbol, Zod schema, object definition or stored representation is added, removed or renamed — `TursoDriverConfig.timeout` and `url` keep their names and types, and `TursoConfigSchema` is untouched. What moves is which CONFIGURATIONS `new TursoDriver()` accepts, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The refusal itself names the key, the scheme and both ways out, and which of the two an author wants (drop the window, or move the url to HTTPS) is authoring intent no ledger line can decide. -->
+  
+  `TursoDriverConfig.timeout` bounds remote operations over HTTP (`libsql://`, `https://`, `http://` — the driver hands `@libsql/client` a `fetch` that aborts at the window) and bounds `sync()` on the replica arm. A remote url spelled `wss://` / `ws://` rides the client's WebSocket transport, which — measured against `@libsql/client@0.17.4` / `@libsql/hrana-client@0.10.0` — takes no `fetch` and no timeout option of its own, so on that one scheme the window reached nothing: the configuration constructed, connected, and ran unbounded, with the gap stated only in a docblock.
+  
+  **BREAKING** accept-set narrowing on a published driver option, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). **The constructor now refuses a configuration it accepted before**: a non-zero `timeout` beside a `wss://` or `ws://` `url` in remote mode throws at `new TursoDriver()` — ahead of the Knex base and of any client, so no half-built driver exists — with the ADR-0112 envelope `code: 'VALIDATION_ERROR'`, `status: 400`, and a message that names the key, the scheme it met, and both ways out:
+  
+  ```
+  `TursoDriverConfig.timeout` (30000 ms) is set beside a `wss://` url, and on that
+  scheme it bounds nothing: a `wss://` url rides @libsql/client's WebSocket
+  transport, which takes no fetch and no timeout option … Either omit `timeout`
+  and run this remote unbounded, or keep it and spell the url `libsql://` or
+  `https://` — the client resolves `libsql://` to HTTPS — where every request IS
+  bounded and a stalled endpoint fails as TIMEOUT / 504.
+  ```
+  
+  A datasource authors the window as `config.timeoutMs`; the datasource seam maps it onto the driver's `timeout`, so a `timeoutMs` beside a WebSocket url now fails the datasource's connect by name instead of quietly running unbounded. Both loaders (`@objectstack/runtime`'s host factory and the open-core datasource factory) reach this refusal through the same constructor.
+  
+  **What stays accepted — the refusal is no wider than the gap**, pinned by controls:
+  
+  - a `wss://` / `ws://` url with no `timeout`, or with `timeout: 0` (the documented "no bound");
+  - `libsql://`, `https://` and `http://` urls WITH a window — the HTTP arm is bounded;
+  - the replica arm with any url scheme — `sync()` is bounded there, so the key is not inert.
+  
+  **What is deliberately NOT done**: routing a `wss://` url over HTTP because `timeout` is set. That would change the wire transport behind the author's back and is a contract decision, not a driver's; the refusal changes no wire behaviour.
+  
+  **What an affected author does.** The refusal text itself says which two: keep the window and spell the url as `libsql://` or `https://` (bounded — `libsql://` resolves to HTTPS), or drop the window and run the WebSocket remote unbounded, as it always did. Which of the two is wanted is authoring intent, and the choice is made at the datasource or driver config, in place.
+  
+  Blast radius, measured on this tree: no in-repo deployment, example or doc pairs a WebSocket url with a window, and the host boot path (`OS_DATABASE_URL`) forwards only `url` and `authToken`, so an env-configured deployment cannot carry `timeout` at all.
+
+### Patch Changes
+
+- d5d8d50: Correct the documented reason for rejecting `CAST(col AS BLOB) LIKE ?` as a portable case-exact construct.
+  
+  Four headers stated, as a universal fact about SQLite, that the construct "was measured to return NOTHING". That is not a property of SQLite: whether `LIKE` is false for a BLOB operand is fixed when SQLite is compiled, by `SQLITE_LIKE_DOESNT_MATCH_BLOBS`, and the two SQLite builds this project ships disagree about it. Measured over the shared `FILTER_TEXT_ROWS` fixture, `{ name: { $contains: 'acme' } }` compiled to that construct returns `[]` on better-sqlite3 13.0.3 (SQLite 3.53.4, flag compiled in) and `['1','2']` on sql.js 1.14.1 (SQLite 3.49.1, flag absent) — the latter being exactly the ASCII case-folding defect the construct was being considered to avoid.
+  
+  No behaviour changes and no conclusion changes: all four sites still reject the construct and still choose `GLOB`. The rejection is now stated in a form that does not depend on any particular return value — a construct whose meaning is decided by an upstream compile flag cannot carry a read scope, because it means two different things on the two builds shipped here. Two supporting readings are recorded alongside it: `typeof CAST(name AS BLOB)` is `'blob'` on both builds, so the CAST is not the part that differs, and `GLOB` answers identically on both.
+  
+  Documentation only. `@objectstack/spec` and `@objectstack/driver-turso` ship the corrected text in their published type declarations (and `spec` also publishes the corrected source file directly, via its `src/**/*.zod.ts` entry); for `@objectstack/driver-sql` and `@objectstack/service-analytics` the change reaches published output only through sourcemaps.
+- 001a83b: `SqlDriver.execute()` — the raw-SQL path the analytics compilers run on — now declares a backend refusal the way the typed read exits (`find` / `count` / `aggregate`) have since #8931: `code: DATABASE_ERROR`, `status: 500`, a composed message that carries none of the dialect's words, and the dialect error whole under a non-enumerable `cause`. `TursoDriver` in remote mode — the one transport that hands the engine's text back with no statement in front of it — declares through the same terminal, so both transports leave the driver with one envelope. **Graded `patch`** on AGENTS.md's changeset rule ("A bug fix in a released package takes a `patch` changeset"; breaking is what removes or renames something an author can write — a spec key, an export, a config field — and nothing here does: `execute()` stays `Promise` of `any`, and `code` / `status` were untyped before) and on the precedent of the identical change on the typed read exits, #8931 via PR #9273, which shipped `@objectstack/driver-sql: patch`.
+  
+  **The defect this closes (#16019, folding in the envelope half of #16028).** `no such function: translate` — what SQLite answers when a compiler emits a function the dialect lacks — left `execute()` as knex's own error: `code: 'SQLITE_ERROR'`, no `status`, message `<statement> - no such function: translate`. Undeclared, it fell to the HTTP doors' phrasing heuristic (`looksLikeInternalErrorLeak`), which recognises `no such column:` and not `no such function:`, so whether the caller saw the engine's text depended on which limb the message happened to match: through knex it was withheld by accident (the statement prefix starts with `select`), through the Turso remote transport it was withheld by a different accident (`SQLITE_ERROR:` in front), and a bare `Error('no such function: translate')` reached the body verbatim. Maintainer ruling 2026-09-06 (decision batch #57, option 3): the substring list is not grown; the driver declares its own fault and the doors classify on the declaration. The heuristic stays as the last-resort fallback for an error that arrives with no declaration.
+  
+  **What moves on the wire — three doors, each because a declared fault is relayed where an undeclared one was re-labelled.**
+  
+  - `POST /api/v1/analytics/dataset/query`: a driver fault on the raw path answers `500 {"code":"DATABASE_ERROR","error":"Internal server error"}` — the declared-fault relay, the same answer the `/data` door and `/analytics/query` already give a declared 5xx — where it was `500 {"code":"ANALYTICS_QUERY_FAILED","error":"Internal server error"}` when the phrasing heuristic happened to fire and the raw engine text when it did not. Status unchanged; the code is now the producer's, exactly as the typed read exits' faults have answered at this door since PR #9273.
+  - The same door, a dataset over a backing table that is NOT present, on the native-SQL strategy (the strategy every deployment whose data engine exposes `execute()` runs): `500 DATABASE_ERROR` where it was `200 {"rows":[],"fields":[],"totals":[]}` plus a `warn`. `queryDataset`'s missing-source degrade sits behind its declared-envelope re-throw (#5717 defence B: a declared envelope is re-thrown untouched, whatever it says), so a driver-raised missing table no longer reaches it — the answer the ObjectQL-aggregate strategy has given since #9273, now on both strategies. The degrade still applies to an undeclared producer (an embedder's own `executeRawSql`, the framework's not-registered signals).
+  - `POST /api/v1/packages/publish` and `DELETE /api/v1/packages/:id`: a raw-exec driver fault under `sys_packages` answers `500 {"code":"DATABASE_ERROR"}` with the composed sentence as its message — `PackageService.publish` / `delete` re-throw a throw that declares an HTTP answer (`declaresHttpAnswer`, whose docblock already says a declared 5xx is re-thrown too) and the door's `sendThrownError` relays it — where it was `500 PACKAGE_PUBLISH_FAILED` / `500 PACKAGE_DELETE_FAILED` from the swallowing branch. Same status band, no dialect text on the wire either way; the ledgered `code` on those two doors moves.
+  
+  **What a consumer of `execute()` sees.** `error.message` is the composed sentence; `error.code` is `DATABASE_ERROR` where it was the backend's errno; `error.status` is `500` where it was absent. The backend's error object — its errno, its diagnostic, and on the dialects that inline them the bound literals — is on `error.cause` (non-enumerable, so it does not serialise), and the driver writes it, with the statement, to its warn log before composing. Cause-following predicates are unaffected: `isMissingTableError(err, readObject)` still classifies a missing table raised on this path. An error that already declares a `status` is passed through untouched, never double-wrapped. A caller that read the dialect's text off `error.message` (a migration preflight recording it as its `detail`, say) now reads the composed sentence there and finds the dialect text on `cause` and in the log; the in-repo sites of that class are tracked as #16657 (read `cause` there).
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [54bb2f1]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [001a83b]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [45cfa1b]
+- Updated dependencies [7862fb7]
+- Updated dependencies [1ca95df]
+- Updated dependencies [a646120]
+- Updated dependencies [2200f8e]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [8f2ecb3]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [51ae731]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [61821e5]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [4771bd9]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [33e939f]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [b72226f]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f89812e]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+- Updated dependencies [78bc4ad]
+  - @objectstack/spec@17.4.0
+  - @objectstack/driver-sql@17.4.0
+  - @objectstack/core@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

@@ -215,11 +215,21 @@ is made when the seeds load rather than when your config is assembled — so
 switching markets does not mean rebuilding, and the axis is evaluated in the one
 layer that could ever reconcile rows already written for another market.
 
+<Callout type="info">
+  **Where the loading locale comes from.** On the normal boot path your stack
+  supplies it: the runtime reads your app's `i18n.defaultLocale` and passes it to
+  the seed loader, so declaring a locale on a dataset takes effect with no extra
+  wiring. Declare no `i18n` block and no locale is sent at all — which is the
+  unrestricted setting, not a filter.
+</Callout>
+
 <Callout type="warn">
   The axis is evaluated against the seed loader's `config.locale`. A host that
-  supplies no locale gets **every** dataset, and the loader warns naming each
-  locale-scoped dataset it let through — so a scope that is not taking effect is
-  one log line to diagnose rather than a silent no-op.
+  supplies no locale — an app with no declared `i18n.defaultLocale`, or an
+  embedding host that builds its own seed-load request — gets **every** dataset,
+  and the loader warns naming each locale-scoped dataset it let through, so a
+  scope that is not taking effect is one log line to diagnose rather than a
+  silent no-op.
 </Callout>
 
 ---

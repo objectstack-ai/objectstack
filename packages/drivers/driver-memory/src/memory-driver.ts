@@ -13,7 +13,11 @@ import { hasDanglingLikeEscape, likePatternToRegexSource } from '@objectstack/sp
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
-import { assertSingleTenantPosture, assertObjectsNotTenantScoped } from './memory-tenancy-guard.js';
+import {
+  assertSingleTenantPosture,
+  assertObjectsNotTenantScoped,
+  assertCallNotTenantScoped,
+} from './memory-tenancy-guard.js';
 import { getValueByPath } from './memory-matcher.js';
 import {
   assertFilterConditionShape,
@@ -562,6 +566,9 @@ export class InMemoryDriver implements IDataDriver {
    * result was unchecked. Same repair shape as `update`/`upsert` (#13878).
    */
   async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // store access or delegation, so a refusal leaves no partial effect.
+    assertCallNotTenantScoped('find', object, options);
     this.logger.debug('Find operation', { object, query });
     
     const table = this.getTable(object);
@@ -644,6 +651,9 @@ export class InMemoryDriver implements IDataDriver {
    * to narrow. The same shape `update()` was repaired with (#13878).
    */
   async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null> {
+    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // store access or delegation, so a refusal leaves no partial effect.
+    assertCallNotTenantScoped('findOne', object, options);
     this.logger.debug('FindOne operation', { object, query });
     
     const results = await this.find(object, { ...query, limit: 1 }, options);
@@ -669,6 +679,9 @@ export class InMemoryDriver implements IDataDriver {
   // breaking change, and method parameters compare bivariantly against the
   // contract's `Record<string, unknown>`, so the declaration is satisfied.
   async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
+    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // store access or delegation, so a refusal leaves no partial effect.
+    assertCallNotTenantScoped('create', object, options);
     this.logger.debug('Create operation', { object, hasData: !!data });
     
     const table = this.getTable(object);
@@ -701,6 +714,9 @@ export class InMemoryDriver implements IDataDriver {
    * `Promise<any>` and no caller was ever asked to narrow.
    */
   async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
+    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // store access or delegation, so a refusal leaves no partial effect.
+    assertCallNotTenantScoped('update', object, options);
     this.logger.debug('Update operation', { object, id });
     
     const table = this.getTable(object);
@@ -733,6 +749,9 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
+    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // store access or delegation, so a refusal leaves no partial effect.
+    assertCallNotTenantScoped('upsert', object, options);
     this.logger.debug('Upsert operation', { object, conflictKeys });
     
     const table = this.getTable(object);
@@ -763,6 +782,9 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async delete(object: string, id: string | number, options?: DriverOptions) {
+    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // store access or delegation, so a refusal leaves no partial effect.
+    assertCallNotTenantScoped('delete', object, options);
     this.logger.debug('Delete operation', { object, id });
     
     const table = this.getTable(object);
@@ -783,6 +805,9 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async count(object: string, query?: DriverQuery, options?: DriverOptions) {
+    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // store access or delegation, so a refusal leaves no partial effect.
+    assertCallNotTenantScoped('count', object, options);
     let records = this.getTable(object);
     if (query?.where) {
         const mongoQuery = this.convertToMongoQuery(query.where, object);
@@ -801,6 +826,9 @@ export class InMemoryDriver implements IDataDriver {
   // ===================================
 
   async bulkCreate(object: string, dataArray: Record<string, any>[], options?: DriverOptions): Promise<Record<string, any>[]> {
+    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // store access or delegation, so a refusal leaves no partial effect.
+    assertCallNotTenantScoped('bulkCreate', object, options);
     this.logger.debug('BulkCreate operation', { object, count: dataArray.length });
 
     const table = this.getTable(object);
@@ -845,6 +873,9 @@ export class InMemoryDriver implements IDataDriver {
   }
   
   async updateMany(object: string, query: DriverQuery, data: Record<string, any>, options?: DriverOptions): Promise<number> {
+    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // store access or delegation, so a refusal leaves no partial effect.
+    assertCallNotTenantScoped('updateMany', object, options);
       this.logger.debug('UpdateMany operation', { object, query });
       
       const table = this.getTable(object);
@@ -887,6 +918,9 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async deleteMany(object: string, query: DriverQuery, options?: DriverOptions): Promise<number> {
+    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // store access or delegation, so a refusal leaves no partial effect.
+    assertCallNotTenantScoped('deleteMany', object, options);
       this.logger.debug('DeleteMany operation', { object, query });
       
       const table = this.getTable(object);
@@ -947,6 +981,9 @@ export class InMemoryDriver implements IDataDriver {
    * follows that established convention rather than inventing a second one.
    */
   async bulkUpdate(object: string, updates: { id: string | number, data: Record<string, any> }[], options?: DriverOptions) {
+    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // store access or delegation, so a refusal leaves no partial effect.
+    assertCallNotTenantScoped('bulkUpdate', object, options);
     this.logger.debug('BulkUpdate operation', { object, count: updates.length });
 
     const table = this.getTable(object);
@@ -1176,6 +1213,9 @@ export class InMemoryDriver implements IDataDriver {
    * ]);
    */
   async aggregate(object: string, pipeline: Record<string, any>[] | DriverQuery, options?: DriverOptions): Promise<any[]> {
+    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // store access or delegation, so a refusal leaves no partial effect.
+    assertCallNotTenantScoped('aggregate', object, options);
     // ObjectQL's engine calls driver.aggregate(object, AST) with the SAME
     // DriverQuery shape find() consumes ({ where, groupBy, aggregations }) — not
     // a MongoDB pipeline. Passing that object into Mingo's Aggregator crashed
@@ -1902,6 +1942,9 @@ export class InMemoryDriver implements IDataDriver {
   // ===================================
 
   async syncSchema(object: string, schema: any, options?: DriverOptions) {
+    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // store access or delegation, so a refusal leaves no partial effect.
+    assertCallNotTenantScoped('syncSchema', object, options);
     // #6915 — metadata-level half of the tenancy guard: an object asking for
     // row-level isolation cannot get it here, so the table is never allocated.
     assertObjectsNotTenantScoped([{ object, schema }]);
@@ -1949,6 +1992,9 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async dropTable(object: string, options?: DriverOptions) {
+    // [#16589] Seam 3: refuse a call the engine scoped — FIRST, before any
+    // store access or delegation, so a refusal leaves no partial effect.
+    assertCallNotTenantScoped('dropTable', object, options);
     if (this.db[object]) {
       const recordCount = this.db[object].length;
       delete this.db[object];
