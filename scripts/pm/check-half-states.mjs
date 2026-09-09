@@ -9736,6 +9736,294 @@ export function h50ThreadReadMismatch(issue, commentRows, sinceMs = Date.parse(T
 }
 
 // ---------------------------------------------------------------------------
+// H52 — an `os-dev-report` whose `open_questions` is NOT empty, on a card that
+// carries no `needs-user-decision` (#16662).
+//
+// ## The defect this row reads
+//
+// The dev report contract carries an `open_questions` array, and a dev that
+// hits a question only the maintainer can answer writes it there — with
+// options, costs and a recommendation, exactly as the contract asks. NOTHING
+// swept that array. The decision inbox is the `needs-user-decision` LABEL, and
+// a question inside a report comment's JSON body carries no label, so the
+// question was filed, well-formed and unreachable: not in the inbox, not in any
+// candidate query, not in any staleness alert. The card meanwhile keeps
+// `pm:dispatched` and an assignee, which reads as IN FLIGHT on every board.
+//
+// ⚠️ Three success signals and a wrong answer — the dev did its job, the report
+// validated, the seat accepted it, and a decision the maintainer was owed never
+// arrived. Both filed instances were found by a human noticing something and
+// NEITHER by mechanism: one during a board sweep run for other reasons, one
+// because an inbox count changed between two check-ins. The longest sat 17 days
+// on a P0 whose deployment had already served 503 for a day, and the inventory
+// it hid in is the lane's own in-flight reading — a card stuck there looks
+// exactly like a card being worked on.
+//
+// ⛔ NOT a change to the report contract, and the filing card is explicit about
+// it: the array is the right place for a dev to put the question; what was
+// missing is the READER. This row is the reader, and it writes nothing.
+//
+// ## What the row asserts, precisely
+//
+// For the NEWEST `os-dev-report` comment on an open `pm:dispatched` card's
+// COMPLETE thread: its `open_questions` array is empty, or the card carries
+// `needs-user-decision`. A non-empty array on a card with no such label is a
+// row naming the report, its stamp, how many questions it holds and the first
+// of them.
+//
+// The NEWEST report and not any report, because a dev's newest report is its
+// current statement of what is open: a later round that closes a question out
+// writes `open_questions: []`, and that empty array is the record that stands
+// this row down. ⚠️ The known and deliberate cost of that choice is stated
+// rather than hidden: a question ANSWERED in the thread — by a ruling comment,
+// a chat reply recorded on the card — with no newer report and no label still
+// reads as open here. That is an over-report, and it is the direction this row
+// chooses on purpose, because the two repairs it asks for are both repairs the
+// board needs anyway: route the question if it is open, and record the answer
+// in a report or on the label if it is not. ⛔ The opposite direction — teach
+// the row to recognise a ruling — was refused: `isTriageRulingComment`'s anchor
+// set is H33's population, the live answer that motivated this row (「Ruling
+// recorded — the three residuals …」) matches none of its five anchors, and
+// widening them would be a change to H33 rather than an addition beside it.
+//
+// ## Population — measured, not assumed
+//
+// The first census (below) is what set it. The row was first written over open
+// `pm:dispatched` cards, on the reasoning that a report lands on a card in
+// flight; the census then read every open card on the board and found 62
+// carriers holding 120 questions, of which SEVEN carry `pm:dispatched`. The
+// other 55 had moved on: 15 `pm:awaiting-maintainer`, 14 `pm:blocked`, 12
+// `pm:on-hold`, 10 `pm:queue`. ⇒ A report's questions OUTLIVE the dispatch
+// that produced them, which is the defect's own shape — the card leaves
+// `pm:dispatched` and the question stays behind. A row scoped to the dispatch
+// would have converted 11% of an invisible state into a listable one and
+// reported the rest as clean.
+//
+//   IN        an OPEN card this sweep listed (`SEEN_LABEL_PAGES`) whose comment
+//             thread is ALREADY IN HAND and COMPLETE. 59 of the census's 62
+//             carriers are reachable from those label pages.
+//   OUT       a CLOSED card. ⚠️ The sharpest bound on the row, and the filing
+//             thread measured it: a ruled card's residual questions were
+//             carried by a label alone, the card closed, and the label went
+//             with it — a closed card is in no open query, so it is harder to
+//             find than the 17-day one. The standing patrol cannot pay for the
+//             closed archive four times a day; the first census paid for it
+//             once (2,100 closed `pm:dispatched` cards: 243 carriers, 415
+//             questions), and the rule this row ships beside is what keeps a
+//             question alive past its card — residual questions get their OWN.
+//   OUT       an open card no label page lists: the census found 3 (two
+//             `tracking` cards and one `repo:objectui` card), and widening the
+//             sweep's input set is a change to every row above rather than an
+//             addition beside them (`SEEN_LABEL_PAGES`'s own note).
+//   OUT       a card carrying `needs-user-decision`: the question is IN the
+//             inbox, which is the state this row exists to reach. ⛔ Never a
+//             second row for a card the inbox already holds.
+//   UNJUDGED  a card whose thread NO other row bought, and one whose thread is
+//             in hand but not COMPLETE — a full first page may hide the newest
+//             report on a later one. Also a report whose payload does not
+//             PARSE: an unread payload has an unknown array, never an empty
+//             one, and #4690's rule is that an unreadable input must not render
+//             as a clean one. All three are counted apart from clean and the
+//             coverage pair says so.
+//
+// ## Cost — none, and that is the trade this row makes
+//
+// ⛔ It buys NOTHING: `commentCache.get` never fetches, so a card no other row
+// needed a thread for stays UNJUDGED rather than clean. That is H47's shape and
+// H47's stated reason, and here it is the whole cost story — the alternative,
+// one thread per listed open card, is ~350 requests a sweep and four sweeps a
+// day, which is a purchase two orders of magnitude past this file's largest and
+// is a decision rather than an implementation detail.
+//
+// So the row is judged at the FOOT of the sweep, after every pass that fills
+// the cache: H2's claim read, H17's hold comments, the `Blocked-by:` fallback,
+// H32's seat posts and — the one that matters most — H50's completing walk,
+// which lands the LAST page for every open `pm:dispatched` card. That last page
+// is load-bearing by construction: a report is posted at the END of a dev
+// round, so on a long thread a first page would miss it, and miss it SILENTLY.
+// Judged at the top of the main loop instead, the cache would be empty on every
+// iteration and the row would report UNJUDGED forever while looking healthy.
+// ---------------------------------------------------------------------------
+
+/**
+ * The `os-dev-report` marker, as the OPENING of a comment.
+ *
+ * Two spellings are equivalent and both are accepted, because both are live on
+ * the board: the bare first-line text, which is the spelling the dispatch
+ * contract now requires, and the HTML-comment form that predates it. ⚠️ The
+ * HTML-comment form is accepted for READING only — it must never be written
+ * again, because GitHub's body sanitizer eats short angle-bracket fragments on
+ * the way into storage and a marker it ate is a report no scan can see, which
+ * is this row's own defect with a different cause.
+ *
+ * Anchored at the START OF THE BODY rather than as a line anywhere in it, and
+ * with no `m` flag, so a comment that MENTIONS the marker — a seat's review
+ * quoting the protocol, this file's own rule text pasted onto a card — is not
+ * read as a report. `isTriageRulingComment`'s reason, enforced by the regex
+ * instead of a first-line split so `latestMarkedComment` can take it directly
+ * and the newest-of-two rule is answered in ONE place for every marker.
+ *
+ * CASE-INSENSITIVE, and the flag is a MEASUREMENT rather than a habit. The two
+ * live precedents point opposite ways — `ACCEPT_VERDICT_MARKER` refuses `i`
+ * because its verdict landed with no dialect behind it, `CLAIM_COMMENT_MARKER`
+ * carries `i` as an accommodation for spellings the fleet had already shipped —
+ * so the census settled it: over 2,698 threads it found FIVE reports opening
+ * `OS-DEV-REPORT`, all on closed cards from an early era and none in the open
+ * population. A shipped dialect exists, so this marker is the second case and
+ * not the first. ⚠️ The `i` is the whole accommodation: the anchor still refuses
+ * a marker on a later line, so widening case cannot admit a comment that merely
+ * mentions the marker.
+ *
+ * ⛔ No `g` flag — a shared regex carrying `lastIndex` between callers is a
+ * state bug waiting for its second reader.
+ */
+export const OS_DEV_REPORT_MARKER = /^[\s>]*(?:<!--[ \t]*)?os-dev-report[ \t]*(?:-->)?[ \t]*(?:\r?\n|$)/i;
+
+/** How many question texts the finding sentence echoes before it degrades to a count. */
+export const H52_QUESTION_ECHO_CAP = 2;
+
+/** How much of one question the sentence echoes — H44's `H44_FRAGMENT_ECHO_CAP` register. */
+export const H52_QUESTION_TEXT_CAP = 160;
+
+/**
+ * A fenced block's INNER text, as a source string rather than a compiled regex.
+ *
+ * Compiled per call, because the only useful form of it carries `g` and a
+ * module-level `g` regex shared between callers carries `lastIndex` with it —
+ * the state bug `CLAIM_COMMENT_MARKER`'s note refuses by name.
+ */
+export const FENCED_BLOCK_SOURCE = '```[ \\t]*[\\w-]*[ \\t]*\\r?\\n([\\s\\S]*?)```';
+
+/**
+ * One `open_questions` entry as the text a reader can act on, or `null` when the
+ * entry carries none.
+ *
+ * The contract's shape is an object with a `question` string; a bare string is
+ * accepted because it is the same fact written shorter. ⛔ Anything else yields
+ * `null` rather than `String(entry)` — `[object Object]` in a finding sentence
+ * is the shape H50's own case bans by name.
+ */
+export function devReportQuestionText(entry) {
+  if (typeof entry === 'string') return entry.trim() || null;
+  const q = entry?.question;
+  return typeof q === 'string' && q.trim() ? q.trim() : null;
+}
+
+/**
+ * The `open_questions` of ONE report comment.
+ *
+ * @returns {{ marked: false }
+ *   | { marked: true, parsed: false }
+ *   | { marked: true, parsed: true, questions: Array<string|null> }}
+ *   `parsed: false` is UNJUDGED and never clean: a payload that did not read has
+ *   an UNKNOWN array, and an empty one is a different fact (#4690).
+ */
+export function devReportOpenQuestions(body) {
+  const text = String(body ?? '');
+  if (!OS_DEV_REPORT_MARKER.test(text)) return { marked: false };
+  const re = new RegExp(FENCED_BLOCK_SOURCE, 'g');
+  let m;
+  while ((m = re.exec(text))) {
+    let doc;
+    try {
+      doc = JSON.parse(m[1]);
+    } catch {
+      continue;
+    }
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) continue;
+    if (!Array.isArray(doc.open_questions)) continue;
+    return { marked: true, parsed: true, questions: doc.open_questions.map(devReportQuestionText) };
+  }
+  return { marked: true, parsed: false };
+}
+
+/**
+ * The NEWEST `os-dev-report` on a thread, with its payload read.
+ *
+ * `latestMarkedComment` is H47's resolution, CALLED rather than restated, so
+ * "which of two reports is newer" is answered here exactly as "which of two
+ * claims is newer" is — by one rule, in one place.
+ *
+ * @returns {{ row: object, marked: true, parsed: boolean, questions?: Array }|null}
+ *   `null` when the thread carries no report at all.
+ */
+export function latestDevReport(commentRows) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  const latest = latestMarkedComment(rows, OS_DEV_REPORT_MARKER);
+  if (!latest) return null;
+  const row = rows[latest.index];
+  return { row, ...devReportOpenQuestions(row?.body) };
+}
+
+/**
+ * Which cards this row can speak about AT ALL — exported for the
+ * counting-policy reason every such predicate is: the predicate that decides
+ * what is even counted is where a silent hole would live.
+ *
+ * ⚠️ Deliberately NOT narrowed to a `pm:*` state. The census measured that a
+ * report's questions outlive the dispatch that produced them — 55 of 62 live
+ * carriers had already left `pm:dispatched` — so any state narrowing here is a
+ * measured hole rather than a bound. What bounds this row is the CACHE, one
+ * level up, and the coverage pair reports that bound as a number.
+ */
+export function h52SpeaksAbout(issue) {
+  return issue !== null && issue !== undefined && issue?.state !== 'closed';
+}
+
+/**
+ * H52 — null when clean OR unjudged, else the finding sentence.
+ *
+ * Three input states for the thread, never two (#4690): `undefined` never
+ * consulted, `null` unreadable or INCOMPLETE — both UNJUDGED, kept apart from
+ * clean by the coverage pair — and rows, judged.
+ *
+ * @param {object} issue — the card.
+ * @param {{ id?: number, body?: string, created_at?: string }[]|null|undefined} commentRows —
+ *   the COMPLETE thread as REST rows.
+ */
+export function h52OpenQuestionsUnrouted(issue, commentRows) {
+  if (!Array.isArray(commentRows)) return null;
+  if (!h52SpeaksAbout(issue)) return null;
+  // The card is already IN the inbox — the state this row exists to reach.
+  if (labelNames(issue).includes(GOVERNED_PR_DECISION_LABEL)) return null;
+  const report = latestDevReport(commentRows);
+  if (!report) return null;
+  // A payload that did not read has an UNKNOWN array — decline, never accuse.
+  if (!report.parsed) return null;
+  const questions = report.questions.filter((q) => q !== null);
+  if (report.questions.length === 0) return null;
+  const reportId = commentIdText(report.row?.id);
+  const named = reportId ? `comment ${reportId}` : 'a comment carrying no readable id';
+  const stamped = report.row?.created_at ?? 'unstamped';
+  const n = report.questions.length;
+  const echoed = questions
+    .slice(0, H52_QUESTION_ECHO_CAP)
+    .map((q) => `「${q.slice(0, H52_QUESTION_TEXT_CAP)}${q.length > H52_QUESTION_TEXT_CAP ? '…' : ''}」`)
+    .join(' · ');
+  const listed = echoed
+    ? `${echoed}${n > H52_QUESTION_ECHO_CAP ? `, +${n - H52_QUESTION_ECHO_CAP} more` : ''}`
+    : 'none of them carries a readable `question` text';
+  return (
+    `the newest \`os-dev-report\` (${named}, ${stamped}) carries ${n} non-empty \`open_questions\` entry(ies) ` +
+    `while the card carries NO \`${GOVERNED_PR_DECISION_LABEL}\` label: ${listed}. So a question only the ` +
+    'maintainer can answer is filed, well-formed and UNREACHABLE — it is in no inbox, no candidate query and ' +
+    'no staleness alert, while the card\'s own state label — whichever of the six it is — reads as work in ' +
+    'progress on every board, so nothing a reader can see says a decision is owed. ⚠️ This is the shape ' +
+    'that produces three success signals and a wrong answer: the dev did its job, the report validated, the ' +
+    'seat accepted it, and the decision never arrived. Remedy, in the order the protocol asks for it: if the ' +
+    'question is the one this card was dispatched on, put the card in the inbox (`needs-user-decision`) and ' +
+    'present it; if it is a RESIDUAL raised while EXECUTING a ruling this card already carries, ⛔ never ' +
+    're-hang the label here — file a NEW card carrying the question and linking the ruled one, because a ' +
+    're-flagged card leaves the inbox unable to say WHICH question is open and invites a reader to re-present ' +
+    'a ruling that has already been executed, and because this card\'s close would take the label, and the ' +
+    'question\'s only visibility, with it. If the question has already been ANSWERED, say so in the next ' +
+    'report, whose empty `open_questions` is the record that stands this row down. ⛔ Nothing here changes ' +
+    'the report contract: the array is the right place for the question. Report-only patrol INPUT: nothing is ' +
+    'blocked and no label is written.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -9921,6 +10209,15 @@ export const SWEEP_COUNT_KEYS = [
   'threadReadJudged',
   'threadReadTruncated',
   'threadReadPagesBought',
+  // H52's coverage triple (#16662). `openQuestionCandidates` is how many OPEN
+  // `pm:dispatched` cards the row could speak about, `openQuestionJudged` how
+  // many had a COMPLETE thread in hand, and `openQuestionUnparsed` how many of
+  // THOSE carried a newest report whose payload did not read — an UNKNOWN array
+  // rather than an empty one, which is the third state this row refuses to fold
+  // into clean. It rides H50's completing walk and buys nothing of its own.
+  'openQuestionCandidates',
+  'openQuestionJudged',
+  'openQuestionUnparsed',
   'commits',
   'commitBindings',
   'commitBindingMessages',
@@ -10356,6 +10653,18 @@ export function summaryLine(counts, findingCount) {
     `clean, since the newest claim may sit on a page this row never saw); ${counts.threadReadPagesBought ?? 0} ` +
     'extra comment page(s) bought completing full first pages. A claim stamped before the field landed is never ' +
     'a row. ' +
+    // H52's coverage triple (#16662). UNCONDITIONAL like every other window's.
+    // It rides H50's completing walk and buys nothing, so a shortfall here is
+    // the SAME walk H50's clause already accounts for — and the third number is
+    // this row's own: a report whose payload did not parse is UNJUDGED, never an
+    // empty array.
+    `Open questions (H52): ${counts.openQuestionJudged ?? 0} of ${counts.openQuestionCandidates ?? 0} ` +
+    'listed open card(s) had a COMPLETE comment thread in hand to judge the newest `os-dev-report` against ' +
+    `(${counts.openQuestionUnparsed ?? 0} carried a newest report whose JSON payload did not read — UNJUDGED ` +
+    'rather than clean, since an unread payload has an UNKNOWN `open_questions` array). It fetches NOTHING of ' +
+    'its own, so a shortfall is a thread no other row bought, or one still full at its first page, and such a ' +
+    'card is UNJUDGED rather than clean. A CLOSED card is out of this population entirely, and the ' +
+    'residual-question rule is what carries a question past its own card. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -10410,6 +10719,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h48Brief', 'Maintainer briefs (H48): '],
   ['h49Partial', 'Partial landings (H49): '],
   ['h50ThreadRead', 'Thread-read fields (H50): '],
+  ['h52OpenQuestions', 'Open questions (H52): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -10779,6 +11089,14 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H48: 'state',
   H49: 'state',
   H50: 'state',
+
+  // H52 is a `stall` and not a `state` (#16662): the board is not contradicting
+  // itself — every label on the card is correct — and no later sweep frees the
+  // card, because the only thing that moves it is a maintainer who cannot see
+  // the question. That is H20/H27/H33's class exactly, and the measured cost of
+  // losing this row to the trim is 17 days on a P0 whose deployment had served
+  // 503 for a day. ⛔ Not `inventory`: it alarms about one card, not a population.
+  H52: 'stall',
 
   H5: 'inventory',
   H6: 'inventory',
@@ -14767,6 +15085,33 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     stats.refDeferred = references.report.deferred;
     stats.refFloor = references.report.floor;
     stats.refBeyond = references.report.beyond;
+  }
+
+  // -- H52 (#16662) — the `open_questions` reader ---------------------------
+  //
+  // At the FOOT of the sweep and off the cache alone, for H47's reason stated
+  // one level up: every pass that buys a thread has run by now (H2, H17, the
+  // `Blocked-by:` fallback, H32 and — the one this row most depends on — H50's
+  // completing walk), and this row adds not one request to any of them.
+  //
+  // COMPLETENESS is checked rather than assumed. A cache entry is a first page
+  // unless the walk lengthened it, and a FULL first page may hide the newest
+  // report on a later one — so a short page proves exhaustion (H50's reading of
+  // the same fact) and anything else is UNJUDGED. ⛔ Never clean: a card whose
+  // thread nobody bought and a card with nothing to report must not render the
+  // same way (#4690).
+  for (const issue of seen.values()) {
+    if (!h52SpeaksAbout(issue)) continue;
+    stats.openQuestionCandidates = (stats.openQuestionCandidates ?? 0) + 1;
+    const rows = commentCache.get(issue.number);
+    if (rows === undefined) continue;
+    const complete = threadWalks.get(issue.number)?.complete ?? rows.length < H50_COMMENTS_PAGE_SIZE;
+    if (!complete) continue;
+    stats.openQuestionJudged = (stats.openQuestionJudged ?? 0) + 1;
+    const payload = latestDevReport(rows);
+    if (payload && !payload.parsed) stats.openQuestionUnparsed = (stats.openQuestionUnparsed ?? 0) + 1;
+    const unrouted = h52OpenQuestionsUnrouted(issue, rows);
+    if (unrouted) findings.push([issue, 'H52', unrouted]);
   }
 
   // H45's second half — the `pm:epic` index, read as its own population.
@@ -21284,6 +21629,147 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H50 summary: …and says an incomplete thread is UNJUDGED, not clean', saidBy('h50ThreadRead', summaryLine({}, 0)).includes('UNJUDGED rather than clean'), true);
   t('H50 summary: …and that a legacy claim is never a row', saidBy('h50ThreadRead', summaryLine({}, 0)).includes('stamped before the field landed is never a row'), true);
   t('H50 summary: a bare line renders numbers, never `undefined`', saidBy('h50ThreadRead', summaryLine({}, 0)).includes('undefined'), false);
+
+  // -- H52 — a non-empty `open_questions` with nothing routing it (#16662) ----
+  // The fixtures are SYNTHETIC on purpose (⛔ the self-test never touches
+  // GitHub); the live firing control is the census posted on the filing card,
+  // which showed the row red on a real carrier and silent on a labelled one.
+  const card52 = (labels = ['pm:dispatched'], extra = {}) => ({
+    number: 16662,
+    state: 'open',
+    labels: labels.map((name) => ({ name })),
+    assignees: [{ login: 'os-musk' }],
+    body: '',
+    title: '',
+    ...extra,
+  });
+  const cm52 = (id, body, at) => ({ id, body, created_at: at });
+  const report52 = (questions, lead = '') =>
+    'os-dev-report\n' + lead + '\n```json\n' + JSON.stringify({ issue: 16662, status: 'done', open_questions: questions }, null, 2) + '\n```\n';
+  const Q52 = [{ question: 'Whether to serve the previous complete kernel while a rebuild runs', options: ['A serve stale', 'B 503'], recommendation: 'A' }];
+  const Q52_TWO = [...Q52, { question: 'A one-SELECT prod reading only a maintainer can take', options: ['A', 'B'], recommendation: 'A' }];
+  const T52 = '2026-09-07T16:10:12Z';
+  const OPEN52 = [cm52(5573240453, report52(Q52), T52)];
+  const EMPTY52 = [cm52(5573240453, report52([]), T52)];
+  const DISPATCHED52 = card52();
+  const h52 = (rows, issue = DISPATCHED52) => h52OpenQuestionsUnrouted(issue, rows);
+  const h52row = (rows, issue = DISPATCHED52) => String(h52(rows, issue) ?? '');
+
+  // The ruled cases — the acceptance口径 of the filing card, as fixtures.
+  t('H52 fires: a non-empty `open_questions` on a card with no `needs-user-decision`', typeof h52(OPEN52), 'string');
+  t('H52 negative control: an EMPTY `open_questions` array is NOT reported', h52(EMPTY52), null);
+  t('H52 negative control: a card ALREADY carrying `needs-user-decision` is NOT reported again', h52(OPEN52, card52(['pm:dispatched', 'needs-user-decision'])), null);
+  t('H52: the label constant is the one H48 already owns, not a second spelling', GOVERNED_PR_DECISION_LABEL, 'needs-user-decision');
+  t('H52: a thread with no report at all is silent', h52([cm52(1, 'Triage: routing only.', T52)]), null);
+
+  // The marker — two spellings, and what is deliberately NOT one.
+  t('H52 marker: the bare first-line text reads', OS_DEV_REPORT_MARKER.test('os-dev-report\n\n```json\n{}\n```'), true);
+  t('H52 marker: the HTML-comment form reads too (legacy, read-only)', OS_DEV_REPORT_MARKER.test('<!-- os-dev-report -->\n\n```json\n{}\n```'), true);
+  t('H52 marker: a blockquoted report reads', OS_DEV_REPORT_MARKER.test('> os-dev-report\n> \n> body'), true);
+  t('H52 marker: leading blank lines are tolerated', OS_DEV_REPORT_MARKER.test('\n\nos-dev-report\nbody'), true);
+  t('H52 marker: a marker-only body reads (no trailing newline)', OS_DEV_REPORT_MARKER.test('os-dev-report'), true);
+  t('H52 marker: ⛔ a comment that MENTIONS the marker is not a report', OS_DEV_REPORT_MARKER.test('The `os-dev-report` comment is missing.'), false);
+  t('H52 marker: ⛔ nor one carrying the marker on a LATER line', OS_DEV_REPORT_MARKER.test('## PM review\n\nos-dev-report\n'), false);
+  t('H52 marker: the measured `OS-DEV-REPORT` dialect reads — 5 shipped reports carry it', OS_DEV_REPORT_MARKER.test('OS-DEV-REPORT\n\nbody'), true);
+  t('H52 marker: …and the double-marker shape one of those five actually shipped', devReportOpenQuestions('OS-DEV-REPORT\n\n<!-- os-dev-report -->\n\n```json\n{"open_questions":[]}\n```').parsed, true);
+  t('H52 marker: widening case does NOT admit a mention — the anchor is what refuses it', OS_DEV_REPORT_MARKER.test('## Review\n\nOS-DEV-REPORT\n'), false);
+  t('H52 marker: ⛔ nor a longer word beginning with it', OS_DEV_REPORT_MARKER.test('os-dev-reports\n\nbody'), false);
+  t('H52 marker: ⛔ carries no `g` flag — a shared `lastIndex` is a state bug', OS_DEV_REPORT_MARKER.global, false);
+  t('H52 marker: ⛔ and no `m` flag, which is what keeps a quoted marker out', OS_DEV_REPORT_MARKER.multiline, false);
+  t('H52 marker: it answers the same twice, so no caller poisons the next', OS_DEV_REPORT_MARKER.test('os-dev-report\n') && OS_DEV_REPORT_MARKER.test('os-dev-report\n'), true);
+
+  // The payload reader — parsed, empty, and the third state that is NEITHER.
+  t('H52 payload: the fenced JSON block is read', devReportOpenQuestions(report52(Q52)).questions.length, 1);
+  t('H52 payload: an empty array reads as parsed and empty', devReportOpenQuestions(report52([])).parsed, true);
+  t('H52 payload: …with a zero-length list', devReportOpenQuestions(report52([])).questions.length, 0);
+  t('H52 payload: prose between the marker and the fence is fine', devReportOpenQuestions(report52(Q52, 'Delta-review follow-up on PR #16619.')).questions.length, 1);
+  t('H52 payload: a report with NO fenced object at all is UNJUDGED, never clean', devReportOpenQuestions('os-dev-report\n\n# Census\n\nprose only.').parsed, false);
+  t('H52 payload: …and the row declines on it rather than accusing', h52([cm52(1, 'os-dev-report\n\n# Census\n\nprose only.', T52)]), null);
+  t('H52 payload: broken JSON in the fence is UNJUDGED, never an empty array', devReportOpenQuestions('os-dev-report\n\n```json\n{ "open_questions": [ \n```').parsed, false);
+  t('H52 payload: a fence whose object carries no `open_questions` is skipped', devReportOpenQuestions('os-dev-report\n\n```json\n{"a":1}\n```').parsed, false);
+  t('H52 payload: …and a LATER fence that does carry it is the one read', devReportOpenQuestions('os-dev-report\n\n```json\n{"a":1}\n```\n\n```json\n{"open_questions":[{"question":"q"}]}\n```').questions.length, 1);
+  t('H52 payload: an unfenced-language block reads too', devReportOpenQuestions('os-dev-report\n\n```\n{"open_questions":[{"question":"q"}]}\n```').questions.length, 1);
+  t('H52 payload: a non-report body is `marked: false`, a fourth state kept apart', devReportOpenQuestions('Triage: routing only.').marked, false);
+  t('H52 payload: a missing body does not crash', devReportOpenQuestions(undefined).marked, false);
+  t('H52 payload: a JSON array (not an object) is not a report payload', devReportOpenQuestions('os-dev-report\n\n```json\n[1,2]\n```').parsed, false);
+  t('H52 payload: `open_questions: null` is not an array, so UNJUDGED', devReportOpenQuestions('os-dev-report\n\n```json\n{"open_questions":null}\n```').parsed, false);
+
+  // Question text — the sentence must never print `[object Object]`.
+  t('H52 text: the contract shape reads its `question`', devReportQuestionText({ question: ' q ' }), 'q');
+  t('H52 text: a bare string reads as itself', devReportQuestionText('q'), 'q');
+  t('H52 text: an entry with no readable question is `null`, never stringified', devReportQuestionText({ options: ['A'] }), null);
+  t('H52 text: an empty string is `null` too', devReportQuestionText('   '), null);
+  t('H52 text: the sentence prints no `[object Object]`', h52row([cm52(1, report52([{ options: ['A'] }]), T52)]).includes('[object Object]'), false);
+  t('H52 text: …and says so in words instead', h52row([cm52(1, report52([{ options: ['A'] }]), T52)]).includes('none of them carries a readable `question` text'), true);
+  t('H52 text: an unreadable entry still COUNTS — the card has a question either way', h52row([cm52(1, report52([{ options: ['A'] }]), T52)]).includes('carries 1 non-empty'), true);
+
+  // The sentence.
+  t('H52 sentence: names the report by its comment id', h52row(OPEN52).includes('comment 5573240453'), true);
+  t('H52 sentence: …and its stamp', h52row(OPEN52).includes(T52), true);
+  t('H52 sentence: …and how many questions it holds', h52row(OPEN52).includes('carries 1 non-empty `open_questions` entry(ies)'), true);
+  t('H52 sentence: …and echoes the question itself', h52row(OPEN52).includes('serve the previous complete kernel'), true);
+  t('H52 sentence: a long list degrades to a count after the echo cap', h52row([cm52(1, report52([...Q52_TWO, { question: 'third' }]), T52)]).includes('+1 more'), true);
+  t('H52 sentence: a long question is truncated rather than dumped', h52row([cm52(1, report52([{ question: 'x'.repeat(400) }]), T52)]).length < 2400, true);
+  t('H52 sentence: names the inbox label the card is missing', h52row(OPEN52).includes('NO `needs-user-decision` label'), true);
+  t('H52 sentence: ⛔ names no ONE state label — the questions outlive the dispatch', h52row(OPEN52).includes('`pm:dispatched` reads as'), false);
+  t('H52 sentence: …and says the state label reads as progress whatever it is', h52row(OPEN52).includes('whichever of the six it is'), true);
+  t('H52 sentence: states the residual rule — a NEW card linking the ruled one', h52row(OPEN52).includes('file a NEW card carrying the question and linking the ruled one'), true);
+  t('H52 sentence: …and ⛔ never re-hanging the label on the ruled card', h52row(OPEN52).includes('never ') && h52row(OPEN52).includes('re-hang the label here'), true);
+  t('H52 sentence: …with the reason a re-flag fails (which question is open)', h52row(OPEN52).includes('unable to say WHICH question is open'), true);
+  t('H52 sentence: …and the reason the label cannot outlive the card', h52row(OPEN52).includes("close would take the label"), true);
+  t('H52 sentence: says an empty `open_questions` in the next report stands it down', h52row(OPEN52).includes('empty `open_questions` is the record that stands this row down'), true);
+  t('H52 sentence: ⛔ disclaims any change to the report contract', h52row(OPEN52).includes('Nothing here changes the report contract'), true);
+  t('H52 sentence: …and states its report-only posture', h52row(OPEN52).includes('Report-only patrol INPUT'), true);
+  t('H52 sentence: a report with no readable id is said so, never `undefined`', h52row([cm52(undefined, report52(Q52), T52)]).includes('a comment carrying no readable id'), true);
+  t('H52 sentence: …and prints no `undefined` anywhere', h52row([cm52(undefined, report52(Q52), T52)]).includes('undefined'), false);
+
+  // Order — the NEWEST report governs, which is the documented stand-down.
+  t('H52 order: a LATER report closing the questions out stands the row down', h52([cm52(1, report52(Q52), T52), cm52(2, report52([]), '2026-09-08T09:00:00Z')]), null);
+  t('H52 order: …and a later report REOPENING them fires again', typeof h52([cm52(1, report52([]), T52), cm52(2, report52(Q52), '2026-09-08T09:00:00Z')]), 'string');
+  t('H52 order: thread order decides when stamps do not', typeof h52([cm52(1, report52([]), 'not-a-date'), cm52(2, report52(Q52), 'not-a-date')]), 'string');
+  t('H52 order: a non-report comment after the report changes nothing', typeof h52([cm52(1, report52(Q52), T52), cm52(2, 'ACCEPT.', '2026-09-08T09:00:00Z')]), 'string');
+  t('H52 order: ⛔ a ruling comment does NOT stand the row down — the documented over-report', typeof h52([cm52(1, report52(Q52), T52), cm52(2, 'Ruling recorded — A, A, A.', '2026-09-08T09:00:00Z')]), 'string');
+  t('H52 order: …and H33 cannot see that ruling either, which is why it was not reused', isTriageRulingComment('Ruling recorded — the three residuals: A, A, A'), false);
+
+  // Population — `pm:dispatched`, open.
+  t('H52 population: an open `pm:dispatched` card is in', h52SpeaksAbout(DISPATCHED52), true);
+  t('H52 population: a `pm:queue` card is IN — the census measured 10 carriers there', h52SpeaksAbout(card52(['pm:queue'])), true);
+  t('H52 population: …and `pm:awaiting-maintainer`, the census\'s LARGEST bucket at 15', h52SpeaksAbout(card52(['pm:awaiting-maintainer'])), true);
+  t('H52 population: …and `pm:blocked` (14) and `pm:on-hold` (12)', h52SpeaksAbout(card52(['pm:blocked'])) && h52SpeaksAbout(card52(['pm:on-hold'])), true);
+  t('H52 population: ⛔ NOT narrowed to `pm:dispatched` — that would have covered 7 of 62', typeof h52(OPEN52, card52(['pm:queue'])), 'string');
+  t('H52 population: a card with no `pm:*` label at all is still judged when its thread is in hand', typeof h52(OPEN52, card52(['bug'])), 'string');
+  t('H52 population: ⛔ a CLOSED card is out — the row states this bound in words', h52SpeaksAbout(card52(['pm:dispatched'], { state: 'closed' })), false);
+  t('H52 population: an unassigned dispatched card is still judged (H1 fires beside it)', typeof h52(OPEN52, { ...DISPATCHED52, assignees: [] }), 'string');
+  t('H52 population: a missing issue is out, never a crash', h52SpeaksAbout(undefined), false);
+
+  // Three input states, never two (#4690).
+  t('H52: an unconsulted thread is UNJUDGED, never clean', h52OpenQuestionsUnrouted(DISPATCHED52, undefined), null);
+  t('H52: an incomplete or unreadable thread is UNJUDGED too', h52OpenQuestionsUnrouted(DISPATCHED52, null), null);
+  t('H52: a missing issue does not crash', h52OpenQuestionsUnrouted(undefined, OPEN52), null);
+  t('H52: `latestDevReport` on a thread with no report is `null`, not an empty payload', latestDevReport([cm52(1, 'Triage.', T52)]), null);
+  t('H52: …and on a non-array input too', latestDevReport(undefined), null);
+
+  // Adjacency — the same completed thread, read by three rows for three facts.
+  t('H52 adjacency: H50 is silent on this carrier (no claim on the thread)', h50ThreadReadMismatch(DISPATCHED52, OPEN52), null);
+  t('H52 adjacency: H2 fires on it instead, and this row is not that row', h2AssigneeNoClaimComment(DISPATCHED52, OPEN52.map((r) => r.body)), true);
+  t('H52 adjacency: H47 is silent (no `Release:` on the thread)', h47ReleaseRecordDesync(DISPATCHED52, OPEN52), null);
+
+  // Registry, counters and the clause.
+  t('H52 band: registered as a STALL row — nothing else moves the card', familyBand('H52'), 'stall');
+  t('H52 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H52'), true);
+  t('H52 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H52 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H52 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H52 band: ⛔ no `H51` is invented here — the number is reserved elsewhere', 'H51' in HALF_STATE_FAMILY_BAND, false);
+  t('H52 band: a stall outranks a state row, so the trim eats this one last', familyRank('H52') < familyRank('H50'), true);
+  t('H52: all three count keys ride the enumerated forwarding contract', ['openQuestionCandidates', 'openQuestionJudged', 'openQuestionUnparsed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t('H52 summary: the coverage pair is reported', saidBy('h52OpenQuestions', summaryLine({ openQuestionJudged: 3, openQuestionCandidates: 4 }, 0)).includes('3 of 4 listed open card(s)'), true);
+  t('H52 summary: …and says the shortfall is an UNBOUGHT thread, so the row costs nothing', saidBy('h52OpenQuestions', summaryLine({}, 0)).includes('fetches NOTHING of its own'), true);
+  t('H52 summary: …with the unparsed count kept apart from clean', saidBy('h52OpenQuestions', summaryLine({ openQuestionUnparsed: 2 }, 0)).includes('2 carried a newest report whose JSON payload did not read'), true);
+  t('H52 summary: …and says an unread payload is UNJUDGED, not clean', saidBy('h52OpenQuestions', summaryLine({}, 0)).includes('UNJUDGED rather than clean'), true);
+  t('H52 summary: …and names the closed-card bound in the clause itself', saidBy('h52OpenQuestions', summaryLine({}, 0)).includes('A CLOSED card is out of this population entirely'), true);
+  t('H52 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h52OpenQuestions', summaryLine({}, 0)).includes('0 of 0'), true);
+  t('H52 summary: a bare line renders numbers, never `undefined`', saidBy('h52OpenQuestions', summaryLine({}, 0)).includes('undefined'), false);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.
