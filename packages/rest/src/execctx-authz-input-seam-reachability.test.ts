@@ -185,7 +185,7 @@ describe('[#13906] §0 — the two seams are LIVE on today\'s tree, by symbol', 
     // REACHES the shared classification, and that neither grew a `catch` of its
     // own again. The discriminator is still the REGISTRY's brand, never message
     // text (#13905); it is asserted at its new home.
-    expect(body).toMatch(/tenancyPosture = await classifyAdmissionTenancyPosture\(\s*\n?\s*\(\) => kernel\.getServiceAsync!\('tenancy'\)/);
+    expect(body).toMatch(/tenancyPosture = await classifyAdmissionTenancyPosture\(\s*\n?\s*\(\) => kernel\.getServiceAsync\('tenancy'\)/);
     expect(body).toMatch(/tenancyPosture = await classifyAdmissionTenancyPosture\(\s*\n?\s*\(\) => this\.tenancyServiceProvider!\(environmentId\)/);
     // ⛔ NARROWNESS CONTROL for the fold: the seam region itself holds NO
     // `catch`. A local `catch` reappearing here is exactly the silent-`catch`

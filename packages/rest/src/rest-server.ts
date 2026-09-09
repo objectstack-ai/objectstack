@@ -2804,7 +2804,7 @@ export class RestServer {
             let tenancyPosture;
             if (kernel && typeof kernel.getServiceAsync === 'function') {
                 tenancyPosture = await classifyAdmissionTenancyPosture(
-                    () => kernel.getServiceAsync!('tenancy') as any,
+                    () => kernel.getServiceAsync('tenancy') as any,
                 );
             } else if (this.tenancyServiceProvider) {
                 // [#15256 / 1A] The SINGLE-KERNEL branch — the wiring every
