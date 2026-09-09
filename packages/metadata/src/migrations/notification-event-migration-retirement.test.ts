@@ -27,6 +27,12 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
 
+// ⭐ Imported at MODULE TOP on purpose. This barrel pulls in the whole
+// migrations surface, and paying that load inside a clocked `it()` made the
+// case time out at 5s under a loaded box — a flake that reads as a retirement
+// regression. A clocked window measures behaviour, never loading (AGENTS.md).
+import * as migrationsBarrel from './index.js';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** Every `.ts` file under this package's `src/`, walked once. */
@@ -76,9 +82,8 @@ describe('[#16194] migrateSysNotificationToEvent is retired from @objectstack/me
     expect(survivors.length, 'the import scan found nothing at all — it is dead').toBeGreaterThan(0);
   });
 
-  it('the barrel exports no name derived from it, and still exports its siblings', async () => {
-    const barrel = await import('./index.js');
-    const names = Object.keys(barrel);
+  it('the barrel exports no name derived from it, and still exports its siblings', () => {
+    const names = Object.keys(migrationsBarrel);
 
     for (const gone of [
       'migrateSysNotificationToEvent',
