@@ -28,6 +28,7 @@ import {
   ExpressionInputSchema,
   ExpressionSchema,
 } from '../shared/expression.zod.js';
+import { ObjectStackDefinitionSchema } from '../stack.zod.js';
 import { FlowEdgeSchema, FlowSchema, type FlowEdge } from './flow.zod.js';
 
 const AST_ONLY = { dialect: 'cel', ast: { kind: 'const', value: true } };
@@ -126,9 +127,12 @@ describe('FlowEdgeSchema.condition — an evaluated slot requires a non-blank `s
   it('is refused at the same path through `FlowSchema`, where `registerFlow` parses', () => {
     const result = FlowSchema.safeParse({
       name: 'gate_flow',
+      label: 'Gate Flow',
+      type: 'autolaunched',
+      status: 'active',
       nodes: [
-        { id: 'start', type: 'start', config: { objectName: 'crm_lead' } },
-        { id: 'end', type: 'end' },
+        { id: 'a', type: 'start', label: 'Start', config: { objectName: 'lead', triggerType: 'record-after-update' } },
+        { id: 'b', type: 'decision', label: 'Branch', config: {} },
       ],
       edges: [edge(AST_ONLY)],
     });
@@ -136,6 +140,28 @@ describe('FlowEdgeSchema.condition — an evaluated slot requires a non-blank `s
     expect(result.error!.issues.map((i) => ({ code: i.code, path: i.path.map(String).join('.'), message: i.message }))).toEqual([
       { code: 'invalid_union', path: 'edges.0.condition', message: EVALUATED_EXPRESSION_SOURCE_REQUIRED },
     ]);
+  });
+
+  it('is refused through `ObjectStackDefinitionSchema` — the parse `objectstack validate` runs before any rule', () => {
+    // `packages/cli` `validate.ts` step 2 is `ObjectStackDefinitionSchema.safeParse(lowered)`
+    // and prints `formatZodErrors` on failure, so this is the CLI's reading.
+    const result = ObjectStackDefinitionSchema.safeParse({
+      flows: [{
+        name: 'gate_flow',
+        label: 'Gate Flow',
+        type: 'autolaunched',
+        status: 'active',
+        nodes: [
+          { id: 'a', type: 'start', label: 'Start', config: { objectName: 'lead', triggerType: 'record-after-update' } },
+          { id: 'b', type: 'decision', label: 'Branch', config: {} },
+        ],
+        edges: [edge(AST_ONLY)],
+      }],
+    });
+    expect(result.success).toBe(false);
+    const located = result.error!.issues.filter((i) => i.path.map(String).join('.') === 'flows.0.edges.0.condition');
+    expect(located.map((i) => ({ code: i.code, message: i.message })))
+      .toEqual([{ code: 'invalid_union', message: EVALUATED_EXPRESSION_SOURCE_REQUIRED }]);
   });
 
   it('CONTROL — `ExpressionInputSchema` and `ExpressionSchema`, the persistence contract, still ACCEPT both shapes', () => {
