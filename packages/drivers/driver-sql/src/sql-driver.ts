@@ -249,6 +249,13 @@ const JSON_COLUMN_TYPES = new Set<string>([
  * column-type switch (these map to INTEGER/REAL columns) and the read-side
  * coercion registry (`numericFields`).
  *
+ * ⚠️ [#16318] The read coercion no longer reads this whole set on every
+ * dialect. The three ALIASES below are how an external, introspected column
+ * reaches the driver, and on PostgreSQL a `bigint` arrives as a STRING; the
+ * server-dialect arm therefore reads {@link SqlDriver.numericValueFields}, the
+ * authorable `NUMERIC_VALUE_TYPES` half, and SQLite keeps this full set for the
+ * legacy TEXT-affinity repair described below. The DDL switch is unchanged.
+ *
  * The read coercion exists so the fix is robust on SQLite even when the column
  * predates it: a `rating`/`slider`/`progress` column created before #2025 has
  * TEXT affinity and returns '4' not 4, and SQLite never alters a column's type
@@ -4380,6 +4387,30 @@ export class SqlDriver implements IDataDriver {
   protected jsonFields: Record<string, string[]> = {};
   protected booleanFields: Record<string, string[]> = {};
   protected numericFields: Record<string, string[]> = {};
+  /**
+   * [#16318] The subset of {@link numericFields} whose field type is an
+   * AUTHORABLE numeric one (`NUMERIC_VALUE_TYPES`), with the driver-internal
+   * SQL aliases `integer` / `int` / `float` deliberately left out.
+   *
+   * Why a second registry rather than a narrower first one: `numericFields` is
+   * read by three other seams — the presentation-kind door, the cross-field
+   * comparability door, and the shard aliasing — and every one of them is about
+   * "this column holds a number", which the aliases do. Only the READ COERCION
+   * needed narrowing, and it needed it on exactly one axis.
+   *
+   * ⚠️ The axis is EXISTING columns. Moving the coercion off the SQLite-only
+   * arm (see `formatOutput`) is what the exact-decimal column forced, and the
+   * aliases are how an EXTERNAL, introspected table's columns reach this
+   * driver — a PostgreSQL `bigint`, which node-postgres hands back as a STRING
+   * precisely because it does not fit a JS double. Coercing those through
+   * `Number()` would silently round above 2^53 on a table this change never
+   * created, which is outside the "new tables only" bound the ruling drew
+   * (「不考虑现有数据」). So on the server dialects the coercion applies to the
+   * seven authorable numeric types and to nothing else; SQLite keeps the wider
+   * set, because that is where the legacy TEXT-affinity repair this pass was
+   * originally written for actually lives.
+   */
+  protected numericValueFields: Record<string, string[]> = {};
   protected dateFields: Record<string, Set<string>> = {};
   protected datetimeFields: Record<string, Set<string>> = {};
   /**
@@ -9635,6 +9666,7 @@ export class SqlDriver implements IDataDriver {
     this.jsonFields[shard] = this.jsonFields[base] ?? [];
     this.booleanFields[shard] = this.booleanFields[base] ?? [];
     this.numericFields[shard] = this.numericFields[base] ?? [];
+    this.numericValueFields[shard] = this.numericValueFields[base] ?? [];
     this.autoNumberFields[shard] = this.autoNumberFields[base] ?? [];
     if (this.dateFields[base]) this.dateFields[shard] = this.dateFields[base];
     if (this.datetimeFields[base]) this.datetimeFields[shard] = this.datetimeFields[base];
@@ -9761,6 +9793,7 @@ export class SqlDriver implements IDataDriver {
     const jsonCols: string[] = [];
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
+    const numericValueCols: string[] = [];
     const dateCols: string[] = [];
     const datetimeCols: string[] = [];
     const timeCols: string[] = [];
@@ -9773,6 +9806,8 @@ export class SqlDriver implements IDataDriver {
         if (this.isJsonField(type, field)) jsonCols.push(name);
         if (type === 'boolean' || type === 'toggle') booleanCols.push(name);
         if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) numericCols.push(name);
+        // [#16318] The authorable half only — see {@link numericValueFields}.
+        if (NUMERIC_VALUE_TYPES.has(type) && !field.multiple) numericValueCols.push(name);
         if (type === 'date') dateCols.push(name);
         if (type === 'datetime') datetimeCols.push(name);
         if (type === 'time') timeCols.push(name);
@@ -9785,6 +9820,7 @@ export class SqlDriver implements IDataDriver {
     this.jsonFields[key] = jsonCols;
     this.booleanFields[key] = booleanCols;
     this.numericFields[key] = numericCols;
+    this.numericValueFields[key] = numericValueCols;
     this.autoNumberFields[key] = autoNumberCols;
     this.tenantFieldByTable[key] = tenantField;
     if (dateCols.length) this.dateFields[key] = new Set(dateCols);
@@ -9831,6 +9867,7 @@ export class SqlDriver implements IDataDriver {
     const jsonCols: string[] = [];
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
+    const numericValueCols: string[] = [];
     const autoNumberCols: Array<{ name: string; format: string; tokens: AutonumberToken[]; tenantField: string | null }> = [];
     // Tenant-isolation column: explicit tenancy opt-out → declared field →
     // implicit `organization_id`. See {@link computeAndRecordTenantField}
@@ -9854,6 +9891,10 @@ export class SqlDriver implements IDataDriver {
         if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) {
           numericCols.push(name);
         }
+        // [#16318] The authorable half only — see {@link numericValueFields}.
+        if (NUMERIC_VALUE_TYPES.has(type) && !field.multiple) {
+          numericValueCols.push(name);
+        }
         if (type === 'date') {
           (this.dateFields[tableName] ??= new Set()).add(name);
         }
@@ -9876,6 +9917,7 @@ export class SqlDriver implements IDataDriver {
     this.jsonFields[tableName] = jsonCols;
     this.booleanFields[tableName] = booleanCols;
     this.numericFields[tableName] = numericCols;
+    this.numericValueFields[tableName] = numericValueCols;
     this.autoNumberFields[tableName] = autoNumberCols;
     this.tenantFieldByTable[tableName] = tenantField;
     // [#11067] The declared shape's answer to "does this table carry
@@ -17101,7 +17143,31 @@ export class SqlDriver implements IDataDriver {
     // Two SQLite readings stay exactly as they were: the legacy TEXT-affinity
     // repair this pass was written for, and a fresh column, which knex declares
     // `float` for both the old float arm and the new decimal one.
-    const numericFields = this.numericFields[object];
+    //
+    // ⚠️ [#16318] The registry is chosen PER DIALECT, and the narrowing is the
+    // "new tables only" bound, not a taste. `numericFields` carries the
+    // driver-internal aliases `integer` / `int` / `float`, which is how an
+    // EXTERNAL, introspected table's columns reach this driver. A PostgreSQL
+    // `bigint` is handed back by node-postgres as a STRING precisely because it
+    // does not fit a JS double, so running it through `Number()` would silently
+    // round it above 2^53 — on a table this change never created. SQLite is the
+    // one dialect where the wider set is right, because there the pass exists
+    // for legacy TEXT-affinity columns of exactly those alias types.
+    //
+    // ⚠️ The repair is bounded by the wire contract it restores, and that bound
+    // is binary64: `valueSchemaFor` gives this whole class `z.number().finite()`
+    // (ADR-0104 D1), so a `find()` result is a JS double however exact the
+    // COLUMN is. Measured: a value the driver itself wrote from a JS number
+    // round-trips exactly ('1234567.890000000000000000000000000000' → 1234567.89),
+    // because the shortest representation is what was stored; a value that was
+    // never a double does not ('1234567890123456.123' → 1234567890123456,
+    // 2^53+1 → 2^53). ⇒ the exactness this change buys is exact-column-through-
+    // a-double: SQL-side writers, `summary` roll-ups computed in SQL and any
+    // magnitude at or above 2^53 are bounded by the read seam, not by the
+    // column. Widening that is a wire-contract change and is NOT in #16318.
+    const numericFields = this.isSqlite
+      ? this.numericFields[object]
+      : this.numericValueFields[object];
     if (numericFields && numericFields.length > 0) {
       for (const field of numericFields) {
         const v = data[field];
