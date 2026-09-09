@@ -1811,18 +1811,33 @@ function compareAuditInstants(a: unknown, b: unknown): number {
  * declared `string` return type.
  *
  * ⚠️ Deliberately NOT the `canonicalIsoInstant` spelling next door in
- * `sys-metadata-repository.ts` / `database-loader.ts` (#14037's sibling
- * sites). That difference used to be exactly one input shape — the Invalid
+ * `sys-metadata-repository.ts` / `database-loader.ts` — which is, since
+ * #16422, the ONLY spelling at #14037's sibling sites. That difference used
+ * to be exactly one input shape — the Invalid
  * `Date` on which that spelling raised `RangeError: Invalid time value`,
  * measured reachable on BOTH live dialects (a MySQL zero datetime; any
  * Postgres year in 275760..294276). #14078 has since RULED it (option B,
  * 2026-09-02): that arm is now total and answers `undefined` for the shape.
  *
- * ⛔ They are still not ONE spelling, and this copy has the strongest reason
- * of the three not to be collapsed — see the paragraph below on what
- * `listCommits` promises its callers for a non-`Date` value. The
- * consolidation is tracked as **#16422**; #14078 ruled only the five arms
- * that THREW.
+ * ⛔ They are still not ONE spelling, and **#16422 ruled that this copy is the
+ * one that stays**. That card collapsed the family's other four call sites —
+ * `rowToEvent` in `sys-metadata-repository.ts` and the three adapter
+ * boundaries in `database-loader.ts` — into `canonicalIsoInstant` and deleted
+ * both sibling definitions of this spelling. This site was held out, for the
+ * reason the last paragraph below states: `listCommits` promises its callers
+ * the RAW value back for a non-`Date`, and `canonicalIsoInstant` rewrites the
+ * whole domain. Measured on the seven inputs that distinguish the two
+ * helpers, swapping it in here moves three: an Invalid `Date` would be ERASED
+ * from the response (`undefined` — the one answer [ADR-0053 D-F3] refuses,
+ * because it silently drops a value that is on disk), and a `number` and an
+ * opaque object would reach {@link compareAuditInstants} as `String(value)`
+ * rather than verbatim, reordering rows this seam deliberately leaves alone.
+ *
+ * ⇒ The family is now two DELIBERATE helpers, not one pending merge: the
+ * shared domain rewrite at the sites whose declared field is a
+ * `z.string().datetime()` and whose caller carries a terminal value, and this
+ * narrow one-shape conversion at the site whose declared contract is
+ * pass-through. ⛔ Do not collapse it without superseding that ruling.
  *
  * ⛔ NOT a tolerant fallback (#13973's standing prohibition): it teaches no
  * consumer to accept an off-spec shape; it converts the one measured
@@ -1837,8 +1852,9 @@ function compareAuditInstants(a: unknown, b: unknown): number {
  * valid `Date` — an absent/opaque column must still reach `sort`'s fallback
  * branch and any in-process reader exactly as before. Consolidating the
  * family's near-identical copies was expected to be #14078's call; that
- * ruling covered only the five arms that threw, so the consolidation is
- * tracked separately as #16422.
+ * ruling covered only the five arms that threw, and #16422 then ruled this
+ * promise the reason to keep this copy rather than the obstacle to removing
+ * it. §D of `protocol-14038-list-commits-created-at-iso.test.ts` is the pin.
  */
 function isoFromValidDate(value: unknown): unknown {
     if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
