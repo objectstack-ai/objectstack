@@ -1,8 +1,9 @@
 ---
-'@objectstack/types': patch
+'@objectstack/types': minor
 '@objectstack/metadata-protocol': patch
 '@objectstack/metadata': patch
 '@objectstack/cli': patch
+'@objectstack/driver-sql': patch
 ---
 
 fix(types,metadata-protocol,metadata,cli): a stored operator record names the dialect again, not the driver's composed refusal
@@ -45,3 +46,24 @@ Two narrowings are part of the contract, not incidental: an UNDECLARED throw is 
 byte-for-byte on its own message channel, and a declared envelope that is not the raw-path
 one — the typed read exits' terminal, which composes a different sentence — is left exactly
 as it arrived.
+
+## The levels, and why they are not uniform
+
+`@objectstack/types` takes **`minor`**: it is the one package here that grows a published
+surface — `operatorFacingErrorText` is a new export, present in `dist/index.d.ts` and in the
+export list. A purely additive widening takes at least `minor`.
+
+The other four take **`patch`**, because none of them widens anything: they are a bug fix in a
+released package, which is exactly what `patch` is for. `@objectstack/driver-sql` is named
+because this change moves its `src/**` — by one ADDED file, the `.test.ts` that pins the helper
+against a real `SqlDriver.execute()` refusal. Its published `dist/` is byte-unchanged by this
+PR: no entry point reaches a test file, and `files` packs `dist` only.
+
+**Not breaking, and deliberately not marked so.** Nothing is removed, renamed or made stricter.
+The only value that changes is the TEXT inside an operator-facing `detail` / `error` field, and
+only where the thrown error declares `DATABASE_ERROR` *and* its message is the raw path's
+composed sentence — the case where that text was the wrong text. Every other throw reaches
+these records byte-for-byte as before, the field names and types are unchanged, and the
+sentence being replaced is not a value any consumer can have been parsing: it is an opaque
+human diagnostic. A consumer reading these records gets the dialect's words back where it had
+been getting a placeholder.
