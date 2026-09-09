@@ -3042,6 +3042,21 @@ jobs:
       - name: Lockstep package-count guard
         run: pnpm check:lockstep-package-count
 
+      # Route-ledger census guard (#16758). `packages/runtime/src/route-ledger.ts`
+      # is census-shaped: its value is the completeness of a list, and nothing in
+      # this tree read its row COUNT. An index-slice edit meant to add two rows
+      # removed 105 lines — route rows plus the whole `/actions` section — and
+      # exited 0; it was caught only because an unrelated gate happened to redden.
+      # The file's own package suite is domain-level ("every registered dispatcher
+      # domain has at least one ledger entry"), which a shorter list satisfies, and
+      # the cross-ledger guards compare against a UNION that still holds 26 of the
+      # 82 rows' wire patterns from other ledgers. This gate holds the GENERATED
+      # census sentence above the array to the array's real length, so a deletion
+      # reds and a deliberate change shows its digits moving in the same diff.
+      # Full-repo state, not diff-shaped, so it runs its real check unconditionally.
+      - name: Route-ledger census guard
+        run: pnpm check:route-ledger-census
+
       # Release-notes drift guard: the platform is one version-locked train, so
       # every released @objectstack/spec major must have a curated, navigable
       # release page at content/docs/releases/v<major>.mdx. Catches the gap that
