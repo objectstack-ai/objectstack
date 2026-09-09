@@ -6414,8 +6414,9 @@ const step18: MigrationStep = {
         + '`integration/connector.zod.ts`) — the one stack-collection member of the #16320 family',
       replacement:
         'delete the key — the D2 conversion `connector-sync-schedule-removed` lists that edit for '
-        + 'every `connectors[]` entry that authored it (`os migrate meta --from 17`) and replays it '
-        + 'over stored 17.x rows. What the conversion cannot write is the cadence the author meant: '
+        + 'every `connectors[]` entry that authored it (the `os migrate meta` mechanical edit list, '
+        + 'from 17) and replays it over stored 17.x rows. What the conversion cannot write is the '
+        + 'cadence the author meant: '
         + 'a sync on a cadence is a `job` (`Job.schedule.expression`, `system/job.zod.ts` — the one '
         + 'cron slot the platform evaluates) whose handler drives the connector, and that job is '
         + 'yours to declare. `realtimeSync` and every other `syncConfig` key are unchanged',
@@ -6440,7 +6441,7 @@ const step18: MigrationStep = {
         + 'from this repo and are not claimed zero — that population is the residue this entry '
         + 'delegates to you.',
       acceptanceCriteria:
-        'Verify YOUR population by hand, since this repo could not: `os migrate meta --from 17` '
+        'Verify YOUR population by hand, since this repo could not: `os migrate meta` (from 17) '
         + 'over your stack lists zero remaining `connector-sync-schedule-removed` edits, and a grep '
         + 'of your sources for `syncConfig` beside `schedule` finds nothing — then, for every '
         + 'connector that had declared a cadence, decide whether a `job` (`Job.schedule.expression`) '
