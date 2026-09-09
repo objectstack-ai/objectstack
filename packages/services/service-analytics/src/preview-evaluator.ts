@@ -235,7 +235,8 @@ function extremumOf(rows: Row[], field: string, kind: 'min' | 'max'): unknown {
  *
  * | metric type      | answer                                                   |
  * |:-----------------|:---------------------------------------------------------|
- * | `count`          | the row count — numeric whatever it counted               |
+ * | `count`          | over `*` the ROW count; over a declared COLUMN that       |
+ * |                  | column's NON-NULL count — numeric either way              |
  * | `count_distinct` | the cardinality of the non-null values — numeric          |
  * | `sum` / `avg`    | arithmetic over the operands that read as numbers         |
  * | `min` / `max`    | the winning operand, IN ITS OWN TYPE ({@link extremumOf}) |
@@ -260,8 +261,26 @@ function extremumOf(rows: Row[], field: string, kind: 'min' | 'max'): unknown {
  * the sibling descriptor rule (`measure-result-type.ts`) answers the same way.
  */
 function aggregate(rows: Row[], metricType: string, field: string): unknown {
-  // `count`, and any metric aggregating over rows rather than a column.
-  if (metricType === 'count' || field === '*') return rows.length;
+  // `*` is the "no column declared" spelling — `dataset-compiler` writes
+  // `sql: m.field ?? '*'` — so a metric over it aggregates over ROWS. Every
+  // metric type keeps that reading, exactly as before.
+  if (field === '*') return rows.length;
+  // [#16218] `count` over a DECLARED column counts that column's non-null
+  // values, which is what `COUNT(col)` means. The condition above used to be
+  // `metricType === 'count' || field === '*'`, so the field a measure declared
+  // was carried in and never read: the preview answered the row count and a
+  // drafted chart showed a different number than the published one, silently —
+  // the number `count(*)` gives, so the author's choice to count a specific
+  // column had no effect on this path at all. The live faces settled the same
+  // question the other way round in #10298: `AGGREGATE_SQL.count` in
+  // `native-sql-strategy.ts` emits COUNT(*) for the star and COUNT(col) for a
+  // real column, and every SQL dialect defines the latter over non-null values.
+  //
+  // A group with no non-null value counts `0`, never null: `emptyGroupValueFor`
+  // (`@objectstack/spec/data`) rules `count` over nothing the identity `0`
+  // because counting nothing is a measured fact — the opposite of the
+  // `min`/`max` reading in {@link extremumOf}.
+  if (metricType === 'count') return rows.filter((r) => r[field] != null).length;
   const nums = rows.map((r) => Number(r[field])).filter((n) => Number.isFinite(n));
   switch (metricType) {
     // The spec's spelling (`AggregationFunction`), which is what the compiler

@@ -151,6 +151,42 @@ export const PLATFORM_ADMIN_CANDIDATE_PAGE_SIZE = 200;
 export const PLATFORM_ADMIN_CANDIDATE_SCAN_CEILING = 5000;
 
 /**
+ * [#16861] The `already_have_admin` guard's page size and hard ceiling — what
+ * replaced the bare, unordered `50` at the HOLDERS read, one read above the
+ * candidate scan.
+ *
+ * Deliberately the same numbers and the same shape as the candidate scan's
+ * pair above rather than a second set of tuning knobs: two adjacent reads in
+ * one function that bound themselves differently is a future reader's trap.
+ * They are separate CONSTANTS because the populations are different objects —
+ * `sys_user` there, `sys_user_permission_set` here — and tuning one must not
+ * silently retune the other.
+ *
+ * Exported for the same reason as the pair above: a test that restates the
+ * numbers goes quietly vacuous the day one is tuned. ⚠️ Neither pair is
+ * re-exported from this package's `index.ts`, so neither is on the published
+ * `.` surface — `bootstrapPlatformAdmin` and its RETURN OBJECT are.
+ */
+export const PLATFORM_ADMIN_GRANT_PAGE_SIZE = 200;
+export const PLATFORM_ADMIN_GRANT_SCAN_CEILING = 5000;
+
+/**
+ * The order the grant scan states TO THE DRIVER, so a page is a deterministic
+ * slice of the population instead of whatever that driver produced first.
+ *
+ * `id` and not `created_at`: `id` is this object's declared primary key, so it
+ * is present and total on every family, and it was MEASURED honoured on this
+ * very object through `ObjectQL` on both SQL families. That measurement is not
+ * a formality — {@link tryFind} answers `[]` when a query is refused, and on
+ * THIS guard `[]` reads as "no platform admin exists yet", which promotes.
+ * An order this object could not serve would therefore be a SILENT relaxation
+ * of the boundary the guard exists to hold.
+ */
+const ADMIN_GRANT_SCAN_ORDER: { field: string; order: 'asc' | 'desc' }[] = [
+  { field: 'id', order: 'asc' },
+];
+
+/**
  * One read, with the sort and the page WHERE THE DRIVER CAN SEE THEM.
  *
  * `orderBy` / `offset` are optional and are only put on the query when a
@@ -358,6 +394,15 @@ export async function bootstrapPlatformAdmin(
    * should not be auditable only by reading which code path ran.
    */
   basis?: 'declared-owner' | 'oldest-authenticable';
+  /**
+   * [#16861] How many `admin_full_access` grant rows the `already_have_admin`
+   * guard actually examined before answering. The old read looked at "up to 50,
+   * whichever the driver produced first" and said nothing, so a guard that had
+   * seen the whole population and a guard that had seen a truncated sample of
+   * it returned BYTE-IDENTICAL payloads. Present on every return the guard
+   * reaches; absent on the returns that precede it.
+   */
+  adminGrantRowsExamined?: number;
 }> {
   const logger = options.logger;
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') {
@@ -476,25 +521,146 @@ export async function bootstrapPlatformAdmin(
     return { seeded: seededCount, adminPromoted: false, reason: 'admin_permission_set_missing', ...resyncCounts };
   }
 
-  const existingAdminLinks = await tryFind(
+  // ── Does this deployment ALREADY have a platform admin? (#16861) ──────────
+  //
+  // This read was `tryFind(ql, 'sys_user_permission_set', { permission_set_id:
+  // adminPsId }, 50)` — no `orderBy`, cap 50 — with the predicate that actually
+  // decides (`!organization_id`) applied CLIENT-SIDE to whatever 50 rows the
+  // driver produced first. `admin_full_access` is not only the platform-admin
+  // set: every ORGANIZATION-SCOPED grant of it writes a row carrying the same
+  // `permission_set_id`, so this population grows with the number of ORG
+  // admins, not with the number of platform admins. A tenant with fifty-odd of
+  // them filled the window with rows that all fail the filter, the short-circuit
+  // did not fire, a SECOND unscoped grant was minted, and `claimSeedOwnership`
+  // re-owned the seeded business records to the newly promoted user — silently,
+  // because the boot logs a successful promotion exactly as it does on a
+  // genuinely fresh install. What fails open there is #14348 case D:
+  // 「Moving an already-granted platform admin is reserved to the maintainer.」
+  //
+  // ## Why this is TWO reads and not `organization_id: null` in the `where`
+  //
+  // The card's suggested one-line narrowing was MEASURED before it was taken,
+  // and on its own it would have RELAXED this guard. Null matching itself is
+  // uniform across the families that can be measured — each answers "the column
+  // holds no value":
+  //
+  //     driver-sql (better-sqlite3)  via ObjectQL + these real objects  -> the unscoped row only
+  //     driver-sqlite-wasm           via ObjectQL + these real objects  -> the unscoped row only
+  //     driver-memory                driver face                       -> null-valued AND key-absent rows
+  //     driver-mongodb               translator (its own live suites    -> `{organization_id: null}`,
+  //                                  need a 123 MB binary download)        Mongo's null-or-missing reading
+  //
+  // What is NOT uniform is the narrowed read against THIS code's own predicate.
+  // `organization_id: ''` is storable on both SQL families and reads back as
+  // `''`: `!organization_id` counts that row UNSCOPED, and `where: {
+  // organization_id: null }` does NOT return it. A narrowing that REPLACED the
+  // client-side predicate would therefore stop seeing a legacy unscoped holder
+  // stored that way, fire less often, and mint the second grant this card is
+  // about. ⛔ This card only tightens, so the predicate is untouched and the
+  // READ is what changes:
+  //
+  //   Leg A — ask the driver the narrow question. Independent of how many
+  //           org-scoped grants exist, so no org-admin count can crowd the
+  //           answer out of a window.
+  //   Leg B — only when leg A found nobody: scan the grant population for this
+  //           set, ORDERED so each page is a deterministic slice rather than
+  //           "whatever the driver produced first", bounded, and WARNING at the
+  //           bound with the number of rows examined. This is the leg that
+  //           still sees a `''`-shaped legacy row.
+  //
+  // Both legs are strictly ADDITIVE to what the old read could see, so the
+  // guard can only fire MORE often than before, never less.
+  //
+  // The seed-data owner `usr_system` (provisioned by the SeedLoader, see
+  // runtime/app-plugin.ts `ensureSeedIdentity`) never counts — otherwise a DB
+  // where it was wrongly promoted would block every real admin forever.
+  // Ignoring it here makes the bootstrap self-healing on restart.
+  const isUnscopedHumanHolder = (r: any) =>
+    !r.organization_id && r.user_id !== SystemUserId.SYSTEM;
+
+  // Counted by row IDENTITY, not by read: the two legs overlap by construction
+  // (leg A's rows are a subset of leg B's population), and a number that
+  // double-counted them would answer "how many reads did you make" while
+  // calling itself rows examined.
+  const examinedGrantRowIds = new Set<string>();
+  const countExamined = (rows: any[]) => {
+    for (const r of rows) {
+      examinedGrantRowIds.add(
+        r?.id === undefined || r?.id === null ? `?${examinedGrantRowIds.size}` : String(r.id),
+      );
+    }
+  };
+  let adminGrantScanTruncated = false;
+
+  // Leg A — the narrow question, asked of the driver.
+  const unscopedGrantRows = await tryFind(
     ql,
     'sys_user_permission_set',
-    { permission_set_id: adminPsId },
-    50,
+    { permission_set_id: adminPsId, organization_id: null },
+    PLATFORM_ADMIN_GRANT_PAGE_SIZE,
+    ADMIN_GRANT_SCAN_ORDER,
   );
-  // Human holders of the cross-tenant grant. The seed-data owner `usr_system`
-  // (provisioned by the SeedLoader, see runtime/app-plugin.ts
-  // `ensureSeedIdentity`) never counts — otherwise a DB where it was wrongly
-  // promoted would block every real admin forever. Ignoring it here makes the
-  // bootstrap self-healing on restart.
-  const humanUnscopedHolders = existingAdminLinks.filter(
-    (r) => !r.organization_id && r.user_id !== SystemUserId.SYSTEM,
-  );
+  countExamined(unscopedGrantRows);
+  let unscopedHolder: any | undefined = unscopedGrantRows.find(isUnscopedHumanHolder);
+
+  // Leg B — the ordered, bounded scan that still applies the exact predicate.
+  if (!unscopedHolder) {
+    const pageSize = PLATFORM_ADMIN_GRANT_PAGE_SIZE;
+    const ceiling = PLATFORM_ADMIN_GRANT_SCAN_CEILING;
+    for (let offset = 0; offset < ceiling && !unscopedHolder; offset += pageSize) {
+      const pageLimit = Math.min(pageSize, ceiling - offset);
+      const page = await tryFind(
+        ql,
+        'sys_user_permission_set',
+        { permission_set_id: adminPsId },
+        pageLimit,
+        ADMIN_GRANT_SCAN_ORDER,
+        offset,
+      );
+      if (page.length === 0) break;
+      countExamined(page);
+      unscopedHolder = page.find(isUnscopedHumanHolder);
+      if (unscopedHolder) break;
+      if (page.length < pageLimit) break;
+      if (offset + page.length >= ceiling) adminGrantScanTruncated = true;
+    }
+  }
+
+  // ⛔ The truncation is never silent (#16861). Reaching the ceiling is the one
+  // way this scan still answers "no platform admin yet" while one exists, and
+  // that answer does not merely skip a log line — it MINTS A SECOND unscoped
+  // grant and hands it the seeded business records. So it says the number it
+  // examined rather than letting the promotion below read as a statement about
+  // the whole table.
+  const adminGrantRowsExamined = examinedGrantRowIds.size;
+  if (adminGrantScanTruncated && !unscopedHolder) {
+    const truncation =
+      '[security] the existing-platform-admin check stopped at its ceiling of '
+      + `${PLATFORM_ADMIN_GRANT_SCAN_CEILING} admin_full_access grant row(s) `
+      + `(${adminGrantRowsExamined} examined) without finding an unscoped human grant — rows beyond `
+      + 'that point were NOT examined, so this deployment may ALREADY have a platform administrator '
+      + 'this boot did not see. Promoting now would mint a SECOND unscoped grant and re-own the seeded '
+      + `business records to it. Name the intended administrator with ${PLATFORM_OWNER_EMAIL_ENV} rather `
+      + 'than leaving the answer to a scan bound.';
+    if (logger?.warn) logger.warn(truncation);
+    else logger?.info?.(truncation);
+  }
+
+  // Attached to every return the guard reaches, so a caller can tell a guard
+  // that saw the whole population from one that saw a bounded slice of it.
+  const grantScanCounts = { adminGrantRowsExamined };
+
   // `single`: a platform admin "already exists" — the promotion is a no-op
   // forever. Under walled postures that same row is the LEGACY anchor and gets
   // the deprecation pointer below instead of a silent early exit.
-  if (!walled && humanUnscopedHolders.length > 0) {
-    return { seeded: seededCount, adminPromoted: false, reason: 'already_have_admin', ...resyncCounts };
+  if (!walled && unscopedHolder) {
+    return {
+      seeded: seededCount,
+      adminPromoted: false,
+      reason: 'already_have_admin',
+      ...resyncCounts,
+      ...grantScanCounts,
+    };
   }
 
   if (walled) {
@@ -506,8 +672,8 @@ export async function bootstrapPlatformAdmin(
     // ONCE per process through the same latch the derivation-site reporter
     // uses (`reportLegacyPlatformAdminGrant`): boot-time detection here and
     // request-time detection there can never add up to two lines.
-    if (humanUnscopedHolders.length > 0) {
-      const holder = humanUnscopedHolders[0];
+    if (unscopedHolder) {
+      const holder = unscopedHolder;
       const holderRows = await tryFind(ql, 'sys_user', { id: holder.user_id }, 1);
       reportLegacyPlatformAdminGrant({
         userId: String(holder.user_id),
@@ -527,7 +693,7 @@ export async function bootstrapPlatformAdmin(
     // administrator, on the old anchor.
     const platformAdminConfig = resolvePlatformAdminEmails();
     if (platformAdminConfig.emails.length === 0) {
-      if (humanUnscopedHolders.length === 0) {
+      if (!unscopedHolder) {
         const message =
           `[security] tenancy posture is walled but ${PLATFORM_OWNER_EMAIL_ENV} declares no usable ` +
           'platform administrator (unset, blank, or refused for an unparseable entry) — ' +
@@ -544,6 +710,7 @@ export async function bootstrapPlatformAdmin(
         adminPromoted: false,
         reason: 'walled_owner_email_undeclared',
         ...resyncCounts,
+        ...grantScanCounts,
       };
     }
 
@@ -572,6 +739,7 @@ export async function bootstrapPlatformAdmin(
       adminPromoted: false,
       reason: 'walled_config_derived',
       ...resyncCounts,
+      ...grantScanCounts,
     };
   }
 
@@ -674,7 +842,13 @@ export async function bootstrapPlatformAdmin(
     });
     if (!inserted) {
       logger?.warn?.(`[security] failed to grant admin_full_access to first user ${chosen.email ?? chosen.id}`);
-      return { seeded: seededCount, adminPromoted: false, reason: 'insert_failed', ...resyncCounts };
+      return {
+        seeded: seededCount,
+        adminPromoted: false,
+        reason: 'insert_failed',
+        ...resyncCounts,
+        ...grantScanCounts,
+      };
     }
     logger?.info?.(
       `[security] first user promoted to platform admin: ${chosen.email ?? chosen.id} `
@@ -699,6 +873,7 @@ export async function bootstrapPlatformAdmin(
       ownershipClaimed,
       basis: audit.basis,
       ...resyncCounts,
+      ...grantScanCounts,
     };
   };
 
@@ -870,6 +1045,7 @@ export async function bootstrapPlatformAdmin(
       // "click the link in your mailbox".
       reason: unverifiedOnly ? 'declared_owner_not_verified' : 'declared_owner_not_authenticable',
       ...resyncCounts,
+      ...grantScanCounts,
     };
   }
 
@@ -892,7 +1068,7 @@ export async function bootstrapPlatformAdmin(
   }
   if (scannedHumans === 0) {
     logger?.info?.('[security] no human users yet — first sign-up will be promoted to platform admin');
-    return { seeded: seededCount, adminPromoted: false, reason: 'no_users', ...resyncCounts };
+    return { seeded: seededCount, adminPromoted: false, reason: 'no_users', ...resyncCounts, ...grantScanCounts };
   }
   if (!target) {
     // [#14348] Humans exist, but not one of them can sign in. Measured on a
@@ -931,6 +1107,7 @@ export async function bootstrapPlatformAdmin(
       adminPromoted: false,
       reason: 'no_authenticable_user',
       ...resyncCounts,
+      ...grantScanCounts,
     };
   }
 

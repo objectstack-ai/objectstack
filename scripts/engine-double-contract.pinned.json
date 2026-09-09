@@ -2627,6 +2627,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/bootstrap-platform-admin-existing-holder-scan.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
       "file": "packages/plugins/plugin-security/src/bootstrap-platform-admin-promotion-selection.test.ts",
       "verb": "update",
       "pinned": 3
