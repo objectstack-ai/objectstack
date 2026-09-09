@@ -99,11 +99,13 @@
  * ## ⚠️ `counts.symbol` is ZERO on this corpus, and that is a census result
  *
  * The whole of `packages/spec/src` contains exactly ONE span written in symbol
- * anchor form, and it does not resolve: `websocket.zod.ts` cites
- * `contracts/realtime-service.ts#RealtimeSubscriptionOptions` package-relative,
- * so no tracked file is at that path (the symbol is real, and lives at
- * `packages/spec/src/contracts/realtime-service.ts`). It is pinned in
- * `CENSUS_RESIDUAL` below.
+ * anchor form, and it does not resolve: `packages/spec/src/api/websocket.zod.ts`
+ * anchors `RealtimeSubscriptionOptions` to a PACKAGE-RELATIVE spelling of the
+ * contracts file, so no tracked file is at that path -- the symbol itself is
+ * real and lives in `packages/spec/src/contracts/realtime-service.ts`. The
+ * citation as written is pinned in `CENSUS_RESIDUAL` below, and ⛔ it is NOT
+ * requoted in anchor form here: this header is itself swept by the `scripts/**`
+ * corpus, so quoting a broken anchor verbatim makes THIS file a finding.
  *
  * So the live-corpus self-test here asserts `fileLevel`, ⛔ never `symbol > 0`
  * the way `scripts/**` can: a corpus the convention has not reached yet cannot
@@ -164,13 +166,16 @@
  * skipped with the gate green.
  *
  * ⚠️ A corpus of TypeScript carries a shape the prose corpora do not: the
- * `repo:` prefix in the grammar is a bare lowercase word, so ANY
- * `word:some/path.ts` convention inside a doc block reads as a cross-repo
- * anchor. `retired-key-migrate-sentence.test.ts` documents its own corpus
- * labels that way (`spec:`, `lint:`, `skills:`) and lands 3 soft
- * `cross-repo-skipped` rows. Soft is the correct disposition -- they are
- * reported and never red -- but the rows are noise rather than signal, and the
- * next author to read this report should know why they are there.
+ * `repo:` prefix in the grammar is a bare lowercase word, so ANY convention
+ * spelling a bare word, a colon and a path inside a doc block reads as a
+ * cross-repo anchor -- written here in words rather than in the form itself,
+ * because this header is swept by the `scripts/**` corpus and the form would
+ * land as a finding against this file.
+ * `packages/spec/src/shared/retired-key-migrate-sentence.test.ts` documents its
+ * own corpus labels that way and lands 3 soft `cross-repo-skipped` rows. Soft
+ * is the correct disposition -- they are reported and never red -- but the rows
+ * are noise rather than signal, and the next author to read this report should
+ * know why they are there.
  */
 
 import { execFileSync } from 'node:child_process';
