@@ -46,8 +46,8 @@ export const OverrideCompositeRequest = ObjectSchema.create({
 export const OverrideCompositeFlow = defineFlow({
   name: 'override_composite_flow',
   label: 'Override Composite Flow',
-  description:
-    'Fires on insert and routes straight to an UNSTAFFED position — the #16679 stranded scene, in miniature.',
+  // The stranded scene, in miniature (see the module header above).
+  description: 'Fires on insert and routes straight to an UNSTAFFED position.',
   type: 'autolaunched',
   status: 'active',
   nodes: [
@@ -86,8 +86,8 @@ export const overrideCompositeStack = defineStack({
     version: '0.0.0',
     type: 'app',
     name: 'Override Composite Fixture',
-    description:
-      'One object, one flow, one permanently-unstaffed position — the #16679 gate-composite pin.',
+    // The gate-composite pin's fixture app (see the module header above).
+    description: 'One object, one flow, one permanently-unstaffed position.',
   },
   // ADR-0097: a `record_change` trigger (the flow's `record-after-create`
   // start node) only registers when the app declares it needs the capability.
