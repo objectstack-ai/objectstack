@@ -530,7 +530,10 @@ function referenceConsequence(clause: 'using' | 'check', kind: 'field' | 'variab
   }
 
   // ── The FIELD half. Which direction it takes is decided by position, and one
-  // of the two is fail-OPEN (#17042).
+  // of the two is fail-OPEN. The runtime repair is tracked in #17042; the id
+  // stays HERE and never in the returned string, because that string reaches
+  // authors, operators and generated surfaces, none of whom can resolve
+  // `#NNNN` (`check:doc-authoring`, maintainer ruling 2026-08-12).
   const closed =
     clause === 'using'
       ? 'the field-existence safety net in `SecurityPlugin` DROPS the policy and, when it was the only ' +
@@ -545,7 +548,7 @@ function referenceConsequence(clause: 'using' | 'check', kind: 'field' | 'variab
       : 'the post-image SATISFIES the negated constraint vacuously, so the check permits exactly the ' +
         'writes it was written to refuse';
   return (
-    'What it costs depends on WHERE the miss sits, and one of the two directions is fail-OPEN (#17042). ' +
+    'What it costs depends on WHERE the miss sits, and one of the two directions is fail-OPEN. ' +
     'The safety net recognises only a LEADING `field ==` / `=` / `in` — `extractTargetField` is that ' +
     `shape match — so a miss THERE fails CLOSED: ${closed}. A miss the net does NOT recognise — a ` +
     'negation (`field != x`, `!(field == x)`, `!(field in [...])`), or any arm after the first — leaves ' +
@@ -556,7 +559,8 @@ function referenceConsequence(clause: 'using' | 'check', kind: 'field' | 'variab
     'selects 0 of 3, and each negation shape selects 3 of 3. ⛔ It is NOT a cross-tenant leak — tenancy is ' +
     'a separate layer and holds; what is defeated is the narrowing authored INSIDE the wall. ' +
     'driver-mongodb follows the same shared ruling; driver-sql is NOT MEASURED and is expected to fail ' +
-    'closed by raising `no such column`. Fixing the runtime is #17042; this rule only reports the miss.'
+    'closed by raising `no such column`. Repairing that is the runtime\'s job, not this rule\'s — what ' +
+    'this diagnostic owes you is WHICH direction your predicate is in.'
   );
 }
 

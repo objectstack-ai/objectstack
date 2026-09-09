@@ -627,7 +627,13 @@ describe('validateRlsPredicateEnforceability — the messages name the COST, not
     // the dangerous half: an author told "this denies everything" about a
     // predicate that in fact matches everything hardens the wrong thing.
     expect(f.message).toMatch(/one of the two directions is fail-OPEN/);
-    expect(f.message).toMatch(/#17042/);
+    // ⛔ …and NOT by citing a tracker id. This string reaches authors,
+    // operators and generated surfaces, none of whom can resolve `#NNNN`
+    // (`check:doc-authoring`); the id lives in the adjacent `//` comment, which
+    // the reader who CAN resolve it is already reading. Pinned here so the next
+    // author does not re-add it and learn this from CI instead.
+    expect(f.message).not.toMatch(/#\d{3,}/);
+    expect(f.hint).not.toMatch(/#\d{3,}/);
     // closed leg — the LEADING position the safety net recognises
     expect(f.message).toMatch(/fails CLOSED/);
     expect(f.message).toMatch(/RLS_DENY_FILTER/);
