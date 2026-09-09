@@ -1843,9 +1843,16 @@ export function walkAddressedPageComponents(
 
     // Pre-order: the visitor sees the parent before its children, so a
     // consumer that emits in visit order emits in document order. The rebuilt
-    // composition slots land on the RETURNED node afterwards — `children` and
-    // `items[].children` are the slots the walk owns; everything else on the
-    // node is the visitor's.
+    // composition slots land on the RETURNED node afterwards, and they are
+    // rebuilt from the ORIGINAL component, never from `next`. The walk owns
+    // two `properties` keys, each only when the ORIGINAL node carries it:
+    // `children` (rebuilt entry by entry), and — on a node carrying at least
+    // one panel (an `items` entry with a `children` array) — the WHOLE `items`
+    // array, panels rebuilt and every other entry carried across exactly as it
+    // was authored. So a visitor's edit to any other `items[*]` key (a panel's
+    // own `label`, say) is overwritten; on a node with no panel `items` is not
+    // rebuilt at all and such an edit stands. Everything else the visitor
+    // returns — every other `properties` key, every top-level key — is kept.
     let next = visit(component, { id, nested, depth, addressed });
 
     const rebuilt = walkComposition(component, depth);

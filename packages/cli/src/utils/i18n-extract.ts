@@ -1055,25 +1055,30 @@ export function authorWarnedTranslationGroups(): ReadonlySet<string> {
  * neither can drift. The KEY list is {@link PAGE_COMPONENT_COPY_KEYS}; the
  * WALK — which components carry those keys — is `walkAddressedPageComponents`,
  * the same traversal `translatePage` itself runs (#13218, completing the key
- * list's precedent). The walk owns the roots (`regions[].components[]` only),
- * the descent (`properties.children` only, depth-capped, cycle-guarded) and
- * the ruled collision arbitration (#12961: region level wins outright; among
- * nested components, document-order first sighting) — this function used to
+ * list's precedent). The walk owns the roots (`regions[].components[]` AND
+ * `slots.<slot>`), the descent (`properties.children` AND a panel's
+ * `properties.items[].children`, depth-capped, cycle-guarded) and the ruled
+ * collision arbitration (#12961: root level wins outright; among nested
+ * components, document-order first sighting) — this function used to
  * hand-mirror all five and now owns none of them. What it still owns:
  *
- *   - the emission exception: a REGION-LEVEL `page:header` emits nothing here
- *     (its copy is offered under `pages.<page>.title` / `.subtitle` instead —
- *     emitting both would offer one string under two keys), but the walk still
- *     counts its id as region-level, so a nested namesake stays blocked;
+ *   - the emission exception: a ROOT-LEVEL `page:header` — a region's entry
+ *     or a `slots.<slot>` entry — emits nothing here (its copy is offered
+ *     under `pages.<page>.title` / `.subtitle` instead — emitting both would
+ *     offer one string under two keys), but the walk still counts its id as
+ *     root-level, so a nested namesake stays blocked;
  *   - the `label` either/or: `label` may be authored on the component itself
  *     or in its props — the same either/or `translatePage` resolves back onto.
  *
  * ⛔ Deliberately NOT `@objectstack/lint`'s `walkPageComponents`, which is
- * WIDER than the resolver in four ways (`slots.<slot>` roots,
- * `properties.items[].children`, `properties.body`, `properties.footer`) and
- * NARROWER in one (it skips `kind: 'html' | 'react' | 'jsx'` pages, which
- * `translatePage` walks) — either direction of that mismatch is one half of
- * the failure pair `PAGE_COMPONENT_COPY_KEYS`' own JSDoc names.
+ * WIDER than the resolver in two ways (`properties.body`, `properties.footer`
+ * — `page:card`'s slots, which the resolver leaves undescended as a renderer
+ * back-compat fallback rather than an authorable spelling; `slots.<slot>`
+ * roots and `properties.items[].children` were the other two until #16772
+ * brought both into the shared walk) and NARROWER in one (it skips
+ * `kind: 'html' | 'react' | 'jsx'` pages, which `translatePage` walks) —
+ * either direction of that mismatch is one half of the failure pair
+ * `PAGE_COMPONENT_COPY_KEYS`' own JSDoc names.
  */
 function emitPageComponentCopy(out: ExpectedEntry[], page: any, name: string): void {
   walkAddressedPageComponents(page, (component, { id, nested, addressed }) => {
