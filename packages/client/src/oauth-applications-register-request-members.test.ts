@@ -53,7 +53,8 @@
  * `scopes` → `scope` is not a rename: `scope` is one space-delimited string,
  * and the array form is driven-refused with
  * `400 [body.scope] Invalid input: expected string, received array`. The
- * space-joined case below is that prescription, pinned.
+ * FIRST case below sends that prescription, byte for byte; the third pins what
+ * the SDK does with the refusal the array form draws.
  *
  * `metadata` has no reachable door at all: only the SERVER_ONLY
  * `PATCH /admin/oauth2/update-client` honours it, and `better-call`'s router
@@ -210,13 +211,25 @@ describe('#15447 oauth.applications.register — the honoured members still reac
     expect(init.body).toBe(JSON.stringify(req));
   });
 
-  it('the space-joined `scope` is what the route accepts — the array form is refused on the wire', async () => {
-    // Driven, not invented: posting `scope: ['openid','profile']` answered
-    // `400 [body.scope] Invalid input: expected string, received array`, while
-    // `['openid','profile'].join(' ')` answered 201 with
-    // `"scope":"openid profile"`. This case pins that the SDK surfaces the
-    // refusal rather than papering over it — the reason a caller's array must
-    // be joined at the CALL SITE and not by a translation layer here.
+  it("surfaces the route's refusal of an array-form `scope` rather than swallowing it", async () => {
+    // ⚠️ The 400 below is a RECORDED response, replayed — never one this test
+    // produces. It is the verbatim answer the driven run got (issue #15447,
+    // comment 5559384773) from posting `scope: ['openid','profile']` at the
+    // real route; the same run got 201 and `"scope":"openid profile"` back from
+    // `['openid','profile'].join(' ')`. ⛔ Nothing here re-drives that, so what
+    // this case pins is the SDK's HANDLING of the refusal — that it surfaces
+    // it rather than papering over it — and never the route's own verdict,
+    // which a transport double answering 400 unconditionally cannot witness.
+    //
+    // The request carries the ARRAY form, spelled through a suppression,
+    // because that is the body which actually produced the recorded 400 —
+    // pairing it with the joined body the route ACCEPTS would be a fixture
+    // asserting one request's answer against another request. The suppression
+    // is load-bearing twice: after this card's narrowing the array form is no
+    // longer expressible through the declared type at all (the removed
+    // `scopes` was the member that invited it), which is the fact that makes
+    // the pairing honest rather than merely relabelled; and if `scope` is ever
+    // widened to accept an array, the directive goes unused and this goes red.
     const fetchMock = vi.fn(
       async () =>
         new Response(
@@ -232,7 +245,8 @@ describe('#15447 oauth.applications.register — the honoured members still reac
       c.oauth.applications.register({
         client_name: 'CTRL-CLIENT-NAME-15447',
         redirect_uris: ['https://app.example.com/cb'],
-        scope: 'openid profile email',
+        // @ts-expect-error [#15447] `scope` is ONE space-delimited string; the array is what the recorded 400 refuses, and the narrowed type no longer lets a caller spell it
+        scope: ['openid', 'profile', 'email'],
       }),
     ).rejects.toThrow(/expected string, received array/);
   });
