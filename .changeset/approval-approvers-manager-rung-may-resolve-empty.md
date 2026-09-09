@@ -1,5 +1,5 @@
 ---
-"@objectstack/lint": patch
+"@objectstack/lint": minor
 ---
 
 `approval-approvers-may-resolve-empty` now covers the `manager` rung, not just the group-routed ones.
@@ -12,5 +12,7 @@ The rule exists for the empty-slate dead-end (#3424): an approver slate that res
 - **When it stays quiet.** A stack whose own seed data wires `sys_user.manager_id` on any seeded row has shown the linter that it populates the column, and the advisory is suppressed. Seed rows are the only manager-chain evidence a stack can carry, so that is the whole of what this check reads on the question.
 
 Existing verdicts are unchanged. The new arm is scoped to slates that are entirely `manager` rungs, which keeps it disjoint from the group-routed arm by construction — no node can draw both findings — and leaves every `position` verdict exactly as it was, mixed slates included: a `[position, manager]` node stays silent, as it is pinned to.
+
+This is a purely additive widening of a published package's public surface — the rule begins covering a case it was silent on — so it is graded `minor`, the floor that act carries regardless of the commit type.
 
 No severity moved. The finding is `info`, so it lands in the advisory channel on every consumer: `os lint` renders it as a suggestion and its exit code is unchanged (a suggestion does not fail a run even under `--strict`), and the runtime publish gate returns it on the 2xx `advisories` array rather than refusing the write. What changes is the report, not any verdict.
