@@ -256,7 +256,7 @@ describe('#11643 — `os build --json` carries the undeclared-authoring-key warn
         'runtimeModule',
         'runtimeModuleSize',
         'size',
-        'specVersionGap',
+        'protocolVersionGap',
         'stats',
         'success',
         'warnings',

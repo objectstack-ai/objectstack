@@ -541,12 +541,17 @@ export default class Validate extends Command {
             // this one.
             warnings: warningsSoFar(),
             conversions: conversionNotices,
-            // The payload key keeps its published name. The AXIS it reports
+            // [#14261] The key now spells the axis it reports. That axis
             // moved from the undeclared `manifest.specVersion` to
-            // `manifest.engines.protocol` (#13860), but this is a machine face
-            // with pinned consumers, and renaming it is a break nobody asked
-            // for. Its value shape is unchanged.
-            specVersionGap: protocolGap,
+            // `manifest.engines.protocol` in #13860, and the published key
+            // name lagged one release behind it. A key spelled `specVersion*`
+            // invites the inference that `manifest.specVersion` is writable;
+            // `ManifestSchema` is not `.strict()` and drops unknown keys with
+            // nothing said (#14192), so acting on that inference produces a
+            // manifest that looks fine and whose line never took effect. The
+            // rename is one stroke, no alias, no dual-key window; its value
+            // shape is unchanged.
+            protocolVersionGap: protocolGap,
             duration: timer.elapsed(),
           },
           // `--strict` means one thing — "treat warnings as errors" — and it now
@@ -556,8 +561,8 @@ export default class Validate extends Command {
           // its `⚠` block while the payload carries them under `conversions`.
           // Gating on the payload field would have left `--json --strict` at 0
           // for a config whose only advisories are conversion notices — the
-          // same divergence one collection narrower. `specVersionGap` stays out
-          // on both faces; it is never gated by `--strict` (see below).
+          // same divergence one collection narrower. `protocolVersionGap` stays
+          // out on both faces; it is never gated by `--strict` (see below).
           //
           // `valid: true` beside a 1 is not a contradiction, it is the text
           // face verbatim: that path prints "Validation passed" and THEN fails
