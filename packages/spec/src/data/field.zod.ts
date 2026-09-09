@@ -1347,8 +1347,25 @@ export const FieldSchema = lazySchema(() => {
    * list of children); these configure the CHILD-side picker that chooses the
    * parent. All optional: the renderer auto-derives a sensible multi-column
    * result from the referenced object's schema when omitted (objectui
-   * packages/fields: LookupField / RecordPickerDialog / deriveLookupColumns,
-   * which read both these camelCase keys and their snake_case aliases).
+   * packages/fields: LookupField / RecordPickerDialog / deriveLookupColumns).
+   *
+   * SNAKE_CASE TOLERANCE — measured on the consumer, not assumed. Those
+   * readers accept a snake_case alias for three of the seven keys declared
+   * below, and for three only: `lookupColumns`, `lookupPageSize` and
+   * `allowCreate` are each read as `<snake> ?? <camel>` in LookupField.tsx.
+   * The other four — `displayField`, `descriptionField`, `lookupFilters`
+   * and `dependsOn` — are read camelCase-only, so a snake_case spelling of
+   * any of those four arrives at the picker as nothing at all. Three of them
+   * lost their twin in objectui#7155's LookupFieldMetadata alias sweep (no
+   * deprecation window, no dual read); `dependsOn` lost its own later,
+   * retired under ADR-0049 enforce-or-remove in objectui#7357. The three
+   * aliases that survive are objectui's own back-compat, never a spelling
+   * this schema declares — the camelCase key is the authored one in every
+   * case.
+   *
+   * Claim dated to objectui ed971e8, re-measured 2026-09-09. It is a reading
+   * of a pinned foreign tree and no gate here re-checks it: when the console
+   * pin moves, this paragraph is what goes stale.
    */
   displayField: z.string().optional().describe("Field shown as each candidate's label in the picker/popover (defaults to the referenced object's name/title)."),
   descriptionField: z.string().optional().describe('Secondary field shown under the label in the quick-select popover.'),
