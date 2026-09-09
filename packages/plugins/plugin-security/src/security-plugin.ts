@@ -6016,9 +6016,32 @@ export class SecurityPlugin implements Plugin {
         ? collected.filter((p) => !isPlatformOwnershipFloorPolicy(p))
         : collected;
       if (allRlsPolicies.length > 0) {
-        // Field-existence safety: a wildcard policy targeting a column the object
-        // lacks is a *deny* contribution (fail-closed), unless the object opted
-        // out of tenancy (skip). Schema-lookup failure keeps all policies.
+        // Field-existence safety, in TWO passes that answer two different
+        // questions. Schema-lookup failure runs neither: a schema that cannot
+        // be loaded must not manufacture denials.
+        //
+        // Pass 1, HERE — the ADR-0095 delta c carve-out, and only that. A
+        // wildcard `organization_id`-leading policy on an object that opted OUT
+        // of tenancy is NOT APPLICABLE to it, so it is skipped WITHOUT
+        // contributing to the deny sentinel; a leading miss on any other column
+        // is a deny contribution. `extractTargetField`'s leading `==` / `=` /
+        // `in` shape match is exactly the right instrument for that carve-out,
+        // because the shape it recognises is the shape the platform's own
+        // tenant policy is authored in.
+        //
+        // Pass 2, in the COMPILER — every column named ANYWHERE in the
+        // predicate, in any position and any polarity. ⚠️ This pass is what
+        // pass 1 cannot do and must not be widened to do: a predicate naming an
+        // undeclared column in a NEGATION-carrying position (`nope != "x"`,
+        // `!(nope == 1)`, `!(nope in […])`, or a trailing `||` arm) returned
+        // `null` from `extractTargetField`, so the policy was KEPT, `dropped`
+        // never incremented, the sentinel never armed — and a row that has no
+        // such column SATISFIES the negation, so the authored narrowing widened
+        // to every row inside the tenant wall instead of denying. Teaching the
+        // regex more spellings would only move the same defect one level over;
+        // the compiler judges the compiled tree, where a negation is a `$not`
+        // node and has no spelling left to hide behind. The matcher's
+        // include-direction ruling is untouched — it never sees the phantom.
         let dropped = 0;
         const compilable = objectFields
           ? allRlsPolicies.filter((p) => {
@@ -6032,7 +6055,12 @@ export class SecurityPlugin implements Plugin {
               return false;
             })
           : allRlsPolicies;
-        layer1 = this.rlsCompiler.compileFilter(compilable, context);
+        layer1 = this.rlsCompiler.compileFilter(
+          compilable,
+          context,
+          'using',
+          objectFields ? { declared: objectFields } : undefined,
+        );
         // Every applicable policy dropped for a missing field → deny sentinel.
         if (layer1 == null && dropped > 0) {
           layer1 = { ...RLS_DENY_FILTER };
@@ -6266,7 +6294,26 @@ export class SecurityPlugin implements Plugin {
     // throwing resolver or an unresolved key still drop the policy and still
     // fail closed, on this path as on the read path.
     await this.stageRlsMembership(context);
-    return this.rlsCompiler.compileFilter(withCheck, context, 'check');
+    // [#17042] The write face's field-existence net — which this path had NONE
+    // of. `computeWriteCheckFilter` compiled `check` clauses with no column
+    // check at all, so a phantom column in a negated position
+    // (`nope != "x"`, `!(nope == 1)`, `!(nope in […])`, a trailing `||` arm)
+    // was satisfied VACUOUSLY by the post-image and PERMITTED the write the
+    // policy was authored to refuse — measured on both SQL drivers, the write
+    // being driver-independent because the check is evaluated in-process
+    // against the post-image (`matchesFilterCondition`, step 3.6). Only a
+    // POSITIVE phantom refused, by accident of `looseEq(undefined, value)`
+    // being false, which is why the hole was invisible to a suite that tested
+    // the positive shape. The guard is the SAME one the read layer passes, so
+    // the two faces can never again disagree about what an undeclared column
+    // means. `null` (schema not loadable) passes no guard and behaves as before.
+    const objectFields = await this.getObjectFieldNames(this.metadata, object, this.ql);
+    return this.rlsCompiler.compileFilter(
+      withCheck,
+      context,
+      'check',
+      objectFields ? { declared: objectFields } : undefined,
+    );
   }
 
   /**
@@ -7650,7 +7697,20 @@ export class SecurityPlugin implements Plugin {
   /**
    * Extract the left-hand field name from a simple RLS expression like
    * `field = current_user.x` or `field IN (current_user.y)`. Returns
-   * `null` for unsupported shapes (in which case we keep the policy).
+   * `null` for unsupported shapes.
+   *
+   * ⚠️ [#17042] What a `null` MEANS here changed, and the change is the whole
+   * point: this is no longer the field-existence net, it is the ADR-0095 delta
+   * c carve-out's instrument. `null` still means "this policy is not the
+   * leading-`organization_id` shape the carve-out is about", so the caller
+   * keeps it — but the policy is now judged for column existence a second time
+   * inside `RLSCompiler.compileFilter`, on the COMPILED tree, where position
+   * and polarity have been normalised away. ⛔ Do not widen this regex to
+   * recognise `!=` / `!` / `not in`: a shape match that must enumerate every
+   * spelling of negation is the same "recognises only what it was told about"
+   * defect the compiler-side pass exists to end, and widening it here would
+   * ALSO turn the carve-out into a denial for the tenancy-disabled case it
+   * deliberately skips.
    */
   private extractTargetField(using?: string): string | null {
     if (!using) return null;
