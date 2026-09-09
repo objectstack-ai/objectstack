@@ -276,7 +276,7 @@ import type * as M184 from './shared/value-domain.zod.js';
 import type * as M185 from './shared/epoch.zod.js';
 
 // ---------------------------------------------------------------------------
-// 815 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 816 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1694,7 +1694,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 815 isomorphic pins', () => {
+  it('still declares all 816 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2180,7 +2180,21 @@ describe('ADR-0122 type-alias convention', () => {
     // `AnalyticsDateRangeSchema` (its union with `z.array(z.string())`) — no
     // default, no transform on either arm, two new pins (`Iso869` / `Iso870`).
     // +2 added.
-    expect(pins).toHaveLength(815);
+    //
+    // 815 -> 816 is #16659's `ScheduleOrganizationSchema`
+    // (automation/schedule-organization.zod.ts, new module slot M186): the
+    // acting organization a time-triggered flow declares, a bare
+    // `z.string().min(1)` — no coercion, no default, no transform, because an
+    // organization id is written exactly as it is stored. The (RISE) case, one
+    // new pin (`Iso871`). +1 added.
+    //
+    // ⚠️ Worth one line on how it ARRIVED, because the module is not new — only
+    // its NAME is. It shipped in the same card as `schedule-organization.ts`,
+    // and every gate in this family reads `*.zod.ts` only, so neither this pin
+    // file nor `check:spec-parsed-alias` could see it. Renaming the file to
+    // `.zod.ts` is what asked the question, and the answer was a real ADR-0122
+    // violation (`z.infer` on the bare alias) sitting green behind an extension.
+    expect(pins).toHaveLength(816);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either
