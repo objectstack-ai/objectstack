@@ -32,7 +32,11 @@
  *    storage driver, and a deployment that had DECLARED its owner could still
  *    have somebody else promoted. The guard's subject survives — `single`
  *    still writes a grant — but "byte-for-byte" does not, and the case that
- *    claimed it is re-authored below with the ruling that replaced it.
+ *    claimed it is re-authored below with the ruling that replaced it —
+ *    a MAINTAINER ruling of 2026-09-08 (decision batch #100), not a triage
+ *    seat's, which also makes verification a REQUIREMENT of the declared-owner
+ *    leg and retires the trigger-set narrowing for the one write that can now
+ *    change the answer.
  *
  * The outcomes here are bootstrap returns, not HTTP answers, so there is no
  * ADR-0112 envelope to assert; the machine-checkable surface is the exact
@@ -444,12 +448,24 @@ describe('single posture — "first user is owner" is ruled reasonable and UNCHA
    * rows the driver produced first — measured on 113 rows, memory promoted the
    * intended owner and sqlite promoted a job-seeker persona — while
    * `PLATFORM_OWNER_EMAIL_ENV`, imported into that same file, was consulted
-   * only on the walled branch. #16682's triage ruled both halves in, in one
-   * change, and ruled the split unacceptable:
+   * only on the walled branch.
    *
-   *   > 只做 1(服务端排序 + 去掉 cap)让结果与驱动无关、可复现 —— 但它仍然可能
-   *   > 提升一个运营者没选的人(最老的可认证用户未必是 owner)。⇒ 修掉了不确定性,
-   *   > ⛔ 没修掉安全性。
+   * The authority for the reversal is a MAINTAINER ruling — 2026-09-08,
+   * decision batch #100, recorded on #16682 (comment 5587754690), which
+   * supersedes the Choice 4A sentence for this one point and states what
+   * survives it, verbatim:
+   *
+   *   > F3 — the Choice 4A sentence is superseded for this one point. Under
+   *   > `single` posture the first-boot promotion consults
+   *   > `OS_PLATFORM_OWNER_EMAIL` first. The rest of Choice 4A (#11974,
+   *   > 2026-08-25) stands: retiring the walled write must not retire the
+   *   > `single` one, and the over-denial invariant (`adminPromoted === true`
+   *   > with a grant row minted) stays pinned.
+   *
+   * ⛔ An earlier revision of this comment quoted the #16682 TRIAGE seat's
+   * ruling instead. That quotation was the reviewer's F3 finding: a pin
+   * recorded under a maintainer ruling cannot be rewritten under a seat's.
+   * The quotation above is the record that resolved it.
    *
    * So a declared owner now DOES decide this promotion. `single` keeping
    * first-user promotion (Choice 4A) is untouched: with no declaration, the
@@ -463,7 +479,10 @@ describe('single posture — "first user is owner" is ruled reasonable and UNCHA
     const ql = makeQl({
       users: [
         user('u_first', 'first@corp.example', '2026-08-23T01:00:00Z'),
-        user('u_second', 'second@corp.example', '2026-08-23T02:00:00Z'),
+        // VERIFIED: the same ruling makes that a REQUIREMENT of this leg, not
+        // a tie-break — an unverified holder is refused
+        // (`declared_owner_not_verified`, pinned in the selection suite).
+        user('u_second', 'second@corp.example', '2026-08-23T02:00:00Z', { email_verified: true }),
       ],
       accounts: [account('u_first'), account('u_second')],
     });
@@ -503,25 +522,57 @@ describe('single posture — "first user is owner" is ruled reasonable and UNCHA
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// [#11974] The bootstrap-replay trigger set, NARROWED with the walled
-// elevation's retirement: `single` + create/insert only. The #11343 update
-// arm (email / email_verified) fired for the walled verify-then-elevate
-// sequence, which no longer exists — and under walled postures NO sys_user
-// write can change the bootstrap's answer, so nothing replays at all.
+// [#11974, amended by #16682] The bootstrap-replay trigger set. #11974
+// narrowed it to `single` + create/insert: the #11343 update arm (email /
+// email_verified) fired for the walled verify-then-elevate sequence, which no
+// longer exists, and its own rationale was that "`single` promotes the oldest
+// authenticable human and never reads `email`/`email_verified`".
+//
+// The maintainer ruling of 2026-09-08 (batch #100) made that last clause
+// false FOR ONE CONFIGURATION: with an owner declared, `single` promotes only
+// a VERIFIED holder of the declared address, and the ruling says the
+// consequence out loud — "the replay predicate promotes as soon as
+// verification lands". So the update arm returns exactly there and nowhere
+// else: `single`, `sys_user`, a payload touching `email`/`email_verified`,
+// and an owner actually declared. With none declared the narrowing is intact,
+// which is every deployment #11974 measured.
 // security-plugin.ts consumes this same predicate.
 // ───────────────────────────────────────────────────────────────────────────
-describe('shouldReplayBootstrapFor — narrowed trigger set (#11974)', () => {
+describe('shouldReplayBootstrapFor — the trigger set equals the selection inputs (#11974, #16682)', () => {
   it('fires on sys_user insert/create under `single` (first-user promotion, unchanged)', () => {
     expect(shouldReplayBootstrapFor({ object: 'sys_user', operation: 'insert', data: { email: 'a@b.c' } })).toBe(true);
     expect(shouldReplayBootstrapFor({ object: 'sys_user', operation: 'create', data: { email: 'a@b.c' } })).toBe(true);
   });
 
-  it('⛔ no longer fires on updates touching email_verified / email — the walled elevation they re-attempted is retired', () => {
+  it('⛔ with NO owner declared, an update touching email_verified / email still does not fire (#11974 narrowing intact)', () => {
+    // `single`'s no-declaration leg ranks by age over authenticable humans and
+    // reads neither column, so replaying here would be the pure re-run tax
+    // #11974 removed.
     expect(
       shouldReplayBootstrapFor({ object: 'sys_user', operation: 'update', data: { id: 'u1', email_verified: true } }),
     ).toBe(false);
     expect(
       shouldReplayBootstrapFor({ object: 'sys_user', operation: 'update', data: { id: 'u1', email: 'x@y.z' } }),
+    ).toBe(false);
+  });
+
+  it('fires on the VERIFYING update once an owner IS declared (#16682 — "promotes as soon as verification lands")', () => {
+    process.env.OS_PLATFORM_OWNER_EMAIL = 'operator@corp.example';
+    expect(
+      shouldReplayBootstrapFor({ object: 'sys_user', operation: 'update', data: { id: 'u1', email_verified: true } }),
+    ).toBe(true);
+    // The address itself is an input too: a row moving ONTO the declared
+    // address is the other write that can change leg 1's answer.
+    expect(
+      shouldReplayBootstrapFor({ object: 'sys_user', operation: 'update', data: { id: 'u1', email: 'x@y.z' } }),
+    ).toBe(true);
+    // ⛔ Still narrow: an update that touches neither column, and any
+    // `sys_account` update, decide nothing.
+    expect(
+      shouldReplayBootstrapFor({ object: 'sys_user', operation: 'update', data: { id: 'u1', name: 'New Name' } }),
+    ).toBe(false);
+    expect(
+      shouldReplayBootstrapFor({ object: 'sys_account', operation: 'update', data: { id: 'a1', email_verified: true } }),
     ).toBe(false);
   });
 
@@ -533,6 +584,13 @@ describe('shouldReplayBootstrapFor — narrowed trigger set (#11974)', () => {
       expect(
         shouldReplayBootstrapFor({ object: 'sys_user', operation: 'update', data: { id: 'u1', email_verified: true } }),
       ).toBe(false);
+      // ...including with an owner declared: a walled posture derives standing
+      // from config at request time and writes nothing to re-attempt.
+      process.env.OS_PLATFORM_OWNER_EMAIL = 'operator@corp.example';
+      expect(
+        shouldReplayBootstrapFor({ object: 'sys_user', operation: 'update', data: { id: 'u1', email_verified: true } }),
+      ).toBe(false);
+      delete process.env.OS_PLATFORM_OWNER_EMAIL;
     }
   });
 

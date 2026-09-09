@@ -199,10 +199,14 @@ async function seedUser(
   email: string,
   createdAt: string,
   withAccount: boolean,
+  // [#16682, maintainer ruling batch #100] Absent means UNVERIFIED, which is
+  // what `isEmailVerifiedUserRow` reads an absent column as — so every fixture
+  // that does not say otherwise is a row the declared-owner leg must REFUSE.
+  emailVerified = false,
 ): Promise<void> {
   await ql.insert(
     'sys_user',
-    { id, email, name: email.split('@')[0], created_at: createdAt },
+    { id, email, name: email.split('@')[0], created_at: createdAt, email_verified: emailVerified },
     { context: SYSTEM_CTX },
   );
   if (withAccount) {
@@ -337,6 +341,51 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
       }
       expect(answers).toEqual(['admin@objectos.ai', 'admin@objectos.ai', 'admin@objectos.ai']);
     });
+
+    /**
+     * [F5] The card's 113-row fixture fits inside ONE
+     * `PLATFORM_ADMIN_CANDIDATE_PAGE_SIZE` page, so it catches a lost
+     * `orderBy` only because there is no client-side re-sort left in the
+     * selection. Add a defensive `.sort(byCreatedAtAsc)` over the returned page
+     * — the exact thing the source comment warns the next author away from —
+     * and every case above this one would go GREEN with the ordering gone,
+     * because the whole population is in the page it re-sorts.
+     *
+     * This case is the one that does not: at `PAGE_SIZE + 1` rows with the
+     * owner's id collating LAST, an unordered read puts the owner on page TWO,
+     * outside anything a page-local re-sort can reach, while page one already
+     * holds an authenticable row for the loop to stop on. So it fails on a lost
+     * `orderBy` whether or not a re-sort is reintroduced.
+     *
+     * Run on the plain real driver (`AS_RETURNED`, id order — measured), which
+     * is the family that produced the card's defect.
+     */
+    it(`survives a future page-local re-sort: ${PLATFORM_ADMIN_CANDIDATE_PAGE_SIZE + 1} rows, owner id-last`, async () => {
+      const engine = await boot();
+      // Page one under id order is `usr_ats_c001..c200`, and `c001` can sign
+      // in — so a page-one answer is available and WRONG.
+      for (let i = 1; i <= PLATFORM_ADMIN_CANDIDATE_PAGE_SIZE; i++) {
+        const n = String(i).padStart(3, '0');
+        await seedUser(
+          engine as any,
+          `usr_ats_c${n}`,
+          `candidate${n}@mail.example`,
+          `2026-01-01T00:00:${String(i % 60).padStart(2, '0')}.000Z`,
+          i <= 3,
+        );
+      }
+      // The intended target: oldest by `created_at`, last by id, authenticable.
+      await seedUser(engine as any, 'usr_zzz_owner', 'owner@objectos.ai', '2025-01-01T00:00:00.000Z', true);
+
+      const report = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, {});
+
+      expect(report.adminPromoted).toBe(true);
+      expect(report.basis).toBe('oldest-authenticable');
+      expect(await adminGrantEmails(engine)).toEqual(['owner@objectos.ai']);
+      // ANTI-VACUITY: the population really does exceed one page, so the row
+      // above really is unreachable from a page-one re-sort.
+      expect((await findRows(engine, 'sys_user')).length).toBe(PLATFORM_ADMIN_CANDIDATE_PAGE_SIZE + 1);
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -348,7 +397,9 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
      * The declared owner is `usr_zzz_declared`: id collates last (so an
      * id-ordered 50-row window misses it), and its `created_at` is the NEWEST
      * of all 113 rows (so the age rule would not pick it either). Only reading
-     * the declaration can produce it.
+     * the declaration can produce it. It is the one VERIFIED row in the
+     * population, which under the batch-#100 ruling is a REQUIREMENT of this
+     * leg and not a tie-break.
      */
     async function seedDeclaredOwnerPopulation(ql: any): Promise<void> {
       await seedUser(ql, 'usr_ats_a000', 'oldest@mail.example', '2025-01-01T00:00:00.000Z', true);
@@ -362,7 +413,7 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
           i <= 6,
         );
       }
-      await seedUser(ql, 'usr_zzz_declared', 'owner@objectos.ai', '2027-12-31T00:00:00.000Z', true);
+      await seedUser(ql, 'usr_zzz_declared', 'owner@objectos.ai', '2027-12-31T00:00:00.000Z', true, true);
     }
 
     for (const order of NATURAL_ORDERS) {
@@ -390,7 +441,7 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
       declareOwner('  Owner@ObjectOS.ai  ');
       const engine = await boot();
       await seedUser(engine as any, 'usr_a', 'first@mail.example', '2025-01-01T00:00:00.000Z', true);
-      await seedUser(engine as any, 'usr_b', 'owner@objectos.ai', '2026-01-01T00:00:00.000Z', true);
+      await seedUser(engine as any, 'usr_b', 'owner@objectos.ai', '2026-01-01T00:00:00.000Z', true, true);
 
       const report = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, {});
       expect(report.basis).toBe('declared-owner');
@@ -444,15 +495,14 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
       };
     }
 
-    it('among rows holding the declared address, a VERIFIED one outranks an older unverified squat', async () => {
-      // `matchesConfiguredPlatformAdmin` states the threat for the walled
-      // derivation: "an attacker who registers the operator's address before
-      // the operator does gains no standing by it." This leg answers it by
-      // ORDER rather than by refusal — somebody who cannot read the operator's
-      // mailbox cannot verify, so the operator's own row wins wherever both
-      // rows can exist, while a deployment where nobody has verified anything
-      // is still promotable (`single` has no verification requirement, and
-      // `bootstrap-platform-admin-walled-owner.test.ts` pins that).
+    it('among rows holding the declared address, only the VERIFIED one is eligible', async () => {
+      // ⚠️ RE-AUTHORED by the maintainer ruling of 2026-09-08 (batch #100).
+      // This case used to pin an ORDERING — "a verified match outranks an older
+      // unverified squat" — and the ruling struck that ordering as moot: a
+      // preference only helps where a verified holder EXISTS. What is pinned
+      // now is the requirement: the older unverified squat is not a candidate
+      // at all, so the answer does not depend on the operator having managed to
+      // register alongside it.
       declareOwner('owner@objectos.ai');
       const ql = makeDuplicateAddressQl(
         [
@@ -477,11 +527,23 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
 
       const report = await bootstrapPlatformAdmin(ql as any, defaultPermissionSets, {});
       expect(report.basis).toBe('declared-owner');
-      // The OLDER row loses: this tie-break is not the age rule.
+      // The OLDER row loses, and not on age: it never entered the candidate set.
       expect(ql.grants().map((g) => String(g.user_id))).toEqual(['usr_owner']);
     });
 
-    it('CONTROL: with nobody verified, the oldest holder of the declared address wins', async () => {
+    it('with NOBODY verified, the declared-owner leg REFUSES — zero grant rows, no fall-back', async () => {
+      // ⚠️ RE-AUTHORED by the maintainer ruling of 2026-09-08 (batch #100).
+      // The predecessor of this case asserted the opposite ("the oldest holder
+      // of the declared address wins"), which was the preference reading. The
+      // ruling's accepted cost is exactly this outcome, loudly:
+      //
+      //   > a `single` deployment whose declared owner has not verified their
+      //   > email gets no platform admin at first boot until they do, with a
+      //   > loud warning saying exactly that.
+      //
+      // Note what is NOT promoted: `usr_early` can sign in and holds the
+      // declared address, and under the previous reading it took the unscoped
+      // `admin_full_access` grant.
       declareOwner('owner@objectos.ai');
       const ql = makeDuplicateAddressQl(
         [
@@ -494,9 +556,46 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
         ],
       );
 
-      const report = await bootstrapPlatformAdmin(ql as any, defaultPermissionSets, {});
-      expect(report.basis).toBe('declared-owner');
-      expect(ql.grants().map((g) => String(g.user_id))).toEqual(['usr_early']);
+      const { warn, logger } = collectingLogger();
+      const report = await bootstrapPlatformAdmin(ql as any, defaultPermissionSets, { logger });
+      expect(report.adminPromoted).toBe(false);
+      expect(report.reason).toBe('declared_owner_not_verified');
+      expect(ql.grants()).toHaveLength(0);
+      const said = warn.join('\n');
+      expect(said).toContain(OWNER_ENV);
+      expect(said).toContain('owner@objectos.ai');
+      expect(said).toContain('VERIFIED');
+      expect(said).toContain('NOT falling back to the oldest');
+    });
+
+    it('the refusal LIFTS the moment verification lands — the replay promotes the owner', async () => {
+      // The ruling's own sentence: "the replay predicate promotes as soon as
+      // verification lands." This case drives the two halves of that in order —
+      // the first pass refuses with zero grant rows, the verifying update
+      // lands, and the replayed pass promotes the same row. `single`'s replay
+      // trigger is pinned next to its producer
+      // (`bootstrap-platform-admin-walled-owner.test.ts`); what is pinned here
+      // is that the SELECTION really does change its answer.
+      declareOwner('owner@objectos.ai');
+      const engine = await boot();
+      await seedUser(engine as any, 'usr_a', 'first@mail.example', '2025-01-01T00:00:00.000Z', true);
+      await seedUser(engine as any, 'usr_owner', 'owner@objectos.ai', '2026-01-01T00:00:00.000Z', true, false);
+
+      const before = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, {});
+      expect(before.adminPromoted).toBe(false);
+      expect(before.reason).toBe('declared_owner_not_verified');
+      expect(await adminGrantEmails(engine)).toEqual([]);
+
+      await (engine as any).update(
+        'sys_user',
+        { id: 'usr_owner', email_verified: true },
+        { context: SYSTEM_CTX },
+      );
+
+      const after = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, {});
+      expect(after.adminPromoted).toBe(true);
+      expect(after.basis).toBe('declared-owner');
+      expect(await adminGrantEmails(engine)).toEqual(['owner@objectos.ai']);
     });
 
     it('a declared address on a NON-human row is not a route to the grant', async () => {
@@ -627,7 +726,10 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
       declareOwner('directory@objectos.ai');
       const engine = await boot();
       await seedUser(engine as any, 'usr_a', 'first@mail.example', '2025-01-01T00:00:00.000Z', true);
-      await seedUser(engine as any, 'usr_dir', 'directory@objectos.ai', '2026-01-01T00:00:00.000Z', false);
+      // VERIFIED, so this case measures the authenticability axis alone: the
+      // only thing missing is a `sys_account`, and #14348's reason code is what
+      // must come back.
+      await seedUser(engine as any, 'usr_dir', 'directory@objectos.ai', '2026-01-01T00:00:00.000Z', false, true);
 
       const { warn, logger } = collectingLogger();
       const report = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, { logger });
@@ -785,7 +887,7 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
       declareOwner('owner@objectos.ai');
       const engine = await boot();
       await seedUser(engine as any, 'usr_a', 'first@mail.example', '2025-01-01T00:00:00.000Z', true);
-      await seedUser(engine as any, 'usr_owner', 'owner@objectos.ai', '2026-01-01T00:00:00.000Z', true);
+      await seedUser(engine as any, 'usr_owner', 'owner@objectos.ai', '2026-01-01T00:00:00.000Z', true, true);
 
       const { info, logger } = collectingLogger();
       await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, { logger });

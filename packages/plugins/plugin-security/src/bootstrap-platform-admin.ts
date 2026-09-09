@@ -260,11 +260,25 @@ function genId(prefix: string): string {
  *    a people directory (where boot finds humans but no logins) that is the
  *    difference between "the first real sign-up is promoted" and "no platform
  *    admin is ever promoted".
- *  - `single` + any update: could never change the promotion answer —
- *    `single` promotes the oldest authenticable human and never reads
- *    `email`/`email_verified`. The pre-#11974 update arm fired here for the
- *    walled match's sake only; with that gone it would be a pure re-run tax
- *    on every verification write.
+ *  - `single` + `sys_user` update touching `email` / `email_verified`, ONLY
+ *    while an owner address is declared: [#16682, maintainer ruling of
+ *    2026-09-08, decision batch #100] the `single` leg now consults
+ *    `OS_PLATFORM_OWNER_EMAIL` and promotes only a VERIFIED holder of a
+ *    declared address. So the verifying write is an INPUT to this function's
+ *    answer again, and the ruling states the consequence directly: "the
+ *    replay predicate promotes as soon as verification lands". Without this
+ *    arm the accepted cost of that ruling would be far worse than the ruling
+ *    describes — an owner who verified would keep waiting until some OTHER
+ *    user happened to sign up.
+ *
+ *    ⛔ NOT the pre-#11974 arm restored wholesale. It is gated on a
+ *    declaration actually existing, which is the only configuration where an
+ *    update can move the answer: with none declared, `single` still promotes
+ *    the oldest authenticable human and still never reads
+ *    `email`/`email_verified`, so the re-run tax the #11974 narrowing removed
+ *    stays removed for every deployment that has not declared an owner.
+ *  - `single` + any other update (a name change, a `sys_account` update):
+ *    reads nothing this function ranks on. Never replays.
  */
 export function shouldReplayBootstrapFor(opCtx: {
   object?: string;
@@ -272,9 +286,15 @@ export function shouldReplayBootstrapFor(opCtx: {
   data?: unknown;
 }): boolean {
   if (opCtx?.object !== 'sys_user' && opCtx?.object !== 'sys_account') return false;
+  if (postureEnforcesWall(resolveTenancyPosture())) return false;
   const op = opCtx?.operation;
-  if (op !== 'create' && op !== 'insert') return false;
-  return !postureEnforcesWall(resolveTenancyPosture());
+  if (op === 'create' || op === 'insert') return true;
+  if (op !== 'update' || opCtx.object !== 'sys_user') return false;
+  // [#16682] The verifying write, and only where it can decide something.
+  const data = opCtx.data;
+  if (!data || typeof data !== 'object') return false;
+  if (!('email_verified' in data) && !('email' in data)) return false;
+  return resolvePlatformAdminEmails().emails.length > 0;
 }
 
 /**
@@ -729,25 +749,34 @@ export async function bootstrapPlatformAdmin(
   // above a security defect rather than a nondeterminism one. This leg asks
   // the anchor first.
   //
-  // The predicate is "can AUTHENTICATE", the same one #14348 established for
-  // this branch — NOT the walled derivation's `email_verified` REQUIREMENT.
-  // That difference is deliberate: `single` ranks by authenticability
-  // everywhere else in this function and has no verification vocabulary at all
-  // (`bootstrap-platform-admin-walled-owner.test.ts` pins that an unverified
-  // first user is still promoted here — the verified invariant was
-  // walled-only), so requiring verification would refuse to promote the
-  // operator on every deployment that never configured email verification.
+  // A VERIFIED holder, and nothing less — maintainer ruling of 2026-09-08
+  // (decision batch #100) on this card, which supersedes the Choice 4A
+  // sentence for this one point:
   //
-  // Verification is used as a PREFERENCE instead, and that is the half that
-  // keeps this leg from opening a door. `matchesConfiguredPlatformAdmin`
-  // states the threat for the walled derivation: "an attacker who registers
-  // the operator's address before the operator does gains no standing by it."
-  // Ordering the matches VERIFIED-FIRST answers it here without the refusal:
-  // an address squatted by somebody who cannot read the operator's mailbox
-  // cannot verify, so the operator's own row outranks it as soon as it exists.
-  // Where nobody has verified, the leg still promotes — which is no wider than
-  // the incumbent, since today's rule hands the grant to whoever registered
-  // first with no config knowledge required at all.
+  //   > F4 — verification is a requirement, not a preference, on the
+  //   > declared-owner leg. A declared address held by a row with
+  //   > `email_verified !== true` is treated like a declared owner nobody can
+  //   > sign in as: REFUSE [...] zero grant rows, and the replay predicate
+  //   > promotes as soon as verification lands. ⛔ No fall-back to
+  //   > oldest-authenticable while a declared address exists.
+  //
+  // So a row is the declared owner only when all four hold: it holds the
+  // declared address, it is human, it can authenticate, and it has verified
+  // that address. An earlier draft of this leg ranked verified rows AHEAD of
+  // unverified ones instead — that ordering is ruled moot and is gone, because
+  // a preference only helps when a verified holder EXISTS. `sys_user.email`
+  // carries a UNIQUE index on the SQL family, so a squatter who registers the
+  // operator's address first leaves the operator unable to hold a row at all,
+  // and a preference then promotes the squat. `matchesConfiguredPlatformAdmin`
+  // states that threat for the walled derivation — "an attacker who registers
+  // the operator's address before the operator does gains no standing by it" —
+  // and this leg now answers it the same way the walled derivation does: by
+  // refusal.
+  //
+  // The accepted cost, stated by the ruling rather than discovered later: a
+  // `single` deployment whose declared owner has not verified their email gets
+  // NO platform admin at first boot until they do, loudly. That is the
+  // intended loud failure; it replaces a silent wrong promotion.
   //
   // `isHumanUser` still applies: a declared address sitting on `usr_system` or
   // a `role: 'system'` row must not become a route to the grant.
@@ -759,6 +788,11 @@ export async function bootstrapPlatformAdmin(
     // addresses; `created_at` decides between several rows holding one.
     let declaredTarget: any | undefined;
     let declaredMatches = 0;
+    // Rows that hold a declared address, are human, and can sign in. The
+    // decline below discriminates on this count, so "nobody holds it / nobody
+    // can sign in as it" and "somebody can sign in but has not verified"
+    // report different reasons instead of one blurred refusal.
+    let declaredAuthenticable = 0;
     for (let i = 0; i < declaredOwners.emails.length && !declaredTarget; i++) {
       const email = declaredOwners.emails[i]!;
       const spelling = declaredOwners.declaredSpellings[i] ?? email;
@@ -771,16 +805,21 @@ export async function bootstrapPlatformAdmin(
       const matching = [...byId.values()]
         .filter((row) => normalizePlatformAdminEmail(row.email) === email)
         .filter(isHumanUser)
-        .sort((a, b) => {
-          // Verified first (the anti-squat half), then oldest — the same
-          // fail-closed predicate the walled derivation and the audit surface
-          // read, never a second local copy of "looks verified".
-          const va = isEmailVerifiedUserRow(a) ? 0 : 1;
-          const vb = isEmailVerifiedUserRow(b) ? 0 : 1;
-          return va === vb ? byCreatedAtAsc(a, b) : va - vb;
-        });
+        .sort(byCreatedAtAsc);
       declaredMatches += matching.length;
-      declaredTarget = await firstAuthenticable(matching);
+      // Authenticability is asked FIRST so the two refusals stay separable:
+      // #14348's "nobody can sign in as the declared address" keeps its own
+      // reason code and its own pins, and the ruling's new requirement reports
+      // itself as itself. `isEmailVerifiedUserRow` is the same fail-closed
+      // predicate the walled derivation and the audit surface read (an ABSENT
+      // column is unverified) — never a second local copy of "looks verified".
+      for (const row of matching) {
+        if (!(await canAuthenticate(row))) continue;
+        declaredAuthenticable += 1;
+        if (!isEmailVerifiedUserRow(row)) continue;
+        declaredTarget = row;
+        break;
+      }
     }
     if (declaredTarget) {
       return promote(declaredTarget, {
@@ -791,30 +830,45 @@ export async function bootstrapPlatformAdmin(
         candidatePoolSize: declaredMatches,
       });
     }
-    // Declared, and not one declared address can sign in. ⛔ NOT a silent
-    // fall-back to whoever happens to be oldest: the operator named the owner,
-    // so promoting somebody else is the very outcome this card is about. The
-    // walled branch already refuses loudly for the same input (see the
-    // `walled_owner_email_undeclared` diagnostic above); this is that answer
-    // for `single`. The replay predicate re-runs this pass on the next
-    // `sys_user` / `sys_account` insert, so the declared owner is promoted the
-    // moment their login exists.
+    // Declared, and not one declared address is held by a verified holder who
+    // can sign in. ⛔ NOT a silent fall-back to whoever happens to be oldest:
+    // the operator named the owner, so promoting somebody else is the very
+    // outcome this card is about. The walled branch already refuses loudly for
+    // the same input (see the `walled_owner_email_undeclared` diagnostic
+    // above); this is that answer for `single`. The replay predicate re-runs
+    // this pass on the next `sys_user` / `sys_account` insert AND on the
+    // verifying update, so the declared owner is promoted the moment both
+    // their login and their verification exist.
+    const unverifiedOnly = declaredAuthenticable > 0;
+    const diagnosis = declaredMatches === 0
+      ? 'no human sys_user row holds that address'
+      : unverifiedOnly
+        ? `none of the ${declaredAuthenticable} matching human row(s) that can sign in has VERIFIED that `
+          + 'address (email_verified is not true), and verification is REQUIRED of the declared owner'
+        : `none of the ${declaredMatches} matching human row(s) can authenticate (no sys_account)`;
+    const remedy = unverifiedOnly
+      ? 'Complete the email verification for the declared address'
+      : 'Register and sign in as the declared address';
     const message =
       `[security] ${PLATFORM_OWNER_EMAIL_ENV} declares `
       + `${declaredOwners.emails.map((e) => JSON.stringify(e)).join(', ')} as this deployment's platform `
-      + `administrator, but ${declaredMatches === 0
-        ? 'no human sys_user row holds that address'
-        : `none of the ${declaredMatches} matching human row(s) can authenticate (no sys_account)`}`
+      + `administrator, but ${diagnosis}`
       + ' — platform admin NOT promoted. Promotion is NOT falling back to the oldest '
       + 'authenticable user: that would hand the highest-privilege grant to somebody the '
-      + `operator did not choose. Register and sign in as the declared address, or unset `
+      + `operator did not choose. ${remedy}, or unset `
       + `${PLATFORM_OWNER_EMAIL_ENV} to use first-user promotion.`;
     if (logger?.warn) logger.warn(message);
     else logger?.info?.(message);
     return {
       seeded: seededCount,
       adminPromoted: false,
-      reason: 'declared_owner_not_authenticable',
+      // [#16682, batch #100] The ruling allows either a distinct code or a
+      // fold into `declared_owner_not_authenticable` with verification named
+      // in the warning. A distinct code is used for the verification miss so
+      // #14348's refusal keeps its own name and its own pins, and an operator
+      // reading a structured sink can tell "register a login" apart from
+      // "click the link in your mailbox".
+      reason: unverifiedOnly ? 'declared_owner_not_verified' : 'declared_owner_not_authenticable',
       ...resyncCounts,
     };
   }
