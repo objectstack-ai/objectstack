@@ -451,20 +451,30 @@ export default ${sanitizeIdentifier(name)}Plugin;
           // The install instruction itself is placement-dependent (#15530):
           // the standalone project is `private` and unpublished, so a registry
           // install is not something its reader can run — the only instruction
-          // that WORKS from a freshly scaffolded directory is a local
-          // reference. The in-repo project is a real workspace sibling under a
-          // scope this repo publishes, so it keeps the install it always had.
+          // that WORKS from a freshly scaffolded directory is a local link.
+          // The in-repo project is a real workspace sibling under a scope this
+          // repo publishes, so it keeps the install it always had.
+          //
+          // ⛔ Never spell the local reference as a PATH (`pnpm add ../<dir>`,
+          // `link:../<dir>`): the scaffolder knows where this project landed
+          // and knows nothing about where the reader's app is, so any relative
+          // path is a guess about a directory layout it never created — a
+          // reference the newcomer cannot follow, and one
+          // `test/init-template-comments-self-contained.test.ts` refuses on
+          // exactly that ground. `pnpm link --global` names no location at all
+          // and both halves run where the reader already is.
           const install = standalone
             ? `This project is \`private\` and carries no npm scope, so there is nothing to
 install from a registry — and \`npm publish\` refuses it until you give it a name
-you own and drop that flag. Reference it from your app by path in the meantime:
+you own and drop that flag. Link it into your app locally in the meantime:
 
 \`\`\`bash
 # here — your app loads dist/index.js, so build it first
 pnpm install && pnpm build
+pnpm link --global
 
-# in your app, when it sits next to this directory
-pnpm add link:../${pluginDirName(name)}
+# in your ObjectStack app
+pnpm link --global ${packageName}
 \`\`\``
             : `\`\`\`bash
 pnpm add ${packageName}

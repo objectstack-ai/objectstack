@@ -294,16 +294,18 @@ describe('os create plugin: the emitted package name follows the placement (#155
 
     // (2) A local reference, because that is what a reader standing in a
     // freshly scaffolded directory can actually run: the package is `private`
-    // and unscoped, so there is nothing on a registry to `pnpm add`. Every
-    // install line is checked, and the population is asserted non-empty — a
-    // for-loop over nothing is the shape that passes on a deleted section.
-    const installLines = standalone.split('\n').filter((l) => l.includes('pnpm add'));
-    expect(installLines.length).toBeGreaterThan(0);
-    for (const line of installLines) {
-      expect(line, 'standalone install lines must be local references').toMatch(
-        new RegExp(`pnpm add link:\\.\\./plugin-${PROJECT}$`),
-      );
-    }
+    // and unscoped, so nothing on a registry answers to that name. Asserted
+    // from BOTH sides — the registry verb is gone, and the local one is
+    // present and names this package — so neither a deleted section nor a
+    // reinstated `pnpm add` can satisfy it.
+    expect(standalone).not.toContain('pnpm add');
+    expect(standalone).toContain(`pnpm link --global plugin-${PROJECT}`);
+
+    // ⛔ And not spelled as a path. The scaffolder knows nothing about where
+    // the reader's app is, so `link:../<dir>` would be a guess about a layout
+    // it never created — refused, on that ground, by
+    // `init-template-comments-self-contained.test.ts`.
+    expect(standalone).not.toMatch(/\.\.\//);
 
     // --in-repo unchanged: a real workspace sibling under a scope this repo
     // publishes, so its registry install line is still the correct one.
