@@ -2872,10 +2872,30 @@ export function resolveSettingsSourceLabel(
 //
 // `field_path` is dot-notation for nested fields. Top-level form fields use
 // just the field name (e.g. `"name"`, `"description"`). Composite and
-// repeater children are addressed via parent path:
+// repeater children are addressed via parent path — the SAME path the
+// extractor (`os i18n extract`, `walkFormField`) emits from a form's declared
+// `fields`, so a repeater ROW property is `<repeater>.<property>` with no
+// literal `items` segment in between:
 //
 //   "capabilities.trackHistory"  // composite "capabilities" → "trackHistory"
-//   "fields.items.label"         // repeater "fields" → row → "label"
+//   "header.actions.label"       // repeater "header.actions" → row → "label"
+//   "fields.items.label"         // repeater "fields" → a DECLARED child
+//                                // named `items` → "label" (not a reserved word)
+//
+// TWO objects consume these keys, and a localised name reaches the panel only
+// through the one the renderer reads for that node (#16458):
+//
+//   - the FormView (`FormFieldSpec.label` / `helpText` / `placeholder`) —
+//     `resolveMetadataFormLabels`, which also SYNTHESIZES a composite /
+//     repeater's `fields[]` from the bundle when the form enumerates none;
+//   - the JSON Schema derived from the metadata type's zod schema
+//     (`properties.<a>.properties.<b>.title`, and through an array's `items`)
+//     — `resolveMetadataFormSchemaTitles`. The console renders a repeater's
+//     rows as a table whose column headers read `items.properties[k].title`,
+//     never a `FormFieldSpec`, so an ITEM-level property name is authored as
+//     a `.meta({ title })` on the zod item schema (the English name) and
+//     localised by this overlay. Only `label` → `title` crosses over;
+//     `helpText` / `placeholder` stay on the FormView route.
 //
 // All helpers are pure (immutable) — they return a new form object with
 // the translated branches when matches exist, or the input unchanged when
@@ -3119,6 +3139,126 @@ export function resolveMetadataFormLabels<T extends Record<string, any>>(
   // mistake #6926 was filed for. It retires when the stored shape folds too.
   if (Array.isArray(form.groups)) {
     next.groups = form.groups.map(translateSection);
+  }
+  return next as T;
+}
+
+/**
+ * Every `metadataForms.<type>.fields.<path>` key recorded at any locale of the
+ * chain — the union, so a key one locale names and another does not is still
+ * visited (the per-key lookup then walks the chain in order).
+ */
+function listMetadataFormFieldPaths(
+  bundle: TranslationBundle | undefined,
+  type: string,
+  opts?: ResolveOptions,
+): string[] {
+  if (!bundle) return [];
+  const seen = new Set<string>();
+  for (const code of localeChain(opts)) {
+    const fields = pickData(bundle, code)?.metadataForms?.[type]?.fields;
+    if (!fields || typeof fields !== 'object') continue;
+    for (const key of Object.keys(fields)) if (key.length > 0) seen.add(key);
+  }
+  return Array.from(seen);
+}
+
+/**
+ * Write `title` onto the JSON Schema node a dot path addresses, copying only
+ * the spine of the tree that changes. Returns the SAME node when the path
+ * addresses nothing — an overlay, not a fork: a key the schema cannot place is
+ * left alone rather than invented.
+ *
+ * Addressing rules, shared with the extractor's `walkFormField` and with
+ * `translateFormField` above:
+ *
+ *   - a segment names an entry of `properties`;
+ *   - an ARRAY node is stepped through into its row schema (`items`) without
+ *     consuming a segment — a repeater row property is `<repeater>.<property>`;
+ *     a literal `items` segment is only ever a declared property of that name;
+ *   - a union (`anyOf` / `oneOf`) applies the path to every branch that can
+ *     take it (an `I18nLabel` is a `string | locale-map` union; an optional
+ *     array authored beside a scalar is a union of shapes);
+ *   - a `$ref` is not followed: a shared definition cannot carry a per-path
+ *     name, and the metadata-type schemas are emitted inlined.
+ */
+function setSchemaTitleAtPath(node: any, segments: readonly string[], title: string): any {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return node;
+  if (segments.length === 0) {
+    return node.title === title ? node : { ...node, title };
+  }
+  const [head, ...rest] = segments;
+  const props = node.properties;
+  if (props && typeof props === 'object' && props[head] && typeof props[head] === 'object') {
+    const child = setSchemaTitleAtPath(props[head], rest, title);
+    return child === props[head] ? node : { ...node, properties: { ...props, [head]: child } };
+  }
+  const items = node.items;
+  if (items && typeof items === 'object' && !Array.isArray(items)) {
+    const row = setSchemaTitleAtPath(items, segments, title);
+    return row === items ? node : { ...node, items: row };
+  }
+  for (const key of ['anyOf', 'oneOf'] as const) {
+    const branches = node[key];
+    if (!Array.isArray(branches)) continue;
+    let changed = false;
+    const next = branches.map((branch: any) => {
+      const out = setSchemaTitleAtPath(branch, segments, title);
+      if (out !== branch) changed = true;
+      return out;
+    });
+    if (changed) return { ...node, [key]: next };
+  }
+  return node;
+}
+
+/**
+ * Overlay a locale bundle's `metadataForms.<type>.fields.<path>.label` entries
+ * onto a JSON Schema derived from the metadata type's zod schema, as `title`
+ * on the node each path addresses (#16458).
+ *
+ * This is the SECOND half of the metadata-form localisation channel.
+ * {@link resolveMetadataFormLabels} decorates the FormView the panel lays
+ * out with; this function decorates the JSON Schema the panel reads field
+ * shapes from — and for one class of node the schema is the ONLY object the
+ * renderer consults: a repeater's rows render as a table whose column headers
+ * are `items.properties[k].title`, with no `FormFieldSpec` in reach. An
+ * item-level property is therefore named in English by a `.meta({ title })`
+ * on the zod item schema, and named in every other locale by a bundle entry at
+ * the row-property path (`header.actions.label`), which lands here.
+ *
+ * Every `fields.<path>` key of the bundle is applied — top-level and composite
+ * paths too — so a consumer reading `properties.<k>.title` sees the same name
+ * the FormView carries. Only `label` crosses over; `helpText` and
+ * `placeholder` are FormView attributes and stay on that route.
+ *
+ * Pure: returns a new schema with the changed spine copied, or the INPUT
+ * OBJECT ITSELF when no bundle entry for `type` exists at any locale of the
+ * chain or no entry addresses a node — a caller may memoise on identity.
+ * Lookup order per key is the resolver's usual chain (requested locale →
+ * `fallbackChain` → nothing; the authored `title` is left in place when no
+ * locale names the node).
+ *
+ * @example
+ * ```ts
+ * const schema = z.toJSONSchema(DashboardSchema, { io: 'input' });
+ * const localized = resolveMetadataFormSchemaTitles(schema, 'dashboard', bundle, { locale: 'zh-CN' });
+ * localized.properties.header.properties.actions.items.properties.label.title; // '标签'
+ * ```
+ */
+export function resolveMetadataFormSchemaTitles<T extends Record<string, any>>(
+  schema: T,
+  type: string,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): T {
+  if (!schema || typeof schema !== 'object') return schema;
+  if (!lookupMetadataForm(bundle, type, opts)) return schema;
+  let next: any = schema;
+  for (const path of listMetadataFormFieldPaths(bundle, type, opts)) {
+    const title = lookupMetadataFormField(bundle, type, path, 'label', opts);
+    if (!title) continue;
+    next = setSchemaTitleAtPath(next, path.split('.'), title);
   }
   return next as T;
 }

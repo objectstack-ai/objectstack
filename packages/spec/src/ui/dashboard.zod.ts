@@ -78,6 +78,20 @@ const DASHBOARD_HISTORY =
 /**
  * Dashboard Header Action Schema
  * An action button displayed in the dashboard header area.
+ *
+ * Each field carries a JSON Schema `title` (#16458): the ITEM-level authoring
+ * name. A repeater row is not a form field — the Studio property panel renders
+ * `header.actions[]` as a table whose column headers read
+ * `items.properties[k].title ?? k` from the JSON Schema derived by
+ * `z.toJSONSchema(DashboardSchema)`, never from a `FormFieldSpec` label. With
+ * no `title`, the fallback arm runs for every locale, English included, and the
+ * machine key is what the maker sees. The title is the English name; a locale
+ * bundle names the same column through
+ * `metadataForms.dashboard.fields['header.actions.<field>'].label`, which
+ * `resolveMetadataFormSchemaTitles` (`system/i18n-resolver.ts`) overlays onto
+ * the derived schema. `dashboard.form.ts` declares the same four children with
+ * the same labels so the extractor emits those keys; `dashboard.test.ts` pins
+ * the two spellings equal.
  */
 export const DashboardHeaderActionSchema = lazySchema(() => strictObject({
   surface: 'this dashboard header action',
@@ -85,16 +99,16 @@ export const DashboardHeaderActionSchema = lazySchema(() => strictObject({
   aliases: { title: 'label', text: 'label', name: 'label', url: 'actionUrl', href: 'actionUrl', link: 'actionUrl', target: 'actionUrl', type: 'actionType', kind: 'actionType' },
 }, {
   /** Action label */
-  label: I18nLabelSchema.describe('Action button label'),
+  label: I18nLabelSchema.describe('Action button label').meta({ title: 'Label' }),
 
   /** Action URL or target */
-  actionUrl: z.string().describe('URL or target for the action'),
+  actionUrl: z.string().describe('URL or target for the action').meta({ title: 'Action URL' }),
 
   /** Action type */
-  actionType: WidgetActionTypeSchema.optional().describe('Type of action'),
+  actionType: WidgetActionTypeSchema.optional().describe('Type of action').meta({ title: 'Action Type' }),
 
   /** Icon identifier */
-  icon: z.string().optional().describe('Icon identifier for the action button'),
+  icon: z.string().optional().describe('Icon identifier for the action button').meta({ title: 'Icon' }),
 }).describe('Dashboard header action'));
 
 /**

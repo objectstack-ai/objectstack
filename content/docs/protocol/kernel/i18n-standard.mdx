@@ -341,6 +341,60 @@ my-plugin/
 }
 ```
 
+### Metadata authoring forms (`metadataForms`)
+
+The Studio property panels that author a metadata document (an object, a
+dashboard, a flow, …) are laid out by the type's authoring form
+(`dashboardForm`, …, `METADATA_FORM_REGISTRY`) and render field shapes from
+the JSON Schema derived from its zod schema. Those forms are authored in
+English; a bundle localises them under `metadataForms.<type>`:
+
+```typescript
+metadataForms: {
+  dashboard: {
+    label: '仪表板',
+    sections: { layout: { label: '布局' } },          // section by its slugged label
+    fields: {
+      columns: { label: '列数', helpText: '栅格列数' }, // a top-level form field
+      'header.showTitle': { label: '显示标题' },        // a composite's child
+      'header.actions': { label: '操作按钮' },          // a repeater
+      'header.actions.label': { label: '标签' },        // a property of each repeater ROW
+    },
+  },
+}
+```
+
+A field path is the dot path from the form root, and a repeater **row**
+property is `<repeater>.<property>` — no `items` segment (`fields.items.label`
+would name a declared child called `items`). The keys are emitted by
+`os i18n extract` from the children the form **declares** under a composite or
+repeater (`fields: [...]`), so a child the form does not enumerate has no key;
+enumerate all of a composite's children or none, because the panel prefers a
+declared list over the schema-derived one.
+
+Two objects consume these entries, and a localised name reaches the panel only
+through the one the renderer reads for that node:
+
+| Node | What the panel reads | Resolver |
+|:---|:---|:---|
+| a form field, a composite's child | `FormFieldSpec.label` / `helpText` / `placeholder` | `resolveMetadataFormLabels(form, type, bundle, opts)` |
+| a property of a repeater row (a table column header) | the JSON Schema `items.properties[k].title` | `resolveMetadataFormSchemaTitles(schema, type, bundle, opts)` |
+
+Both run in `GET /api/v1/meta`, which serves every type's `form` and `schema`
+already localised for the request's locale; a client deriving the schema itself
+with `z.toJSONSchema` applies the second one to its own copy. Only `label`
+crosses over to the schema (as `title`); `helpText` and `placeholder` stay on
+the form.
+
+**Naming an item-level property** therefore has three parts, none of which is
+a locale-catalog entry alone: the English name is a `.meta({ title: 'Action URL' })`
+on the zod item schema (`DashboardHeaderActionSchema`), because that is the
+object the table header reads and its fallback — the raw key — runs in every
+locale, English included; the form declares the child with the same `label`,
+so the extractor emits `fields['header.actions.actionUrl']` and the platform
+catalogs carry a translation for it; and a locale bundle's entry at that path is
+what the overlay writes back as the node's `title`.
+
 ## Translation API
 
 ### Basic Translation
