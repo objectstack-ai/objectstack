@@ -1154,6 +1154,13 @@ jobs:
             --captures "$RUNNER_TEMP/test-timings" \
             --out "$RUNNER_TEMP/test-timing-table/test-timing-table.md" \
             --json "$RUNNER_TEMP/test-timing-table/test-timing-table.json"
+          # Echo the table into the JOB LOG as well as the job summary. A job
+          # summary is readable in the web UI and by essentially nothing else —
+          # there is no REST endpoint that returns one — so without this the
+          # only machine-readable copy is the artifact, and reaching that needs
+          # an artifact download. The log is the copy a seat, a script or
+          # `gh run view --log` can actually read.
+          cat "$RUNNER_TEMP/test-timing-table/test-timing-table.md" || true
 
       - name: Publish the merged timing table artifact
         if: always()
