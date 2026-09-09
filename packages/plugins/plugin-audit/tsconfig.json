@@ -42,8 +42,31 @@
   "include": [
     "src/**/*"
   ],
+  // [#16829] Tests leave the BUILD program, exactly as `plugin-approvals`
+  // spells it. They are NOT losing coverage: `tsconfig.test.json` beside this
+  // file includes them and the `typecheck` script NAMES it (via
+  // `check:test-typecheck --project`), which is the pair
+  // `pnpm check:type-check-coverage` reads.
+  //
+  // The reason is the `@objectstack/driver-sqlite-wasm` `paths` rule above.
+  // That rule puts the driver's SOURCE into whichever program resolves the
+  // specifier, and the only importer is the record-view integration test. In
+  // THIS program that source is compiled under the root config's CommonJS-bound
+  // module setting, where `knex-wasm-dialect.ts` and `wasm-connection.ts` are 4
+  // × TS1470 ("`import.meta` is not allowed in files which will build into
+  // CommonJS output") — a verdict about the driver's module semantics billed to
+  // this package. `tsconfig.test.json` compiles the same files as ESM
+  // (`module: esnext`, `moduleResolution: bundler`), which is what vitest really
+  // runs them as, and there `import.meta` is legal.
+  //
+  // ⛔ The `paths` rule stays in THIS file rather than moving to the test
+  // config: a child that declared its own `paths` would REPLACE this map, not
+  // merge into it, silently sending `@objectstack/metadata-core` and
+  // `@objectstack/platform-objects/apps` back to `dist/`. That refusal is
+  // written into `tsconfig.test.json`'s own header.
   "exclude": [
     "dist",
-    "node_modules"
+    "node_modules",
+    "**/*.test.ts"
   ]
 }
