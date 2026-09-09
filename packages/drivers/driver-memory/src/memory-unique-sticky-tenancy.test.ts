@@ -169,6 +169,31 @@ describe('[#16729] the explicit tenancy opt-out is sticky across a partial re-re
       });
     });
 
+    it('refuses it on the DECLARED-INDEX surface too', async () => {
+      // Both surfaces are wired through the same resolved column; a fix that
+      // routed only the field-level one would leave a declared
+      // `unique: 'organization'` index re-scoped by the same partial call.
+      const declaredFull = {
+        name: 'sys_seat',
+        fields: GLOBAL_FIELDS,
+        indexes: [{ fields: ['key'], unique: 'organization' }],
+        tenancy: { enabled: false },
+      };
+      const declaredPartial = { ...declaredFull, tenancy: undefined };
+
+      const driver = new InMemoryDriver();
+      await driver.syncSchema('sys_seat', declaredFull);
+      await driver.syncSchema('sys_seat', declaredPartial);
+
+      await driver.create('sys_seat', { id: '1', key: 'K', organization_id: 'org_a' });
+      await expect(
+        driver.create('sys_seat', { id: '2', key: 'K', organization_id: 'org_b' }),
+      ).rejects.toMatchObject({
+        code: UNIQUE_VIOLATION_CODE,
+        status: UNIQUE_VIOLATION_STATUS,
+      });
+    });
+
     it('still lets two organizations hold the same key on a genuinely scoped object', async () => {
       const driver = new InMemoryDriver();
       await driver.syncSchema('crm_account', scopedPartial);
