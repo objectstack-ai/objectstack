@@ -78,15 +78,24 @@
 // prints a JSON array, newest first. `--event <name>` overrides which event's
 // runs are examined; it exists so the default can be exercised against a
 // counter-example rather than trusted, and ⛔ is not a way to feed the dataset
-// from an affected-only run. `--check-coverage` judges MEASURED UNION
+// from an affected-only run. It has THREE exits and they are three different
+// readings: 0 with the eligible runs on stdout, 1 when candidates existed and
+// every one was rejected (a finding), and `EXIT_PREREQUISITE_NOT_MET` (3) when
+// there were no candidates at all -- NOTHING was measured. See "TWO WAYS TO
+// COME BACK WITH NOTHING" below; a caller that reads any non-zero as a finding
+// will report a bootstrap window as a broken dataset. `--check-coverage` judges MEASURED UNION
 // CARRIED against the workspace and exits non-zero when a package that HAD a
 // measured weight has neither -- it names workspace packages that were never
 // measured too, but those are a report rather than a refusal, because the
 // partitioner already estimated them and this refresh did not change that.
 
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import process from 'node:process';
 
+import { EXIT_FINDINGS, EXIT_PREREQUISITE_NOT_MET } from '../import-prerequisite.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
 // The Test Core shard count. Spelled here as the number of jobs and artifacts a
@@ -325,6 +334,150 @@ export async function listCandidates({
 }
 
 // ---------------------------------------------------------------------------
+// TWO WAYS TO COME BACK WITH NOTHING, AND THEY ARE NOT THE SAME READING (#16467)
+// ---------------------------------------------------------------------------
+//
+// Measured on this card's own PR, job 102286535939: the refresh lane ran with
+// `event=schedule` before that trigger existed on `main`, and printed
+//
+//   NO ELIGIBLE RUN among the 0 most recent completed `schedule` runs ...
+//   Every one was censored, failed, or has lost its run-summary artifacts ...
+//
+// Read the 0. NOTHING was examined -- and the sentence names three causes, none
+// of which occurred. A diagnosis that lists causes that did not happen is worse
+// than no diagnosis: it sends the next reader hunting a flake that does not
+// exist. So the two outcomes are split, with two exits and two messages:
+//
+//   EMPTY CANDIDATE LIST -- the API has no completed run of this event at all.
+//     The PREREQUISITE (an hourly run has happened, recently enough to still
+//     hold its artifacts) is NOT MET, nothing was measured, and the code is the
+//     repo-wide `EXIT_PREREQUISITE_NOT_MET` -- ⛔ never a finding's
+//     `EXIT_FINDINGS`. This is the bootstrap window: at least an hour between
+//     the trigger landing and the first hourly run finishing.
+//
+//   CANDIDATES EXISTED, NONE WAS ELIGIBLE -- every one really was censored,
+//     failed, or lost its artifacts. That IS a finding, it keeps exit 1, and it
+//     keeps the sentence naming those causes, because now they are justified.
+//
+// ⛔ A persistent NOT MEASURED is NOT a steady state. Once the hourly run has
+// been live for a while, "zero completed schedule runs" stops meaning bootstrap
+// and starts meaning the trigger was removed or every run is being cancelled --
+// a defect to file, not a green day. Both the message below and the workflow
+// step that reads the code say so, because a silent 3 is how a lane ends up
+// passing because it never looked.
+
+// The text of the empty-list refusal, as a VALUE so `--self-test` can assert on
+// it without spawning a process or stubbing `process.exit`.
+export function noCandidatesText({ event, workflow, limit }) {
+  return (
+    `select-shard-timings-run: PREREQUISITE NOT MET -- the API returned NO completed \`${event}\` run of ` +
+    `${workflow} on main at all (asked for the ${limit} most recent).\n` +
+    '\n  NOTHING was measured. This is NOT "every candidate was rejected": there were no candidates,' +
+    '\n  so no run was censored, none failed, and none lost its artifacts. The dataset was left exactly' +
+    '\n  as it is, which is the correct outcome for this reading.' +
+    '\n' +
+    `\n  Expected while the hourly \`${event}\` run is bootstrapping: the trigger has to land on main and` +
+    '\n  one run has to finish before anything is downloadable, and run-summary artifacts are retained' +
+    '\n  for 1 day.' +
+    '\n' +
+    '\n  ⛔ PERSISTENTLY NOT MEASURED IS A DEFECT, NOT A STEADY STATE. If this keeps saying zero after' +
+    `\n  the hourly run has been live for a few hours, the \`${event}\` trigger is gone from ${workflow} or` +
+    '\n  every hourly run is being cancelled -- and the balancing dataset is quietly ageing out. File it.' +
+    '\n' +
+    `\n  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} -- capture it BEFORE any pipe:` +
+    '\n  `node scripts/ci/select-shard-timings-run.mjs --candidates > /tmp/candidates.log 2>&1; echo "EXIT=$?"`.' +
+    "\n  Piped, `$?` is the LAST command's status, and `head`/`tail` essentially never fail -- that" +
+    '\n  is the false green.)\n'
+  );
+}
+
+// The text of the none-eligible refusal. Unchanged in substance: here the three
+// causes it names are the ones that actually applied, one per examined run.
+export function noEligibleRunText({ examined, event, workflow }) {
+  return (
+    `select-shard-timings-run: NO ELIGIBLE RUN among the ${examined} most recent completed ` +
+    `\`${event}\` runs of ${workflow} on main. Every one was censored, failed, or has lost its ` +
+    'run-summary artifacts to the 1-day retention window. This is a refusal, not a no-op: nothing ' +
+    'was regenerated.'
+  );
+}
+
+// The `--candidates` production path, with `process.exit` and the writing of
+// stdout lifted OUT so the self-test drives the real thing. What `main` does
+// with the result is print it and exit with the code; everything that decides
+// the code is here.
+export async function runCandidates({ repo, token, limit, event, workflow = 'ci.yml', fetchImpl = fetch }) {
+  const notes = [
+    `select-shard-timings-run: examining the ${limit} most recent completed \`${event}\` runs of ` +
+      `${workflow} on main. The hourly \`schedule\` run is the FULL battery; a \`push\` run has been ` +
+      'affected-only since #16467 and is not a measurement of the workspace.',
+  ];
+  const examined = await listCandidates({ repo, token, limit, event, workflow, fetchImpl });
+  for (const run of examined) {
+    notes.push(
+      run.eligible
+        ? `  ELIGIBLE  ${run.run_id}  ${run.created_at}  ${String(run.head_sha).slice(0, 10)}`
+        : `  rejected  ${run.run_id}  ${run.created_at}  ${run.reasons.join('; ')}`
+    );
+  }
+
+  // LEG 1 -- nothing to examine. Checked BEFORE eligibility, because "none of
+  // zero was eligible" is vacuously true and is exactly the sentence that lied.
+  if (examined.length === 0) {
+    return {
+      exitCode: EXIT_PREREQUISITE_NOT_MET,
+      notes,
+      message: noCandidatesText({ event, workflow, limit }),
+      eligible: [],
+    };
+  }
+
+  // LEG 2 -- candidates existed and every one was rejected. A finding.
+  const eligible = examined.filter((r) => r.eligible);
+  if (eligible.length === 0) {
+    return {
+      exitCode: EXIT_FINDINGS,
+      notes,
+      message: noEligibleRunText({ examined: examined.length, event, workflow }),
+      eligible: [],
+    };
+  }
+
+  return { exitCode: 0, notes, message: null, eligible };
+}
+
+// The workflow file whose NOT MEASURED branch this script's exit 3 exists for.
+// A quoted repo-relative literal: the dispatch derivation reads a gate's path
+// literals as the population it watches, so editing that workflow schedules
+// this self-test.
+export const REFRESH_WORKFLOW = '.github/workflows/shard-timings-refresh.yml';
+
+// The `run:` script of one named step, de-indented, so the self-test can drive
+// the real branch instead of reading it. Text rather than a YAML parse: this
+// file is dependency-free by design, and one block scalar at a known indent is
+// not a parsing problem. Throws when the step or its `run:` is absent -- an
+// extractor that returned '' would make every assertion below vacuous.
+export function extractStepScript(yamlText, stepName) {
+  const lines = String(yamlText).split('\n');
+  const at = lines.findIndex((line) => line.trimEnd() === `      - name: ${stepName}`);
+  if (at === -1) throw new Error(`extractStepScript: no step named '${stepName}'`);
+  let i = at + 1;
+  for (; i < lines.length; i += 1) {
+    if (/^      - name: /.test(lines[i])) throw new Error(`extractStepScript: step '${stepName}' has no \`run:\``);
+    if (lines[i].trimEnd() === '        run: |') break;
+  }
+  if (i >= lines.length) throw new Error(`extractStepScript: step '${stepName}' has no \`run:\``);
+  const body = [];
+  for (let j = i + 1; j < lines.length; j += 1) {
+    const line = lines[j];
+    if (line.trim() !== '' && !line.startsWith('          ')) break;
+    body.push(line.slice(10));
+  }
+  if (body.join('').trim() === '') throw new Error(`extractStepScript: step '${stepName}' has an empty \`run:\``);
+  return body.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // -- The self-test's own battery roster and floor ---------------------------
 //
 // Same shape as the two scripts this one serves: what is pinned is the
@@ -338,8 +491,16 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // reports a battery that registered zero cases by name, and a battery folded
   // into another only makes a number smaller.
   'select-shard-timings-run candidate selection': 13,
+  // #16467, patch round. Its own battery so that "the empty/ineligible
+  // distinction stopped being tested" is a NAMED breach rather than a smaller
+  // number folded into a neighbour.
+  'select-shard-timings-run empty vs ineligible': 17,
+  // #16467, patch round. The CONSUMER of exit 3: the workflow step's own
+  // `run:` block, lifted out of the YAML and driven under `bash -e` against a
+  // stub `node`. An exit code nothing reads is not a distinction.
+  'shard-timings-refresh NOT MEASURED path': 18,
 });
-const SELF_TEST_BATTERY_FLOOR = 2;
+const SELF_TEST_BATTERY_FLOOR = 4;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 // Returned by `selfTest()` only after its verdict is printed, so a `return` that
@@ -743,6 +904,284 @@ async function selfTest() {
     if (!listQuery?.includes('per_page=3')) throw new Error(`limit: not forwarded (${listQuery})`);
   });
 
+  // -------------------------------------------------------------------------
+  battery('select-shard-timings-run empty vs ineligible');
+  // -------------------------------------------------------------------------
+  // The two ways to come back with nothing. Measured on this card's own PR:
+  // the lane printed "NO ELIGIBLE RUN among the 0 ... Every one was censored,
+  // failed, or has lost its artifacts" when nothing had been examined at all.
+  // Both legs are pinned here, because a distinction with only one leg tested
+  // is a distinction that collapses the first time someone simplifies it.
+  const runsFor = (n) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: 700 + i,
+      head_sha: `${700 + i}`.padStart(40, 'e'),
+      created_at: '2026-09-09T04:00:00Z',
+      html_url: `https://example.invalid/${700 + i}`,
+    }));
+  // `shape` decides what the runs' jobs look like: 'eligible' is six successes,
+  // 'censored' is six cancellations -- a real rejection cause, so leg 2's
+  // message is justified when it fires.
+  const fakeWithRuns = (count, shape) => async (url) => {
+    const { pathname } = new URL(String(url));
+    if (/\/actions\/workflows\/[^/]+\/runs$/.test(pathname)) {
+      return { ok: true, status: 200, statusText: 'OK', json: async () => ({ workflow_runs: runsFor(count) }) };
+    }
+    if (/\/actions\/runs\/\d+\/jobs$/.test(pathname)) {
+      const conclusions = shape === 'eligible' ? allSix : allSix.map(() => 'cancelled');
+      return { ok: true, status: 200, statusText: 'OK', json: async () => ({ jobs: jobs(conclusions) }) };
+    }
+    if (/\/actions\/runs\/\d+\/artifacts$/.test(pathname)) {
+      return { ok: true, status: 200, statusText: 'OK', json: async () => ({ artifacts: artifacts([1, 2, 3, 4, 5, 6]) }) };
+    }
+    return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) };
+  };
+  const candidates = (count, shape) =>
+    runCandidates({ repo: 'o/r', token: 't', limit: 24, event: 'schedule', fetchImpl: fakeWithRuns(count, shape) });
+
+  // LEG 1 -- the API has no completed run of this event at all.
+  const empty = await candidates(0, 'eligible');
+  await check(() => {
+    if (empty.exitCode !== EXIT_PREREQUISITE_NOT_MET) {
+      throw new Error(`empty leg: expected exit ${EXIT_PREREQUISITE_NOT_MET}, got ${empty.exitCode}`);
+    }
+  });
+  await check(() => {
+    if (empty.exitCode === EXIT_FINDINGS) throw new Error('empty leg: an unmet prerequisite exits as a finding');
+  });
+  await check(() => {
+    if (!empty.message.includes('PREREQUISITE NOT MET')) throw new Error('empty leg: the refusal does not name the prerequisite');
+  });
+  await check(() => {
+    // ⛔ The whole defect: it must not ASSERT causes that did not occur. The
+    // words appear only inside the sentence that DENIES them, which is why the
+    // forbidden strings here are the affirmative claims and not the bare nouns.
+    for (const claim of ['Every one was censored', 'NO ELIGIBLE RUN']) {
+      if (empty.message.includes(claim)) throw new Error(`empty leg: the message still claims '${claim}'`);
+    }
+  });
+  await check(() => {
+    if (!empty.message.includes('there were no candidates') || !empty.message.includes('no run was censored')) {
+      throw new Error('empty leg: it does not deny the three causes it used to assert');
+    }
+  });
+  await check(() => {
+    if (!empty.message.includes('NOTHING was measured')) throw new Error('empty leg: it does not say nothing was measured');
+  });
+  await check(() => {
+    // ⛔ A silent 3 is how a lane passes because it never looked.
+    if (!empty.message.includes('PERSISTENTLY NOT MEASURED IS A DEFECT')) {
+      throw new Error('empty leg: it does not say a persistent NOT MEASURED is a defect');
+    }
+  });
+  await check(() => {
+    if (!empty.message.includes(`Exit code ${EXIT_PREREQUISITE_NOT_MET}`) || !empty.message.includes(`a finding's ${EXIT_FINDINGS}`)) {
+      throw new Error('empty leg: the advisory does not interpolate both codes');
+    }
+  });
+  await check(() => {
+    if (empty.eligible.length !== 0) throw new Error('empty leg: it returned runs it did not have');
+  });
+
+  // LEG 2 -- candidates existed and every one was rejected. Still a finding.
+  const censored = await candidates(3, 'censored');
+  await check(() => {
+    if (censored.exitCode !== EXIT_FINDINGS) {
+      throw new Error(`ineligible leg: expected exit ${EXIT_FINDINGS}, got ${censored.exitCode}`);
+    }
+  });
+  await check(() => {
+    if (censored.exitCode === EXIT_PREREQUISITE_NOT_MET) {
+      throw new Error('ineligible leg: a real finding was demoted to NOT MEASURED');
+    }
+  });
+  await check(() => {
+    if (!censored.message.includes('NO ELIGIBLE RUN among the 3')) {
+      throw new Error(`ineligible leg: the count is wrong or absent (${censored.message})`);
+    }
+  });
+  await check(() => {
+    if (censored.message.includes('PREREQUISITE NOT MET')) {
+      throw new Error('ineligible leg: it printed the prerequisite refusal');
+    }
+  });
+  await check(() => {
+    // The causes it names really did apply: every shard concluded `cancelled`.
+    if (!censored.notes.some((n) => n.includes('rejected') && n.includes('did not conclude success'))) {
+      throw new Error(`ineligible leg: the per-run rejection reason was not printed (${censored.notes.join(' | ')})`);
+    }
+  });
+
+  // POSITIVE CONTROL -- the same fake, one eligible run, exits 0 and returns it.
+  // Without this the two refusals above could both be a fake that never works.
+  const good = await candidates(2, 'eligible');
+  await check(() => {
+    if (good.exitCode !== 0) throw new Error(`positive control: an eligible run did not exit 0 (${good.exitCode})`);
+  });
+  await check(() => {
+    if (good.eligible.length !== 2 || good.message !== null) {
+      throw new Error(`positive control: expected two eligible runs and no message (${good.eligible.length})`);
+    }
+  });
+  await check(() => {
+    if (EXIT_PREREQUISITE_NOT_MET === EXIT_FINDINGS || EXIT_PREREQUISITE_NOT_MET === 0) {
+      throw new Error('the NOT MEASURED code is not distinct from a finding or from success');
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  battery('shard-timings-refresh NOT MEASURED path');
+  // -------------------------------------------------------------------------
+  // The exit code above only helps if its CONSUMER reads it. So the workflow
+  // step is not read here, it is RUN: its `run:` block is lifted out of the
+  // YAML and driven under `bash -e` against a stub `node` that answers with
+  // whichever exit code the case is about. Three legs, because a branch tested
+  // only on the path it was written for is a branch nobody has seen fail.
+  const REFRESH_YAML = readFileSync(REFRESH_WORKFLOW, 'utf8');
+  const SELECT_STEP = 'Choose a green, uncensored, un-replayed run';
+  const stepScript = extractStepScript(REFRESH_YAML, SELECT_STEP);
+
+  await check(() => {
+    if (!stepScript.includes('--candidates')) throw new Error('extractor: the lifted block is not the selection step');
+  });
+  await check(() => {
+    // NONSENSE CONTROL: an absent step must throw, not return an empty script
+    // that makes every assertion below pass over nothing.
+    if (!threw(() => extractStepScript(REFRESH_YAML, 'no such step in this workflow'))) {
+      throw new Error('extractor: an absent step returned a script instead of throwing');
+    }
+  });
+
+  // driveStep(exitCode) -- run the lifted block with a stub `node` that exits
+  // `exitCode` for the `--candidates` call and defers to the real node for the
+  // step's other `node -e` invocation.
+  const driveStep = (exitCode) => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-timings-step-'));
+    try {
+      const runnerTemp = join(dir, 'runner-temp');
+      const bin = join(dir, 'bin');
+      mkdirSync(runnerTemp);
+      mkdirSync(bin);
+      const stub = join(bin, 'node');
+      writeFileSync(
+        stub,
+        [
+          '#!/usr/bin/env bash',
+          'for a in "$@"; do',
+          '  if [ "$a" = "--candidates" ]; then',
+          `    echo "select-shard-timings-run: stubbed refusal text" >&2`,
+          `    printf '[]'`,
+          `    exit ${exitCode}`,
+          '  fi',
+          'done',
+          `exec ${JSON.stringify(process.execPath)} "$@"`,
+        ].join('\n')
+      );
+      chmodSync(stub, 0o755);
+      const outputFile = join(dir, 'github-output');
+      const summaryFile = join(dir, 'github-summary');
+      writeFileSync(outputFile, '');
+      writeFileSync(summaryFile, '');
+      const run = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', stepScript], {
+        cwd: dir,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH}`,
+          RUNNER_TEMP: runnerTemp,
+          GITHUB_OUTPUT: outputFile,
+          GITHUB_STEP_SUMMARY: summaryFile,
+        },
+      });
+      return {
+        status: run.status,
+        stdout: run.stdout ?? '',
+        output: readFileSync(outputFile, 'utf8'),
+        summary: readFileSync(summaryFile, 'utf8'),
+      };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  // LEG 3 -- NOT MEASURED. The step must go GREEN, skip the rest, and be LOUD.
+  const notMeasured = driveStep(3);
+  await check(() => {
+    if (notMeasured.status !== 0) throw new Error(`workflow leg 3: the step failed (exit ${notMeasured.status}): ${notMeasured.stdout}`);
+  });
+  await check(() => {
+    if (!notMeasured.output.includes('not_measured=true')) {
+      throw new Error(`workflow leg 3: the skip output was not set (${notMeasured.output})`);
+    }
+  });
+  await check(() => {
+    if (!notMeasured.output.includes('select_exit=3')) throw new Error('workflow leg 3: the exit code was not recorded');
+  });
+  await check(() => {
+    // ⛔ A silent 3 is the failure shape this branch exists to avoid.
+    if (!notMeasured.stdout.includes('::warning::')) throw new Error('workflow leg 3: no annotation was minted');
+  });
+  await check(() => {
+    if (!notMeasured.summary.includes('NOT MEASURED')) throw new Error('workflow leg 3: the step summary says nothing');
+  });
+  await check(() => {
+    if (!notMeasured.summary.includes('A PERSISTENT NOT MEASURED IS A DEFECT, NOT A STEADY STATE')) {
+      throw new Error('workflow leg 3: the summary omits the persistent-3-is-a-defect sentence');
+    }
+  });
+  await check(() => {
+    if (!notMeasured.summary.includes('there were')) throw new Error('workflow leg 3: the summary does not deny the causes that did not occur');
+  });
+  await check(() => {
+    if (!notMeasured.summary.includes('stubbed refusal text')) {
+      throw new Error("workflow leg 3: the selector's own refusal text was not quoted into the summary");
+    }
+  });
+
+  // LEG 2 CONTROL -- a real finding must still fail the step, and must NOT be
+  // reported as NOT MEASURED. Without this leg the branch above could swallow
+  // every non-zero.
+  const finding = driveStep(1);
+  await check(() => {
+    if (finding.status !== 1) throw new Error(`workflow leg 1: a finding did not fail the step (exit ${finding.status})`);
+  });
+  await check(() => {
+    if (finding.output.includes('not_measured=true')) throw new Error('workflow leg 1: a finding was reported as NOT MEASURED');
+  });
+  await check(() => {
+    if (!finding.stdout.includes('::error::')) throw new Error('workflow leg 1: a finding minted no error annotation');
+  });
+
+  // LEG 0 CONTROL -- the ordinary path is untouched: the step succeeds and sets
+  // no skip flag, so the rest of the job runs.
+  const ordinary = driveStep(0);
+  await check(() => {
+    if (ordinary.status !== 0) throw new Error(`workflow leg 0: the ordinary path failed (exit ${ordinary.status}): ${ordinary.stdout}`);
+  });
+  await check(() => {
+    if (ordinary.output.includes('not_measured=true')) throw new Error('workflow leg 0: the ordinary path set the skip flag');
+  });
+  await check(() => {
+    if (!ordinary.output.includes('select_exit=0')) throw new Error('workflow leg 0: the exit code was not recorded');
+  });
+
+  // The YAML half: the two steps that must not run on the NOT MEASURED reading
+  // carry the guard. Everything after `compare` is already gated on
+  // `steps.compare.outputs.changed`, which is '' when `compare` is skipped.
+  for (const stepName of [
+    'Regenerate the dataset, accumulating runs until the workspace is covered',
+    'Compare against the committed dataset',
+  ]) {
+    await check(() => {
+      const at = REFRESH_YAML.indexOf(`      - name: ${stepName}`);
+      if (at === -1) throw new Error(`YAML half: no step named '${stepName}'`);
+      const window = REFRESH_YAML.slice(at, at + 900);
+      if (!window.includes("if: steps.select.outputs.not_measured != 'true'")) {
+        throw new Error(`YAML half: '${stepName}' would still run on the NOT MEASURED reading`);
+      }
+    });
+  }
+
   // -- The floor: every declared battery ran, and ran its cases. Evaluated
   //    before the verdict, so the success line can only be printed by a run in
   //    which the set of batteries that registered EQUALS the set declared.
@@ -848,31 +1287,13 @@ async function main() {
     const limit = limitAt === -1 ? 12 : Number(argv[limitAt + 1]);
     const eventAt = argv.indexOf('--event');
     const event = eventAt === -1 ? DEFAULT_RUN_EVENT : String(argv[eventAt + 1]);
-    const workflow = 'ci.yml';
-    console.error(
-      `select-shard-timings-run: examining the ${limit} most recent completed \`${event}\` runs of ` +
-        `${workflow} on main. The hourly \`schedule\` run is the FULL battery; a \`push\` run has been ` +
-        'affected-only since #16467 and is not a measurement of the workspace.'
-    );
-    const examined = await listCandidates({ repo, token, limit, event, workflow });
-    for (const run of examined) {
-      console.error(
-        run.eligible
-          ? `  ELIGIBLE  ${run.run_id}  ${run.created_at}  ${String(run.head_sha).slice(0, 10)}`
-          : `  rejected  ${run.run_id}  ${run.created_at}  ${run.reasons.join('; ')}`
-      );
+    const result = await runCandidates({ repo, token, limit, event });
+    for (const note of result.notes) console.error(note);
+    if (result.exitCode !== 0) {
+      console.error(result.message);
+      process.exit(result.exitCode);
     }
-    const eligible = examined.filter((r) => r.eligible);
-    if (eligible.length === 0) {
-      console.error(
-        `select-shard-timings-run: NO ELIGIBLE RUN among the ${examined.length} most recent completed ` +
-          `\`${event}\` runs of ${workflow} on main. Every one was censored, failed, or has lost its ` +
-          'run-summary artifacts to the 1-day retention window. This is a refusal, not a no-op: nothing ' +
-          'was regenerated.'
-      );
-      process.exit(1);
-    }
-    console.log(JSON.stringify(eligible, null, 2));
+    console.log(JSON.stringify(result.eligible, null, 2));
     return;
   }
 

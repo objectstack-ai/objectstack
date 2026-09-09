@@ -268,8 +268,74 @@ jobs:
           # is coverage left on the table; the cost is two API reads per run
           # examined and the loop below still stops at the first accumulation
           # that covers the workspace.
+          #
+          # ⭐ THREE EXITS, THREE READINGS (#16467). The selector answers 0, 1
+          # or 3, and this step must not flatten them:
+          #
+          #   0  eligible runs on stdout — carry on.
+          #   1  candidates existed and every one was censored, failed or lost
+          #      its artifacts. A FINDING. The job goes red, as it always did.
+          #   3  EXIT_PREREQUISITE_NOT_MET — the API held NO completed
+          #      `schedule` run of ci.yml at all. NOTHING was measured. The
+          #      dataset is untouched, which is the correct outcome, so the job
+          #      must not go red for it.
+          #
+          # Measured, which is why this branch exists: on the pull request that
+          # landed the hourly run, this lane ran with `event=schedule` before
+          # that trigger existed on main, printed "NO ELIGIBLE RUN among the 0"
+          # and named three causes none of which had occurred. It also does not
+          # clear at merge — there is a bootstrap window of at least an hour
+          # before the first hourly run finishes.
+          #
+          # `|| SELECT_EXIT=$?` and not a bare call: this step runs under
+          # `bash -e`, where the non-zero would kill it before the code could
+          # be read at all.
+          #
+          # stderr goes to a FILE and is echoed back immediately: the log keeps
+          # every line it had, and the refusal text becomes quotable into the
+          # step summary below, where somebody reading a green job will see it.
+          SELECT_EXIT=0
           node scripts/ci/select-shard-timings-run.mjs --candidates --limit 24 \
-            > "$RUNNER_TEMP/candidates.json"
+            > "$RUNNER_TEMP/candidates.json" 2> "$RUNNER_TEMP/select-stderr.txt" || SELECT_EXIT=$?
+          cat "$RUNNER_TEMP/select-stderr.txt"
+          echo "select_exit=$SELECT_EXIT" >> "$GITHUB_OUTPUT"
+          if [ "$SELECT_EXIT" -eq 3 ]; then
+            # ⛔ NEVER QUIET. A 3 that scrolls past in a green job is how this
+            # lane ends up passing because it never looked — the shape that has
+            # already cost this repo two cards. It is an annotation, a step
+            # summary section and a job-level notice, and every one of them says
+            # that a PERSISTENT 3 is a defect rather than a steady state.
+            echo "not_measured=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Shard timings NOT MEASURED: no completed \`schedule\` run of ci.yml exists on main yet. The dataset was left untouched. If this repeats once the hourly full run has been live for a few hours, the trigger is gone or every hourly run is being cancelled — file it."
+            {
+              echo "### Shard timings: NOT MEASURED (exit 3) — nothing was regenerated, and nothing failed"
+              echo
+              echo "\`select-shard-timings-run --candidates\` found **no completed \`schedule\` run of"
+              echo "\`ci.yml\` on \`main\` at all**. That is not \"every candidate was rejected\": there were"
+              echo "no candidates, so no run was censored, none failed and none lost its artifacts."
+              echo "\`scripts/test-shard-timings.json\` is untouched, which is the correct outcome for this"
+              echo "reading, and this job is green because nothing went wrong — not because anything passed."
+              echo
+              echo "Expected exactly once: while the hourly full run bootstraps. The trigger has to be on"
+              echo "\`main\` and one run has to finish, and run-summary artifacts live 1 day."
+              echo
+              echo "⛔ **A PERSISTENT NOT MEASURED IS A DEFECT, NOT A STEADY STATE.** If this section is"
+              echo "still here after the hourly run has been live for a few hours, the \`schedule\` trigger"
+              echo "has been removed from \`ci.yml\` or every hourly run is being cancelled — and the"
+              echo "balancing dataset is quietly ageing out while this job reports green. File a card."
+              echo
+              echo "The selector's own refusal text, verbatim:"
+              echo
+              echo '```'
+              cat "$RUNNER_TEMP/select-stderr.txt" 2>/dev/null || echo '(the refusal text is in this job log)'
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$SELECT_EXIT" -ne 0 ]; then
+            echo "::error::select-shard-timings-run refused with exit $SELECT_EXIT — candidates existed and none was eligible. Nothing was regenerated."
+            exit "$SELECT_EXIT"
+          fi
           echo "Eligible runs, newest first:"
           node -e '
             const runs = JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/candidates.json", "utf8"));
@@ -304,6 +370,11 @@ jobs:
       # quiet week costs one run's download and a busy one costs a few.
       - name: Regenerate the dataset, accumulating runs until the workspace is covered
         id: generate
+        # Skipped on the NOT MEASURED reading: there is nothing to download.
+        # Every step after `compare` is already gated on
+        # `steps.compare.outputs.changed`, which is the empty string when
+        # `compare` itself is skipped — so guarding these two guards the tail.
+        if: steps.select.outputs.not_measured != 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -411,6 +482,7 @@ jobs:
       # file is what has to differ for a PR to be worth anyone's attention.
       - name: Compare against the committed dataset
         id: compare
+        if: steps.select.outputs.not_measured != 'true'
         run: |
           if cmp -s scripts/test-shard-timings.json "$RUNNER_TEMP/refresh/refreshed.json"; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
