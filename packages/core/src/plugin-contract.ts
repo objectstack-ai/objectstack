@@ -66,13 +66,12 @@ import type { Plugin } from './types.js';
  * consumers as `CHANGELOG.md` and is what an upgrading author greps after
  * the refusal, so a shorter enumeration there does not merely omit keys —
  * it tells an author refused `at 'author'` that their key is not enforced.
- * ⚠️ The two changesets still pending in `.changeset/` when #16365 landed
- * (`enforce-plugin-schema-at-kernel-use.md`, `litekernel-enforces-plugin-contract.md`)
- * enumerate EIGHT and say `version` is excluded. That was true of the release
- * they describe and is deliberately left standing — a changeset is a record of
- * its own PR, not a live document — so #16365's own changeset carries the
- * ninth key and says in as many words that it supersedes them. This comment is
- * the authority on the CURRENT set.
+ * ⚠️ `CHANGELOG.md` is NOT a live document and is deliberately not corrected:
+ * `@objectstack/core@17.4.0` shipped with both enforcement entries enumerating
+ * EIGHT and saying `version` is excluded, which is what that release did. The
+ * #16365 changeset carries the ninth key and supersedes them BY VERSION rather
+ * than by rewriting them. ⇒ This comment is the authority on the CURRENT set;
+ * a released entry is the authority on the release it names.
  *
  * What this does NOT refuse, which is what bounds the narrowing: UNKNOWN
  * keys. `PluginSchema` is a plain `z.object` with no `.strict()` — the
