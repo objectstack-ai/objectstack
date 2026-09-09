@@ -45,7 +45,7 @@ model: opus
    - (c) 元数据 = 由写它的人以外的人存储并再作者化的键:React prop 不是,存储视图配置是。
    - 把作者引向运行时会兑现却让事情更糟的元数据的警告不在 (c) 内,记为边界不扩类。
    - 其余 ⛔ 不立卡:观察、死代码、未演练漂移、抛光、风格、文档 nit、命名。
-   - 它们进 PR `## 验收备注`,报告 `out_of_scope_findings` 记 `noted, not filed: …`,席位 ACCEPT 时读。
+   - 它们进 PR `## Acceptance notes`,报告 `out_of_scope_findings` 记 `noted, not filed: …`,席位 ACCEPT 读。
    - 写 `noted, not filed` 前先答哪一个 PR 或人会碰到这个文件;答不出就写明「承接者:无」。
    - 先搜再立:关键词 + 文件路径扫 open issues;并行 dev 同一小时立的卡只有这一搜能看见。
    - 通道先探后选:同容器先测一条 repo-scoped REST 读;通 ⇒ 走 REST 列表端点 + 本地 grep。
@@ -278,7 +278,7 @@ model: opus
 - ⛔ 不写否定式的关单句,它照样关掉点名的卡:解析器无视否定,只匹配关键词 + `#<n>`。
 - 关键词是 `fix/fixes/fixed/close/closes/closed` 与 `resolve/resolves/resolved`;让它们远离其它卡号。
 - 写 `#<n> is not addressed here`、`out of scope: #<n>` 或 `#<n> remains open`。
-- PR 正文与 commit message 分开解析:卡片关系只在正文声明一次,commit ⛔ 不带卡片 trailer。
+- 卡片关系只在 PR 正文声明一次:commit ⛔ 不带卡片 trailer,其 trailer pair 一律 model-free。
 - 标题与散文用英文(见 AGENTS.md);引用的中文裁决保持原文不译,改写引文就是改写裁决。
 - 受管面(见 AGENTS.md)PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空。
 - 五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的;席位定稿成评论。
