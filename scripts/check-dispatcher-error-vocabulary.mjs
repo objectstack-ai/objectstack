@@ -294,7 +294,12 @@ import { isEntrypoint } from './invoked-as.mjs';
 // do. That module deliberately declares no path population of its own, so
 // importing it hands this gate no watch hints it did not already have — see its
 // header, which prices the alternative.
-import { workspacePackageDirs } from './workspace-enumerator.mjs';
+import {
+  expandWorkspaceGlob,
+  isExclusionGlob,
+  readWorkspaceGlobs,
+  workspacePackageDirs,
+} from './workspace-enumerator.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -316,7 +321,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '[#14626] THE NESTED TEMPLATE, across all FOUR shared textual primitives.': 242,
   '[#13790] The INLINE literal EXPRESSION at an object-literal `code:`.': 40,
   '[#14742] THE REGEX LITERAL, across all FOUR shared textual primitives.': 39,
-  "[#16649] Every published package's src/ is a ledger member, never classified away.": 21,
+  "[#16649] Every published package's src/ is a ledger member, never classified away.": 25,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -392,16 +397,48 @@ const PENDING_REGISTRATION_ALLOWANCE = Object.freeze({
  * [#16649] The published face's FLOOR. `derivePublishedFaces` reads manifests
  * off disk, and every read is a way for the enumeration to come back short —
  * a moved workspace glob, a manifest that stops parsing, a `src/` that moves.
- * A face list that silently shrinks turns this refusal off for the packages it
- * dropped, and a gate that guards a shrinking population reads exactly like one
+ * A face list that comes back short turns this refusal off for the packages it
+ * dropped, and a gate that guards part of a population reads exactly like one
  * that guards all of it: green.
  *
- * So the count is held against a floor. A FLOOR, not an equality — publishing a
- * new package is ordinary work and must not red — and set well below the 69
- * measured when this landed, because its job is to catch an enumeration that
- * BROKE, not one that moved.
+ * A FLOOR, not an equality — publishing a new package is ordinary work and must
+ * not red — set well below the 70 measured when this landed.
+ *
+ * ⚠️ ⛔ THE FLOOR ALONE CANNOT CATCH A LOST GLOB, and saying otherwise would be
+ * the same false comfort this gate exists to refuse. Measured on this tree, per
+ * workspace glob: `packages/*` 31, `packages/services/*` 16,
+ * `packages/plugins/*` 15, `packages/drivers/*` 5, `examples/*` 5,
+ * `packages/qa/*` 4, `packages/connectors/*` 4, `packages/apps/*` 3,
+ * `packages/triggers/*` 3, `packages/adapters/*` 1, `apps/*` 1 — 88 members
+ * before the published filter. Losing the LARGEST glob entirely still leaves 57,
+ * comfortably over any floor low enough not to red on ordinary churn — and
+ * `expandWorkspaceGlob` returns `[]` for a glob whose parent directory is gone,
+ * SILENTLY. So `packages/*` could vanish, taking `packages/spec` with it, and a
+ * floor of 40 would not notice.
+ *
+ * That is what {@link emptyWorkspaceGlobs} is for: the floor catches a
+ * collapse, the per-glob presence pin catches a vanished parent, and neither is
+ * a completeness claim about the members inside a glob that still resolves.
  */
 const PUBLISHED_SOURCE_FACE_FLOOR = 40;
+
+/**
+ * [#16649] Every non-exclusion workspace glob that expands to NOTHING.
+ *
+ * Zero on this tree, and that is the whole point: a glob expanding to nothing
+ * is either a directory that moved without `pnpm-workspace.yaml` following it,
+ * or a category deliberately emptied whose glob nobody deleted. The first turns
+ * this gate's refusal off for everything under it; the second is a one-line
+ * cleanup. Both are worth a red, and neither is visible in a member COUNT.
+ *
+ * `readGlobs` / `expand` are injected so `--self-test` can drive a workspace
+ * this repo does not have.
+ */
+export function emptyWorkspaceGlobs({ readGlobs, expand }) {
+  return readGlobs()
+    .filter((glob) => !isExclusionGlob(glob))
+    .filter((glob) => expand(glob).length === 0);
+}
 
 /**
  * [#16649] Every published workspace member's `src/`, as repo-relative prefixes.
@@ -5704,6 +5741,37 @@ function selfTest() {
       'packages/qa/dogfood is private on this tree, so the "outside the face" control above is a real member ' +
         'the enumeration really excludes, not an invented path');
 
+    // ── The per-glob presence pin: the half the FLOOR structurally cannot do ──
+    ok(emptyWorkspaceGlobs({
+      readGlobs: () => ['packages/*', 'packages/plugins/*', '!packages/x'],
+      expand: (g) => (g === 'packages/plugins/*' ? [] : ['a']),
+    }).join(',') === 'packages/plugins/*',
+      'a glob expanding to NOTHING is reported by name — losing a whole glob hides more members than ' +
+        'any survivable floor can detect, so the count cannot be the detector');
+    ok(emptyWorkspaceGlobs({
+      readGlobs: () => ['!packages/gone'],
+      expand: () => [],
+    }).length === 0,
+      'an EXCLUSION glob expands to nothing by definition and is not a finding (control)');
+    ok(emptyWorkspaceGlobs({
+      readGlobs: () => readWorkspaceGlobs(ROOT),
+      expand: (g) => expandWorkspaceGlob(ROOT, g),
+    }).length === 0,
+      'the LIVE workspace has a glob that expands to nothing — the production run refuses on this too');
+    // The measurement that says the floor alone is not enough, held against the
+    // live tree rather than left as a claim in a comment.
+    {
+      const perGlob = readWorkspaceGlobs(ROOT)
+        .filter((g) => !isExclusionGlob(g))
+        .map((g) => expandWorkspaceGlob(ROOT, g).length);
+      const total = perGlob.reduce((a, b) => a + b, 0);
+      ok(total - Math.max(...perGlob) > PUBLISHED_SOURCE_FACE_FLOOR,
+        `losing the largest workspace glob would leave ${total - Math.max(...perGlob)} member(s), which is ` +
+          `BELOW the floor of ${PUBLISHED_SOURCE_FACE_FLOOR} — if this ever flips, the floor really would ` +
+          'catch a lost glob and PUBLISHED_SOURCE_FACE_FLOOR\'s docblock is stale. It is asserted in the ' +
+          'direction that keeps the per-glob pin necessary, not in the direction that flatters the floor');
+    }
+
     // Registration is the way out: a registered code derives no site at all.
     const { sites: none } = deriveSites({
       registered: new Set(['SPEC_ONLY_ONE']),
@@ -5827,6 +5895,22 @@ function main() {
         `deliberately. ⛔ Do not lower the floor to pass.`,
     );
   }
+  // The half the floor cannot do: a whole glob going empty hides far more
+  // members than any survivable floor can detect (see PUBLISHED_SOURCE_FACE_FLOOR).
+  const emptyGlobs = emptyWorkspaceGlobs({
+    readGlobs: () => readWorkspaceGlobs(ROOT),
+    expand: (glob) => expandWorkspaceGlob(ROOT, glob),
+  });
+  if (emptyGlobs.length > 0) {
+    throw new Error(
+      `pnpm-workspace.yaml declares ${emptyGlobs.length} glob(s) that expand to NO member: ` +
+        `${emptyGlobs.join(', ')}. Every member under such a glob is invisible to this gate's published ` +
+        `face, so its refusal is off for all of them — and the member COUNT cannot show it, because a ` +
+        `floor low enough to survive ordinary churn is lower than the largest glob. Either the directory ` +
+        `moved and the glob should follow it, or the category is empty and the glob should be deleted. ` +
+        `⛔ Do not silence this by lowering the floor — the floor never saw it.`,
+    );
+  }
 
   const findings = reconcile({
     sites,
@@ -5859,7 +5943,8 @@ function main() {
     `${registered.size} registered codes (${ledger.size} ledger + ${standard.size} standard); ` +
     `${sites.length} unregistered code-stamping site(s) found; ${declared.length} classified.\n` +
     `  [#16649] the published face: ${publishedFaces.length} published member(s), each contributing its ` +
-    `src/ (floor ${PUBLISHED_SOURCE_FACE_FLOOR}), holding ${publishedSites.length} stamp site(s); plus the stricter ` +
+    `src/ (floor ${PUBLISHED_SOURCE_FACE_FLOOR}, and every workspace glob checked non-empty — the floor ` +
+    `alone cannot see a lost glob), holding ${publishedSites.length} stamp site(s); plus the stricter ` +
     `spec face, ${specSites.length} site(s) under ${SPEC_SOURCE_FACE}. Every one of them is ` +
     `'foreign-vocabulary' or 'runtime-pinned' — any other verdict there is a finding: those trees ship in ` +
     `their package's dist, and the #16404 ruling makes the ledger the published face, door or no door.\n` +

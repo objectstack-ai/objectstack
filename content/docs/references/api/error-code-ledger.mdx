@@ -113,11 +113,13 @@ the string under the package that stamps it, and a comment that states its
 thrown value is the boundary"). Until #16649 the dispatcher vocabulary
 (`packages/runtime/src/dispatcher-error-vocabulary.ts`) carried a
 `boot-refusal` verdict that recorded that same reachability for the codes
-NOT yet registered; it is RETIRED, because the gate below now refuses every
-verdict that parks a site away from registration under any published
-package's `src/`. So a `door: 'none'` code has no resting place short of a
-row here, and the ratchet is the one `pending-registration` already had: a
-row here makes the site vanish from that scan. What registration changes
+NOT yet registered; it is RETIRED, because the gate below now refuses it —
+and every verdict like it — under any published package's `src/`. The one
+verdict that still parks a site there is `pending-registration`, and only
+outside `packages/spec/src/**`, under the dated allowance spelled out below.
+So a `door: 'none'` code has no resting place short of a row here, and the
+ratchet is the one `pending-registration` already had: a row here makes the
+site vanish from that scan. What registration changes
 for such a code is the face,
 not the wire: nothing demotes today, and if a door ever does answer with
 it, `error.code` carries the specific code instead of the status-derived
