@@ -57,7 +57,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `director` | 以项目总监席身份运行(人工召唤;四职见 升级与决策 节与 `references/lanes/director.md`) | — |
 | `label:<name>` | backlog 过滤标签;`label:all` = 全部 open 未认领 | `pm:queue` |
 | `repo:<owner/name>` | 扫哪个仓的 backlog(单 issue 的落地仓看它自己的 `repo:*` 标签) | `objectstack-ai/objectstack` |
-| `batch:<n>` | 同时在飞的 dev 上限 | `3` |
+| `batch:<n>` | 同时在飞的 dev 上限 | 默认 `3`;`n` 的维护者天花板 `5` |
 | `rounds:<n>` | 跑 N 轮后停 | 队列清空为止 |
 | `mode:subagent` \| `mode:cloud` | 派发后端 | 按卡分流:S+M ⇒ `subagent`,`cloud` 只留 L/XL 等保留面 |
 | `#12 #34 …` | 显式 issue 清单,整体覆盖标签查询 | — |
