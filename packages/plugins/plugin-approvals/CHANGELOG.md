@@ -1,5 +1,258 @@
 # @objectstack/plugin-approvals
 
+## 17.4.0
+
+### Minor Changes
+
+- 6530e04: A restored approval suspension can now be decided again, not only cancelled.
+  
+  `AutomationEngine.restoreConsumedSuspension` re-arms the pause of a run that stranded mid-resume and tells the operator to *re-issue the continuation*. For an `approval` suspension nobody could: every approvals door that stamps the resume marker — `decide`, `recall`, `sendBack`, `resubmit` — guards on a `pending` request, and the row is terminal, written by the very call that stranded the run; and the generic engine door refuses an `approval` pause outright, because that node declares `resumeAuthority: 'service'`. The only remaining verb was `cancelRun`, which discards the branch's downstream work — so the advertised repair produced a run that looked resumable and was not decidable.
+  
+  Measured against the real engine and the real decision door: the restored suspension lacks nothing. A `resumeAuthority`-marked resume walks the restored pause to completion. What was missing was an **issuer** on the approvals side, and that is what this adds.
+  
+  - **`ApprovalService.continueRestoredRun(requestId, options?)`** re-issues the continuation the recorded outcome already produced once, against a pause an operator has re-armed. It reports which outcome it replayed, which edge it walked, and whether the signal was replayed exactly or rebuilt (`source: 'journal' | 'reconstructed'`).
+  - **The failing door now journals the signal it was carrying** on the repairable exit — the engine's own `status: 'stranded'` discriminator, the one exit that journals a repair snapshot — under `__strandedContinuation` in the request's `node_config_json`, beside the `__decisionOutputs` side-channel that was already there. Best-effort: it is awaited but can never replace the `RESUME_FAILED` throw the decision's caller is owed.
+  - **The continuation is tied to this request's own pause, by three guards.** A boolean "is this run suspended" is not enough: a run outlives any one request, so a terminal row's continuation could be issued against whatever pause the run happened to be sitting on. It now requires that the request is still the newest on its run, that a pause exists (strictly — an unreadable store throws rather than reading as "not suspended"), and that the pause is parked **where this request's recorded outcome was issued from**. That node is signal-aware, not simply the row's own: `approve`, `reject`, `revise` and `recall` are all issued at the request's own approval node, but a `resubmit` is only ever issued from the revise window the request's `revise` edge leads to, so its pause is re-armed there while the row still records the approval node. Comparing against the row's own node refused exactly that case, and told the operator the pause was not this request's when it was. The node check is fail-closed in every direction, including an engine that cannot report where a run is parked and a revise window this service cannot derive from the flow definition. This needs no new automation-engine surface: `listSuspendedRunsDurable` is already public, and the approvals-side resume interface simply declares it.
+  - **Runs stranded before this shipped are served too**, and where the signal cannot be proved the verb **refuses instead of guessing**. A status is not the same thing as a continuation, and three of the four terminal statuses have more than one writer or issuer: `approved` is unambiguous; `rejected` has two writers, discriminated by the `revise` action row that only ADR-0044's revision-limit auto-rejection leaves behind; `returned` has one writer but **two** issuers, discriminated by the `resubmit` action row whose sole writer is `resubmit` — without it a stranded resubmit was rebuilt as a send-back and walked the wrong edge, proceeding only through the engine's unmatched-label fallback with the wrong output; and `recalled` has two writers across **three** behaviours, two of which issue no continuation at all, so it is **refused on the rebuild path** with a message naming what an operator can do instead. Journal-recoverable is a **measured, named set** rather than a blanket claim: `approve`, `reject`, `resubmit` and `recall` continuations replay end to end through the verb, and `reject` and `resubmit` do so on the rebuild path as well. Two shapes are refused by design and stay refused — a `rejected` row that also carries a `revise` action, and a `recalled` row with no journal. NOT covered by a pin, and so not claimed: the `approve` rebuild path.
+  
+  - **A journalled signal is checked against what the row's status can have issued, before it is replayed.** The journal records what the last FAILED resume was carrying, and nothing rewrites it when a later door moves the row on — so a signal can outlive the state that issued it. Measured, with no injected failure beyond the strand: a `resubmit` strands and journals `resubmit`; the submitter then recalls, a real `cancelRun` on an already-stranded run answers `false`, the row is marked `recalled` and the run stays parked; the restore re-arms the pause; and the stale `resubmit` was replayed, opening a fresh `pending` round on a request somebody deliberately withdrew. Every step an ordinary action answering ordinarily. A row is now replayable only for a continuation its own status can have issued — `approved`→`approve`, `rejected`→`reject`, `returned`→`revise` or `resubmit`, `recalled`→`recall`, and nothing at all for a status nobody has enumerated. ⛔ Clearing the journal after a successful replay does not close this and was measured not to: the offending replay is the FIRST replay of that journal, so a clear that fires afterwards can never run before the advance it would prevent.
+  
+  ⛔ What this deliberately does not do, each pinned: it does not re-open or rewrite the request row — all four `pending` guards are untouched and no status, mirror field or audit row is written, so a decided request still cannot be decided again through the front door; it does not relax `resumeAuthority: 'service'`, since the resume still goes through the one call site that stamps the marker; and it does not change `ApprovalDecisionResult`, whose shape is the subject of an open ruling. It also grants no capability in-process code did not already have — `RESUME_AUTHORITY_SERVICE` is importable by any host — what it adds is the guarded form, and the guards are stated as what they actually check: that this request is still the newest on its run, that a pause exists at all, that it is parked where this outcome was issued from, and that the recorded signal is one the row's present status can have issued. ⛔ None of them checks that the pause was consumed and genuinely re-armed, and an earlier wording of this entry claimed one did: a `returned` row with a resubmit action row and a pause that was never consumed is admitted, with `restoreConsumedSuspension` itself answering *"already resumable — nothing to restore"*. That shape is benign — the recorded action is the submitter's own resubmit, so the step it walks was decided — but it is not what any guard tests. Like the engine verb it completes, it is an in-process operator repair: no REST route, and no entry in the spec `ApprovalService` contract.
+- 4c31f02: The stranded-request inspection tells a repairable strand from a cascade-failed run — through a dedicated read-only engine member, not through the wire (#15358, ruling B′).
+  
+  `ApprovalService.inspectStrandedRequests` keyed on `run.status === 'failed'`, which over-reports in one direction: a **cascade-failed** run — an ancestor `failAncestors` failed while it was parked at its `subflow` node, whose pause `failSuspendedRun` consumed and journalled nothing — has the same terminal `failed` row as the #13909 strand, so both came back `runState: 'failed'`, and `restoreConsumedSuspension` re-arms one and refuses the other (`NO_CONSUMED_SUSPENSION`). The engine's discriminator (the consumed-suspension snapshot on the durable `RunRecord`) is deliberately NOT on the `ExecutionLogEntry` that `getRun` answers, because `GET /automation/:name/runs/:runId` serves that object verbatim — so the plugin could not read it, and reading its absence as "not a strand" would have called the repairable row dead.
+  
+  **`@objectstack/service-automation` — additive, `minor`.** `AutomationEngine.inspectConsumedSuspension(runId)` answers whether `restoreConsumedSuspension` would have a consumed suspension to put back, from the SAME two witnesses that verb reads (this process's hot journal and the durable row, reconciled by the same `rowSupersedesJournal` / `persisted` / drop-notice rules — the read is now one private method both call), and re-arms nothing. Four answers, none folded: `repairable: true` (with the pause it would re-arm and which witness answered); `SNAPSHOT_DROPPED` (the strand happened, the store could not persist the snapshot, and this process holds no hot copy — repairable only by the replica that stranded it, while it lives); `NO_CONSUMED_SUSPENSION` (cascade-failed or never paused); `RUN_SUSPENDED` (already resumable). It REJECTS when a store cannot be read — an outage is unknown, not "nothing to restore". The result type is exported as `ConsumedSuspensionInspection`. `restoreConsumedSuspension` behaves exactly as before; nothing on `ExecutionLogEntry`, the run-detail route, or `@objectstack/spec` changes.
+  
+  **`@objectstack/plugin-approvals` — additive on two published types, `minor`.**
+  
+  - `ApprovalResumeSurface` gains the optional `inspectConsumedSuspension?(runId)`, declared the way `listSuspendedRunsDurable` is: a method `AutomationEngine` already implements, widening no engine surface.
+  - `StrandedRunState` splits `'failed'` three ways and keeps `'missing'` untouched: `'repairable'` (the #13909 strand — restore, then `continueRestoredRun`), `'snapshot_dropped'` (its own class: as `repairable` it over-reports, as `unrepairable` it is a false negative), and `'unrepairable'` (the cascade-failed / never-paused run, #15222's shape — nothing re-arms it). **`'failed'` stays a member, on purpose**: it is what a `failed` row is reported as when the attached surface has no `inspectConsumedSuspension` (an engine build older than this plugin, or a host double). Absence of the discriminator is fail-closed for a report — the row is reported, undifferentiated, never labelled `unrepairable` and never dropped. A thrown read counts `undetermined`, as the other two oracles' do.
+  
+  A consumer switching exhaustively over `StrandedRunState` gains three arms; nothing it matched before stops arriving. The inspection's summary log adds `runRepairable` / `runSnapshotDropped` / `runUnrepairable` beside the existing counts.
+- 3d3f60e: An approval decision that lands while its flow run strands now says so in fields, not only in prose.
+  
+  `POST /api/v1/approvals/requests/{id}/reject` — and its sibling decision doors — could produce three coexisting outcomes from one call: the caller read HTTP 500, the request row **was** in its terminal status and had left the pending inbox, and the workflow run was stranded. A caller reading 500 has one honest inference available — "the rejection did not happen" — and it was the wrong one, so scripts and operators retried or escalated against a decision that was already durable. The only carrier of the truth was English prose in `error`, so finding the affected run meant regexing a run id out of a sentence, and nothing said whether that run could be repaired at all.
+  
+  The 500 stays. A recorded decision whose flow never advances is still a failure and is still reported as one; the door does not become atomic and no decision is ever rolled back. What changed is that it stops discarding what the engine already said:
+  
+  - **The `RESUME_FAILED` body gains four fields**, additively — `finalized` (always `true`: the decision stands), `decision`, `runId`, and `repairable`. Existing consumers see the same `code`, the same `error` and the same status.
+  - **`repairable` carries the engine's own discriminator** — `AutomationResult.status === 'stranded'`, the state stamped on exactly the exit that journals a repair snapshot. `false` is the answer for every other failure, including a lost run: absence of the signal is not repairability, and a repair verb that would refuse is worse than no promise.
+  - **`serviceResume` carries `status`** through to the door. It previously read only `success` / `code` / `error`, and the stranded exit reports a `status` and no `code` at all — so the platform's own repairability signal died one line before the envelope was built.
+  
+  `@objectstack/types` gains `strandedDecisionFailure` / `strandedDecisionDetails` and the `StrandedDecisionDetails` type — the constructor and its recogniser in one module, so the producing service and the REST door cannot drift. A `RESUME_FAILED` raised without that carrier answers exactly the body it always did; the door never synthesises the envelope.
+
+### Patch Changes
+
+- ea03c7c: Fix: a `department` approver on a seeded business unit no longer routes the approval to another organization's members.
+  
+  `ApprovalService.expandBusinessUnitUsers` screened the `sys_business_unit` rows with the null-inclusive tenant predicate (#3807 — a seeded unit carries no organization and is admitted on purpose) but read `sys_business_unit_member` with no organization predicate at all, under a system context that carries no tenant either. A seeded unit id exists identically in every tenant, so a `department:<id>` approver on tenant A's request resolved the shared unit and then collected every tenant's membership rows hanging off it — approval authority over A's record, routed to B's users. The member read now carries a strict `organization_id` equality against the directory organization the approver resolves in: the same screen `plugin-sharing` applies to these rows, and the same posture this package already takes for `sys_team_member` and `sys_user_position`.
+  
+  The screen is strict rather than null-inclusive on purpose. `sys_business_unit_member.organization_id` is filled by REST/session writes but left NULL by seed replay and by elevated system-context writes (tracked in #14570), so a NULL on a membership row means unknown tenancy, not "platform-global", and routing fails closed on it. Declared cost: on a deployment whose membership rows (not merely its units) were seeded or system-written, a `department` approver on a request that carries an organization now expands to nobody — the slot falls to the `department:<id>` literal, the existing `expanded to nobody` warning (#3807) names it, and `onEmptyApprovers` governs the request as for any unstaffed target. The repair is to stamp those membership rows. A request that carries no organization is unchanged, and so is every unit-level screen.
+- be92d46: These fourteen packages now declare `repository.directory`, so their npm pages carry a working "source" deep link to their own directory in the monorepo.
+  
+  npm renders that field by concatenating it onto `repository.url`. None of these fourteen manifests carried a `repository` block at all, so every one of their npm pages offered no route from the package back to its code — not a broken link, no link. That is what this publishes: the block those pages read, naming each package's own directory.
+  
+  Nothing else about these packages changes. No export, no runtime behaviour, no dependency and no file in the tarball other than the manifest's own `repository` key. The version bump exists because the fix is only real once it is published: the field lives in the manifest npm serves, so a corrected manifest sitting in the repository leaves the package page exactly as wrong as it was.
+  
+  The rule behind it is now mechanical rather than remembered — `check:manifest-repository-directory` makes a publishable (non-private) workspace manifest declare the field naming its own directory, so a package added or moved after this cannot quietly go back to having no source link.
+- ac6213e: Four server-side authorization sites stop deriving platform-operator authority from a NAME in `ExecutionContext.positions`, and read the ADR-0095 posture rung instead.
+  
+  `positions[]` is the security axis, so it carries ADR-0057 D4 `sys_user_position` names alongside the built-ins. `sys_user_position` is `apiEnabled` and its `position` values are unconstrained, so a tenant could mint a row spelling `platform_admin` for one of their own users: `resolveUserAuthzGrants` pushed that name straight onto `grants.positions`, while `grants.posture` — derived from the unscoped `admin_full_access` grant and nothing else — correctly stayed `MEMBER`. Every reader of the name therefore answered `true` for a principal enforcement treats as an ordinary member. `resolve-authz-context.ts` states the rule at `hasPlatformAdminStanding` ("read the RUNG — never `positions.includes(...)`"), but a comment is not a gate and these four had not followed it.
+  
+  Each site now tests `posture === 'PLATFORM_ADMIN'`, byte-for-byte what `hasPlatformAdminStanding` returns:
+  
+  - **`plugin-sharing`** — `hasPlatformAuthority`. The minted row satisfied `assertResolvableAdminScope`, so an org-less caller holding only the ORG-scoped `manage_sharing` capability was answered with **every tenant's** sharing rules, and could delete platform-global rules. The `manage_platform_settings` capability spelling is unchanged.
+  - **`plugin-approvals`** — `isOverrideActor`. This predicate already read the rung and then ORed the name onto it, which is no protection: an OR is only as strong as its weakest arm. Because the platform arm deliberately crosses the tenant wall, the minted row let a member of one organization approve, reject or recall a **different organization's** pending request while holding no slot in its slate. The `ADMIN_FULL_ACCESS` capability arm and both TENANT_ADMIN arms are unchanged.
+  - **`runtime`** — the ADR-0126 §5 activation gate. Under a `group` or `isolated` posture this gate is the only thing between a tenant org admin and the **install-wide** `sys_metadata_activation` row, so the minted row reopened #10243 with a durable row behind it.
+  - **`plugin-security`** — `derivePosture` in the explain engine. Narrower than the other three, and stated precisely rather than overclaimed: the name-read sat behind an early `ctx.posture` return that `buildContextForUser` always populates, so the shipping path was already gated and a D4 row never moved it. What the read did reach was a posture-less hand-built context, where it made the panel **report** `PLATFORM_ADMIN` for a principal enforcement treats as a MEMBER — a misreport rather than an admission, but in the one tool an administrator opens to check exactly this.
+  
+  No behaviour changes for a genuine platform operator: their resolved context carries the rung, and the built-in position is still projected onto `positions[]` for display and predicate use. What changes is that the name alone no longer answers the authorization question.
+  
+  Graded `patch` on the surface it moves: no exported type, signature or contract changes, and no authorable metadata is added, removed or renamed. The only observable difference is that a principal who never held the capability grant stops being admitted — which is the defect, not a feature anyone could have depended on.
+- 455d037: Documentation: `ApprovalService.recall`'s docblock summary line no longer claims the submitter is the only actor.
+  
+  The block opened with "Withdraw a pending request (submitter only)" and then, three paragraphs down, stated the #3424 privileged override correctly — "The #3424 privileged override reaches a PENDING request only (#12775, maintainer ruling 2026-09-02)". Both cannot be true, and the code settles it in the paragraph's favour: `overrideAdmits` short-circuits the non-submitter guard on a `pending` request. A reader who finishes the block is not misled, but the summary line is the one an editor shows on hover and the one any single-line extraction takes.
+  
+  The summary line now reads "Withdraw an undecided request." — status is the axis and the actor rules are left to the paragraphs that already state them correctly, the same structural move the `IApprovalService.recall` docstring makes on the spec side.
+  
+  Prose only: no guard, no branch and no signature changed. It earns a changeset rather than `skip-changeset` because `@objectstack/plugin-approvals` publishes `dist/`, and this text ships inside the published `dist/index.d.ts` for `ApprovalService.recall`.
+- 8c7cca1: `inspectStrandedRequests` no longer drops a row it could not differentiate, and no longer lets one misbehaving host abort the whole scan (#16709, items 2 and 3).
+  
+  Both are the same mistake at two altitudes: the method exists to **enumerate** the terminal approval requests whose flow run cannot advance, so a failure to read the #15358 third oracle must never remove a row from the answer — and never remove the *other* rows either.
+  
+  - **A thrown third read now leaves its row in `stranded`, as `'failed'`.** It used to be counted `undetermined` and skipped, exactly as a thrown `hasSuspendedRun` or `getRun` is. Those two are not the same question: a throw from either leaves it unknown *whether* the row is stranded at all, and a storage outage must not be published as a lost run. By the time the third oracle is asked, both have answered — no live pause, terminal `failed` — and it is asked only *which* of the three shapes the row is. A read that could not be made is therefore the textbook "could not differentiate", which is what `'failed'` already means (`StrandedRunState`, #15358 ruling item 1). Dropping the row let `stranded: []` read as "nothing stranded" while a row was in fact stuck, with a log line as its only trace; for a report, fail-closed means showing the row.
+  - **A host that violates `ApprovalResumeSurface` no longer aborts the scan.** `refineFailedRunState(verdict)` ran outside the `try` that wrapped the read, so an implementation resolving `undefined` where a verdict is declared threw a `TypeError` out of `inspectStrandedRequests` itself and the scan enumerated **nothing**. The refinement now runs inside that `try`; a malformed verdict costs its own row the differentiation, is counted `undetermined`, and costs every other row nothing.
+  
+  ⛔ No new `StrandedRunState` member and no widened export: both cases map onto the existing undifferentiated `'failed'`. The `undetermined` counter is kept as telemetry and now **overlaps** `stranded` by design — a row can be both reported and counted — so neither number alone sizes the scan's blind spot.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [159dbad]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [cbca47d]
+- Updated dependencies [acf4d38]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [098cbb7]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [86c75f4]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [51ae731]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [4ca358d]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [6acb37e]
+- Updated dependencies [7797102]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [0a038cc]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [97adce2]
+- Updated dependencies [a83482c]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [4771bd9]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [c930f85]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b3820c3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [4df2a98]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f89812e]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+- Updated dependencies [021a735]
+- Updated dependencies [7bdb163]
+  - @objectstack/spec@17.4.0
+  - @objectstack/core@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/formula@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/metadata-core@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

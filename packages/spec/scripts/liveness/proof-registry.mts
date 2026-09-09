@@ -153,7 +153,11 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     bound: true,
     // `readonly` was renderer-only until #2948 — declared ≠ enforced is exactly
     // the false-compliance class ADR-0049 closes. The proof pins the server-side
-    // strip (forge dropped, sibling edit lands, insert exempt) over real HTTP.
+    // strip over real HTTP on BOTH write paths — a forged create is dropped, a
+    // forged PATCH is dropped, the sibling edit lands. Since the maintainer
+    // ruling of 2026-09-03 (option C, #14147) `engine.insert` runs the same
+    // `stripReadonlyFields` under the same `isSystem` gate as UPDATE, and the
+    // #3043 protocol-ingress copy is deleted.
     ledgerBindings: [{ type: 'field', path: 'readonly' }],
   },
   {

@@ -1,0 +1,14 @@
+---
+"@objectstack/lint": minor
+---
+
+`os lint` now refuses a `min`/`max` roll-up whose answer cannot be stored in the column it rolls up into — `rollup/non-numeric-aggregand`, at `error`.
+
+`FieldSchema.summaryOperations` admits `min`/`max` over ANY child field, and the engine's `aggregateSummaryValue` returns the driver's answer verbatim (only an empty-set fallback stands between the backend and the stored value). A `summary` field is a member of the spec's `NUMERIC_VALUE_TYPES`, so `valueSchemaFor` answers `z.number().finite()` for it and `driver-sql`'s `createColumn` emits a float column. An ordinary "latest shipment" roll-up — `max` over a `datetime` child field — therefore computes an instant into a column the value contract says holds a finite number, and nothing between author and driver correlated the two. It is refused at authoring time rather than tolerated in a consumer (Prime Directive #12).
+
+- **The accept set** is the numeric class union the boolean class, read from `NUMERIC_VALUE_TYPES` and `BOOLEAN_VALUE_TYPES` rather than typed out. The first is the set that DEFINES the criterion — it is the membership `valueSchemaFor` consults to answer `z.number().finite()`, so a type joining it moves the value contract and this door together. The second is admitted on the authority of the `min(flag)=0` / `max(flag)=1` ruling pinned by the spec's own `AGGREGATION_CASES` (#11152): the answer is a number, so it fits.
+- **It is NOT `isAggregateCompatibleWithFieldType`.** That table deliberately accepts `min`/`max` over the temporal class, because there the answer is returned to a caller and "return[s] a value of the field's OWN type" (#15768). Reusing it here would accept the very declaration this rule exists to refuse. The two questions look alike and are not — "can every backend give one answer" versus "does that answer fit the column this roll-up is stored into" — so this predicate is that table's `min`/`max` row narrowed by exactly the temporal class, and a test pins the disagreement.
+- **Scope.** `min`/`max` only. `count` reads no value off the field; `sum`/`avg` over a non-numeric child is a different shape, whose accept set the aggregate table's own rows already exclude, and is not widened into here.
+- **Silent where it cannot resolve.** An unknown child object, a field the child does not declare, or a field with no declared type produce no finding — the aggregate table's own consumer tier ("a consumer that cannot resolve a field's type must NOT call the predicate with a guess"). A partially-loaded model cannot draw a false refusal.
+
+No export moves: the rule id is an inline literal inside the already-exported `lintDataModel`, beside `rollup/missing-summary`. Measured across this repository, no declaration trips the new refusal — all three `min`/`max` roll-ups aggregate a `number` child field — so this adds a door rather than migrating anything.

@@ -1153,22 +1153,60 @@ os migrate files-to-references --apply
   1. backfill                 (dry run by default; --apply writes)
   2. verifyFileReferences     (reconcile the ledger against what records hold)
   3. zero blocking findings → move this datastore's media columns:
-                               unquote every cell, retype the column to the
-                               string column — per dialect, transactional
-                               where the dialect allows it, aborting on the
-                               first cell that is not a JSON string
+    3a. pre-check, before any DDL or rewrite: read every cell of every media
+        column this step is about to move, aborting on the
+        first cell that is not a JSON string
+    3b. only if 3a found none: unquote every cell, retype the column to the
+        string column — per dialect, transactional
+        where the dialect allows it
   4. record sys_migration { id: 'adr-0104-file-references', verified_at, blocking: 0 }
   5. the driver's encoding, strict enforcement and collection read THAT ROW
 ```
 
-The per-dialect sketch, carried from the measurement and **unrehearsed** (see
-the gaps below): SQLite rewrites each cell in place with `json_extract` where
-`json_type` is `'text'` (the column keeps TEXT affinity; only the encoding
-changes); Postgres retypes the column to a varchar with a `USING` clause that
-unquotes the JSON string; MySQL retypes with `MODIFY COLUMN` and unquotes with
-`JSON_UNQUOTE` — the order of those two is one of the things the rehearsal
-settles. A dry run prints the statements it would execute and writes nothing,
-as #3617 already requires of every mode but `--apply`.
+**Amendment from the rehearsal (2026-09-08).** Step 3 reads as two sub-steps
+because the rehearsal gap 2 asked for was run and came back negative: the
+statements the sketch below prescribes do not perform the abort step 3
+promises. The requirement itself is unchanged — 3a is where it was always
+meant to sit, and #16183 carries only that correction. The decision, the
+window and the end-state column are untouched.
+
+The per-dialect sketch for 3b — SQLite and Postgres now **rehearsed**, MySQL
+still **unrehearsed** (see the gaps below): SQLite rewrites each cell in place
+with `json_extract` where `json_type` is `'text'` (the column keeps TEXT
+affinity; only the encoding changes); Postgres retypes the column to a varchar
+with a `USING` clause that unquotes the JSON string; MySQL retypes with
+`MODIFY COLUMN` and unquotes with `JSON_UNQUOTE` — the order of those two is
+one of the things the rehearsal settles. A dry run prints the statements it
+would execute and writes nothing, as #3617 already requires of every mode but
+`--apply`.
+
+**Neither rehearsed statement performs 3a's abort** — they are the move, not
+the guard, and 3b is written above as the move alone because of it. Measured
+on a live PostgreSQL 16.13 (2026-09-08) against a `json` column holding three
+JSON-quoted ids and one un-backfilled inline object, the prescribed retype
+`ALTER TABLE … ALTER COLUMN … TYPE varchar(2048) USING (col #>> '{}')` was
+**accepted**, and the object was flattened to the literal text
+`{"url":"https://x/y.png"}` in the varchar column. `#>> '{}'` extracts *any*
+json type as text; "unquotes the JSON string" is only what it does when the
+cell happens to hold one. Measured on SQLite 3.51.2 the same day over the same
+four-cell shape, the `json_type` = `'text'` gate converted the two quoted
+cells, left an already-bare cell untouched and was idempotent on a re-run —
+and left the inline-object cell **silently unconverted** rather than refusing
+it. The two failure modes differ (Postgres destroys that cell's structure,
+SQLite leaves it in the old encoding) and neither is the stated abort: an
+implementer who reads either statement as delivering it loses exactly the rows
+the reconciliation exists to find.
+
+3a is therefore its own statement, run before 3b touches anything, and its
+discriminator comes from those same two rehearsals: on Postgres
+`select count(*) from t where json_typeof(col) is distinct from 'string'`,
+which returned `1` on the fixture above — it sees the row the DDL did not
+refuse — and on SQLite `json_type(col) <> 'text'` under a `json_valid` guard,
+where an un-backfilled inline object types as `'object'`. **MySQL's
+discriminator was not measured.** Nor was whether some *other* Postgres
+`USING` expression could abort on its own: `#>> '{}'` is the idiom this
+paragraph's words describe and it does not, which leaves the rest an open
+question, not a finding. Gap 2 below carries both.
 
 ### The window: two encodings, one invariant, one end
 
@@ -1262,27 +1300,47 @@ the 2026-08-27 ruling refuses.
 
 ### Confidence gaps — stated, not assumed
 
-1. **Postgres and MySQL are reasoned, not measured.** Only SQLite was measured
-   (two in-memory cells, four rows each, the driver's own TEXT column against
-   a hand-created `VARCHAR(2048)` column, byte-identical reads). The
-   Postgres/MySQL statements above — identical write-side quoting, no read
-   parse arm, a varchar returning quoted text verbatim, `22P02` on a bare
-   write into `json` — are read from the driver source. What closes it: the
-   driver card's per-dialect pins for both encodings run against the live
-   services of the `Temporal Conformance (live PG + MySQL)` job
-   (`postgres:16`, `mysql:8.0`), replacing this paragraph's reasoning with a
-   measurement before `--apply` gains step 3.
-2. **The migration sketch is unrehearsed.** No datastore, copy or fixture has
-   had the unquote-and-retype step run against it; the per-dialect statement
-   order is unsettled (MySQL in particular: a `JSON` column refuses a bare
-   `file_x` as invalid JSON, so the retype must precede the unquote or the two
-   must be one statement). What closes it: a rehearsal on a copy of a real
-   datastore per dialect — the showcase dogfood store is the in-repo
-   candidate — with the dry run printing every statement it would execute and
-   the apply run proving every media cell reads back equal before and after.
+1. **Postgres and MySQL are reasoned, not measured — one Postgres statement
+   excepted.** Only SQLite was measured (two in-memory cells, four rows each,
+   the driver's own TEXT column against a hand-created `VARCHAR(2048)` column,
+   byte-identical reads). The Postgres/MySQL statements above — identical
+   write-side quoting, no read parse arm, a varchar returning quoted text
+   verbatim, `22P02` on a bare write into `json` — are read from the driver
+   source. What closes it: the driver card's per-dialect pins for both
+   encodings run against the live services of the `Temporal Conformance
+   (live PG + MySQL)` job (`postgres:16`, `mysql:8.0`), replacing this
+   paragraph's reasoning with a measurement before `--apply` gains step 3.
+
+   **The exception (2026-09-08).** Step 3's Postgres retype — that one
+   statement and no other — is now measured, on a live PostgreSQL 16.13, and
+   the sketch above records what it returned. For that statement the Postgres
+   half of this gap moves from reasoned to **measured**, with a negative
+   result. Nothing else moved: **MySQL remains entirely unmeasured**, and
+   every other Postgres claim in this paragraph is still reasoning read from
+   the driver source.
+2. **The migration sketch is partly rehearsed, and the first rehearsal came
+   back negative.** Postgres and SQLite have now had the step run against a
+   hand-built fixture (2026-09-08 — live PostgreSQL 16.13, SQLite 3.51.2),
+   and the result closed one question by falsifying the prescription: neither
+   statement performs the abort the step promises, which is why 3a stands
+   above as a pre-check of its own. That is the part this gap closes — a
+   recorded negative result, not a clearance.
+
+   **What is still open.** MySQL has had nothing run against it: its statement
+   order is unsettled (a `JSON` column refuses a bare `file_x` as invalid
+   JSON, so the retype must precede the unquote or the two must be one
+   statement) and its abort discriminator is unknown. Whether some *other*
+   Postgres `USING` expression could abort on its own is likewise unmeasured —
+   an open question, not a finding. And no rehearsal has yet run against a
+   copy of a **real** datastore on any dialect. What closes the rest: a
+   rehearsal per dialect on a copy of a real datastore — the showcase dogfood
+   store is the in-repo candidate — with the dry run printing every statement
+   it would execute and the apply run proving every media cell reads back
+   equal before and after.
 
 Until both close, the window section's Postgres/MySQL descriptions are the
-ruling's intent, not a measurement, and the driver card carries that caveat
+ruling's intent, not a measurement — the single step-3 Postgres statement
+measured on 2026-09-08 excepted — and the driver card carries that caveat
 into its PR body.
 
 ### Sequencing

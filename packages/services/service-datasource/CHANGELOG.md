@@ -1,5 +1,254 @@
 # @objectstack/service-external-datasource
 
+## 17.4.0
+
+### Patch Changes
+
+- fb447b4: The datasource admin routes derive the tenancy posture before resolving the caller
+  
+  `requireDatasourceAdmin` resolved the request with `resolveAuthzContext({ ql, headers, getSession })` and supplied no `tenancyPosture`. Both posture-conditional API-key refusals are gated on the caller supplying one — `organization_required` and `organization_membership_ended` — so neither ran on this family, and an API key stamped with an organization its owner had left was admitted; the routes then gated it on `authz.systemPermissions` alone. Because this family gates on system capabilities rather than on organization-scoped rows, the consequence was an admitted principal rather than a cross-organization row read.
+  
+  The posture is now read off the kernel's `tenancy` service and classified rather than swallowed: a service that was never registered stays quiet (`undefined` — the supported no-tenancy composition, unchanged behaviour), while one that was registered and failed to build raises `AuthzStoreUnavailableError` instead of degrading to "no posture". Patch rather than minor: no accept set widens, and a declared guard returns to enforced.
+- e9fcd6b: fix(service-datasource): the shared libSQL config builder reads the canonical `config.timeoutMs` (#16023, follow-up on #15680)
+  
+  `buildTursoDriverConfig` — the ONE seam both libSQL loaders go through (#7314) —
+  still consulted `config.timeout` after #15680 renamed that authored key to
+  `timeoutMs` and tombstoned the old spelling. A turso datasource authored the
+  canonical way therefore reached the seam, matched nothing, and had its timeout
+  **silently dropped**: no diagnostic in any channel.
+  
+  The reader now consults `config.timeoutMs`. The DRIVER key it lands on is
+  unchanged and still spelled `timeout` — `TursoDriverConfig.timeout` is
+  published-but-inert (#16024), and renaming an inert key would ratify it as real,
+  which is what ADR-0049 exists to prevent. So this seam is the one place the
+  authored and driver spellings differ, and it now says so.
+  
+  ## No fallback arm for the retired spelling — the seam's own precedent
+  
+  Both sibling arms in `default-datasource-driver-factory.ts` already answer this
+  in the same words: sqlite's "`filename` is the whole contract … so no `??`
+  tolerance survives here", mongo's "`url` is the one spelling". A renamed
+  datasource config key reaches a reader already canonical from two directions —
+  authoring refuses the retired spelling at the door (`retiredKey()`: `tsc`
+  `never` plus a parse-time prescription), and a stored `sys_metadata` row replays
+  the full ADR-0087 chain including `retiredFromLoadPath` entries at
+  `loadDatasourceRows` / `loadDatasourceRow`, so the D2 conversion
+  `turso-config-timeout-to-timeout-ms` has rewritten the key before this table
+  sees it. A `??` arm would be a consumer-side dialect (Prime Directive #12) for a
+  spelling both doors have closed.
+  
+  `authToken`'s legacy arm is not a counter-precedent: it is kept for a LIVE route
+  (host boot translating `OS_DATABASE_AUTH_TOKEN` into a config it constructs
+  itself, which never meets the authoring schema), not for a retired spelling.
+  
+  ## Why the covering test did not catch it, and what replaces it
+  
+  `TursoConfigSource.config` is a bare string-keyed bag, so `tsc` cannot see a
+  rename through it — the tombstone's type channel, which caught the alias tables
+  elsewhere in this stack, does not reach here. And the covering test authored the
+  **retired** spelling at all three of its turso `config` sites, so it was green
+  for exactly the behaviour that had become wrong. A test that pins the retired
+  spelling cannot notice this class of bug.
+  
+  The three sites now author the canonical spelling, and the file gains cases
+  DERIVED from the authoring contract rather than written against today's key
+  list: they read `TursoConfigSchema`'s own `retiredKey()` tombstones and assert
+  that (a) every canonical replacement is consulted by some reader, and (b) no
+  retired spelling is — probed at every JS type a reader could type-test, with a
+  vacuity guard so a mis-derived empty list fails instead of passing. They hold
+  for the next rename without being edited.
+  
+  The two sibling pins that author the same spec — `packages/cli`'s driver
+  correspondence check and `packages/runtime`'s cross-loader convergence check —
+  move to the canonical spelling with it; their assertions read driver keys and
+  are unchanged.
+- c5d6803: Published `.js.map` files no longer embed the complete original source text (`sourcesContent`) — comments included. `sourcemap: true` was esbuild shorthand, and esbuild's own default for `sourcesContent` is `true`; nobody had decided to publish every package's full source (including `@internal`/test-only comments) to npm inside its source maps, it fell out of a default nobody had looked at. Measured before this change: 55 of 57 publishable packages shipped embedded source text, and maps were roughly half of `@objectstack/spec`'s published bytes.
+  
+  `sourcesContent: false` is now set at one shared place (`scripts/tsup-drop-sources-content.mjs`, wired into every `tsup.config.ts` via tsup's `esbuildOptions` hook — most packages build through the repo-root config directly and pick this up with no config change of their own). `mappings` are untouched, so stack-trace positions still resolve correctly to the original file/line/column; only the embedded source text is gone.
+  
+  `@objectstack/cli` (built with `tsc`, not `tsup`) never embedded source text to begin with — its maps' `sources` entries point at `src/**` paths that are not part of the published tarball either way. That is not a defect unique to `cli`: every `tsup`-built package's `sources` entries are `../src/**`-relative paths that are equally outside `files: ["dist", …]`, and were merely masked by the embedded content that just stopped shipping. Shipping `src/**` in `files[]` to make `sources` resolve was rejected — it would put most of the removed bytes straight back. So `cli`'s maps are left exactly as `tsc` emits them: this is now the fleet-consistent shape (accurate `mappings`, non-resolving-but-honest `sources` labels, no embedded text), not an outlier.
+  
+  A new gate, `pnpm check:sourcemap-no-sources-content`, sweeps every built, non-private package's `dist/**/*.map` and fails if any of them carries a non-empty `sourcesContent` array — so a future `tsup.config.ts` that skips the shared hook, or a toolchain upgrade that changes esbuild's default back, is caught rather than silently re-publishing source text.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [54bb2f1]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [10d05bb]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2003259]
+- Updated dependencies [a646120]
+- Updated dependencies [a06faeb]
+- Updated dependencies [001a83b]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [45cfa1b]
+- Updated dependencies [7862fb7]
+- Updated dependencies [1ca95df]
+- Updated dependencies [a646120]
+- Updated dependencies [2200f8e]
+- Updated dependencies [7862fb7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ed5d557]
+- Updated dependencies [7862fb7]
+- Updated dependencies [a646120]
+- Updated dependencies [5071310]
+- Updated dependencies [2200f8e]
+- Updated dependencies [0145680]
+- Updated dependencies [bc0ac1d]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [8f2ecb3]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [51ae731]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [1cf7392]
+- Updated dependencies [db4bf90]
+- Updated dependencies [5f4f1f6]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [61821e5]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [4771bd9]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [33e939f]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [b72226f]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f89812e]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+- Updated dependencies [78bc4ad]
+  - @objectstack/spec@17.4.0
+  - @objectstack/driver-sql@17.4.0
+  - @objectstack/core@17.4.0
+  - @objectstack/driver-turso@17.4.0
+  - @objectstack/driver-memory@17.4.0
+  - @objectstack/driver-mongodb@17.4.0
+  - @objectstack/driver-sqlite-wasm@17.4.0
+  - @objectstack/types@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes
