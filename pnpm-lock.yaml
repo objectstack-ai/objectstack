@@ -665,6 +665,12 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../objectql
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../platform-objects
+      '@objectstack/plugin-auth':
+        specifier: workspace:*
+        version: link:../plugins/plugin-auth
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../plugins/plugin-hono-server
