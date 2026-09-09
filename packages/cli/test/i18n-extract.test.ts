@@ -275,6 +275,96 @@ describe('collectExpectedEntries', () => {
   });
 });
 
+describe('collectExpectedEntries — dashboard global filters (#16772)', () => {
+  // The extractor's `globalFilters` emitter is the CLI half of the bundle
+  // group `dashboards.<name>.globalFilters.<key>`. `check:i18n-walk-parity`
+  // measures at TOP-LEVEL group granularity and `dashboards` was already
+  // walked before this group existed, so nothing that gate sees changes when
+  // a sub-group emitter drifts — this pin is what holds it.
+  const dashboardConfig: any = {
+    dashboards: [
+      {
+        name: 'ops',
+        label: 'Operations',
+        globalFilters: [
+          {
+            // `name` present: it is the key, and `field` is NOT.
+            name: 'dept',
+            field: 'department',
+            label: 'Requesting Department',
+            options: [
+              { value: 'eng', label: 'Engineering' },
+              { value: 'sales', label: 'Sales' },
+            ],
+          },
+          {
+            // No `name`: keyed by `field`. Not a lenient fallback —
+            // `GlobalFilterSchema.name` is declared as defaulting to `field`,
+            // so this IS the filter's key everywhere the platform reads it.
+            field: 'created_at',
+            label: 'Date Range',
+          },
+          {
+            // `optionsFrom` rows are fetched at runtime, so no option of this
+            // filter is addressable from a bundle. Its own `label` is authored
+            // text and stays addressable — the two halves are pinned apart.
+            name: 'owner',
+            field: 'owner_id',
+            label: 'Owner',
+            optionsFrom: { object: 'user', valueField: 'id', labelField: 'name' },
+          },
+          {
+            // Neither key: `globalFilterKey` is undefined and the filter is
+            // passed over rather than offered under a made-up key.
+            label: 'Unkeyed',
+            options: [{ value: 'x', label: 'X' }],
+          },
+        ],
+      },
+    ],
+  };
+
+  const filterPaths = () =>
+    collectExpectedEntries(dashboardConfig)
+      .map((e) => e.path.join('.'))
+      .filter((p) => p.startsWith('dashboards.ops.globalFilters.'))
+      .sort();
+
+  it('offers the filter label and every static option, keyed by `name` else `field`', () => {
+    expect(filterPaths()).toEqual([
+      'dashboards.ops.globalFilters.created_at.label',
+      'dashboards.ops.globalFilters.dept.label',
+      'dashboards.ops.globalFilters.dept.options.eng',
+      'dashboards.ops.globalFilters.dept.options.sales',
+      'dashboards.ops.globalFilters.owner.label',
+    ]);
+  });
+
+  it('carries the authored source values, and keys an option by its `value`', () => {
+    const byPath = Object.fromEntries(
+      collectExpectedEntries(dashboardConfig).map((e) => [e.path.join('.'), e.sourceValue]),
+    );
+    expect(byPath['dashboards.ops.globalFilters.dept.label']).toBe('Requesting Department');
+    expect(byPath['dashboards.ops.globalFilters.dept.options.eng']).toBe('Engineering');
+    expect(byPath['dashboards.ops.globalFilters.dept.options.sales']).toBe('Sales');
+    expect(byPath['dashboards.ops.globalFilters.created_at.label']).toBe('Date Range');
+  });
+
+  it('offers nothing under a `field` a named filter overrode, and nothing for an unkeyed one', () => {
+    const paths = filterPaths();
+    // `name: 'dept'` won, so the field spelling addresses nothing.
+    expect(paths).not.toContain('dashboards.ops.globalFilters.department.label');
+    // The unkeyed filter contributes no entry at all, under any spelling.
+    expect(paths.some((p) => p.endsWith('.options.x'))).toBe(false);
+  });
+
+  it('offers no option key for an `optionsFrom` filter — the rows are fetched, not authored', () => {
+    const paths = filterPaths();
+    expect(paths).toContain('dashboards.ops.globalFilters.owner.label');
+    expect(paths.filter((p) => p.startsWith('dashboards.ops.globalFilters.owner.options.'))).toEqual([]);
+  });
+});
+
 describe('extractTranslations', () => {
   it('fills the default locale from schema and emits empty strings for other locales', () => {
     const { bundles, counts } = extractTranslations(config, {

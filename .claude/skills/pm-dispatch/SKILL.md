@@ -237,16 +237,16 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 ## 域车道
 
 - 锚定规则:每个包恰好属于一个域;issue 的 `domain:*` = 修复落地的那个包所属的域。
-- 域由分诊读代码判定,⛔ 绝不从 issue 标题的词汇猜域。
-- 说不出修复碰哪个文件就还没分诊完,不可标。
+- 唯一例外 `packages/lint` 等与 spec 相交的 devx 面:围着 spec 契约转的归 `domain:spec`,余留 devx。
+- 域由分诊读代码判定,⛔ 绝不从 issue 标题的词汇猜域;说不出修复碰哪个文件就还不可标。
 
 | 标签 | 包家族 |
 |:--|:--|
 | `domain:engine` | `packages/objectql`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`;`packages/metadata*`、`packages/platform-objects`;`packages/drivers/driver-*`;退役标签 `domain:engine-core` / `domain:metadata` / `domain:drivers` 只退出流通,GitHub 标签对象保留 |
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`、`plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-*`;`plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit`;退役标签 `domain:identity` 同上只退流通 |
-| `domain:devx` | `packages/lint`、`packages/sdui-parser`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类;与 `domain:skills` 的分界按门禁的 SUBJECT:治理 agent 指令面/governed 面的归 skills,治理代码/文档质量的归本域);与 `domain:spec` 相交的面按是否围着 spec 契约转切分 |
+| `domain:devx` | `packages/lint`(与 spec 相交的面均按锚定规则的例外切分)、`packages/sdui-parser`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类;与 `domain:skills` 的分界按门禁的 SUBJECT:治理 agent 指令面/governed 面的归 skills,治理代码/文档质量的归本域) |
 | `domain:skills` | `.claude/skills/**`(含本文件)+ `skills/**`;根 `AGENTS.md` + 根 `CLAUDE.md`;governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
-| `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及围着 spec 契约转的工具链;一般开发工具面留 `devx`;席内分派见 `references/lanes/spec.md` |
+| `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
 | `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client*`、`cloud-connection`、`create-objectstack`、`packages/adapters/*`、`plugin-hono-server`、`plugin-dev` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`packages/console`(dist 由脚本生成 ⛔ 不手改;UI 缺陷走 `repo:objectui`)、`examples/*`(归它演练的子系统) |
 
@@ -339,9 +339,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 分类动作每张三选一,外加一个修复通道。
 - ⛔ 不挂 `needs:contract-review`:随 draft PR 或 `Clause-②: yes` 认领;裁定写方向、给六态之一。
 - `pm:queue` = 有具名落点或复现的具体缺陷,或范围明确的工具/门禁修复,无可问之事。
-- `pm:queue` 也收恢复不变量的 finding 与 test-only pin。
+- `pm:queue` 也收恢复不变量的 finding、test-only pin,与实现未被裁错的说明书脱节(修文档)。
 - `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序。
-- 碰存量数据迁移形状或删除已发布能力的卡也进决策箱。
+- 碰迁移形状或删已发布能力也进决策箱;说明书脱节不进:有裁定出处才是 (b),否则改文档。
 - 决策卡落卡必带四棱卡面块与其上的「维护者速读」,⛔ 不留待有人接手再补。
 - 决策卡的速读同题,用业务语言先讲事情与选项,末句只问一字:A/B/C 或是否。
 - `finding` = 三类内待定级:(a) 可复现缺陷(复现或失败探针);(b) 违背已声明契约(引契约文);
@@ -435,11 +435,11 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 引用读到的现状,⛔ 不引用裁决写作时的描述。
 - 工作项面:卡片与分诊评论列的每条工作项逐条对树核验是否仍未完成,⛔ 不对卡核验。
 - 每条工作项写进派发令时都是 dev 首先证伪的前提。
-- 并行度以 `batch` 封顶;同批独立性按文件面不相交判,⛔ 不按包;`priority:p0` 可超 `batch`。
+- 并行度以 `batch` 封顶,等待不填槽;同批独立按文件面不相交判,⛔ 不按包、不按 check 名。
+- single-writer 路径 = `SINGLE_CLAIM_PATHS` 所枚举;共享其它路径是普通并发,后落地方解冲突。
 - 第 N 单派发前读 `scripts/pm/os-verify-lock.sh --status`:到达深度 ≥ `LOCK_DEPTH_HOLD`(= 2)即等。
 - 到达深度 = `queue N:` 行数 + 1(待派 dev 的运行算作到达);`state:` holder 与 `parked` 行不计。
 - 有效上限是锁宽的函数,⛔ 不是第二个 `batch`;`priority:p0` 可超 `batch`,⛔ 不越过深度等待。
-- 阈值出处是深度表:深度 1/2/3/4 的 exit 99 率 1%/23%/36%/56%;等待不填槽,读数带 UTC 写进认领。
 - 同文件单跨轮硬串行;延后不是搁置,被延后那一刻就把已知的坑记到该 issue 上。
 - 家族派发是范围澄清不是豁免:一个 dev 有意覆盖 N 张同区域已裁卡,可折叠为一次派发。
 - 折叠准入五门全过才可折:① 同缺陷形态同修法(⛔ 不是同关键词/同子系统)。
@@ -711,7 +711,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 先过升级门槛:明显的问题直接修,大多数感觉像决定的不是决定。
 - 只在至少一条成立时升级:选项在产品语义或公开契约形状上真实分歧且既有规范定不了。
 - 或修复需破坏性/难回滚动作;其余归 PM 裁量:裁定、派发、维护者否决窗口而非许可门。
-- 具名不升级类(立即行动):恢复不变量的修复;技术任务间的顺序与依赖;验证策略。
+- 具名不升级类(立即行动):恢复不变量;技术任务间顺序与依赖;验证策略;说明书脱节。
 - dev 的 `needs_decision` 经 PM 复核落进不升级类的,PM 直接答复不上传。
 - 第三档:带前提的裁决,三件套缺一不可:① 裁决(选定路线)。
 - ② 把裁决挂在具名、可证伪的前提上,派发令要求 dev 先验前提再动手。

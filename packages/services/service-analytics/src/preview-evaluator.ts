@@ -17,7 +17,12 @@
 // Anything beyond (joins via `include`, raw SQL) falls back to the caller's
 // normal execution path — the preview simply doesn't claim it.
 
-import { calendarPartsInTzOrUtc, nextUtcCalendarDay, utcInstantMs } from '@objectstack/core';
+import {
+  calendarPartsInTzOrUtc,
+  nextUtcCalendarDay,
+  resolveAnalyticsDateRangeString,
+  utcInstantMs,
+} from '@objectstack/core';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import type { Cube } from '@objectstack/spec/data';
 
@@ -274,6 +279,68 @@ function aggregate(rows: Row[], metricType: string, field: string): unknown {
 }
 
 /**
+ * The window one `timeDimensions[].dateRange` lowers to on this face, reduced
+ * to the three facts the closed vocabulary decides: the two bounds, and whether
+ * the upper one is excluded.
+ *
+ * Structurally `@objectstack/core`'s `LoweredDateRangeWindow` — the shared
+ * conformance kit's currency — so this face registers in the kit with no
+ * translation of its own, and a translation layer cannot become the place the
+ * fourth face quietly grows a fourth interpretation.
+ */
+export interface PreviewDateRangeWindow {
+  readonly start: string;
+  readonly end: string;
+  readonly endExclusive: boolean;
+}
+
+/**
+ * [#16322] Lower one `dateRange` for the draft-preview face — the FOURTH
+ * analytics face, now held to the same closed vocabulary as `driver-memory`'s
+ * cube face and both `service-analytics` strategies.
+ *
+ * ⛔ It used to degenerate to the point window `[range, range]`, exactly the
+ * shape this card abolished on the other three: a VALID `last_30_days` filtered
+ * `v >= 'last_30_days' && v <= 'last_30_days~'` — **zero rows, silently** —
+ * while the published chart beside it answered a real window. That is precisely
+ * the continuity a draft preview exists to provide: publish materialises the
+ * SAME seed, so a preview that disagrees with the live face makes the numbers
+ * jump across the publish boundary for no reason an author can see.
+ *
+ * The STRING arm is the closed preset vocabulary (#16041), lowered by the ONE
+ * shared `resolveAnalyticsDateRangeString` the other three faces call — so this
+ * is not a second interpretation but the only one — and REFUSED with the
+ * ADR-0112 `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` envelope when it is not a
+ * preset name. ⛔ The refusal PROPAGATES: this evaluator is reached through
+ * `queryDataset`, which types its selection from `AnalyticsQuery` and never
+ * Zod-parses it, so the schema door is behind it — which is the whole moment a
+ * face-side refusal exists for.
+ *
+ * The ARRAY arm is the CALLER's explicit window and is untouched, bound for
+ * bound, with the inclusive upper reading it has always had (#16179). Its
+ * bare-day widening (#3777) stays in the predicate below rather than moving
+ * here: that is a per-face calendar translation, not a window this vocabulary
+ * resolved.
+ *
+ * @throws the ADR-0112 envelope for a string outside `DATE_RANGE_PRESETS`.
+ */
+export function lowerPreviewDateRange(
+  dateRange: string | readonly string[],
+  timezone?: string,
+): PreviewDateRangeWindow {
+  if (!Array.isArray(dateRange)) {
+    const window = resolveAnalyticsDateRangeString(dateRange as string, { timezone });
+    return { start: window.start, end: window.end, endExclusive: window.endExclusive };
+  }
+  // ⛔ An oddly-sized array keeps the reading this face has always published
+  // (a one-entry array leaves the upper bound unwritten); the sibling faces
+  // degenerate it to a point instead, and reconciling the two is a divergence
+  // of its own, not this card's.
+  const [start, end] = dateRange as readonly string[];
+  return { start: String(start), end: String(end), endExclusive: false };
+}
+
+/**
  * Evaluate `query` over `rows` using the cube's measure/dimension specs.
  * Mirrors the engine strategies' output contract: rows keyed by bare
  * measure/dimension names, `fields` describing each output column.
@@ -290,15 +357,27 @@ export function evaluateAnalyticsQueryOverRows(
     const dim = cube.dimensions?.[td.dimension];
     const field = String(dim?.sql ?? td.dimension);
     if (!td.dateRange) continue;
-    const [start, end] = Array.isArray(td.dateRange) ? td.dateRange : [td.dateRange, td.dateRange];
+    // [#16322] One lowering for both arms — the closed preset vocabulary, or
+    // the caller's explicit window — and a refusal for anything else.
+    const explicit = Array.isArray(td.dateRange);
+    const { start, end, endExclusive } = lowerPreviewDateRange(td.dateRange, query.timezone);
+    // Bare-day end → half-open `< day+1`, the same translation the SQL
+    // paths apply (#3777); a full-timestamp end keeps the historical
+    // `'~'`-suffix trick (inclusive of that instant's own sub-values).
+    // ⛔ Neither reaches a RESOLVED preset window: it states its own upper
+    // reading and is never a bare day — the ten calendar presets stop BEFORE
+    // their end instant, the three rolling ones end at NOW and reach it.
+    const nextDay = explicit ? nextUtcCalendarDay(end) : null;
     filtered = filtered.filter((r) => {
       const v = String(r[field] ?? '');
-      // Bare-day end → half-open `< day+1`, the same translation the SQL
-      // paths apply (#3777); a full-timestamp end keeps the historical
-      // `'~'`-suffix trick (inclusive of that instant's own sub-values).
-      const nextDay = nextUtcCalendarDay(end);
-      const inUpper = nextDay != null ? v < nextDay : v <= `${end}~`;
-      return v >= String(start) && inUpper;
+      const inUpper = endExclusive
+        ? v < end
+        : nextDay != null
+          ? v < nextDay
+          : explicit
+            ? v <= `${end}~`
+            : v <= end;
+      return v >= start && inUpper;
     });
   }
 

@@ -785,6 +785,7 @@ describe('translation unknown-key strictness (#4001)', () => {
     ['an app translation', { apps: { crm: { label: 'CRM', nagivation: {} } } }, 'navigation'],
     ['a page translation', { pages: { home: { subtitel: 'Welcome' } } }, 'subtitle'],
     ['a dashboard widget', { dashboards: { sales: { widgets: { rev: { titel: 'Revenue' } } } } }, 'title'],
+    ['a dashboard global filter', { dashboards: { sales: { globalFilters: { region: { lable: 'Region' } } } } }, 'label'],
     ['a settings key', { settings: { mail: { keys: { host: { lable: 'Host' } } } } }, 'label'],
     ['a metadata form field', { metadataForms: { object: { fields: { name: { helpTxt: 'x' } } } } }, 'helpText'],
   ])('rejects a typo in %s and names the key it meant', (_what, body, expected) => {
@@ -816,6 +817,67 @@ describe('translation unknown-key strictness (#4001)', () => {
     expect(result.success).toBe(false);
     expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
       .toContain('`help` → `helpText`');
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // #16772 — `dashboards.<name>.globalFilters.<key>`, the filter bar's copy
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('dashboard global-filter copy (#16772)', () => {
+    const parse = (globalFilters: unknown) =>
+      TranslationDataSchema.safeParse({ dashboards: { sales: { label: 'Sales', globalFilters } } });
+
+    it('accepts the key face — `label` and an option value→label map — keyed by filter name', () => {
+      const result = parse({
+        region: { label: 'Region', options: { emea: 'EMEA', apac: 'APAC' } },
+        // A filter keyed by its `field` (no authored `name`), label only.
+        category: { label: 'Category' },
+        // Options only — a translator may translate the values and keep the
+        // authored label.
+        status: { options: { '1': 'Active', 'true': 'Yes' } },
+      });
+      expect(result.success).toBe(true);
+      expect(result.success && result.data.dashboards?.sales.globalFilters).toEqual({
+        region: { label: 'Region', options: { emea: 'EMEA', apac: 'APAC' } },
+        category: { label: 'Category' },
+        status: { options: { '1': 'Active', 'true': 'Yes' } },
+      });
+    });
+
+    it('CONTROL: the group was unaddressable before — the same face on a 17.3-shaped bundle is what the strict object refused', () => {
+      // Not a phantom check: the assertion below is the accept side of the
+      // widening, and the reject side is the `unrecognized_keys` the group's
+      // members still produce for any spelling outside the face.
+      const result = parse({ region: { label: 'Region', title: 'Region' } });
+      expect(result.success).toBe(false);
+      const issue = result.error?.issues.find((i) => i.code === 'unrecognized_keys');
+      expect(issue?.message).toContain('this dashboard global-filter translation');
+      expect(issue?.message).toContain('`title` → `label`');
+    });
+
+    it.each([
+      ['choices', 'options'],
+      ['values', 'options'],
+      ['name', 'label'],
+    ])('points the dashboard-document spelling `%s` at `%s`', (alias, expected) => {
+      const result = parse({ region: { [alias]: {} } });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+        .toContain(`\`${alias}\` → \`${expected}\``);
+    });
+
+    it('points `filters` / `globalFilter` on the dashboard entry at `globalFilters`, as the dashboard schema does', () => {
+      for (const alias of ['filters', 'globalFilter']) {
+        const result = TranslationDataSchema.safeParse({ dashboards: { sales: { [alias]: {} } } });
+        expect(result.success).toBe(false);
+        expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+          .toContain(`\`${alias}\` → \`globalFilters\``);
+      }
+    });
+
+    it('rejects a non-string option label — the map is value → translated label, nothing deeper', () => {
+      const result = parse({ region: { options: { emea: { label: 'EMEA' } } } });
+      expect(result.success).toBe(false);
+    });
   });
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -1195,7 +1257,7 @@ describe('translation unknown-key strictness (#4001)', () => {
       apps: { crm: { label: 'CRM', navigation: { sales: { label: 'Sales' } } } },
       messages: { 'common.save': 'Save' },
       globalActions: { export_csv: { label: 'Export', params: { format: { label: 'Format' } } } },
-      dashboards: { sales: { label: 'Sales', widgets: { rev: { title: 'Revenue', subCaption: 'vs last quarter' } } } },
+      dashboards: { sales: { label: 'Sales', widgets: { rev: { title: 'Revenue', subCaption: 'vs last quarter' } }, globalFilters: { region: { label: 'Region', options: { emea: 'EMEA' } } } } },
       pages: { home: { label: 'Home', title: 'Welcome' } },
       flows: { lead_conversion: { label: 'Convert Lead', screens: { details: { title: 'Details', fields: { name: { label: 'Name', placeholder: 'Enter a name' } } } } } },
       settings: { mail: { title: 'Mail', keys: { host: { label: 'Host' } } } },

@@ -18,6 +18,28 @@
  * introspection). The legacy if-chain prefixes cannot be enumerated from the
  * registry, so they are pinned in LEGACY_CHAIN_PREFIXES — when ADR-0076 D11
  * extracts another branch, that list and the ledger move together.
+ *
+ * These are domain-level checks, not route-level ones, and worth naming
+ * precisely so nobody reads this suite's green as "every route has a row".
+ * "At least one ledger entry" is satisfied the moment any row exists for a
+ * domain — most domains here carry several routes, but a few carry exactly
+ * one, where domain- and route-granularity coincide only by accident. For a
+ * multi-route domain, any non-last row can be deleted, or never added,
+ * without turning anything red. That is not a slip in these six assertions —
+ * it is what the registry exposes: `DomainHandlerRegistry.list()` returns
+ * `{prefix, match, methods, handler}` per domain, with no sub-route field to
+ * walk, and a busy domain like `/automation` resolves its own routes through
+ * one function's inline `parts[N] === 'literal'` if-chain rather than a table
+ * anything here could enumerate. An ablation on #17038 measured the
+ * consequence directly: deleting a whole `ROUTE_LEDGER` row left this suite
+ * fully green, because the row's domain still held "at least one" through its
+ * siblings. Whether the ledger should also be checked at route granularity —
+ * and how, given the registry's shape above — is an open maintainer decision
+ * tracked in #17041; this paragraph states today's coverage, not a plan for
+ * tomorrow's. Deliberately no row/domain counts here: a hand-typed number in
+ * this prose is exactly the unguarded-count defect this lane spent the same
+ * day eliminating elsewhere (#16919, #17039), and nothing in this file would
+ * ever notice it going stale.
  */
 
 import { describe, it, expect } from 'vitest';

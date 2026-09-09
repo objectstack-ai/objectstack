@@ -76,12 +76,15 @@
  *     the part worth writing down: measured through the real
  *     `collectExpectedEntries`, the three offer exactly THREE keys between
  *     them (one page-level `label` each). All three author `regions: []` and
- *     put every component under `slots.*`, and the shared walk
+ *     put every component under `slots.*`. Since #16772 the shared walk
  *     (`walkAddressedPageComponents`, `@objectstack/spec/system`) roots at
- *     `regions[].components[]` -- so 45 further authored copy sites, every one
- *     an inline `{ en, 'zh-CN', ... }` locale map, have no bundle face to be
- *     counted against. A config-only change would declare pages the walk still
- *     cannot see: it would look like a fix and measure nothing.
+ *     `slots.<slot>` as well as `regions[].components[]`, so it now REACHES
+ *     every one of those components -- and not one of them carries an `id`,
+ *     so none is addressable by `pages.<name>.components.<id>`: the 45
+ *     further authored copy sites, every one an inline `{ en, 'zh-CN', ... }`
+ *     locale map, still have no bundle face to be counted against. A
+ *     config-only change would declare pages that offer nothing beyond their
+ *     label: it would look like a fix and measure nothing.
  *
  *     Their gate is `packages/cli/test/platform-page-i18n-parity.test.ts`,
  *     which owns both halves from the other side -- a `pages.*` bundle entry

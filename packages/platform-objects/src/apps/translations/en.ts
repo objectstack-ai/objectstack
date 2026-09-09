@@ -229,6 +229,12 @@ export const en: TranslationData = {
           description: 'Event volume grouped by action (login, logout, config, …)',
         },
       },
+      // The date-range bar above the widgets — addressable since
+      // `dashboards.<name>.globalFilters` (#16772), keyed by the filter's
+      // `field` because it authors no `name`.
+      globalFilters: {
+        created_at: { label: 'Date Range' },
+      },
     },
   },
 

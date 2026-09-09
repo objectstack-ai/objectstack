@@ -164,6 +164,12 @@ export const zhCN: TranslationData = {
         widget_events_by_user: { title: '按用户分布的事件', description: '用户活动分布' },
         widget_recent_events: { title: '按操作统计的事件量', description: '按操作分组的事件量（登录、登出、配置等）' },
       },
+      // The date-range bar above the widgets — addressable since
+      // `dashboards.<name>.globalFilters` (#16772), keyed by the filter's
+      // `field` because it authors no `name`.
+      globalFilters: {
+        created_at: { label: '日期范围' },
+      },
     },
   },
 

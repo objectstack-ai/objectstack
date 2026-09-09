@@ -4,13 +4,12 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import {
   resolveAuthzContext,
   isAuthzStoreUnavailableError,
-  // [#15351] The posture-derivation trio. `effectiveTenancyPosture` reads the
-  // posture IN FORCE off the `tenancy` service (never the REQUESTED one an env
-  // var asks for); the other two carry decision-1-option-A's classification
-  // (#13906) at this seam — see `resolveAdmissionTenancyPosture`.
-  effectiveTenancyPosture,
-  isServiceNotRegisteredError,
-  AuthzStoreUnavailableError,
+  // [#16013] The posture derivation, in ONE call. It reads the posture IN
+  // FORCE off the `tenancy` service (never the REQUESTED one an env var asks
+  // for) and carries decision-1-option-A's classification (#13906) for every
+  // admission seam at once -- see `resolveAdmissionTenancyPosture` below for
+  // the half that stays this seam's own.
+  classifyAdmissionTenancyPosture,
   type TenancyPostureSource,
 } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
@@ -340,17 +339,21 @@ export class SettingsServicePlugin implements Plugin {
    * there. The posture the guards must see is the one the `tenancy` service
    * reports, which is what {@link effectiveTenancyPosture} reads.
    *
-   * ## The classification, decision 1 option A (#13906)
+   * ## The classification, decision 1 option A (#13906) — no longer written here
    *
-   * - **Never registered** ⇒ branded (`isServiceNotRegisteredError`), quiet
-   *   `undefined`. A lean embedding with no `plugin-auth` is a SUPPORTED
-   *   composition; behaviour there is exactly what it was.
-   * - **Registered and unable to answer** ⇒ `AuthzStoreUnavailableError`
-   *   (ADR-0112 `SERVICE_UNAVAILABLE` / 503). Admission was never DECIDED, so
-   *   it must not be answered. ⛔ A `try { … } catch { undefined }` here
-   *   re-introduces exactly the permissive-on-failure defect #13906 exists to
-   *   repair — a failure reading as "this check does not apply". The caller's
-   *   own `catch` re-raises this brand rather than degrading it to a denial.
+   * [#16013] `classifyAdmissionTenancyPosture` (`@objectstack/core`) owns it
+   * for every admission seam: never registered ⇒ branded ⇒ quiet `undefined`;
+   * every other rejection ⇒ `AuthzStoreUnavailableError` (ADR-0112
+   * `SERVICE_UNAVAILABLE` / 503), because admission was never DECIDED and must
+   * not be answered. ⛔ A `try { … } catch { undefined }` at any seam
+   * re-introduces exactly the permissive-on-failure defect #13906 exists to
+   * repair — a failure reading as "this check does not apply" — and six copies
+   * of that decision were six chances to write it.
+   *
+   * ⚠️ At THIS door: a lean embedding with no `plugin-auth` is a SUPPORTED
+   * composition, so behaviour there is exactly what it was; and on the loud arm
+   * the caller's own `catch` re-raises the brand rather than degrading it to a
+   * denial.
    *
    * ⚠️ The brand exists only on the ASYNC resolution path: `PluginContext.getService`
    * throws two UNBRANDED plain `Error`s (`… not found` and `… is async - use
@@ -366,9 +369,10 @@ export class SettingsServicePlugin implements Plugin {
    * so absence is the only fault it could report anyway. It keeps the quiet
    * answer, unchanged.
    *
-   * ⛔ Deliberately NOT extracted into a shared helper: sibling repairs are in
-   * flight on the same seam across other packages, and this file's copy is the
-   * precedent set by `@objectstack/cloud-connection`'s install-local door.
+   * ⛔ That argument is exactly why the RESOLUTION above did NOT move when the
+   * classification did (#16013): the shared helper is handed a decided way to
+   * reach the service; whether this host shape may be asked at all is a fact
+   * only this seam holds.
    */
   private async resolveAdmissionTenancyPosture(
     ctx: PluginContext,
@@ -377,16 +381,9 @@ export class SettingsServicePlugin implements Plugin {
       | { getServiceAsync?: <T>(name: string, scopeId?: string) => Promise<T> }
       | undefined;
     if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
-    try {
-      return effectiveTenancyPosture(
-        await kernel.getServiceAsync<TenancyPostureSource>('tenancy'),
-      );
-    } catch (err) {
-      if (!isServiceNotRegisteredError(err)) {
-        throw new AuthzStoreUnavailableError('tenancy', err);
-      }
-      return undefined;
-    }
+    return classifyAdmissionTenancyPosture(() =>
+      kernel.getServiceAsync!<TenancyPostureSource>('tenancy'),
+    );
   }
 
   /**

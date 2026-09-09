@@ -21,7 +21,7 @@ import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.
 import { invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
-import { nextUtcCalendarDay } from '@objectstack/core';
+import { nextUtcCalendarDay, resolveAnalyticsDateRangeString } from '@objectstack/core';
 import {
   rebucketCrossObject,
   RECOMBINABLE_METHODS,
@@ -1647,13 +1647,16 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * HERE on every driver — and "bucketed trend" is precisely the shape that also
    * carries a range ("last 12 months", "this quarter").
    *
-   * Bounds are inclusive on both ends — logically "from day X through day Y".
-   * The `$lte` end is left as the bare calendar day on purpose: the driver's
-   * filter compiler owns the calendar-day → instant translation, compiling a
-   * bare-day `$lte` on a `datetime` column into the half-open `< nextDay`
-   * (#3777) while a `date` column keeps the plain `<=`. `NativeSQLStrategy`
-   * performs the same half-open translation itself because it binds into raw
-   * SQL, so one dashboard reads the same on every driver.
+   * An EXPLICIT `[a, b]` window is inclusive on both ends — logically "from day
+   * X through day Y". The `$lte` end is left as the bare calendar day on
+   * purpose: the driver's filter compiler owns the calendar-day → instant
+   * translation, compiling a bare-day `$lte` on a `datetime` column into the
+   * half-open `< nextDay` (#3777) while a `date` column keeps the plain `<=`.
+   * `NativeSQLStrategy` performs the same half-open translation itself because
+   * it binds into raw SQL, so one dashboard reads the same on every driver.
+   *
+   * [#16322] A window this face RESOLVED is a different question and carries
+   * its own upper reading — see the string arm below.
    *
    * [#5526] Bounds are forwarded at the type `dateRange` is DECLARED with —
    * `string` (`AnalyticsQuerySchema`'s `timeDimensions[].dateRange: string[]`) —
@@ -1671,10 +1674,21 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * the very coercion that already makes a `where` bound on that same column
    * work today.
    *
-   * A bare-string `dateRange` degenerates to the single point `[s, s]`, matching
-   * `NativeSQLStrategy`. Relative phrases ("Last 7 days") are NOT resolved here;
-   * neither SQL path resolves them, and inventing a second interpretation on the
-   * driver-independent path is how the two would drift apart again.
+   * [#16322] A bare string is a member of the CLOSED date-range preset
+   * vocabulary (#16041) and is lowered to a real window by
+   * `@objectstack/core`'s `resolveAnalyticsDateRangeString` — the same call
+   * `driver-memory`'s cube face makes, so this is not a second interpretation
+   * but the only one. Anything else is REFUSED with the ADR-0112
+   * `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` envelope.
+   *
+   * ⛔ It used to degenerate to the single point `[s, s]` — MEASURED on the
+   * dataset door, which does not Zod-parse its selection: `last_30_days`
+   * compiled to `created_at >= 'last_30_days' AND created_at <= 'last_30_days'`
+   * on both SQL strategies, and so did `'not a range at all'`, and so did
+   * `'today'`. A nonsense point window is not a narrower query, it is a
+   * DIFFERENT query whose answer depends on how the backend happens to compare
+   * a vocabulary word against a timestamp — which is precisely how the two
+   * backends came to answer one bad input with opposite wrong answers.
    *
    * An oddly-sized array (the schema types `dateRange` as a plain `string[]`)
    * takes its first two entries, a one-entry array degenerating to a point.
@@ -1689,8 +1703,31 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     const out: Array<{ field: string; bounds: Record<string, unknown> }> = [];
     for (const td of query.timeDimensions ?? []) {
       if (!td.dateRange) continue;
-      const range = Array.isArray(td.dateRange) ? td.dateRange : [td.dateRange, td.dateRange];
-      const [start, end = start] = range;
+      // [#16322] The STRING arm is the CLOSED preset vocabulary, resolved by
+      // the one shared lowering `driver-memory`'s cube face also calls — so a
+      // dashboard's `last_30_days` opens on the same instant on every backend,
+      // and a string outside the vocabulary is REFUSED here rather than
+      // degenerating to a point window bound with the literal name.
+      if (!Array.isArray(td.dateRange)) {
+        const window = resolveAnalyticsDateRangeString(td.dateRange, { timezone: query.timezone });
+        out.push({
+          field: this.resolveFieldName(cube, td.dimension, 'dimension'),
+          // A window this path RESOLVED states its own upper reading: the ten
+          // calendar presets stop BEFORE their end instant (`$lt`, so two
+          // adjacent windows cannot both count a row stamped on the boundary —
+          // #16179's memory-side repair, same rule on this side), while the
+          // three rolling ones end at NOW, a moment they reach.
+          bounds: window.endExclusive
+            ? { $gte: window.start, $lt: window.end }
+            : { $gte: window.start, $lte: window.end },
+        });
+        continue;
+      }
+      // ⛔ The CALLER's explicit window is untouched, bound for bound: `$lte`
+      // on a bound they wrote is the reading this face has published since it
+      // existed (#16179), and the driver's own bare-day widening still owns
+      // the calendar-day → instant translation for it.
+      const [start, end = start] = td.dateRange;
       if (start == null) continue;
       out.push({
         field: this.resolveFieldName(cube, td.dimension, 'dimension'),
