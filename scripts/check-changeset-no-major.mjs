@@ -920,18 +920,86 @@ export function render(result) {
 // grandfathering here, and the six are cleared by declaring, not by softening.
 
 /**
- * The `src` root whose movement makes a package's PUBLISHED surface the thing
- * that grew. WHICH roots ship is a different axis and is deliberately left
- * alone here — `bin/**` ships too, and that is #16692's card, not this one.
- * What this half answers is only HOW DEEP the package owning the root may sit.
+ * The compiled-source root whose movement makes a package's PUBLISHED surface
+ * the thing that grew — the FIRST of this reading's two legs.
+ *
+ * ⚠️ It is deliberately a path shape and not a question about the packed set,
+ * and the difference is load-bearing enough to write down: `packages/cli`'s
+ * `files` is `["dist","README.md","CHANGELOG.md"]`, so `src/**` is NOT packed —
+ * it is what `dist` is COMPILED FROM. A predicate rewritten to ask "is this
+ * path in the tarball?" would therefore stop counting `src/**` as growth, gut
+ * this axis outright, and print a tick while doing it: the exact shape #16692
+ * and #16713 both document. ⇒ The packed set is the reason for a SECOND leg
+ * below, never a replacement for this one.
  */
 const PUBLISHED_SOURCE_ROOT = 'src';
 
 /**
- * Every directory this path could be the published source OF: each ancestor `D`
- * under `packages/` for which the path reads `D/src/**`, SHALLOWEST FIRST.
+ * The `bin` targets a manifest declares, as package-relative paths.
  *
- * ## Why this is shape only, and not a deeper pattern (#16713)
+ * npm packs a `bin` target REGARDLESS of `files` (#14874), which is what makes
+ * this leg a published surface rather than a convenience: `packages/cli`'s
+ * `files` names only `dist`, and `bin/run.js` ships anyway.
+ *
+ * Both spellings npm accepts are read — a bare string, and an object of command
+ * names to paths — because a package that grew a second command would otherwise
+ * change shape out from under a string-only reading. Anything else (an array, a
+ * number, a `null`) declares no target and yields none: this is a reader, and a
+ * malformed field is not a licence to guess.
+ *
+ * ⛔ The returned paths are the target FILES, not the directory holding them,
+ * and that is measured rather than tidy. `packages/cli/bin/` holds two files:
+ * `run.js`, which `bin` names and npm packs, and `run-dev.js`, which nothing
+ * names and `files` excludes — it does not ship. Counting the whole directory
+ * would call a non-shipping developer script a published surface, and this gate
+ * may over-include only where it cannot tell the difference; here it can.
+ *
+ * @param {unknown} manifest a parsed package.json, or anything at all
+ * @returns {string[]} package-relative target paths, `./` stripped, deduped
+ */
+export function binTargetsOf(manifest) {
+  const bin = /** @type {{ bin?: unknown }} */ (manifest ?? {}).bin;
+  const raw = typeof bin === 'string' ? [bin] : bin !== null && typeof bin === 'object' && !Array.isArray(bin) ? Object.values(bin) : [];
+  const targets = new Set();
+  for (const value of raw) {
+    if (typeof value !== 'string') continue;
+    // `./bin/run.js` and `bin/run.js` are the same target; a trailing slash and
+    // a doubled separator are not, until they are normalised.
+    // Order matters: separators collapse FIRST, or `.//bin/x.js` strips to
+    // `/bin/x.js` and reads as absolute — a real target dropped by its spelling.
+    const rel = value
+      .replace(/\/+/g, '/')
+      .replace(/^(?:\.\/)+/, '')
+      .replace(/\/+$/, '');
+    // An absolute path or one that climbs out of the package names nothing this
+    // package publishes, so it is dropped rather than resolved.
+    if (rel === '' || rel === '.' || rel.startsWith('/') || rel.split('/').includes('..')) continue;
+    targets.add(rel);
+  }
+  return [...targets];
+}
+
+/**
+ * Every directory this path could be the published surface OF: each ancestor
+ * `D` under `packages/` that publishes the path, SHALLOWEST FIRST.
+ *
+ * ## Two legs, and why the second one cannot be a list (#16692)
+ *
+ * `D` owns the path when EITHER holds:
+ *
+ *   1. **compiled source** — the path reads `D/src/**`. Shape only, no manifest
+ *      needed, and byte-for-byte the reading #16713 landed.
+ *   2. **a packed `bin` target** — `D`'s own manifest names the path in `bin`.
+ *      Manifest-derived, so it is not a written-down list of roots and cannot
+ *      drift the way the one this card was filed against did.
+ *
+ * ⛔ Leg 2 is NOT "`bin/**` added to a list of roots". Triage ruled that out in
+ * this card's own words — «it is a list, and lists drift — this finding exists
+ * because of a list» — and the difference is real, not stylistic: a package that
+ * points `bin` at `dist/cli.js` or `scripts/run.js` is read here and would be
+ * invisible to a directory-name list.
+ *
+ * ## Why this is shape only for leg 1, and not a deeper pattern (#16713)
  *
  * The reading used to be a single regular expression whose package segment was
  * one-path-segment-wide, so it saw `packages/<name>/src/**` and nothing else.
@@ -967,39 +1035,88 @@ const PUBLISHED_SOURCE_ROOT = 'src';
  * nested ones — measured over the whole tree, 22 package dirs matched before,
  * 72 after, and none lost.
  *
+ * ## SUPERSET-ONLY, and why the reader is a required argument
+ *
+ * Leg 1 runs first and unconditionally, so every path that owned a directory
+ * before this card owns it still: the two legs are a union and leg 2 only adds.
+ * That is a SAFETY property, not a nicety — this axis may over-include
+ * harmlessly and can never under-include harmlessly — and it is pinned by a
+ * control rather than argued.
+ *
+ * ⛔ `manifestOf` is therefore REQUIRED and this throws without it. A default
+ * that quietly skipped leg 2 would restore precisely the blindness this card
+ * closes, at a call site that reads as if it asked the whole question, and the
+ * gate would print a tick meaning "the axis did not look" (#4690). Missing
+ * input is a failure, never a pass — including when the missing input is a
+ * collaborator.
+ *
  * @param {string} path a repo-relative path, as `git diff --name-only` prints it
- * @returns {string[]} candidate package directories, shallowest first
+ * @param {(dir: string) => object | false | null} manifestOf reads `<dir>/package.json`
+ *   out of the tree under judgement: the parsed object, `false` when a manifest is
+ *   THERE but will not parse, `null` when there is none. The three answers are not
+ *   two: `false` makes `D` a candidate whose name cannot be read, so the path lands
+ *   in `packagesTouched`'s `unreadable` set instead of in neither set — the same
+ *   invariant leg 1 owes, extended to leg 2. ⚠️ Residual, stated rather than
+ *   implied: where a manifest is ABSENT there is no `bin` field to have named
+ *   anything, so leg 2 contributes no candidate and none is owed.
+ * @returns {string[]} candidate package directories, shallowest first, deduped
  */
-export function publishedSourceOwners(path) {
+export function publishedSourceOwners(path, manifestOf) {
+  if (typeof manifestOf !== 'function') {
+    throw new TypeError(
+      'publishedSourceOwners(path, manifestOf): the manifest reader is required — the `bin` leg (#16692) ' +
+        'is manifest-derived, and a call that omits it would silently read `src/**` alone while looking ' +
+        'like it asked the whole question (#4690).',
+    );
+  }
   const segments = path.split('/');
   if (segments[0] !== 'packages') return [];
   const owners = [];
-  // `i` indexes the `src` segment. It starts at 2 so the owner is at least
-  // `packages/<something>` — `packages/src/**` names no package — and stops one
-  // short of the end, so the path is INSIDE `src/` rather than a file called
-  // `src`.
-  for (let i = 2; i < segments.length - 1; i += 1) {
-    if (segments[i] === PUBLISHED_SOURCE_ROOT) owners.push(segments.slice(0, i).join('/'));
+  // `i` indexes the segment AFTER the candidate directory, so the candidate is
+  // `segments.slice(0, i)`. It starts at 2 so the owner is at least
+  // `packages/<something>` — `packages/src/**` names no package — and runs to
+  // the last segment, so the candidate is always a proper ancestor of the path.
+  for (let i = 2; i < segments.length; i += 1) {
+    const dir = segments.slice(0, i).join('/');
+    // LEG 1, compiled source. `i < segments.length - 1` keeps the path INSIDE
+    // `src/` rather than being a file called `src`.
+    if (segments[i] === PUBLISHED_SOURCE_ROOT && i < segments.length - 1) {
+      owners.push(dir);
+      continue;
+    }
+    // LEG 2, a packed `bin` target. `false` is a candidate on purpose: a
+    // manifest that is present and will not parse cannot be asked what it
+    // publishes, and that must be REPORTED rather than read as a no.
+    const manifest = manifestOf(dir);
+    if (manifest === false) {
+      owners.push(dir);
+      continue;
+    }
+    if (manifest && binTargetsOf(manifest).some((target) => path === `${dir}/${target}`)) owners.push(dir);
   }
   return owners;
 }
 
 /**
- * The workspace package names whose `src/**` this diff moves, read from the
- * HEAD tree rather than from the working directory — the self-test and the
- * acceptance run both drive commits that are not checked out.
+ * The workspace package names whose PUBLISHED surface this diff moves — its
+ * `src/**` or a `bin` target it packs — read from the HEAD tree rather than
+ * from the working directory, because the self-test and the acceptance run both
+ * drive commits that are not checked out.
  *
- * `unreadable` is returned beside them, never folded into them: a `<dir>/src/**`
- * path whose manifest could not be read is a package this reading could not
- * name, and a name it could not read must not look like a package the diff did
- * not touch (#4690).
+ * `unreadable` is returned beside them, never folded into them: a path this
+ * reading matched but whose owning manifest could not be read is a package it
+ * could not name, and a name it could not read must not look like a package the
+ * diff did not touch (#4690).
  *
- * ⭐ That distinction is the bill the widening above has to keep paying, and it
- * is exactly where the NEW failure mode lands. A nested path now MATCHES, so a
- * nested directory whose manifest is missing or unparseable is REPORTED as
- * unreadable instead of vanishing the way every nested path used to. The
- * invariant, stated so it can be tested: a path that matches the shape lands in
- * `packages` or in `unreadable` — never in neither.
+ * ⭐ That distinction is the bill each widening has to keep paying, and both
+ * widenings pay it here. #16713: a nested path now MATCHES, so a nested
+ * directory whose manifest is missing or unparseable is REPORTED as unreadable
+ * instead of vanishing the way every nested path used to. #16692: a directory
+ * whose manifest is THERE but will not parse cannot be asked what it packs, so
+ * it becomes a candidate the reader cannot name and lands in `unreadable` too
+ * — rather than being read as a package that publishes nothing. The invariant,
+ * stated so it can be tested: a path this reading matches lands in `packages`
+ * or in `unreadable` — never in neither.
  *
  * @param {{ cwd: string, from: string, head: string }} opts
  * @returns {{ packages: string[], unreadable: string[] }}
@@ -1013,27 +1130,43 @@ export function packagesTouched({ cwd, from, head }) {
   }
   // One manifest read per candidate DIRECTORY rather than per changed file: a
   // diff that moves forty files in one package would otherwise ask forty times.
-  const nameOfDir = new Map();
-  const nameFor = (dir) => {
-    if (!nameOfDir.has(dir)) {
-      const manifest = showOrNull(head, `${dir}/package.json`, cwd);
-      let name = null;
-      if (manifest !== null) {
+  //
+  // ⚠️ The cache is on the MANIFEST rather than on the name, because the `bin`
+  // leg (#16692) needs the whole object and the name leg needs one field of it;
+  // caching the name would make the reader read the same blob twice per dir.
+  //
+  // Three answers, never two — `false` is a manifest that is THERE and will not
+  // parse, and it is what keeps #4690's distinction alive through leg 2: such a
+  // directory becomes a candidate that cannot be NAMED, so its path lands in
+  // `unreadable` below instead of in neither set.
+  const manifestOfDir = new Map();
+  /** @returns {object | false | null} */
+  const manifestOf = (dir) => {
+    if (!manifestOfDir.has(dir)) {
+      const blob = showOrNull(head, `${dir}/package.json`, cwd);
+      let value = null;
+      if (blob !== null) {
         try {
-          name = JSON.parse(manifest).name ?? null;
+          const parsed = JSON.parse(blob);
+          value = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : false;
         } catch {
-          name = null;
+          value = false;
         }
       }
-      nameOfDir.set(dir, typeof name === 'string' && name ? name : null);
+      manifestOfDir.set(dir, value);
     }
-    return nameOfDir.get(dir);
+    return manifestOfDir.get(dir);
+  };
+  const nameFor = (dir) => {
+    const manifest = manifestOf(dir);
+    const name = manifest === false || manifest === null ? null : manifest.name;
+    return typeof name === 'string' && name ? name : null;
   };
 
   const packages = new Set();
   const unreadable = new Set();
   for (const line of out.split('\n')) {
-    const owners = publishedSourceOwners(line.trim());
+    const owners = publishedSourceOwners(line.trim(), manifestOf);
     if (owners.length === 0) continue;
     const owner = owners.find((dir) => nameFor(dir) !== null);
     if (owner) packages.add(nameFor(owner));
@@ -1651,11 +1784,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "The LEVEL axis: #16044's two heads, one word apart (#16055)": 56,
   'The GRAIN: a PR-scoped declaration judged at PR scope (#16361)': 25,
   'THE DEPTH: a nested package is a candidate the axis can refuse (#16713)': 21,
+  'THE ROOT: a packed `bin` target is a published surface the axis can refuse (#16692)': 37,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 16;
+const SELF_TEST_BATTERY_FLOOR = 17;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2801,7 +2935,13 @@ function selfTest() {
     // gate that lost its discrimination.
     battery('THE DEPTH: a nested package is a candidate the axis can refuse (#16713)');
     {
-      const owners = (p) => JSON.stringify(publishedSourceOwners(p));
+      // ⚠️ #16692 made this reading TWO-legged, so the shape helper has to be
+      // handed a manifest reader. This one answers for exactly ONE directory,
+      // which is what keeps every assertion in this battery about DEPTH: no
+      // other candidate on any walk below can resolve a `bin` target, so a
+      // green here cannot be coming from the other leg.
+      const cliManifest = { name: '@objectstack/cli', version: '0.0.0', files: ['dist'], bin: { os: './bin/os.mjs' } };
+      const owners = (p) => JSON.stringify(publishedSourceOwners(p, (dir) => (dir === 'packages/cli' ? cliManifest : null)));
       const declaredYes = { value: 'yes', payload: true, readings: ['carrier: on'] };
 
       // The shape reading, at three depths and its controls. Depth-agnostic is
@@ -2817,9 +2957,19 @@ function selfTest() {
         `three levels deep reads the same way — a fix that hard-codes ONE optional group segment fails HERE, which is why the reading is a walk and not a wider pattern — got ${owners('packages/a/b/c/src/x.ts')}`,
       );
       assert(owners('packages/drivers/driver-sql/README.md') === '[]', 'control: a path with no `src/` segment owns nothing — otherwise the three positives above would hold for every file in the repo');
+      // ⭐ INVERTED by #16692, deliberately and in place. This control was
+      // written by #16713 to hold the ROOT axis OPEN — «`bin/**` is still NOT
+      // read … a fix that reddened here would be answering a different card» —
+      // and it did its job: the boundary could not close by accident, and this
+      // is the card that came to close it on purpose. The reasoning is kept and
+      // the direction is flipped, because that is the difference between a
+      // boundary that was moved and one that was forgotten.
       assert(
-        owners('packages/cli/bin/os.mjs') === '[]',
-        'control: `bin/**` is still NOT read — WHICH roots ship is #16692\'s axis and this card must not silently close it; a fix that reddened here would be answering a different card',
+        owners('packages/cli/bin/os.mjs') === '["packages/cli"]',
+        'INVERTED (#16692): a `bin` target IS read now — npm packs it regardless of `files` (#14874), so a diff confined to it names its package. ' +
+          'What is STILL not read, and is a different instrument entirely: whether an `src/**` change grew the PUBLIC FACE at all. A package-internal ' +
+          'data line under `src/` is counted as growth on path alone — the 误判 half, filed separately — and no reading of the PACKED set can answer it. ' +
+          `got ${owners('packages/cli/bin/os.mjs')}`,
       );
       assert(owners('scripts/check-changeset-no-major.mjs') === '[]', 'control: outside `packages/` there is no owner at all');
       assert(owners('packages/src/x.ts') === '[]', 'control: the owner must be at least `packages/<something>` — `packages` itself is not a package');
@@ -2932,6 +3082,220 @@ function selfTest() {
       assert(
         renderLevel(judgeLevel({ levels: nmScanned.levels, touched: nmTouched, declaration: declaredYes })).stdout.join('\n').includes('packages/newgroup/newpkg'),
         'and the tick PRINTS it — an offender that could not be seen must be stated beside the green, or the green is the same silent pass this card is about',
+      );
+    }
+
+    // ── THE ROOT: a packed `bin` target is a published surface (#16692) ──────
+    //
+    // The DEPTH battery above answers HOW DEEP the package owning a root may
+    // sit. This one answers WHICH ROOTS SHIP, and it is the other half of the
+    // same finding: a diff confined to `packages/cli/bin/**` paired a
+    // `Clause-②: yes` with a `patch` and stayed GREEN on PR #16686, while the
+    // byte-for-byte same declaration over `src/**` went RED on PR #16672 the
+    // same day. ⇒ Same declaration, same grade, opposite verdicts, because
+    // `bin/` ships (npm packs a `bin` target REGARDLESS of `files`, #14874) and
+    // the axis could not see it. The dispatching seat then read that green as
+    // "the axis looked and approved" and had to correct itself publicly — the
+    // concrete cost this card records.
+    //
+    // ⛔ THE TRAP THIS BATTERY GUARDS, stated because it is the failure this
+    // repair could most plausibly have shipped: triage's ruling said to judge a
+    // package by its PACKED set. Taken literally that GUTS the axis, because
+    // `files` is `["dist", ...]` and `src/**` is not packed — it is compiled
+    // into what is. Such a fix reds nothing and prints ticks. So the `src/**`
+    // leg is untouched and the packed reading is an ADDITIONAL leg, and the
+    // superset control below is what proves that rather than asserting it.
+    //
+    // Every count here is paired the way the DEPTH battery pairs its own: a red
+    // proves nothing alone, because "the reading widened" and "the gate refuses
+    // everything now" produce the same red.
+    battery('THE ROOT: a packed `bin` target is a published surface the axis can refuse (#16692)');
+    {
+      const declaredYes = { value: 'yes', payload: true, readings: ['carrier: on'] };
+      const CLI = '@objectstack/cli';
+      const CS = '.changeset/root-leg.md';
+
+      // ── The reader for `bin`, in both spellings npm accepts and its junk ───
+      const targets = (bin) => JSON.stringify(binTargetsOf({ bin }));
+      assert(targets({ os: './bin/run.js' }) === '["bin/run.js"]', `the object spelling, with \`./\` stripped — got ${targets({ os: './bin/run.js' })}`);
+      assert(targets('bin/run.js') === '["bin/run.js"]', `the STRING spelling is the same target — a package with one command may write either — got ${targets('bin/run.js')}`);
+      assert(
+        targets({ objectstack: './bin/run.js', os: './bin/run.js' }) === '["bin/run.js"]',
+        `two command NAMES pointing at one file is one target — this is the real manifest of packages/cli — got ${targets({ objectstack: './bin/run.js', os: './bin/run.js' })}`,
+      );
+      assert(
+        targets({ a: './bin/a.js', b: 'bin/b.js' }) === '["bin/a.js","bin/b.js"]',
+        `two DIFFERENT targets are both read — a package that grew a second command must not be read through its first — got ${targets({ a: './bin/a.js', b: 'bin/b.js' })}`,
+      );
+      assert(targets(undefined) === '[]', 'control: no `bin` field declares no target — otherwise every package would own its whole tree through this leg');
+      assert(targets(['bin/run.js']) === '[]', 'control: an ARRAY is not a spelling npm accepts, and a reader that guessed here would be inventing a published surface');
+      assert(targets({ a: 42, b: null }) === '[]', 'control: non-string values name nothing — a malformed manifest is not a licence to guess');
+      assert(targets({ a: '../../etc/passwd', b: '/abs.js' }) === '[]', 'control: a target that climbs out of the package, or is absolute, names nothing THIS package publishes');
+      assert(targets({ a: './/bin//run.js/' }) === '["bin/run.js"]', `control: a target is normalised before it is compared, or the same file spelt twice is two targets — got ${targets({ a: './/bin//run.js/' })}`);
+
+      // ── The walk, with a manifest under `packages/cli` and nowhere else ────
+      const manifestWith = (bin) => (dir) => (dir === 'packages/cli' ? { name: CLI, version: '0.0.0', files: ['dist'], bin } : null);
+      const seen = (p, bin) => JSON.stringify(publishedSourceOwners(p, manifestWith(bin)));
+
+      assert(seen('packages/cli/bin/run.js', { os: './bin/run.js' }) === '["packages/cli"]', `THE CARD: a packed \`bin\` target names its package — got ${seen('packages/cli/bin/run.js', { os: './bin/run.js' })}`);
+      assert(seen('packages/cli/bin/run.js', 'bin/run.js') === '["packages/cli"]', `... in the string spelling too — got ${seen('packages/cli/bin/run.js', 'bin/run.js')}`);
+      // ⭐ THE CONTROL THAT SAYS THIS IS NOT A LIST OF ROOTS. `bin/run-dev.js`
+      // really sits beside `bin/run.js` in this repo; `bin` does not name it and
+      // `files` is `["dist","README.md","CHANGELOG.md"]`, so it does NOT ship.
+      // A repair that added `bin/**` as a root — the option triage refused —
+      // would count it, and would be over-including where the tree can tell.
+      assert(
+        seen('packages/cli/bin/run-dev.js', { os: './bin/run.js' }) === '[]',
+        `control: a sibling in the SAME directory that \`bin\` does not name is not published — this leg reads the manifest, it does not add \`bin/\` to a list of roots — got ${seen('packages/cli/bin/run-dev.js', { os: './bin/run.js' })}`,
+      );
+      // And the converse, which no directory list could ever get right.
+      assert(
+        seen('packages/cli/dist/cli.js', { os: './dist/cli.js' }) === '["packages/cli"]',
+        `control: a \`bin\` that points OUTSIDE \`bin/\` is read — «add \`bin/**\` to the roots» is blind here, and lists drifting is why this card exists — got ${seen('packages/cli/dist/cli.js', { os: './dist/cli.js' })}`,
+      );
+      assert(
+        JSON.stringify(publishedSourceOwners('packages/cli/bin/run.js', () => null)) === '[]',
+        'FIRING control: the identical path owns nothing when no manifest answers — so the positives above are the MANIFEST being read, not the path shape',
+      );
+      const unparseableAt = (at) => (dir) => (dir === at ? false : null);
+      assert(
+        JSON.stringify(publishedSourceOwners('packages/cli/bin/run.js', unparseableAt('packages/cli'))) === '["packages/cli"]',
+        `#4690 extended to this leg: a manifest that is THERE and will not parse cannot be asked what it packs, so its directory is a CANDIDATE that cannot be named — it lands in \`unreadable\`, never in neither set — got ${JSON.stringify(publishedSourceOwners('packages/cli/bin/run.js', unparseableAt('packages/cli')))}`,
+      );
+      assert(
+        JSON.stringify(publishedSourceOwners('packages/cli/README.md', unparseableAt('packages/cli'))) === '["packages/cli"]',
+        'and the residual is honest about its own width: with the manifest unparseable, NO path under that directory can be ruled out either, so an ordinary file there is reported too — over-reporting a residual is this axis\'s safe direction, under-reporting it is #4690',
+      );
+      let threw = null;
+      try {
+        publishedSourceOwners('packages/cli/bin/run.js');
+      } catch (error) {
+        threw = error;
+      }
+      assert(
+        threw instanceof TypeError && /manifest reader is required/.test(threw.message),
+        `the reader is REQUIRED: a default would silently read \`src/**\` alone at a call site that reads as if it asked the whole question — got ${threw && threw.message}`,
+      );
+
+      // ── SUPERSET-ONLY, measured rather than argued ────────────────────────
+      //
+      // The safety property this card owes: no path that was «grown» before may
+      // stop being «grown». Driven with a bin-bearing manifest under EVERY
+      // ancestor — the most a second leg could ever perturb — every answer the
+      // DEPTH battery pins must come back byte for byte.
+      const everywhere = () => ({ name: 'x', version: '0.0.0', bin: { x: './bin/x.js' } });
+      for (const [path, expected] of [
+        ['packages/cli/src/commands/lint.ts', '["packages/cli"]'],
+        ['packages/drivers/driver-sql/src/sql-driver.ts', '["packages/drivers/driver-sql"]'],
+        ['packages/a/b/c/src/x.ts', '["packages/a/b/c"]'],
+        ['packages/create-objectstack/src/templates/blank/src/objects/note.object.ts', '["packages/create-objectstack","packages/create-objectstack/src/templates/blank"]'],
+      ]) {
+        const got = JSON.stringify(publishedSourceOwners(path, everywhere));
+        assert(got === expected, `superset: \`${path}\` still resolves exactly as it did before the \`bin\` leg — got ${got}, want ${expected}`);
+      }
+      assert(
+        JSON.stringify(publishedSourceOwners('packages/drivers/driver-sql/README.md', everywhere)) === '[]',
+        'nonsense control on the superset run: a manifest under every ancestor must NOT make an ordinary file owned — otherwise the four rows above would hold for any input at all',
+      );
+
+      // ── End to end, on real temp git repositories ─────────────────────────
+      const manifestJson = (bin) => JSON.stringify({ name: CLI, version: '0.0.0', files: ['dist', 'README.md'], bin });
+      const levelOf = ({ dir, base }) => {
+        const scanned = scan({ cwd: dir, base });
+        const touched = packagesTouched({ cwd: dir, from: scanned.base, head: 'HEAD' });
+        return { touched, result: judgeLevel({ levels: scanned.levels, touched, declaration: declaredYes }) };
+      };
+      const binRepo = (bump, file, bin = { objectstack: './bin/run.js', os: './bin/run.js' }) =>
+        makeRepo(
+          { 'packages/cli/package.json': manifestJson(bin), [file]: '#!/usr/bin/env node\nrun(1);\n' },
+          { [file]: '#!/usr/bin/env node\nrun(2);\n', [CS]: `---\n"${CLI}": ${bump}\n---\n\nbody\n` },
+        );
+
+      // THE LEG THIS CARD IS ABOUT — the pairing that was green on PR #16686.
+      const binPatch = levelOf(binRepo('patch', 'packages/cli/bin/run.js'));
+      assert(binPatch.touched.packages.includes(CLI), `end to end: a diff confined to a packed \`bin\` target must NAME the package from its own manifest — got ${JSON.stringify(binPatch.touched)}`);
+      assert(binPatch.result.verdict === 'enforce', `end to end: \`bin/**\` + \`Clause-②: yes\` + \`patch\` is REFUSED — got ${binPatch.result.verdict}`);
+      assert(renderLevel(binPatch.result).exitCode === 1, 'and it EXITS 1 — a verdict name CI never reads is not a refusal');
+      assert(renderLevel(binPatch.result).stderr.join('\n').includes(CLI), 'and the refusal NAMES the package — an author who cannot see which line is being asked about cannot act on it');
+      assert(levelOf(binRepo('patch', 'packages/cli/bin/run.js', 'bin/run.js')).result.verdict === 'enforce', 'end to end: the STRING spelling of `bin` refuses identically — a package with one command must not be graded by which spelling it chose');
+
+      // CONTROL 1, the level. Without it the red above is equally consistent
+      // with "any diff under a package is now refused".
+      const binMinor = levelOf(binRepo('minor', 'packages/cli/bin/run.js'));
+      assert(
+        binMinor.touched.packages.includes(CLI) && binMinor.result.verdict === 'clean' && renderLevel(binMinor.result).exitCode === 0,
+        `control: the same \`bin\` diff graded \`minor\` PASSES while still being SEEN — the refusal is about the LEVEL, not about the root — got ${JSON.stringify(binMinor.touched)} / ${binMinor.result.verdict}`,
+      );
+
+      // CONTROL 2, the `src` leg re-driven in THIS harness, so the red above
+      // reads as a widening rather than as a reading that moved.
+      const srcLeg = levelOf(
+        makeRepo(
+          { 'packages/cli/package.json': manifestJson({ os: './bin/run.js' }), 'packages/cli/src/commands/lint.ts': 'export const before = 1;\n' },
+          { 'packages/cli/src/commands/lint.ts': 'export const after = 2;\n', [CS]: `---\n"${CLI}": patch\n---\n\nbody\n` },
+        ),
+      );
+      assert(
+        srcLeg.result.verdict === 'enforce' && renderLevel(srcLeg.result).exitCode === 1,
+        `control: the \`src/**\` leg still reds in this same harness — a \`bin\` red beside an \`src\` green would mean the reading MOVED rather than widened, which is the fix this card must not ship — got ${srcLeg.result.verdict}`,
+      );
+
+      // CONTROL 3, the non-target sibling, end to end. The unit row above says
+      // the walk does not own it; this says the GATE does not refuse it.
+      const sibling = levelOf(binRepo('patch', 'packages/cli/bin/run-dev.js'));
+      assert(
+        sibling.touched.packages.length === 0 && sibling.result.verdict === 'clean' && renderLevel(sibling.result).exitCode === 0,
+        `control: a file beside the target that \`bin\` does not name and \`files\` excludes does NOT ship, and is not refused — got ${JSON.stringify(sibling.touched)} / ${sibling.result.verdict}`,
+      );
+
+      // CONTROL 4, the NEGATIVE control triage made mandatory: a diff touching
+      // no published surface at all must still pass under the very same `yes`.
+      // ⛔ Without this leg an implementation that simply always enforced would
+      // satisfy every positive above and be indistinguishable from a correct one.
+      for (const [label, file] of [
+        ['content/docs/**', 'content/docs/a.mdx'],
+        ['.github/**', '.github/workflows/x.yml'],
+      ]) {
+        const nothing = levelOf(
+          makeRepo({ 'packages/cli/package.json': manifestJson({ os: './bin/run.js' }), [file]: 'a\n' }, { [file]: 'b\n', [CS]: `---\n"${CLI}": patch\n---\n\nbody\n` }),
+        );
+        assert(
+          nothing.touched.packages.length === 0 && nothing.touched.unreadable.length === 0 && nothing.result.verdict === 'clean' && renderLevel(nothing.result).exitCode === 0,
+          `NEGATIVE control (${label}): a diff that publishes nothing still PASSES under a \`yes\` — got ${JSON.stringify(nothing.touched)} / ${nothing.result.verdict}`,
+        );
+      }
+
+      // ⭐ #4690, extended to this leg end to end. A manifest that is THERE and
+      // will not parse cannot be asked what it packs. Before this change such a
+      // directory was simply not a candidate for anything outside `src/**`, so a
+      // `bin` change under it landed in NEITHER set — the shape this whole file
+      // is built to refuse.
+      const { dir: brokenDir, base: brokenBase } = makeRepo(
+        { 'packages/broken/package.json': '{ "name": "@objectstack/broken",\n', 'packages/broken/bin/run.js': 'a\n' },
+        { 'packages/broken/bin/run.js': 'b\n', [CS]: `---\n"${CLI}": patch\n---\n\nbody\n` },
+      );
+      const brokenScanned = scan({ cwd: brokenDir, base: brokenBase });
+      const brokenTouched = packagesTouched({ cwd: brokenDir, from: brokenScanned.base, head: 'HEAD' });
+      assert(brokenTouched.unreadable.includes('packages/broken'), `a dir whose manifest will not parse is reported as unreadable, not as absent (#4690) — got ${JSON.stringify(brokenTouched)}`);
+      assert(brokenTouched.packages.length === 0, 'and it is not named as a package either — an unparseable manifest yields no name to report');
+      assert(
+        brokenTouched.unreadable.length + brokenTouched.packages.length === 1,
+        'the invariant this leg owes: a path this reading matches lands in exactly one of the two sets, never in neither',
+      );
+      assert(
+        renderLevel(judgeLevel({ levels: brokenScanned.levels, touched: brokenTouched, declaration: declaredYes })).stdout.join('\n').includes('packages/broken'),
+        'and the tick PRINTS it — an offender that could not be seen must be stated beside the green, or the green is the silent pass this card is about',
+      );
+      // The nonsense control on that reading: a dir with NO manifest at all has
+      // no `bin` field to have named anything, so an ordinary file under it is
+      // not a candidate and nothing is owed. ⛔ Otherwise the row above would
+      // hold for every path in the repo and `unreadable` would mean nothing.
+      const { dir: bareDir, base: bareBase } = makeRepo({ 'packages/bare/bin/run.js': 'a\n' }, { 'packages/bare/bin/run.js': 'b\n', [CS]: `---\n"${CLI}": patch\n---\n\nbody\n` });
+      const bareScanned = scan({ cwd: bareDir, base: bareBase });
+      const bareTouched = packagesTouched({ cwd: bareDir, from: bareScanned.base, head: 'HEAD' });
+      assert(
+        bareTouched.packages.length === 0 && bareTouched.unreadable.length === 0,
+        `nonsense control: an ABSENT manifest declares no \`bin\`, so nothing under it is a candidate and no residual is owed — got ${JSON.stringify(bareTouched)}`,
       );
     }
 
