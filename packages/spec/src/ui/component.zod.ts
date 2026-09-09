@@ -674,10 +674,11 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 —
-     * `containers.tsx` is byte-identical to the one at `00d3f09c5`, the hop on
-     * which both anchors moved by exactly one line (the icon block from
-     * `729-735`, the registration input from `788`), so NO anchor moved here;
+     * (`.objectui-sha` = `53ded82bf`; re-derived at that pin 2026-09-08 —
+     * `containers.tsx` is byte-identical to the one at `a472b0716` and, through
+     * it, to `00d3f09c5`, the last hop on which either anchor moved by exactly
+     * one line (the icon block from `729-735`, the registration input from
+     * `788`), so NO anchor moved here;
      * both were re-READ at the new pin with the cited text unchanged rather
      * than inferred from that identity): `containers.tsx:730-736`
      * renders
@@ -1733,10 +1734,11 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 —
-     * `containers.tsx` is byte-identical to the one at `00d3f09c5`, the hop on
-     * which both anchors moved by exactly one line (the icon block from
-     * `918-924`, the registration input from `965`), so NO anchor moved here;
+     * (`.objectui-sha` = `53ded82bf`; re-derived at that pin 2026-09-08 —
+     * `containers.tsx` is byte-identical to the one at `a472b0716` and, through
+     * it, to `00d3f09c5`, the last hop on which either anchor moved by exactly
+     * one line (the icon block from `918-924`, the registration input from
+     * `965`), so NO anchor moved here;
      * both were re-READ at the new pin with the cited text unchanged rather
      * than inferred from that identity): `containers.tsx:919-925`
      * renders
@@ -1940,9 +1942,10 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 — both
+   * (`.objectui-sha` = `53ded82bf`; re-derived at that pin 2026-09-08 — both
    * files, `resolve-icon.ts` and `button.tsx`, are byte-identical to the ones
-   * at `00d3f09c5`, so no anchor MOVED; the re-READ still corrected two that
+   * at `a472b0716` and, through them, to `00d3f09c5`, so no anchor MOVED; an
+   * earlier re-READ corrected two that
    * had been wrong since they were written — the registration's input list and
    * its `defaultProps`, see the last paragraph of this block. The hop onto
    * `00d3f09c5` was the one that moved this record's SUBSTANCE rather than
@@ -2581,10 +2584,11 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 — all
+   * (`.objectui-sha` = `53ded82bf`; re-derived at that pin 2026-09-08 — all
    * five files in the chain below, `index.tsx`, `ObjectMetricWidget.tsx`,
    * `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx`, are
-   * byte-identical to the ones at `00d3f09c5` and at `67dadd602` before it, so
+   * byte-identical to the ones at `a472b0716`, at `00d3f09c5` and at
+   * `67dadd602` before it, so
    * NO anchor moved — the `object-metric` registration still begins at `:194`
    * and the icon input still lands on `:204`. Every anchor below was re-READ
    * at the new pin rather than inferred from that identity), and the chain
@@ -2644,6 +2648,10 @@ export type ObjectMetricProps = z.input<typeof ObjectMetricPropsSchema>;
  * forwarded schema `quickAdd`/`coverImageField`/`conditionalFormatting`
  * (`KanbanRenderer`, index.tsx). `groupField` is the DESIGNER's spelling with
  * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
+ * `limit` (#16503) was measured later, at the pin this repo builds against
+ * (`.objectui-sha` = `53ded82bf`; re-READ there 2026-09-08, file
+ * byte-identical to `a472b0716`, anchor unmoved): `ObjectKanban.tsx:264`, the `$top` of the
+ * board's one query — its docblock below carries the four-face record.
  */
 export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-kanban`',
@@ -2662,6 +2670,42 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   columns: z.array(z.unknown()).optional()
     .describe('Swimlane definitions ({ id, title } per `groupBy` value, or bare value strings) — NOT a field projection'),
   filter: z.unknown().optional().describe('Base query filter, handed to the wire `$filter`'),
+  /**
+   * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
+   * 2026-09-07, option A: the contract declares the capability that already
+   * ships, is documented and is in use). Measured at the objectui pin this
+   * repo builds against (`.objectui-sha` = `53ded82bf`; all four anchors
+   * re-READ at that pin 2026-09-08, every `plugin-kanban` file byte-identical
+   * to the one at `a472b0716` and none moved), four faces agreed
+   * while this map refused the key by name: the board's one query is
+   * `dataSource.find(objectName, { $filter: schema.filter, $top: schema.limit
+   * ?? DEFAULT_KANBAN_LIMIT })` (`plugin-kanban/src/ObjectKanban.tsx:262-266`,
+   * the default `100` at `:71` — a REAL top-level `$top` since objectui#4025;
+   * before that the cap sat under a `options` key no adapter read),
+   * `OBJECT_KANBAN_DATA_SOURCE` maps `limit: 'limit'`
+   * (`plugin-kanban/src/index.tsx:395-398`), `KanbanSchema` — the type
+   * `ObjectKanban.tsx:143` reads `schema` through — declares `limit?: number`
+   * (`plugin-kanban/src/types.ts:134`), and `content/docs/plugins/plugin-kanban.mdx`
+   * teaches it with a typed snippet (`limit: 250`) plus a Properties row. So
+   * an author following the published docs wrote a node the save gate
+   * refused, with the same `unrecognized_keys` verdict a typo gets.
+   *
+   * Why the carrier is `limit` and not the bound view's `pagination.pageSize`
+   * (the alternative the card opened): precedence is the `ElementDataSourceGate`
+   * table, not this key's. The component-level `dataSource.limit` overrides
+   * this key, and a bound named view's `pagination.pageSize` is LOWERED INTO
+   * it through the `limit: 'limit'` mapping only when the component authored
+   * none (`react/src/element-data-source/ElementDataSourceGate.tsx:236-241`,
+   * `readLimit`/`writeLimit` keyed by `ElementDataSourceLimitKey`). The board
+   * has no `pagination` read point, so declaring that spelling here would name
+   * a key the renderer ignores — the accepted-and-dropped defect this section
+   * exists to remove. Same shape as the `element:record_picker` and
+   * `record:related_list` row caps (one `$top` contract, not a third dialect),
+   * and like them the renderer's 100 is documented rather than declared:
+   * a schema default would materialize `limit: 100` on every parsed board.
+   */
+  limit: z.number().int().positive().optional()
+    .describe("Maximum number of records loaded onto the board (row cap); lowered to the query's top-level `$top` (renderer default 100). The component-level `dataSource.limit` wins when both are set; a bound view's `pagination.pageSize` fills it only when unset"),
   data: z.array(z.unknown()).optional().describe('Static inline cards — bypasses the object query'),
   cardTitle: z.string().optional().describe('Field rendered as each card title'),
   titleField: z.string().optional().describe('Legacy fallback for `cardTitle` (the board reads `cardTitle || titleField`). Prefer `cardTitle`'),

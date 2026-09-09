@@ -1129,7 +1129,8 @@ export const FieldSchema = lazySchema(() => {
    * Used by `lookup` and `master_detail` field types to define cross-object references.
    * The `reference` property is **required** for these types — it identifies the target
    * object whose records this field links to, and the superRefine below enforces it:
-   * a `lookup` / `master_detail` whose `reference` is missing or empty is refused at
+   * a `lookup` / `master_detail` whose `reference` is missing, empty, or
+   * whitespace-only is refused at
    * parse time. The engine uses `reference` during $expand
    * post-processing to resolve foreign key IDs into full related objects via batch queries.
    * 
@@ -1346,8 +1347,25 @@ export const FieldSchema = lazySchema(() => {
    * list of children); these configure the CHILD-side picker that chooses the
    * parent. All optional: the renderer auto-derives a sensible multi-column
    * result from the referenced object's schema when omitted (objectui
-   * packages/fields: LookupField / RecordPickerDialog / deriveLookupColumns,
-   * which read both these camelCase keys and their snake_case aliases).
+   * packages/fields: LookupField / RecordPickerDialog / deriveLookupColumns).
+   *
+   * SNAKE_CASE TOLERANCE — measured on the consumer, not assumed. Those
+   * readers accept a snake_case alias for three of the seven keys declared
+   * below, and for three only: `lookupColumns`, `lookupPageSize` and
+   * `allowCreate` are each read as `<snake> ?? <camel>` in LookupField.tsx.
+   * The other four — `displayField`, `descriptionField`, `lookupFilters`
+   * and `dependsOn` — are read camelCase-only, so a snake_case spelling of
+   * any of those four arrives at the picker as nothing at all. Three of them
+   * lost their twin in objectui#7155's LookupFieldMetadata alias sweep (no
+   * deprecation window, no dual read); `dependsOn` lost its own later,
+   * retired under ADR-0049 enforce-or-remove in objectui#7357. The three
+   * aliases that survive are objectui's own back-compat, never a spelling
+   * this schema declares — the camelCase key is the authored one in every
+   * case.
+   *
+   * Claim dated to objectui ed971e8, re-measured 2026-09-09. It is a reading
+   * of a pinned foreign tree and no gate here re-checks it: when the console
+   * pin moves, this paragraph is what goes stale.
    */
   displayField: z.string().optional().describe("Field shown as each candidate's label in the picker/popover (defaults to the referenced object's name/title)."),
   descriptionField: z.string().optional().describe('Secondary field shown under the label in the quick-select popover.'),
@@ -1822,9 +1840,23 @@ export const FieldSchema = lazySchema(() => {
   // measured as accepted before this check). `Field.lookup()` /
   // `Field.masterDetail()` take the target as their first positional
   // argument, so helper-authored fields cannot miss it.
+  //
+  // [#16126] The emptiness test is applied to the TRIMMED value, so a
+  // whitespace-only `reference` joins `undefined` and `''` under this one
+  // issue and this one message. It names no object either: the declared
+  // grammar for an object name is `/^[a-z_][a-z0-9_]*$/` (`ObjectSchema`'s
+  // own `fields` key schema), so no whitespace-bearing string can ever
+  // resolve to one, and all three consequences the message lists hold
+  // verbatim for `'   '`. It is also the state a cleared target picker
+  // emits: `''` and `'   '` are one authoring gesture that was getting
+  // opposite verdicts. The notion of blank is `.trim()` — the same one
+  // `EvaluatedExpressionSchema` applies to `source`, not a third one.
+  // Trimming is for the TEST only: a value with surrounding whitespace is
+  // authored and is still stored as written, and a non-string still
+  // answers `invalid_type` from the base schema before this runs.
   if (
     (field.type === 'lookup' || field.type === 'master_detail') &&
-    (field.reference === undefined || field.reference === '')
+    (field.reference === undefined || field.reference.trim() === '')
   ) {
     ctx.addIssue({
       code: 'custom',

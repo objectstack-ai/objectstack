@@ -98,16 +98,44 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  * the first thing a newcomer sees, on the one screen where they are deciding
  * whether this project is solid, and there is nothing they did to cause it.
  *
- *  - `better-auth>better-sqlite3` — better-auth 1.7.1 peers `^12.0.0` while the
- *    tree resolves 13.x (`@objectstack/driver-sql`'s optional dependency). The
- *    peer is OPTIONAL and governs one configuration only: a raw better-sqlite3
- *    `Database` handed to better-auth's `database` option. ObjectStack never
- *    does that — `AuthManager.createDatabaseConfig()` passes an ObjectQL
- *    adapter factory. Measured on the configuration the range *does* govern
- *    (better-auth's own Kysely dialect: migrations, sign-up, sign-in, adapter
- *    find/update/delete), 1.7.1 behaves identically on better-sqlite3 13.0.3
- *    and on 12.11.1. So the upstream range is stale and 13 is right — widening
- *    is the correct remedy, not pinning our own declaration back to 12.
+ *  - `better-auth>better-sqlite3` — better-auth peers `^12.0.0` while the tree
+ *    resolves 13.x. The peer is OPTIONAL and governs one configuration only: a
+ *    raw better-sqlite3 `Database` handed to better-auth's `database` option.
+ *    ObjectStack never does that — `AuthManager.createDatabaseConfig()` passes
+ *    an ObjectQL adapter factory (or `undefined`, better-auth's own in-memory
+ *    adapter). So the upstream range is stale and 13 is right — widening is
+ *    the correct remedy, not pinning our own declaration back to 12.
+ *
+ *    RE-MEASURED on the pinned 1.7.2 (#16813). The original reading was taken
+ *    on 1.7.1 (#10326) and was behavioural: better-auth's own Kysely dialect —
+ *    migrations, sign-up, sign-in, adapter find/update/delete — behaves
+ *    identically on better-sqlite3 13.0.3 and on 12.11.1. 1.7.2 makes that
+ *    structural instead of empirical: of the 464 files in the published
+ *    `better-auth@1.7.2` tarball, exactly ONE names better-sqlite3 —
+ *    `package.json`, i.e. the peer declaration itself. Zero code files
+ *    reference it (positive control: `kysely` names 9). better-auth never
+ *    imports the package; it accepts a `Database` the CALLER constructs and
+ *    hands it to Kysely, and its own sqlite test path uses node's built-in
+ *    `node:sqlite` `DatabaseSync`. There is therefore no better-auth call site
+ *    that could touch an API moved between better-sqlite3 12 and 13 — the
+ *    range is a statement about an instance we never supply.
+ *
+ *    ⚠️ TWO CORRECTIONS to what this entry used to say, both measured:
+ *      • the 13.x copy better-auth binds to is `@objectstack/cli`'s OWN
+ *        `optionalDependencies` entry, NOT `@objectstack/driver-sql`'s. On the
+ *        chain that actually reports (`cli` → `runtime` → `plugin-auth` →
+ *        `better-auth`) the CLI is the ancestor, so its copy is the one pnpm
+ *        resolves the peer against — pnpm names it in the warning itself
+ *        ("found 13.0.3 in @objectstack/cli"). Editing driver-sql alone would
+ *        not move this line.
+ *      • pinning the CLI back to `^12` is not a neutral alternative. Measured
+ *        on a bare project depending on `@objectstack/cli@17.3.0`, it clears
+ *        the report only by installing a SECOND native better-sqlite3
+ *        (12.11.1 alongside 13.0.3), and the 12 copy is dead weight — the CLI
+ *        loads better-sqlite3 itself (`src/utils/sqlite-occupancy.ts`) and
+ *        knex resolves 13.x through driver-sql regardless. This
+ *        `allowedVersions` entry clears the same report with the resolution
+ *        byte-identical (0 lines of lockfile diff).
  *
  *  - RETIRED (#3653): `@better-auth/scim>better-call` — the rc.1-era scim pin
  *    peered an exact `better-call@1.3.7` against the host's 1.4.0, and this
@@ -282,16 +310,31 @@ export const SCAFFOLD_PNPM_RANGE = '>=10.15';
 // changes is the floor each project DECLARES — and a floor is a support
 // promise, so the one that survives is the one the docs already make.
 //
-// ⛔ `create-objectstack`'s `^6.0.0` is deliberately NOT unified here. That
-// package cannot import from `@objectstack/cli`: the dependency edge already
-// runs the other way (`create-objectstack` is a `workspace:*` dependency of
-// this package, and this file imports its `created-summary` renderer), so a
-// reverse import is a cycle — and it publishes as a two-dependency `npx`
-// package that must not pull the CLI's ~50-package closure. Its emission is
-// also a committed template file copied byte-for-byte, with no renderer to
-// route through a constant. Unifying it would move a scaffolded project from
-// TypeScript 6.0.3 to 5.9.3, which is a user-visible change and a support
-// decision, not a refactor.
+// `create-objectstack` — the third scaffolder, and the one that CANNOT reach
+// these constants by import. The dependency edge already runs the other way
+// (`create-objectstack` is a `workspace:*` dependency of this package, and this
+// file imports its `created-summary` renderer), so a reverse import is a cycle
+// — and it publishes as a two-dependency `npx` package that must not pull the
+// CLI's ~50-package closure. Its emission is a committed template file copied
+// byte-for-byte, with no renderer to route through a constant. That is the
+// whole reason its `typescript` line drifted to `^6.0.0` while these two held.
+//
+// It is unified anyway, by GENERATION rather than by import:
+// `scripts/sync-scaffold-emission-policy.mjs` reads the `SCAFFOLD_*` constants
+// out of THIS file and stamps them into every bundled template's
+// `package.json`; `create-objectstack`'s `build` runs it, and
+// `pnpm check:scaffold-emission-policy` reddens the moment the inlined values
+// disagree with the source. ⛔ So a value below is read by a script as well as
+// by a compiler: keep the `export const NAME = '<value>';` spelling on one
+// line, and add the row to that script's `POLICY_STAMPS` if a new constant has
+// to reach the templates too.
+//
+// ⚠️ Unifying it moved a scaffolded project's DECLARED floor from `^6.0.0` to
+// `^5.3.0` (both resolve to typescript 5.9.3 or later at install time; the
+// floor is the support promise). The repo's own devDependency is `^6.0.3`, and
+// that is deliberately NOT this value: `content/docs/getting-started/index.mdx`
+// states both halves in one sentence — "ObjectStack works with TypeScript 5.3+,
+// but the project itself is built and tested against TypeScript 6.x".
 
 /** The TypeScript range every scaffolded project declares. */
 export const SCAFFOLD_TYPESCRIPT_RANGE = '^5.3.0';
@@ -301,9 +344,6 @@ export const SCAFFOLD_VITEST_RANGE = '^4.0.0';
 
 /** The `@types/node` range a scaffolded project declares. */
 export const SCAFFOLD_TYPES_NODE_RANGE = '^22.0.0';
-
-/** The `tsx` range a scaffolded project declares when its scripts need it. */
-export const SCAFFOLD_TSX_RANGE = '^4.21.0';
 
 /** The zod range a scaffolded project declares when it authors schemas. */
 export const SCAFFOLD_ZOD_RANGE = '^4.3.6';
@@ -332,10 +372,11 @@ export const SCAFFOLD_TSCONFIG_COMPILER_OPTIONS = {
  *
  * `rootDir` and `include` are the only things the emitted shapes differ on:
  * `os create plugin` compiles `src/` alone, while `os init`'s three templates
- * and `os create example` also compile the `objectstack.config.ts` at the
- * project root. Measured before this renderer existed, four of the five
- * emitted `tsconfig.json` files were already byte-identical and the fifth
- * differed only in those two keys — so nothing here is a new decision.
+ * also compile the `objectstack.config.ts` at the project root. Measured before
+ * this renderer existed, four of the five emitted `tsconfig.json` files were
+ * already byte-identical and the fifth differed only in those two keys — so
+ * nothing here is a new decision. (Five because `os create example` was one of
+ * them; it was retired in #16483, and the measurement is left as it was taken.)
  */
 export function renderScaffoldTsconfig(
   options: { rootDir: string; include: string[] },
@@ -461,11 +502,16 @@ export function renderPnpmWorkspaceYaml(
       '# package states, and that pnpm reports on a first install. None is a',
       '# real incompatibility:',
       '#',
-      '#   better-auth peers better-sqlite3 ^12.0.0 while the tree resolves 13.x.',
-      '#   That peer is optional and covers handing better-auth a raw',
-      '#   better-sqlite3 `Database`; ObjectStack hands it an ObjectQL adapter',
-      '#   instead. Measured on the configuration the range does cover,',
-      '#   better-auth 1.7.1 behaves identically on 13.0.3 and on 12.11.1.',
+      '#   better-auth peers better-sqlite3 ^12.0.0 while the tree resolves 13.x',
+      '#   (the copy @objectstack/cli declares for its own sqlite tooling). That',
+      '#   peer is optional and covers handing better-auth a raw better-sqlite3',
+      '#   `Database`; ObjectStack hands it an ObjectQL adapter instead, so',
+      '#   nothing here goes down that path. Re-measured on better-auth 1.7.2:',
+      '#   no file in the published package references better-sqlite3 at all —',
+      '#   it only accepts a Database you construct — so there is no call site',
+      '#   that could depend on what changed between 12 and 13. The upstream',
+      '#   range is stale; pinning back to 12 would just install a second,',
+      '#   unused native copy.',
       '#',
       '#   @better-auth/scim (held at a release candidate deliberately) peers an',
       '#   exact better-call 1.3.7, while better-auth itself depends on 1.4.0. A',
@@ -531,6 +577,7 @@ export const TEMPLATES: Record<string, {
       start: 'objectstack compile && objectstack serve',
       build: 'objectstack compile',
       validate: 'objectstack validate',
+      lint: 'objectstack lint',
       typecheck: 'tsc --noEmit',
     },
     configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';
@@ -601,7 +648,7 @@ export default ${toCamelCase(namespace)}Item;
   },
 
   plugin: {
-    description: 'Reusable plugin with objects',
+    description: 'Metadata package: declarative objects another stack loads',
     get dependencies() {
       return {
         '@objectstack/spec': pkgVersion(),
@@ -617,6 +664,7 @@ export default ${toCamelCase(namespace)}Item;
     scripts: {
       build: 'objectstack compile',
       validate: 'objectstack validate',
+      lint: 'objectstack lint',
       test: 'vitest run',
       typecheck: 'tsc --noEmit',
     },
@@ -690,6 +738,7 @@ export default ${toCamelCase(namespace)}Item;
     scripts: {
       build: 'objectstack compile',
       validate: 'objectstack validate',
+      lint: 'objectstack lint',
       typecheck: 'tsc --noEmit',
     },
     configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';
@@ -866,7 +915,18 @@ export default class Init extends Command {
   };
 
   static override flags = {
-    template: Flags.string({ char: 't', description: 'Template: app, plugin, empty', default: 'app' }),
+    template: Flags.string({
+      char: 't',
+      // The word `plugin` names two different artifacts in this CLI and only one
+      // of them is a template here: `-t plugin` writes a METADATA PACKAGE
+      // (declarative objects, compiled), while `os create plugin` writes a
+      // KERNEL CODE plugin (TypeScript implementing `Plugin`). The flag
+      // spellings are published surface and unchanged (#16484); the nouns are
+      // what tell the two apart. See the chooser in
+      // content/docs/deployment/cli.mdx under `os init`.
+      description: 'Template: app, plugin (a metadata package), empty',
+      default: 'app',
+    }),
     install: Flags.boolean({ description: 'Install dependencies', default: true, allowNo: true }),
     'package-manager': Flags.string({
       char: 'p',

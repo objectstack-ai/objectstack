@@ -14,6 +14,7 @@
 
 import { CoreServiceName } from '@objectstack/spec/system';
 import { AnalyticsQueryRequestSchema } from '@objectstack/spec/api';
+import { isAnalyticsDateRangeRefusalIssue } from '@objectstack/spec/data';
 import { isServiceServeable } from '../service-serveable.js';
 import { validationFailure, fieldsFromZodIssues } from '../validation-failure.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -62,10 +63,27 @@ function assertAnalyticsQueryBody(body: unknown): void {
     const parsed = AnalyticsQueryRequestSchema.safeParse(body);
     if (!parsed.success) {
         const fields = fieldsFromZodIssues(parsed.error.issues);
-        throw validationFailure(
-            `Invalid AnalyticsQuery body: ${fields.map((f) => `${f.field}: ${f.message}`).join('; ')}`,
-            fields,
-        );
+        const message = `Invalid AnalyticsQuery body: ${fields.map((f) => `${f.field}: ${f.message}`).join('; ')}`;
+        // [#16041] The closed-vocabulary refusal of `timeDimensions[].dateRange`
+        // answers its own registered code, `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED`
+        // (maintainer ruling, decision batch #57: the string arm closes to the
+        // date-range preset vocabulary and any other string is refused at the
+        // schema with the ADR-0112 envelope carrying a stable code). The schema
+        // raises ONE prescriptive issue at the field's own path and exports the
+        // predicate that recognises it — structural, never message sniffing —
+        // so this door lifts the CONDITION the contract declared rather than
+        // classifying prose. Lifted only when every issue is that refusal: a
+        // body wrong in several places stays the generic `VALIDATION_FAILED`
+        // + `fields[]`, whose per-field carrier is the right one for a
+        // multi-field failure. `.status`/`.code` declared so
+        // `resolveThrownHttpError` serves the same envelope at both exits.
+        if (parsed.error.issues.every(isAnalyticsDateRangeRefusalIssue)) {
+            throw Object.assign(new Error(message), {
+                status: 400,
+                code: 'ANALYTICS_DATE_RANGE_UNRECOGNIZED',
+            });
+        }
+        throw validationFailure(message, fields);
     }
 }
 

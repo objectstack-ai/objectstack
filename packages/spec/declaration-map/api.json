@@ -644,6 +644,8 @@
     "RestQueryAdapterSchema": "api/RestQueryAdapter",
     "RestServerConfig": "api/RestServerConfig",
     "RestServerConfigSchema": "api/RestServerConfig",
+    "ResumeFailureDetails": "api/ResumeFailureDetails",
+    "ResumeFailureDetailsSchema": "api/ResumeFailureDetails",
     "RetryStrategy": "api/RetryStrategy",
     "RevertPackageCommitResponse": "api/RevertPackageCommitResponse",
     "RevertPackageCommitResponseSchema": "api/RevertPackageCommitResponse",

@@ -161,7 +161,14 @@ export const EXIT_PREREQUISITE_NOT_MET = 3;
 
 // `@objectstack/cli:test:  Tests  381 passed | 3 skipped (384)`
 //  ^ turbo prefix (absent when vitest runs directly)   ^ tallies   ^ declared
-const SUMMARY = /^(?:(\S+?):test:)?\s*(Test Files|Tests)\s+(.+?)\s+\((\d+)\)\s*$/;
+// #16466: a package may split its suite into two turbo tasks, `test` and
+// `test:repo` (the escaping tests, hashed on the repo-wide inputs). Both are
+// vitest runs of the SAME package and each prints its own summary, so both are
+// read and attributed to the package -- two rows, neither lost -- while a
+// `test:smoke` or `build` line still attributes nothing. Every reader below
+// that names the task consults this set; there is no second spelling.
+const TEST_TASKS = new Set(['test', 'test:repo']);
+const SUMMARY = /^(?:(\S+?):test(?::repo)?:)?\s*(Test Files|Tests)\s+(.+?)\s+\((\d+)\)\s*$/;
 
 // turbo's end-of-run roster, both measured on turbo 2.10.10:
 //   `Failed:    @objectstack/embedder-openai#test, @objectstack/sdui-parser#test`
@@ -235,10 +242,26 @@ const GROUP_OPEN = /^(?:::group::|##\[group\])(.+?)\s*$/;
 const GROUP_CLOSE = /^(?:::endgroup::|##\[endgroup\])\s*$/;
 // A line that is nothing but `<pkg>:test`. Reached only after the two markers
 // above have had their turn, so a `::group::` header can never land here.
-const BARE_TASK_HEADER = /^(\S+):test$/;
+const BARE_TASK_HEADER = /^(\S+):test(?::repo)?$/;
 
-export function parseSummaries(text) {
-  const rows = [];
+/**
+ * The three header shapes, walked ONCE, so every reader of a turbo test log
+ * shares one answer to "whose output is this line?".
+ *
+ * Yields `{ line, group }` for every line that is NOT itself a header: `group`
+ * is the package whose task header is currently open, or `null` when none is.
+ * It deliberately does NOT strip a stream-order `<pkg>:test:` prefix -- that
+ * prefix is part of the line each caller matches, and `parseSummaries` below
+ * reads it out of its own regex. What is centralised here is the part measured
+ * to be easy to get wrong and expensive when wrong: the `::group::` /
+ * `##[group]` header, its close, the BARE header turbo gives the run's failing
+ * task, and the end-of-run roster that closes that bare header.
+ *
+ * A second reader re-deriving this walk is the hazard: a prefix-only parser is
+ * blind exactly on the failing task, which is the one any grader cares about
+ * most. Extend it HERE, never in a copy.
+ */
+export function* attributedLines(text) {
   let group = null;
   for (const line of text.split('\n')) {
     if (GROUP_CLOSE.test(line)) {
@@ -249,10 +272,11 @@ export function parseSummaries(text) {
     if (open) {
       // `@objectstack/spec:test` -> spec, but `@objectstack/spec:build` and
       // GitHub's own `Run <script>` groups attribute nothing. Package names
-      // carry `@` and `/` but never `:`, so the last `:` is the task boundary.
+      // carry `@` and `/` but never `:`, so the FIRST `:` is the task boundary
+      // -- the task itself may carry one (`test:repo`, #16466).
       const label = open[1];
-      const sep = label.lastIndexOf(':');
-      group = sep > 0 && label.slice(sep + 1) === 'test' ? label.slice(0, sep) : null;
+      const sep = label.indexOf(':');
+      group = sep > 0 && TEST_TASKS.has(label.slice(sep + 1)) ? label.slice(0, sep) : null;
       continue;
     }
     // The failing task's bare header. `##[group]` / `::group::` spellings have
@@ -269,6 +293,13 @@ export function parseSummaries(text) {
       group = null;
       continue;
     }
+    yield { line, group };
+  }
+}
+
+export function parseSummaries(text) {
+  const rows = [];
+  for (const { line, group } of attributedLines(text)) {
     const m = line.match(SUMMARY);
     if (!m) continue;
     const [, pkg, kind, tallies, declared] = m;
@@ -298,7 +329,7 @@ export function parseFailedTestPackages(text) {
     for (const entry of m[1].split(',')) {
       const task = entry.trim();
       const hash = task.lastIndexOf('#');
-      if (hash > 0 && task.slice(hash + 1) === 'test') failed.add(task.slice(0, hash));
+      if (hash > 0 && TEST_TASKS.has(task.slice(hash + 1))) failed.add(task.slice(0, hash));
     }
   }
   return failed;
@@ -704,6 +735,17 @@ function selfTest({ quiet = false } = {}) {
   eq([...parseFailedTestPackages('Failed:    @objectstack/spec#build')], [], 'failed: a build failure was charged to the test task');
   eq([...parseFailedTestPackages('Failed:    @objectstack/spec#build, @objectstack/cli#test')], ['@objectstack/cli'], 'failed: mixed roster');
   eq([...parseFailedTestPackages('no roster here')], [], 'failed: invented an entry');
+
+  // -- #16466: the split `test:repo` task is the same package, read the same way. --
+  eq(parseSummaries('@objectstack/spec:test:repo:  Tests  390 passed (390)').map((r) => r.pkg), ['@objectstack/spec'], 'split: a test:repo-prefixed summary is attributed to the package');
+  eq(parseSummaries('@objectstack/spec:test:repo:  Test Files  26 passed (26)').map((r) => [r.kind, r.declared]), [['Test Files', 26]], 'split: Test Files kind under test:repo');
+  eq(parseSummaries('::group::@objectstack/spec:test:repo\n      Tests  5 passed (5)').map((r) => r.pkg), ['@objectstack/spec'], 'split: a ::group:: test:repo header attributes the lines under it');
+  eq(parseSummaries('@objectstack/spec:test:repo\n      Tests  5 passed (5)').map((r) => r.pkg), ['@objectstack/spec'], 'split: a bare test:repo header attributes the lines under it');
+  eq(parseSummaries('@objectstack/spec:test:smoke:  Tests  5 passed (5)').map((r) => r.pkg), [], 'split: a test:smoke-prefixed line is not a suite summary');
+  eq(parseSummaries('::group::@objectstack/spec:test:smoke\n      Tests  5 passed (5)').map((r) => r.pkg), ['(vitest)'], 'split: a test:smoke group attributes nothing');
+  eq(parseSummaries(['@objectstack/spec:test:  Tests  100 passed (100)', '@objectstack/spec:test:repo:  Tests  5 passed (5)'].join('\n')).map((r) => `${r.pkg}=${r.declared}`), ['@objectstack/spec=100', '@objectstack/spec=5'], 'split: both tasks of one package are two rows, neither lost');
+  eq([...parseFailedTestPackages('Failed:    @objectstack/spec#test:repo')], ['@objectstack/spec'], 'split: a failed test:repo task names its package');
+  eq([...parseFailedTestPackages('Failed:    @objectstack/spec#test:smoke')], [], 'split: a failed test:smoke task is not charged to the suite');
 
   // -- parseRunCompleted: the cancelled-vs-silent discriminator. --
   eq(parseRunCompleted(' Tasks:    4 successful, 4 total'), true, 'tasks: a complete run');

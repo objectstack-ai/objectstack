@@ -28,13 +28,16 @@
  *     to a sibling's 405. It therefore mounts unconditionally and answers its
  *     own honest 404 where no package service exists.
  *
- * ## The asymmetry is load-bearing, and is pinned too
+ * ## The registrar mounts publish and NOTHING ELSE — pinned too (#14503)
  *
- * The other three package routes must NOT follow. Each shadows a live
- * dispatcher twin at a byte-identical pattern; mounting them without a service
- * would replace three working routes with a degraded refusal. A future edit
- * that "makes the registrar consistent" by mounting all four unconditionally
- * fails the `keeps its hands off the three dispatcher twins` case below.
+ * The three routes that used to sit beside publish behind a `package`-service
+ * gate — `GET /packages`, `GET /packages/:id`, `DELETE /packages/:id` — are
+ * gone from this registrar: they duplicated the dispatcher's `/packages`
+ * domain at byte-identical patterns, the two had already diverged (404
+ * wording, `{ package }` wrapper, `source` stamp), and the ruling on #14503
+ * made the dispatcher domain the single implementation. A future edit that
+ * "restores" any of them here, with or without a service, fails the
+ * `mounts nothing but publish` cases below.
  */
 
 // `.js` on the relative imports: under `moduleResolution: nodenext` an
@@ -123,30 +126,27 @@ describe('#7563 — POST /packages/publish is mounted with or without a `package
     expect(returned.map((r) => `${r.method} ${r.path}`)).toEqual(['POST /api/v1/packages/publish']);
   });
 
-  it('keeps its hands off the three dispatcher twins when there is no service', () => {
-    // The asymmetry, stated as a test so it cannot be "tidied up": these three
-    // patterns are served by the runtime dispatcher on a package-service-less
-    // stack, and a degraded REST shadow registered ahead of them would take
-    // three working routes away.
+  it('mounts nothing but publish when there is no service — the three former twins are the dispatcher\'s alone (#14503)', () => {
+    // Stated as a test so it cannot be "tidied up" back: these three patterns
+    // are served by the runtime dispatcher's `/packages` domain, the single
+    // implementation since #14503, and a REST copy registered beside it would
+    // re-create the two-doors-one-URL fork this card closed.
     const server = createMockServer();
     registerPackageRoutes(server as any, () => undefined, '/api/v1', AUTHED);
 
     const keys = mountedOn(server);
+    expect(keys).toEqual(['POST /api/v1/packages/publish']);
     expect(keys).not.toContain('GET /api/v1/packages');
     expect(keys).not.toContain('GET /api/v1/packages/:id');
     expect(keys).not.toContain('DELETE /api/v1/packages/:id');
   });
 
-  it('mounts the full surface when a package service is there', () => {
+  it('mounts nothing but publish when a package service IS there — presence no longer changes the surface', () => {
     const server = createMockServer();
-    registerPackageRoutes(server as any, () => packageServiceStub() as any, '/api/v1', AUTHED);
+    const returned = registerPackageRoutes(server as any, () => packageServiceStub() as any, '/api/v1', AUTHED);
 
-    expect(mountedOn(server).sort()).toEqual([
-      'DELETE /api/v1/packages/:id',
-      'GET /api/v1/packages',
-      'GET /api/v1/packages/:id',
-      'POST /api/v1/packages/publish',
-    ]);
+    expect(mountedOn(server)).toEqual(['POST /api/v1/packages/publish']);
+    expect(returned.map((r) => `${r.method} ${r.path}`)).toEqual(['POST /api/v1/packages/publish']);
   });
 });
 
@@ -246,14 +246,9 @@ describe('#7563 — the composition mounts publish on a service-less boot', () =
     expect(recorded.filter((r) => r.includes('/packages'))).toEqual(['POST /api/v1/packages/publish']);
   });
 
-  it('records all four when `package` is present', () => {
+  it('records the publish route — and only it — when `package` is present too (#14503)', () => {
     const { recorded } = compose({ package: packageServiceStub() });
-    expect(recorded.filter((r) => r.includes('/packages')).sort()).toEqual([
-      'DELETE /api/v1/packages/:id',
-      'GET /api/v1/packages',
-      'GET /api/v1/packages/:id',
-      'POST /api/v1/packages/publish',
-    ]);
+    expect(recorded.filter((r) => r.includes('/packages'))).toEqual(['POST /api/v1/packages/publish']);
   });
 
   it('mirrors the publish route under the scoped base, on both bases, with no service', () => {

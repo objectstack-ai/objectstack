@@ -1,5 +1,197 @@
 # @objectstack/plugin-email
 
+## 17.4.0
+
+### Patch Changes
+
+- dfb7a0d: `plugin-email` strips read decorations with the shared list, not a blanket underscore sweep.
+  
+  `readEffectiveTemplate` — the layered read a `DELETE /meta/email_template/:name` runs to restore the packaged baseline an overlay was hiding — removed decorations with a module-local copy of `stripReadDecorations` that dropped **every** key beginning with `_`. The shared list it drifted from, `METADATA_READ_DECORATIONS` in `@objectstack/spec/kernel`, is exactly `['_diagnostics', '_draft']`, and its module header names the ADR-0010 protection envelope (`_lock`, `_lockReason`, `_lockSource`, `_provenance`, `_packageId`, `_packageVersion`, `_lockDocsUrl`) as deliberately **not** a member: it is envelope state the write path legitimately carries, and the closed metadata schemas allowlist it so a served document keeps its provenance on re-parse.
+  
+  The private copy justified its sweep on the claim that `EmailTemplateDefinitionSchema` "declares no underscore key". That is false — `email-template.zod.ts` spreads `MetadataProtectionFields` into its `strictObject`, so every envelope key is declared and parses clean. The copy was removing keys the schema was deliberately widened to accept, and the list lives in `spec` precisely so a producer and its consumers cannot drift like this.
+  
+  The path now calls the shared helper, matching the other read-back-envelope consumers (the dataset query in `rest-server.ts`, the cold-boot flow bind in `service-automation`, `saveMetaItem`'s verbatim persist, and the route-level seed apply). Two behavioural consequences:
+  
+  - An underscore key that is neither a decoration nor declared is no longer swallowed before validation. The closed schemas exist to reject exactly that (protocol 17), and the rejection is now reported on the write's own response through the mutation projector, instead of the reset quietly succeeding against a body the schema would have refused.
+  - The ADR-0010 envelope survives the strip. It still does not reach `sys_email_template`: `upsertDeclaredEmailTemplate` projects the parsed template through `mapTemplateToRow`, a closed column list, and the object declares no underscore column — so no stored row changes shape. There is deliberately no second, envelope-stripping pass beside the shared one; spelling one would re-create the drift this fixes, one layer up.
+- be92d46: These fourteen packages now declare `repository.directory`, so their npm pages carry a working "source" deep link to their own directory in the monorepo.
+  
+  npm renders that field by concatenating it onto `repository.url`. None of these fourteen manifests carried a `repository` block at all, so every one of their npm pages offered no route from the package back to its code — not a broken link, no link. That is what this publishes: the block those pages read, naming each package's own directory.
+  
+  Nothing else about these packages changes. No export, no runtime behaviour, no dependency and no file in the tarball other than the manifest's own `repository` key. The version bump exists because the fix is only real once it is published: the field lives in the manifest npm serves, so a corrected manifest sitting in the repository leaves the package page exactly as wrong as it was.
+  
+  The rule behind it is now mechanical rather than remembered — `check:manifest-repository-directory` makes a publishable (non-private) workspace manifest declare the field naming its own directory, so a package added or moved after this cannot quietly go back to having no source link.
+- a4816a7: The three provenance-stamp `beforeUpdate` hooks stop re-reading a row the engine has already read, and their contract now states what they actually do on a multi-row update.
+  
+  `sys_email_template`, `sys_sharing_rule` and `sys_webhook` each carry a hook that stamps `customized: true` when a non-system caller edits a package- or platform-seeded row — the half of seed-not-clobber that detects the admin edit. All three carried the same two comments, and both were assertions about runtime behaviour that runtime measurement falsifies:
+  
+  - **"multi-row updates (no single `input.id`) are not stamped."** Not true on any engine these packages ship against. A predicate (`multi: true`) update dispatches `beforeUpdate` once per matched row, and every per-row context arrives with `input.id` bound — so the `if (!id) return` guard answered "single write" on every row of a batch and declined nothing. The rows were being stamped all along.
+  - **"`previous` is not resolved before beforeUpdate hooks run — read the current row ourselves."** The engine binds `previous` before dispatching `beforeUpdate` on both write shapes, so each hook was issuing its own `find` for a row the engine had just read — on a bulk edit, one extra read **per matched row**.
+  
+  Observable behaviour is deliberately unchanged: the same rows are stamped, with the same values, and a bulk edit whose matched rows disagree on `managed_by` is still refused by the engine with `MULTI_UPDATE_HOOK_KEY_DIVERGENCE` (HTTP 400) rather than widening one row's stamp across the batch. What changes is the cost and the contract: the redundant per-row read is gone, and the header of each hook now describes the per-row dispatch, the single `SET` clause a predicate write shares, and why declining to stamp on a bulk edit was rejected — unstamped rows are exactly the ones the next boot's seeder overwrites.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [159dbad]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [cbca47d]
+- Updated dependencies [acf4d38]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [098cbb7]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [86c75f4]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [51ae731]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [4ca358d]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [6acb37e]
+- Updated dependencies [7797102]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [0a038cc]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [97adce2]
+- Updated dependencies [a83482c]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [4771bd9]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [c930f85]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b3820c3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f89812e]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+- Updated dependencies [021a735]
+- Updated dependencies [7bdb163]
+  - @objectstack/spec@17.4.0
+  - @objectstack/core@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/formula@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

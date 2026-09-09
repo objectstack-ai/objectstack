@@ -61,24 +61,25 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `a472b0716`, `packages/plugin-grid`; re-measured at
-  // that pin, 2026-09-04 — previously measured at `00d3f09c5`, `67dadd602`,
-  // before that at `d8ec8d6d4`, `9602dc820`, `190fbd01d`, `9a3daf8d3`,
-  // originally at `6314e87f2`. `ObjectGrid.tsx` DID change across the move off
-  // `00d3f09c5` (7 insertions, 4 deletions, all at `:1204-1213`, where
-  // `objectName` moved onto the shared `resolveRecordSourceObjectName`), and
-  // the re-READ caught the previous record's OWN grid anchor as wrong rather
-  // than merely shifted: `3790-3805` at `00d3f09c5` is `runBulkActionAggregate`
-  // and says nothing about selection. The block this record means was
-  // `3541-3556` there — byte-identical to the one cited at
-  // `67dadd602:3436-3451` — and is `ObjectGrid.tsx:3544-3559` here, shifted
-  // only by the three insertions above it. That is the #10274 class again, and
-  // the reason a citation refresh re-READS instead of moving numbers:
-  // arithmetic on the wrong anchor would have produced `3793-3808`, a
-  // fresh-looking span still describing the wrong function. The second claim,
+  // (`.objectui-sha` = `53ded82bf`, `packages/plugin-grid`; re-measured at
+  // that pin, 2026-09-08 — previously measured at `a472b0716`, `00d3f09c5`,
+  // `67dadd602`, before that at `d8ec8d6d4`, `9602dc820`, `190fbd01d`,
+  // `9a3daf8d3`, originally at `6314e87f2`. `ObjectGrid.tsx` DID change again
+  // across the move off `a472b0716` (24 insertions, 30 deletions), so the
+  // selection block this record means was re-READ rather than carried: it is
+  // `ObjectGrid.tsx:3538-3553` here, was `3544-3559` at `a472b0716`, and the
+  // sixteen lines are BYTE-IDENTICAL across the hop — `git hash-object` on both
+  // spans returns `6133933199230670e29d8c7f51c558d86a0af1d2`, so the block only
+  // shifted six lines UP and none of its substance moved. The earlier hop off
+  // `00d3f09c5` is the one that caught the previous record's OWN grid anchor as
+  // wrong rather than merely shifted: `3790-3805` there is
+  // `runBulkActionAggregate` and says nothing about selection. That is the
+  // #10274 class, and the reason a citation refresh re-READS instead of moving
+  // numbers — arithmetic on a wrong anchor produces a fresh-looking span still
+  // describing the wrong function. The second claim,
   // `hooks/useBulkExecutor.ts:284-289`, is in a file byte-identical at both
   // pins and re-READ there rather than carried on that identity — it still
-  // ends on `label = 'bulk delete'`, the line the `284-288` span cited four
+  // ends on `label = 'bulk delete'`, the line the `284-288` span cited five
   // pins ago stopped short of, truncating the second of the two branches it
   // names (byte-identity is never taken as proof an anchor is right):
   //
@@ -109,6 +110,39 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
     'API keys — the grid renders no checkbox column because the object grants no ' +
     'delete affordance — and a promoted bulk revoke would fan out per row through ' +
     'the action runner rather than hitting /batch (#7802).',
+  // #15873 — maintainer ruling 2026-09-07 (decision batch #64, option (a),
+  // verbatim 「同意」): the data door admits `update` so an administrator can set
+  // the four platform-owned columns (`require_mfa`, `parent_organization_id`,
+  // `sort_order`, `timezone`) the ADR-0092 D2 whitelist already admitted on
+  // the engine path. The ruling named ONE verb on an identity table, and
+  // `bulk` is a second widening it did not take: granting it would open
+  // `POST /data/sys_organization/batch` and the `*Many` routes to every API
+  // client. What `update` DOES derive is admitted, and named: `import` is
+  // `any: ['create', 'update']` in `API_METHOD_DERIVATION`, so update-mode
+  // `POST /data/sys_organization/import` now passes the method gate and
+  // updates N rows in one request — each row clamped to the D2 whitelist under
+  // the caller's context, insert/upsert modes still 405. That is not the batch
+  // shape this ledger is about (`bulk` gates `/batch` and `*Many`, `import`
+  // does not read it), which is why the exemption stands beside it. The
+  // object's one list view (`all_orgs`) declares no `bulkActions` /
+  // selection, and the implicit bulk-delete entry gates on the `delete`
+  // affordance — off three times over (`managedBy: 'better-auth'` denies by
+  // default, `userActions` opens `edit` alone, `delete` is not in
+  // `apiMethods`) — so there is no multi-select to batch today. The cost the
+  // header prices — a promoted multi-select edit fanning out per row through
+  // the action runner — is accepted for a table that holds one row in
+  // single-org deployments. Should a batch organization edit gain a real
+  // caller, that is a further widening for the contract-review lane: delete
+  // this entry and add `'bulk'`; the stale-entry test below refuses to let
+  // both stand.
+  sys_organization:
+    'Administrators set the platform-owned columns through single-record PATCH ' +
+    'and the derived update-mode import door (#15873 ruled `update`; both are ' +
+    'column-clamped per row by ADR-0092 D2). `bulk` — /batch and the *Many ' +
+    'routes — is not granted: no console surface multi-selects organizations ' +
+    '(the list view declares no bulk actions and the object grants no delete ' +
+    'affordance), and a promoted bulk edit would fan out per row through the ' +
+    'action runner rather than hitting /batch (#7802).',
 };
 
 /** Every `*.object.ts` under `packages/`, skipping build output and deps. */

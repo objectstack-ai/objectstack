@@ -60,6 +60,7 @@
     "ai/BlueprintNavItem:label",
     "ai/BlueprintNavItem:target",
     "ai/BlueprintNavItem:type",
+    "ai/BlueprintNavItem:viewName",
     "ai/BlueprintObject:description",
     "ai/BlueprintObject:fields",
     "ai/BlueprintObject:label",

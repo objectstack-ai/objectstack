@@ -690,11 +690,17 @@ const translationDataShape = () => ({
    *   dashboards.<name>.widgets.<widgetId>.title
    *   dashboards.<name>.widgets.<widgetId>.description
    *   dashboards.<name>.widgets.<widgetId>.subCaption
+   *   dashboards.<name>.globalFilters.<filterName>.label
+   *   dashboards.<name>.globalFilters.<filterName>.options.<value>
    */
   dashboards: z.record(z.string(), strictObject({
     surface: 'this dashboard translation',
     history: TRANSLATION_HISTORY,
-    aliases: { name: 'label', title: 'label', components: 'widgets', charts: 'widgets', cards: 'widgets' },
+    // `filters` / `globalFilter` mirror `DashboardSchema`'s own alias table for
+    // the authored key, so an author who spells the group the way the
+    // dashboard document accepts it is pointed at the one spelling the bundle
+    // takes.
+    aliases: { name: 'label', title: 'label', components: 'widgets', charts: 'widgets', cards: 'widgets', filters: 'globalFilters', globalFilter: 'globalFilters' },
   }, {
     label: z.string().optional().describe('Translated dashboard title'),
     description: z.string().optional().describe('Translated dashboard description'),
@@ -735,6 +741,52 @@ const translationDataShape = () => ({
        */
       subCaption: z.string().optional().describe("Translated metric sub-caption (overlays the widget's `options.description`, a different authored field from `description`)"),
     })).optional().describe('Widget translations keyed by widget id'),
+    /**
+     * Global-filter copy, keyed by the filter's stable `name`
+     * (`GlobalFilterSchema.name`, which the dashboard schema declares as
+     * defaulting to `field` — a filter that authors no `name` is addressed by
+     * its `field`, the same key its value is published under and that
+     * widgets reference in `filterBindings`).
+     *
+     * **The hole this closes (#16772).** The filter bar draws DIRECTLY ABOVE
+     * the widget titles this group has always translated, and neither a
+     * filter's label nor its static option labels had any key here — so a
+     * translated dashboard rendered `Requesting Department: 全部` over six
+     * Chinese widget titles. Not a drifted key: no key. `label` overlays
+     * `globalFilters[].label`; `options.<value>` overlays the matching
+     * `globalFilters[].options[].label`, keyed by the option's `value`
+     * spelled as a string (`String(value)` — the option value is declared
+     * `string | number | boolean`, and a record key can only be a string).
+     * Resolved by `translateDashboard` (i18n-resolver.ts) on the served
+     * document; objectui's filter bar reads the served `label` / option
+     * `label` through `pickLocalized`, so no client change is needed.
+     *
+     * **Two routes, and which one this is.** A filter bound to an object field
+     * may also set `object` (#7804), in which case the CONSOLE resolves its
+     * field label and option labels through `objects.<object>.fields.<field>`
+     * client-side. That route is object-scoped and shared across every
+     * dashboard drawing that field; this group is dashboard-scoped copy for
+     * the filter AS THIS DASHBOARD LABELS IT — the authored `label` a
+     * translator sees beside the widget titles. A filter that omits `object`
+     * (every filter in the measured app) has only this route.
+     *
+     * `optionsFrom` options are NOT here: they are fetched rows, labelled by
+     * the source object's `labelField` at request time, and a bundle key for
+     * a value that exists only in data would be the declared-but-unresolvable
+     * shape this file exists to keep out.
+     */
+    globalFilters: z.record(z.string(), strictObject({
+      surface: 'this dashboard global-filter translation',
+      history: TRANSLATION_HISTORY,
+      // `title` / `name` are the `GlobalFilterSchema` alias spellings for the
+      // authored label; `choices` / `values` are its alias spellings for
+      // `options` — the same words an author reaches for on the dashboard
+      // document itself.
+      aliases: { name: 'label', title: 'label', text: 'label', choices: 'options', values: 'options', items: 'options' },
+    }, {
+      label: z.string().optional().describe("Translated filter label (overlays the filter's authored `label` in the dashboard filter bar)"),
+      options: z.record(z.string(), z.string()).optional().describe("Static option value to translated label map (overlays `options[].label` for the option whose `value`, spelled as a string, matches the key)"),
+    })).optional().describe('Global-filter translations keyed by the filter `name` (a filter that authors no `name` is keyed by its `field`)'),
   })).optional().describe('Dashboard translations keyed by dashboard name'),
 
   /**
@@ -835,6 +887,16 @@ const translationDataShape = () => ({
    * because `page:header` instances carry no stable `id`; the page name is the
    * only addressable identifier for them. Every other component does have one,
    * which is what `components` addresses — see its own note.
+   *
+   * **One component, one address.** For a REGION-LEVEL `page:header` the two
+   * keys above are the ONLY route, even when the component happens to carry an
+   * `id`: `translatePage` does not read `components.<id>` for it (ruled
+   * 2026-09-06, decision batch #58 — the page-name route is canonical). Before
+   * that ruling the id route was read here and WON, so a bundle could address
+   * one header `title` two ways while `subtitle` — excluded from `components`
+   * for exactly this reason, see its note below — only ever had one. A
+   * `page:header` NESTED inside a container is a different component: the
+   * page-name route does not reach it, so it stays id-only.
    */
   pages: z.record(z.string(), strictObject({
     surface: 'this page translation',
@@ -868,7 +930,7 @@ const translationDataShape = () => ({
      *
      * | key | declared by |
      * |:---|:---|
-     * | `title` | `page:card`, `record:related_list` (and `page:header`, see below) |
+     * | `title` | `page:card`, `record:related_list` (and a NESTED `page:header` — a region-level one is page-name-addressed, see the `subtitle` note below) |
      * | `label` | `page:tabs`, `page:accordion`, `record:details`, `record:related_list`, `record:path`, `element:button`, `element:record_picker`, `element:text_input` |
      * | `description` | `element:text_input` |
      * | `placeholder` | `element:record_picker`, `element:text_input` |
@@ -896,7 +958,11 @@ const translationDataShape = () => ({
      * - **`subtitle` is not here** — `page:header` is its only declarer, and
      *   that component is addressed by page name above. Declaring it in both
      *   places would give one string two spellings, which is how the
-     *   dashboards/pages asymmetry started.
+     *   dashboards/pages asymmetry started. The 2026-09-06 ruling settled the
+     *   same question for its sibling `title` in the same direction: a
+     *   region-level `page:header` is read by page name only, so the component
+     *   now has ONE address for both of its keys rather than two for one of
+     *   them.
      * - **`content` is not here** — `element:text`'s one authored string is
      *   declared `content: I18nLabelSchema` (`ui/component.zod.ts`), so it is
      *   localizable at its own authoring site, and adding it to this face would

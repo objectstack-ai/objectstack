@@ -27,13 +27,24 @@
  * claimed the stronger property would be the same shape of comfort the
  * `workspace:*` assertion above was.
  *
- * The sweep is DERIVED from the template map, never a list of `plugin` and
- * `example`: a third template must arrive already covered.
+ * The sweep is DERIVED from the template map, never a written-down roster: a
+ * template added later must arrive already covered.
+ *
+ * ## `example` is not in that map any more
+ *
+ * `os create example` was retired in #16483 under the #15531 ruling — it
+ * emitted a subset of what `os init` writes plus one README. Its absence from
+ * the map is asserted below beside its presence in `RETIRED_TEMPLATES`, so
+ * deleting a template WITHOUT leaving the signpost behind reddens here. What
+ * the surviving refusal actually prints, driven through the real CLI, is pinned
+ * in `create-example-retired.e2e.test.ts`.
  */
 
 import { describe, it, expect } from 'vitest';
 import {
+  RETIRED_TEMPLATES,
   templates,
+  emittedPackageName,
   objectstackDependencySpec,
   rootTsconfigExtends,
   DEFAULT_PLACEMENT,
@@ -77,8 +88,22 @@ function objectstackDeps(pkg: Record<string, any>): Record<string, string> {
 describe('os create: the sweep covers every shipped template', () => {
   it('derives its population from the template map', () => {
     expect(TEMPLATE_KEYS.length).toBeGreaterThan(0);
-    // The two reported in #14824, named so a rename is loud rather than silent.
-    expect(TEMPLATE_KEYS).toEqual(expect.arrayContaining(['plugin', 'example']));
+    // Named so a rename is loud rather than silent. `plugin` is the survivor of
+    // the two #14824 reported; `example` was retired in #16483.
+    expect(TEMPLATE_KEYS).toEqual(expect.arrayContaining(['plugin']));
+  });
+
+  it('has retired `example`, and left a signpost where the template was', () => {
+    // Both halves, because the ruling is not satisfied by either alone: the
+    // template is gone from the roster AND the command still answers for the
+    // word. A deletion that dropped the entry below would leave
+    // `os create example` failing generically, which is what #16483 forbids.
+    expect(TEMPLATE_KEYS).not.toContain('example');
+    expect(Object.keys(RETIRED_TEMPLATES)).toContain('example');
+    // The signpost names the replacement — the property, not the wording. The
+    // message a user actually sees is driven and asserted in
+    // `create-example-retired.e2e.test.ts`.
+    expect(RETIRED_TEMPLATES.example.detail.join('\n')).toContain('os init');
   });
 
   it('defaults to the standalone placement', () => {
@@ -180,6 +205,116 @@ describe.each(TEMPLATE_KEYS)('os create %s --in-repo — the platform-work emiss
 
   it('emits no pnpm-workspace.yaml, which would sever the workspace it joins', () => {
     expect(Object.keys(templates[key].filesFor('in-repo'))).not.toContain('pnpm-workspace.yaml');
+  });
+});
+
+/**
+ * PIN (#15530) — the emitted package NAME follows the placement, and the
+ * standalone half carries the flag that enforces it.
+ *
+ * ## The defect
+ *
+ * #14824 pointed the default emission at a developer outside this monorepo and
+ * the name did not move with the audience: `os create plugin my-thing` kept
+ * writing `"name": "@objectstack/plugin-my-thing"` — a scope its new owner
+ * cannot publish to — and no `private` flag. ⚠️ Nothing here could see it. The
+ * name is never resolved from a registry inside the emitted project, so the
+ * unit pins above, the type-check and `scripts/create-scaffold-smoke.sh` are
+ * all green on the defect; the cost lands at `npm publish`, in the terminal of
+ * whoever ran the scaffolder. The ruling (#15530, decision batch #106 item 1)
+ * is option A: unscoped `plugin-<name>` plus `"private": true` for standalone,
+ * `@objectstack/plugin-<name>` unchanged for `--in-repo`.
+ *
+ * ## Why both arms are read in ONE test, and why `not.toBe` is here as well
+ *
+ * This is a DISCRIMINATION, not two independent facts, and the failure mode a
+ * one-armed pin has is that it passes on a scaffolder that has stopped
+ * discriminating — or stopped emitting. So each `it` renders both placements
+ * in the same run and closes with the inequality: a mutation that makes the
+ * two arms identical **in either direction** (scoping the standalone name
+ * back, unscoping the in-repo one, marking both `private`, marking neither)
+ * reddens here even if every equality above it were somehow satisfied.
+ *
+ * The expected strings are LITERALS, deliberately — ⛔ never `pluginPackageName`,
+ * which is the function under test: reading it would move both sides of every
+ * comparison together and pin nothing at all. The one derived expectation
+ * (`dirName`) is derived from the OTHER surface the ruling names — "matching
+ * the directory the scaffolder prints".
+ */
+describe('os create plugin: the emitted package name follows the placement (#15530)', () => {
+  /** One rendered file, or a loud failure — ⛔ never `undefined` read as a pass. */
+  function emit(file: string, placement: ScaffoldPlacement): unknown {
+    const render = templates.plugin.filesFor(placement)[file];
+    if (!render) throw new Error(`the plugin template emits no ${file} for ${placement}`);
+    return render(PROJECT);
+  }
+
+  it('emits an unscoped, private standalone manifest and a scoped, publishable --in-repo one', () => {
+    const standalone = emit('package.json', 'standalone') as Record<string, unknown>;
+    const inRepo = emit('package.json', 'in-repo') as Record<string, unknown>;
+
+    // Read the same way the COMMAND reads it before it writes anything, so a
+    // manifest that stopped carrying a string `name` fails here rather than
+    // being judged as absent-and-therefore-fine.
+    expect(emittedPackageName(templates.plugin, 'standalone', PROJECT))
+      .toBe(`plugin-${PROJECT}`);
+    expect(emittedPackageName(templates.plugin, 'in-repo', PROJECT))
+      .toBe(`@objectstack/plugin-${PROJECT}`);
+
+    // (1) standalone — unscoped, and the same string as the directory the
+    // scaffolder prints, which is the ruling's own wording for it.
+    expect(standalone.name).toBe(`plugin-${PROJECT}`);
+    expect(standalone.name).toBe(templates.plugin.dirName(PROJECT));
+    expect(String(standalone.name).startsWith('@')).toBe(false);
+
+    // ⭐ The load-bearing half. The name is readability; THIS is what makes an
+    // accidental `npm publish` fail loudly whichever name won.
+    expect(standalone.private).toBe(true);
+
+    // (3) --in-repo — scoped and unchanged: it lands under packages/plugins/,
+    // where every sibling really carries that scope and really is published.
+    expect(inRepo.name).toBe(`@objectstack/plugin-${PROJECT}`);
+    expect(inRepo.private).toBeUndefined();
+
+    // NON-DEGENERACY: the two arms differ, in this run, in both fields.
+    expect(standalone.name).not.toBe(inRepo.name);
+    expect(standalone.private).not.toBe(inRepo.private);
+  });
+
+  it('carries the name into the README, install instruction included', () => {
+    const standalone = String(emit('README.md', 'standalone'));
+    const inRepo = String(emit('README.md', 'in-repo'));
+
+    // The README is the SECOND copy of the name — title, install line, import
+    // specifier. A rename that reaches only the manifest leaves this file
+    // telling a developer to install a package that exists under no name.
+    expect(standalone).not.toContain('@objectstack/plugin-');
+    expect(standalone).toContain(`# plugin-${PROJECT}`);
+    expect(standalone).toContain(`from 'plugin-${PROJECT}'`);
+
+    // (2) A local reference, because that is what a reader standing in a
+    // freshly scaffolded directory can actually run: the package is `private`
+    // and unscoped, so nothing on a registry answers to that name. Asserted
+    // from BOTH sides — the registry verb is gone, and the local one is
+    // present and names this package — so neither a deleted section nor a
+    // reinstated `pnpm add` can satisfy it.
+    expect(standalone).not.toContain('pnpm add');
+    expect(standalone).toContain(`pnpm link --global plugin-${PROJECT}`);
+
+    // ⛔ And not spelled as a path. The scaffolder knows nothing about where
+    // the reader's app is, so `link:../<dir>` would be a guess about a layout
+    // it never created — refused, on that ground, by
+    // `init-template-comments-self-contained.test.ts`.
+    expect(standalone).not.toMatch(/\.\.\//);
+
+    // --in-repo unchanged: a real workspace sibling under a scope this repo
+    // publishes, so its registry install line is still the correct one.
+    expect(inRepo).toContain(`pnpm add @objectstack/plugin-${PROJECT}`);
+    expect(inRepo).toContain(`from '@objectstack/plugin-${PROJECT}'`);
+
+    // NON-DEGENERACY, same shape as above: one README for both placements is
+    // the regression this test exists to catch.
+    expect(standalone).not.toBe(inRepo);
   });
 });
 

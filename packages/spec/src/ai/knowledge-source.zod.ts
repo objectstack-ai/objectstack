@@ -33,10 +33,13 @@ export const KnowledgeRefreshPolicySchema = lazySchema(() => z.object({
    * `integration/connector.zod.ts`). A bare string is shorthand for
    * `{ dialect: 'cron', source }`; the parse enforces a non-empty string or an
    * expression envelope and normalizes to the envelope. It does NOT judge cron
-   * syntax: that verdict is the `cron` dialect engine's (`@objectstack/formula`
-   * cron-engine — 5- or 6-field, or an `@yearly`…`@reboot` alias) when the
-   * expression is evaluated, so the describe below promises exactly what the
-   * parse enforces (ADR-0049 declared = enforced; #14825).
+   * syntax, and neither does anything downstream: this slot is parsed and
+   * reaches no engine. `croner` judges a cron pattern only where a schedule is
+   * wired (`CronSchedule.expression`, a different slot), and
+   * `@objectstack/formula`'s registered `cron` engine has no caller outside
+   * that package — so the syntax verdict belongs to whatever external
+   * scheduler the author hands this value to, and the describe below promises
+   * exactly what the parse enforces (ADR-0049 declared = enforced; #14825).
    *
    * `service-knowledge` does not schedule the cron itself — it merely
    * surfaces the value so an automation flow / external scheduler can
@@ -45,8 +48,8 @@ export const KnowledgeRefreshPolicySchema = lazySchema(() => z.object({
   cron: CronExpressionInputSchema.optional().describe(
     'Cron-dialect expression for a periodic full reindex. A bare string is shorthand for '
     + '`{ dialect: \'cron\', source }`; the parse enforces a non-empty string or an expression '
-    + 'envelope and normalizes to the envelope — cron syntax (5- or 6-field, or an `@` alias) is '
-    + 'the `cron` dialect engine\'s verdict when the expression is evaluated, not checked here. '
+    + 'envelope and normalizes to the envelope — cron syntax is not checked here, and no engine '
+    + 'evaluates this slot: the verdict belongs to whatever external scheduler you hand the value to. '
     + '`service-knowledge` does not schedule it: the value is surfaced so an automation flow / '
     + 'external scheduler can trigger `reindexSource`.',
   ),

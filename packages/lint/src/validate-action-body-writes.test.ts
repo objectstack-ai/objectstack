@@ -196,17 +196,35 @@ describe('validateActionBodyWrites — ctx.api writes', () => {
     expect(finding.message).not.toMatch(/write-path validator skips/);
   });
 
-  it('checks insert/create/update payloads (argument 0) and updateById at argument 1', () => {
+  it('checks insert/update payloads (argument 0) and updateById at argument 1', () => {
     const findings = validateActionBodyWrites(
       stackWith(
         "await ctx.api.object('crm_contact').insert({ emial: 'a' }); " +
-          "await ctx.api.object('crm_contact').create({ email: 'b' }); " +
           "await ctx.api.object('crm_deal').updateById(ctx.recordId, { stag: 'won' });",
       ),
     );
     expect(findings.map((f) => f.message.match(/writing '(\w+)'/)?.[1])).toEqual(['emial', 'stag']);
     expect(findings[0].message).toContain("ctx.api.object('crm_contact').insert");
     expect(findings[1].message).toContain('updateById');
+  });
+
+  // ⭐ [#16249] The ledger is shared, so the withdrawal lands on THIS surface
+  // too — and for the same reason: an action `body` runs in the same QuickJS
+  // sandbox, whose `ctx.api.object()` installs no `create` leaf, and
+  // `objectstack build` refuses `.create(` at lowering for hook and action
+  // bodies alike. This case replaces a `.create({ email: 'b' })` line that used
+  // a VALID field inside the case above: it produced no finding before the
+  // withdrawal and none after, so it could never have measured the change.
+  it('does not grade a .create() payload on the action surface either (#16249)', () => {
+    const findings = validateActionBodyWrites(
+      stackWith("await ctx.api.object('crm_contact').create({ emial: 'b' });"),
+    );
+    expect(findings).toEqual([]);
+    // Control, same misspelling through the verb the sandbox has.
+    const control = validateActionBodyWrites(
+      stackWith("await ctx.api.object('crm_contact').insert({ emial: 'b' });"),
+    );
+    expect(control).toHaveLength(1);
   });
 
   it('accepts declared fields and system columns', () => {

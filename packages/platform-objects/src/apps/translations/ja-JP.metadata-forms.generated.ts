@@ -58,7 +58,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       isSystem: {
         label: "システム組み込み",
-        helpText: "システムオブジェクト（削除から保護）"
+        helpText: "システムオブジェクト（削除から保護。共有の既定は公開）"
       },
       fields: {
         label: "フィールド",
@@ -162,7 +162,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.reference": {
         label: "参照",
-        helpText: "対象オブジェクト（lookup/master_detail 用）"
+        helpText: "対象オブジェクト名。tree フィールドでは省略可能で、指定する場合はこのオブジェクト自身でなければなりません（ツリーは同一オブジェクト内の階層です — 別のオブジェクトへリンクする場合は lookup を使います）"
       },
       "fields.lookupFilters": {
         label: "Lookup Filters",
@@ -210,7 +210,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.trackHistory": {
         label: "履歴追跡",
-        helpText: "変更履歴を保持"
+        helpText: "レコードのアクティビティタイムラインでこのフィールドを要約する"
       },
       "fields.visibleWhen": {
         label: "Visible When",
@@ -666,7 +666,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       filter: {
         label: "フィルター",
-        helpText: "フィルター条件"
+        helpText: "フィルター条件 — リストツールバーと同じビジュアルビルダー。演算子と値入力はフィールドタイプに応じて変わります"
       },
       sort: {
         label: "並び替え",
@@ -786,7 +786,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       type: {
         label: "型",
-        helpText: "ページの種類 — list / record / home / app / utility。リストページの見せ方（grid / kanban / calendar）はページタイプではなく、Interface で設定するビジュアライゼーションです。"
+        helpText: "ページの種類。\"List / Interface\" はソースビューをキュレーションされたサーフェスにバインドします。見せ方（grid / kanban / calendar / …）はページタイプではなく、Interface で設定するビジュアライゼーションです。"
       },
       template: {
         label: "テンプレート",
@@ -1049,7 +1049,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       advanced: {
         label: "詳細",
-        description: "一括操作、AI 公開、API リクエスト形状。"
+        description: "AI 公開と API リクエスト形状。"
       }
     },
     fields: {
@@ -1087,7 +1087,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       body: {
         label: "本文",
-        helpText: "実行する JavaScript コード"
+        helpText: "L1 式または L2 サンドボックス JS body"
       },
       "body.language": {
         label: "Language",
@@ -1164,7 +1164,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       basics: {
         label: "基本",
-        description: "ID とデータソース。"
+        description: "ID とレポートタイプ。"
       },
       dataset_binding: {
         label: "Dataset binding",
@@ -1208,7 +1208,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       columns: {
         label: "列",
-        helpText: "レポートに表示する列"
+        helpText: "横方向のディメンション名（matrix のみ）"
       },
       order: {
         label: "並び順",
@@ -1427,7 +1427,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       variables: {
         label: "変数",
-        helpText: "subject/body で参照する変数名リスト"
+        helpText: "[{ \"name\": \"user.name\", \"type\": \"string\", \"required\": true, \"description\": \"...\" }]"
       },
       fromOverride: {
         label: "送信者オーバーライド",
@@ -1460,7 +1460,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "ID",
-        description: "権限セットはプロファイルに追加アクセス権を重ねる。プロファイルは各ユーザーに 1:1 で割り当てる基本セット。"
+        description: "権限セットは唯一の能力コンテナです。ユーザーは保持するすべてのセットの和集合を得るため、セットはアクセス権を追加することしかできません。ポジションがセットを人に配分します。"
       },
       system_permissions: {
         label: "システム権限",

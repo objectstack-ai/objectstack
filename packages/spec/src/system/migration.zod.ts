@@ -273,6 +273,8 @@ export const DataMigrationFlagSchema = lazySchema(() => z.object({
     .describe('When this deployment last ADMITTED a value the verified contract rejects, via an OS_ALLOW_LAX_* escape hatch. Does not clear verified_at — it withdraws the irreversible half of what the certificate authorises'),
   deviation_detail: z.string().nullable().optional()
     .describe('JSON-encoded first counterexample behind deviation_observed_at (object, field, type, parse issue), for diagnostics'),
+  columns_moved_at: z.string().datetime().nullable().optional()
+    .describe('When this deployment last completed the COLUMN MOVE for this migration — the step that retypes the migrated columns and rewrites the values they hold into the new encoding. Separate evidence from applied_at and verified_at, which attest the backfill and its self-check only: a deployment can carry both and still store the legacy encoding. Null/absent says exactly that, and is an expected steady state rather than an error — it is what a consumer that cannot read this field must assume'),
 }).describe('Deployment-level record that a data migration ran here and its self-check passed — the evidence gate consumers read instead of the platform version'));
 export type DataMigrationFlag = z.input<typeof DataMigrationFlagSchema>;
 

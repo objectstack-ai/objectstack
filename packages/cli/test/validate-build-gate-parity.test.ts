@@ -52,6 +52,16 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   'lintUnknownAuthoringKeys',
   // [ADR-0046] Package docs: flatness, prefixed names, MDX/image ban, links.
   'collectAndLintDocs',
+  // [#16544] The pre-parse lowering of inline `function` handlers to a
+  // metadata `body` + string ref. It refuses nothing itself; it decides what
+  // the parse — and the registry's `parsed` tier — SEES. Build-only until
+  // #16544, on the reasoning that "there is nothing to lower when nothing is
+  // emitted": measured false, because the `hook-body-*` /
+  // `hook-api-update-readonly-*` family opens on `body.language === 'js'`, so
+  // on the un-lowered stack `os validate` passed a handler-authored hook `os
+  // build` refuses. Both doors run the same call, between the two key lints
+  // above and the parse.
+  'lowerCallables',
 ];
 
 /**
@@ -68,9 +78,6 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
     '[ADR-0090 D6] The snapshot gate reads (and with --update-access-matrix WRITES) access-matrix.json ' +
     'next to the config. Rewriting a committed snapshot is not a read-only operation.',
   diffAccessMatrix: 'The comparison half of the same D6 snapshot gate.',
-  lowerCallables:
-    'Lowers inline `function` handlers to string refs so they survive JSON.stringify. It exists to ' +
-    'produce the artifact; there is nothing to lower when nothing is emitted.',
   buildRuntimeBundle: 'Emits the objectstack-runtime.{hash}.mjs sibling module. Artifact output by definition.',
 };
 

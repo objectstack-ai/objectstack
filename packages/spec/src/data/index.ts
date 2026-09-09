@@ -210,9 +210,20 @@ export * from './analytics.zod';
 // and build-time coherence validation.
 export * from './aggregation-policy';
 
+// Aggregate × field-type compatibility (#16353) — which `AggregationFunction`
+// a `DatasetMeasure` may apply to a field of which `FieldType`; the one table
+// the dataset compiler and the lint rule both refuse against.
+export * from './aggregate-field-type-compatibility';
+
 // Percent storage scale (0–1 fraction vs whole percentage points) — resolved
 // from field metadata so renderers never guess it from the value's magnitude.
 export * from './percent-scale';
+
+// The NUMERIC column family's physical representation (#16318) — the single
+// per-field-type table `SqlDriver.createColumn` and both `os generate
+// migration` formats read, so one declaration cannot produce three different
+// columns.
+export * from './numeric-column-representation';
 
 // Record display-name contract (ADR-0079) — title eligibility, primary-field
 // resolution/derivation, record display-name rendering, primary provisioning,

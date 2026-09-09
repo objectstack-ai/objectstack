@@ -9,11 +9,12 @@ import {
     // be RESOLVED leaves the caller's permissions equally undetermined, so it
     // takes the same loud answer rather than the quiet 403 it used to wear.
     AuthzStoreUnavailableError,
-    effectiveTenancyPosture,
-    // [#13906] The REGISTRY's own "never registered" brand — the discriminator
-    // that lets the tenancy seam absorb the supported no-tenancy composition
-    // while every other rejection stays loud. Never message text (#13905).
-    isServiceNotRegisteredError,
+    // [#13906 / #16013] The ONE classification the tenancy seam applies on
+    // BOTH of its wirings: the REGISTRY's own "never registered" brand absorbs
+    // the supported no-tenancy composition (never message text, #13905) while
+    // every other rejection stays loud. ⛔ The two wirings themselves are NOT
+    // the helper's — see `computeExecCtx`.
+    classifyAdmissionTenancyPosture,
     assembleExecutionContext, normalizeAuthGate, type AuthGate,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
     // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
@@ -262,39 +263,33 @@ type TransportScopedMetaRequest<R> = R & { environmentId?: string };
  * What the compiler regains here is the KEY SET — an undeclared member (TS2353)
  * and a missing required member (TS2739/TS2741) — not the value types of keys
  * read off the request bag.
+ *
+ * ⭐ [#16337] The one slot this alias could NOT cover is now covered too, and
+ * the helper that covered for it is gone. #15866 left three server-built
+ * `findData` literals — the import-job listing, the export chunk loop and the
+ * public reference picker — speaking the UNDECLARED wire dialect (`$filter`,
+ * `$top`, `$skip`, `$orderby`, `$expand`, `filters`, `select`, `sort`) and
+ * routed them through a `wireDialectQuery` helper that cast the `query` member
+ * to `FindDataRequest['query']`. All three now build the CANONICAL QueryAST
+ * (`object`, `where`, `orderBy`, `limit`, `offset`, `fields`, `expand`), so the
+ * `query` slot compiles against the declared contract like every other member
+ * and the helper has been retired with this card.
+ *
+ * ⚠️ The rewrite is a spelling change ONLY, and that is measurable rather than
+ * asserted: `@objectstack/metadata-protocol`'s `findData` folds every alias
+ * spelling onto the canonical key by the spec's own table
+ * (`RPC_QUERY_ALIAS_SLOTS`) and moves the value verbatim, so both dialects
+ * reach `engine.find` as the same option bag. `rest-server-canonical-query-ast
+ * .test.ts` drives the before/after pairs through the real normalizer and
+ * asserts that equality, so a future edit that changes the option bag while
+ * still compiling reddens there.
+ *
+ * ⛔ Server-built means server-built: the wire aliases stay accepted at the
+ * HTTP door for CALLERS. Declaring them there is #16066's spec half and is not
+ * this file's business.
  */
 type ServerScopedDataRequest<R> = R & { environmentId?: string; context?: unknown };
 
-/**
- * [#15866] The ONE thing restoring the data doors' compile-time check could not
- * type honestly, isolated behind a name so what stays erased is countable and
- * greppable instead of diffuse — and so the next person meets the reason rather
- * than a bare cast.
- *
- * `FindDataRequest.query` declares the AST (`QuerySchema`). But
- * `@objectstack/metadata-protocol`'s `findData` ingress accepts TWO dialects
- * through that one slot: the AST, and the WIRE dialect its normalizer folds —
- * the bare transport spellings and the OData `$` forms (`$top`→`top`→`limit`,
- * `$orderby`→`orderBy`, `filter`/`filters`/`$filter`→`where`, …). That second
- * set is deliberately undeclared: the normalizer's own table calls them "the
- * wire-only spellings no schema declares", and its sibling hint table is
- * documented as never accepting input precisely so a second de-facto contract
- * does not grow (Prime Directive #12).
- *
- * Three server-built literals in this file speak that wire dialect (the
- * import-job listing, the export chunk loop, the public picker). ⛔ The two
- * repairs this card forbids are exactly the two that would make them compile:
- * widening `QuerySchema` to admit `$`-forms, and dropping back to a runtime
- * `safeParse`. So the honest move is neither — it is to keep the erasure, make
- * it one slot wide instead of one call wide, and hand the gap back: the
- * declared-vs-shipped mismatch on this slot is a CONTRACT question, filed
- * separately, not something this door may settle by itself.
- *
- * ⚠️ What is NOT erased at those three sites, and was before: the method name,
- * the arity, and every other member of the request literal.
- */
-const wireDialectQuery = (query: Record<string, unknown>): FindDataRequest['query'] =>
-    query as FindDataRequest['query'];
 import {
     buildFieldMetaMap,
     referenceFieldNames,
@@ -306,6 +301,8 @@ import {
     type ExportFieldMeta,
 } from './export-format.js';
 import { runImport } from './import-runner.js';
+// [#16581] The public picker's authoring-dialect → parser-grammar lowering.
+import { lowerViewFilterRules } from './view-filter-rule-lowering.js';
 import { prepareImportRequest } from './import-prepare.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 import { enrichOpenApiWithEndpoints } from './openapi-endpoints.js';
@@ -695,17 +692,25 @@ function importJobUndoable(row: any): boolean {
  * [#13994] The input domain is what a DRIVER materialises into such a column,
  * and it is dialect-dependent — measured, not guessed:
  *
- *  - **JS `Date`** — `driver-sql` on Postgres and MySQL. `timestamptz` /
- *    `DATETIME(3)` are instants and the driver materialises them as `Date` on
- *    purpose (`SqlDriver.withPostgresCalendarDayAsText` says so in as many
- *    words); `driver-mongodb` stamps `new Date()` and BSON round-trips it.
- *    `formatOutput`'s two timestamp repairs — the `AUDIT_TIMESTAMP_COLUMNS`
- *    pass and the `normalizeSqliteDatetimeOutput` pass over `datetimeFields` —
- *    both sit INSIDE its `if (this.isSqlite)` arm, so neither runs here. ⚠️ A
- *    declared `Field.datetime` is therefore NOT protected on Postgres/MySQL.
- *  - **`string`, already canonical ISO-8601 UTC** — `driver-sql` on SQLite and
- *    its `driver-turso` / `driver-sqlite-wasm` siblings, and `driver-memory`.
- *    Passed through unchanged, so a canonical row is a fixed point.
+ *  - **JS `Date`** — `driver-mongodb` stamps `new Date()` and BSON round-trips
+ *    it. On `driver-sql` the CLIENT layer still materialises `timestamptz` /
+ *    `DATETIME(3)` as a `Date` on purpose — those are instants, and
+ *    `SqlDriver.withPostgresCalendarDayAsText` still leaves the parser alone in
+ *    as many words ([ADR-0053 D-F2]) — but that is no longer what leaves the
+ *    read door. Since #13973 ([ADR-0053 D-F1]) `formatOutput`'s two timestamp
+ *    repairs — the `AUDIT_TIMESTAMP_COLUMNS` pass and the
+ *    `normalizeSqliteDatetimeOutput` pass over `datetimeFields` — both run on
+ *    EVERY dialect, so the driver folds that `Date` at its own read boundary.
+ *    ⚠️ Exactly one `Date` shape still arrives here from `driver-sql`: an
+ *    INVALID `Date`, which has no canonical text to fold to and is handed
+ *    through unchanged by design ([ADR-0053 D-F3], `isoFromValidDate`). That
+ *    residue is what keeps this arm live rather than dead — see the #14078
+ *    section below, which is the arm that absorbs it.
+ *  - **`string`, already canonical ISO-8601 UTC** — `driver-sql` on every
+ *    dialect (SQLite and its `driver-turso` / `driver-sqlite-wasm` siblings
+ *    have always stored the text; Postgres and MySQL are folded to it at the
+ *    read door), and `driver-memory`. Passed through unchanged, so a canonical
+ *    row is a fixed point.
  *  - **anything else** a host stamps into the column — rendered as before.
  *
  * Why this is not `String(v)`: on a `Date`, `String` runs
@@ -1775,7 +1780,7 @@ export class RestServer {
         }
         // 3. Single-project default fallback. Registered by
         //    `createSingleEnvironmentPlugin()` so bare `/api/v1/data/...` URLs
-        //    (no `/projects/<id>` prefix, no hostname mapping, no header)
+        //    (no `/environments/<id>` prefix, no hostname mapping, no header)
         //    resolve to the lone project's kernel rather than the control
         //    plane.
         if (this.defaultEnvironmentIdProvider) {
@@ -2057,7 +2062,7 @@ export class RestServer {
     }
 
     /**
-     * [#3939] Enforce the deployment's batch-size cap on a bulk write route.
+     * [#3939] Enforce the configured batch-size cap on a bulk write route.
      * Returns `true` when a response was sent (the caller must return).
      *
      * The cap was declared in three places in `batch.zod.ts` (`.max(200)` on
@@ -2072,10 +2077,34 @@ export class RestServer {
      * own result), which turns a 10k-id body into 10k sequential engine
      * round-trips inside one request instead of one statement.
      *
-     * The cap is deployment policy — `RestServerConfig.batch.maxBatchSize`
-     * (1..1000, default 200) — so it lives here and the schemas carry shape
-     * only. One place decides it, and it is the place that knows the
-     * deployment's configured value.
+     * The cap is `RestServerConfig.batch.maxBatchSize` (1..1000, default 200),
+     * so it lives here and the schemas carry shape only: one place decides it,
+     * and it is the place that holds the constructed config.
+     *
+     * Reachability: EMBEDDER-ONLY (#15543, #16801). ⛔ It is NOT deployment
+     * policy — this docblock said exactly that until #16801, and no shipped
+     * boot path makes it true. A `RestServerConfig` is the ARGUMENT a host
+     * passes when it constructs the server, and there is exactly ONE door:
+     * `createRestApiPlugin({ api })` (`packages/rest/src/rest-api-plugin.ts`),
+     * whose `start()` is the only non-test site that reaches
+     * `new RestServer(...)`. Neither shipped boot path opens it with a `batch`
+     * config — `os serve` (`packages/cli/src/commands/serve.ts`) forwards
+     * exactly two keys out of the stack config's `api:` block
+     * (`api.enableProjectScoping`, `api.projectResolution`), and the dev plugin
+     * (`packages/plugins/plugin-dev/src/dev-plugin.ts`) calls
+     * `createRestApiPlugin()` with no config at all. ⇒ A CLI-started
+     * deployment always gets the schema default of 200, and no flag, config
+     * file or CLI option moves it.
+     *
+     * This is the recorded posture, not a gap awaiting a fix, and it is written
+     * the same way on the spec side — the `BatchEndpointsConfigSchema` docblock
+     * and the WHO CAN WRITE THIS CONFIG header in
+     * `packages/spec/src/api/rest-server.zod.ts`, plus the per-key REACHABILITY
+     * row in `packages/spec/liveness/batch_endpoints.json`. Keep the two
+     * wordings together: threading a `batch` config through a boot path would
+     * be a NEW authorable key, which the spec-side siblings were denied for
+     * want of measured demand, so reversing that is its own decision and
+     * ⛔ not a docblock's to take.
      */
     private enforceBatchSize(res: any, count: number, max: number, object?: string): boolean {
         if (count <= max) return false;
@@ -2760,22 +2789,23 @@ export class RestServer {
             // factories (`registerServiceFactory` throws "not supported"), so
             // absence is the only fault it could report anyway. It keeps the
             // previous quiet answer, unchanged.
+            //
+            // [#16013] The CLASSIFICATION below is one shared function, not two
+            // hand-written copies: `classifyAdmissionTenancyPosture` answers
+            // quiet `undefined` for the branded "never registered" (the
+            // supported no-tenancy composition, no posture-conditional refusal)
+            // and raises `AuthzStoreUnavailableError('tenancy', err)` for every
+            // other rejection — the same loud answer `wiredEngineOrLoud` gives
+            // the engine seam, carried to the door by the same nets, because
+            // the posture is an authorization INPUT and admission was never
+            // decided. ⛔ The WIRING branch is NOT shared and must not become
+            // so: which of the two wirings may be asked is this file's fact
+            // alone, for the reason spelled out in the `else if` below.
             let tenancyPosture;
             if (kernel && typeof kernel.getServiceAsync === 'function') {
-                try {
-                    tenancyPosture = effectiveTenancyPosture(await kernel.getServiceAsync('tenancy') as any);
-                } catch (err) {
-                    // Registered and unable to answer. The posture is an
-                    // authorization INPUT, so admission was never decided — the
-                    // same loud answer `wiredEngineOrLoud` gives the engine seam,
-                    // carried to the door by the same nets.
-                    if (!isServiceNotRegisteredError(err)) {
-                        throw new AuthzStoreUnavailableError('tenancy', err);
-                    }
-                    // Never registered ⇒ the supported no-tenancy composition:
-                    // quiet `undefined`, no posture-conditional refusal.
-                    tenancyPosture = undefined;
-                }
+                tenancyPosture = await classifyAdmissionTenancyPosture(
+                    () => kernel.getServiceAsync('tenancy') as any,
+                );
             } else if (this.tenancyServiceProvider) {
                 // [#15256 / 1A] The SINGLE-KERNEL branch — the wiring every
                 // deployment the open core builds actually runs, and the one
@@ -2793,16 +2823,9 @@ export class RestServer {
                 // rejection is the outage it is. The provider re-raises
                 // unbranded rejections for precisely that reason — see
                 // `rest-api-plugin.ts`.
-                try {
-                    tenancyPosture = effectiveTenancyPosture(
-                        await this.tenancyServiceProvider(environmentId) as any,
-                    );
-                } catch (err) {
-                    if (!isServiceNotRegisteredError(err)) {
-                        throw new AuthzStoreUnavailableError('tenancy', err);
-                    }
-                    tenancyPosture = undefined;
-                }
+                tenancyPosture = await classifyAdmissionTenancyPosture(
+                    () => this.tenancyServiceProvider!(environmentId) as any,
+                );
             }
             const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
             // [#6216] The anonymous contract IS the shared assembler's default
@@ -4497,9 +4520,19 @@ export class RestServer {
 
                         // Align auth route with the versioned base path if present.
                         // Auth is a control-plane concern, so use the unscoped base.
+                        //
+                        // [#16538] The strip names BOTH spellings, exactly as the MCP
+                        // sibling above does. It used to name only the retired
+                        // `/projects/:environmentId`, while `isScoped` — the condition
+                        // guarding this very branch — keys on `/environments/:environmentId`
+                        // alone. So the replace could never match where it ran: it returned
+                        // `basePath` unchanged and a scoped `/discovery` advertised
+                        // `/api/v1/environments/:environmentId/auth`, keeping both the scope
+                        // this comment says to drop and a literal, unsubstituted route
+                        // parameter. Pinned in `discovery-per-request-protocol.test.ts`.
                         if (discovery.routes.auth) {
                             const unscopedBase = isScoped
-                                ? basePath.replace(/\/projects\/:environmentId$/, '')
+                                ? basePath.replace(/\/(environments|projects)\/:environmentId$/, '')
                                 : basePath;
                             discovery.routes.auth = `${unscopedBase}/auth`;
                         }
@@ -4517,12 +4550,21 @@ export class RestServer {
                         // That move landed with NO edit in this block, which is
                         // exactly the property #6633 was built to provide.
                         //
-                        // A boot that mounted nothing (no `package` service ⇒
-                        // the registrar was never called) advertises nothing:
-                        // the protocol's service-presence `packages` entry is
+                        // A boot that mounted nothing advertises nothing: the
+                        // protocol's service-presence `packages` entry is
                         // deleted rather than left to promise a 404 — this
                         // server knows the mount fact, which is strictly better
-                        // knowledge than service presence.
+                        // knowledge than service presence. [#14503] The package
+                        // registrar's ONE route (`POST {base}/packages/publish`)
+                        // mounts on every boot since #7563, so `routes.packages`
+                        // is advertised on every boot at THIS server's base; the
+                        // family's reads and delete are served by the runtime
+                        // dispatcher's `/packages` domain, the single
+                        // implementation. (While the base was keyed on the
+                        // registrar's own `GET {base}/packages` copy — never
+                        // mounted on a stock boot, where the `package` service
+                        // registers after this plugin starts — a stock boot
+                        // advertised no `routes.packages` at all.)
                         const direct = this.getDirectMountRouteBases(
                             isScoped ? (req.params?.environmentId ?? ':environmentId') : undefined,
                         );
@@ -8045,9 +8087,45 @@ export class RestServer {
                     // stringified pair and match no transition key.
                     if (refuseRepeatedQueryParams(req, res, ['from'])) return;
                     const from = req.query?.from !== undefined ? String(req.query.from) : undefined;
-                    const ql = this.objectQLProvider
-                        ? await this.objectQLProvider(environmentId).catch(() => undefined)
-                        : undefined;
+                    // [#15405] The engine seam, reached the way its SIBLING at
+                    // `computeExecCtx` already reaches it — `wiredEngineOrLoud`
+                    // — so "no engine is wired" and "the engine WAS wired and
+                    // could not be resolved" stay two facts instead of one
+                    // `undefined`. The retired spelling this replaces:
+                    //
+                    //     this.objectQLProvider(environmentId).catch(() => undefined)
+                    //
+                    // ⚠️ That `.catch` was DEAD CODE until #13904. The shipped
+                    // provider used to be `try { … } catch { return undefined; }`
+                    // and so could not reject at all; the collapse happened one
+                    // layer earlier. #13904 made the provider re-raise PRECISELY
+                    // so a consumer could see the outage — and this consumer, the
+                    // slot's second and the one nobody enumerated, caught it
+                    // straight back. A wired-and-failing engine and a
+                    // never-registered one therefore both answered the
+                    // `404 NOT_FOUND · "Object not found"` twelve lines below:
+                    // this route lying about the cause during exactly the
+                    // incident it would be consulted in.
+                    //
+                    // ⛔ NOT `seamOrUndefined`. That helper SWALLOWS, and
+                    // swallowing at this seam IS the defect #13476 repaired —
+                    // its own docblock forbids routing the data-engine seam
+                    // back through it "to make the seams uniform".
+                    //
+                    // The wiring fact is the provider's PRESENCE, asked once and
+                    // never inferred from what it returned, so an UNWIRED engine
+                    // still reaches the 404 below byte-for-byte as before — and
+                    // so does a provider that RESOLVES `undefined`, which is the
+                    // seam contract declaring absence rather than failing.
+                    // `wiredEngineOrLoud` also invokes the provider
+                    // SYNCHRONOUSLY, so a host wiring a non-`async` provider —
+                    // which the seam's declared type cannot prevent — reaches the
+                    // same answer as one that rejects (#13280) instead of
+                    // escaping past a `.catch` that never came into existence.
+                    const ql = await wiredEngineOrLoud(
+                        Boolean(this.objectQLProvider),
+                        () => this.objectQLProvider!(environmentId),
+                    );
                     const schema = (ql as any)?.registry?.getObject?.(name);
                     if (!schema) {
                         // `{ error: { code, message } }`, the envelope
@@ -8205,14 +8283,14 @@ export class RestServer {
                         // inventing org RESOLUTION here, and this reads
                         // `tenantId` off the execution context `resolveExecCtx`
                         // already resolves, exactly as #8803 did for the audit
-                        // read. The raw tenant is right for a READ (the write
-                        // doors run it through `organizationIdForMetaWrite`
-                        // instead): `getMetaItemLayered`'s overlay layer is
-                        // org-scoped-first, THEN env-wide, so this is fail-open
-                        // in the safe direction — an org-less caller reads
-                        // exactly what it reads today, and an org-scoped caller
-                        // still falls back to the env-wide row. Nothing that
-                        // resolves today stops resolving.
+                        // read. [#14907] The CALLEE gates: `getMetaItemLayered`
+                        // resolves `organizationIdForMetaRead` AFTER its canonical
+                        // fold, so the tenant goes over RAW. ⛔ Pre-gating HERE, on
+                        // the unfolded `:type`, would be the #10340 defect. ⛔ And
+                        // the old "fail-open in the safe direction" reading is the
+                        // argument the predicate refutes: an org named on a type
+                        // the registry does not declare overridable resurrects the
+                        // phantoms #6190 stopped minting.
                         //
                         // Environment scoping still holds: it comes from WHICH
                         // protocol `resolveProtocol` hands back, not from the
@@ -8970,12 +9048,20 @@ export class RestServer {
         // Shared loader: fetch one job row by id. Used by the read routes, the
         // cancel route, and the background worker's durable cancellation checks.
         const loadImportJob = async (p: any, jobId: string, environmentId?: string, context?: any): Promise<any | undefined> => {
-            const r = await p.findData({
+            // [#16337] The FOURTH server-built `findData` literal in this file,
+            // and the one the card's three did not name — because nothing could
+            // see it: `p` is `any`, so this call was type-checked by nothing at
+            // all and its `$filter` / `$top` wire spellings cost no diagnostic.
+            // Annotating the literal is what puts it back under the same
+            // compiler check as its three siblings; canonicalising it is the
+            // same mechanical rewrite (`$filter`→`where`, `$top`→`limit`).
+            const jobLoadRequest: ServerScopedDataRequest<FindDataRequest> = {
                 object: IMPORT_JOB_OBJECT,
-                query: { $filter: { id: jobId }, $top: 1 },
+                query: { object: IMPORT_JOB_OBJECT, where: { id: jobId }, limit: 1 },
                 ...(environmentId ? { environmentId } : {}),
                 ...(context ? { context } : {}),
-            });
+            };
+            const r = await p.findData(jobLoadRequest);
             const rows = Array.isArray(r?.records) ? r.records
                 : Array.isArray(r?.data) ? r.data
                     : Array.isArray(r?.rows) ? r.rows
@@ -9340,7 +9426,19 @@ export class RestServer {
                     const offset = Math.max(0, Number(q.offset) || 0);
                     const jobsListRequest: ServerScopedDataRequest<FindDataRequest> = {
                         object: IMPORT_JOB_OBJECT,
-                        query: wireDialectQuery({ $filter: filter, $orderby: { created_at: 'desc' }, $top: limit, $skip: offset }),
+                        // [#16337] Canonical QueryAST, not the wire dialect this
+                        // literal used to speak (`$filter` / `$orderby` / `$top` /
+                        // `$skip`). The normalizer folds those onto exactly these
+                        // keys and the record sort form onto exactly this node
+                        // list, so the option bag reaching `engine.find` is
+                        // unchanged — pinned in `rest-server-canonical-query-ast.test.ts`.
+                        query: {
+                            object: IMPORT_JOB_OBJECT,
+                            where: filter,
+                            orderBy: [{ field: 'created_at', order: 'desc' }],
+                            limit,
+                            offset,
+                        },
                         ...(environmentId ? { environmentId } : {}),
                         ...(context ? { context } : {}),
                     };
@@ -9644,15 +9742,30 @@ export class RestServer {
                         const take = Math.min(chunkSize, limit - exported);
                         const findArgs: ServerScopedDataRequest<FindDataRequest> = {
                             object: objectName,
-                            query: wireDialectQuery({
-                                ...(filter ? { $filter: filter } : {}),
-                                ...(search ? { $search: search } : {}),
-                                ...(search && searchFields ? { $searchFields: searchFields } : {}),
-                                ...(orderby ? { $orderby: orderby } : {}),
-                                ...(expandFields.length > 0 ? { $expand: expandFields.join(',') } : {}),
-                                $top: take,
-                                $skip: skip,
-                            }),
+                            // [#16337] Canonical QueryAST. `expand` is spelled as
+                            // the relation map the AST declares rather than as the
+                            // comma list `$expand` accepted: the normalizer lowers
+                            // that list to `{name: {object: name}}`, which is what
+                            // this builds directly — same map, one fewer dialect.
+                            // (The nested `object` naming the RELATION rather than
+                            // its target is the normalizer's own lowering, kept
+                            // byte-identical here on purpose.)
+                            query: {
+                                object: objectName,
+                                ...(filter ? { where: filter } : {}),
+                                ...(search ? { search } : {}),
+                                ...(search && searchFields ? { searchFields } : {}),
+                                ...(orderby ? { orderBy: orderby } : {}),
+                                ...(expandFields.length > 0
+                                    ? {
+                                        expand: Object.fromEntries(
+                                            expandFields.map((rel): [string, { object: string }] => [rel, { object: rel }]),
+                                        ),
+                                    }
+                                    : {}),
+                                limit: take,
+                                offset: skip,
+                            },
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         };
@@ -9896,7 +10009,29 @@ export class RestServer {
                         });
                         return;
                     }
-                    const emailService = await this.emailServiceProvider(environmentId).catch(() => undefined);
+                    // [#15405] `seamOrUndefined`, not the retired
+                    // `.catch(() => undefined)`. That handler attaches to the
+                    // promise the call RETURNS, so it can only ever see a
+                    // REJECTION: a host wiring a non-`async` provider — which
+                    // the seam's declared type cannot prevent, and
+                    // `RestServer`'s constructor is the public wiring point —
+                    // throws while the expression is still being evaluated, so
+                    // there is no promise to attach to and the handler is never
+                    // reached (#13280).
+                    //
+                    // ⚠️ NOT reachable from the SHIPPED wiring: the provider
+                    // `rest-api-plugin.ts` hands over is declared `async`.
+                    // Repaired because it is the same retired spelling at an
+                    // embedder-reachable seam, ⛔ not on a claim of live impact.
+                    //
+                    // The ANSWER is deliberately unchanged — absorb to
+                    // `undefined` and take the 501 below. ⛔ Unlike the engine
+                    // seam, this one must NOT go loud: the
+                    // `if (!this.emailServiceProvider)` guard above has already
+                    // answered the wiring question, and "not configured" and
+                    // "configured and unusable" both mean this deployment cannot
+                    // send mail — one 501, no fact lost by folding them.
+                    const emailService = await seamOrUndefined(() => this.emailServiceProvider!(environmentId));
                     if (!emailService || typeof emailService.send !== 'function') {
                         res.status(501).json({
                             code: 'NOT_IMPLEMENTED',
@@ -10501,9 +10636,25 @@ export class RestServer {
                     // then the search predicate over displayFields. The
                     // search predicate uses `contains` on the first
                     // display field so non-indexed columns still work.
-                    const filters: any[] = [];
-                    if (Array.isArray(picker.filter)) filters.push(...picker.filter);
-                    if (q) filters.push({ field: displayFields[0], operator: 'contains', value: q });
+                    //
+                    // [#16581] …and then LOWER the composed rows to the filter
+                    // grammar the ingress parses. BOTH halves are the authoring
+                    // dialect `FormFieldPublicPickerSchema.filter` declares
+                    // (`{field, operator, value}`) — the declared rows because
+                    // an author wrote them, the search row because this route
+                    // built it in the same shape — and the normalizer refuses
+                    // that shape with `400 INVALID_FILTER`. So the endpoint
+                    // answered 400 for EVERY non-empty search, with or without a
+                    // declared `publicPicker.filter`; only the degenerate
+                    // no-filter call could succeed. `lowerViewFilterRules` is
+                    // the one-way translation (authoring dialect →
+                    // `FilterArray`) and lives at this door because this is the
+                    // door that speaks both; ⛔ the repair the ruling excludes
+                    // is teaching `findData` a second dialect.
+                    const rules: any[] = [];
+                    if (Array.isArray(picker.filter)) rules.push(...picker.filter);
+                    if (q) rules.push({ field: displayFields[0], operator: 'contains', value: q });
+                    const filters = lowerViewFilterRules(rules);
 
                     const context: any = {
                         permissions: ['guest_portal'],
@@ -10512,13 +10663,28 @@ export class RestServer {
 
                     const pickerRequest: ServerScopedDataRequest<FindDataRequest> = {
                         object: referenceTo,
-                        // [#15866] `filters` is a WIRE-only spelling the normalizer folds to
-                        // `where`, and no schema declares it — see {@link wireDialectQuery}.
-                        query: wireDialectQuery({
+                        // [#16337] Canonical QueryAST: `filters` → `where`,
+                        // `select` → `fields`, `sort` → `orderBy`. The normalizer
+                        // folds each of those aliases onto exactly these keys and
+                        // moves the value verbatim, so this is a spelling change
+                        // and nothing else.
+                        //
+                        // ⚠️ The VALUE on `where` is a `FilterArray`, not a
+                        // `FilterCondition`. #16337 left `ViewFilterRule` OBJECTS
+                        // here — the dialect `FormFieldPublicPickerSchema.filter`
+                        // declares — which the ingress refuses with
+                        // `400 INVALID_FILTER`; #16581 lowers them above, so what
+                        // arrives is the declared array grammar the normalizer
+                        // parses. `FilterCondition`'s `[key: string]: any` index
+                        // signature is why an array compiles against the slot at
+                        // all; that the value is now a filter the ingress ACCEPTS
+                        // is measured end-to-end, not asserted by the type.
+                        query: {
+                            object: referenceTo,
                             limit: maxResults,
                             offset: 0,
-                            filters,
-                            select: ['id', ...displayFields],
+                            where: filters,
+                            fields: ['id', ...displayFields],
                             // [#7485] Ordering is FIXED — first display field,
                             // ascending. This used to read `picker.sort`, a key
                             // `FormFieldPublicPickerSchema` (#7467) deliberately
@@ -10528,8 +10694,8 @@ export class RestServer {
                             // permanently-maintained public key on an
                             // UNAUTHENTICATED surface. A pre-schema stored row
                             // still carrying `sort` is IGNORED, not an error.
-                            sort: [{ field: displayFields[0], order: 'asc' }],
-                        }),
+                            orderBy: [{ field: displayFields[0], order: 'asc' }],
+                        },
                         ...(environmentId ? { environmentId } : {}),
                         context,
                     };
@@ -10537,7 +10703,23 @@ export class RestServer {
 
                     // Project the response server-side too — never trust
                     // that the driver respected `select`.
-                    const rows: any[] = Array.isArray(result?.data) ? result.data : Array.isArray(result?.items) ? result.items : [];
+                    //
+                    // [#16581] `records` FIRST, which is the key `findData`
+                    // actually returns (`{ object, records, total, hasMore }`)
+                    // and the order the other three read sites in this file
+                    // already use. This one read `data` / `items` and NOT
+                    // `records`, so against the real protocol it matched
+                    // nothing and the picker answered `200 {"data":[]}` — an
+                    // empty list for every search. Invisible until the filter
+                    // above stopped 400ing, and invisible to the sibling suite
+                    // because its `findData` double answers `{ data }`, a shape
+                    // the protocol does not produce. The legacy aliases stay so
+                    // those doubles and alternate protocols keep working.
+                    const rows: any[] = Array.isArray(result?.records) ? result.records
+                        : Array.isArray(result?.data) ? result.data
+                            : Array.isArray(result?.items) ? result.items
+                                : Array.isArray(result?.rows) ? result.rows
+                                    : Array.isArray(result) ? result : [];
                     const projected = rows.slice(0, maxResults).map((row: any) => {
                         const out: any = { id: row?.id };
                         for (const f of displayFields) {
@@ -13352,11 +13534,20 @@ export class RestServer {
         let packagesScoped: string | undefined;
         let datasources: string | undefined;
         for (const { method, path } of this.directMountedRoutes) {
-            // The package registrar's list route (`GET {base}/packages`) IS the
-            // surface base — recorded verbatim, recognised, never rebuilt.
-            if (method === 'GET' && path.endsWith('/packages')) {
-                if (path.includes(SCOPED_SEGMENT)) packagesScoped = path;
-                else packagesUnscoped = path;
+            // [#14503] The package registrar mounts ONE route,
+            // `POST {base}/packages/publish`, under the family base; the base
+            // is that recorded path minus its `/publish` segment — recognised,
+            // never rebuilt. (It used to be keyed on the registrar's own
+            // `GET {base}/packages` copy of the list route, removed by #14503:
+            // the dispatcher's `/packages` domain is the family's single
+            // implementation, and REST's contribution to the family is publish.)
+            const publishAt = path.endsWith('/packages/publish') && method === 'POST'
+                ? path.length - '/publish'.length
+                : -1;
+            if (publishAt > 0) {
+                const base = path.slice(0, publishAt);
+                if (path.includes(SCOPED_SEGMENT)) packagesScoped = base;
+                else packagesUnscoped = base;
             }
             // Every federation route sits under
             // `{base}/datasources/:name/external/…`; the advertised base is

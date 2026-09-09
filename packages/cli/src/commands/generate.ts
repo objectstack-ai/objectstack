@@ -17,9 +17,10 @@ import type { FieldType } from '@objectstack/spec/data';
 // `computeTenantField` — are spelled here in the driver's own terms ON TOP of
 // these, so the part that can be shared is shared and only the part that
 // genuinely lives on `driver-sql` is mirrored.
-import { isTenancyDisabled, isUniqueDeclared } from '@objectstack/spec/data';
+import { isTenancyDisabled, isUniqueDeclared, numericColumnFor } from '@objectstack/spec/data';
 import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
+import { findEmissionParseFailures } from '../utils/emitted-source-parses.js';
 
 // ─── Metadata Type Templates ────────────────────────────────────────
 
@@ -699,12 +700,87 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
     console.log(`  ${chalk.dim('File:')}  ${chalk.white(path.join(dir, fileName))}`);
     console.log('');
 
+    // Both emissions are rendered ONCE, here, and every branch below reuses
+    // them: the scaffold file, and the barrel re-export line. They are the two
+    // files one name reaches (#16541), and rendering them at the single point
+    // where the name has finished being derived is what lets one refusal cover
+    // all 14 emission sites across all 7 generators instead of 14 patches.
+    const content = generator.generate(name);
+    const exportLine = `export { default as ${toCamelCase(name)} } from '${moduleSpecifier}';`;
+
+    // ⛔ REFUSE rather than rewrite (#16541).
+    //
+    // This command ran no name validation at all, so a name that is legal as a
+    // NAME but not as an IDENTIFIER was interpolated straight into a binding
+    // position and written out under `exit 0` — `const foo.bar:
+    // Data.ServiceObject = {`, plus a matching barrel line: two files that are
+    // not TypeScript, from a command that reported success.
+    //
+    // The criterion is PARSEABILITY, not a charset. `findEmissionParseFailures`
+    // asks the compiler about the bytes above and about nothing else, which is
+    // why it also covers what a rule about identifier characters would miss —
+    // a reserved word is illegal as a `const` binding and legal as an
+    // `export { default as … }` alias, and `${toCamelCase(name)}Views` parses
+    // for a name that bare `${toCamelCase(name)}` refuses.
+    //
+    // Which names this command should ACCEPT — and whether it should normalise
+    // the ones it does, the way `os create` derives its identifier since
+    // #15892 — is an OPEN decision. Sanitising here would answer it by quietly
+    // widening tolerance, and a legal-looking identifier derived from a name
+    // that should have been refused is the worse of the two failures. So
+    // nothing is rewritten, acceptance is unchanged for every name that already
+    // produced parseable output, and the refusal is loud.
+    //
+    // Placed AHEAD of the dry-run branch on purpose: a preview that prints
+    // un-parseable TypeScript and exits 0 is the same defect in preview form.
+    const parseFailures = await findEmissionParseFailures([
+      { label: path.join(dir, fileName), source: content },
+      { label: path.join(dir, 'index.ts'), source: exportLine },
+    ]);
+    if (parseFailures.length > 0) {
+      printError('Refusing to generate — the TypeScript this would write does not parse');
+      console.log('');
+      console.log(`  ${chalk.dim('Name:')}       ${chalk.white(name)}`);
+      console.log(`  ${chalk.dim('Identifier:')} ${chalk.white(toCamelCase(name))}`);
+      console.log('');
+      for (const failure of parseFailures) {
+        console.log(`  ${chalk.white(failure.label)}`);
+        for (const diagnostic of failure.diagnostics) {
+          console.log(chalk.dim(`    ${diagnostic}`));
+        }
+      }
+      console.log('');
+      console.log(chalk.dim(
+        `  \`${CLI_ALIAS} g\` derives a TypeScript identifier from the name you give it, and`,
+      ));
+      console.log(chalk.dim(
+        '  this one is not something the compiler can parse — so what is listed above',
+      ));
+      console.log(chalk.dim(
+        '  would be written broken. Nothing was written.',
+      ));
+      console.log('');
+      console.log(chalk.dim(
+        '  It refuses instead of rewriting your name into a legal-looking identifier,',
+      ));
+      console.log(chalk.dim(
+        '  which would decide in silence which names this command accepts. Pick a name',
+      ));
+      console.log(chalk.dim(
+        `  that survives as an identifier — \`${CLI_ALIAS} g ${type} order_line\` and`,
+      ));
+      console.log(chalk.dim(
+        `  \`${CLI_ALIAS} g ${type} order-line\` both work, and both fold to \`orderLine\`.`,
+      ));
+      console.log('');
+      process.exit(1);
+    }
+
     if (flags.dryRun) {
       printInfo('Dry run — no files written');
       console.log('');
       console.log(chalk.dim('  Content:'));
       console.log(chalk.dim('  ' + '-'.repeat(38)));
-      const content = generator.generate(name);
       for (const line of content.split('\n')) {
         console.log(chalk.dim(`  ${line}`));
       }
@@ -725,8 +801,9 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
         fs.mkdirSync(fullDir, { recursive: true });
       }
 
-      // Write file
-      const content = generator.generate(name);
+      // Write file — the same `content` the parse check above accepted, ⛔ not
+      // a re-render: a second call to `generator.generate` would make the
+      // bytes that were checked and the bytes that land two different things.
       fs.writeFileSync(filePath, content);
       printSuccess(`Created ${path.join(dir, fileName)}`);
 
@@ -734,7 +811,6 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
       const indexPath = path.join(process.cwd(), dir, 'index.ts');
       if (fs.existsSync(indexPath)) {
         const indexContent = fs.readFileSync(indexPath, 'utf-8');
-        const exportLine = `export { default as ${toCamelCase(name)} } from '${moduleSpecifier}';`;
 
         if (!indexContent.includes(toCamelCase(name))) {
           fs.appendFileSync(indexPath, exportLine + '\n');
@@ -742,8 +818,7 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
         }
       } else {
         // Create barrel index
-        const exportLine = `export { default as ${toCamelCase(name)} } from '${moduleSpecifier}';\n`;
-        fs.writeFileSync(indexPath, exportLine);
+        fs.writeFileSync(indexPath, exportLine + '\n');
         printSuccess(`Created ${dir}/index.ts`);
       }
 
@@ -1047,9 +1122,18 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   richtext: 'TEXT',
   html: 'TEXT',
   markdown: 'TEXT',
-  number: 'DECIMAL(18,2)',
-  currency: 'DECIMAL(18,2)',
-  percent: 'DECIMAL(5,2)',
+  // #16318 — the NUMERIC family's seven members are RESOLVED, never written
+  // here. `DECIMAL(18,2)` / `DECIMAL(5,2)` were this file's own numbers and no
+  // other producer ever agreed with them: measured on live PostgreSQL 16.13,
+  // one object through all three producers, `number` was `real` on the driver,
+  // `numeric(18,2)` from this map and `numeric(8,2)` from the typescript format
+  // below — a THREE-way split, every arm of it lossy in a different direction.
+  // These entries exist so this map stays total over `FieldType`; the ANSWER is
+  // {@link numericSqlType} over `packages/spec`'s own table, which
+  // `SqlDriver.createColumn` reads too.
+  number: numericSqlType('number'),
+  currency: numericSqlType('currency'),
+  percent: numericSqlType('percent'),
   boolean: 'BOOLEAN',
   date: 'DATE',
   // #15521 — TIMESTAMPTZ, not TIMESTAMP, for the same reason and with the same
@@ -1125,7 +1209,7 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   // a design-token name) is a value the platform stores and a table generated
   // for the same object refuses.
   color: 'VARCHAR(255)',
-  rating: 'INTEGER',
+  rating: numericSqlType('rating'),
   // #14828 — `vector` is in STRUCTURED_JSON_TYPES, hence in the driver's
   // `JSON_COLUMN_TYPES`. `VECTOR` was also not portable: it needs pgvector and
   // does not exist on MySQL or SQLite.
@@ -1149,11 +1233,16 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   // `driver-sql`'s `JSON_COLUMN_TYPES`, which is seeded from this same class.
   checkboxes: 'JSONB',
   tags: 'JSONB',
-  // NUMERIC_VALUE_TYPES. `progress` takes `percent`'s narrower shape because it
-  // is the same 0-100 quantity; `slider` and `summary` are open-range.
-  slider: 'DECIMAL(18,2)',
-  progress: 'DECIMAL(5,2)',
-  summary: 'DECIMAL(18,2)',
+  // NUMERIC_VALUE_TYPES — #16318, resolved like the four above. `progress`
+  // used to take `percent`'s NARROWER shape here because it is the same 0-100
+  // quantity; it still shares `percent`'s answer, and the shared answer is now
+  // the wide one. Measured, and the reason the narrow one could not stay: a
+  // `percent` stores a 0-1 FRACTION unless the field declares `max > 1`
+  // (`percentScaleOf`), so the legitimate 33.333% the ruling names reaches the
+  // column as `0.33333`, and `numeric(5,2)` ROUNDED it to `0.33`.
+  slider: numericSqlType('slider'),
+  progress: numericSqlType('progress'),
+  summary: numericSqlType('summary'),
   // REFERENCE_VALUE_TYPES: the stored value is the related record's id, so the
   // width belongs to the TARGET's id column, never to this field. #14828 read
   // that derivation off the driver and applied it: the target's `id` column is
@@ -1197,6 +1286,50 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
  * nothing else.
  */
 const STRING_FAMILY_TYPES: ReadonlySet<string> = new Set(['email', 'url', 'phone', 'password']);
+
+/**
+ * The NUMERIC family's column, in this format's SQL vocabulary (#16318).
+ *
+ * ⛔ Never a transcription. The precision, the scale and the per-type answer
+ * all live in `packages/spec`'s {@link numericColumnFor}, which
+ * `SqlDriver.createColumn` reads too — that shared table IS the repair, and a
+ * literal `DECIMAL(18,2)` here would re-create the divergence one layer up.
+ * This function only spells the answer; it decides nothing.
+ *
+ * It throws rather than falling back, and the throw is the point: an undefined
+ * answer for one of the seven literals its callers pass would mean this file's
+ * vocabulary and `NUMERIC_VALUE_TYPES` have parted. A fallback string would
+ * emit a column that silently disagrees with the platform's — the exact defect
+ * #16318 closes — so the failure is made loud instead. `packages/spec`'s
+ * `numeric-column-representation.test.ts` fails first, in CI, in both
+ * directions.
+ */
+function numericSqlType(type: string): string {
+  const numeric = numericColumnFor(type);
+  if (numeric === undefined) {
+    throw new Error(
+      `generate: '${type}' is not in NUMERIC_VALUE_TYPES, so packages/spec states no column for it. ` +
+        'Add it to the numeric physical-representation table, or stop asking this resolver for it.',
+    );
+  }
+  return numeric.kind === 'integer' ? 'INTEGER' : `DECIMAL(${numeric.precision},${numeric.scale})`;
+}
+
+/**
+ * ADR-0113's physical NOT NULL, spelled the way `SqlDriver.createColumn`
+ * spells it: `(field as { storage?: { notNull?: boolean } }).storage?.notNull`.
+ *
+ * ⛔ NOT `required`. The driver was deliberately taken off that key, and its
+ * own arm records why: "`required` is the write-time contract enforced by the
+ * record validator at the engine seam, and binding the DDL to it made every
+ * post-deploy tightening a destructive migration". Both generators stayed on
+ * `required`, so a scaffolded table constrained columns the platform's own
+ * table leaves nullable — #16294 cause 1, which this unblocks. That card's
+ * other two causes are not addressed here.
+ */
+function declaredNotNull(field: unknown): boolean {
+  return (field as { storage?: { notNull?: boolean } } | undefined)?.storage?.notNull === true;
+}
 
 /**
  * The widest `varchar(n)` any dialect this platform speaks will declare —
@@ -1632,7 +1765,10 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
       // returns without emitting one and `schema-drift.ts`'s `fieldHasColumn`
       // answers false for it, so a column here is one the runtime never writes.
       if (sqlType === null) continue;
-      const notNull = fieldDef.required ? ' NOT NULL' : '';
+      // [#16318 / ADR-0113] The physical NOT NULL comes from the EXPLICIT
+      // storage constraint, never from `required`. See {@link declaredNotNull}
+      // for the driver's own recorded reason; ⛔ do not restate it here.
+      const notNull = declaredNotNull(fieldDef) ? ' NOT NULL' : '';
       fieldLines.push(`  "${fieldName}" ${sqlType}${notNull}`);
     }
 
@@ -1746,7 +1882,10 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
 
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
       const fType = String(fieldDef.type || 'text');
-      const required = fieldDef.required ? '.notNullable()' : '.nullable()';
+      // [#16318 / ADR-0113] `storage.notNull`, never `required` — the same
+      // move, for the same recorded reason, as the sql format above. The local
+      // name is kept so the emitter below reads unchanged.
+      const required = declaredNotNull(fieldDef) ? '.notNullable()' : '.nullable()';
 
       // #14829 - `multiple` before the type, exactly as `SqlDriver.createColumn`
       // does it: the driver short-circuits on the flag above its own per-type
@@ -1830,15 +1969,29 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
               : `table.string('${fieldName}', ${keyable})`;
           break;
         }
-        case 'number': case 'currency': case 'percent':
-        // #14657 — NUMERIC_VALUE_TYPES: `valueSchemaFor` gives all of these
-        // `z.number()`, and `driver-sql` gives them a float column.
-        case 'slider': case 'progress': case 'summary':
-          colMethod = `table.decimal('${fieldName}')`;
+        // #16318 — NUMERIC_VALUE_TYPES, resolved from `packages/spec`'s own
+        // physical-representation table, which `SqlDriver.createColumn` and the
+        // sql format above read too.
+        //
+        // ⚠️ `table.decimal(name)` with NO arguments — what this arm used to
+        // emit — is knex's `decimal(8, 2)`, not an unconstrained `numeric`.
+        // Measured on live PostgreSQL 16.13, that column REFUSED `1234567.89`
+        // outright: a money value the platform stores today could not be stored
+        // in a table this format generated for the same object. It never
+        // matched the sql format's own `DECIMAL(18,2)` either, so the two halves
+        // of one command disagreed with each other as well as with the driver.
+        case 'number': case 'currency': case 'percent': case 'rating':
+        case 'slider': case 'progress': case 'summary': {
+          const numeric = numericColumnFor(fType);
+          // ⛔ Not a fallback spelling — see {@link numericSqlType} for why an
+          // undefined answer here is made loud rather than papered over.
+          if (numeric === undefined) throw new Error(`generate: no column stated for numeric type '${fType}'`);
+          colMethod =
+            numeric.kind === 'integer'
+              ? `table.integer('${fieldName}')`
+              : `table.decimal('${fieldName}', ${numeric.precision}, ${numeric.scale})`;
           break;
-        case 'rating':
-          colMethod = `table.integer('${fieldName}')`;
-          break;
+        }
         case 'boolean':
         // #14657 — BOOLEAN_VALUE_TYPES; `driver-sql` shares one arm for the pair.
         case 'toggle':

@@ -5,6 +5,20 @@ description: Solution Blueprint protocol schemas
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
 
+Solution Blueprint Schema (ADR-0033 §4 — plan-first authoring)
+
+The structured-output target an AI agent emits for a *high-level* goal
+("build me a project-management system") instead of transcribing a field
+list. It is a **simplified proposal shape** — deliberately lighter than the
+full `ObjectSchema` / `ViewSchema` / `DashboardSchema`.
+The `apply_blueprint` tool expands each entry into a proper metadata body
+and stages it as a draft (so the per-type Zod schema still validates the
+real artifact at write time).
+
+The blueprint is **never persisted on its own**: the agent presents it for
+conversational confirmation/edit (cheap), and only on human approval does it
+batch-draft. This is the safety valve for low-specificity input.
+
 <Callout type="info">
 **Source:** `packages/spec/src/ai/solution-blueprint.zod.ts`
 </Callout>
@@ -30,7 +44,7 @@ const result = BlueprintAppSchema.parse(data);
 | **name** | `string` | ✅ | App machine name (snake_case) |
 | **label** | `string` | optional | App display label |
 | **icon** | `string` | optional | Lucide icon for the App Launcher |
-| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
+| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string; … }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
 
 ### Nested Shape: `BlueprintApp.nav[number]`
 
@@ -40,6 +54,7 @@ const result = BlueprintAppSchema.parse(data);
 | **target** | `string` | ✅ | Object or dashboard machine name to surface (snake_case) |
 | **label** | `string` | optional | Nav entry label (defaults to the target label/name) |
 | **icon** | `string` | optional | Lucide icon name for the nav entry |
+| **viewName** | `string` | optional | For type:"object" only — the `views[].name` this entry opens (e.g. "ticket_status_board"). Omit for the object's default list. SET it whenever this blueprint authors a kanban/calendar/gallery/gantt view the menu should reach: give the object ONE entry per view (a 「工单列表」 entry with no viewName plus a 「工单看板」 entry with viewName:"ticket_status_board"). Without it every entry on the same target opens the SAME default list, and a label/icon saying otherwise is decoration. |
 
 
 ---
@@ -173,6 +188,7 @@ const result = BlueprintAppSchema.parse(data);
 | **target** | `string` | ✅ | Object or dashboard machine name to surface (snake_case) |
 | **label** | `string` | optional | Nav entry label (defaults to the target label/name) |
 | **icon** | `string` | optional | Lucide icon name for the nav entry |
+| **viewName** | `string` | optional | For type:"object" only — the `views[].name` this entry opens (e.g. "ticket_status_board"). Omit for the object's default list. SET it whenever this blueprint authors a kanban/calendar/gallery/gantt view the menu should reach: give the object ONE entry per view (a 「工单列表」 entry with no viewName plus a 「工单看板」 entry with viewName:"ticket_status_board"). Without it every entry on the same target opens the SAME default list, and a label/icon saying otherwise is decoration. |
 
 
 ---
@@ -323,7 +339,7 @@ const result = BlueprintAppSchema.parse(data);
 | **name** | `string` | ✅ | App machine name (snake_case) |
 | **label** | `string` | optional | App display label |
 | **icon** | `string` | optional | Lucide icon for the App Launcher |
-| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
+| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string; … }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
 
 ### Nested Shape: `SolutionBlueprint.seedData[number]`
 
@@ -386,7 +402,7 @@ const result = BlueprintAppSchema.parse(data);
 | **name** | `string` | ✅ | App machine name (snake_case) |
 | **label** | `string \| null` | ✅ | App display label, or null |
 | **icon** | `string \| null` | ✅ | Lucide icon for the App Launcher, or null |
-| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label: string \| null; icon: string \| null }[] \| null` | ✅ | Navigation entries; null to auto-surface every created object and dashboard |
+| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label: string \| null; icon: string \| null; … }[] \| null` | ✅ | Navigation entries; null to auto-surface every created object and dashboard |
 
 
 ---

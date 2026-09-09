@@ -330,3 +330,65 @@ describe('[#9292] unscoped /discovery follows the shared resolution chain', () =
     expect(substance(served)).toEqual(substance(await tenantA.getDiscovery()));
   });
 });
+
+// ---------------------------------------------------------------------------
+// [#16538] `routes.auth` is a CONTROL-PLANE concern, so a SCOPED document must
+// still advertise it on the unscoped base.
+//
+// The handler states that contract two lines above the computation ("Auth is a
+// control-plane concern, so use the unscoped base") and then strips only the
+// retired `/projects/:environmentId` spelling — while `isScoped`, the very
+// condition guarding the branch, is true only for `/environments/:environmentId`.
+// So the strip could never match on the branch it guarded: `replace` returned
+// the string unchanged and the advertised auth route kept both the scope and a
+// literal, unsubstituted `:environmentId`.
+//
+// These pins live HERE and not beside the three `routes.auth` pins in
+// `packages/objectql/src/protocol-discovery.test.ts` because those measure the
+// PRODUCER (`ObjectStackProtocolImplementation.getDiscovery()`), which never
+// sees a base path; the defect is in this file's REST projection over it, and
+// `@objectstack/rest` is not reachable from `packages/objectql` (it would be a
+// dependency cycle — `@objectstack/rest` devDepends on `@objectstack/objectql`).
+// That is why no test had ever touched `routes.auth` on a scoped document, and
+// why the defect was green.
+// ---------------------------------------------------------------------------
+
+const AUTH_TENANT_SHAPE = { ...tenantAShape, services: [...tenantAShape.services, 'auth'] };
+
+describe('[#16538] scoped /discovery advertises routes.auth on the UNSCOPED base', () => {
+  it('strips the environment scope, leaving no :environmentId in routes.auth', async () => {
+    const { serve } = boot({
+      environments: { 'tenant-a': realProtocol(AUTH_TENANT_SHAPE) },
+      host: realProtocol(hostShape),
+    });
+
+    const served = await serve(SCOPED, { environmentId: 'tenant-a' });
+
+    // Control, first: this document really is the scoped one, and the routes
+    // that SHOULD carry the environment do carry the resolved id. Without it a
+    // green assertion below could just mean the unscoped branch was taken.
+    expect(served.routes.data).toBe('/api/v1/environments/tenant-a/data');
+    expect(served.scoping).toMatchObject({ scoped: true, environmentId: 'tenant-a' });
+
+    // Subject: auth is advertised on the unscoped base, as the comment above
+    // the computation says it is.
+    expect(served.routes.auth).toBe('/api/v1/auth');
+    // And separately: whatever base it lands on, it never advertises an
+    // unsubstituted route parameter. This is the half a client cannot use at
+    // all — `GET /api/v1/environments/:environmentId/auth` is not a URL.
+    expect(served.routes.auth).not.toContain(':environmentId');
+  });
+
+  it('keeps the unscoped document\'s auth route unchanged', async () => {
+    // The other branch of the same computation, pinned so the repair cannot be
+    // paid for out of the unscoped answer. Green before the fix and after —
+    // it is a regression guard, not the reproduction.
+    const { serve } = boot({
+      environments: { 'tenant-a': realProtocol(AUTH_TENANT_SHAPE) },
+      host: realProtocol(AUTH_TENANT_SHAPE),
+      withKernelManager: false,
+    });
+
+    expect((await serve(UNSCOPED)).routes.auth).toBe('/api/v1/auth');
+  });
+});

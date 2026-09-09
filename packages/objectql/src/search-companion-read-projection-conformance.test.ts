@@ -352,8 +352,13 @@ describe.each([
   it('door: the update response body', async () => {
     bindCompanionStamp(engine);
     const updated = await engine.update(CONTACT, { id: contactId, name: '张伟明' });
-    expect(updated?.name).toBe('张伟明');
-    expectNoCompanion(updated);
+    // [#16231] A by-id update answers the RECORD; the count limb is the
+    // predicate path's. Narrowed here so "the update response body" — the door
+    // this case is named for — is asserted as the row it is.
+    expect(typeof updated).toBe('object');
+    const updatedRow = updated as Record<string, any> | null;
+    expect(updatedRow?.name).toBe('张伟明');
+    expectNoCompanion(updatedRow);
   });
 
   it('door: records nested by expand', async () => {

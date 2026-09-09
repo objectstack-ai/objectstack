@@ -1,5 +1,203 @@
 # @objectstack/driver-sqlite-wasm
 
+## 17.4.0
+
+### Minor Changes
+
+- 7862fb7: `SqliteWasmDriver.initObjects` accepts `tenancy`, `indexes` and `lifecycle` in a **fresh object literal**, inherited from the widened `SqlDriver` — and that inheritance is now asserted rather than assumed.
+  
+  This package overrides neither `initObjects` nor `registerObjectMetadata`, so its published `.d.ts` re-declares none of them and the door it exposes is `SqlDriver`'s, imported from `@objectstack/driver-sql`. Measured on the built declarations: zero re-declarations of `initObjects`, `registerObjectMetadata`, `rotateShards`, `ensureShardTable` or `registerManagedObjectMetadata`. That is the opposite direction of the defect the sibling packages carried — `TursoDriver` overrode `initObjects` with a narrower literal and shadowed a base-class fix for five weeks — and it is recorded here because a consumer reading only this package's changelog would otherwise never learn its accept set moved.
+  
+  `src/sqlite-wasm-16711-inherited-object-def-keys.test.ts` pins the inheritance inside this package's own tsc program: the inherited parameter is not `any`, each key is present on the element type, a fresh literal carrying them compiles and is read at run time, and a misspelling is still `TS2353`. It goes red both ways — if the base narrows again, and if a future override here re-declares the door more narrowly.
+- b72226f: `SqlDriver.initObjects()` and `SqlDriver.registerObjectMetadata()` now declare the `indexes` key they have always read.
+  
+  Both entry points took `Array<{ name; fields?; tenancy? }>`, with no `indexes` in the type. The key was read out of those very objects one call deep anyway, through an `as any`, in `registerManagedObjectMetadata` — and the map it fills, `managedObjectIndexes`, is what `syncDeclaredIndexes` renders every declared UNIQUE from. So the driver's whole index-sync path was driven by a key its own signature said did not exist, while the sibling `detectManagedDrift` on the same class had always declared `indexes?: any[]`: the two halves of one class disagreed about the shape of the same input.
+  
+  That is the shape #4311 already addressed for `tenancy`, one key over, and the comment it left above `initObjects` described `indexes` word for word.
+  
+  **Why nothing tripped over it.** TypeScript's excess-property check fires on a fresh object literal and not on one bound to a variable first, so the same object was accepted or rejected by nothing but where it was spelled — `await driver.initObjects([{ ...bare, indexes: [] }])` was rejected with TS2353, `const o = { ...bare, indexes: [] }; await driver.initObjects([o])` was accepted, and the index was synced either way. Every caller happened to bind first, so the package typechecked green for a reason unrelated to correctness.
+  
+  **Why this matters beyond a compile error.** The loud symptom was a rejected correct call. The quiet one is the reachable branch: an author — or an AI — reading the signature concludes `indexes` is not accepted and drops the key, and a declared UNIQUE is then never synced, with no error at authoring time and no error at boot. The schema says those rows cannot collide; they can.
+  
+  What changed, all inside `SqlDriver`:
+  
+  - `registerObjectMetadata(objects)`, `initObjects(objects)` and the shared `registerManagedObjectMetadata(obj)` helper each gained `indexes?: any[]`, spelled exactly as `detectManagedDrift` already spells it.
+  - Every `(obj as any)` cast reading `indexes` off those parameters is gone — the one at the `managedObjectIndexes.set` site and the two inside `initObjects`' own create/alter path. The cast was the evidence that the declaration and the read disagreed; leaving any of them would have fixed the signature while keeping the "the type does not admit me but I read it anyway" path alive. That path is now closed on this parameter.
+  
+  **What the accept set does, precisely — it moves in both directions.** For a **fresh object literal**, which is what an author writes and what the excess-property check judges, this is purely a widening: `{ ...bare, indexes: [...] }` was rejected and is now accepted. For a **variable-bound** argument, which bypasses that check and is judged by ordinary assignability, it is a narrowing: `indexes` spelled as a record, as a `readonly` tuple (`as const`), or as `null` compiled under the previous signatures and is now rejected with TS2322. Measured in both directions, all three shapes, on this package's own `tsc`.
+  
+  That narrowing is deliberate, and the three shapes did **not** all behave the same way before it — the difference is worth stating exactly, because only one of them ever worked:
+  
+  - A **record** and **`null`** never survived the `Array.isArray(obj.indexes)` guard the driver has always applied. That author got no index and no diagnostic — silently, at run time. Rejecting those two at compile time is precisely the failure this change exists to make impossible.
+  - A **`readonly` tuple (`as const`)** is a different case, and the only one with anything to lose. `as const` is type-only: at run time the value is a plain array, `Array.isArray` returns `true`, and the index **was** synced. That caller compiled and worked, and is now rejected at compile time. Nothing about its run-time behaviour changed — the rejection is entirely on the type surface.
+  
+  No migration is owed even so. No caller in this repository is affected, and the shape could never have reached `detectManagedDrift` on the same class either, which publishes the very same `any[]` spelling for the very same key — so a `readonly` caller was already unable to use half of this driver's declared-index surface. A caller in that position spells the array without `as const`, or widens it at the call site.
+  
+  The disposition on that corrected ground, recorded here because the ground itself moved: **no `BREAKING` banner and no ADR-0087 disposition**, resting on grounds (i) and (iii) alone — zero affected callers, and the `any[]` spelling already published on `detectManagedDrift` for the same key on the same class. The ground that every newly rejected shape had already been discarded at run time is **not** among them: it is false for the `readonly` tuple, and nothing here leans on it.
+  
+  `@objectstack/driver-sqlite-wasm` is named because `SqliteWasmDriver extends SqlDriver` and overrides neither method, so both widened signatures land in its own published `.d.ts` and its consumers see the identical change. The two packages are in the same fixed version group, so this is a CHANGELOG effect rather than a version one.
+  
+  The `IDataDriver` contract itself did not move: `registerObjectMetadata?(schemas: unknown[])` in `@objectstack/spec` already accepted `unknown[]`, and `SqlDriver` narrowed it on its own. What grew is `SqlDriver`'s own published accept set.
+
+### Patch Changes
+
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [54bb2f1]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [001a83b]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [45cfa1b]
+- Updated dependencies [7862fb7]
+- Updated dependencies [1ca95df]
+- Updated dependencies [a646120]
+- Updated dependencies [2200f8e]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [8f2ecb3]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [51ae731]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [61821e5]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [4771bd9]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [33e939f]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [b72226f]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f89812e]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+- Updated dependencies [78bc4ad]
+  - @objectstack/spec@17.4.0
+  - @objectstack/driver-sql@17.4.0
+  - @objectstack/core@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

@@ -4,6 +4,12 @@ import { randomUUID } from 'node:crypto';
 import type { IHttpServer, IHttpRequest, IHttpResponse, IStorageService } from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
+// [#15999] The BRAND predicate, never `instanceof` — this error crosses package
+// boundaries and a monorepo resolves the same module through more than one path
+// (`src` under vitest aliases, `dist` under the published `exports`), so two
+// copies of the class make `instanceof` answer FALSE for a genuine instance.
+// See `packages/core/src/security/authz-store-unavailable.ts`.
+import { isAuthzStoreUnavailableError } from '@objectstack/core';
 import type {
   StorageMetadataStore,
   FileRecord,
@@ -77,6 +83,11 @@ export interface StorageRoutesOptions {
    *   - `deny` → 403 (session, but cannot read the parent record the file
    *     belongs to / is attached to, and is not the owner)
    *   - `allow` → a short-lived signed URL is issued
+   * A THROW is not a verdict: since #15999 an `AuthzStoreUnavailableError`
+   * raised by this authorizer is relayed as its declared `503`
+   * `SERVICE_UNAVAILABLE` rather than flattened into the `deny` 403 — the
+   * store was unreadable, so no verdict was ever reached. Every other throw
+   * still fails closed to `deny`.
    * A file with neither an attachments scope nor a field owner — an unclaimed
    * upload, an org logo — keeps the stable anonymous capability URL, as does
    * any file explicitly marked `acl: 'public_read'` (the opt-in for genuinely
@@ -167,7 +178,8 @@ export function registerStorageRoutes(
   // them start being gated by this change.
   //
   // Returns the signed-URL TTL to use, or `false` if a response was already
-  // sent (401/403) and the handler must stop.
+  // sent (401/403, and since #15999 the `503 SERVICE_UNAVAILABLE` an
+  // authorization-store OUTAGE is answered with) and the handler must stop.
   const authorizeDownload = async (
     file: FileRecord,
     req: IHttpRequest,
@@ -181,7 +193,35 @@ export function registerStorageRoutes(
     let verdict: FileReadVerdict;
     try {
       verdict = await opts.authorizeFileRead(file, req);
-    } catch {
+    } catch (err) {
+      // [#15999, ruling item 3] An UNREADABLE authorization store is an outage,
+      // not a verdict. `buildFileReadAuthorizer` already re-raises the brand
+      // rather than returning `'deny'` (#13279) — and until now this `catch`
+      // absorbed that re-raise one frame up and rendered it as this gate's own
+      // `403`, which is precisely the confusion #13279 exists to prevent: an
+      // outage answered as a capability denial, indistinguishable on the wire
+      // from a genuine refusal.
+      //
+      // RELAYED here rather than re-raised. A bare re-raise escapes into the
+      // route's own outer `catch`, which answers `500 INTERNAL` — no longer
+      // wrong-but-informative, merely opaque — and the shared render that would
+      // give an escaped envelope its declared status does not exist yet
+      // (#16545). A relay answers the DECLARED envelope before the throw
+      // escapes, so it is correct today and stays correct once #16545 lands;
+      // the same shape `badRequest` in `service-datasource`'s `admin-routes.ts`
+      // has used for a service-thrown `503`/`SERVICE_UNAVAILABLE` since #6504.
+      //
+      // `status` / `code` are read OFF the error rather than written as digits:
+      // the envelope this answers is the one the producer declared.
+      //
+      // ⛔ Scoped to the brand on purpose. Every other fault still falls to
+      // `'deny'` below — this door must never fall open, and widening the arm
+      // to "anything that carries a status" would let an unrelated coded throw
+      // decide the answer.
+      if (isAuthzStoreUnavailableError(err)) {
+        sendError(res, err.status, err.code, err.message);
+        return false;
+      }
       verdict = 'deny'; // a failed authz check must never fall open
     }
     if (verdict === 'unauthenticated') {

@@ -1,5 +1,201 @@
 # @objectstack/plugin-reports
 
+## 17.4.0
+
+### Minor Changes
+
+- afa3a26: fix(plugin-reports)!: a non-member schedule `timezone` no longer discards the cron expression, and a schedule already holding one stops instead of firing on a cadence nobody asked for (#16291)
+  
+  **BREAKING** for a deployment that already stores a report schedule with a cron expression and a `timezone` that is not an IANA member. Such a schedule is delivering today, on the wrong cadence; after this change it does not deliver at all until a human corrects the zone. It ships as `minor` under the lockstep launch-window convention (`scripts/check-changeset-no-major.mjs` refuses `major`); the version number is not the signal here, this entry is.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves. No key is retired, no def is unpublished, no schema shape changes, and `sys_report_schedule`'s declaration is untouched apart from a comment — so `objectstack migrate meta`, `spec-changes.json` and the upgrade guide have nothing to rewrite and no ledger entry would have anything to say. The obligation this change creates is DATA-SIDE and operational, not a code rewrite: an operator checks `sys_report_schedule.last_status` for `failed` and corrects the row's `timezone`, and the schedule resumes on the next sweep by itself. That channel is the row the operator is already looking at, which is strictly more precise than a migration-chain entry about a metadata surface that did not change. -->
+  
+  ## What an upgrading operator has to do, and how to find out
+  
+  If `sys_report_schedule` holds a row whose `timezone` is not a real IANA zone **and** whose `cron_expression` is set, the sweep now marks it `last_status: 'failed'` with a `last_error` naming the zone, and stops running it. Correct the `timezone` on that row; the schedule resumes on the next sweep with no re-enable and no second action, because `active` and the past `next_run_at` are deliberately left alone.
+  
+  Only rows written **before** `valueDomain: 'iana_time_zone'` landed on that column can be in this state, and the set cannot grow: measured on a real kernel with a real SQLite driver, `insert` into `sys_report_schedule` with `timezone: 'Mars/Olympus'` is already refused today — `VALIDATION_FAILED · Timezone must be a valid IANA time zone identifier, e.g. Europe/Zurich (got "Mars/Olympus")`. A set that cannot grow is still not an empty one, which is why this carries a banner rather than a shrug.
+  
+  ## The defect
+  
+  croner (10.0.1) answers a non-member zone in three different ways, and only the middle one was ever reached here: `new Cron(expr, { timezone })` **without a callback** validates the expression and lets any zone through, `nextRun()` on that instance then throws a `CronDate` conversion `TypeError`, and the callback form throws at construction. `scheduleReport`'s eager guard used the callback-less form, so the timezone half of its own input passed straight under a guard whose stated purpose was "a clear error at schedule time instead of a schedule that silently falls back to interval on sweep" — and `nextRunAt` caught that deferred throw and returned `from + interval_minutes`. A schedule authored as "every weekday 09:00 Asia/Shanghai" became "every 1440 minutes, forever", re-derived on every sweep, logged only as a complaint about a cron expression that was perfectly good.
+  
+  ## What changed
+  
+  - **The create-time guard now asks the right question.** `scheduleReport` consults `isValueDomainMember('iana_time_zone', …)` from `@objectstack/spec/shared` — the same predicate `sys_report_schedule.timezone`'s `valueDomain` declaration enforces on write — and refuses a non-member with `VALIDATION_FAILED: invalid timezone '<zone>': not a member of the 'iana_time_zone' value domain`. One answer at both doors, so this one cannot accept what the storage door refuses; it says so earlier and names the input that is actually wrong. It applies whether or not a `cron_expression` is set, because the storage gate does too. **This is not what makes the change breaking:** the storage door already refuses the same value today, so no reachable accept set narrows — what moves is which door answers and how clearly.
+  - **The row now stores the string the scheduler evaluates.** An empty `timezone` was stored verbatim while every `new Cron` call site read it as `UTC`; it is normalised to `UTC` on the way in.
+  - **A schedule already holding an unusable zone is stopped, not rescheduled.** It is not run and its `next_run_at` is not advanced; `last_status` / `last_error` carry the reason. Repairing the value automatically was rejected: the intended zone is not recoverable from a typo, and rewriting it to `UTC` would deliver at yet another set of wrong instants while the row looked healthy. Interval-only schedules are untouched — interval arithmetic never consults the zone, so a legacy bad value there still delivers on the cadence its author asked for.
+  - **Both fall-back warnings name both inputs.** The "no next occurrence" and the former "invalid cron" lines each mentioned only the expression, so either of them on a timezone fault sent an investigator to audit the half that was fine. They now carry the expression *and* the zone, and the second no longer asserts the expression is the broken one.
+
+### Patch Changes
+
+- be92d46: These fourteen packages now declare `repository.directory`, so their npm pages carry a working "source" deep link to their own directory in the monorepo.
+  
+  npm renders that field by concatenating it onto `repository.url`. None of these fourteen manifests carried a `repository` block at all, so every one of their npm pages offered no route from the package back to its code — not a broken link, no link. That is what this publishes: the block those pages read, naming each package's own directory.
+  
+  Nothing else about these packages changes. No export, no runtime behaviour, no dependency and no file in the tarball other than the manifest's own `repository` key. The version bump exists because the fix is only real once it is published: the field lives in the manifest npm serves, so a corrected manifest sitting in the repository leaves the package page exactly as wrong as it was.
+  
+  The rule behind it is now mechanical rather than remembered — `check:manifest-repository-directory` makes a publishable (non-private) workspace manifest declare the field naming its own directory, so a package added or moved after this cannot quietly go back to having no source link.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [159dbad]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [cbca47d]
+- Updated dependencies [acf4d38]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [51ae731]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [4ca358d]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [6acb37e]
+- Updated dependencies [7797102]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [0a038cc]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [97adce2]
+- Updated dependencies [a83482c]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [4771bd9]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [c930f85]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b3820c3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f89812e]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+- Updated dependencies [021a735]
+- Updated dependencies [7bdb163]
+  - @objectstack/spec@17.4.0
+  - @objectstack/core@17.4.0
+  - @objectstack/platform-objects@17.4.0
+
 ## 17.3.0
 
 ### Patch Changes

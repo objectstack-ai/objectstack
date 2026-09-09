@@ -69,6 +69,8 @@
 
 import { firstUndeclaredReference } from '@objectstack/formula';
 
+import { recordsOf } from './object-graph.js';
+
 type AnyRec = Record<string, unknown>;
 
 /** The node shape this module reads: `collectFlowGraphs`' element type, loosened. */
@@ -219,8 +221,13 @@ export function collectFlowVariableNames(
   }
 
   for (const graph of graphs) {
-    for (const item of graph.nodes) {
-      const flowNode = item as AnyRec;
+    // `recordsOf`, not a bare cast (#16751). Row 1 above guards each
+    // `flow.variables` member with `if (!item || typeof item !== 'object')`
+    // seven lines up; this loop did not, so a non-record region node made
+    // `flowNode.id` throw out of a collector that is contractually total.
+    // `collectFlowGraphs` only `Array.isArray`-checks a nested region's list,
+    // so the members reaching here carry no promise from the producer either.
+    for (const flowNode of recordsOf(graph.nodes)) {
       // Row 8 — the node id itself.
       if (typeof flowNode.id === 'string' && flowNode.id) names.add(flowNode.id);
       const rawConfig = flowNode.config;
@@ -266,6 +273,23 @@ const MAX_BARE_ROOTS = 64;
  * shadow goes unwarned. That is an UNDER-report, the safe direction for a new
  * warning, and it is the price of the pinned oracle — closing it would mean
  * consulting the AST, which is what re-opens the macro-variable false positive.
+ *
+ * ⛔ That blind spot is NOT confined to the colliding name, and reading it as
+ * name-local understates it (#16412). Those roots are declared `map`, so using
+ * one as the operand of an operator with no `map` overload makes the checker's
+ * FIRST error a `no such overload` rather than an `Unknown variable` — the
+ * oracle returns `null` on iteration 0 and this loop terminates before it has
+ * judged anything. Every shadow in that source is then lost, whatever it is
+ * named, and the source still compiles (the permissive env leaves those roots
+ * `dyn`, so no sibling diagnostic fires either). Measured, `status` and
+ * `config` both declared variables and both fields:
+ *
+ *     config == 'x' && status == 'y'   -> []           `status` LOST
+ *     status == 'y' && config == 'x'   -> ['status']   same names, other order
+ *
+ * The masking is positional, so the loop's own upper bound is not what limits
+ * it. See {@link firstUndeclaredReference}'s false-negative section for the
+ * mechanism and for why widening the oracle is a design decision, not a patch.
  */
 function bareRootsOf(source: string): string[] {
   const found: string[] = [];

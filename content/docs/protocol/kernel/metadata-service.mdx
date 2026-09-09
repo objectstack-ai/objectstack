@@ -254,11 +254,20 @@ parse-time error carrying the prescription.)
 new MetadataManager({
   datasource: 'default',
   cache: {
-    enabled: true,
     databaseLoader: { enabled: true, maxSize: 500, ttlMs: 60_000 },
   },
 });
 ```
+
+`cache.databaseLoader` is the only live member of the `cache` block. The outer
+`cache.enabled`, `cache.ttlSeconds` (formerly `cache.ttl`) and `cache.maxSize`
+were removed in #15624 (ADR-0049 enforce-or-remove): they were declared and
+documented but read by nothing — `MetadataManager` hands `cache.databaseLoader`
+and nothing else to the loader — so `cache: { enabled: false }` never switched
+anything off. Authoring any of them is now a compile-time and parse-time error
+carrying the prescription; the switch, TTL and cap that are honoured are
+`databaseLoader.enabled`, `databaseLoader.ttlMs` (milliseconds) and
+`databaseLoader.maxSize` (an entry count).
 
 The cache exposes `LRUCache.stats()` (`size` / `hits` / `misses` / `hitRate`) for metrics.
 

@@ -1780,11 +1780,14 @@ function collectDuplicateActionKeyErrors(config: ObjectStackDefinition): string[
  * (`@objectstack/types`) duck-types a RECORD-validation failure on that `name`
  * and would answer `400 VALIDATION_FAILED` + `fields[]` for it.
  *
- * ⛔ None of these is registered in the ADR-0112 ledger — no wire door raises
- * them (see the first member's note). Each has its classification row in
- * `packages/runtime/src/dispatcher-error-vocabulary.ts` as `door: 'none'` /
- * `verdict: 'boot-refusal'`; `check:dispatcher-error-vocabulary` holds the two
- * files equal in both directions.
+ * Every member is registered in the ADR-0112 ledger under `@objectstack/spec`
+ * (#16449, under the #16404 ruling: a `code` that ships in `dist` is the
+ * published face, door or no door — a consumer's `catch (e) { switch (e.code) }`
+ * pins the spelling the moment it ships). No wire door raises them —
+ * `defineStack` runs at authoring and boot time (see the first member's note)
+ * — so the registration widens `ErrorCode` without changing any HTTP body;
+ * `check:dispatcher-error-vocabulary` holds every `packages/spec/src` stamp
+ * site to that ledger.
  *
  * `issues` is HETEROGENEOUS across members, on purpose: the six semantic
  * refusals carry one string per finding, the schema arm carries the zod issue
@@ -1841,12 +1844,12 @@ abstract class StackRefusalError<TIssue = string> extends Error {
  * repo's rejection pins alike — reads structurally rather than by `instanceof`.
  * Export it the day a consumer needs the narrowed type, as its own change.
  *
- * ⛔ Not registered in the ADR-0112 ledger, for the same reason its two
- * precedents are not: no wire door raises it. `defineStack` runs at authoring
- * and boot time (`os validate`, `os build`, the `os serve` / `os migrate` host
- * configs and `DevPlugin`); no HTTP domain handler calls it. The classification
- * row lives in `packages/runtime/src/dispatcher-error-vocabulary.ts` as
- * `door: 'none'` / `verdict: 'boot-refusal'`.
+ * Registered in the ADR-0112 ledger under `@objectstack/spec` since #16449
+ * (the #16404 ruling; before it the code shipped unregistered — recorded as
+ * under-tiered on #14552 and not reopened). No wire door raises it:
+ * `defineStack` runs at authoring and boot time (`os validate`, `os build`,
+ * the `os serve` / `os migrate` host configs and `DevPlugin`); no HTTP domain
+ * handler calls it. The ledger row carries that reachability reading.
  *
  * Since #15963 the envelope half (`status`, `issues`) lives on
  * {@link StackRefusalError}, which every `defineStack` refusal now extends;

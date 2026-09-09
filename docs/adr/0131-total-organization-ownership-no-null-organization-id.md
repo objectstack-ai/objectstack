@@ -1,8 +1,6 @@
 # ADR-0131: Organization ownership is total — no NULL `organization_id`; declared metadata stays in code; a row exists only when an organization authored it
 
-**Status**: Proposed (2026-09-04) — awaiting the maintainer's hand-merge, which is itself the
-acceptance act for a governed surface (Prime Directive #14). ⛔ Nothing below is settled until
-this record merges; the implementation cards are cut **from** the merged ADR, never ahead of it.
+**Status**: Accepted (2026-09-04) — accepted by the merge that landed it on `main` ([#14976](https://github.com/objectstack-ai/objectstack/pull/14976), commit `0ed271574`), which is itself the acceptance act for a governed surface (Prime Directive #14). Execution is paused under #15193 and the maintainer's standing instruction; that pause is carried there, not by this status line.
 **Deciders**: ObjectStack maintainer, 2026-09-03/04, live chat on
 [#13564](https://github.com/objectstack-ai/objectstack/issues/13564), verbatim and untranslated,
 in the order the model was built: the premise 「我理解只有代码定义的元数据是跨租户的，对象、字段、视图等
@@ -825,9 +823,12 @@ stamp-and-backfill repair (#12929, #13180, #13527, #13572, #13565, #14726) and #
 - The issue body of #13564 cites the arm by a bare line number (7320) that had drifted by ~4,600 lines
   before the first census read it; on `origin/main` `2514d49f3` the
   arms are inside `applyTenantScope` (~12016–12066) and there are **two**. This record cites symbols.
-- `ensure-default-organization.ts` cites "ADR-0081 D1" for the Default Organization; in this
-  repository `docs/adr/0081` is the trusted React page tier — the "0081" is cloud's numbering. The
-  framework record is [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md).
+- `ensure-default-organization.ts` cites "cloud ADR-0081 D1" for the Default Organization; in this
+  repository `docs/adr/0081` is the trusted React page tier — the "0081" is cloud's numbering, and the
+  record is **cloud ADR-0081** (*Organization Management — Open Basics, Enterprise
+  `@objectstack/organizations`*, Accepted 2026-07-09), identified 2026-09-04, so the citations now carry
+  the qualifier rather than resolving here. The framework record is
+  [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md).
 - `resolve-authz-context.ts` already resolves positions **by name** (`{ name: { $in: grants.positions } }`
   against `sys_position`); D4 changes where that lookup goes first, not what it is keyed on.
 - `template-loader.ts` resolves by `(name, locale)`; a grep for `organization` / `tenant` in it returns

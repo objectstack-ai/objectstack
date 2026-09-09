@@ -368,6 +368,13 @@ describe("#9585 — the failed run's artefacts ride BOTH doors' 400 details", ()
         // `code` is promoted out of `details` into the declared field by the
         // shared envelope builder, never duplicated (`error-envelope.ts`).
         expect(res.response.body.error.details.code).toBeUndefined();
+        // [#15221] …and NOTHING else rides here. The resume door's 400 carries
+        // the engine's verdict (`runId` / `status` / `repairable`,
+        // `ResumeFailureDetailsSchema`); this door never resumes, so
+        // "repairable" has no referent and the member is ABSENT — absent
+        // means "not a resume", never "not repairable". Exact equality is the
+        // negative pin: a member added here by accident reds this line.
+        expect(res.response.body.error.details).toEqual({ errorMessage: AUTHOR_MESSAGE, summary: SUMMARY });
     });
 
     it('one failed run, two doors, ONE details payload — the drift pin', async () => {

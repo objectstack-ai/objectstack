@@ -34,7 +34,7 @@ import { resolveFilterSubtreeProvenance } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907) — read from the spec so this
 // transport's "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` admits, nor from the local driver's twin.
-import { AggregationFunction } from '@objectstack/spec/data';
+import { AggregationFunction, emptyGroupValueFor } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 // [#8413] What a `unique: true` FIELD becomes, from the one place that decides
 // it. `uniqueIndexesFromFields`' own contract is that it is "the ONLY place
@@ -1369,6 +1369,10 @@ export class RemoteTransport {
     this.assertSafeIdentifier(object);
 
     const selectParts: string[] = [];
+    // [#15546] Result columns whose NULL answer folds to the identity the
+    // platform declares for that aggregate over NOTHING — the twin of
+    // `SqlDriver.aggregate`'s `foldedOutput`. See {@link foldEmptyAggregateAnswers}.
+    const foldedOutput = new Map<string, number>();
 
     // [#6212] `groupBy` is `GroupByNode[]` — a UNION of a bare field name and a
     // structured `{ field, dateGranularity?, alias? }` entry — so reading it as
@@ -1501,6 +1505,13 @@ export class RemoteTransport {
       const alias = agg.alias || `${func}_${field === '*' ? 'all' : field}`;
       const argSql = lowering.distinct ? `distinct ${fieldSql}` : fieldSql;
       selectParts.push(`${lowering.sql}(${argSql}) AS ${this.aliasIdentifierSql(alias)}`);
+      // [#15546] What this aggregate answers over NOTHING, read from the policy
+      // rather than restated: `sum` (and the two counts, which never arrive as
+      // NULL) fold to `0`; `avg`/`min`/`max` have no identity and their NULL
+      // passes through. Keyed by the OUTPUT column — every aggregation here
+      // has one, defaulted or caller-supplied.
+      const identity = emptyGroupValueFor(func);
+      if (identity !== undefined) foldedOutput.set(alias, identity);
     }
 
     if (selectParts.length === 0) selectParts.push('*');
@@ -1524,7 +1535,7 @@ export class RemoteTransport {
 
     try {
       const result = await this.client!.execute({ sql, args });
-      return this.mapRows(result);
+      return this.foldEmptyAggregateAnswers(this.mapRows(result), foldedOutput);
     } catch (error: any) {
       if (
         error.message &&
@@ -1535,6 +1546,38 @@ export class RemoteTransport {
       }
       throw error;
     }
+  }
+
+  /**
+   * [#15546] Fold the NULL SQL answers for an aggregate over an all-NULL
+   * aggregand to the identity the platform declares for that aggregate over
+   * NOTHING — the twin of `SqlDriver.foldEmptyAggregateAnswers`, and the reason
+   * it is here: `TursoDriver` picks this compiler or the local one from `url`,
+   * so without it the SAME driver answered `sum` over a group whose column is
+   * NULL in every row as `0` locally and `null` remotely — the #5907/#6203
+   * shape, one query, two answers, decided by a connection string. Measured
+   * on the enrolled remote face (libsql IS SQLite) before this fold: `null`.
+   *
+   * `emptyGroupValueFor` (spec `data/aggregation-policy.ts`) is READ rather
+   * than restated, so `avg`/`min`/`max` — no identity over nothing — are never
+   * registered and their NULL reaches the caller untouched; `count` and
+   * `count_distinct` register but never arrive as NULL. Presentation, not
+   * compilation: the statement is unchanged. Only `null` folds — an
+   * `undefined` would mean the column was never projected, a different defect
+   * that must stay visible. Rows are mutated in place, as `mapRows` builds
+   * them. Pinned by the `sum(amount)` cases of `AGGREGATION_CASES`.
+   */
+  private foldEmptyAggregateAnswers(
+    rows: Record<string, unknown>[],
+    identities: Map<string, number>,
+  ): Record<string, unknown>[] {
+    if (identities.size === 0) return rows;
+    for (const row of rows) {
+      for (const [column, identity] of identities) {
+        if (row[column] === null) row[column] = identity;
+      }
+    }
+    return rows;
   }
 
   async create(object: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {

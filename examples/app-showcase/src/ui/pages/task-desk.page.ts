@@ -41,7 +41,7 @@ function Page() {
         </button>
       </header>
 
-      <ListView key={reload} objectName="showcase_task"
+      <ListView key={reload} data={{ provider: 'object', object: 'showcase_task' }}
         fields={['title', 'assignee', 'status', 'priority']}
         navigation={{ mode: 'none' }} onRowClick={(r) => setEditId(r.id)} />
 

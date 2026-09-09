@@ -322,8 +322,19 @@ for (const liveCell of [PG_CELL, MYSQL_CELL]) {
         // it physically too. Both directions measured, boundary included.
         const KT = `${T}_keyed`;
         // Hoisted (not an inline literal) the way #11374's `boundedObject()`
-        // is: `indexes` rides through `initObjects` beyond its narrow
-        // parameter type, exactly as the platform objects declare it.
+        // is, exactly as the platform objects declare it.
+        //
+        // ⚠️ The second half of what this comment used to say has EXPIRED and
+        // is kept here as a dated record rather than deleted: it read
+        // "`indexes` rides through `initObjects` beyond its narrow parameter
+        // type", and that was true — the signature declared no `indexes` and
+        // the driver read the key through an `as any` anyway. #16570 declared
+        // it and #16711 closed the class, so the hoist is no longer LOAD-BEARING
+        // here; an inline literal would compile today. It stays because
+        // mirroring #11374's authoring shape is why it was written that way in
+        // the first place, and because this suite is about column widths, not
+        // about parameter types. The pin that must stay inline is
+        // `sql-driver-16711-object-def-param-keys.test.ts`.
         const keyedObject = {
           name: KT,
           fields: {

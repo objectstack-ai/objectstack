@@ -1,12 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { IHttpServer, shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, rethrowAuthzStoreUnavailable } from '@objectstack/core';
-// [#7020] The read cohort names the READ-ONLY half of the ADR-0106 D4 exemption
-// on purpose: `OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES` became the derived union
-// (write gate ∪ read-only exemptions) under the 2026-08-10 ruling, while this
-// gate's cohort was ruled separately (#7033 / #7023) and pins write-only callers
-// OUT. Same value it read before — no re-ruling by side effect.
-import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
 import type { PackageService } from '@objectstack/service-package';
 // The declared envelope is written in ONE place for the whole platform (#3973),
 // and so (#8016) is the rule that reads an HTTP answer off a THROWN error.
@@ -23,45 +17,27 @@ import {
   INTERNAL_ERROR_MESSAGE,
 } from '@objectstack/types';
 import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
-import { readSingleQueryValue, repeatedQueryParamMessage } from './query-multiplicity.js';
-// [#9846] The declared meta-read shapes for the `protocol.getMetaItems` seam
-// below — imported so this module's idea of the request/response is the SPEC's
-// idea of it, not a hand-rolled restatement that the spec can drift away from
-// while this file keeps compiling green. Same discipline as the sibling
-// meta-read doors in `rest-server.ts` (#9805 / #9741).
-import type { GetMetaItemsRequest, GetMetaItemsResponse } from '@objectstack/spec/api';
-// [#9960] The declared uninstall shapes for the `protocol.deletePackage` seam
-// below, imported from the PRODUCER for the same reason the meta-read shapes
-// above come from the spec: so this module's idea of the request/response is
-// the one statement of that contract rather than a local restatement the
-// producer can drift away from while this file keeps compiling green. There is
-// no spec shape to import for this verb — `deletePackage` is deliberately
-// undeclared in `packages/spec` (zero external consumers, #9960) — so the
-// producer's own exported type IS the contract. Type-only: no runtime import of
-// `@objectstack/metadata-protocol` exists here, and this package still does not
-// depend on it at run time (see `query-multiplicity.ts` and `rest-server.ts`,
-// which duck-type the same seam for exactly that reason).
-import type { DeletePackageRequest, DeletePackageResponse } from '@objectstack/metadata-protocol';
 
 /**
  * [#7033 / #7023] The authorization gate for the REST package transport.
  *
  * `/packages` had TWO HTTP transports and both were ungated: the runtime
  * dispatcher domain (`packages/runtime/src/domains/packages.ts`) AND this
- * `@objectstack/rest` direct-mount registrar — which registers FIRST in the
- * production stack (first-match-wins, see the module note above), so for the
- * three routes both declare (`GET /packages`, `GET /packages/:id`,
- * `DELETE /packages/:id`) THIS transport is the one production actually serves.
- * Gating only the dispatcher would leave those routes open — the exact
- * one-transport gap #6603/#7019 paid for on `/meta`.
+ * `@objectstack/rest` direct-mount registrar. Gating only the dispatcher would
+ * have left this registrar's routes open — the exact one-transport gap
+ * #6603/#7019 paid for on `/meta`.
  *
- * Same ruled policy as the dispatcher (maintainer, 2026-08-09): a domain-wide
- * anonymous floor, `manage_metadata` for state-changing routes
- * (`POST /packages/publish`, `DELETE /packages/:id`), and the ADR-0106 D4 read
- * set (`studio.access` / `setup.access`) for reads (`GET /packages`,
- * `GET /packages/:id`). The public MARKETPLACE browse is a different surface
- * (`/marketplace/packages`, MarketplaceProxyPlugin) — these `/api/v1/packages`
- * routes are management, so denying anonymous here strands no public browse.
+ * [#14503] Since the registrar mounts ONE route — `POST /packages/publish`,
+ * the only verb+path here with no dispatcher twin — the gate has one cohort:
+ * the same ruled policy as the dispatcher (maintainer, 2026-08-09), a
+ * domain-wide anonymous floor, then `manage_metadata` for the state-changing
+ * verb. The read cohort (`studio.access` / `setup.access`, ADR-0106 D4) is
+ * enforced where the reads are served — the dispatcher domain is the single
+ * implementation of `GET /packages` and `GET /packages/:id` now, and
+ * `packages/runtime/src/domains/packages-capability-gate.test.ts` pins that
+ * cohort. The public MARKETPLACE browse is a different surface
+ * (`/marketplace/packages`, MarketplaceProxyPlugin) — this `/api/v1/packages`
+ * route is management, so denying anonymous here strands no public browse.
  *
  * The caller context is resolved through {@link PackageRoutesOptions.resolveExecutionContext},
  * which the composition wires to the `RestServer`'s own resolver (the SAME
@@ -75,13 +51,12 @@ async function refusePackageRequest(
   options: PackageRoutesOptions,
   req: any,
   res: any,
-  kind: 'read' | 'write',
 ): Promise<boolean> {
   // [#13279] The gate's OWN net. `rethrowAuthzStoreUnavailable` keeps the
   // fail-closed default for every fault except a permission-store outage, which
   // must reach `handlePackageRouteError` and be answered as the 503
   // `SERVICE_UNAVAILABLE` it is — never as a capability denial the caller could
-  // mistake for "you lack `studio.access`".
+  // mistake for "you lack `manage_metadata`".
   const ctx = options.resolveExecutionContext
     ? await options.resolveExecutionContext(req).catch(rethrowAuthzStoreUnavailable)
     : undefined;
@@ -99,15 +74,11 @@ async function refusePackageRequest(
     return true;
   }
   const held = new Set<string>(Array.isArray(ctx?.systemPermissions) ? ctx.systemPermissions : []);
-  const allowed = ctx?.isSystem || (kind === 'write'
-    ? held.has('manage_metadata')
-    : OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES.some((c) => held.has(c)));
+  const allowed = ctx?.isSystem || held.has('manage_metadata');
   if (!allowed) {
-    // Same wrapped envelope, one FORBIDDEN code, message per cohort — the sibling
-    // `/meta` REST capability gate's shape, built through the shared `sendError`.
-    sendError(res, 403, 'FORBIDDEN', kind === 'write'
-      ? 'Managing packages requires the `manage_metadata` capability.'
-      : 'Reading packages requires the `studio.access` or `setup.access` capability.');
+    // Same wrapped envelope, one FORBIDDEN code — the sibling `/meta` REST
+    // capability gate's shape, built through the shared `sendError`.
+    sendError(res, 403, 'FORBIDDEN', 'Managing packages requires the `manage_metadata` capability.');
     return true;
   }
   return false;
@@ -130,12 +101,13 @@ async function refusePackageRequest(
  * retry that cannot succeed, and it hides the one thing the caller needed to
  * act on (the code).
  *
- * It was also a disagreement rather than merely a bug. The dispatcher twin
- * (`packages/runtime/src/domains/packages.ts` → `errorFromThrown`) has always
- * read `.status` first and answered 409 for the same throw. Two doors serve
- * `/api/v1/packages`; **this** registrar mounts first in the production stack
- * (first-match-wins, see the module note above), so the wrong answer was the
- * live one.
+ * It was also a disagreement rather than merely a bug. The dispatcher's
+ * `/packages` domain (`packages/runtime/src/domains/packages.ts` →
+ * `errorFromThrown`) has always read `.status` first and answered 409 for the
+ * same throw, so the two doors that then served `/api/v1/packages` answered
+ * one refusal two ways. (Since #14503 the read and delete twins are gone from
+ * this registrar — the dispatcher domain is their single implementation — and
+ * the rule below governs the one route left, `POST /packages/publish`.)
  *
  * ## Why it delegates instead of mapping here
  *
@@ -163,13 +135,14 @@ async function refusePackageRequest(
  * predates this change and is unchanged by it (filed separately)". Filed as
  * #8086, and closed here.
  *
- * It was reachable, not theoretical, and was reproduced through this door
- * before being fixed — a real `ObjectQL` engine and a real
+ * It was reachable, not theoretical, and was reproduced through this
+ * registrar before being fixed — a real `ObjectQL` engine and a real
  * `ObjectStackProtocolImplementation` whose driver fails the `sys_metadata`
- * read the way a missing table does. `DELETE /api/v1/packages/:id` with no
- * `?version=` routes to `protocol.deletePackage`, whose FIRST database touch
+ * read the way a missing table does. The registrar's then-mounted
+ * `DELETE /api/v1/packages/:id` (removed by #14503) with no `?version=` routed
+ * to `protocol.deletePackage`, whose FIRST database touch
  * (`engine.find('sys_metadata', { where })`) sits outside that method's
- * per-item `try`, so the driver line propagates whole and arrived here:
+ * per-item `try`, so the driver line propagated whole and arrived here:
  *
  *     HTTP 500
  *     {"success":false,"error":{"code":"INTERNAL_ERROR",
@@ -180,9 +153,9 @@ async function refusePackageRequest(
  * `packages/runtime/src/http-dispatcher.ts`) has run exactly this expression
  * since #3867, and `rest-server.ts` runs the same predicate at three call
  * sites. #5437 / PR #5464 closed this class one seam over and never reached
- * this registrar, because it does not go through `resolveErrorResponse` at all.
- * Two doors serve `/api/v1/packages` and this one mounts FIRST in the
- * production stack, so the unfiltered answer was the live one.
+ * this registrar, because it does not go through `resolveErrorResponse` at all
+ * — and for `POST /packages/publish` this registrar is the only door, so an
+ * unfiltered answer here is the live one.
  *
  * Scoped to 5xx, deliberately: a 4xx message is a caller-facing answer by
  * design — the protocol's `[tenant_scope_required]` refusal names the very
@@ -199,77 +172,10 @@ async function refusePackageRequest(
  * the same predicate. Widening it HERE would be a new rule at one door and
  * would re-create the divergence this closes. The cure is option C — the
  * producer (`metadata-protocol`) not interpolating driver text into
- * client-facing messages at all — which is a separate card. Pinned as a live
- * case in `package-door-5xx-message-sanitization.test.ts` so it goes red the
- * day either lands.
+ * client-facing messages at all — which is a separate card. Pinned on the
+ * publish route in `package-door-5xx-message-sanitization.test.ts` so it goes
+ * red the day either lands.
  */
-/**
- * The fields a REGISTRY-sourced package entry is declared to carry on this
- * door: the installed-package record shape (`InstalledPackageSchema`,
- * `@objectstack/spec/kernel` — that schema is the authority; this list mirrors
- * it deliberately, so publishing a newly declared field here is a decision
- * rather than a side effect), plus `_diagnostics`, which is not part of the
- * record at all — `decorateMetadataItem` in `@objectstack/metadata-protocol`
- * grafts it onto every item leaving `getMetaItems`, and this door serves that
- * output. It is listed because it is MEASURED to be the only thing the
- * decoration adds for `type: 'package'`, not because the record declares it.
- */
-const REGISTRY_PACKAGE_RESPONSE_FIELDS = [
-  'manifest',
-  'status',
-  'enabled',
-  'installedAt',
-  'updatedAt',
-  'installedVersion',
-  'previousVersion',
-  'statusChangedAt',
-  'errorMessage',
-  'settings',
-  'upgradeHistory',
-  'registeredNamespaces',
-  '_diagnostics',
-  // [#14375] The ADR-0070 D2 writability verdict. Like `_diagnostics` this is
-  // NOT a record field: `getMetaItems({ type: 'package' })` stamps it on every
-  // registry item, and this door's contract is to CARRY it (the durable row is
-  // spread over the registry item, so a durable copy without the key must leave
-  // the verdict standing) — pinned in `package-list-writable-carry.test.ts`.
-  // Listed here because an allowlist that omitted it would drop the field
-  // SILENTLY, answering 200 with the verdict simply gone.
-  'writable',
-] as const;
-
-/**
- * Project a registry-sourced entry onto its declared fields before it is spread
- * into a response — defence in depth behind the `500 Converting circular
- * structure to JSON` repair, not the repair itself.
- *
- * The repair is at the PRODUCER: `SchemaRegistry.installPackage`
- * (`@objectstack/objectql`) stores a serializable projection of the manifest
- * instead of the caller's live `defineStack()` object, whose `plugins: [...]`
- * held initialised plugin instances and through them the engine — a cycle since
- * the engine grew `actionActivation -> store -> engine`. So this door has
- * nothing unserializable left to hand out.
- *
- * What the projection adds is the failure MODE for the next undeclared member:
- * `{ ...item }` let ONE bad member on ONE package fail the whole list for every
- * caller, and an explicit field list degrades the same member to a field this
- * response never mentions. Only the REGISTRY half is projected — the database
- * half below is `PackageService`'s own durable JSON, whose shape this door does
- * not own and must not narrow.
- *
- * Undefined fields are omitted, so the bytes are unchanged for every entry that
- * already served fine.
- */
-function toRegistryPackageResponse(item: unknown): Record<string, unknown> {
-  if (item === null || typeof item !== 'object') return {};
-  const src = item as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  for (const field of REGISTRY_PACKAGE_RESPONSE_FIELDS) {
-    if (src[field] !== undefined) out[field] = src[field];
-  }
-  return out;
-}
-
 function sendThrownError(res: any, error: unknown): void {
   const thrown = resolveThrownHttpError(error);
   // The dispatcher twin's expression, byte for byte — one rule, two doors.
@@ -342,16 +248,6 @@ function sendThrownError(res: any, error: unknown): void {
 }
 
 /**
- * The `?version=` multiplicity rule (#6307), now shared (#6877).
- *
- * Both helpers moved to `query-multiplicity.ts` when the same rule was applied
- * to `rest-server.ts`'s read points — ONE rule and one refusal message across
- * the package, rather than a second implementation free to drift. Behaviour
- * here is unchanged; only the definitions' home moved. The module's header
- * carries the full argument for why repetition is refused rather than resolved.
- */
-
-/**
  * Resolve the `package` service AT REQUEST TIME.
  *
  * [#7563] Deliberately a function and not a resolved instance. The composition
@@ -363,8 +259,18 @@ function sendThrownError(res: any, error: unknown): void {
  * follows registration order for plugins with no edge between them
  * (`plugin-order.ts`), so on every showcase-shaped deployment the service is
  * present at request time and absent at the one instant the mount decision was
- * taken. Resolving per request makes the answer independent of composition
- * order instead of silently encoding it.
+ * taken. Resolving per request is what lets the HANDLER answer for the
+ * deployment it is really on.
+ *
+ * ⚠️ [#14503] It never made the MOUNT decision independent of composition
+ * order, whatever this docblock used to claim: `registerPackageRoutes` still
+ * asked the resolver ONCE, at registration time, to decide whether to mount
+ * its three service-gated routes — so on that same showcase boot those three
+ * were never mounted at all (measured: 147 registrations with the service
+ * absent against 150 with it present; the dispatcher's `/packages` domain
+ * answered every read and delete). That gate is gone with the routes; the one
+ * route left mounts unconditionally and this resolver is consulted only per
+ * request.
  */
 export type PackageServiceResolver = () => PackageService | undefined;
 
@@ -372,45 +278,6 @@ export type PackageServiceResolver = () => PackageService | undefined;
  * Options for package route registration.
  */
 export interface PackageRoutesOptions {
-  /**
-   * Protocol service (ObjectStackProtocol) — provides access to in-memory
-   * SchemaRegistry packages loaded via defineStack()/AppPlugin at boot time,
-   * and (#2747) the full `deletePackage` uninstall semantics: package
-   * metadata rows, the durable `sys_packages` record, and the registered
-   * data-plane cleanups (e.g. plugin-security revoking the package's
-   * permission sets and bindings).
-   */
-  protocol?: {
-    /**
-     * [#9846] Request/response types are the SPEC's declared shapes, so a
-     * change to `GetMetaItemsRequest` (a narrowed `type` vocabulary, a newly
-     * required member, a renamed key) is a compile error HERE instead of a
-     * silent drift. The member stays OPTIONAL and both call sites keep their
-     * `typeof … === 'function'` feature-detection: `MetadataProtocol` declares
-     * this verb REQUIRED, and adopting that whole would change what this seam
-     * tolerates — a behaviour question, deliberately not answered here.
-     */
-    getMetaItems?(req: GetMetaItemsRequest): Promise<GetMetaItemsResponse>;
-    /**
-     * [#7780] `allTenants` is the explicit carrier for cross-tenant uninstall
-     * semantics; the protocol refuses a call that names neither it nor an
-     * `organizationId` (`TENANT_SCOPE_REQUIRED`, 400).
-     *
-     * [#9960] Request/response are the PRODUCER's declared shapes. The local
-     * restatement they replace named neither `organizationId` nor `keepData`
-     * and omitted `deleted` from the response — so the one key that decides an
-     * uninstall's blast radius had no word for it here, while the dispatcher
-     * twin sent that key on every org-scoped call. The member stays OPTIONAL
-     * and the call site below keeps its `typeof … === 'function'`
-     * feature-detection: the `protocol` service slot is deliberately
-     * uncontracted (`ServiceSlotContracts`), the spec's own `PackageProtocol`
-     * does not declare this verb at all, and registrants that carry no
-     * `deletePackage` are real — so requiring the member here would change what
-     * this seam tolerates, which is a behaviour question this card does not
-     * answer.
-     */
-    deletePackage?(req: DeletePackageRequest): Promise<DeletePackageResponse>;
-  };
   /**
    * [#7033 / #7023] Resolve the caller's execution context for a package route
    * request. Wired by the composition to the `RestServer`'s own resolver (the
@@ -427,103 +294,7 @@ export interface PackageRoutesOptions {
 }
 
 /**
- * [#9846] Compile-time pin for the `protocol.getMetaItems` seam above.
- *
- * WHAT IT CATCHES: that the option's request/response types are still the
- * SPEC's declared shapes rather than a hand-rolled restatement of them. The
- * defect this card closes is not a wrong call today — both call sites send a
- * valid request — it is that a LOCAL structural re-declaration lets the spec
- * move underneath this module (a narrowed `type` vocabulary, a newly required
- * member, a renamed key) while this file keeps compiling green. A test that
- * only drove today's call sites would not notice that; an EXACT type equality
- * does, because it fails both when someone re-hand-rolls the local shape and
- * when the spec's shape changes without this seam being re-read.
- *
- * WHY IT LIVES HERE and not in a `*.test.ts`: this package's `tsconfig.json`
- * EXCLUDES its `*.test.ts` / `*.spec.ts` files, and no sibling gate
- * type-checks them either, so a type-level assertion written in a test file
- * would be compiled by nothing — a phantom check that evaluates never and
- * stays green when deleted. It sits in compiled source instead, where the
- * package's own `typecheck` script (which CI runs) evaluates it.
- *
- * Mutual assignability would NOT do: the old local `{ type: string }` and
- * `GetMetaItemsRequest` are assignable in both directions, so an
- * assignability check passes on exactly the shape this card removed.
- */
-type ExactlyEqual<X, Y> =
-  (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2) ? true : false;
-
-/** Fails to instantiate unless its argument is exactly `true`. */
-type Pinned<T extends true> = T;
-
-type DeclaredGetMetaItems = NonNullable<NonNullable<PackageRoutesOptions['protocol']>['getMetaItems']>;
-
-/** The REQUEST type is exactly the spec's `GetMetaItemsRequest`. */
-export type _PinGetMetaItemsRequestIsSpecDeclared = Pinned<
-  ExactlyEqual<Parameters<DeclaredGetMetaItems>[0], GetMetaItemsRequest>
->;
-
-/** The RESPONSE type is exactly the spec's `GetMetaItemsResponse`. */
-export type _PinGetMetaItemsResponseIsSpecDeclared = Pinned<
-  ExactlyEqual<Awaited<ReturnType<DeclaredGetMetaItems>>, GetMetaItemsResponse>
->;
-
-/**
- * The member stays OPTIONAL. `MetadataProtocol` declares `getMetaItems` as a
- * REQUIRED member; adopting it whole would change what this seam tolerates
- * (both call sites feature-detect with `typeof … === 'function'`), which is a
- * behaviour question this card does not answer. This pin fails if a later
- * edit quietly makes the member required.
- */
-export type _PinGetMetaItemsStaysOptional = Pinned<
-  undefined extends NonNullable<PackageRoutesOptions['protocol']>['getMetaItems'] ? true : false
->;
-
-/**
- * [#9960] The same three pins for the `protocol.deletePackage` seam, and for
- * the same reason — with one difference worth stating: `getMetaItems` above is
- * pinned to the SPEC's declared shapes, while this verb has no spec
- * declaration, so the producer (`@objectstack/metadata-protocol`) is the
- * contract these pin against. That is the adjudicated shape of #9960, not an
- * oversight: declaring a protocol verb for a surface with zero external
- * consumers is a spec-seat decision nobody has asked for.
- *
- * WHAT THEY CATCH: that this option's request/response are still the producer's
- * types rather than a hand-rolled restatement of them. Exact equality, not
- * mutual assignability — the shape this card removed (`{ packageId; actor?;
- * allTenants? }`) is assignable to `DeletePackageRequest` in one direction, so
- * an assignability check would have passed on the very divergence that made
- * `organizationId` and `keepData` unsayable here.
- *
- * They live in compiled source, not a `*.test.ts`, for the reason spelled out
- * above the `getMetaItems` pins: this package's `tsconfig.json` excludes its
- * test files, so a type-level assertion written there is compiled by nothing.
- */
-type DeclaredDeletePackage = NonNullable<NonNullable<PackageRoutesOptions['protocol']>['deletePackage']>;
-
-/** The REQUEST type is exactly the producer's `DeletePackageRequest`. */
-export type _PinDeletePackageRequestIsProducerDeclared = Pinned<
-  ExactlyEqual<Parameters<DeclaredDeletePackage>[0], DeletePackageRequest>
->;
-
-/** The RESPONSE type is exactly the producer's `DeletePackageResponse`. */
-export type _PinDeletePackageResponseIsProducerDeclared = Pinned<
-  ExactlyEqual<Awaited<ReturnType<DeclaredDeletePackage>>, DeletePackageResponse>
->;
-
-/**
- * The member stays OPTIONAL — see the option's own note. This pin fails if a
- * later edit quietly makes it required, which would turn a protocol registrant
- * without the verb from a supported shape into a type error.
- */
-export type _PinDeletePackageStaysOptional = Pinned<
-  undefined extends NonNullable<PackageRoutesOptions['protocol']>['deletePackage'] ? true : false
->;
-
-/**
- * Register package management API routes
- *
- * Provides endpoints for publishing, retrieving, and managing packages.
+ * Register the REST package management route.
  *
  * Returns the routes it mounted, so the caller can record them on the
  * `RestServer` that owns the surface (#5822) — the returned array IS the array
@@ -531,40 +302,47 @@ export type _PinDeletePackageStaysOptional = Pinned<
  *
  * Routes:
  * - POST /api/v1/packages/publish - Publish a package to the marketplace registry
- * - GET /api/v1/packages - List all packages (merges registry + database)
- * - GET /api/v1/packages/:id - Get a specific package
- * - DELETE /api/v1/packages/:id - Delete a package
+ *
+ * ## One route, and why (#14503)
+ *
+ * This registrar used to mount three more — `GET /packages`,
+ * `GET /packages/:id` and `DELETE /packages/:id` — gated on the `package`
+ * service and documented as SHADOWING the dispatcher's twins at the same
+ * patterns. Neither half of that sentence held on a stock boot: the gate asked
+ * `resolvePackageService()` ONCE, here, inside `RestApiPlugin.start()`, and
+ * `objectstack serve` registers `PackageServicePlugin` AFTER
+ * `createRestApiPlugin`, so the three were never mounted at all (measured: 147
+ * registrations with the service absent against 150 with it present, the
+ * 3-route delta exactly) and the dispatcher's `/packages` domain answered
+ * every request — with its own 404 wording (`Package '<id>' not found`) and
+ * its own envelope (the bare row under `data`, no `{ package }` wrapper and no
+ * `source` stamp). Two implementations of one URL that had already diverged
+ * were ruled (maintainer, 2026-09-02, on #14503) to become one: the three
+ * routes are gone, `packages/runtime/src/domains/packages.ts` is the single
+ * implementation, and `packages/runtime/src/domains/packages-single-door.test.ts`
+ * pins the surviving door's wording and envelope so "which door answered"
+ * stays observable. The REST-only `source: 'registry' | 'database' | 'both'`
+ * stamp and the `?version=` read (with its repeated-parameter refusal) on
+ * those verbs went with the routes — recorded in the `@objectstack/rest`
+ * changeset as deliberately removed, not silently dropped.
+ *
+ * `POST /packages/publish` stays because it has NO twin (#7563): nobody else
+ * serves that verb+path, so when this registrar sat out, the request did not
+ * 404 — it was absorbed by the dispatcher's `/packages/:id` (with
+ * `id = "publish"`), and the router answered `405` with
+ * `Allow: DELETE, GET, HEAD, PATCH`: ANOTHER route's method set, describing
+ * verbs that would each operate on a package literally named `publish`. "Use
+ * a different method" is the one answer that misinforms here, because `POST`
+ * is the only verb this surface ever had. Mounting it always means the path
+ * has an owner that can tell the truth — the handler when a package service
+ * is reachable, and an honest 404 naming this surface when none is.
  *
  * Marketplace publish lives at `/packages/publish`, NOT at the bare
  * `POST /packages` (#3610): that verb+path is the dispatcher packages
- * domain's *install* route, and this registrar registers first in the
- * production stack (first-match-wins), so claiming it here silently
- * swallowed every `client.packages.install` call with a 400. The
- * dispatcher's own `POST /packages/:id/publish` (ADR-0033 draft publish)
- * is two segments — different shape, no clash.
- *
- * ## Which of these four mount, and why they differ (#7563)
- *
- * `POST /packages/publish` mounts UNCONDITIONALLY; the other three stay gated
- * on the `package` service. That asymmetry is not a compromise — it is the one
- * shape that is honest for each:
- *
- *  - The three gated routes have DISPATCHER TWINS at byte-identical patterns
- *    (`packages/runtime/src/domains/packages.ts` — `GET /packages`,
- *    `GET /packages/:id`, `DELETE /packages/:id`), mounted unconditionally.
- *    This registrar shadows them when it runs (first-match-wins). Mounting them
- *    without a `package` service would replace three WORKING routes with a
- *    degraded refusal, so absence keeps them where they are.
- *  - `POST /packages/publish` has NO twin. Nobody else serves that verb+path,
- *    so when this registrar sits out, the request does not 404 — it is absorbed
- *    by the dispatcher's `/packages/:id` (with `id = "publish"`), and the
- *    router answers `405` with `Allow: DELETE, GET, HEAD, PATCH`: ANOTHER
- *    route's method set, describing verbs that would each operate on a package
- *    literally named `publish` (#7563). "Use a different method" is the one
- *    answer that misinforms here, because `POST` is the only verb this surface
- *    ever had. Mounting it always means the path has an owner that can tell the
- *    truth — the handler when a package service is reachable, and an honest
- *    404 naming this surface when none is.
+ * domain's *install* route, and a registrar claiming it swallowed every
+ * `client.packages.install` call with a 400. The dispatcher's own
+ * `POST /packages/:id/publish` (ADR-0033 draft publish) is two segments —
+ * different shape, no clash.
  *
  * The degraded answer is 404 and not 503: a deployment that composed no
  * marketplace capability is not going to grow one on retry, and 503 invites
@@ -594,22 +372,21 @@ export type _PinDeletePackageStaysOptional = Pinned<
  *
  * Generic conditions reuse the STANDARD catalog rather than becoming registered
  * synonyms of it: a missing request field is `MISSING_REQUIRED_FIELD`, an absent
- * package is `RESOURCE_NOT_FOUND`, a request whose own parameters are
- * self-contradictory is `VALIDATION_ERROR` (the catalog's generic validation
- * failure, and what `HttpStatusErrorCodeMap` already names a bare 400 — see
- * `readSingleQueryValue`), an unexpected throw is `INTERNAL_ERROR`. Only
- * the package-specific outcomes are registered — `PACKAGE_MANIFEST_INVALID`,
- * `PACKAGE_PUBLISH_FAILED`, `PACKAGE_DELETE_PARTIAL`, `PACKAGE_DELETE_FAILED`.
+ * surface is `RESOURCE_NOT_FOUND`, an unexpected throw is `INTERNAL_ERROR`.
+ * Only the package-specific outcomes are registered — `PACKAGE_MANIFEST_INVALID`
+ * and `PACKAGE_PUBLISH_FAILED` on this route (`PACKAGE_DELETE_PARTIAL` and
+ * `PACKAGE_DELETE_FAILED` belonged to the delete route #14503 removed and stay
+ * in the ledger only as history).
  *
  * [#8016] "An **unexpected** throw is `INTERNAL_ERROR`" is the sentence above,
- * and it was right — the CODE had drifted wider than it. Every one of the four
+ * and it was right — the CODE had drifted wider than it. Every one of the
  * catch-alls treated *every* throw as unexpected, so a coded, status-carrying
  * refusal from below (`409 DESTRUCTIVE_CHANGE` out of the metadata protocol,
- * reached through `packageService.publish` / `.delete`) was answered as a
- * server fault. The word doing the work is "unexpected": a throw that DECLARES
- * its own status and a registered code is not unexpected, it is a refusal, and
- * it now leaves through {@link sendThrownError} carrying both. `INTERNAL_ERROR`
- * is still exactly what an unexpected throw gets — the sentence is unchanged
+ * reached through `packageService.publish`) was answered as a server fault.
+ * The word doing the work is "unexpected": a throw that DECLARES its own
+ * status and a registered code is not unexpected, it is a refusal, and it now
+ * leaves through {@link sendThrownError} carrying both. `INTERNAL_ERROR` is
+ * still exactly what an unexpected throw gets — the sentence is unchanged
  * because it was never the thing that was wrong.
  */
 export function registerPackageRoutes(
@@ -621,7 +398,7 @@ export function registerPackageRoutes(
   const packagesPath = `${basePath}/packages`;
 
   /**
-   * The always-mounted half — see "Which of these four mount" above.
+   * The one route this registrar mounts — see "One route, and why" above.
    */
   const publishRoute: DirectMountedRoute =
   // POST /api/v1/packages/publish - Publish a package to the marketplace
@@ -631,7 +408,7 @@ export function registerPackageRoutes(
     metadata: { summary: 'Publish a package to the marketplace registry', tags: ['packages'] },
     handler: async (req, res) => {
     try {
-      if (await refusePackageRequest(options, req, res, 'write')) return;
+      if (await refusePackageRequest(options, req, res)) return;
       // Resolved HERE, not at composition (#7563). Authorization runs first so
       // an anonymous prober cannot read a deployment's capability composition
       // off this seam.
@@ -716,377 +493,14 @@ export function registerPackageRoutes(
   };
 
   /**
-   * The service-gated half — mounted only when a `package` service is
-   * reachable, because each of these three SHADOWS a live dispatcher twin at
-   * the same pattern and a degraded shadow is worse than no shadow.
-   *
-   * These take the RESOLVED service, not the resolver: the gate below already
-   * decided on presence, and handing them an optional they would each have to
-   * re-check would add three branches no deployment can reach. Their bodies are
-   * unchanged from before #7563.
-   */
-  const serviceGatedRoutes = (packageService: PackageService): readonly DirectMountedRoute[] => [
-  // GET /api/v1/packages - List all packages (merges registry + database)
-  {
-    method: 'GET',
-    path: packagesPath,
-    metadata: { summary: 'List packages (registry + published)', tags: ['packages'] },
-    handler: async (_req, res) => {
-    try {
-      if (await refusePackageRequest(options, _req, res, 'read')) return;
-      // Merge two sources:
-      // 1. Registry packages (in-memory, loaded at boot via defineStack/AppPlugin)
-      // 2. Database packages (published via POST /packages)
-      const packagesMap = new Map<string, any>();
-
-      // Registry packages (via protocol service → SchemaRegistry).
-      //
-      // [#11130] NOT wrapped in a catch, deliberately — this is the OTHER half
-      // of the two-source merge, and it absorbed a failed registry read into a
-      // 200 for exactly as long as the durable half did. It used to carry:
-      //
-      //     } catch {
-      //       // Protocol unavailable — continue with database only
-      //     }
-      //
-      // which left nothing on the wire to separate "these are all the packages"
-      // from "these are the packages I could still see": `total` was reported as
-      // a complete count either way, and the surviving entries kept
-      // `source: 'database'`, which reads as PROVENANCE, not as a warning that
-      // the registry half is missing. Same standing family ruling as the durable
-      // half below — #10965 · #10677 / PR #10788 · #10789 / PR #10964 · #11063:
-      // **a read that could not happen must not be reported as a read that found
-      // nothing.**
-      //
-      // ⭐ The PRODUCER already declares its refusal, so this is #11063's edit
-      // and not a new posture. The live `protocol` service is
-      // `ObjectStackProtocolImplementation` (`packages/metadata-protocol`),
-      // whose `getMetaItems` sends every non-benign `sys_metadata` overlay read
-      // failure through `rethrowUnlessMetadataStoreUnprovisioned` →
-      // `metadataStoreUnavailableError`: `SERVICE_UNAVAILABLE` / 503 with an
-      // ADR-0112 status+code ON the error, the same envelope #10965 gave
-      // `PackageService.list()`. {@link sendThrownError} carries that status and
-      // code through the declared envelope rather than re-deciding them. The one
-      // benign reason a registry read can fail — `sys_metadata` not provisioned
-      // yet — is NOT a throw at all on that path (`isMissingTableError`), so
-      // first boot still lists the registry set.
-      //
-      // The `if` guard above is a DIFFERENT case and is untouched: a composition
-      // with no protocol service is an absence, not a failed read, and still
-      // answers 200 with the durable half alone.
-      //
-      // ⛔ The card's shape (c) — keep the 200 and make the tolerance visible
-      // with a partial-result marker — is a response-shape change and therefore
-      // a contract decision; it was NOT authorized by this card's grading, and
-      // no wire field is added here.
-      if (options.protocol && typeof options.protocol.getMetaItems === 'function') {
-        const result = await options.protocol.getMetaItems({ type: 'package' });
-        if (result?.items) {
-          // [#9846] The declared `GetMetaItemsResponse` types `items` as
-          // `unknown[]` — the spec says nothing about what a metadata item
-          // CONTAINS. The registry-specific keys read below (`manifest.id`)
-          // are not spec-declared, so the ELEMENT read stays runtime-shaped
-          // on purpose, exactly as the sibling meta-read doors do via
-          // `metaItemsArray` in `rest-server.ts`. The seam itself is now
-          // spec-typed; this coercion is confined to the read and changes
-          // no behaviour (a malformed entry still throws, as it did when the
-          // local shape claimed `any[]` — since #11130 it reaches the outer
-          // catch and is answered as the 500 a fault deserves, instead of
-          // being swallowed into a 200).
-          for (const item of result.items as any[]) {
-            const id = item.manifest?.id || item.id;
-            if (id) {
-              packagesMap.set(id, {
-                ...toRegistryPackageResponse(item),
-                source: 'registry',
-              });
-            }
-          }
-        }
-      }
-
-      // Database packages (published artifacts).
-      //
-      // [#11063] NOT wrapped in a catch, deliberately — this is the half that
-      // used to absorb a failed durable read into a 200. The absorbed failure
-      // left nothing on the wire to separate "these are all the packages" from
-      // "these are the packages I could still see": `total` was reported as a
-      // complete count either way, and the registrar-sourced entries kept
-      // `source: 'registry'`, which reads as PROVENANCE, not as a warning that
-      // the database half is missing. A refusal the caller never sees is the
-      // family this repo has already ruled on — #10965 · #10677 / PR #10788 ·
-      // #10789 / PR #10964: **a read that could not happen must not be reported
-      // as a read that found nothing.** Here it was one level up, in a
-      // consumer-side catch rather than in a flattener.
-      //
-      // What escapes is exactly ONE throw, and it is a declared refusal, not a
-      // fault: `PackageService.list()` catches its own driver faults and still
-      // answers `[]` (logging at error), and re-throws only the #10965 seam
-      // refusal — `SERVICE_UNAVAILABLE` / 503 with the ADR-0112 status+code on
-      // the error — raised when the storage seam ACCEPTED the query and
-      // returned no result set. The outer catch hands it to
-      // {@link sendThrownError}, which carries the producer's own status and
-      // code through the declared envelope rather than re-deciding them.
-      //
-      // ⭐ This ALIGNS the two read doors rather than inventing a posture:
-      // `GET /packages/:id` next door has never had an inner catch on its
-      // DURABLE read, so THAT half has answered this same 503 since #10965. The
-      // list door answering 200 while the detail door refused was the
-      // inconsistency, not the fix.
-      //
-      // ⚠️ [#11376] The qualifier is load-bearing and this note was written
-      // without it, as a claim about the whole door. It was false: the detail
-      // door's REGISTRY read carried its own `catch {}`, and swallowing there
-      // was worse than here — control fell through to a terminal
-      // `404 RESOURCE_NOT_FOUND` for a read that could not happen. #11376
-      // removed it. Both halves of both read doors now carry the producer's
-      // refusal, which is what makes the alignment claim above true.
-      //
-      // ⛔ The alternative the card sketched — keep the 200 and add a declared
-      // partial-result marker — is a response-shape change and therefore a
-      // contract decision; it was NOT authorized by this card's grading, and no
-      // wire field is added here.
-      const dbPackages = await packageService.list();
-      for (const pkg of dbPackages) {
-        const id = pkg.manifest?.id || pkg.id;
-        if (id) {
-          // Database entry takes precedence (has richer metadata from publish)
-          packagesMap.set(id, {
-            ...packagesMap.get(id),
-            ...pkg,
-            source: packagesMap.has(id) ? 'both' : 'database',
-          });
-        }
-      }
-
-      const packages = Array.from(packagesMap.values());
-      sendOk(res, { packages, total: packages.length });
-    } catch (error) {
-      sendThrownError(res, error);
-    }
-    },
-  },
-
-  // GET /api/v1/packages/:id - Get a specific package
-  {
-    method: 'GET',
-    path: `${packagesPath}/:id`,
-    metadata: { summary: 'Get a package by id', tags: ['packages'] },
-    handler: async (req, res) => {
-    try {
-      if (await refusePackageRequest(options, req, res, 'read')) return;
-      const packageId = req.params.id;
-      const requested = readSingleQueryValue(req.query?.version);
-      if (!requested.ok) {
-        sendError(res, 400, 'VALIDATION_ERROR', repeatedQueryParamMessage('version', requested.count));
-        return;
-      }
-      const version = requested.value || 'latest';
-
-      // Try database first (richer data from publish)
-      const pkg = await packageService.get(packageId, version);
-      if (pkg) {
-        sendOk(res, { package: { ...pkg, source: 'database' } });
-        return;
-      }
-
-      // Fall back to registry (in-memory loaded packages).
-      //
-      // [#11376] NOT wrapped in a catch, deliberately. This read used to carry
-      // its own inner catch:
-      //
-      //     } catch {
-      //       // Protocol unavailable
-      //     }
-      //
-      // and it is the WORSE half of this family, not a smaller one. Control
-      // fell straight through to the `sendError` below, so a registry read that
-      // COULD NOT HAPPEN was answered as `404 RESOURCE_NOT_FOUND` —
-      // `Package "<id>" was not found.` The list door's version of the same
-      // swallow (#11130) at least answered a 200 whose `total` merely
-      // UNDER-COUNTED; this one answers a TERMINAL NEGATIVE FACT, and a caller
-      // acts on it: an installer decides the package is not installed and
-      // offers to install it, a console hides the entry, a script branches to
-      // the create path. The producer's own words for this condition are the
-      // opposite — *"whether this item exists is unknown"*.
-      //
-      // Same standing family ruling as every sibling — #10965 · #10677 /
-      // PR #10788 · #10789 / PR #10964 · #11063 · #11130: **a read that could
-      // not happen must not be reported as a read that found nothing.**
-      //
-      // ⭐ It is #5532's defect resurfacing one layer up, which is why removing
-      // the catch is the whole repair. `ObjectStackProtocolImplementation`
-      // (`packages/metadata-protocol`) — the live `protocol` service this
-      // registrar is handed — was taught by #5532 NOT to report an unreadable
-      // `sys_metadata` as "that item does not exist"; this consumer-side catch
-      // then re-applied precisely that relabelling to the protocol's answer.
-      // The PRODUCER therefore already declares the refusal: every non-benign
-      // `sys_metadata` overlay read failure leaves `getMetaItems` through
-      // `rethrowUnlessMetadataStoreUnprovisioned` → `metadataStoreUnavailableError`,
-      // i.e. `SERVICE_UNAVAILABLE` / 503 with an ADR-0112 status+code ON the
-      // error — the same envelope #10965 gave `PackageService.get()` one line
-      // above. {@link sendThrownError} carries that status and code through the
-      // declared envelope rather than re-deciding them. The one benign reason a
-      // registry read can fail — `sys_metadata` not provisioned yet — is NOT a
-      // throw at all on that path (`isMissingTableError`), so first boot still
-      // resolves a registry hit.
-      //
-      // ⛔ What did NOT move. The defect is that a failed read was
-      // INDISTINGUISHABLE from an absent resource, so the repair has to keep
-      // the other direction intact, and both are pinned in
-      // `package-id-registry-read-refusal.test.ts`:
-      //   - a genuine MISS — both sources read fine and neither holds the id —
-      //     is still `404 RESOURCE_NOT_FOUND`, unchanged;
-      //   - a composition with NO protocol service is an absence, not a failed
-      //     read; the `if` guard below is untouched and that deployment still
-      //     reaches the same 404.
-      //
-      // ⛔ No wire field is added: the response shape is a contract decision
-      // and this card does not carry one.
-      if (options.protocol && typeof options.protocol.getMetaItems === 'function') {
-        const result = await options.protocol.getMetaItems({ type: 'package' });
-        const match = result?.items?.find((item: any) =>
-          (item.manifest?.id || item.id) === packageId
-        );
-        if (match) {
-          sendOk(res, { package: { ...toRegistryPackageResponse(match), source: 'registry' } });
-          return;
-        }
-      }
-
-      sendError(res, 404, 'RESOURCE_NOT_FOUND', `Package "${packageId}" was not found.`);
-    } catch (error) {
-      sendThrownError(res, error);
-    }
-    },
-  },
-
-  // DELETE /api/v1/packages/:id - Delete a package
-  {
-    method: 'DELETE',
-    path: `${packagesPath}/:id`,
-    metadata: { summary: 'Delete a package', tags: ['packages'] },
-    handler: async (req, res) => {
-    try {
-      if (await refusePackageRequest(options, req, res, 'write')) return;
-      const packageId = req.params.id;
-      // Refused BEFORE the branch below, because the branch below is exactly
-      // what a repeated `?version=` silently changed (#6307): the truthiness of
-      // `version` is what decides full uninstall vs version-scoped delete.
-      const requested = readSingleQueryValue(req.query?.version);
-      if (!requested.ok) {
-        sendError(res, 400, 'VALIDATION_ERROR', repeatedQueryParamMessage('version', requested.count));
-        return;
-      }
-      const version = requested.value;
-
-      // [#2747] A FULL uninstall (no version pin) goes through
-      // protocol.deletePackage — one uninstall semantic, not three dialects:
-      // it removes the package's metadata rows, drops the durable
-      // sys_packages record, and runs the registered data-plane cleanups
-      // (plugin-security revokes the package's permission sets/bindings —
-      // no ghost grants). A version-scoped delete keeps the narrow durable
-      // registry semantics, as does a deployment without the protocol.
-      if (!version && typeof options.protocol?.deletePackage === 'function') {
-        // [#7780] `allTenants: true` is stated, not implied. This registrar has
-        // no organization to resolve — `packages/rest` carries no
-        // `resolveActiveOrganizationId` and no org plumbing at all (the
-        // dispatcher twin owns that seam), so of the two doors the ruling
-        // allows — resolve an org, or declare the cross-tenant intent — only
-        // the second is available here.
-        //
-        // This preserves the behaviour this door has always had (a full
-        // uninstall through it is package-wide, which #7705 case 4 pinned on
-        // purpose); what changes is that the width is now DECLARED at the call
-        // site instead of being inferred from an argument nobody passed. The
-        // protocol now refuses the undeclared form outright, so the two doors
-        // can no longer disagree by accident.
-        const result = await options.protocol.deletePackage({ packageId, allTenants: true });
-        // Zero metadata rows is still a successful uninstall (e.g. a
-        // runtime-registered package that never published metadata) —
-        // only per-item failures make it a failure.
-        if (result.failedCount === 0) {
-          sendOk(res, {
-            message: `Deleted ${packageId}`,
-            deletedCount: result.deletedCount,
-            cleanups: result.cleanups,
-          });
-          return;
-        }
-        // Was a bare `{ success: false, failed, cleanups }` — a failure with no
-        // `error` at all, so a caller learned that it failed but never why. The
-        // per-item detail is preserved under the declared `error.details`.
-        sendError(
-          res,
-          400,
-          'PACKAGE_DELETE_PARTIAL',
-          `Deleting ${packageId} left ${result.failedCount} item(s) behind.`,
-          { details: { failed: result.failed, cleanups: result.cleanups } },
-        );
-        return;
-      }
-
-      const result = await packageService.delete(packageId, version);
-
-      if (result.success) {
-        sendOk(res, {
-          message: `Deleted ${packageId}${version ? `@${version}` : ''}`,
-        });
-        return;
-      }
-
-      // [#8275] A REPORTED delete failure is a DRIVER FAULT, and a driver fault
-      // is a **5xx**. The statement that failed is `DELETE FROM sys_packages
-      // WHERE id = ? [AND version = ?]`; a missing table, a lock timeout or a
-      // foreign-key restriction there is a SERVER fault, and answering `400`
-      // invited the caller to fix a request that was never the problem while
-      // hiding a real fault from every dashboard that buckets by status. The
-      // sibling of what #8131 fixed for `publish` and #8016 for the throw path.
-      //
-      // The CALLER's own errors on this route are unaffected and still 4xx: the
-      // repeated-`?version=` refusal above is checked before `delete` is called
-      // at all, `PACKAGE_DELETE_PARTIAL` keeps its 400 (per-item uninstall
-      // failures are a different outcome, not this one), and a coded refusal
-      // thrown from below `delete` is re-thrown by the producer and answered by
-      // {@link sendThrownError} with its own status — so a `409
-      // DESTRUCTIVE_CHANGE` is still a 409, not swept in here.
-      //
-      // The code stays `PACKAGE_DELETE_FAILED` rather than becoming
-      // `INTERNAL_ERROR`: it is registered, it says more than the generic
-      // fallback, and it discloses nothing. `envelopeViolations` imposes no
-      // code↔status agreement, so a registered code on a 5xx is conformant.
-      //
-      // Unlike `publish`, the MESSAGE needed no fixing and gets none: it is
-      // built here from the request's own `:id` and `?version=`, so it echoes
-      // only what the caller sent and has never carried driver text. The
-      // producer returns a bare flag with no message channel at all
-      // (`PackageDeleteResult`), which is what keeps that true — this route is
-      // a status-classification defect only, never a disclosure.
-      sendError(
-        res,
-        500,
-        'PACKAGE_DELETE_FAILED',
-        `Failed to delete ${packageId}${version ? `@${version}` : ''}.`,
-      );
-    } catch (error) {
-      sendThrownError(res, error);
-    }
-    },
-  },
-  ];
-
-  /**
    * ONE declaration of this registrar's surface (#5822): the array below is
    * what gets mounted on the host server AND what is handed back as the
    * description of what was mounted. There is no second table to keep in sync —
-   * see `direct-mount.ts` for why that identity is the whole point. The gate is
-   * inside the declaration rather than around the call, so "what was mounted"
-   * stays the array that mounted it on both branches.
+   * see `direct-mount.ts` for why that identity is the whole point. No service
+   * gate sits around it any more (#14503): the resolver is a per-request
+   * concern of the handler, never a mount-time verdict.
    */
-  const packageService = resolvePackageService();
-  const routes: readonly DirectMountedRoute[] = packageService
-    ? [publishRoute, ...serviceGatedRoutes(packageService)]
-    : [publishRoute];
+  const routes: readonly DirectMountedRoute[] = [publishRoute];
 
   return mountDirectRoutes(server, routes);
 }

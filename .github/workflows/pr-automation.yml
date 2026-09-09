@@ -1,8 +1,41 @@
 name: PR Automation
 
+# `edited` is load-bearing, not decoration (#16776). The PR BODY is an input to
+# the Check Changeset job below: `check-changeset-no-major.mjs` reads the
+# clause-② declaration out of `github.event.pull_request.body`, and that job
+# refuses a PR whose declaration is unreadable while a changeset grades `patch` a
+# package the diff grew. A verdict whose input is the body has to re-fire when
+# the body changes, for the reason this file already writes out twice for labels:
+# the payload is a SNAPSHOT, and `rerun_failed_jobs` replays that same frozen
+# payload, so without `edited` a red cleared by writing `Clause-②: no` in the
+# body could not be cleared at all without pushing a commit. Manufacturing a
+# `synchronize` to get a body read is not hypothetical -- PR #16342 took a
+# deliberate `git merge origin/main` after a body edit for exactly that, and the
+# run it produced is the first measured pass in that round where the gate read
+# the line.
+#
+# Sibling shape, deliberately copied rather than reinvented: this repo's two
+# other PR-body-scoped blocking checks -- `duplicate-fix-guard.yml` and
+# `partof-closing-keyword-guard.yml` -- already take `edited` and already carry
+# this argument.
+#
+# COST, measured rather than waved at (2026-09-01..09-08, this repo's own run
+# counts through `GET /actions/workflows/<file>/runs?event=pull_request`):
+# a workflow on the DEFAULT types (`check-links.yml`, [opened, synchronize,
+# reopened]) recorded 1967 runs; the two `edited`-subscribed workflows above
+# recorded 2524 each, agreeing exactly. So `edited` is ~557 events / 8 days
+# (~70/day), against this workflow's own 3684 -- about +15%. One Check Changeset
+# job is ~46s (job 101999797457). The two jobs above it are excluded from
+# `edited` below, so that +15% buys exactly one job and not three.
+#
+# NOT filtered to `github.event.changes.body`, and that is deliberate. Such a
+# filter would trim title-only edits, and its failure direction is the defect
+# coming back silently -- an expression that misjudges `changes.body` on an
+# empty previous body stops the gate re-reading and nothing says so. The volume
+# above does not buy that risk.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
 
 jobs:
   # ===========================================================================
@@ -96,7 +129,14 @@ jobs:
     name: Check PR Size
     # A `labeled`/`unlabeled` event cannot change this job's input (the diff),
     # so running it there recomputes the same answer for a fee. See above.
-    if: github.event.action != 'labeled' && github.event.action != 'unlabeled'
+    # `edited` (#16776) is excluded by the SAME sentence and not by a new one: a
+    # title or body edit moves no file either. Excluding it also keeps this job's
+    # behaviour byte-identical to what it was before `edited` was subscribed --
+    # the trigger was added for the changeset job's body reading and buys one job.
+    if: >-
+      github.event.action != 'labeled'
+      && github.event.action != 'unlabeled'
+      && github.event.action != 'edited'
     runs-on: ubuntu-latest
     permissions:
       # `contents: read` is for the checkout the label writer needs. Declaring
@@ -159,10 +199,15 @@ jobs:
     # scans only `needs.*.outputs.*` reads, so this one is out of its scope and
     # has to state its intent by hand.)
     needs: pr-size
+    # `edited` excluded for the same reason as the size job above (#16776): the
+    # path labels are a function of the changed FILES, which a body or title edit
+    # does not move. The `edited` trigger was added for the Check Changeset job's
+    # body reading, and nothing here reads the body.
     if: >-
       !cancelled()
       && github.event.action != 'labeled'
       && github.event.action != 'unlabeled'
+      && github.event.action != 'edited'
     runs-on: ubuntu-latest
     permissions:
       contents: read

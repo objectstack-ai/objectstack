@@ -420,7 +420,7 @@ never crosses HTTP. The refusal is emitted as the flat body shown above, and
     "details": {
       "limit": 1000,
       "window": "1m",
-      "retry_after": 45,
+      "retryAfterSeconds": 45,
       "quota_reset": "2024-01-16T14:31:00Z"
     }
   }
@@ -528,7 +528,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
     "message": "Service temporarily unavailable",
     "details": {
       "reason": "database_maintenance",
-      "retry_after": 300,
+      "retryAfterSeconds": 300,
       "estimated_completion": "2024-01-16T15:00:00Z"
     }
   }
@@ -652,7 +652,7 @@ Content-Type: application/json
     "details": {
       "limit": 1000,
       "window": "1m",
-      "retry_after": 45,
+      "retryAfterSeconds": 45,
       "quota_reset": "2024-01-16T14:31:00Z",
       "upgrade_url": "https://app.acme.com/billing/upgrade"
     },
@@ -736,7 +736,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
       if (!response.ok) {
         // Check if error is retryable
         if (data.error.code === 'RATE_LIMIT_EXCEEDED') {
-          const retryAfter = data.error.details.retry_after || 1;
+          const retryAfter = data.error.details.retryAfterSeconds || 1;
           await sleep(retryAfter * 1000);
           continue;
         } else if (data.error.code === 'INTERNAL_ERROR') {

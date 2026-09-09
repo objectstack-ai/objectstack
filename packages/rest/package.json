@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/rest",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "ObjectStack REST API Server - automatic REST endpoint generation from protocol",
   "type": "module",
@@ -21,7 +21,8 @@
   "scripts": {
     "build": "tsup --config ../../tsup.config.ts && node ../../scripts/check-dts-emitted.mjs",
     "dev": "tsc -w",
-    "test": "vitest run",
+    "test": "vitest run --project local",
+    "test:repo": "vitest run --project repo",
     "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/rest --project tsconfig.test.json",
     "gen:test-typecheck-debt": "tsx ../../scripts/check-test-typecheck.mts --update --package packages/rest --project tsconfig.test.json",
     "typecheck": "tsc --noEmit && pnpm check:test-typecheck"
@@ -49,7 +50,7 @@
     "@types/node": "^26.2.0",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "objectstack",

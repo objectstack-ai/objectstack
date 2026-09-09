@@ -323,6 +323,20 @@ export const ShowcaseTranslationBundle = {
           kpi_paid_rate: { title: 'Paid Rate' },
           table_rate_by_status: { title: 'Paid Rate by Status' },
         },
+        // The filter bar drawn above the widgets — declared surface since
+        // `dashboards.<name>.globalFilters` (#16772), keyed by the filter's
+        // `name`; static options keyed by their `value`.
+        globalFilters: {
+          region: { label: 'Region', options: { amer: 'AMER', emea: 'EMEA', apac: 'APAC' } },
+        },
+      },
+      showcase_ops_dashboard: {
+        globalFilters: {
+          task_status: {
+            label: 'Task Status',
+            options: { backlog: 'Backlog', todo: 'To Do', in_progress: 'In Progress', in_review: 'In Review', done: 'Done' },
+          },
+        },
       },
     },
   },
@@ -972,6 +986,20 @@ export const ShowcaseTranslationBundle = {
         widgets: {
           kpi_paid_rate: { title: '已付比例' },
           table_rate_by_status: { title: '各状态已付比例' },
+        },
+        // Born under the ratchet with `dashboards.<name>.globalFilters`
+        // (#16772): the filter label and its static option labels are
+        // declared surface now, so they are translated at birth.
+        globalFilters: {
+          region: { label: '区域', options: { amer: '美洲', emea: '欧洲、中东和非洲', apac: '亚太' } },
+        },
+      },
+      showcase_ops_dashboard: {
+        globalFilters: {
+          task_status: {
+            label: '任务状态',
+            options: { backlog: '待办池', todo: '待处理', in_progress: '进行中', in_review: '审核中', done: '已完成' },
+          },
         },
       },
     },

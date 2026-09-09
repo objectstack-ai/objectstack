@@ -106,9 +106,19 @@ export const SysImportJob = ObjectSchema.create({
     //   - the landed text declarations for the same value class:
     //     `sys_metadata_audit.actor`, `sys_metadata_commit.actor` and
     //     `sys_view_definition.owner` all declare `maxLength: 255`.
-    // The floor is cleared with room to spare: a minted platform id is 26
-    // characters (measured on #11431, where honouring a bound below that made a
-    // column structurally unable to hold any id at all).
+    // [#16410] There is no fixed "floor" to clear, because an id has no fixed
+    // width. `driver-sql` mints `nanoid(DEFAULT_ID_LENGTH)` — a per-driver
+    // constant — and `driver-memory` mints no fixed width at all, while a
+    // caller-SUPPLIED id is stored verbatim at whatever width the caller chose,
+    // so nothing on the write path bounds one. 255 is safe not as headroom over
+    // some id width but by the referenced-column transitivity derived above: it
+    // is the width of the column this value is COPIED FROM. Read the width
+    // claim where it is maintained — `driver-sql`'s `[#15522]` note beside
+    // `DEFAULT_ID_LENGTH`, measured there against a live driver — never a number
+    // restated here; a restated number is exactly how this sentence came to
+    // assert 26. (#11431 is the same trap from the other side: honouring a
+    // declared bound BELOW what a driver mints makes a column structurally
+    // unable to hold any id at all.)
     // 255 is also <= the 768-character utf8mb4 key ceiling, so the
     // `(created_by, created_at)` index below is expressible on MySQL — which is
     // the whole point: unbounded, this column was emitted TEXT and MySQL refused

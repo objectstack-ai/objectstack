@@ -1,6 +1,6 @@
 # ADR-0074: Audit timestamps are stored in one canonical, timezone-explicit format on SQLite
 
-**Status**: Accepted (2026-06-26)
+**Status**: Accepted (2026-06-26). **Read side extended (2026-09-07):** the read repair this ADR added on SQLite is, since [ADR-0053 addendum D-F1](./0053-date-and-datetime-semantics.md) (#13973), one presentation on every dialect — `created_at` / `updated_at` leave every read door as the canonical ISO-Z text on Postgres and MySQL too, where they used to leave as the client library's `Date`. The storage decision below is unchanged.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0053](./0053-date-and-datetime-semantics.md) (`datetime` is an instant stored as UTC)
 **Consumers**: `@objectstack/driver-sql` (`create`/`bulkCreate`/`upsert`/`update`, `formatOutput`), `@objectstack/objectql` (optimistic locking via `updated_at`, `sys_metadata` writes), report/analytics date bucketing, and any out-of-tree consumer of `created_at`/`updated_at` (notably the objectos kernel freshness probe).

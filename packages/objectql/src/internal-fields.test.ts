@@ -261,8 +261,16 @@ describe('#7728: the `internal` field flag omits a value from the generic data p
       const updated = await ctx.engine.update('itest_api_key', { id: created.id, revoked: true }, {
         context: { isSystem: true },
       } as any);
-      expect(updated.key).toBe(HASH);
-      expect(updated.revoked).toBe(true);
+      // [#16231] `update` declares its dispatch union now. This is the BY-ID
+      // path — the payload carries `id` and no `where` — so the answer is the
+      // post-write record; the count limb belongs to the predicate path. Pinned
+      // here rather than cast away, because "the by-id result is a RECORD that
+      // keeps the flagged field" is exactly what this case is about.
+      expect(typeof updated).toBe('object');
+      expect(updated).not.toBeNull();
+      const updatedRow = updated as Record<string, any>;
+      expect(updatedRow.key).toBe(HASH);
+      expect(updatedRow.revoked).toBe(true);
     });
   });
 

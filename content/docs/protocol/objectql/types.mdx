@@ -263,9 +263,19 @@ quantity:
 - `min`/`max`: Range validation
 
 **Database mapping:**
-- SQL driver: a floating-point column (`REAL` on PostgreSQL/SQLite, `FLOAT` on
-  MySQL). `precision`/`scale` are validation and display metadata — the DDL does
-  **not** emit `NUMERIC(precision, scale)`.
+- SQL driver: an **exact decimal** column at a fixed, portable size —
+  `NUMERIC(65,30)` on PostgreSQL, `DECIMAL(65,30)` on MySQL, `float` on SQLite
+  (which applies neither precision nor scale). The size comes from one
+  per-field-type table in `packages/spec`
+  (`NUMERIC_COLUMN_REPRESENTATION`), which the driver and both
+  `os generate migration` formats all read, so one declaration produces one
+  column whoever builds the table.
+  ⚠️ The field's own `precision`/`scale` remain validation and display
+  metadata: the DDL does **not** emit `NUMERIC(precision, scale)` from *your*
+  declared numbers — the column is the fixed pair above whatever the field
+  declares.
+  ⚠️ **New columns only.** Nothing retypes a column that already exists; a
+  table created before this keeps its `REAL`/`FLOAT` columns and their values.
 - MongoDB: `Number`
 
 **Use cases:**
@@ -309,8 +319,17 @@ deprecated in the spec.
 - `precision` (0–10, default 2) for decimal places
 
 **Database mapping:**
-- SQL driver: a floating-point column (`REAL` / `FLOAT`) — one column, no
-  companion currency column and no JSON blob
+- SQL driver: the same **exact decimal** column as `number`
+  (`NUMERIC(65,30)` / `DECIMAL(65,30)`; `float` on SQLite) — one column, no
+  companion currency column and no JSON blob. Money is the member where the
+  binary32 `REAL` this replaced lost a correctness question rather than a
+  display one: `1234567.89` read back `1234567.9` from a `REAL` column.
+  ⚠️ The column is **not** a blanket `DECIMAL(18,2)`: the platform's own CLDR
+  table carries 0-digit currencies (JPY, KRW) and 3-digit ones (BHD, KWD), and
+  the currency-code schema fails open for crypto and custom codes, so a money
+  column that fixes two decimals is wrong for a set the platform declines to
+  close.
+  ⚠️ **New columns only** — see `number` above.
 - MongoDB: `Number`
 
 ---
@@ -331,7 +350,11 @@ discount_rate:
 
 **Storage:** the percentage **number itself** — `25.5` means 25.5%, matching the
 `min: 0` / `max: 100` bounds above. It is *not* rescaled to a 0–1 ratio on write.
-Physically it is the same floating-point column as `number`.
+Physically it is the same **exact decimal** column as `number`
+(`NUMERIC(65,30)` / `DECIMAL(65,30)`; `float` on SQLite), on new tables only.
+That width is what holds a legitimate `33.333` — the narrow `NUMERIC(5,2)` the
+`--format sql` generator used to emit rounded it half-up to `33.33`, and
+rounded the 0–1 fraction storage of the same value to `0.33`.
 
 <Callout>
 The separate `percent` **template filter** (`{{ record.rate | percent }}`) does
@@ -1174,7 +1197,8 @@ The column each type gets from the SQL driver, per dialect:
 |---------------|------------|-------|--------|
 | `text` / `textarea` / `html` | `TEXT` \* | `TEXT` \* | `TEXT` \* |
 | `email` / `url` / `phone` / `password` | `VARCHAR(maxLength)` † | `VARCHAR(maxLength)` † | `VARCHAR(maxLength)` † |
-| `number` / `currency` / `percent` | `REAL` | `FLOAT` | `REAL` |
+| `number` / `currency` / `percent` / `slider` / `progress` | `NUMERIC(65,30)` ‡ | `DECIMAL(65,30)` ‡ | `float` ‡ |
+| `rating` | `INTEGER` ‡ | `INT` ‡ | `INTEGER` ‡ |
 | `date` | `DATE` | `DATE` | `TEXT` (`YYYY-MM-DD`) |
 | `datetime` | `TIMESTAMPTZ` | `DATETIME(3)` | `TEXT` (canonical `…Z`) |
 | `time` | `TIME` | `TIME(3)` | `TEXT` (`HH:MM:SS[.fff]`) |
@@ -1182,7 +1206,7 @@ The column each type gets from the SQL driver, per dialect:
 | `select` / `radio` | `VARCHAR(255)` | `VARCHAR(255)` | `VARCHAR(255)` |
 | `multiselect` / `tags` | `JSON` | `JSON` | `TEXT` (JSON) |
 | `lookup` / `master_detail` / `tree` | `VARCHAR(255)` | `VARCHAR(255)` | `VARCHAR(255)` |
-| `summary` | `REAL` | `FLOAT` | `REAL` |
+| `summary` | `NUMERIC(65,30)` ‡ | `DECIMAL(65,30)` ‡ | `float` ‡ |
 | `autonumber` | `VARCHAR(255)` | `VARCHAR(255)` | `VARCHAR(255)` |
 | `formula` | *(no column — virtual)* | *(no column)* | *(no column)* |
 | `json` / `location` / `address` | `JSON` | `JSON` | `TEXT` (JSON) |
@@ -1208,6 +1232,22 @@ Note the neighbouring rows that deliberately do **not** follow this rule:
 `tree` store the referenced record's id, and `autonumber` stores a
 runtime-issued number — in none of those is the stored string the value the
 field's `maxLength` describes, so all of them keep `VARCHAR(255)`.
+
+‡ **The numeric family is NEW COLUMNS ONLY.** The size is one per-field-type
+table in `packages/spec` (`NUMERIC_COLUMN_REPRESENTATION`) that
+`SqlDriver.createColumn` and both `os generate migration` formats read, so the
+three producers no longer disagree; before it they emitted `REAL`,
+`NUMERIC(18,2)`/`NUMERIC(5,2)` and `NUMERIC(8,2)` for the same declaration.
+`65,30` is MySQL's documented `DECIMAL` maximum and therefore the portable one.
+Nothing retypes an existing column, plans a migration, or reports drift over the
+difference — a table created before this keeps its `REAL`/`FLOAT` columns, and a
+new numeric field added to it gets an exact-decimal column beside them.
+On SQLite the exact-decimal members compile to the same `float` column the
+driver emitted before (knex's SQLite `decimal` compiler is the literal `float`),
+so SQLite keeps REAL affinity and gains no exactness; `rating` moves to INTEGER
+affinity there and SQLite still accepts a fractional value as a REAL. The
+refusal `rating` gains is a PostgreSQL/MySQL effect: PostgreSQL refuses a
+fractional star count outright, and MySQL **rounds** it (4.5 arrives as 5).
 
 Any field flagged `multiple: true` becomes a `JSON` column regardless of its
 type. Relationship columns are plain id strings with no database `FOREIGN KEY`

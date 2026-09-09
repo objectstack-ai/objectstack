@@ -167,9 +167,11 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { blank, scanSource } from './js-comment-mask.mjs';
 
@@ -330,8 +332,44 @@ function scriptSymbolClass(source, symbol) {
     new RegExp(`\\b(?:export\\s+)?(?:default\\s+)?(?:declare\\s+)?(?:abstract\\s+)?(?:async\\s+)?(?:function\\s*\\*?|class|interface|type|enum|namespace|module)\\s+${n}\\b`),
     // value binding
     new RegExp(`\\b(?:export\\s+)?(?:declare\\s+)?(?:const|let|var)\\s+${n}\\b`),
-    // a member or object-literal key written at the start of a line
-    new RegExp(`^[ \\t]*(?:readonly |static |public |private |protected |abstract |declare |async |\\* )*(?:get |set )?(?:${n}|'${n}'|"${n}"|\\[${n}\\]|\\['${n}'\\]|\\["${n}"\\])\\s*[?!]?\\s*[:(<=]`, 'm'),
+    /* A member or object-literal key written at the start of a line.
+     *
+     * ⚠️ The modifier alternation below is HAND-ENUMERATED, and it has been
+     * demonstrated INCOMPLETE once (#16821): `override` was absent, so a
+     * symbol anchor naming any `override` member -- a dated reading: 276 of
+     * them under packages/ when this was measured, 207 of those the
+     * `static override` metadata on CLI command classes -- returned
+     * `unresolved-symbol` for a declaration that was really there. The gate's
+     * own remedy text ("name the real symbol, or drop to a file-level
+     * anchor") then left an author only the WEAKER anchor, because the real
+     * symbol was already named correctly.
+     *
+     * ⭐ And the shape being refused was the one the anchor rule exists for:
+     * an `override` member is where a subclass restates a base contract, so
+     * it is exactly where a citation most needs to be checkable. The failure
+     * was loud per author and silent in aggregate -- the corpus censuses read
+     * like coverage while being structurally unable to contain an `override`
+     * member.
+     *
+     * ⇒ Widening this list is ADDITIVE: it makes a real declaration resolve
+     * and refuses nothing that resolved before. But this list is the SHARED
+     * one -- every registered corpus resolves through it -- so a widening
+     * moves every census in the same stroke, and a PR that widens it re-takes
+     * them all and says what moved.
+     *
+     * ⛔ Whether this set should be DERIVED rather than enumerated is a live
+     * question about this resolver and is NOT settled here. It is a
+     * maintainer's call, because the ruling this module implements is that a
+     * corpus joins by REGISTRATION and there is to be no second
+     * implementation -- so a rewrite of the rule is a change to every corpus
+     * at once, not a local cleanup.
+     *
+     * ⛔ The alternation stays a free-order `*` group on purpose. TS fixes the
+     * written order (accessibility, `static`, `override`, `readonly`,
+     * `abstract`), but pinning that order here would refuse a spelling for
+     * being unidiomatic rather than for being ABSENT, and judging style is not
+     * this rule's job. */
+    new RegExp(`^[ \\t]*(?:readonly |static |public |private |protected |override |abstract |declare |async |\\* )*(?:get |set )?(?:${n}|'${n}'|"${n}"|\\[${n}\\]|\\['${n}'\\]|\\["${n}"\\])\\s*[?!]?\\s*[:(<=]`, 'm'),
     // named re-export
     new RegExp(`\\bexport\\s*\\{[^}]*\\b${n}\\b[^}]*\\}`),
     // destructured binding
@@ -522,7 +560,26 @@ const trackedCache = new Map();
 function trackedFiles(root) {
   const key = resolve(root);
   if (!trackedCache.has(key)) {
-    const out = execFileSync('git', ['ls-files'], { cwd: key, encoding: 'utf8', maxBuffer: 1 << 28 });
+    /* ⛔ THE ENVIRONMENT IS EXPLICIT, and passing none is what made this a
+     * measured incident rather than a hypothetical (#16624). Git exports
+     * `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` into every child it runs,
+     * and those OUTRANK `cwd`: a caller sweeping a SYNTHETIC root from inside a
+     * hook -- which is where `pre-commit` runs the gates built on this resolver
+     * -- would have this line answer with THE REAL REPOSITORY's file list while
+     * `key` names a temp directory. Silently: the sweep resolves against the
+     * wrong tree and reports findings, or none, about a corpus nobody swept.
+     *
+     * The sibling half of the same incident was a WRITE: an inheriting
+     * `git add -A` staged 8,190 paths as deleted in the real index and an
+     * inheriting `git init` wrote `core.bare = true` into the SHARED
+     * `.git/config`, breaking every worktree on the machine. This resolver only
+     * ever reads, so its exposure is the wrong answer rather than the damage --
+     * but the fix is one rule for both, and it lives in `scripts/git-env.mjs`.
+     *
+     * ⚠️ `gitFreeEnv()` is correct HERE because `ls-files` needs nothing from
+     * the ambient environment but the repository `cwd` names. ⛔ It must not be
+     * copied onto a git child that fetches or pushes -- see that module. */
+    const out = execFileSync('git', ['ls-files'], { cwd: key, encoding: 'utf8', maxBuffer: 1 << 28, env: gitFreeEnv() });
     trackedCache.set(key, new Set(out.split('\n').filter(Boolean)));
   }
   return trackedCache.get(key);
@@ -712,8 +769,12 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ symbol-anchors --se
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 // 63 → 67 when `declinedShape` gained a case per arm (#15809).
+// 67 → 69 when the sweep's git child gained an explicit environment (#16624).
+// 69 → 93 when the member-modifier spellings gained a case EACH, every one of
+//         them paired with its own negative control, after `override` was found
+//         missing from the hand-enumerated accept set (#16821).
 const SELF_TEST_BATTERIES = Object.freeze({
-  'symbol-anchors self-test': 67,
+  'symbol-anchors self-test': 93,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -778,6 +839,39 @@ export function selfTest() {
   }
   check(symbolResolutionClass(ts, 'x.ts', 'sys_metadata') === 'literal', 'a quoted data identifier resolves as `literal`, not `declaration`');
   check(symbolResolutionClass(ts, 'x.ts', 'notPresentAnywhere') === null, 'an absent symbol must NOT resolve');
+
+  // 1b. ⭐ MEMBER MODIFIERS, one case per spelling, each with its own control.
+  //     The modifier alternation in `scriptSymbolClass` is hand-enumerated and
+  //     has been demonstrated incomplete once (#16821: `override` was missing,
+  //     so no `override` member in the tree could carry a symbol anchor and the
+  //     only remedy on offer was a weaker anchor). ⛔ One token per finding is
+  //     NOT the repair -- an enumeration is worth exactly what it is provoked
+  //     with, so every spelling is driven by name here rather than trusted to
+  //     the one that happened to be reported.
+  //     ⭐ The negative control rides the SAME source as each positive row: a
+  //     matcher that answered `declaration` to everything would satisfy every
+  //     row above and this battery would never be able to fail.
+  const memberSpellings = [
+    ['plain', 'initObjects(o) {}'],
+    ['async', 'async initObjects(o) {}'],
+    ['public async', 'public async initObjects(o) {}'],
+    ['protected async', 'protected async initObjects(o) {}'],
+    ['private', 'private initObjects(o) {}'],
+    ['override', 'override initObjects(o) {}'],
+    ['override async', 'override async initObjects(o) {}'],
+    ['protected override async', 'protected override async initObjects(o) {}'],
+    ['public override', 'public override initObjects(o) {}'],
+    ['static override', 'static override initObjects(o) {}'],
+    ['override get', 'override get initObjects() { return 1; }'],
+    ['override readonly property', 'override readonly initObjects: number = 1;'],
+  ];
+  for (const [spelling, member] of memberSpellings) {
+    const cls = `class Subclass extends Base {\n  ${member}\n}\n`;
+    check(symbolResolutionClass(cls, 'x.ts', 'initObjects') === 'declaration',
+      `a member declared \`${spelling}\` must resolve as a declaration`);
+    check(symbolResolutionClass(cls, 'x.ts', 'notPresentAnywhere') === null,
+      `CONTROL: an absent name must NOT resolve against a \`${spelling}\` member`);
+  }
 
   // 2. ⭐ The census caveat, enforced: prose is not resolution. A symbol named
   //    only in a comment is exactly the false green that made 72.1% a LOWER
@@ -930,6 +1024,58 @@ export function selfTest() {
     'a continuation is a CONTINUATION even when a path preceded it on the line');
   check(declinedShape({ path: 'a/b.ts' }) === 'directory-qualified', 'a path with a slash is directory-qualified');
   check(declinedShape({ path: 'b.ts' }) === 'bare-filename', 'a path with no slash is a bare filename — the shape no resolver can bind');
+
+  // 12. ⛔ THE ENVIRONMENT ISOLATION PIN (#16624), and it is the one case here
+  //     that spawns `git`. `sweepCorpus` resolves through `git ls-files`, and
+  //     for its whole life it passed NO ENVIRONMENT OF ITS OWN. From a plain
+  //     shell that is invisible; from inside a hook, git's exported `GIT_DIR`
+  //     outranks the `cwd` this resolver hands the child, and a sweep of a
+  //     SYNTHETIC root silently answers with the real repository's file list.
+  //
+  //     The provocation is the failure itself: a bogus `GIT_DIR` is injected,
+  //     a real two-file corpus is swept under it, and the sweep must come back
+  //     having resolved ITS OWN tree. Before the fix this threw -- `git
+  //     ls-files` cannot open a `GIT_DIR` that does not exist -- so the case
+  //     could not pass by accident.
+  //
+  //     ⚠️ Every `git` this case runs is itself spawned with a stripped
+  //     environment. A pin for this defect that reproduced the defect while
+  //     writing the real index would be the incident a second time.
+  const envPinDir = mkdtempSync(join(tmpdir(), 'symbol-anchors-envpin-'));
+  const priorGitDir = process.env.GIT_DIR;
+  let envPinSweep = null;
+  let envPinError = null;
+  try {
+    mkdirSync(join(envPinDir, 'docs'), { recursive: true });
+    mkdirSync(join(envPinDir, 'pkg'), { recursive: true });
+    writeFileSync(join(envPinDir, 'pkg', 'a.ts'), 'export function handler() { return 1; }\n');
+    writeFileSync(
+      join(envPinDir, 'docs', 'note.md'),
+      ['# note', '', 'the read lives at `pkg/a.ts#handler`.', ''].join('\n'),
+    );
+    execFileSync('git', ['init', '-q'], { cwd: envPinDir, env: gitFreeEnv() });
+    execFileSync('git', ['add', '-A'], { cwd: envPinDir, env: gitFreeEnv() });
+    process.env.GIT_DIR = join(tmpdir(), 'a-git-dir-that-does-not-exist');
+    try {
+      envPinSweep = sweepCorpus(defineCorpus({ id: 'envpin', label: 'env pin', docRoots: ['docs'] }), envPinDir);
+    } catch (err) {
+      envPinError = err;
+    }
+  } finally {
+    if (priorGitDir === undefined) delete process.env.GIT_DIR;
+    else process.env.GIT_DIR = priorGitDir;
+    rmSync(envPinDir, { recursive: true, force: true });
+  }
+  check(
+    envPinError === null,
+    '⛔ ENV LEAK: `sweepCorpus` must not inherit a hook\'s GIT_DIR — with one injected it threw: '
+      + String(envPinError && envPinError.message).slice(0, 200),
+  );
+  check(
+    envPinSweep !== null && envPinSweep.counts.symbol === 1 && envPinSweep.findings.filter((f) => !f.soft).length === 0,
+    '⛔ ENV LEAK: the sweep must resolve against ITS OWN tracked tree under an injected GIT_DIR — got '
+      + JSON.stringify(envPinSweep && { counts: envPinSweep.counts.symbol, findings: envPinSweep.findings.length }),
+  );
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //

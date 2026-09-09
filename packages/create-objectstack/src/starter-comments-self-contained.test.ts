@@ -59,6 +59,21 @@
 // still-unfollowable line untouched. See the fifth `MONOREPO_ONLY` entry
 // below for how it is scoped to avoid the reader's own project also being
 // called "a monorepo" (`blank/pnpm-workspace.yaml`, correctly).
+//
+// ## A sixth `MONOREPO_ONLY` pattern: the same reference, written RELATIVELY
+//
+// All five patterns above match a reference spelled in ABSOLUTE, repo-rooted
+// form — `packages/<name>/`, `scripts/<name>.mjs`, an ADR id, an issue
+// number, the framework's own name. None of them matches that same
+// unfollowable reference written as a path which climbs OUT of the scaffolded
+// project. `os create` shipped exactly that into a project README —
+// `[ObjectStack Documentation](../../content/docs)` — and assertion 1 read
+// the file, matched none of its five patterns, and reported it as a PASSING
+// row, which is worse than never having reported on it (#15150).
+//
+// The sixth pattern closes that spelling. It is a pure regression guardrail:
+// this tree ships zero `../` of any kind today, so it catches nothing on the
+// day it lands and exists so the shape cannot grow back.
 
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
@@ -115,6 +130,42 @@ const MONOREPO_ONLY = [
   // "a monorepo root" (`blank/pnpm-workspace.yaml`), which is a correct,
   // self-contained, followable statement about a directory they do have.
   { label: 'a reference to the ObjectStack repo as an unlinked location', re: /\bObjectStack (?:framework )?(?:mono)?repo\b/i },
+  // #15150: the five patterns above are all spelled ABSOLUTELY — a
+  // repo-rooted path, an identifier, or a name. This one is the same class of
+  // unfollowable reference written RELATIVELY, as a path that climbs out of
+  // the project the reader actually has. A scaffolded project has no parent
+  // directory to climb into, so `../../content/docs` resolves nowhere for
+  // them however faithfully it describes this monorepo.
+  //
+  // Anchored on `../`, deliberately NOT on `./`, and deliberately not on the
+  // depth judgement #15150 proposed (`check:cross-package-test-inputs`-style
+  // "the shallowest point a path reaches"). In THIS population the two give
+  // the same answer, for a measured reason: every relative reference the
+  // shipped tree carries is `./`-anchored and points DOWNWARD from the file
+  // that writes it (`./note.object.js`, `./src/objects/index.js`), so the
+  // count of `../` here — escaping or merely climbing — is zero. The bare
+  // anchor therefore has no correct text to redden. The leading lookbehind is
+  // what keeps it that way: it refuses a `..` that is itself part of a longer
+  // run of dots, so an ellipsis followed by a path is not a hit.
+  //
+  // ⚠️ WHAT IT MATCHES IS WIDER THAN WHAT MOTIVATED IT, and that is worth
+  // stating plainly rather than leaving for someone to discover from a red:
+  // this matches ANY `../`, including a climb that stays INSIDE the project.
+  // `import { x } from '../config'` in a nested source file, or a prose
+  // "see ../README.md in this project", are both legal in a scaffolded project
+  // and both redden here. Nothing about the pattern distinguishes them; only
+  // the population does.
+  //
+  // So the trade is sound exactly while the swept tree carries no `../` at all
+  // — measured zero today — and the condition to re-read is: a template grows
+  // an intra-project relative climb, i.e. a source file nested deeply enough to
+  // reach back up toward its own project root. That needs no other change to
+  // happen. When it does, the red is on correctly-shaped, legal text, and the
+  // fix is the depth judgement (`check:cross-package-test-inputs`-style, "the
+  // shallowest point a path reaches") — never an exemption for the file, and
+  // never a widened pattern, which would hand the escaping spelling its
+  // exemption back.
+  { label: 'a path that climbs out of the scaffolded project', re: /(?<![\w.])\.\.\/[\w./-]*/ },
 ];
 
 const read = (rel: string) => fs.readFileSync(path.join(templateRoot, rel), 'utf8');

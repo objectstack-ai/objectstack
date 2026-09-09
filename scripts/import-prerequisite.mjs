@@ -876,11 +876,60 @@ export function reportPrerequisiteNotMet(importerUrl, verdict, measures) {
 }
 
 /**
+ * The module extensions a gate in this repo is written in. The corpus is
+ * exactly these two, and `check-ratchet-remedy-authority.mjs` already declares
+ * the same pair for the same reason. Declared as a list rather than inlined as
+ * a character class so the rule below reads as a rule, and so widening it is an
+ * edit someone has to mean.
+ */
+const GATE_MODULE_EXTENSIONS = ['.mjs', '.mts'];
+
+/**
+ * The gate's NAME: its basename with the module extension removed, whichever of
+ * the two it is.
+ *
+ * The identifier in the headline and the command the reader runs are two
+ * different strings -- the block below says so, and this is the half that is a
+ * NAME. The extension comes off for `.mts` as it always has for `.mjs`, and the
+ * test that settles it is what the reader actually has to type:
+ *
+ *   - The reader never types this identifier. The runnable string is `command`,
+ *     built by `importerCommandPath`, which keeps the real path WITH its real
+ *     extension (`node scripts/check-exported-any-returns.mts`) and is already
+ *     correct for both spellings.
+ *   - What the reader types to RE-RUN the gate is its package script --
+ *     `pnpm --filter @objectstack/client check:exported-any-returns` -- which
+ *     carries no extension at all. A `.mts` gate runs through `tsx`, not `node`,
+ *     so its file extension is not the reader's entry point either.
+ *
+ * So an extension here is not information the reader needs; it only appeared
+ * because a strip written when every gate was `.mjs` stopped matching the file
+ * family that arrived later. The rule is stated here rather than left as a
+ * regex because the other defensible reading -- keep the extension and call the
+ * `.mjs` gates the inconsistent ones -- would change what EVERY importer prints,
+ * which is a different change from this one.
+ *
+ * ⛔ Not a path: a basename, always. `prerequisiteNotMetText`'s own comment and
+ * the self-test below both hold that boundary, and it is unchanged here.
+ *
+ * The `X.mjs` + `X.d.mts` pairs in this tree are NOT a name collision waiting
+ * to happen: a `.d.mts` is a type declaration beside its implementation, holds
+ * no runtime code and is never executed, so it never imports this module and
+ * never reaches this function. ⛔ Do not add a `.d` case for it — pinning an
+ * input that cannot occur is the phantom check AGENTS.md warns about.
+ */
+function gateNameOf(importerUrl) {
+  const base = fileURLToPath(importerUrl).split('/').pop();
+  const ext = GATE_MODULE_EXTENSIONS.find((e) => base.endsWith(e));
+  return ext ? base.slice(0, -ext.length) : base;
+}
+
+/**
  * The text `reportPrerequisiteNotMet` prints, as a value — so the self-test can
  * assert on the advisory without spawning a process or stubbing `process.exit`.
  */
 function prerequisiteNotMetText(importerUrl, verdict, measures) {
-  const gate = fileURLToPath(importerUrl).split('/').pop().replace(/\.mjs$/, '');
+  const gate = gateNameOf(importerUrl);
   // The path to RUN and the name to CALL IT BY are two different strings, and
   // only the first moves. ⛔ The `/tmp/${gate}.log` sink below keeps the
   // BASENAME on purpose: a repo-relative path there would spell
@@ -1196,6 +1245,34 @@ export function selfTest() {
     t('the /tmp log sink keeps the BASENAME — a repo-relative one names absent directories',
       advisoryFor(lintGate).includes('> /tmp/check-doc-formula-expressions.log 2>&1')
         && !advisoryFor(lintGate).includes('/tmp/packages/lint'));
+
+    // (g) The module extension comes off for `.mts` exactly as it always did
+    // for `.mjs`. Pinned as a PAIR on the same fixture — one `.mts` gate and
+    // one `.mjs` gate differing only in extension — because a single
+    // observation cannot tell "the extension was stripped" from "there was
+    // never one to strip", which is the discrimination this card turned on.
+    const mtsGate = join(wt, 'scripts', 'check-fixture-any-returns.mts');
+    const mjsSibling = join(wt, 'scripts', 'check-fixture-any-returns.mjs');
+    t('a `.mts` importer is named WITHOUT its extension',
+      advisoryFor(mtsGate).includes('\ncheck-fixture-any-returns: PREREQUISITE NOT MET')
+        && !advisoryFor(mtsGate).includes('check-fixture-any-returns.mts: PREREQUISITE'),
+      advisoryFor(mtsGate));
+    t('CONTROL: its `.mjs` sibling prints the SAME name, so the identifier is the gate\'s, not the file\'s',
+      advisoryFor(mjsSibling).includes('\ncheck-fixture-any-returns: PREREQUISITE NOT MET')
+        && !advisoryFor(mjsSibling).includes('check-fixture-any-returns.mjs: PREREQUISITE'),
+      advisoryFor(mjsSibling));
+
+    // ⛔ The half that must NOT move with it. The command is a PATH: strip its
+    // extension and the reader is handed a file that does not exist — the same
+    // defect this module already fixed once, relocated one token to the right.
+    t('⛔ but the COMMAND still carries the real `.mts` extension — a path, not a name',
+      advisoryFor(mtsGate).includes('`node scripts/check-fixture-any-returns.mts > '),
+      advisoryFor(mtsGate));
+    t('and the `.mjs` sibling\'s command keeps ITS real extension too',
+      advisoryFor(mjsSibling).includes('`node scripts/check-fixture-any-returns.mjs > '));
+    t('the /tmp log sink follows the NAME, so it carries no extension either',
+      advisoryFor(mtsGate).includes('> /tmp/check-fixture-any-returns.log 2>&1'),
+      advisoryFor(mtsGate));
 
     // ── the CLOSURE: every declared prerequisite, in one command ────────────
     //

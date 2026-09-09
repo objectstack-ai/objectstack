@@ -42,7 +42,7 @@ metadata:
 For comprehensive documentation with incorrect/correct examples:
 
 - **[Naming Conventions](./rules/naming.md)** — snake_case rules, option values, config properties
-- **[Field Types](./rules/field-types.md)** — All 49 field types with decision tree and configs
+- **[Field Types](./rules/field-types.md)** — All 49 field types and configs
 - **[Relationships](./rules/relationships.md)** — lookup vs master_detail, junction patterns, delete behaviors
 - **[Validation Rules](./rules/validation.md)** — All validation types, script inversion, severity levels
 - **[Index Strategy](./rules/indexing.md)** — btree/gin/gist/fulltext, composite indexes, partial indexes

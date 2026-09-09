@@ -2231,8 +2231,13 @@ const ObjectSchemaBase = strictObject(
    * Opt-in declaration that records of this object MAY be published via
    * an opaque capability token (Notion / Google Docs / Figma "anyone with
    * the link" style). When omitted or `enabled:false`, the platform
-   * refuses to create share-link rows for this object — independent of
-   * any permission the caller holds.
+   * refuses to create share-link rows for this object AND refuses to
+   * resolve any that already exist — a STANDING policy held at every
+   * redemption, not a mint-time check (#14033), so links minted while the
+   * block was on stop serving the moment it is turned off, those minted
+   * through the system-context / `permissive` mint bypass included. Both
+   * halves are independent of any permission the caller holds; see
+   * `enabled` below for the whole statement.
    *
    * Distinct from {@link sharingModel}, which governs *principal-based*
    * sharing (share with specific users / teams / roles). A single object

@@ -46,6 +46,25 @@
 // pins it. The second test keeps a figure from growing back into core.ts.
 // ---------------------------------------------------------------------------
 //
+// What this file does NOT see, and what does (#15347)
+//
+// This is a SOURCE SCAN over two hard-coded names. Both limits are by
+// construction, and #14680 is what they cost: a heavyweight arriving through
+// any other specifier is outside FORBIDDEN_PACKAGES, and a scan of this
+// package's own sources cannot follow one that arrives three packages deep —
+// which is how that one arrived, invisible to every gate for the whole time it
+// was live.
+//
+// The transitive half now lives in `scripts/check-lean-entry-closure.mjs`. It
+// loads the BUILT lean entry in a fresh child per published condition and
+// asserts the package set the entry actually evaluates — an exclusion claim, in
+// the same discipline as this file's: a set of package names, never a size.
+//
+// ⛔ It does not replace this test and this test is not folded into it. That one
+// needs a built `dist/` and runs in ci.yml's `build-core`; this one deliberately
+// needs NOTHING — no build, no install, no child process — so it still answers
+// on a tree where the other cannot run at all. Two instruments, one boundary.
+//
 // If this test fails, you added a forbidden import somewhere reachable from
 // core.ts. Keep metadata/plugin/kernel concerns out of the core closure.
 

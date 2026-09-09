@@ -174,14 +174,14 @@ The source is real React executed at render by the runtime. The injected scope a
   `<RecordHighlights>`, `<RecordRelatedList>`, `<RecordPath>`, `<RecordActivity>`,
   …): the registry injects a wrapper for each, but every one of them renders from
   the record context a **record page** mounts, which a react page never does — so
-  they come back empty however you bind them. `os validate` rejects them here
+  they come back empty. `os validate` rejects them here
   (`react-block-needs-record-context`), by tag and via `<Block type="record:…">`.
   On a react page the parent record is ordinary React state, so use the blocks
-  that read their own props: `<ListView objectName="<child>" filters={['<lookup
-  field>', '=', parentId]}>` for a related list, `<ObjectForm mode="view"
-  recordId={…}>` for a field panel, plain JSX over `useAdapter().findOne` for a
-  highlights strip or a stage bar. Need the family itself? Author the page as
-  `type:'record'`, where the context exists
+  that read their own props: `<ListView data={{ provider: 'object', object:
+  '<child>' }} filters={['<lookup>', '=', parentId]}>` for a related list,
+  `<ObjectForm mode="view" recordId={…}>` for a field panel, plain JSX over
+  `useAdapter().findOne` for a highlights strip or a stage bar. Need the family
+  itself? Author the page as `type:'record'`, where the context exists
 - `data` / `variables` / `page`
 
 Compose **layout with inline `style={{…}}`** (real CSS); use the injected blocks
@@ -215,7 +215,7 @@ function Page() {
   const [reload, setReload] = React.useState(0);
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 24, padding: 32, alignItems: 'start' }}>
-      <ListView key={reload} objectName="project"
+      <ListView key={reload} data={{ provider: 'object', object: 'project' }}
         fields={['name','status','owner']} navigation={{ mode: 'none' }}
         onRowClick={(r) => setSel(r)} />
       {sel

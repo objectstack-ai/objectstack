@@ -122,7 +122,7 @@ export default {
   objects: [{
     name: 'mcpcollision_task',
     label: 'Task',
-    sharingModel: 'public',
+    sharingModel: 'private',
     fields: { title: { type: 'text', label: 'Title' } },
   }],
   // NOTE: \`mcp\` is deliberately NOT declared. The banner advertises the MCP

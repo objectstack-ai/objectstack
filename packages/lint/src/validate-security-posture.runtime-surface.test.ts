@@ -175,10 +175,15 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     expect(stackKeyForType('flow')).toBe('flows');
   });
 
-  it('[#8310] seed / permission / book / object all cross — the completed flip, on the whole 12-rule entry', () => {
+  it('[#8310] seed / permission / book / object all cross — the completed flip, on the whole 14-rule entry', () => {
     // The registration the #7891 programme was for: the
-    // `validateSecurityPosture` entry (12 rule ids — `security-role-word` is
+    // `validateSecurityPosture` entry (14 rule ids — `security-role-word` is
     // its own entry now, see below) declares all four mapped types.
+    // ⚠️ The count was written as 12 and had already drifted: it missed
+    // `security-cbp-ambiguous-relation` (#14747). Re-measured by counting the
+    // distinct `rule:` constants this function emits — 13 before
+    // `security-fls-unknown-field` (#16108), 14 with it. The number is prose,
+    // not an assertion; the pins below are what hold.
     // `permission`/`book` measured ZERO refusals when they crossed (PR
     // #8546); `object` crosses under the #8310 maintainer ruling with the
     // red suites repaired honestly (fixtures author their `sharingModel`).

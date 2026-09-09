@@ -1,5 +1,783 @@
 # @objectstack/lint
 
+## 17.4.0
+
+### Minor Changes
+
+- 954cb0b: feat(service-automation): an `assignment` value may be a CEL envelope — evaluated at run time, validated at `registerFlow`, `objectstack validate` and the runtime publish gate (#15137, the executor half of #14149)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key is renamed, retired or re-typed: the `assignments` map and every value form it accepted still parse. The only newly refused shape is a malformed CEL value envelope, a spelling declared one day earlier in #15113 and offered by no authoring surface before it, so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions for a consumer to follow. -->
+  
+  **BREAKING** in the accept-set sense, landing in the launch window as `minor`
+  (the lockstep convention; the level also follows the 2026-09-04 bump ruling —
+  this adds `AutomationEngine.evaluateValueEnvelope` to a published surface, and an
+  additive widening is at least `minor`). No ADR-0087 conversion: no authorable key
+  is renamed or retired, and the shape this refuses was never a shape any surface
+  offered.
+  
+  The maintainer's 2026-09-02 ruling on #14149 made an assignment value able to be
+  a CEL **value** expression, so the declared stdlib (`joinNonEmpty`, `map`, `size`
+  …) is finally reachable from metadata — until now CEL was only ever asked for a
+  boolean. The spec half landed the contract (PR #15113); this is the half that
+  makes it do something.
+  
+  ```yaml
+  # before: written into the variable verbatim, and rendered by `notify` as
+  #         {"dialect":"cel","source":"joinNonEmpty(...)"}
+  # now:    evaluated — digest is "Renewal due\nInvoice overdue"
+  assignments:
+    digest: { dialect: cel, source: 'joinNonEmpty(rows.map(r, r.subject), "\n")' }
+  ```
+  
+  - **Evaluated at run time.** The built-in `assignment` executor evaluates a
+    `value`-role envelope with the expression engine and assigns the result, in the
+    same CEL scope a flow predicate is evaluated in (one shared scope builder, so a
+    predicate and a value expression cannot disagree about what `rows` means). A
+    plain string keeps today's `{token}` interpolation, and every other literal is
+    still assigned as data.
+  - **Refused at three doors.** A malformed envelope now stops the flow registering
+    (`registerFlow` throws, the severity a malformed predicate gets) and surfaces as
+    a located `error` finding naming the node and the author's own variable —
+    `config.assignments.digest` — both at `objectstack validate` and at the runtime
+    publish gate a Studio / REST / MCP flow write goes through
+    (`validateStackExpressions` is registered `CLI_AND_RUNTIME`, `runtimeTypes:
+    ['flow']`). Malformed is a composition, not a fixed list: whatever
+    `AssignmentValueSchema` refuses in the envelope's shape — among them a missing,
+    empty or non-string `source`, a dialect other than `cel`, a non-object `meta` —
+    and then CEL that does not parse. All three doors derive that set from the same
+    two published validators, so none refuses a shape the executor would have run,
+    and a registered flow never faults for a shape those validators judge malformed.
+    Two shapes sit outside what either validator can judge — an `ast`-only envelope
+    and a whitespace-only `source` (it passes `min(1)` and reads as "not authored"
+    to the validator, while the CEL engine parses it untrimmed) — and those fault
+    loudly at run time rather than assigning a value. Both are pinned and tracked in
+    #15430.
+  - **Only the canonical map.** The ledger declares `assignment.assignments.*` and
+    nothing else, so the two legacy shapes the executor still normalizes — the
+    `assignments: [{ variable, value }]` array and the bare `{ <variable>: <value> }`
+    config — keep every meaning they had, envelope-shaped values included.
+    `AssignmentConfigSchema` is deliberately NOT wired into `parseNodeConfig` for the
+    array form: refusing it would break flows that register today, and that refusal
+    is a maintainer ruling rather than a lane's call (#15137 ask 3).
+  
+  **What changes silently, and how far it reaches.** A flow that today authors an
+  envelope-shaped object *as data* in the canonical `assignments` map now evaluates
+  it — no error on either side, a different value. The discriminator is the spec's
+  own `isExpressionEnvelopeShaped`: a plain object naming a **string** `dialect`,
+  in the declared map only. Data that names no `dialect`, names a non-string one,
+  nests the envelope one level down, or sits in either legacy shape is untouched
+  and byte-identical. The remaining overlap — a well-formed
+  `{ dialect: 'cel', source: … }` written as data in the canonical map — is exactly
+  the spelling the ruling reinterprets; every near-miss the two validators can
+  judge now refuses loudly at registration instead of changing value in silence.
+- 36a16d0: Two new widget-binding rule ids for a chart widget with an empty selection
+  
+  `validateWidgetBindings` reported nothing about two dataset-bound chart shapes that the
+  `@object-ui` revision this repo pins (`.objectui-sha`) visibly degrades. Both are now
+  warnings, suppressible per widget with `suppressWarnings: ['<rule-id>']`:
+  
+  - `chart-measures-missing` — a chart-family widget selects no measures (`values` empty or
+    absent). `DatasetWidget.tsx:683` returns the authoring placeholder "Pick measures
+    (values) for this dataset widget." before any query runs, above every family branch, so
+    no chart is drawn at all.
+  - `chart-dimensions-missing` — a chart-family widget selects at least one measure but no
+    dimensions. `DatasetWidget.tsx:423` reads
+    `const isMetric = METRIC_TYPES.has(widgetType) || dimensions.length === 0;`, so the
+    widget renders as a single KPI number and the declared chart family is silently ignored.
+    The hint steers the author to a dimension, or to the `metric`/`kpi` family that matches
+    what actually renders.
+  
+  Warning tier rather than error for both: an empty selection is a work-in-progress state a
+  build must tolerate, and erroring would gate the `sys_metadata` publish path on a
+  half-authored widget. Neither shape is folded into `chart-config-missing` — neither is
+  caused by, nor repairable with, `chartConfig`, which carries presentation only.
+  
+  "Chart family" is derived, not hand-listed: every declared `ChartTypeSchema` option that
+  the pinned renderer routes to its chart branch — the taxonomy minus the renderer's own
+  `METRIC_TYPES` (`metric`, `kpi`, `gauge`, `solid-gauge`, `bullet`) and its `table`/`pivot`
+  tabular test. A `metric` tile with no dimensions, such as the shipped `system_overview`
+  board's own KPI tiles, is therefore not a finding.
+- c01b3a6: `chart-field-unknown` drops to `warning` on the three `chartConfig` binding keys the pinned renderer refuses, and says what actually happens
+  
+  The rule id covers exactly three positions, and the `@object-ui` revision this repo pins (`.objectui-sha`) refuses all three as bindings, so none of them can produce the data failure the messages described:
+  
+  - `chartConfig.xAxis.field` — `axisPresentation` (`@object-ui/core` `src/utils/chart-presentation.ts`) builds the axis presentation **minus** its `field`. The x-axis key is `buildChartSeries`' `xAxisKey`, i.e. the widget's `dimensions[0]`; an authored `field` re-points nothing.
+  - `chartConfig.yAxis[].field` — the same call, per entry. The entry keeps its slot (the count is what turns on a secondary axis) and its scale and chrome; only the binding is dropped.
+  - `chartConfig.series[].name` — `mergeAuthoredSeries` pairs an authored entry with the derived series whose `dataKey` it equals, one per entry of `values`. An entry naming no derived series is ignored whole, so the presentation hung on it — the mark, the colour, the stack, the axis side — lands on nothing.
+  
+  The renderer pins this by name in `DatasetWidget.chartConfig.test.tsx` ("ignores an authored axis `field` and keeps the derived axis binding", "ignores an authored series and keeps one derived series per measure").
+  
+  So the old message — "the query result will not contain it" — named a query failure that never happens, and `error` blocked a build and a Studio publish for a key that changes nothing at runtime. That is the class `widget-legacy-analytics-shape` reports at `warning` in the same file ("the dashboard renderer ignores them … a silent no-op"), and this id now carries the same tier, the same suppressibility (`suppressWarnings: ['chart-field-unknown']` per widget) and the same kind of sentence. Each message states its own consequence, because the axis positions and the series position are refused for different reasons.
+  
+  The finding is **kept**, not deleted: unlike the `chart-config-missing` over-reach this measurement came from, the metadata really is wrong — the author wrote a binding and believes it is in force.
+  
+  ## Migration
+  
+  **A publish that used to be refused now succeeds.** Ruled 2026-08-15, `validateWidgetBindings` put its whole error set on the `sys_metadata` publish door (Studio / REST `/meta` / MCP) as one "this board cannot render" reference-integrity class. That class was six ids and is now five — `chart-field-unknown` has left it. A dashboard write whose only reference-integrity problem is a refused `chartConfig` binding key is no longer a 422 `INVALID_METADATA`; it publishes, and the finding rides the non-blocking `advisories` channel on the 2xx response instead. The other five (`widget-dataset-unknown`, `widget-dimension-unknown`, `widget-measure-unknown`, `widget-legacy-analytics-unrenderable`, `dashboard-filter-field-unknown`) are unchanged.
+  
+  Same direction on the CLI: `os validate` / `os build` / `os lint` report the finding at `warning`, so a stack that used to fail the build over one of these keys now exits 0 with an advisory. If you were relying on the build to stop on it, add the key to your own gate, or fix the binding — the fix has not changed:
+  
+  - point `xAxis.field` at a dimension the widget selects (or drop the key — `xAxis` carries presentation only);
+  - point `yAxis[].field` at a selected measure (or drop it — `yAxis[]` carries presentation only);
+  - name a selected measure in `series[].name`, remembering that post-cutover (ADR-0021) result rows are keyed by the dataset's measure **name** (`sum_amount`), not the base column (`amount`).
+  
+  A deliberately inert key can be silenced per widget with `suppressWarnings: ['chart-field-unknown']`.
+- 56fe8c2: A flow predicate authored as a CEL envelope is now refused at build time, instead of running unread by either validator.
+  
+  A `predicate`-role expression slot holds **bare CEL text** — `DecisionConditionSchema.expression` is declared `z.string()`, and so is a screen field's `visibleWhen`. An author who instead wrote the `{ dialect, source }` expression *envelope* there reached a shape nothing could see: a flow node's `config` is an open `z.record(z.unknown())` that no Zod schema is parsed against, the unknown-key walk exempts the schemaless node types on purpose (`decision` publishes no descriptor `configSchema`), and the expression ledger's `predicate` arm skipped every non-string as "a type violation for the schema pass to report" — a schema pass that, for those node types, does not exist. `registerFlow` accepted the flow, `objectstack validate` reported nothing, and the evaluator was the only layer that ever read the predicate.
+  
+  - `resolveFlowNodeExpressions` now emits a non-string sitting in a `predicate` slot, and the new `predicateSlotRefusal` / `PREDICATE_SLOT_STRING_REFUSAL` say why it is refused — one notion, derived once, read by both validators so build time and author time cannot disagree about the shape. `flow-template` slots keep the old rule: no validator implements that dialect, so a finding there is one nobody could judge.
+  - `registerFlow` throws, naming the node, the slot and the index, and attributing the finding to the envelope's own `source`. `objectstack validate` reports the same refusal as a located `error`.
+  
+  **String predicates are untouched, deliberately.** A whitespace-only string still means "not authored" on both sides, exactly as before; what a non-empty string *says* is still judged by `validateExpression('predicate', …)`, brace trap and all. Only the shape moved.
+  
+  An app that authored an envelope in one of these slots now fails to register with a message naming the slot; the fix is to write the predicate as bare CEL text (`record.rating >= 4`). The `{ dialect, source }` envelope remains the `value`-role spelling, on the `assignment` node's `assignments` map.
+- d61bad0: New gating rule `flow-filter-token-unknown`: a `{…}` filter token in a flow node's `config.filter` that NEITHER `{…}` dialect can resolve is now an authoring-time `error`.
+  
+  `filter-token-unknown` walks seven presentation collections and not `flows`, so `{TOMORROW()}` in a list view's filter failed the build while the identical string in a flow node's `config.filter` was silent — even though this package's other filter rules (`empty-combinator`, the preset-comparand rules) have reached flows all along.
+  
+  The gap was not an oversight to close by adding a root. A flow node's filter is interpolated by the automation template evaluator **before** ObjectQL sees it, and only what that evaluator cannot resolve is handed on. Judging a flow filter against the ObjectQL vocabulary — the obvious one-line fix — reports every legitimate `{record.id}` and `{recordId}`: measured at **7 findings, all 7 false positives**, on this repo's own example apps. So the new rule is a second rule id with the flow dialect as its reference set, and `filter-token-unknown`'s surface list is untouched.
+  
+  Reported (`error`): a call to a name in neither table — `{TOMORROW()}`, `{ROUND(x)}`, `{Math.round(x)}`, `{DATEADD(day, -45)}`. The flow template dialect's function vocabulary is closed (`round` / `floor` / `ceil` / `abs` / `min` / `max`, plus the whole-token `NOW()` / `TODAY()` with an optional `± N` day offset), and the evaluator already raises a guard refusal on anything else — so the node cannot run at all, and the build was shipping a flow whose runtime was already decided. This is the same severity axis `flow-template-unknown-field` applies at this exact position.
+  
+  Silent, deliberately: `{TODAY() - 45}` and every other whole-token date form; `{$User.Id}`; `{current_user_id}` / `{today}` / `{30_days_ago}` and the rest of the filter placeholders; and every bare or dotted identifier (`{recordId}`, `{record.id}`, `{currentTask.id}`), which addresses the run's variable map — declared flow variables, node outputs, and the trigger record's own fields — and is not decidable from authored metadata.
+  
+  Finding delta on this repo's example apps: **0**. Expect a new `error` only where a flow filter calls a function the evaluator would refuse at run time.
+- a87163c: New advisory rule `field-no-consumers` (`validateFieldConsumers`): a field declared on an object that nothing in the stack reads or displays is reported as a `warning` by `os validate`, `os build` and `os lint`.
+  
+  Until now such a field was schema-valid and passed every platform check — the declaration was inert and nothing in the toolchain said so. The rule is object-aware (the same field name on two objects gets two verdicts, resolved against the object whose declaration encloses each reference), and it distinguishes consumers from carriers: a view column, form section, page binding, flow node, dataset dimension, widget filter, formula, validation, hook or action is a consumer; a translation label, a seed value, an import-mapping column, a field-level permission grant or a flow that only writes the field is a carrier and never counts. The finding carries the verdict (`carrier-only` with the carrier paths a removal must clean, or `inert`), the roots scanned, and — when the name is also declared elsewhere — the other objects, so a per-object verdict is never mistaken for a name-level one.
+  
+  Exempt, each derived from the spec rather than listed by hand: the registry-injected system columns an author re-declared, the record's title field (ADR-0079 `nameField` ladder), and `master_detail` fields (ADR-0035 — cascade delete, `controlled_by_parent` sharing and roll-ups read the relationship by declaration). A stack that declares no consumer root at all (objects only, or objects plus carriers) is not judged: its consumers live in another package. Test fixtures are never scanned.
+  
+  Public surface: `validateFieldConsumers`, `FIELD_NO_CONSUMERS`, `FIELD_CONSUMER_ROOTS`, `FIELD_CARRIER_ROOTS`, and the `FieldConsumerFinding` / `FieldConsumerVerdict` / `FieldConsumerSeverity` types.
+- 0cde37d: `objectstack lint` now judges hooks authored as inline `handler` functions with the same write-set rules it already applied to explicit `body` hooks.
+  
+  The `hook-body-write-unknown-field`, `hook-body-write-unprovisioned-anchor`, `hook-body-source-unparseable`, `hook-api-update-readonly-field` and `hook-api-update-readonly-when-field` rules open on `body.language === 'js'`. A hook written as `handler: async (ctx) => { … }` carries no `body`, so on the stack `objectstack lint` handed the rule registry the whole family returned before reading anything — while the reference app authors every one of its hooks that way. `objectstack build` never had the gap: it lowers each inline handler to a metadata body before it parses and judges the lowered stack.
+  
+  `objectstack lint` now hands the registry's parsed-tier rules that same lowered view (the `lowerCallables` pass the build runs), so a handler-authored hook writing a `readonly` field through `ctx.api` is refused by the pre-flight exactly as the build would refuse it. What this does and does not change:
+  
+  - A config whose inline handler writes a `readonly: true` field via `ctx.api.object(...).update()` / `.updateById()` / `.insert()` — and does not declare `runAs: 'system'` — now fails `objectstack lint` with `hook-api-update-readonly-field` (exit 1). It already failed `objectstack build` with the same finding, so nothing that built green fails lint red.
+  - The warning-severity members of the family (`hook-body-write-unknown-field`, `hook-api-update-readonly-when-field`, …) now report on inline handlers too; they never fail a run without `--strict`.
+  - Nothing about what `objectstack build` accepts changes, and `objectstack validate` — which parses without lowering — is unchanged and still does not see handler-authored hooks; both are recorded in the rules' headers.
+  - The lint input is never mutated: rules that read the live function value (`hook-body/not-lowerable` and its siblings) keep seeing it, and a handler the extractor refuses has no body on any command, so no rule guesses about a body that was not produced.
+  
+  Measured on this repository's own four example apps (`examples/app-crm`, `app-showcase`, `app-todo`, `app-multi-package`), before and after: **121 findings before, 121 after — row for row identical, and zero at `error` on both sides.** No config that passes today starts failing. Two of the six hooks in that corpus are `handler`-authored and were invisible to this family before; their bodies write nothing the family objects to, which is why the delta is zero rather than the family being unreached. The reach itself is pinned separately, with a body-authored control beside every leg.
+  
+  `@objectstack/lint` carries only the header ledger recording which *intakes* reach each hook rule — the call sites of `runAuthoringRules`, which are more numerous than the three commands (the scaffold validator is a fourth, and it has always reached this family). Its behaviour is unchanged.
+- 9f890d3: `filter-preset-comparand` gains a FIELD-TYPED arm (#16106, maintainer-ruled 1′): on a declared `date` / `datetime` field, a dashboard date-range preset name (`last_30_days`, `this_quarter`, …) is now refused in EVERY comparand position — bare (implicit equality), `$eq` / `$ne`, `$in` / `$nin`, and their view-rule (`equals` / `not_equals` / `in` / `not_in`) and triple (`=` / `!=` / `in` / `nin`) spellings — with the same located message and prescription the ordering positions already carry (`{ $gte: '{30_days_ago}' }` for `last_30_days`, and so on). The field type is read from the stack's own object graph: a dashboard widget or report through its `dataset` to that dataset's `object`, a view through `data.object`, a flow CRUD node through `config.objectName`, a page component through `dataSource` / `properties`, an object's own list views and `relatedListFilter`, a summary field's child object. A position the graph cannot bind, a registry-injected column, a `time` field, or a select / text column stays unjudged — equality against a picklist value that collides with a preset name is a working filter. The field-agnostic schema door in `@objectstack/spec` keeps its ordering-only boundary unchanged; this closes the authoring-time gap where `objectstack lint` and the runtime publish gate accepted a filter the engine then refused with `INVALID_FILTER` / 400 on first render.
+- 720bf47: `flow-update-readonly-field` and `hook-api-update-readonly-field` now report a non-system **create** of a static-`readonly` field — a new **error**-severity finding that fails `os lint` / `os validate` / `os build` on a shape they used to accept.
+  
+  Both rules scanned only the update verb (`update_record`; `ctx.api…update()` / `.updateById()`) and justified the omission with the same sentence: INSERT is engine-exempt from the author-declared `readonly` strip, so a create that seeds a `readonly` column is not a no-op. The maintainer ruling of 2026-09-03 (option C, #14147) made that false — `engine.insert` now runs the same `isSystem`-gated `stripReadonlyFields` the update path runs — so a flow `create_record` without `runAs: 'system'`, or a hook body's `ctx.api.object('…').insert()` under a non-system trigger, that writes a `readonly` field became a **silent no-op**: the row lands without the column (which falls back to its `defaultValue`), the step reports `success`, and only a run-time warning names the dropped field (measured end to end in `@objectstack/service-automation`'s `create-record-readonly-drop.test.ts`). Nothing reported it at build time. This closes that scan gap (#15394).
+  
+  **What now fails that passed before.** Exactly one new shape per rule, at `error`:
+  
+  - a flow `create_record` node whose literal `fields` map writes a field the target object declares `readonly: true`, on a flow that does not declare `runAs: 'system'`;
+  - an L2 hook body's literal `ctx.api.object('<name>').insert({ … })` writing such a field, on a hook that does not declare `runAs: 'system'`.
+  
+  The rule ids and severities are the update ones — one id per shape, not per verb — and each finding's message names the verb it was judged on and what actually happens to a create. Everything the rules already skipped is still skipped: a templated object name, a non-literal payload, an object outside the stack or declaring no fields, an unknown field (the unknown-field rules' question), and any `runAs: 'system'` flow or hook, because seeding a `readonly` column at create time is a system act and that write lands.
+  
+  **Deliberately not reported.**
+  
+  - No `readonlyWhen` (conditional) finding on a create, on either surface: a conditional lock is evaluated against the record being written over, which a create does not have, and the engine runs no conditional strip on INSERT ("INSERT stays exempt"). A warning there would state something false about a write that lands.
+  - The hook rule judges `.insert()` only, not `.create()`. The host `ObjectRepository` aliases `create()` to `insert()`, but L2 bodies run in QuickJS and the VM-side `ctx.api.object()` installs no `create` leaf — a body calling `.create()` throws `TypeError: not a function` on its first run, a loud failure rather than the silent drop this rule reports. The silence is recorded as a reasoned method exclusion (`READONLY_HOOK_METHOD_EXCLUSIONS`) and pinned.
+  - No create finding on a **platform object** — one declaring `managedBy`, or in the reserved `sys_` namespace. The engine's create-side strip does not judge those at all (`staticReadonlyInsertSubject`: their own ADR-0086 write guard governs them), so a finding there would describe a strip that never runs. The update verb keeps judging them, exactly as the engine's update path does.
+  - `validate-readonly-action-writes` is unchanged: an action body runs system-elevated by design, so its create genuinely lands.
+  
+  **Migration.** If your build reds on the new finding, the fix is one of: declare `runAs: 'system'` on the flow or hook when seeding the `readonly` column is the intent (the intended channel — `readonly` governs the end-user/API surface, not trusted system writers); remove the key from the `create_record` `fields` / `insert()` payload when it is not; or stamp it in a `beforeInsert` hook on the target object (`ctx.input.<field> = …`), which is a server value the strip does not touch. Measured over this repository's shipped examples (`app-crm`, `app-showcase`, `app-todo`): zero in-repo flows or hooks go red — the two `create_record` nodes that target an object carrying a `readonly` field write none of its `readonly` fields, and the one flow that creates unauthenticated already declares `runAs: 'system'`; no shipped hook body inserts through `ctx.api`.
+- b4b37e5: The object publish door now refuses an object whose `searchableFields` entry, or whose built-in list view's `columns` (and every other field-naming position on that list view), names a field the object does not have.
+  
+  `#15254` closed this one key over: it crossed the reference-integrity suite onto the object write door for the object's own field-name **lists** (`highlightFields`, `publicSharing.redactFields`). The two members that read the *other* field surfaces an object carries — its ADR-0061 search set and its built-in `listViews` — still declared `runtimeTypes: ['flow', 'view']`, so on the only door a Studio, REST `/meta` or MCP author has they never judged the snapshot that arrived. An object could publish clean with `searchableFields: ['gone_field']` or a list-view column resolving to nothing, and both fail the same silent way downstream: the engine filters a stale search entry out without a word (`resolveSearchFields`), so `$search` scans a narrower set than declared — or, once every entry is stale, the auto-default set the author never chose — and a dangling column renders one field short.
+  
+  - **`validateSearchableFields` and `validateListViewFieldRefs` gain `object`** in their suite-member `runtimeTypes`. No new rule and no new finding class: the rule ids (`searchable-field-unknown`, `searchable-field-unsearchable`, `list-view-field-unknown`, `list-view-field-dotted`) and their severities are unchanged — they now reach the door where the author actually is.
+  - **The crossing carries the #9313 precondition.** Both members resolve only against `stack.objects`, the one collection every per-write snapshot carries, so neither opens a missing-collection false-positive channel; their `views[]` rungs simply find no `stack.views` on an object snapshot.
+  - **Measured before crossing**, at the door's own snapshot shape and differential, over every shipped object definition in the monorepo: 116 objects (platform-objects 48, showcase 24, plugins 19, services 12, crm 6, metadata-core 5, todo 1, qa 1), 105 built-in list views on 40 objects, 666 list-view field-naming positions and 5 `searchableFields` entries judged — **0 findings for both members, precision 1.0**, against synthetic probes that are refused.
+  - **`validateSortableFields`, the third sibling, is deliberately not crossed** — it measured equally clean, but that crossing is its own adjudication.
+  
+  ## Migration
+  
+  **A publish that used to succeed can now be refused (HTTP 422, `INVALID_METADATA`).** The receipt names the rule id and the offending path, name-keyed on the wire — for example `objects.proj_task.searchableFields[1]` or `objects.proj_task.listViews.all.columns[1]` — plus the string that was written and the fields the object actually has.
+  
+  To fix a refusal, do one of:
+  
+  - rewrite the entry to the field's current API name (after a Studio label edit the derived name is the one to use — `field_10` becomes `health_score`); or
+  - drop the entry from the declaration; or, for `searchable-field-unsearchable`, target a text-like stored column instead of a virtual or non-scannable one.
+  
+  `os validate` / `os build` / `os lint` already reported these findings at the same severity, so a code-authored stack can be repaired before it reaches a publish. Objects that name a platform-injected system column are unaffected — both members resolve those per object and stay silent where the platform really provisions them.
+- e0af1a8: feat(spec)!: `<ListView objectName>` / `<ListView viewType>` are retired from the react-tier component contract — `data={{ provider: 'object', object }}` / `type` are the only spellings (#14791)
+  
+  <!-- adr-0087: registered ui-react-list-view-binding-aliases-retired -->
+  
+  **BREAKING** — an accept-set narrowing on a published contract. The `REACT_BLOCKS`
+  ListView entry no longer publishes the `objectName` and `viewType` overlay props that
+  #11284 had deprecated in favour of ListViewSchema's own `data` / `type`: the generated
+  contract (`skills/objectstack-ui/references/react-blocks.md`) drops both rows, and
+  `@objectstack/lint`'s `validate-react-page-props` now REFUSES either spelling on a
+  `kind:'react'` page with a new `react-prop-retired` error that carries the fix, where it
+  used to warn and accept. Shipped as `minor` under the repo's launch-window convention for
+  breaking changes; the hand-migration prescription is registered under protocol major 18
+  (`ui-react-list-view-binding-aliases-retired`). Maintainer ruling on #14791 (2026-09-07,
+  director seat summon #17, decision batch #1, option B — retire now, no deprecation window,
+  「同意」).
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `<ListView objectName="account" … />` | `<ListView data={{ provider: 'object', object: 'account' }} … />` |
+  | `<ListView viewType="kanban" … />` | `<ListView type="kanban" … />` |
+  | `<ListView … />` with no binding at all | add `data={{ provider: 'object', object: '…' }}` — it is the required binding on a react page |
+  
+  One-line fix: on every `<ListView>` in react page source replace `objectName="X"` with
+  `data={{ provider: 'object', object: 'X' }}` and `viewType="K"` with `type="K"`, then re-run
+  `objectstack validate` — a leftover alias is reported as `react-prop-retired` with this
+  same prescription, and a list with no data source as `react-prop-missing-required`.
+  
+  ## Why now, and why no window
+  
+  The contract deprecated both aliases (#11284) while objectui's ListView still read only
+  `objectName`, so a page written the canonical way validated green and rendered an empty
+  list. That consumer half has landed and ships in the console this repo pins
+  (`normalizeListViewSchema` at `a472b071` folds `data.provider === 'object'` onto the key
+  the renderer reads and takes the author's `type` for the view kind), so both spellings
+  render today — and the maintainer's standing rule for a spelling with zero external
+  authors is to retire it at once rather than keep two vocabularies alive.
+  
+  ## What else moved
+  
+  - `REACT_RETIRED_OVERLAY_PROPS` is a new export of `@objectstack/spec/ui`: the tombstone
+    ledger (prop → replacement + one-line fix) the lint quotes, the react-tier twin of a
+    metadata schema's `retiredKey()`.
+  - `data` is restated on the ListView overlay as its **required** binding (ledgered in
+    `REACT_OVERLAY_SHADOWS`), so the generated contract marks it ✓ and a `<ListView>` with no
+    data source is refused — the check the required `objectName` used to carry.
+  - `REACT_RECORD_BLOCK_ALTERNATIVES['record:related_list']` prescribes the canonical spelling.
+  - The showcase pages (`crm-workbench`, `renewals-pipeline`, `task-desk`), the published
+    `objectstack-ui` skill and the react-pages / validating-metadata guides write the
+    canonical spelling; `@objectstack/lint` exports `REACT_PROP_RETIRED`.
+- 9408b7f: A flow condition that is neither CEL text nor an expression is now refused at build time, instead of being read as an empty condition and answering a silent `false`.
+  
+  `evaluateCondition` derives its source as `typeof expression === 'string' ? expression : (expression?.source ?? '')`. For a value that is neither — a number, a boolean, an array — the read yields `undefined`, the `??` supplies `''`, and the empty-source arm returns **`false`**: the "an unauthored branch must not open" rule, applied to a value that was very much authored. Measured: a `decision` node carrying `config: { condition: 42 }` **registered clean** and executed `success: true` with nothing said at any layer; `{ source: 1 }` did not even get that far and threw a bare `TypeError: exprStr.trim is not a function` out of the validator. `config.condition` is also the key a **start node's trigger gate** is read from, so the same value could gate a whole flow shut forever with no signal to the author.
+  
+  - The new `structuralConditionRefusal` / `STRUCTURAL_CONDITION_SHAPE_REFUSAL` in `@objectstack/spec/automation` are the single shared notion of why, read by both validators so build time and author time cannot disagree about the shape. `registerFlow` throws, naming the node or edge and attributing the finding; `objectstack validate` reports the same refusal as a located `error`.
+  
+  **This is deliberately NOT the `predicate`-slot rule, and the difference is measured.** A ledger `predicate` slot (`decision.conditions[].expression`, a screen field's `visibleWhen`) is declared `z.string()`, so `PREDICATE_SLOT_STRING_REFUSAL` refuses every non-string including an envelope. Neither structural slot is declared that way: `FlowEdgeSchema.condition` is `ExpressionInputSchema`, whose string arm **transforms into** `{ dialect: 'cel', source }` — so after `FlowSchema.parse` every authored edge condition *is* an envelope — and `FlowNodeSchema.config` is an open `z.record` that passes an envelope written at `config.condition` through verbatim, where `evaluateCondition` evaluates it correctly. Both shapes stay accepted here; an envelope with no `dialect`, and an `ast`-carrying one (`ExpressionSchema`'s own `source`-or-`ast` rule), stay accepted too.
+  
+  **Strings are untouched, deliberately.** A whitespace-only condition still means "not authored" and still answers `false` on both sides — consistent behaviour, ruled correct, not a defect. What a non-empty string *says* is still `validateExpression('predicate', …)`'s verdict, brace trap and all. Only the shape moved.
+  
+  An app that authored a number, a boolean, an array or a source-less object in a node or edge `condition` now fails to register with a message naming the site; the fix is to write the condition as bare CEL text (`record.rating >= 4`) or as an expression envelope.
+- 615fac3: A publish now refuses an object whose `highlightFields` names a field that does not exist on it — the same gate that refuses a code-authored stack.
+  
+  `list-view-field-unknown` inspects `view.columns`, and Studio's app builder mints no `view` items at all, so the reference-integrity family had nothing to inspect on the only artifacts the click path authors. What it authors is the **object**, and an object-level field-name list was covered by nothing that could refuse: measured on `origin/main`, `runtimeAuthoringRulesFor('object')` dispatched seven rules with no reference-integrity rule among them, while the object-level existence check that did exist (`semantic-role-field-unknown`) is `warning`, advisory-tier and CLI-only. So `os validate` exited 0 on a dangling reference and the runtime publish door — the only door a Studio, REST `/meta` or MCP author has — said nothing at all.
+  
+  The reproduction is the natural click order, not a contrived one: click-create a field (Studio mints it as `field_10`), add it to `highlightFields`, then give it a label — the API name auto-derives to `health_score` and `highlightFields` keeps `field_10`. Anyone who names a field after placing it produces this.
+  
+  - **New rule `object-field-ref-unknown` (`error`)**, in `@objectstack/lint`, over the object-level field-name **lists** that no rule owned: `highlightFields` (ADR-0085) and `publicSharing.redactFields`. It resolves through the same `object-graph` seam as the rest of the family, so the three shared skips hold — an object outside the stack, an object with no readable field map (ADR-0015 `external`), and a registry-injected system column resolved **per object** (`highlightFields: ['owner_id']` is a live pointer on an owned object and a real miss under `ownership: 'none'`).
+  - **It runs on the runtime publish door.** The reference-integrity suite entry's `runtimeTypes` gains `object`, and the suite's per-member declaration keeps the crossing narrow: this is the only member that judges an object snapshot; every other member keeps `['flow', 'view']` or the frozen `['flow']` default.
+  - **`validateSemanticRoles` keeps the provenance question** at the same position (`semantic-role-field-unprovisioned`, still `warning`) and no longer restates existence — one finding per path, at one tier.
+  - **`probes.checked` gained an `objects` counter.** Its absence was the tell: a receipt reading `{seeds: 0, views: 0, widgets: 0}` was accurate while the objects the package published were probed by nothing.
+  
+  ## Migration
+  
+  **A publish that used to succeed can now be refused (HTTP 422, `INVALID_METADATA`).** The receipt names the rule id `object-field-ref-unknown` and the offending path, name-keyed on the wire — for example `objects.proj_task.highlightFields[1]` — plus the string that was written and the fields the object actually has.
+  
+  To fix a dangling reference, do one of:
+  
+  - rewrite the entry to the field's current API name (after a Studio label edit the derived name is the one to use — `field_10` becomes `health_score`); or
+  - drop the entry from the list.
+  
+  `os validate` / `os build` / `os lint` report the same finding at `error`, so a stack can be repaired before it reaches a publish. If an object legitimately points at a platform-injected system column, no change is needed — the rule resolves those per object and stays silent where the platform really provisions them.
+- 6b7d709: `objectstack validate` now lowers hooks authored as inline `handler` functions to a metadata body before it parses, so the hook write-set rules judge them there exactly as `objectstack build` and `objectstack lint` already do.
+  
+  The `hook-body-write-unknown-field`, `hook-body-write-unprovisioned-anchor`, `hook-body-source-unparseable`, `hook-api-update-readonly-field` and `hook-api-update-readonly-when-field` rules open on `body.language === 'js'`. A hook written as `handler: async (ctx) => { … }` carries no `body`, and `objectstack validate` parsed the normalized stack without lowering — so on that command the whole family returned before reading anything, and a stack `objectstack build` refuses with `hook-api-update-readonly-field` (exit 1) passed `objectstack validate` with exit 0 and no finding. The same statement authored as an explicit `body: { language: 'js', source }` was refused by `objectstack validate` all along, so the silence was the command's intake, not the rule.
+  
+  `objectstack validate` now runs the same `lowerCallables` pass `objectstack build` runs before its parse — after its two pre-parse undeclared-key lints, which keep reading the un-lowered stack, and before the schema parse, which reads the lowered view — and hands the rule registry the parsed result as before. This moves what `objectstack validate` accepts in **both** directions, and both are parity with `objectstack build`:
+  
+  - **Narrowing (hooks).** A config whose inline handler writes a `readonly: true` field via `ctx.api.object(...).update()` / `.updateById()` / `.insert()` — and does not declare `runAs: 'system'` — now fails `objectstack validate` with `hook-api-update-readonly-field` (exit 1). It already failed `objectstack build` and (since #16095) `objectstack lint` with the same finding, so nothing that builds green starts failing `objectstack validate`.
+  - **Widening (actions, and a nameless `functions` array entry).** A plain-object config carrying an inline action `target` callable — `actions: [{ name, label, target: async (ctx) => { … } }]`, or the same on `objects[*].actions[*]` — was **refused** by `objectstack validate` before this change: `ActionSchema.target` is a string, and nothing lowered the function before the parse, so the run exited 1 with `invalid_type` at `actions.0.target` (measured through the real CLI: `valid=false errors=2 invalid_type@objects.0.actions.0.target | invalid_type@actions.0.target`). The same pass now lowers it to a ref string plus `body` on this command too, so `objectstack validate` **accepts** it (exit 0, `valid: true`) — exactly as `objectstack build` accepted it all along (exit 0 on both sides). Likewise a nameless `functions` **array** entry, `functions: [{ handler: async (ctx) => { … } }]`, which the same pass names `anon_fn`: the array form requires `name`, so `objectstack validate` refused it at the parse (measured: `valid=false errors=1 invalid_union@functions`, exit 1) and now accepts it (exit 0, `valid: true`), as `objectstack build` did (exit 0 on both sides). The `functions` map forms and `hooks[*].handler` parse either way and are not affected. These are accepted-set relaxations on a published command; they are declared here rather than inferred from the build's behaviour, and pinned beside the hook legs.
+  - The warning-severity members of the family now report on inline handlers under `objectstack validate` too; they fail a run only with `--strict`, as every other advisory does.
+  - The `--json` payload gains no key and the text face prints no new step: the lowering is a view for the parse and the rule registry. A handler the extractor cannot lower (a forbidden token, a module-scope identifier) has no body on any command and is reported by `objectstack lint`'s `hook-body/*` rules and `objectstack build`'s warn-and-bundle line, never guessed at here.
+  - Nothing about what `objectstack build` accepts changes; on both axes above `objectstack validate` now agrees with it.
+  
+  Measured on this repository's ten `objectstack.config.ts` corpus files at `6ba0db4e0` with `objectstack validate --json`, before and after: **exit code, error text and rule-id list identical on 10 of 10 — zero findings change, zero verdicts change.** Six reach the rule registry (the four example apps and the `plugin-auth` / `plugin-security` / `service-i18n` configs); two (`driver-memory`, `plugin-hono-server`) are plugin manifests, not stacks, and are refused at the schema parse — after the lowering point — with the same top-level `unrecognized_keys` on both sides; two (`app-showcase`, the `blank` template) fail at load in the measuring environment, before the lowering point, on both sides. None of the repository's handler-authored hooks writes through `ctx.api`, and none of the ten carries an inline action `target` callable, which is why the delta is zero on both axes rather than either being unreached — a corpus with neither shape cannot see either limb, so both are pinned on their own fixtures; the reach itself is pinned by the card's own fixture, with the body-authored control beside it and a handler-authored hook the family has nothing to say about still passing.
+  
+  `@objectstack/lint` carries only the header ledger recording which intakes reach each hook rule; `objectstack validate` moves from "not reached" to "reached". Its behaviour is unchanged.
+- cd55558: `widget-measures-missing` — the empty-measure selection is reported on every widget family, not just charts
+  
+  `chart-measures-missing` (#15462) reported the authoring placeholder only for the chart
+  family, but the return that produces it is type-independent. At the `@object-ui` revision
+  this repo pins (`.objectui-sha` = `a472b0716`), `packages/plugin-dashboard/src/DatasetWidget.tsx:683`
+  reads `if (values.length === 0)` and returns *"Pick measures (values) for this dataset
+  widget."* ABOVE `isMetric` (`:423`, over `METRIC_TYPES` at `:343`), `isTable` (`:424`) and
+  the chart branch alike. So a `metric`, `kpi`, `gauge`, `solid-gauge`, `bullet`, `table` or
+  `pivot` widget that selects no measures renders the same placeholder — the KPI number or
+  the table the author declared is not drawn at all — and nothing reported it:
+  `table-count-only` requires `values.length > 0` before it looks, and the rules that iterate
+  `dimensions[]`/`values[]` are silent on an empty array by construction.
+  
+  - **New id `widget-measures-missing`** — a NON-chart declared widget type selects no
+    measures. Warning tier, suppressible per widget with
+    `suppressWarnings: ['widget-measures-missing']`, exactly as the chart-family id is. The
+    message states the consequence its family actually has (the single KPI number is not
+    drawn / no table is rendered) and the hint names the dataset's declared measures.
+  - **`chart-measures-missing` is unchanged** — same id, same chart-family population, same
+    message and same suppression. The condition split rather than widened because "chart"
+    stops naming it once the population is every family, while the old id is reachable from
+    the package barrel (a public-surface contract) and may already be written into a board's
+    `suppressWarnings`.
+  - `chart-dimensions-missing` stays chart-family only: a dimensionless `metric` or `table`
+    is what those families are for.
+  
+  The two never double-report one widget, in the pin's own order: the measures check runs
+  before the dimensions one, and `table-count-only` already skips an empty selection.
+
+### Patch Changes
+
+- 347b777: `chart-config-missing` no longer fires on a widget whose binding the renderer derives
+  
+  The rule warned on every chart-family widget that declared no `chartConfig`, on the
+  stated grounds that "the renderer cannot determine which measure to plot, so the series
+  renders empty". Measured against the `@object-ui` revision this repo pins
+  (`.objectui-sha`), that consequence is false: `DatasetWidget` derives the x-axis key and
+  one series per measure from the widget's own `dimensions` / `values` via
+  `buildChartSeries`, and refuses an authored `ChartAxis.field` / `ChartSeries.name`
+  outright — `chartConfig` carries presentation only. The renderer pins this by name:
+  "ignores an authored axis `field` and keeps the derived axis binding", "ignores an
+  authored series and keeps one derived series per measure", "emits none of the
+  presentation keys when no chartConfig is declared".
+  
+  The false finding was landing on this platform's own shipped metadata — the
+  `system_overview` dashboard's pie and bar tiles, on the Setup board every customer opens
+  first — which is the ADR-0072 D1 cost the rule family exists to avoid.
+  
+  The rule id is unchanged and keeps one true arm: a `combo` widget with no `chartConfig`,
+  whose per-series mark is authored as `chartConfig.series[].type` and has no other
+  channel, so every measure draws with the same default mark and the chart is not a
+  combination at all. Its message now names that consequence instead of the binding.
+  An existing `suppressWarnings: ['chart-config-missing']` entry stays valid.
+- a51eb86: `chart-measure-unknown` no longer blocks a build over a chart `series[].name` (or a page chart's `yAxis[].field`) that names nothing — those positions are presentation, and the message now says so.
+  
+  The rule fired at `error` on every measure position of the three chart surfaces it covers, with one consequence sentence: *"result rows are keyed by MEASURE NAME … so this series comes back empty"*. Read at the `@object-ui` revision this repo pins (`.objectui-sha`), that is true only where the position feeds the dataset query, and the three surfaces do not agree:
+  
+  - **Report charts** run the chart's own query out of the two axis strings (`useDatasetRows(dataset, [xAxis], [yAxis], …)` — *"the embedded chart queries only `chart.xAxis` × `chart.yAxis`"*), so `chart.xAxis`/`chart.yAxis` are the binding. `chart.series[]` is *"the author's per-chart override for ONE measure's display name"*, lowered through `mergeAuthoredSeries`, where *"an authored entry naming a measure that is NOT in the dataset selection is **ignored** — membership belongs to the dataset"*.
+  - **List-view charts** have no presentation position at all: `ListChartConfigSchema` is a strict object of `chartType`/`dataset`/`dimensions`/`values`, and `values[]` is handed to the chart as the dataset measures.
+  - **Dataset-bound page chart components** query `{ dimensions, measures: values }` and then replace the authored series wholesale with one derived entry per selected measure, so `properties.series[].name` reaches the renderer not at all and `properties.yAxis[].field` re-points nothing.
+  
+  **Behaviour change users see:** the three presentation positions — report `chart.series[].name`, page-component `properties.series[].name` and `properties.yAxis[].field` — drop from `error` to `warning`. A build or a metadata publish that used to be refused because of one of them now succeeds, with the finding on the advisory channel. The finding is KEPT, not deleted: the metadata really is wrong — the author wrote a key and believes it is in force. Every query position (report `chart.yAxis`, and `values[]` on all three surfaces) keeps `error` and its existing message verbatim.
+  
+  Two smaller corrections ride along, both from the same read:
+  
+  - The page surface's `yAxis[].field` refs are no longer concatenated into the `series[]` limb before the measure walk, so an axis position no longer takes the series message. Reading both shapes on that surface stays deliberate; giving them one sentence was not.
+  - `chart-axis-not-selected` (a declared measure outside the selection) took the same one-size consequence, *"the query does not return it, so the series plots nothing"*. It keeps that wording at a query position and states the real one at a presentation position, where no series is derived for the name in the first place.
+  
+  Note that none of these three surfaces declares `suppressWarnings` — it is a dashboard-widget key — so the new advisories cannot be individually silenced; the hint says so instead of pointing at a key that does not exist.
+- 693fbcb: `dashboard-action-route-unresolved` now resolves the `apps/NAME` head of a dashboard header action's `url` target against `stack.apps`, and reports every unresolved `<collection>/<name>` segment in the path rather than stopping at the first one it recognizes.
+  
+  Before this, `URL_COLLECTION_TO_STACK_KEY` had no `apps` entry, so an `actionUrl` like `/apps/no_such_app_nope/crm_lead` was never checked at all — a dashboard button pointing at an app that does not exist passed lint clean. Worse, once a bad app name was combined with a second bad segment later in the same path (e.g. `/apps/no_such_app_nope/dashboard/no_such_dashboard_nope`), the old loop returned at the FIRST recognized segment and reported only that one — so a bad app name plus a bad dashboard name reported only the dashboard, never the app.
+  
+  **Behavior change on paths that used to pass clean:** the loop no longer stops scanning a path the moment it recognizes one collection segment, resolved or not. A path like `/dashboards/exec/views/bad_view` — where `exec` is a real dashboard but `bad_view` names no view — used to report nothing (the loop returned as soon as `dashboards/exec` resolved, never reaching `views/bad_view`); it now reports one warning on the `views/bad_view` segment. Any stack with a dashboard `url` action whose path recognizes a valid collection segment followed later by an unresolved one will see a NEW warning here that did not fire before. This is intentional — it is the same false-affordance category the rule already exists to catch — but it is a real, visible change to what a clean `lint` run reports on such stacks, not a pure addition.
+- 86c75f4: `firstUndeclaredReference` now documents the side of its contract it was silent about: it can false-NEGATIVE, and a `null` is "nothing was reported", not "every reference is rooted".
+  
+  The existing sentence — "Acts ONLY on cel-js's `Unknown variable: X` fault, so it cannot false-positive on arithmetic/comparison overloads" — is true, and stays. What it never said is what that narrowing costs. cel-js's checker returns exactly ONE error, so when the first one is of another class every undeclared reference behind it in the same source goes unjudged and the helper answers `null` — the same value that means the source is clean. A contract that declares only which error it cannot make reads as making neither.
+  
+  No behaviour changes. This is the contract text, and it ships: the amended block is JSDoc on a published export, so it is emitted into `@objectstack/formula`'s `dist/index.d.ts` and `dist/index.d.mts` (measured — the declaration file grew 53.45 KB to 55.99 KB) and is what a consumer reads on hover.
+  
+  What the amendment adds, all of it measured rather than reasoned:
+  
+  - **The masking is positional, not name-keyed.** The masked name is not the one that triggered the first error, so excluding the trigger's own name does not reach it. `data == 'x' && status == 'q'` answers `null`; the same two names in the other order answer `"status"`.
+  - **`celEngine.compile()` is not a gate against it.** `compile` type-checks in the permissive environment, where every unlisted name is `dyn`. The strict environment here declares `SCOPE_ROOTS` as `map`, so a root — or an object field sharing one of those names (`data`, `config`, `result`, `item`, `event`, `input`, `user`, …) — used as the operand of an operator with no `map` overload faults HERE and nowhere else. A caller that only reaches the helper on a clean compile is therefore not protected by its own gate.
+  - **The CEL type-name class is the same shape.** `type == 'grid'` is already pinned as a blind spot in `@objectstack/lint`'s `visibility-bare-identifier` suite, but pinned per NAME; the masking it causes is source-wide.
+  - **What closing it would take, and why that is not this change.** Widening the regex onto the overload message is the false positive the narrowing buys off (`type(record.x) == string` is legitimate CEL). Reporting past the first error needs a re-check loop over a neutralised source, or a checker entry returning more than one error — cel-js 8.0.0 has neither; its `TypeCheckResult` carries a single `error`. Both change what every consuming rule reports, so the oracle's shape is a design decision.
+  
+  `@objectstack/lint` carries a second comment-only correction, to `flow-variable-scope`'s account of the same oracle. Its "known, deliberate blind spot" note bounded the under-report to a flow variable named after a `SCOPE_ROOTS` member; measured, the bound does not hold — such a name in an operand position terminates the discovery loop on iteration 0 and every shadow in that source is lost, whatever it is named. That block sits on an internal function, so unlike the `formula` half it reaches no published declaration file; the entry is here because the package is touched and published.
+- b371960: `flow-decision-unconditional-branch` now reports the decision that gates on nothing — the shape the rule used to skip.
+  
+  A `decision` whose out-edges carry no `condition` and no `isDefault`, and whose node declares no `config.conditions[]`, selects no branch at all: the automation engine's own decision executor reports no branch when `conditions[]` is empty, so traversal considers every out-edge and each successor runs on every pass. The gateway is decoration. The rule could not see that shape, because it was framed as "an unconditional edge undercuts a guarded one" and read zero guarded edges as nothing to undercut — so the strictly worse gateway was the one case that stayed silent, and it is the harder one to notice in review, because the node still says `type: 'decision'`.
+  
+  Same rule id, same `warning` tier, with its own message: it names the out-edges that run unconditionally and offers the three fixes (a `condition` per branch plus `isDefault: true` on the fallback, a `config.conditions[]` whose `label` matches an out-edge, or dropping `type: 'decision'` for the node the gateway already behaves as). The mixed shape — one guarded out-edge beside an unconditional one — keeps its existing wording and its single finding.
+  
+  Decisions that do declare their routing stay silent, including the two that are easiest to catch by mistake: an ordinary gateway with guarded edges, and a decision that routes by `config.conditions[]` labels alone with bare out-edges. A decision declaring a label no out-edge claims remains the gating `flow-branch-label-unmatched` on its own, with no second finding piled on the same node.
+- d91dff4: `validateStackExpressions` no longer throws on a non-record entry of a flow's `nodes` list.
+  
+  An empty item in a YAML `nodes:` list deserialises to `null`, so this is an authorable shape — the same one #15552, #15636 and #15742 closed for stack collections and for `objects[].fields`. Here it crashed the linter instead of producing a finding: `flow.nodes: [null, ...]` threw `Cannot read properties of null (reading 'type')`, which presents to an author as a broken tool rather than as a problem with their metadata.
+  
+  Both of the file's inline casts now read through `recordsOf`, the one home of this coercion, instead of asserting that `Array.isArray` proves anything about a list's MEMBERS:
+  
+  - The flow walk reads `flow.nodes` through `recordsOf`, and — the half that actually removes the crash — hands that coerced array to `collectFlowGraphs` rather than the raw flow. `collectFlowGraphs` declares its input as already-parsed `FlowNodeParsed[]` and is transparent about members, so passing raw authored metadata was calling it out of contract; coercing only the local variable relocated the throw into `@objectstack/spec` instead of ending it. The producer's contract is unchanged, deliberately: widening it to tolerate malformed members is the wrong direction.
+  - The per-graph walk reads `graph.nodes` through `recordsOf` in place of an `as unknown as` double cast. A nested region's node list is only `Array.isArray`-checked before it becomes a graph, so that list carries the producer's word about its members and not a check.
+  
+  A non-record member is dropped whole and in silence, exactly as the file's sibling field readers already did; a flow standing beside the junk entry is still judged, and a `nodes` list holding a plain string still reports exactly what it reported before.
+- dff0bdd: `flow-template-unknown-field` and `flow-template-lookup-traversal` now reach a `{record.<field>}` template that sits outside a node filter — the `warning` half both rules already declared, and never emitted.
+  
+  A `{record.<field>}` token in a filter has always been reported as an `error`: an unresolved token there erases the condition and the CRUD node refuses to run. A token anywhere else — a message body, an http request payload, a created row's field values — is the quiet failure the rules were written for: it renders as an empty string on every run, and nothing reports it at either end — no build-time finding, no run-time error — so a hand-off payload naming a renamed field ships an empty value and the run is recorded as a success. That half was silent.
+  
+  The cause was one key, in the shared flow walk rather than in either rule. A rule that scans a node's config recursively has to read a view of it with the nested regions removed, or it reports every finding inside a `loop` / `try_catch` / `parallel` a second time against the container. That view was built by removing every key that holds a region on *any* node type — and `body` is `loop`'s region slot **and** the canonical request-payload key on an `http` node. So `config.body` was deleted from every node's view before any rule read it, and the whole of an http payload was invisible. The view now removes only the slots the node's own type declares, which is exactly the set the walk descended into: nothing is double-reported, and nothing that was never a region is dropped.
+  
+  Expect new `warning` findings on flows that publish clean today. Each one names a token that renders empty at run time; `warning` does not change `os validate`'s exit code, so a build that passed still passes.
+- 7a01847: Fix: a name-keyed `pages:` map no longer passes every source-page lint vacuously.
+  
+  `pages` has two authoring carriers — a list, or a map keyed by page name that
+  `normalizeStackInput` folds into a list before the schema sees it. Four rules
+  (`validate-jsx-pages`, `validate-page-source-styling`,
+  `validate-react-page-props`, `validate-react-pages`) read the collection through
+  a private coercion that answered a map with an empty list, and they run on the
+  raw `os lint` path where nothing has normalized it yet. On a map-shaped stack
+  all four therefore returned no findings by never walking a single page: an
+  empty source, a syntax error, an unparseable component and a Tailwind
+  `className` were all reported as clean. They now read `collectionEntries`,
+  which handles both carriers, and a finding on the map carrier is located by the
+  author's own key (`pages.home.source`) rather than a synthetic index.
+  
+  The same change removes the last sixteen private copies of the collection
+  coercion in this package. Twelve rules — the `function` form, which had already
+  grown the non-record filter locally in two different spellings — now read
+  `recordsOf` from `object-graph.ts`. Two behaviour changes fall out, both on
+  input that was already malformed: an array-typed member of `agents:` /
+  `skills:` / `tools:` used to survive the looser local filter and draw one
+  reference-integrity finding at a position nobody authored, and is now dropped;
+  a member of a name-keyed `validations:` map whose value is not a record is now
+  carried as `{ name }` rather than discarded, which reaches no check that reads
+  it. No rule id, message or severity changes, and every finding path on the list
+  carrier is unchanged.
+- f36eef5: Flow-node-list readers no longer throw on a non-record member — `lintFlowPatterns`, `collectFlowVariableNames` and the three record-change template-path readers now coerce through `recordsOf`.
+  
+  `lintFlowPatterns` crashed on an ordinary flow. A YAML `nodes:` list item left empty deserialises to `null`, and the rule read `nodes.find(n => n.type === 'start')` off a list it had only `Array.isArray`-checked, so an author's own metadata turned `objectstack validate` into an uncaught `TypeError` out of a function contractually typed `(stack) => Finding[]`:
+  
+  ```
+  TypeError: Cannot read properties of null (reading 'type')
+      at lint-flow-patterns.ts:1430
+  ```
+  
+  `Array.isArray` proves the LIST, never its MEMBERS — the same sentence removed from `validate-expressions.ts` one file over. All seven readers now go through `recordsOf` (`object-graph.ts`), which stays the single home for this coercion; no new copy of the predicate is declared.
+  
+  - **`lintFlowPatterns`** — `flow.nodes` is coerced once, and that coerced array is what is handed on to `collectFlowGraphs`. That second half is the load-bearing one: `collectFlowGraphs` is transparent about members (it forwards the caller's array and re-exposes the same objects), so coercing only for the local read would have moved the crash into `packages/spec` rather than removing it. Its two `graph.nodes` readers are coerced as well, because a nested region's node list reaches them with only an `Array.isArray` behind it.
+  - **`collectFlowVariableNames`** — the `graph.nodes` walk had no member guard while the `flow.variables` walk seven lines above it did. Reachable today only at a region nest of exactly `MAX_REGION_DEPTH`; it now cannot throw at any depth.
+  - **The three record-change template-path readers** (`boundObjectOf`, `declaredExpandOf` and the per-flow start lookup in `validateFlowTemplatePaths`) were **not** throwing. They survived on an optional chain in the `.find` predicate — one character's difference from the reader that did throw, maintained by nothing and looking redundant next to the `Array.isArray` above it. They are coerced for the same reason and the optional chain goes with it. This half is a hardening, not a bug fix.
+  
+  A malformed member is dropped, in silence, exactly as `recordsOf` drops one everywhere else; the valid nodes standing beside it are still judged and the findings a flow draws are unchanged.
+- 36a6082: `flow-double-brace-interpolation` and `flow-bare-dollar-reference` now read an `http` node's request payload. Both rules were blind to the whole of `config.body` on every node type — the one key where an uninterpolated token has an outbound consequence.
+  
+  The recursive template scan in `lint-flow-patterns.ts` read a region-stripped view of each node's config, and it built that view from the FLAT UNION of every config key that holds a region on *any* node type (`body`, `try`, `catch`, `branches`) rather than from the slots the node in hand actually owns. `body` is `loop`'s region slot **and** the canonical request-payload key on an `http` node, so `config.body` was deleted from every node's view before the scan ever read it.
+  
+  That made the two rules silent exactly where they matter most: `http-nodes.ts` interpolates the raw config wholesale, so a double-brace `{{ record.title }}` or a bare `$source.id` written in a payload is never interpolated and ships to the endpoint as literal text. Measured before this change, an `http` node whose `body` carried either token shape — at the top level or nested inside a `try_catch` region — produced zero findings from either rule.
+  
+  - **The call site passes its own slots.** `stripRegions(node.config, ownRegionKeys(node.type))`. The remedy was already written in `stripRegions`' own docblock ("Pass the OWNING node's slots, not the flat union") and the sibling call site in `flow-walk.ts` already followed it; this one did not.
+  - **The trapping default is gone.** `stripRegions`' `regionKeys` parameter is now REQUIRED. The flat union survived as a default only to bound an earlier change, and the cost of leaving it was this defect: the shorter call compiled and quietly asked a different question. A caller that has not decided which set it means now fails to compile instead.
+  - **The double-count direction is unchanged and pinned.** A token inside a `loop` body is still reported exactly ONCE, against the node that carries it and not also against the container — the reason the strip exists, and the direction that breaks if a repair over-corrects to stripping nothing.
+  
+  Both rules keep their existing severity. New findings appear only where a `{{ }}` or bare `$ref.field` sits in a previously-hidden key; measured across `examples/app-showcase`, `app-crm` and `app-todo` (34 flows, `http` payloads inside a `parallel` branch and a `try_catch` try among them), the count is unchanged at zero — those payloads use correct single-brace tokens.
+- 7ad2ca0: `validateFormLayout` now resolves the bound object for a view container's default `form` (and its `formViews.*` entries that declare no binding of their own) when that container names its object only on the `list` block (`list.data.object`, `list.object` or `list.objectName`) and nowhere on the container itself.
+  
+  Before this fix, `containerObject` had no way to see a list-only binding, so `objName` stayed `undefined` for every site under such a container — and `form-field-unknown` / `form-section-group-unknown` never fired there, however wrong the section content was. This is the same fallback rung `validate-translatable-sections.ts` already carries for its own sites; it is now shared by both. `absolute-colspan-discouraged` is unaffected by this change — it was never gated on the object binding (it needs only a field's `colSpan`), so it already fired on a list-bound container's form sections before this fix.
+  
+  Consequence: a view whose object binding lives only on `list` and whose default `form` (or an unbound `formViews.*` entry) references a nonexistent field or an undeclared `section.group` now gets a `warning` finding it did not get before. A stack with no such dangling reference sees no new output.
+- 7dafaae: No authoring rule throws on a non-record entry of any stack collection.
+  
+  A collection is authored either as a list or as a name-keyed map, so every rule that reads one coerces `unknown` into an array of records first. That coercion had been hand-copied into 39 modules, and 23 of the copies spelled the array branch as an unchecked cast — every member was asserted to be a record. A YAML list item left empty deserialises to `null`, so a single stray `-` under `flows:`, `pages:`, `dashboards:`, `datasets:`, `apps:`, `permissions:`, `capabilities:`, `data:`, `hooks:`, `views:`, `actions:`, `translations:` (or a per-object `fields:` / `actions:` / `views:`) reached a property read on `null` and threw a stack trace out of `os lint` / `os validate` instead of reporting a finding. The rules are pure `(stack) => Finding[]` running on the raw path, so nothing upstream had judged the entry's shape.
+  
+  Twenty-two of those readers now read through the shared, guarded `recordsOf`, which drops a non-record member of the array shape whole and keeps the author's key on the map shape. Nothing else about what the rules judge changes: a valid entry standing beside a junk one is still read, and still draws exactly the findings it drew before.
+  
+  The remaining copies are pinned by a new source-text test in the package, so the predicate cannot be pasted back in: it asserts that `recordsOf` is the only collection coercion, that every module still holding a private one is named in a dated ledger that is exact in both directions, and that no coercion outside a dated single-file allowance casts its array branch unchecked.
+- 52b59d6: fix(lint): every `stack.objects` reader skips a non-record entry, so no authoring rule throws on the publish door
+  
+  A `null` member of `stack.objects` — what an empty YAML list item
+  deserialises to, and what a partial editor write leaves behind — crashed
+  13 of the 42 `AUTHORING_RULES` with
+  `TypeError: Cannot read properties of null (reading 'name')`. The
+  authoring rules are pure `(stack) => Finding[]` (ADR-0019) and run on the
+  RAW `lint` path as well as the parsed one, so nothing upstream had judged
+  the entry's shape. At the runtime publish gate they are called inside the
+  gate rather than behind a try/catch of their own, so the throw was an
+  exception on a WRITE path, not a skipped finding; on the CLI, `os lint` /
+  `os validate` / `os compile` died on the first one instead of reporting
+  the stack.
+  
+  The repair before this one guarded ONE seam — the object-graph index every
+  field-path rule opens with. The crash stood at fourteen more readers of
+  the same collection, each a hand-copied `asArray` whose array branch was
+  an unchecked `v as AnyRec[]`. Copies are why: the defensive spelling was
+  already present in about a dozen siblings and absent in the rest, so
+  fixing one left the others answering the old way.
+  
+  So the copies are gone. `recordsOf` — the guarded reader, exported from
+  `object-graph.ts` and package-private — is now the one coercion from a
+  collection authored as an array OR as a name-keyed map into the records it
+  holds, and fifteen files call it:
+  
+  - `validate-expressions.ts`, `validate-list-view-mode.ts`,
+    `validate-widget-bindings.ts`, `filter-walk.ts`,
+    `validate-object-references.ts`, `validate-record-title.ts`,
+    `validate-form-layout.ts`, `lint-autonumber-formats.ts`,
+    `lint-view-refs.ts`, `validate-org-axis-red-lines.ts`,
+    `validate-sharing-rule-enforceability.ts` — the eleven sites that threw.
+  - `validate-searchable-fields.ts`'s `indexObjectSearchTargets` and
+    `validate-page-field-bindings.ts`'s `indexObjectFields` — two shared
+    indexers inside the reference-integrity suite, each in front of two
+    rules and both hidden behind whichever suite member threw first.
+  - `object-field-groups.ts`'s `indexObjectFieldGroups`, which the
+    re-measure surfaced only once the eleven above stopped throwing.
+  - `validate-security-posture.ts`, the one that never threw: an `[]`
+    member passed its `typeof v === 'object'` read and drew a second
+    `security-owd-unset` at `object "(object 0)"` — an `error` about an
+    entry no author wrote.
+  
+  The verdict is a SKIP, not a finding, matching the seam it extends: a junk
+  `objects` member is a SHAPE defect and belongs to the schema, every rule
+  already re-answers the question in its own per-object guard, and reporting
+  it at the reader would emit one finding per member for one bad entry. On
+  the name-keyed map shape a member whose VALUE is unreadable keeps its key
+  (`{ name }`) — the author named it, only its body is illegible.
+  
+  No rule tier, id, message or accept-set changes. A valid object standing
+  beside a junk one is judged exactly as it is judged alone; only a path
+  index moves, and only for the rules that index `objects` raw, where
+  `objects[1]` is the honest position.
+- 434ca2d: `validateStackExpressions` no longer throws on a non-record entry in an object's `fields:` list.
+  
+  An empty item in a YAML `fields:` list deserialises to `null`, and `buildFieldIndex` cast each member of the list inline (`fields.map(f => (f as AnyRec).name)`) before the `.filter` two calls later could drop it. `Array.isArray` proves the LIST, never its MEMBERS, so linting such a stack failed with `TypeError: Cannot read properties of null (reading 'name')` out of the whole rule instead of reporting anything about the file.
+  
+  The list is now read through `recordsOf` — the one place that coercion is decided — which drops a non-record member of the array shape whole and in **silence**: it carries no author-written name, so there is nothing to report about it. That matches what the two sibling field readers in the same module (`buildFieldTypeIndex`, `fieldEntries`) already did with the same member, so the three readers now agree. The readable siblings of the junk member are still indexed, so unknown-field findings on that object continue to be reported.
+  
+  The map shape (`fields: { amount: { … } }`) is unchanged: there the author's key is the field name, which is what this index needs.
+- 25a3d91: Stop reporting a declarative `operation: 'update'` action as "a button wired to nothing"
+  
+  The boot action-governance inventory (ADR-0110 D5) built its `unboundDeclarations`
+  finding from a `type`-only test. The declarative single-record field write
+  (`operation: 'update'` + `patch`, #14092) is exactly the shape that test mistakes
+  for a dead button: `ActionSchema` refuses `target` and `body` beside it and keeps
+  `type` at its default `script`, because the platform action route is where the
+  write is performed. Every such action was named at every boot and every
+  `metadata:reloaded` — with a prescription ("add a `body`, or register a handler
+  under the declared `target`") that parse itself refuses.
+  
+  Both readers now read `operation` before `type`, the precedence the runtime doors
+  already use: the engine inventory, and the authoring-time AI tool-reference rule,
+  which had diverged from the runtime's listing door and reported a resolvable
+  `action_<name>` reference as fictional.
+- ce21963: `nav-object-ungranted`'s hint no longer tells you to gate the nav entry with `requiredPermissions`/`visible` — that never cleared the finding, because the rule never reads either key. Gating restricts who can see the entry; it doesn't grant the object read, so a holder who clears the gate could still hit permission-denied, and the warning kept firing anyway. The hint (and the module doc-block) now name the two remedies that actually clear it: grant read on the object in a permission set (`allowRead: true` or `viewAllRecords`), or drop the nav entry. No behavior change — the rule fires and stays silent on exactly the same inputs as before; only the wording of the hint moved.
+- ba426b0: A junk entry in `stack.objects` no longer crashes the reference-integrity rules, and a probe rule that throws is reported instead of read as "nothing wrong".
+  
+  `indexObjectGraph` is the first statement of every rule that resolves a field path, and it read each `stack.objects` member without checking it was a record — so a `null` entry (an empty YAML list item, a partial editor write) threw `TypeError: Cannot read properties of null (reading 'name')` before any rule's own per-object guard could run. Because these rules also run inside the runtime publish gate, that was an exception on a write path rather than a missed finding. The seam now drops non-record entries — silently, matching every sibling collection reader in the package — and the valid objects beside them are judged exactly as before.
+  
+  On the publish receipt, `runBuildProbes`' object plane wrapped its rule call in a catch that produced an empty finding list, so a crashed rule was indistinguishable from a clean object while `checked.objects` had already counted it. A rule that throws now surfaces as a `runtime`-layer `object_field_ref_rule_failed` error carrying the thrown message, so an unverified object never reads as a verified one. Probes still never fail the publish they verify.
+- eda26ce: `security-owd-alias` no longer tells authors that `sharingModel: 'public'` is a retired ADR-0090 D4 alias. It never was one — no shipped schema ever accepted it — and the map that said so is now split along the two histories it was conflating.
+  
+  `OWD_ALIAS_FIX` carried four keys under one comment, `[ADR-0090 D4] Legacy alias → canonical fix-it mapping`, while D4 names three: "The legacy aliases `read`, `read_write`, `full` are **removed from the zod enum**". Those three have a retirement behind them — the `owd-legacy-read-aliases` ADR-0087 stored-row conversion for the two `read*` spellings, the `13.owd-full-alias-removed` semantic entry for `full`. `public` has neither, and correctly so: a conversion rewrites a spelling some shipped schema once took, and this one never was taken, so its stored population is zero by construction. The missing conversion was the mislabel's shadow, not a gap.
+  
+  - **Two maps, one union.** `OWD_RETIRED_ALIAS_FIX` holds the three D4 aliases; `OWD_WRONG_LAYER_FIX` holds `public`; `OWD_ALIAS_FIX` stays as their union, so every key still earns the same rule id, the same path and the same fix-it. No accept set moves and no value starts or stops being reported.
+  - **The `public` fix-it is KEPT.** It catches a real authoring mistake: three neighbouring keys on the same `ObjectSchema` take `'public'` legally — `access.default` (`z.enum(['public', 'private'])`, ADR-0066) and `publicSharing.allowedAudiences` (`z.enum(['public', 'link_only', 'signed_in', 'email'])`) — and off-schema so does the sharing runtime's own internal vocabulary, `effectiveSharingModel(): 'private' | 'read' | 'public'`. `sharingModel` is the one neighbour that refuses it, and it fails CLOSED to `private` with no notice on the read path, so this fix-it is the author's only signal.
+  - **The message says which group it is in.** One shared clause, used by both the `sharingModel` and the `externalSharingModel` branch. A retired alias still reads `is a retired alias (ADR-0090 D4)`; `public` now reads that it is not an OWD value and never was, and names the neighbouring keys that do take it. The fix-it text, severity, rule id and path are byte-identical either way.
+  
+  Why the wording mattered enough to change: a diagnostic that credits `public` to D4 sends its reader looking for the conversion and the semantic entry that would exist if the acceptance had happened, and finding them absent reads as a data-fidelity defect in the conversion registry. It is not one.
+- ed6579b: `objectstack build` now refuses to lower a hook/action body that calls `.create(`, and the shared write-pattern ledger stops advertising the verb. Three layers used to disagree about `ctx.api.object('x').create({ … })`, and the loudest one was wrong.
+  
+  - The spec contract `IScopedObjectRepository` (`packages/spec/src/contracts/scoped-context.ts`) declares `insert` and names `create` as measured-and-deliberately-excluded.
+  - The QuickJS sandbox installs exactly `insert / update / delete / updateMany / deleteMany / upsert` as the `ctx.api.object()` write leaves — no `create`. An L2 body calling `.create()` therefore threw `TypeError: not a function` on its **first run**, and under a hook's default `onError: 'abort'` that throw aborted the triggering write, with a message naming no member.
+  - The extractor ledger nonetheless advertised `.create({…})` as legal `api-crud-literal` syntax and mapped it in `API_WRITE_METHODS`, so `hook-body-write-unknown-field` graded the payload as a live write and stayed silent when the field existed — a clean bill of health for a call that cannot run. Build time said nothing at all.
+  
+  What changes:
+  
+  - **`@objectstack/cli`** — `.create(` joins `FORBIDDEN_PATTERNS` in the hook/action body extractor, beside `.sudo(` and for the same reason (a member real on the in-process `ScopedContext` / `ObjectRepository` and absent from the VM). The refusal names `.insert({ ... })` as the spelling the sandbox actually has. Behaviour is the `forbidden-token` fallback every other entry has: the callable is still registered and still shipped through the back-compat `.mjs` bundle, so a handler keeps running in-process where the host `create()` alias exists — `objectstack build` merely declines to *also* emit it as a body that cannot run. Under `--strict-body` it is a hard failure, correctly. The rule is receiver-loose like `.sudo(` (`const repo = ctx.api.object('x'); repo.create(…)` is refused too) with one carve-out: `Object.create()` is a real sandbox global and is **not** affected.
+  - **`@objectstack/lint`** — `create` is withdrawn from `HOOK_BODY_WRITE_PATTERNS`' advertised `api-crud-literal` syntax and from `API_WRITE_METHODS`, on the hook and action surfaces alike. `hook-body-write-unknown-field` / `action-body-write-unknown-field` no longer grade a `.create()` payload; `hook-api-update-readonly-field` keeps its existing `create` exclusion, whose *reason* is updated — it is no longer "the call throws, so a silently-dropped finding would be false" but "the shape can no longer reach this rule at all".
+  
+  **Migration.** If a hook or action body calls `ctx.api.object('x').create({ … })`, spell it `ctx.api.object('x').insert({ … })` — the same host method, the one the sandbox installs and the only insert verb the contract declares. The host-side `ObjectRepository.create()` alias is untouched and stays reachable from in-process handlers and actions.
+- 89758ac: `chart-axis-not-selected` resolves a report chart against its own `chart.yAxis`, not `report.values` (#15734)
+  
+  **Behaviour change — one false finding removed on the report surface.** A report chart whose `chart.yAxis` names a declared measure that `report.values` does not select no longer raises a `chart-axis-not-selected` warning. Nothing else about the rule moves, and no other surface moves at all.
+  
+  The warning stated a query consequence the renderer refutes. Read at the `@object-ui` revision this repo pins (`.objectui-sha`), `plugin-report/src/DatasetReportRenderer.tsx` does not query `report.values` for the chart at all — it runs the chart's own, narrower query out of the two axis strings:
+  
+  ```
+  const state = useDatasetRows(
+    dataset,
+    plan.kind === 'series' && xAxis ? [xAxis] : [],
+    wantsQuery && yAxis ? [yAxis] : [],
+  ```
+  
+  and says so in that file's own words at the `scopeOrder` docblock: *"the embedded chart queries only `chart.xAxis` × `chart.yAxis`"*. So the measure the warning said "the query does not return" is exactly the one the query asks for, and the chart plots it. `report.values` is the selection of the TABLE beneath the chart.
+  
+  Both limbs follow from that one measurement:
+  
+  - **No not-selected check at the report `chart.yAxis`.** That position IS the chart's query, so it cannot fail to select itself. `chart-measure-unknown` there is untouched: an UNDECLARED measure is still no column at all, and still an `error`.
+  - **`chart.series[].name` resolves against the singleton `{ chart.yAxis }`.** The entry is a display-name override paired with a DERIVED series, and the chart derives exactly one (`buildChartSeries(…, [xAxis], [yAxis], …)`). An entry naming `chart.yAxis` now lands however the table is selected, and one naming any other declared measure is still reported — including a measure `report.values` does select, which it could not reach before.
+  
+  The list-view and page-component surfaces are unchanged, and carry firing controls that say so: on both, `values` IS the measure set the query asks for (`ObjectView` hands it to the chart; `ObjectChart` queries `{ dimensions: schema.dimensions, measures: schema.values }`), so the existing resolution is the right one there.
+  
+  The per-position tier and consequence wording is untouched — only the SET the report surface resolves against moves.
+- d83d079: A report's `dataset`, `rows`, `columns` and `values` are checked whether or not the report draws a chart (#16105)
+  
+  **Behaviour change — new findings on reports that used to publish clean.** `validateChartBindings` reached a report through one closure that opened `if (!isRec(chart)) return`, and that closure was the only place a report's `dataset` was ever passed to the resolver. Two gaps followed, and both are closed:
+  
+  - **A report authored without a `chart` was not checked at all.** Bind it to a dataset that does not exist and `os lint` exited 0 and named nothing. It now reports `chart-dataset-unknown` at `error`, the same as a charted report always did.
+  - **`rows` and `columns` were resolved on no report, charted or not.** On one and the same report object the measure selection (`values`) was resolved against the dataset and the dimension selection beside it was not. Both now report `chart-dimension-unknown` at `error` for a name the bound dataset does not declare as a dimension, at `reports[i].rows[j]` / `reports[i].columns[j]`. A chartless report's `values` is resolved for the first time too, under the existing `chart-measure-unknown`.
+  
+  `ReportSchema` is what makes these bindings rather than free text: it requires `dataset` + `values` on every non-`joined` report, and declares `rows` (the down axis) and `columns` (the across axis a `matrix` pivots on, ADR-0021 D2) as dimension names taken from that dataset. The chart is optional decoration on top of a binding the report already has. So a report bound to a missing dataset, or grouping on a dimension its dataset does not declare, now fails authoring instead of rendering blank or mis-grouped in production.
+  
+  No new rule id, no severity moved, and the charted path is unchanged — `chart-axis-not-selected` stays a `warning` and still resolves against the chart's own `chart.yAxis`. Two smaller corrections come with the restructure, both on messages an author reads:
+  
+  - The dataset finding on a report now points at `reports[i].dataset`, the key the author wrote. It used to say `reports[i].chart.dataset`, a position a report does not have.
+  - Its sentence ends "there is no data to render" rather than "the chart has no data to render", which is not true of a report that draws no chart.
+  
+  Blocks of a `joined` report carry the same keys and take the same checks. An unresolvable dataset is still exactly one finding per report or block.
+- c5d6803: Published `.js.map` files no longer embed the complete original source text (`sourcesContent`) — comments included. `sourcemap: true` was esbuild shorthand, and esbuild's own default for `sourcesContent` is `true`; nobody had decided to publish every package's full source (including `@internal`/test-only comments) to npm inside its source maps, it fell out of a default nobody had looked at. Measured before this change: 55 of 57 publishable packages shipped embedded source text, and maps were roughly half of `@objectstack/spec`'s published bytes.
+  
+  `sourcesContent: false` is now set at one shared place (`scripts/tsup-drop-sources-content.mjs`, wired into every `tsup.config.ts` via tsup's `esbuildOptions` hook — most packages build through the repo-root config directly and pick this up with no config change of their own). `mappings` are untouched, so stack-trace positions still resolve correctly to the original file/line/column; only the embedded source text is gone.
+  
+  `@objectstack/cli` (built with `tsc`, not `tsup`) never embedded source text to begin with — its maps' `sources` entries point at `src/**` paths that are not part of the published tarball either way. That is not a defect unique to `cli`: every `tsup`-built package's `sources` entries are `../src/**`-relative paths that are equally outside `files: ["dist", …]`, and were merely masked by the embedded content that just stopped shipping. Shipping `src/**` in `files[]` to make `sources` resolve was rejected — it would put most of the removed bytes straight back. So `cli`'s maps are left exactly as `tsc` emits them: this is now the fleet-consistent shape (accurate `mappings`, non-resolving-but-honest `sources` labels, no embedded text), not an outlier.
+  
+  A new gate, `pnpm check:sourcemap-no-sources-content`, sweeps every built, non-private package's `dist/**/*.map` and fails if any of them carries a non-empty `sourcesContent` array — so a future `tsup.config.ts` that skips the shared hook, or a toolchain upgrade that changes esbuild's default back, is caught rather than silently re-publishing source text.
+- b398ad2: **BREAKING (behaviour):** a static `readonly` field is now stripped from a **non-system caller's INSERT payload inside `engine.insert`**, exactly as it already was on `engine.update`. A non-system create that used to write a read-only column now has that column dropped, reported through `onFieldsDropped` / `droppedFields`, logged at `warn`, and refused outright under `strictReadonlyWrites`. Seeding a read-only column at create time is a **system** act — use `context.isSystem`, a flow's `runAs: 'system'`, a system hook or a seed.
+  
+  Until now the create-side strip lived only at the DataProtocol ingress (`stripReadonlyForInsert` in `@objectstack/metadata-protocol`), so `readonly` meant one thing on insert and another on update: every external REST/GraphQL/MCP create was stripped, while a caller reaching `engine.insert` directly — the automation engine's `create_record` among them — wrote the column with no refusal, no `WARN` and no dropped-field event.
+  
+  - `stripReadonlyForInsert` and its five call sites in `@objectstack/metadata-protocol` are **deleted**, not kept as a second implementation; every create face — `createData`, `cloneData`, `createManyData`, `insertManyData`, and `batchData`'s `create` rows and both arms of `upsert` that create — now hands the caller's payload to the engine whole, and every face whose response carries `droppedFields` (`createData`, `createManyData`, `insertManyData`, every `batchData` row that created) reports the engine's own verdict there, so `droppedFields` says the same thing at each of those seams. `cloneData` forwards whole but reports nothing on the wire: its response contract (`CloneDataResponseSchema`, declared as produced) has no `droppedFields` member, so a clone that carried or overrode a read-only column is stripped and logged at `warn` but not reported in the 201 body — adding that key is a spec change, not part of this one.
+  - `create_record` (`@objectstack/service-automation`) starts receiving readonly drops on the `onFieldsDropped` channel it has been wired for since #3407 — a flow without `runAs: 'system'` that seeds a read-only column now reports a node warning and `output.droppedFields` instead of a clean success. That package's own code changes only in prose; the traffic is new, the surface is not.
+  - Unchanged, deliberately: `isSystem` is still the exemption; `preserveAudit` is still an UPDATE-path exemption and a create that asks for it is told so out loud; runtime-owned types (`autonumber`) keep their own pass and their own wider whitelist; platform objects (`managedBy`, the `sys_` namespace) are still left to their own field-write guards; `readonlyWhen` still has no create-side strip. A stripped key's `defaultValue` is re-derived, so a forged `approval_status` becomes `draft` rather than NULL.
+  - `@objectstack/service-settings` is `patch`: prose only — the `upsertRow` docblock, which ships in the package's `.d.ts`, no longer states the superseded INSERT exemption; it names the platform-object carve-out that actually keeps a `sys_setting` insert outside the strip.
+  - `@objectstack/lint` and `@objectstack/spec` are `patch`: both change prose only. All three lint rules — `validate-readonly-action-writes`, `validate-readonly-flow-writes`, `validate-readonly-hook-writes` — drop the superseded "INSERT is exempt" premise from their docblocks and from the justification of their green control cases; the two non-elevated rules now name their `insert`/`create` silence as a scan gap rather than an exemption (the action rule additionally records its now-reasoned refusal as a module-local constant that its `index` does not re-export, so no public surface widens). The spec change is prose only: one docblock sentence that named the deleted function, the `strictReadonlyWrites` contract docblock (which now states what strict refuses on insert), and the `readonly` liveness-ledger verdict, whose evidence pointer named the deleted ingress strip.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The BREAKING here is a WRITE-PATH BEHAVIOUR change, not a retirement of an authorable or published surface, so there is nothing for the ledger to carry to `objectstack migrate meta`, `spec-changes.json` or the upgrade guide: no spec property, metadata key, accepted value or exported symbol disappears, and this body prescribes no FROM/TO migration. The remedy for an affected caller is to declare the write trusted (`context.isSystem` / `runAs: 'system'`), which is application code, not a metadata migration. The obvious retirement candidate is a non-question in the same direction: `stripReadonlyForInsert` was a bare module-private `function` in `packages/metadata-protocol/src/protocol.ts`, absent from that package's `index.ts` (the only path its `exports` map offers), so no consumer could name it. -->
+- 60ff091: `visibility-bare-identifier` now reports an identifier written bare beside a `has()` guard in the same visibility predicate.
+  
+  `has(status) && status == "qualified"` published clean while `status == "qualified"` — the same defect, without the guard — gated at `error`. The guarded spelling is the one the totality discipline pushes authors toward, so an author who correctly adds `has()` and forgets the `record.` prefix on both halves landed in the silent row. That predicate never evaluates for any record, and an unevaluable `visibleWhen` on a form surface fails OPEN: the field renders and carries its `required: true` into the console's submit check.
+  
+  The cause was not the exclusion a `has()` argument earns — that is correct and stays. `firstUndeclaredReference` reads the first error the CEL checker reports and acts only on `Unknown variable: X`; a bare `has(x)` fails that check with `has() invalid argument` instead, and a first error of a different class masked every undeclared reference behind it in the same predicate, whatever it was called. Each `has(…)` call is now masked out of the source before the checker sees it, using the canonical AST's own spans, so the argument occurrence is excluded and every other occurrence is judged exactly as it would be with no guard written beside it.
+  
+  Expect new `error` findings on predicates that used to publish clean: a guarded-but-unprefixed `visibleWhen` on a view, page component or form section is now refused at build, validate and lint alike. That is the fail-open shape the rule exists to catch. A `has()` argument that is the only bare occurrence — `has(status)` on its own — stays silent, as it did before.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [098cbb7]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [86c75f4]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+  - @objectstack/spec@17.4.0
+  - @objectstack/formula@17.4.0
+  - @objectstack/sdui-parser@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes
@@ -433,7 +1211,7 @@
   
   No `packages/spec` change — the page surface stays closed, which is what ADR-0047
   §7 open question 3 asks for.
-- 5383fa6: React-tier vocabulary converges on the metadata-tier spelling, deprecate-first (#11284, maintainer ruling 2026-08-23). `<ListView>`'s canonical bindings are now the spec ListView schema's own props: `data={{ provider: 'object', object: '…' }}` for the object binding (objectui#2890 A6) and `type` for the visualization kind. `objectName` and `viewType` remain published and accepted as deprecated aliases for the whole deprecation window — nothing is removed in this release — with the deprecation visible at authoring time: `[DEPRECATED → …]` markers in the generated react-blocks contract, and a new `react-prop-deprecated` lint warning (never an error) on every use of a deprecated spelling. The lint accepts either spelling as satisfying `<ListView>`'s required binding and resolves field-name props (`columns`, `searchableFields`, filter positions, …) against the object bound by whichever spelling is present, canonical winning when both are. `<ObjectForm>` / `<ObjectChart>` `objectName` are unchanged: the form's spec counterpart is explicitly not 1:1 (objectui#2890 Scope B), and the chart has no metadata-tier object binding to converge on (charts bind through a dashboard `dataset` there — see chart.zod.ts guidance). Removal of the deprecated aliases is a later card after the deprecation window.
+- 5383fa6: React-tier vocabulary converges on the metadata-tier spelling, deprecate-first (#11284, maintainer ruling 2026-08-23). `<ListView>`'s canonical bindings are now the spec ListView schema's own props: `data={{ provider: 'object', object: '…' }}` for the object binding (objectui#2890 A6) and `type` for the visualization kind. `objectName` and `viewType` remain published and accepted as deprecated aliases for the whole deprecation window — nothing is removed in this release — with the deprecation visible at authoring time: `[DEPRECATED → …]` markers in the generated react-blocks contract, and a new `react-prop-deprecated` lint warning (never an error) on every use of a deprecated spelling. The lint accepted either spelling as satisfying `<ListView>`'s required binding and resolved field-name props (`columns`, `searchableFields`, filter positions, …) against the object bound by whichever spelling is present, canonical winning when both are — true at this entry's own commit `5383fa6`, and already false in the release that published it. `22b0081` (#15025) landed before the 17.3.0 version cut and tightened the lint back to what actually renders, so as released here every clause is the other way round: a `<ListView>` bound only by `data={{ provider: 'object', object }}` does NOT satisfy the required binding and `os validate` refuses it, field-name props resolve against `objectName` only, and `objectName` is the spelling that decides when a page carries both, because it is the one the renderer queries. `objectName` / `viewType` are therefore the spellings to write. `<ObjectForm>` / `<ObjectChart>` `objectName` are unchanged: the form's spec counterpart is explicitly not 1:1 (objectui#2890 Scope B), and the chart has no metadata-tier object binding to converge on (charts bind through a dashboard `dataset` there — see chart.zod.ts guidance). Removal of the deprecated aliases was described here as a later card after the deprecation window; that is no longer the plan. The maintainer ruling of 2026-09-07 on #14791 — the card that measured the missing consumer half — retires `objectName` / `viewType` with no deprecation window at all, leaving `data` / `type` as the only spellings. objectui has since landed the renderer fold the canonical spelling needed (present at the pinned `.objectui-sha`, `packages/core/src/utils/normalize-list-view.ts`), and the spec-side retirement is authored as PR #16777, still draft and awaiting a maintainer merge — so within this release the deprecated spellings remain the working ones. (Corrected after publication, #15026.)
 - 46b53a2: Add `validateReadonlyActionWrites` — an author-time warning on an action body writing a `readonlyWhen` field through `ctx.api`.
   
   The action surface is the third write surface in the readonly family, after `flow-update-readonly-field` and `hook-api-update-readonly-field`, and it is the one where the family's answer differs. An action body's `ctx.api` is `createContext({ ...callerEnvelope, isSystem: true })` — elevated by design, so RLS/FLS-bypassing trusted execution is the documented posture — and the engine's **static** readonly strip runs only for non-system callers. Measured against a real engine over a memory driver:

@@ -295,6 +295,8 @@ GET    /api/v1/automation/:name/runs                   # list runs
 GET    /api/v1/automation/:name/runs/:runId            # run detail
 GET    /api/v1/automation/:name/runs/:runId/screen     # screen spec of a parked run
 POST   /api/v1/automation/:name/runs/:runId/resume     # resume a parked run
+POST   /api/v1/automation/:name/runs/:runId/cancel              # cancel a suspended run — PLATFORM_ADMIN only (isSystem bypass), body { reason? }; 501 if unimplemented
+POST   /api/v1/automation/:name/runs/:runId/restore-suspension  # re-arm a run stranded by a failed resume — same gate; body { reason? }; 501 if unimplemented
 POST   /api/v1/automation/trigger/:name                # legacy execute shape
 ```
 

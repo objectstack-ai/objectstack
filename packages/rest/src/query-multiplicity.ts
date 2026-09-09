@@ -9,10 +9,14 @@ import { RPC_QUERY_ALIAS_SLOTS } from '@objectstack/spec/data';
  * (`packages/spec/src/contracts/http-server.ts`). A repeated parameter
  * (`?package=a&package=b`) is the ARRAY arm, and that arm is not hypothetical:
  * the `node:http` adapter (`@objectstack/http-conformance`'s `NodeHttpServer`)
- * hands it through as `['a','b']`, measured over a real socket on #6878. The
- * production Hono adapter happens to collapse repeats to the first value before
- * a handler runs — which is why this class is dormant today, and why it stops
- * being dormant the moment that collapse is removed (#6878's ruled route 2).
+ * hands it through as `['a','b']`, measured over a real socket on #6878 — and
+ * so does the production Hono adapter: `plugin-hono-server`'s `readQuery` has
+ * kept repeats as an array since #6878 / PR #6941 (that card's ruled route 2),
+ * pinned green by `packages/qa/http-conformance/src/query-multiplicity.conformance.test.ts`
+ * ("hands a consumer the SAME operand on either adapter — the ambiguity is
+ * visible, not collapsed"). This class is LIVE on every adapter the repo
+ * ships; an earlier version of this header called it dormant behind a Hono
+ * collapse that no longer exists (#14503 retired the sentence).
  *
  * ## Why the answer is a refusal and not a rule for picking
  *
@@ -51,9 +55,12 @@ import { RPC_QUERY_ALIAS_SLOTS } from '@objectstack/spec/data';
  * site names the parameters it declares single-valued instead of gating "every
  * key in `req.query`".
  *
- * #6307 landed the first copy of this rule in `package-routes.ts`. The two pure
- * helpers now live here so there is ONE rule and one message, not a second
- * implementation that drifts.
+ * #6307 landed the first copy of this rule in `package-routes.ts`, on the
+ * `?version=` of that registrar's package read/delete routes. Those routes are
+ * gone (#14503 — the dispatcher's `/packages` domain is their single
+ * implementation, and it reads no `version`), so the rule now has one home:
+ * here, for the `rest-server.ts` read points — ONE rule and one message, not
+ * a second implementation that drifts.
  */
 
 /**

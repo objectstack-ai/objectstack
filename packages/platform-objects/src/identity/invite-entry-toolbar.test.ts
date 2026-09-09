@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // #11544 — the email-invite entry was UNREACHABLE from where admins actually
-// look. The org record page (ADR-0081) opens on tab-0 **Members**
+// look. The org record page (cloud ADR-0081 D3) opens on tab-0 **Members**
 // (`sys_member`), whose toolbar carried exactly one action — `add_member`,
 // which attaches an ALREADY-REGISTERED user by id. `invite_user` lived only on
 // tab-1 Invitations. The maintainer, looking to "invite a teammate by email",

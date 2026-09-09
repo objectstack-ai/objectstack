@@ -109,6 +109,12 @@ import {
   AuditMetaItemResponse,
   RollbackMetaItemResponse,
   DiffMetaItemResponse,
+  // [#13523] The change-log body of `GET /meta/:type/:name/history`, the one
+  // door of the family above whose declaration (#12005, PR #13521) landed
+  // AFTER the ruling's bindings were written — so both of its exits carried a
+  // pre-declaration spelling until now. Bound here on the same terms as its
+  // `AuditMetaItemResponse` twin: the PAYLOAD, envelope-free.
+  HistoryMetaItemResponse,
   PackagePublishResult,
   DiscardPackageDraftsResponse,
   ListPackageCommitsResponse,
@@ -424,14 +430,24 @@ export interface CreateDataResult<T = any> {
  * Spec: CloneDataResponseSchema (#11924)
  *
  * `CreateDataResult`'s structural sibling plus `sourceId` — `id` names the NEW
- * record, `sourceId` the record it was copied from. No `droppedFields`: unlike
- * `createData`, the clone producer emits no write-observability event.
+ * record, `sourceId` the record it was copied from. Since #15703 it carries
+ * `droppedFields` too: the clone producer reports the engine's readonly-strip
+ * verdict exactly as `createData` does.
  */
 export interface CloneDataResult<T = any> {
   object: string;
   id: string;
   sourceId: string;
   record: T;
+  /**
+   * [#15703] Fields the server LEGALLY stripped before the clone was written —
+   * a non-system clone cannot seed a static `readonly` column, whether the value
+   * was COPIED from the source row or supplied through `overrides`, so those
+   * keys are dropped and the field re-derives its default. Present only when
+   * ≥1 field was dropped; the clone still succeeded. Body only: unlike `create`,
+   * the clone route sets no `X-ObjectStack-Dropped-Fields` header.
+   */
+  droppedFields?: DroppedFieldsEvent[];
 }
 
 /** Spec: UpdateDataResponseSchema */
@@ -1014,6 +1030,414 @@ export interface OAuthConsentResult {
     url: string;
 }
 
+/**
+ * The user object better-auth puts on the wire from the `auth.*` routes that
+ * echo one — `changePassword`, `verifyEmail` (on a change-email verification),
+ * `twoFactor.verifyTotp` and `twoFactor.verifyBackupCode`. Served BARE by
+ * better-auth (no `{ success, data }` envelope), camelCase, and exactly the
+ * columns better-auth's own user schema declares: the serialiser
+ * (`parseUserOutput`) walks that schema and nothing else, so ObjectStack's
+ * extra `sys_user` columns (`locale`, `must_change_password`, …) never appear
+ * here even though they sit on the same row.
+ *
+ * ⚠️ **Timestamps are ISO-8601 strings, never `Date`** (maintainer ruling on
+ * #12104). The adapter is declared `supportsDates: false`, better-auth revives
+ * the stored string into a `Date` server-side, and `JSON.stringify` puts an
+ * ISO string back on the wire — measured `"createdAt":"2026-09-07T07:02:20.593Z"`
+ * on a real SQL driver. There is no revival layer in this SDK; `new Date(x)`
+ * is the caller's own step.
+ *
+ * A nullable column arrives as `null` on the SQL drivers (measured on
+ * better-sqlite3: `"image":null`, `"banReason":null`) and as an ABSENT key on
+ * a store that does not materialise an unset column (measured on the
+ * in-memory engine) — hence `?: … | null` on every one of them.
+ *
+ * The plugin-conditional members below are on the wire only when the server
+ * enables the better-auth plugin that declares them; each was measured both
+ * with and without its plugin. No index signature: one would erase every
+ * precise member beside it.
+ */
+export interface AuthWireUser {
+    id: string;
+    name: string;
+    email: string;
+    emailVerified: boolean;
+    /** Avatar URL — `null` (SQL) or absent (document store) when unset. */
+    image?: string | null;
+    /** ISO-8601. */
+    createdAt: string;
+    /** ISO-8601. */
+    updatedAt: string;
+    /** `twoFactor` plugin only. */
+    twoFactorEnabled?: boolean;
+    /**
+     * `admin` plugin only. An open string: the vocabulary is the deployment's
+     * (`'user'` is the plugin's default), so no union is declared.
+     */
+    role?: string | null;
+    /** `admin` plugin only; the plugin defaults it to `false`. */
+    banned?: boolean | null;
+    /** `admin` plugin only. */
+    banReason?: string | null;
+    /** `admin` plugin only. ISO-8601 when set. */
+    banExpires?: string | null;
+    /** `phoneNumber` plugin only. */
+    phoneNumber?: string | null;
+    /** `phoneNumber` plugin only; the plugin defaults it to `false`. */
+    phoneNumberVerified?: boolean | null;
+}
+
+/**
+ * `{ status: true }` — better-auth's receipt on the routes of the `auth.*`
+ * family that carry no payload: `updateUser`, `changeEmail`,
+ * `sendVerificationEmail`, `sessions.revoke` / `revokeOthers` / `revokeAll`,
+ * `twoFactor.disable` and `accounts.unlink`. Every one of those handlers ends
+ * `ctx.json({ status: true })` — read in the vendor's source and measured on
+ * all eight against a real server — so the literal IS the wire fact: the
+ * value never carries `false`. A refusal is a 4xx, which `this.fetch` raises
+ * as a throw before any receipt exists.
+ *
+ * ⚠️ `updateUser` does NOT echo the updated user, whatever its OpenAPI stub
+ * says: the handler answers this receipt and puts the new fields into the
+ * session cookie. Re-read `me()` for the new values.
+ */
+export interface AuthStatusReceipt {
+    status: true;
+}
+
+/**
+ * What `POST /change-password` answers.
+ */
+export interface AuthPasswordChangeResult {
+    /**
+     * ⚠️ SECRET — an unsigned session token. When `revokeOtherSessions: true`
+     * made the server rotate the caller's session this is the NEW session's
+     * token (every other session is gone and the cookie the caller held is
+     * dead); `null` otherwise. A bearer-mode caller has to store it itself —
+     * this SDK does not.
+     */
+    token: string | null;
+    /** The caller, as better-auth's session held it when the write ran. */
+    user: AuthWireUser;
+}
+
+/**
+ * What `GET /verify-email` answers when it answers JSON — i.e. when the call
+ * carries no `callbackURL`. With one, the route answers a 302 to that URL with
+ * an EMPTY body (measured), and what `res.json()` then parses is whatever the
+ * callback target serves — so a caller that wants this receipt omits
+ * `callbackURL`.
+ */
+export interface AuthEmailVerificationResult {
+    /** Always `true`; a bad or expired token is a 401 raised by `this.fetch`. */
+    status: true;
+    /**
+     * The updated user when the token was minted by `changeEmail` (the address
+     * has changed and `emailVerified` is `true`); `null` when the token
+     * verified the CURRENT address — on the first verification and on every
+     * repeat of it alike.
+     */
+    user: AuthWireUser | null;
+}
+
+/**
+ * What `POST /two-factor/verify-totp` and `POST /two-factor/verify-backup-code`
+ * answer on success, on both lanes (a signed-in user confirming a factor, and
+ * a sign-in challenge being completed).
+ */
+export interface AuthTwoFactorVerificationResult {
+    /**
+     * ⚠️ SECRET — the unsigned token of the session the caller now holds,
+     * accepted as a bearer. On the enrolment lane the vendor rotates the
+     * session mid-request; the value here is the LIVE one (plugin-auth's
+     * `two-factor-rotated-token-echo` repairs the vendor's stale echo).
+     * Through this SDK `verifyBackupCode` cannot send `disableSession`, so
+     * the token is always present.
+     */
+    token: string;
+    /**
+     * The caller, as the row stands when the response is written. The vendor
+     * echoes the user from its PRE-rotation snapshot on the enrolment lane, so
+     * `twoFactorEnabled` used to read `false` here although the flag had just
+     * flipped server-side; plugin-auth's `two-factor-rotated-token-echo`
+     * repairs that member from the row on the same rotating routes it repairs
+     * `token` on, so no second read is needed. The payload's shape is
+     * unchanged — the repair corrects values only.
+     */
+    user: AuthWireUser;
+}
+
+/**
+ * What ObjectStack's own `POST /set-initial-password` mount answers on success
+ * — the platform envelope, not better-auth's `{ status }` receipt, because the
+ * route is an ObjectStack wrapper around the vendor's server-only
+ * `auth.api.setPassword`. Its refusals (`409 PASSWORD_ALREADY_SET`, `400`,
+ * `401`) carry `{ success: false, error: { code, message } }` and are raised
+ * by `this.fetch`, so `success` is never `false` here.
+ */
+export interface AuthSetInitialPasswordResult {
+    success: true;
+}
+
+/**
+ * The columns every organization answer of the `organizations.*` family
+ * carries — exactly better-auth's organization schema (`id`, `name`, `slug`,
+ * `logo`, `metadata`, `createdAt`), served BARE (no `{ success, data }`
+ * envelope). The adapter's output transform walks that schema and nothing
+ * else, so `sys_organization`'s `updated_at` and every other ObjectStack column
+ * stay off the wire — measured against a real server on a real SQL driver.
+ *
+ * ⚠️ **`createdAt` is an ISO-8601 string, never `Date`** (maintainer ruling on
+ * #12104): the adapter is declared `supportsDates: false`, better-auth revives
+ * the stored string into a `Date` server-side, and `JSON.stringify` puts an
+ * ISO string back on the wire — measured `"createdAt":"2026-09-07T09:27:01.545Z"`.
+ * There is no revival layer in this SDK; `new Date(x)` is the caller's step.
+ *
+ * ⚠️ **`metadata` arrives as the stored JSON TEXT, not an object**, on every
+ * route that reads the row back (`setActive`, `get`, `delete`, `list`): better-auth
+ * stores it `JSON.stringify`-ed in a text column and only the two write routes
+ * decode it — see {@link OrganizationEchoWire}. `JSON.parse(metadata)` is the
+ * caller's step here. `null` (SQL) or absent (a store that does not
+ * materialise an unset column) when never set; same for `logo`.
+ *
+ * `@objectstack/spec/identity`'s `Organization` is NOT relayed: it declares
+ * `updatedAt` required and `metadata` as an object, and neither is what this
+ * wire carries.
+ */
+export interface OrganizationWire {
+    id: string;
+    name: string;
+    slug: string;
+    /** `null` (SQL) or absent (document store) when unset. */
+    logo?: string | null;
+    /** ISO-8601. */
+    createdAt: string;
+    /** The stored JSON text (`'{"plan":"pro"}'`), undecoded; `null`/absent when unset. */
+    metadata?: string | null;
+}
+
+/**
+ * The organization as the two WRITE routes echo it back — `create` and
+ * `update` — which are the only two that decode `metadata` before answering
+ * (`JSON.parse` in the create handler, `parseJSON` in the update adapter).
+ * An unset `metadata` is ABSENT here (the handlers fold it to `undefined`),
+ * never `null`. Every other column is {@link OrganizationWire}'s.
+ */
+export interface OrganizationEchoWire extends Omit<OrganizationWire, 'metadata'> {
+    /** Decoded object; absent when unset. */
+    metadata?: Record<string, unknown>;
+}
+
+/**
+ * A membership row as better-auth serves it — its own member schema, nothing
+ * of ObjectStack's `sys_member` beyond it (no `updatedAt`). `role` is one of
+ * the closed ADR-0108 vocabulary (`owner` / `admin` / `delegated_admin` /
+ * `member`), typed `string` because the wire mirrors the vendor's column, not
+ * because the set is open; the platform refuses a multi-role
+ * (`'admin,member'`) at the door with `400 VALIDATION_FAILED`.
+ *
+ * `@objectstack/spec/identity`'s `Member` is not relayed: it declares
+ * `updatedAt` required and the wire never carries it.
+ */
+export interface OrganizationMemberWire {
+    id: string;
+    organizationId: string;
+    userId: string;
+    role: string;
+    /** ISO-8601. */
+    createdAt: string;
+}
+
+/**
+ * The four-column user projection better-auth hand-picks onto a member on the
+ * routes that join the user (`listMembers`, `get`, `getActiveMember`, `leave`,
+ * `removeMember` by email) — exactly these four, never the full user.
+ */
+export interface OrganizationMemberUserWire {
+    id: string;
+    name: string;
+    email: string;
+    /** `null` (SQL) or absent (document store) when unset. */
+    image?: string | null;
+}
+
+/** A membership row with its user joined on. */
+export interface OrganizationMemberWithUserWire extends OrganizationMemberWire {
+    user: OrganizationMemberUserWire;
+}
+
+/**
+ * What `POST /organization/create` answers: the new organization (metadata
+ * decoded) plus `members`, which is ALWAYS exactly one row — the creator's
+ * `owner` membership (the handler answers the literal `[member]`). The default
+ * team the server also mints (teams are enabled on this platform) is NOT
+ * echoed; read it through `get`.
+ */
+export interface OrganizationCreateResult extends OrganizationEchoWire {
+    members: [OrganizationMemberWire];
+}
+
+/**
+ * The team row as better-auth serves it from `teams.create` / `teams.update`.
+ * `updatedAt` is on the wire from both, for two different reasons: the
+ * `create-team` handler writes `updatedAt: new Date()` itself, while the
+ * `update-team` handler writes NO timestamp of its own (its update is
+ * `{ name, ...additionalFields }`) — the value comes from better-auth's team
+ * schema, which declares `updatedAt` with an `onUpdate` default the adapter
+ * applies on every update of the model, with the platform's own audit stamping
+ * of `sys_team.updated_at` behind it. Measured: `update-team` on the default
+ * team (which the vendor creates without `updatedAt`) answered a fresh
+ * `updatedAt` on a real SQL driver and on an engine with no platform stamping
+ * in the loop at all. The vendor's `memberCount` column is stripped on these
+ * routes — but NOT inside `get`, see {@link OrganizationFullTeamWire}.
+ */
+export interface OrganizationTeamWire {
+    id: string;
+    name: string;
+    organizationId: string;
+    /** ISO-8601. */
+    createdAt: string;
+    /** ISO-8601. */
+    updatedAt: string;
+}
+
+/**
+ * The team rows inside `get(...).teams`. Two differences from
+ * {@link OrganizationTeamWire}: the full-organization join does not strip the
+ * vendor's `memberCount` (measured), and the default team minted at
+ * organization creation is written without `updatedAt` by the vendor, so on
+ * this row the value is the platform's own `sys_team.updated_at` stamp rather
+ * than better-auth's (measured at rest on a real SQL driver before any
+ * update). `updatedAt` is optional here as the safe direction for a store
+ * without that stamping; the only place it was observed absent was a
+ * hand-rolled test fake, never a real driver.
+ */
+export interface OrganizationFullTeamWire extends Omit<OrganizationTeamWire, 'updatedAt'> {
+    /** ISO-8601 when present. */
+    updatedAt?: string;
+    memberCount: number;
+}
+
+/**
+ * An invitation row as better-auth serves it: its invitation schema plus the
+ * two `additionalFields` ObjectStack declares on it (`businessUnitId`,
+ * `positions` — the ADR-0105 D8 placement intent), which arrive `null` on
+ * SQL and absent on a document store when unset. No `updatedAt`, so
+ * `@objectstack/spec/identity`'s `Invitation` is not relayed; its
+ * {@link InvitationStatus} vocabulary is (#7781), narrowed per route by the
+ * `Status` parameter where the handler pins it.
+ *
+ * `teamId` is the comma-joined list of team ids the invitee joins on accept,
+ * `null` when none (the handler writes the `null` explicitly).
+ */
+export interface OrganizationInvitationWire<Status extends InvitationStatus = InvitationStatus> {
+    id: string;
+    organizationId: string;
+    email: string;
+    role: string;
+    status: Status;
+    teamId: string | null;
+    inviterId: string;
+    /** ISO-8601. */
+    expiresAt: string;
+    /** ISO-8601. */
+    createdAt: string;
+    /** ADR-0105 D8 placement: `null` (SQL) or absent when the invitation carries none. */
+    businessUnitId?: string | null;
+    /** ADR-0105 D8 placement: `null` (SQL) or absent when the invitation carries none. */
+    positions?: string[] | null;
+}
+
+/** What `POST /organization/accept-invitation` answers. */
+export interface OrganizationInvitationAcceptResult {
+    invitation: OrganizationInvitationWire<'accepted'>;
+    /** The membership just created for the caller — bare, no `user` joined. */
+    member: OrganizationMemberWire;
+}
+
+/**
+ * What `POST /organization/reject-invitation` answers. `member` is the
+ * literal `null` — the vendor keeps the key for symmetry with accept.
+ */
+export interface OrganizationInvitationRejectResult {
+    invitation: OrganizationInvitationWire<'rejected'>;
+    member: null;
+}
+
+/** What `GET /organization/list-members` answers. */
+export interface OrganizationMembersPage {
+    members: OrganizationMemberWithUserWire[];
+    /** Total members in the organization, independent of the page. */
+    total: number;
+}
+
+/**
+ * What `POST /organization/remove-member` answers. ⚠️ `user` is on the wire
+ * ONLY when the member was addressed by EMAIL: that path answers the
+ * user-joined row, while the by-id path explicitly strips the join before
+ * answering (measured both ways). The vendor's OpenAPI stub omits `user`
+ * entirely.
+ */
+export interface OrganizationRemoveMemberResult {
+    member: OrganizationMemberWire & { user?: OrganizationMemberUserWire };
+}
+
+/**
+ * What `GET /organization/get-full-organization` answers: the row (metadata
+ * as stored JSON text, see {@link OrganizationWire}) plus every invitation of
+ * any status, every member with its user joined, and — because this platform
+ * mounts the organization plugin with `teams: { enabled: true }`
+ * unconditionally — the organization's teams.
+ */
+export interface OrganizationFullWire extends OrganizationWire {
+    invitations: OrganizationInvitationWire[];
+    members: OrganizationMemberWithUserWire[];
+    teams: OrganizationFullTeamWire[];
+}
+
+/** A team membership row as `teams.addMember` answers it (idempotent: re-adding answers the same row). */
+export interface OrganizationTeamMemberWire {
+    id: string;
+    teamId: string;
+    userId: string;
+    /** ISO-8601. */
+    createdAt: string;
+}
+
+/** The literal receipt `POST /organization/remove-team` answers; a refusal is a thrown 4xx. */
+export interface OrganizationTeamRemovedReceipt {
+    message: 'Team removed successfully.';
+}
+
+/** The literal receipt `POST /organization/remove-team-member` answers; a refusal is a thrown 4xx. */
+export interface OrganizationTeamMemberRemovedReceipt {
+    message: 'Team member removed successfully.';
+}
+
+/**
+ * The conventional CRUD data prefix — `CrudEndpointsConfigSchema.dataPrefix`
+ * in `packages/spec` declares `.default('/data')`, and REST mounts every data
+ * route under `${basePath}${crud.dataPrefix}`.
+ *
+ * This is the same kind of value as the `routeMap` conventions below: what the
+ * SDK falls back to when discovery has not told it otherwise, NOT a competing
+ * source of truth. `_dataPrefix()` prefers the advertised value in every case
+ * where it can read one.
+ */
+const DEFAULT_DATA_PREFIX = '/data';
+
+/**
+ * The conventional metadata prefix — `MetadataEndpointsConfigSchema.prefix`
+ * in `packages/spec` declares `.default('/meta')`, and REST mounts every
+ * metadata route under `${basePath}${metadata.prefix}`.
+ *
+ * The exact sibling of {@link DEFAULT_DATA_PREFIX}, and the same kind of
+ * value: what the SDK falls back to when discovery has not told it otherwise,
+ * NOT a competing source of truth. `_metaPrefix()` prefers the advertised
+ * value in every case where it can read one.
+ */
+const DEFAULT_META_PREFIX = '/meta';
+
 export class ObjectStackClient {
   private baseUrl: string;
   private token?: string;
@@ -1329,22 +1753,27 @@ export class ObjectStackClient {
      * Returns events recorded in `sys_metadata_history` for every
      * overlay put/delete, ordered by `event_seq` ascending. Non-overlay
      * metadata types return an empty list.
+     *
+     * [#13523] Returns {@link HistoryMetaItemResponse} — the published
+     * declaration (#12005), replacing the inline shape this method carried
+     * from before that schema existed. The route answers BARE, so the named
+     * type is the whole body, exactly as on the `getAudit` twin.
+     *
+     * ⚠️ The rebind is NOT field-for-field: the inline shape declared
+     * `actor: string` for a door that answers `null` on every
+     * system-initiated write (boot sync, migration, scheduled job — the
+     * producer's own `rowToEvent`), so a caller that read `actor` without a
+     * null check was type-checked against a promise the door never made. It
+     * also declared `op` as a plain `string` where the producer's vocabulary
+     * is closed, `ref.org` as optional where the producer always writes one,
+     * and omitted `ref.version` / `version` / `previousName` entirely. See
+     * the card for the field-by-field measurement.
      */
     getHistory: async (
         type: string,
         name: string,
         options?: { sinceSeq?: number; limit?: number },
-    ): Promise<{ events: Array<{
-        seq: number;
-        op: string;
-        ref: { org?: string; type: string; name: string };
-        hash: string | null;
-        parentHash: string | null;
-        actor: string;
-        message?: string;
-        ts: string;
-        source: string;
-    }> }> => {
+    ): Promise<HistoryMetaItemResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
         if (options?.sinceSeq !== undefined) params.set('sinceSeq', String(options.sinceSeq));
@@ -1352,7 +1781,7 @@ export class ObjectStackClient {
         const qs = params.toString();
         const url = `${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
-        return this.unwrapResponse(res);
+        return this.unwrapResponse<HistoryMetaItemResponse>(res);
     },
     
     /**
@@ -2689,6 +3118,154 @@ export class ObjectStackClient {
   _isFilterAST(v: unknown): boolean { return this.isFilterAST(v); }
 
   /**
+   * @internal The CRUD data prefix this client's server actually mounts, read
+   * off the advertised routes (#14879).
+   *
+   * `crud.dataPrefix` moves the mounted CRUD paths and the advertised
+   * discovery document TOGETHER — REST builds every data route as
+   * `${basePath}${crud.dataPrefix}` and then advertises the same value as
+   * `routes.data = ${realBase}${crud.dataPrefix}`. The SDK is the third
+   * surface that has to describe those same paths, so it must read the value
+   * rather than restate it: a deployment on a non-default prefix mounts
+   * nothing at `/data`, and a client that assumes `/data` calls paths that do
+   * not exist.
+   *
+   * The advertised `routes.data` is `{realBase}{dataPrefix}` — ONE string
+   * carrying TWO unknowns, and no discovery key carries either half alone.
+   * The split is recovered in the order below, and where it cannot be
+   * recovered this DECLINES to the conventional `/data` rather than guess,
+   * exactly as `_apiBase()` declines rather than return a base of unknown
+   * shape:
+   *
+   *   1. If the advertised value already ends with the conventional `/data`,
+   *      that IS the prefix. Taking this first is what makes the change
+   *      incapable of regressing a deployment that works today: every rule
+   *      below can only run in the branch where the current code — which
+   *      knows the single literal `/data` — is ALREADY wrong.
+   *   2. Otherwise `routes.metadata` supplies the missing equation. It is
+   *      `{realBase}{metadata.prefix}` over the SAME `realBase` (both are
+   *      substituted from one `realBase` in the same discovery handler), so
+   *      the two advertised routes share exactly `realBase` plus whatever
+   *      their two prefixes happen to share. Cutting their common run back to
+   *      its last `/` therefore lands on the `realBase` boundary, and the
+   *      remainder of `routes.data` is the prefix. This is also correct when
+   *      the document was served from the environment-scoped mount, where
+   *      both routes carry the same `/environments/{id}` segment and it
+   *      simply becomes part of the shared run.
+   *
+   * A derived prefix of `/` or empty is not a prefix this understands, so it
+   * declines too, as does the case where the two routes share nothing but the
+   * leading `/` and therefore share no base at all. The one shape that survives all of it — a deployment that
+   * moved `dataPrefix` off `/data` AND whose `routes.metadata` is not
+   * substituted from the same base (i.e. `api.enableMetadata` is off) — is
+   * one the SDK cannot serve today either; it keeps today's answer.
+   */
+  _dataPrefix(): string {
+    const data = this.discoveryInfo?.routes?.data;
+    if (typeof data !== 'string' || !data) return DEFAULT_DATA_PREFIX;
+
+    // (1) The conventional prefix — today's entire rule, kept first.
+    if (data.endsWith(DEFAULT_DATA_PREFIX)) return DEFAULT_DATA_PREFIX;
+
+    // (2) `routes.metadata` as the second equation over the same `realBase`.
+    const meta = this.discoveryInfo?.routes?.metadata;
+    if (typeof meta !== 'string' || !meta || meta === data) return DEFAULT_DATA_PREFIX;
+
+    let shared = 0;
+    while (shared < data.length && shared < meta.length
+           && data.charCodeAt(shared) === meta.charCodeAt(shared)) shared++;
+
+    // `boundary === 0` means the two advertised routes have nothing in common
+    // but the leading `/` — so they do NOT share a `realBase`, and the whole of
+    // `routes.data` would be mistaken for the prefix. That happens when
+    // `routes.metadata` was never substituted from this deployment's base (its
+    // endpoints are off, so it still carries the conventional literal) while
+    // `routes.data` was. Decline: a wrong prefix is worse than today's.
+    const boundary = data.lastIndexOf('/', shared - 1);
+    if (boundary <= 0) return DEFAULT_DATA_PREFIX;
+
+    const derived = data.slice(boundary);
+    return derived.length > 1 ? derived : DEFAULT_DATA_PREFIX;
+  }
+
+  /**
+   * @internal The metadata prefix this client's server actually mounts, read
+   * off the advertised routes (#16675).
+   *
+   * The same defect as #14879 one key over, so deliberately the same
+   * derivation shape as {@link ObjectStackClient._dataPrefix}, fallback
+   * discipline included. `metadata.prefix` moves the mounted metadata paths
+   * and the advertised discovery document TOGETHER — REST builds every
+   * metadata route as `${basePath}${metadata.prefix}` and then advertises the
+   * same value as `routes.metadata = ${realBase}${metadata.prefix}`. The SDK
+   * is the third surface that has to describe those same paths, so it must
+   * read the value rather than restate it: a deployment on a non-default
+   * prefix mounts nothing at `/meta`, and a client that assumes `/meta` calls
+   * paths that do not exist.
+   *
+   * The advertised `routes.metadata` is `{realBase}{metadata.prefix}` — ONE
+   * string carrying TWO unknowns, and no discovery key carries either half
+   * alone. The split is recovered in the order below, and where it cannot be
+   * recovered this DECLINES to the conventional `/meta` rather than guess. An
+   * SDK must not become unusable because a server's discovery document is
+   * missing a key:
+   *
+   *   1. If the advertised value already ends with the conventional `/meta`,
+   *      that IS the prefix. Taking this first is what makes the change
+   *      incapable of regressing a deployment that works today: every rule
+   *      below can only run in the branch where the current code — which
+   *      knows the single literal `/meta` — is ALREADY wrong. It is also what
+   *      keeps a DEFAULT deployment free of any new dependency: the answer is
+   *      reached from `routes.metadata` alone, and an unconnected client
+   *      never reaches a rule at all.
+   *   2. Otherwise `routes.data` supplies the missing equation. It is
+   *      `{realBase}{crud.dataPrefix}` over the SAME `realBase` (both are
+   *      substituted from one `realBase` in the same discovery handler), so
+   *      the two advertised routes share exactly `realBase` plus whatever
+   *      their two prefixes happen to share. Cutting their common run back to
+   *      its last `/` therefore lands on the `realBase` boundary, and the
+   *      remainder of `routes.metadata` is the prefix. This is also correct
+   *      when the document was served from the environment-scoped mount,
+   *      where both routes carry the same `/environments/{id}` segment and it
+   *      simply becomes part of the shared run.
+   *
+   * A derived prefix of `/` or empty is not a prefix this understands, so it
+   * declines too, as does the case where the two routes share nothing but the
+   * leading `/` and therefore share no base at all. The one shape that
+   * survives all of it — a deployment that moved `metadata.prefix` off
+   * `/meta` AND whose `routes.data` is not substituted from the same base
+   * (i.e. `api.enableCrud` is off) — is one the SDK cannot serve today
+   * either; it keeps today's answer.
+   */
+  _metaPrefix(): string {
+    const meta = this.discoveryInfo?.routes?.metadata;
+    if (typeof meta !== 'string' || !meta) return DEFAULT_META_PREFIX;
+
+    // (1) The conventional prefix — today's entire rule, kept first.
+    if (meta.endsWith(DEFAULT_META_PREFIX)) return DEFAULT_META_PREFIX;
+
+    // (2) `routes.data` as the second equation over the same `realBase`.
+    const data = this.discoveryInfo?.routes?.data;
+    if (typeof data !== 'string' || !data || data === meta) return DEFAULT_META_PREFIX;
+
+    let shared = 0;
+    while (shared < meta.length && shared < data.length
+           && meta.charCodeAt(shared) === data.charCodeAt(shared)) shared++;
+
+    // `boundary === 0` means the two advertised routes have nothing in common
+    // but the leading `/` — so they do NOT share a `realBase`, and the whole
+    // of `routes.metadata` would be mistaken for the prefix. That happens when
+    // `routes.data` was never substituted from this deployment's base (its
+    // endpoints are off, so it still carries the conventional literal) while
+    // `routes.metadata` was. Decline: a wrong prefix is worse than today's.
+    const boundary = meta.lastIndexOf('/', shared - 1);
+    if (boundary <= 0) return DEFAULT_META_PREFIX;
+
+    const derived = meta.slice(boundary);
+    return derived.length > 1 ? derived : DEFAULT_META_PREFIX;
+  }
+
+  /**
    * @internal The unscoped API base this client's server actually serves,
    * derived from the advertised routes (#6714 face 3).
    *
@@ -2697,10 +3274,12 @@ export class ObjectStackClient {
    * / `environmentId` — no path), so the one derivable source is
    * `routes.data`: the REST discovery endpoint advertises it as
    * `{realBase}{dataPrefix}` with `dataPrefix` defaulting to `/data`. This
-   * derivation strips that conventional suffix; when the deployment customises
-   * `dataPrefix` away from `/data` the derivation declines and the caller
-   * falls back to the `/api/v1` convention — exactly today's behavior, so the
-   * change is strictly "follow the advertised base when it is derivable".
+   * derivation strips that advertised suffix — `_dataPrefix()` reads which
+   * suffix it is (#14879), so a deployment that moves `crud.dataPrefix` off
+   * the default no longer forces this derivation to decline. When the suffix
+   * is not derivable either, the caller falls back to the `/api/v1`
+   * convention — exactly today's behavior, so the change is strictly "follow
+   * the advertised base when it is derivable".
    *
    * When the discovery response was served from the environment-scoped mount
    * (`scoping.scoped`), `routes.data` is `{base}/environments/{id}/data`; the
@@ -2721,8 +3300,9 @@ export class ObjectStackClient {
    */
   _apiBase(): string {
     const data = this.discoveryInfo?.routes?.data;
-    if (typeof data === 'string' && data.endsWith('/data')) {
-      let base = data.slice(0, -'/data'.length);
+    const dataPrefix = this._dataPrefix();
+    if (typeof data === 'string' && data.endsWith(dataPrefix)) {
+      let base = data.slice(0, -dataPrefix.length);
       const scoping = this.discoveryInfo?.scoping;
       if (scoping?.scoped) {
         const advertised = typeof scoping.environmentId === 'string' && scoping.environmentId
@@ -2765,8 +3345,12 @@ export class ObjectStackClient {
     /**
      * Create a new organization.
      * POST /api/v1/auth/organization/create
+     *
+     * Answers the new organization with `metadata` DECODED (one of the two
+     * routes that does) and `members` holding exactly the creator's `owner`
+     * row — measured; the vendor's OpenAPI stub names the bare Organization.
      */
-    create: async (req: { name: string; slug?: string; logo?: string; metadata?: Record<string, unknown> }) => {
+    create: async (req: { name: string; slug?: string; logo?: string; metadata?: Record<string, unknown> }): Promise<OrganizationCreateResult> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/create`, {
         method: 'POST',
@@ -2785,7 +3369,7 @@ export class ObjectStackClient {
     update: async (
       organizationId: string,
       data: { name?: string; slug?: string; logo?: string; metadata?: Record<string, unknown> },
-    ) => {
+    ): Promise<OrganizationEchoWire> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/update`, {
         method: 'POST',
@@ -2800,8 +3384,13 @@ export class ObjectStackClient {
      * handlers (e.g. `EnvironmentProvisioningService`) consult.
      *
      * POST /api/v1/auth/organization/set-active
+     *
+     * Answers the organization row as STORED (`metadata` is the JSON text,
+     * see {@link OrganizationWire}). Answers `null` — measured, a 4-byte body
+     * — when `organizationId` is the empty string and the session has no
+     * active organization to fall back to; a non-member is a thrown 403.
      */
-    setActive: async (organizationId: string) => {
+    setActive: async (organizationId: string): Promise<OrganizationWire | null> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/set-active`, {
         method: 'POST',
@@ -2813,8 +3402,12 @@ export class ObjectStackClient {
     /**
      * Get full organization detail (members, invitations, teams).
      * GET /api/v1/auth/organization/get-full-organization?organizationId=...
+     *
+     * `metadata` is the stored JSON text here (see {@link OrganizationWire}).
+     * Answers `null` (measured) when `organizationId` is the empty string and
+     * the session has no active organization; an unknown id is a thrown 400.
      */
-    get: async (organizationId: string) => {
+    get: async (organizationId: string): Promise<OrganizationFullWire | null> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(
         `${this.baseUrl}${route}/organization/get-full-organization?organizationId=${encodeURIComponent(organizationId)}`,
@@ -2825,7 +3418,7 @@ export class ObjectStackClient {
     /**
      * List members of an organization.
      */
-    listMembers: async (organizationId: string) => {
+    listMembers: async (organizationId: string): Promise<OrganizationMembersPage> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(
         `${this.baseUrl}${route}/organization/list-members?organizationId=${encodeURIComponent(organizationId)}`,
@@ -2836,7 +3429,7 @@ export class ObjectStackClient {
     /**
      * Invite a user to the organization.
      */
-    invite: async (req: { email: string; role?: string; organizationId?: string }) => {
+    invite: async (req: { email: string; role?: string; organizationId?: string }): Promise<OrganizationInvitationWire<'pending'>> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/invite-member`, {
         method: 'POST',
@@ -2848,7 +3441,7 @@ export class ObjectStackClient {
     /**
      * Leave the given organization.
      */
-    leave: async (organizationId: string) => {
+    leave: async (organizationId: string): Promise<OrganizationMemberWithUserWire> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/leave`, {
         method: 'POST',
@@ -2862,11 +3455,14 @@ export class ObjectStackClient {
      *
      * POST /api/v1/auth/organization/delete
      *
+     * Answers the deleted organization's row as it was stored (measured) —
+     * NOT the bare id string the vendor's OpenAPI stub declares.
+     *
      * better-auth removes the organization row, all members, and all
      * pending invitations. Project teardown (per-project DBs, etc.) is
      * handled server-side by hooks attached to the organization plugin.
      */
-    delete: async (organizationId: string) => {
+    delete: async (organizationId: string): Promise<OrganizationWire> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/delete`, {
         method: 'POST',
@@ -2886,7 +3482,7 @@ export class ObjectStackClient {
     removeMember: async (
       organizationId: string,
       params: { memberIdOrEmail: string },
-    ) => {
+    ): Promise<OrganizationRemoveMemberResult> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/remove-member`, {
         method: 'POST',
@@ -2902,11 +3498,14 @@ export class ObjectStackClient {
      * Body: `{ memberId, role, organizationId? }`. The `memberId` is the
      * `member` table row id (not user id). `role` is one of the configured
      * organisation roles (default: `owner | admin | member`).
+     *
+     * Answers the updated membership row BARE (measured) — not wrapped in
+     * `{ member }` as the vendor's OpenAPI stub declares, and without `user`.
      */
     updateMemberRole: async (
       organizationId: string,
       params: { memberId: string; role: string },
-    ) => {
+    ): Promise<OrganizationMemberWire> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/update-member-role`, {
         method: 'POST',
@@ -2916,18 +3515,93 @@ export class ObjectStackClient {
     },
 
     /**
-     * Look up the calling user's membership row in the given organisation.
+     * Look up the calling user's membership row in the GIVEN organisation.
      * Useful for permission checks on the client without having to scan the
      * full member list.
      *
-     * better-auth: GET /organization/get-active-member?organizationId=…
+     * Two requests, because no single better-auth route answers this question:
+     *
+     *   1. `GET /get-session` — who is calling. The body is the bare
+     *      `{ user, session }` envelope for a signed-in caller and the literal
+     *      `null` for an anonymous one (measured).
+     *   2. `GET /organization/list-members?organizationId=…&filterField=userId`
+     *      `&filterValue=<the caller>&limit=1` — the row, unwrapped from the
+     *      one-entry page.
+     *
+     * ⚠️ It is deliberately NOT `GET /organization/get-active-member`, which
+     * this method used to call. That handler reads only the session's
+     * `activeOrganizationId` and never looks at `ctx.query`, so it answered the
+     * ACTIVE organisation's row whatever id the caller named — the
+     * wrong-but-plausible answer, silently. `list-members` reads
+     * `ctx.query.organizationId` and its rows carry the identical shape
+     * ({@link OrganizationMemberWithUserWire}), so only the addressing moved.
+     * Measured against better-auth 1.7.2 over a real `AuthManager` + `SqlDriver`.
+     *
+     * What an existing caller sees change, all of it measured on the same drive:
+     *
+     *   - naming a NON-active organisation now answers THAT organisation's row
+     *     instead of the active one's — the defect this method carried;
+     *   - a caller who is not a member of `organizationId` is refused
+     *     `403 YOU_ARE_NOT_A_MEMBER_OF_THIS_ORGANIZATION`. Before, the named
+     *     organisation was never consulted, so the answer was about the
+     *     ACTIVE one: a 200 carrying the active organisation's row, or
+     *     `400 MEMBER_NOT_FOUND` when the caller had no row there either;
+     *   - a caller with no active organisation gets their row rather than
+     *     `400 NO_ACTIVE_ORGANIZATION` — `setActive` is no longer a
+     *     precondition, which is the point of naming the organisation;
+     *   - an anonymous caller still gets `401 UNAUTHORIZED`, thrown from the
+     *     `list-members` request by the same session middleware that guarded
+     *     `get-active-member`;
+     *   - a FALSY `organizationId` is refused here, before the wire. It used to
+     *     answer the ACTIVE organisation's row at 200: better-auth resolves
+     *     `ctx.query.organizationId || session.activeOrganizationId`, so an
+     *     empty string fell through to session state — the same
+     *     wrong-but-plausible answer this method was fixed to stop giving,
+     *     surviving on one input while the contract above says "the GIVEN
+     *     organisation". Naming the active organisation explicitly asks that
+     *     question honestly; `auth.me()` carries the id, on
+     *     `session.activeOrganizationId`.
+     *
+     * @param organizationId the organisation to ask about. Required and
+     *   non-empty; there is no "whichever one is active" spelling, deliberately.
+     * @throws if `organizationId` is falsy, or if the server answers 200 with no
+     *   membership row for the caller.
      */
-    getActiveMember: async (organizationId: string) => {
+    getActiveMember: async (organizationId: string): Promise<OrganizationMemberWithUserWire> => {
+      // A falsy id is not "the active organisation", it is a caller bug: the
+      // route would silently substitute session state for the question asked.
+      // Loud beats a plausible answer about the wrong organisation (#16568).
+      if (!organizationId) {
+        throw new Error('[ObjectStack] organizations.getActiveMember: organizationId is required');
+      }
       const route = this.getRoute('auth');
+      // Step 1 — the caller's own user id. Typed to the shape the route really
+      // serves rather than to `SessionResponse`, which declares the REST
+      // `{ success, data }` envelope this better-auth route does not use.
+      const sessionRes = await this.fetch(`${this.baseUrl}${route}/get-session`, {
+        headers: { Origin: this.baseUrl },
+      });
+      const session = (await sessionRes.json()) as { user?: { id?: string } } | null;
+      // Anonymous → `null`, and the request below is then refused 401 by the
+      // session middleware before the filter is ever read. The refusal stays
+      // the SERVER's; nothing is invented here to stand in for it.
+      const userId = session?.user?.id ?? '';
       const res = await this.fetch(
-        `${this.baseUrl}${route}/organization/get-active-member?organizationId=${encodeURIComponent(organizationId)}`,
+        `${this.baseUrl}${route}/organization/list-members`
+          + `?organizationId=${encodeURIComponent(organizationId)}`
+          + `&filterField=userId&filterValue=${encodeURIComponent(userId)}&limit=1`,
       );
-      return res.json();
+      const page = (await res.json()) as OrganizationMembersPage;
+      const [member] = page.members;
+      if (!member) {
+        // Unreachable through the route's own gate — `list-members` refuses a
+        // non-member 403 before it filters, so a 200 with no row means the
+        // membership vanished between the two requests. Loud beats a cast.
+        throw new Error(
+          `[ObjectStack] organizations.getActiveMember: no membership row for the calling user in organization "${organizationId}"`,
+        );
+      }
+      return member;
     },
 
     /**
@@ -2994,7 +3668,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/cancel-invitation */
-      cancel: async (invitationId: string) => {
+      cancel: async (invitationId: string): Promise<OrganizationInvitationWire<'canceled'>> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/cancel-invitation`, {
           method: 'POST',
@@ -3004,7 +3678,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/accept-invitation */
-      accept: async (invitationId: string) => {
+      accept: async (invitationId: string): Promise<OrganizationInvitationAcceptResult> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/accept-invitation`, {
           method: 'POST',
@@ -3014,7 +3688,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/reject-invitation */
-      reject: async (invitationId: string) => {
+      reject: async (invitationId: string): Promise<OrganizationInvitationRejectResult> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/reject-invitation`, {
           method: 'POST',
@@ -3070,7 +3744,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/create-team */
-      create: async (req: { name: string; organizationId: string }) => {
+      create: async (req: { name: string; organizationId: string }): Promise<OrganizationTeamWire> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/create-team`, {
           method: 'POST',
@@ -3080,7 +3754,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/update-team */
-      update: async (params: { teamId: string; data: { name?: string } }) => {
+      update: async (params: { teamId: string; data: { name?: string } }): Promise<OrganizationTeamWire> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/update-team`, {
           method: 'POST',
@@ -3090,7 +3764,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/remove-team */
-      delete: async (params: { teamId: string; organizationId?: string }) => {
+      delete: async (params: { teamId: string; organizationId?: string }): Promise<OrganizationTeamRemovedReceipt> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/remove-team`, {
           method: 'POST',
@@ -3111,7 +3785,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/add-team-member */
-      addMember: async (params: { teamId: string; userId: string }) => {
+      addMember: async (params: { teamId: string; userId: string }): Promise<OrganizationTeamMemberWire> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/add-team-member`, {
           method: 'POST',
@@ -3121,7 +3795,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/remove-team-member */
-      removeMember: async (params: { teamId: string; userId: string }) => {
+      removeMember: async (params: { teamId: string; userId: string }): Promise<OrganizationTeamMemberRemovedReceipt> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/remove-team-member`, {
           method: 'POST',
@@ -3509,10 +4183,14 @@ export class ObjectStackClient {
      * Update the current user's profile.
      *
      * better-auth: POST /update-user — accepts `{ name?, image?, ... }`
-     * (any custom user fields configured on the server). Returns the
-     * updated user.
+     * (any custom user fields configured on the server).
+     *
+     * Answers `{ status: true }` and NOT the updated user — the handler puts
+     * the new fields into the session cookie and echoes only the receipt
+     * (measured; the vendor's OpenAPI stub, which promises `{ user }`, is
+     * wrong). Re-read `me()` for the new values.
      */
-    updateUser: async (data: { name?: string; image?: string | null; [key: string]: unknown }) => {
+    updateUser: async (data: { name?: string; image?: string | null; [key: string]: unknown }): Promise<AuthStatusReceipt> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/update-user`, {
         method: 'POST',
@@ -3526,13 +4204,15 @@ export class ObjectStackClient {
      *
      * better-auth: POST /change-password.
      * Set `revokeOtherSessions: true` to invalidate every other session
-     * after the change.
+     * after the change — the server then ROTATES the caller's session too and
+     * answers the new token in `token`; this SDK does not store it, so a
+     * bearer-mode caller must.
      */
     changePassword: async (req: {
       currentPassword: string;
       newPassword: string;
       revokeOtherSessions?: boolean;
-    }) => {
+    }): Promise<AuthPasswordChangeResult> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/change-password`, {
         method: 'POST',
@@ -3554,7 +4234,7 @@ export class ObjectStackClient {
      *
      * ObjectStack mount: POST /set-initial-password — `{ newPassword }`.
      */
-    setInitialPassword: async (req: { newPassword: string }) => {
+    setInitialPassword: async (req: { newPassword: string }): Promise<AuthSetInitialPasswordResult> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/set-initial-password`, {
         method: 'POST',
@@ -3570,7 +4250,7 @@ export class ObjectStackClient {
      *
      * better-auth: POST /change-email — `{ newEmail, callbackURL? }`.
      */
-    changeEmail: async (req: { newEmail: string; callbackURL?: string }) => {
+    changeEmail: async (req: { newEmail: string; callbackURL?: string }): Promise<AuthStatusReceipt> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/change-email`, {
         method: 'POST',
@@ -3583,7 +4263,7 @@ export class ObjectStackClient {
      * Re-send the email-verification link to the current user (or any
      * address when called as an admin). better-auth: POST /send-verification-email.
      */
-    sendVerificationEmail: async (req: { email: string; callbackURL?: string }) => {
+    sendVerificationEmail: async (req: { email: string; callbackURL?: string }): Promise<AuthStatusReceipt> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/send-verification-email`, {
         method: 'POST',
@@ -3596,8 +4276,13 @@ export class ObjectStackClient {
      * Verify an email-verification token (the link target).
      *
      * better-auth: GET /verify-email?token=…&callbackURL=…
+     *
+     * The declared result is what the route answers WITHOUT `callbackURL`.
+     * With one, the route answers a 302 to that URL with an empty body
+     * (measured); `fetch` follows it and `res.json()` then parses whatever
+     * the callback target serves. Omit `callbackURL` to receive the receipt.
      */
-    verifyEmail: async (params: { token: string; callbackURL?: string }) => {
+    verifyEmail: async (params: { token: string; callbackURL?: string }): Promise<AuthEmailVerificationResult> => {
       const route = this.getRoute('auth');
       const url = new URL(`${this.baseUrl}${route}/verify-email`);
       url.searchParams.set('token', params.token);
@@ -3614,6 +4299,24 @@ export class ObjectStackClient {
      *      typically following an out-of-band confirmation step.
      *
      * Server policy decides which is required; pass whichever you have.
+     *
+     * ⚠️ NOT BOUND, and deliberately so — the one member of the `auth.*`
+     * family #14313 left at `Promise<any>`, with its
+     * `exported-any-returns.json` entry still open.
+     *
+     * The maintainer's ruling of 2026-08-12 on #7735 keeps better-auth's
+     * `user.deleteUser` deliberately unconfigured (self-service deletion in a
+     * B2B tenancy needs a design first), and `auth-route-ledger.ts` books the
+     * route `disabled`. Measured against a real server: the vendor's handler
+     * refuses with **HTTP 404 and a ZERO-BYTE body** (once the
+     * last-local-credential guard is satisfied; before it, 409
+     * `LAST_LOCAL_CREDENTIAL`), so `this.fetch` throws before the
+     * `res.json()` below ever runs — this method has no success path a
+     * caller can observe. No declared return type can be honest for a value
+     * the runtime never delivers; the vendor's success shape
+     * (`{ success: true, message }`) becomes bindable the day the route is
+     * switched on, and binding it before then would declare a capability the
+     * runtime does not have.
      */
     deleteUser: async (req: { password?: string; token?: string; callbackURL?: string }) => {
       const route = this.getRoute('auth');
@@ -3651,7 +4354,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /revoke-session — revoke a single session by token. */
-      revoke: async (token: string) => {
+      revoke: async (token: string): Promise<AuthStatusReceipt> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/revoke-session`, {
           method: 'POST',
@@ -3661,7 +4364,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /revoke-other-sessions — keep current, kill the rest. */
-      revokeOthers: async () => {
+      revokeOthers: async (): Promise<AuthStatusReceipt> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/revoke-other-sessions`, {
           method: 'POST',
@@ -3671,7 +4374,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /revoke-sessions — kill every session for this user. */
-      revokeAll: async () => {
+      revokeAll: async (): Promise<AuthStatusReceipt> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/revoke-sessions`, {
           method: 'POST',
@@ -3709,8 +4412,12 @@ export class ObjectStackClient {
        * or to step up an existing 2FA-enabled session. `trustDevice` (when
        * supported by the server config) suppresses the 2FA challenge on
        * this browser for the configured trust period.
+       *
+       * On the enrolment lane the server rotates the session and answers the
+       * LIVE token in `token`; this SDK does not store it — a bearer-mode
+       * caller must, or its next call answers 401.
        */
-      verifyTotp: async (req: { code: string; trustDevice?: boolean }) => {
+      verifyTotp: async (req: { code: string; trustDevice?: boolean }): Promise<AuthTwoFactorVerificationResult> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/two-factor/verify-totp`, {
           method: 'POST',
@@ -3719,8 +4426,15 @@ export class ObjectStackClient {
         return res.json();
       },
 
-      /** Disable 2FA for the current user. Requires the password again. */
-      disable: async (req: { password: string }) => {
+      /**
+       * Disable 2FA for the current user. Requires the password again.
+       *
+       * ⚠️ The server ROTATES the caller's session on success and echoes only
+       * the receipt (the new token rides the `Set-Cookie` and the bearer
+       * plugin's `set-auth-token` header, neither of which this SDK reads), so
+       * a bearer-mode caller's stored token is dead after this call.
+       */
+      disable: async (req: { password: string }): Promise<AuthStatusReceipt> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/two-factor/disable`, {
           method: 'POST',
@@ -3747,7 +4461,7 @@ export class ObjectStackClient {
        * Verify a 2FA backup code in lieu of a TOTP. Useful as a recovery
        * affordance when the user has lost their authenticator app.
        */
-      verifyBackupCode: async (req: { code: string }) => {
+      verifyBackupCode: async (req: { code: string }): Promise<AuthTwoFactorVerificationResult> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/two-factor/verify-backup-code`, {
           method: 'POST',
@@ -3792,7 +4506,7 @@ export class ObjectStackClient {
        * id at the provider. 1.7 narrowed the body from the old
        * `{ providerId, accountId? }` pair; the row id implies the provider.
        */
-      unlink: async (req: { accountId: string }) => {
+      unlink: async (req: { accountId: string }): Promise<AuthStatusReceipt> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/unlink-account`, {
           method: 'POST',
@@ -4343,8 +5057,26 @@ export class ObjectStackClient {
        *   err.message;                 // the node failure, verbatim
        *   err.details?.errorMessage;   // the flow author's `errorMessage`
        *   err.details?.summary;        // per-node accounting of the failed run
+       *   err.details?.runId;          // the run this resume was addressed to
+       *   err.details?.status;         // 'stranded' | 'failed' — the engine's verdict, when it stamped one
+       *   err.details?.repairable;     // true exactly when `status` is 'stranded'
        * }
        * ```
+       *
+       * **Since #15221 the 400 tells a stranded run from a plain failure.**
+       * A resume that consumed the pause and then failed downstream leaves
+       * the run *stranded* — terminal like any failure, but the pause a
+       * durable decision was waiting on is gone with it and only an explicit
+       * operator verb can re-arm it. The engine says so
+       * (`AutomationResult.status: 'stranded'`), and the door forwards that
+       * verdict in `err.details`: branch on `err.details.repairable`, never
+       * on the message text. `repairable` is always present on this 400 —
+       * `false` on a plain terminal failure, deliberately, so an absent
+       * member reads as an older server rather than as "not repairable".
+       * The shape is `ResumeFailureDetailsSchema` (`@objectstack/spec/api`);
+       * the code stays `FLOW_FAILED` (no `FLOW_STRANDED` sibling). The
+       * trigger door's 400 carries `errorMessage` / `summary` only — it never
+       * resumes, so "repairable" has no referent there.
        *
        * A **stale** suspension (the flow deregistered, or the node edited away
        * under a live pause) rejects with **404** rather than 400: nothing ran,
@@ -6203,18 +6935,68 @@ export class ScopedEnvironmentClient {
   }
 
   /**
+   * URL for a route mounted under the deployment's CRUD data prefix (#14879).
+   *
+   * Every route reached through here is mounted by REST as
+   * `${dataPath}/...` with `dataPath = ${basePath}${crud.dataPrefix}`, so the
+   * prefix is deployment state, not a constant. The unscoped twin of each of
+   * these methods already reads it — it builds `${baseUrl}${getRoute('data')}`
+   * and `routes.data` IS `{realBase}{dataPrefix}`. This surface restated
+   * `/data` as a literal instead, so on a deployment that moved
+   * `crud.dataPrefix` the scoped half of one SDK called paths the server does
+   * not mount while the unscoped half of the same SDK called the right ones.
+   *
+   * The scoped form cannot consume `routes.data` verbatim the way the
+   * unscoped form does: the environment segment goes BETWEEN the API base and
+   * the prefix (`{base}/environments/{id}{dataPrefix}`), and the id is this
+   * client's, which need not be the one discovery resolved. So the two halves
+   * are taken separately — `_apiBase()` for the base, `_dataPrefix()` for the
+   * prefix — and both decline to today's conventions when the advertised
+   * document does not determine them.
+   */
+  private dataUrl(suffix: string): string {
+    return `${this.parent._baseUrl()}${this.scope()}${this.parent._dataPrefix()}${suffix}`;
+  }
+
+  /**
+   * URL for a route mounted under the deployment's metadata prefix (#16675).
+   *
+   * The exact sibling of {@link ScopedEnvironmentClient.dataUrl}, for the
+   * other half of the same defect. Every route reached through here is
+   * mounted by REST as `${metaPath}/...` with
+   * `metaPath = ${basePath}${metadata.prefix}`, so the prefix is deployment
+   * state, not a constant. The unscoped twin of each of these methods already
+   * reads it — it builds `${baseUrl}${getRoute('metadata')}` and
+   * `routes.metadata` IS `{realBase}{metadata.prefix}`. This surface restated
+   * `/meta` as a literal instead, so on a deployment that moved
+   * `metadata.prefix` the scoped half of one SDK called paths the server does
+   * not mount while the unscoped half of the same SDK called the right ones.
+   *
+   * The scoped form cannot consume `routes.metadata` verbatim the way the
+   * unscoped form does: the environment segment goes BETWEEN the API base and
+   * the prefix (`{base}/environments/{id}{metadata.prefix}`), and the id is
+   * this client's, which need not be the one discovery resolved. So the two
+   * halves are taken separately — `_apiBase()` for the base, `_metaPrefix()`
+   * for the prefix — and both decline to today's conventions when the
+   * advertised document does not determine them.
+   */
+  private metaUrl(suffix: string): string {
+    return `${this.parent._baseUrl()}${this.scope()}${this.parent._metaPrefix()}${suffix}`;
+  }
+
+  /**
    * Metadata operations scoped to this project.
    */
   meta = {
     getTypes: async (): Promise<GetMetaTypesResponse> => {
-      const res = await this.parent._fetch(this.url('/meta'));
+      const res = await this.parent._fetch(this.metaUrl(''));
       return this.parent._unwrap<GetMetaTypesResponse>(res);
     },
     getItems: async (type: string, options?: { packageId?: string }): Promise<GetMetaItemsResponse> => {
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
       const qs = params.toString();
-      const res = await this.parent._fetch(this.url(`/meta/${type}${qs ? `?${qs}` : ''}`));
+      const res = await this.parent._fetch(this.metaUrl(`/${type}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemsResponse>(res);
     },
     /** Same `{ type, name, item }` envelope as the unscoped surface (#5563). */
@@ -6222,7 +7004,7 @@ export class ScopedEnvironmentClient {
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
       const qs = params.toString();
-      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`));
+      const res = await this.parent._fetch(this.metaUrl(`/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemResponse>(res);
     },
     /**
@@ -6249,7 +7031,7 @@ export class ScopedEnvironmentClient {
       // Header half of the same bag, through the same one builder the twin
       // calls — see {@link metaSaveHeaders}.
       const headers = metaSaveHeaders(options);
-      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
+      const res = await this.parent._fetch(this.metaUrl(`/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
         method: 'PUT',
         body: JSON.stringify(item),
         ...(headers ? { headers } : {}),
@@ -6284,26 +7066,41 @@ export class ScopedEnvironmentClient {
       // Header half of the same bag, through the same one builder the twin
       // calls — see {@link metaDeleteHeaders}.
       const headers = metaDeleteHeaders(options);
-      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
+      const res = await this.parent._fetch(this.metaUrl(`/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
         method: 'DELETE',
         ...(headers ? { headers } : {}),
       });
       // Bare body, same as the unscoped twin — `_unwrap` is `unwrapResponse`.
       return this.parent._unwrap<DeleteMetaItemResponse>(res);
     },
+    /**
+     * The durable change-log for a metadata item, scoped to this
+     * environment. Reaches the SAME handler as the unscoped twin — one
+     * `registerForBase` replay against `/environments/:environmentId` — so
+     * the body is byte-identical and the declaration must be too.
+     *
+     * [#13523] Returns {@link HistoryMetaItemResponse}. This exit declared
+     * NOTHING before: no return annotation, and `_unwrap` called with no type
+     * argument, so `T` had no inference site and the published method
+     * answered `Promise<unknown>` — every caller forced to narrow by hand,
+     * against no contract. The unscoped twin meanwhile declared a DIFFERENT,
+     * inline shape. Binding one exit and not the other would have relocated
+     * that divergence rather than removed it (the #7019 direction), so both
+     * exits name this one type.
+     */
     getHistory: async (
       type: string,
       name: string,
       options?: { sinceSeq?: number; limit?: number },
-    ) => {
+    ): Promise<HistoryMetaItemResponse> => {
       const params = new URLSearchParams();
       if (options?.sinceSeq !== undefined) params.set('sinceSeq', String(options.sinceSeq));
       if (options?.limit !== undefined) params.set('limit', String(options.limit));
       const qs = params.toString();
       const res = await this.parent._fetch(
-        this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history${qs ? `?${qs}` : ''}`),
+        this.metaUrl(`/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history${qs ? `?${qs}` : ''}`),
       );
-      return this.parent._unwrap(res);
+      return this.parent._unwrap<HistoryMetaItemResponse>(res);
     },
   };
 
@@ -6316,7 +7113,7 @@ export class ScopedEnvironmentClient {
    */
   data = {
     query: async <T = any>(object: string, query: Partial<QueryAST>): Promise<PaginatedResult<T>> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/query`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/query`), {
         method: 'POST',
         body: JSON.stringify(query),
       });
@@ -6382,22 +7179,22 @@ export class ScopedEnvironmentClient {
       }
 
       const qs = queryParams.toString();
-      const res = await this.parent._fetch(this.url(`/data/${object}${qs ? `?${qs}` : ''}`));
+      const res = await this.parent._fetch(this.dataUrl(`/${object}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<PaginatedResult<T>>(res);
     },
     get: async <T = any>(object: string, id: string): Promise<GetDataResult<T>> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/${id}`));
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/${id}`));
       return this.parent._unwrap<GetDataResult<T>>(res);
     },
     create: async <T = any>(object: string, data: Partial<T>): Promise<CreateDataResult<T>> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}`), {
         method: 'POST',
         body: JSON.stringify(data),
       });
       return this.parent._unwrap<CreateDataResult<T>>(res);
     },
     createMany: async <T = any>(object: string, data: Partial<T>[]): Promise<T[]> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/createMany`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/createMany`), {
         method: 'POST',
         body: JSON.stringify(data),
       });
@@ -6412,7 +7209,7 @@ export class ScopedEnvironmentClient {
      * validates + previews without persisting.
      */
     import: async (object: string, request: ImportRequest): Promise<ImportResponse> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/import`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/import`), {
         method: 'POST',
         body: JSON.stringify(request),
       });
@@ -6424,18 +7221,18 @@ export class ScopedEnvironmentClient {
      * them in the background while callers poll progress / results / history.
      */
     createImportJob: async (object: string, request: CreateImportJobRequest): Promise<CreateImportJobResponse> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/import/jobs`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/import/jobs`), {
         method: 'POST',
         body: JSON.stringify(request),
       });
       return this.parent._unwrap<CreateImportJobResponse>(res);
     },
     getImportJobProgress: async (jobId: string): Promise<ImportJobProgress> => {
-      const res = await this.parent._fetch(this.url(`/data/import/jobs/${encodeURIComponent(jobId)}`));
+      const res = await this.parent._fetch(this.dataUrl(`/import/jobs/${encodeURIComponent(jobId)}`));
       return this.parent._unwrap<ImportJobProgress>(res);
     },
     getImportJobResults: async (jobId: string): Promise<ImportJobResults> => {
-      const res = await this.parent._fetch(this.url(`/data/import/jobs/${encodeURIComponent(jobId)}/results`));
+      const res = await this.parent._fetch(this.dataUrl(`/import/jobs/${encodeURIComponent(jobId)}/results`));
       return this.parent._unwrap<ImportJobResults>(res);
     },
     listImportJobs: async (query: Partial<ListImportJobsRequest> = {}): Promise<ImportJobSummary[]> => {
@@ -6445,31 +7242,31 @@ export class ScopedEnvironmentClient {
       if (query.limit != null) qs.set('limit', String(query.limit));
       if (query.offset != null) qs.set('offset', String(query.offset));
       const suffix = qs.toString() ? `?${qs.toString()}` : '';
-      const res = await this.parent._fetch(this.url(`/data/import/jobs${suffix}`));
+      const res = await this.parent._fetch(this.dataUrl(`/import/jobs${suffix}`));
       const body = await this.parent._unwrap<ListImportJobsResponse>(res);
       return body.jobs;
     },
     cancelImportJob: async (jobId: string): Promise<{ success: boolean }> => {
-      const res = await this.parent._fetch(this.url(`/data/import/jobs/${encodeURIComponent(jobId)}/cancel`), {
+      const res = await this.parent._fetch(this.dataUrl(`/import/jobs/${encodeURIComponent(jobId)}/cancel`), {
         method: 'POST',
       });
       return this.parent._unwrap<{ success: boolean }>(res);
     },
     undoImportJob: async (jobId: string): Promise<UndoImportJobResponse> => {
-      const res = await this.parent._fetch(this.url(`/data/import/jobs/${encodeURIComponent(jobId)}/undo`), {
+      const res = await this.parent._fetch(this.dataUrl(`/import/jobs/${encodeURIComponent(jobId)}/undo`), {
         method: 'POST',
       });
       return this.parent._unwrap<UndoImportJobResponse>(res);
     },
     update: async <T = any>(object: string, id: string, data: Partial<T>): Promise<UpdateDataResult<T>> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/${id}`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/${id}`), {
         method: 'PATCH',
         body: JSON.stringify(data),
       });
       return this.parent._unwrap<UpdateDataResult<T>>(res);
     },
     batch: async (object: string, request: BatchUpdateRequest): Promise<BatchUpdateResponse> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/batch`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/batch`), {
         method: 'POST',
         body: JSON.stringify(request),
       });
@@ -6496,21 +7293,21 @@ export class ScopedEnvironmentClient {
       options?: BatchOptions,
     ): Promise<BatchUpdateResponse> => {
       const request: UpdateManyRequest = { records, options };
-      const res = await this.parent._fetch(this.url(`/data/${object}/updateMany`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/updateMany`), {
         method: 'POST',
         body: JSON.stringify(request),
       });
       return this.parent._unwrap<BatchUpdateResponse>(res);
     },
     delete: async (object: string, id: string): Promise<DeleteDataResult> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/${id}`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/${id}`), {
         method: 'DELETE',
       });
       return this.parent._unwrap<DeleteDataResult>(res);
     },
     deleteMany: async (object: string, ids: string[], options?: BatchOptions): Promise<BatchUpdateResponse> => {
       const request: DeleteManyRequest = { ids, options };
-      const res = await this.parent._fetch(this.url(`/data/${object}/deleteMany`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/deleteMany`), {
         method: 'POST',
         body: JSON.stringify(request),
       });

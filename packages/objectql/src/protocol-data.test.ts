@@ -651,7 +651,13 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
             const ctx = { userId: 'u1' };
             await protocol.cloneData({ object: 'account', id: 'src-1', context: ctx });
             expect(findOne).toHaveBeenCalledWith('account', expect.objectContaining({ context: ctx }));
-            expect(insert).toHaveBeenCalledWith('account', expect.anything(), { context: ctx });
+            // [#15703] The insert options carry the context AND the
+            // `onFieldsDropped` listener `createData` wires — the clone reports
+            // the engine's readonly-strip verdict on its 201 body since #15703.
+            expect(insert).toHaveBeenCalledWith('account', expect.anything(), {
+                context: ctx,
+                onFieldsDropped: expect.any(Function),
+            });
         });
 
         it('rejects with 403 CLONE_DISABLED when enable.clone === false', async () => {

@@ -25,14 +25,14 @@
 // dispatcher domain files.
 //
 // The population comes from `packages/rest/src/rest-route-ledger.ts` (94 rows
-// / 19 families) and `packages/runtime/src/route-ledger.ts` (80 rows / 21
+// / 19 families) and `packages/runtime/src/route-ledger.ts` (82 rows / 21
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
 // domain cannot be silently absent from them, and therefore cannot be silently
 // absent from here. Widening a regex instead was refused: it rots on the next
 // added file, which is the mechanism this replaces. Deriving "gated" from
-// source syntax was refused too, on a measurement — 22 of 30 apparently
-// ungated `register(` sites in `rest-server.ts` are false, a 73% false-ungated
+// source syntax was refused too, on a measurement — 22 of 29 apparently
+// ungated `register(` sites in `rest-server.ts` are false, a 76% false-ungated
 // rate — because that trades a visible gap for a written-down false assurance.
 // The ledgers supply the POPULATION; the classification stays a reviewed row
 // here.

@@ -116,6 +116,53 @@ export function isConsumerInstallable(type: string | undefined): boolean {
   return type != null && (CONSUMER_INSTALLABLE_TYPES as readonly string[]).includes(type);
 }
 
+/**
+ * The stable code a `PluginSchema` refusal carries when a `type: 'ui'` plugin
+ * omits a key the `ui` type requires (#16334).
+ *
+ * `staticPath` and `slug` are described below as `(Required for type="ui")`
+ * and were declared `.optional()` with nothing behind the prose. Once
+ * `kernel.use()` ran the schema on the boot path (#16049) that prose became a
+ * promise the runtime visibly did not keep. The `superRefine` on
+ * `PluginSchema` makes it true: a `type: 'ui'` plugin missing either key is
+ * refused with one issue per missing key, `path` naming the key.
+ *
+ * Where the code is readable — MEASURED on this tree, not assumed:
+ *
+ *  - At the HEAD of the issue's `message`. The one runtime caller of
+ *    `PluginSchema` is `PluginLoader.validatePluginContract`
+ *    (`packages/core/src/plugin-loader.ts`, #16049), which surfaces the first
+ *    issue's `path` and `message` and reads nothing else, and
+ *    `ObjectKernel.use()` re-wraps that into a fresh `Error` carrying only the
+ *    message. So the code reaches the boot log verbatim today, with no loader
+ *    change:
+ *
+ *      PLUGIN_CONTRACT_VIOLATION: plugin '@acme/console' is refused by the
+ *      declared plugin contract at 'staticPath': PLUGIN_UI_REQUIRED_KEY_MISSING: …
+ *
+ *  - On the issue's `params.code` (zod's slot for custom-issue metadata), with
+ *    `params.key` naming the missing key — for a reader that wants the code as
+ *    a field rather than a message prefix. No reader does today; whether the
+ *    loader should stamp it onto `err.code` is the boot path's seam (#16049),
+ *    not this one.
+ *
+ * Spelled the ADR-0112 way and registered in `ERROR_CODE_LEDGER` under
+ * `@objectstack/spec` (#16449, under the #16404 ruling: a code that ships in
+ * `dist` is the published face, door or no door). Not wire vocabulary in the
+ * door sense: it is raised at authoring / `kernel.use()`, before any HTTP
+ * boundary exists, and rides `PLUGIN_CONTRACT_VIOLATION`'s envelope — the
+ * ledger row records that reading.
+ */
+export const PLUGIN_UI_REQUIRED_KEY_MISSING = 'PLUGIN_UI_REQUIRED_KEY_MISSING';
+
+/**
+ * The keys `type: 'ui'` requires — exactly the two whose `.describe()` says
+ * `(Required for type="ui")`. Module-private on purpose: the published symbol
+ * is the refusal code above; the key set itself is pinned by
+ * `plugin-ui-required-keys.test.ts`, one case per key.
+ */
+const PLUGIN_UI_REQUIRED_KEYS = ['staticPath', 'slug'] as const;
+
 export const PluginSchema = lazySchema(() => z.object({
   id: z.string().min(1).optional().describe('Unique Plugin ID (e.g. com.example.crm)'),
   type: z.enum([
@@ -127,10 +174,55 @@ export const PluginSchema = lazySchema(() => z.object({
   slug: z.string().regex(/^[a-z0-9-_]+$/).optional().describe('URL path segment (Required for type="ui")'),
   default: z.boolean().optional().describe('Serve at root path (Only one "ui" plugin can be default)'),
   
-  version: z.string().regex(/^\d+\.\d+\.\d+$/).optional().describe('Semantic Version'),
+  // #16365 — the grammar SemVer 2.0.0 actually defines, prerelease and build
+  // metadata included, which is what `describe('Semantic Version')` has said
+  // without qualification all along. The regex it replaces, `/^\d+\.\d+\.\d+$/`,
+  // refused `1.0.0-alpha.1` and `1.0.0+20230101` — a declaration refusing part
+  // of what it declared.
+  //
+  // ⭐ This is `PluginLoader.isValidSemanticVersion`'s spelling character for
+  // character (`packages/core/src/plugin-loader.ts`), deliberately, and not a
+  // third grammar invented here. That check is the one the boot path has always
+  // run, so adopting it makes the two declarations converge EXACTLY — which is
+  // what let `assertPluginContract` drop the `version` exclusion it carried as a
+  // stopgap, and is why nothing that loads today is refused now.
+  //
+  // ⚠️ MEASURED, not assumed, in both directions. It is a strict SUPERSET of the
+  // regex it replaces (same three-segment core, two OPTIONAL suffix groups), so
+  // the accept set only grows. It is ALSO wider than SemVer 2.0.0 itself, in a
+  // fringe this change neither introduces nor widens: leading zeroes in the
+  // numeric core (`01.1.1`) were accepted by BOTH spellings before this change
+  // and are accepted by both after it, and the loader additionally accepts the
+  // degenerate identifier forms SemVer forbids (`1.0.0-alpha..1`, `1.0.0-0123`,
+  // `1.0.0+.`). Tightening to the official SemVer 2.0.0 regex would therefore
+  // have NARROWED this key — refusing `01.1.1`, which it accepts today — which
+  // is the one thing the #16365 ruling forbids. Closing that fringe is its own
+  // card, on the loader and this key together.
+  version: z.string().regex(/^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$/).optional().describe('Semantic Version'),
   description: z.string().optional(),
   author: z.string().optional(),
   homepage: z.string().url().optional(),
+}).superRefine((plugin, ctx) => {
+  // #16334 — the `(Required for type="ui")` prose on `staticPath` / `slug`,
+  // enforced. Scoped to `type === 'ui'` exactly: every other type, and a
+  // plugin declaring no `type` (`.default('standard')`), owes neither key.
+  // Absence only — a PRESENT value is judged by its own declaration above
+  // (`slug` keeps its regex, `staticPath` stays any string), never re-judged.
+  if (plugin.type !== 'ui') return;
+  for (const key of PLUGIN_UI_REQUIRED_KEYS) {
+    if (plugin[key] !== undefined) continue;
+    ctx.addIssue({
+      code: 'custom',
+      path: [key],
+      message:
+        `${PLUGIN_UI_REQUIRED_KEY_MISSING}: a \`type: 'ui'\` plugin must declare \`${key}\` — `
+        + (key === 'staticPath'
+          ? 'the absolute path of the static assets it serves.'
+          : 'the URL path segment it is mounted under.')
+        + " Declare it, or drop `type: 'ui'` if this plugin serves no assets.",
+      params: { code: PLUGIN_UI_REQUIRED_KEY_MISSING, key },
+    });
+  }
 }));
 
 export type PluginDefinition = z.input<typeof PluginSchema>;

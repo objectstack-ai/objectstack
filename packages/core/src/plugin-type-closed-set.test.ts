@@ -14,12 +14,21 @@
 // The COMPILE-TIME half — a non-member literal or a `string`-typed value no
 // longer type-checks against the PUBLISHED `Plugin.type` — lives in
 // `packages/rest/src/plugin-type-closed-set.pin.test.ts`, deliberately NOT
-// here: `@objectstack/core` has no `typecheck` script (type-check DEBT ledger
-// entry), so a `@ts-expect-error` in this package is a phantom pin no tsc
-// program a `typecheck` script runs would ever evaluate —
-// `check:type-check-coverage` refuses exactly that. The rest package's
-// `tsconfig.test.json` program is compiled by its `typecheck` script and reads
-// core's BUILT `.d.ts`, so the pin over there guards the published contract.
+// here. The rest package's `tsconfig.test.json` program is compiled by its
+// `typecheck` script and resolves `@objectstack/core` to core's BUILT
+// `dist/index.d.ts`, so the pin over there guards the contract consumers
+// actually resolve.
+//
+// ⚠️ This used to read as though the split were forced — that
+// `@objectstack/core` "has no `typecheck` script (type-check DEBT ledger
+// entry)", making a `@ts-expect-error` here a phantom pin
+// `check:type-check-coverage` refuses. False on this tree: #14613 split a
+// `tsconfig.test.json` out of the build config, `package.json`'s `typecheck`
+// NAMES it (via `check:test-typecheck --project`), and this package holds no
+// DEBT entry. A directive here WOULD be evaluated — against `./types.ts`,
+// this package's own SOURCE. The published `.d.ts` is what those pins are
+// about and only the rest program reads it, which is a reason that outlives
+// any package's script list.
 
 import { describe, it, expect } from 'vitest';
 import { CORE_PLUGIN_TYPES, PluginSchema } from '@objectstack/spec/kernel';
@@ -57,9 +66,21 @@ describe('Plugin.type closed set — runtime parity with the spec enum (#13925)'
         expect(CORE_PLUGIN_TYPES).toHaveLength(7);
     });
 
+    /**
+     * The minimal spec-legal object per member. `ui` alone owes more than its
+     * `type`: `staticPath` and `slug` are required for it since #16334
+     * (`plugin-ui-required-keys.test.ts` in spec pins that), so a bare
+     * `{ type: 'ui' }` is refused at `['staticPath']` / `['slug']` — a reading
+     * about those two keys, not about the enum this file pins. Every other
+     * member is legal with its `type` alone, which the bare `{ type }` states.
+     */
+    function minimalLegal(type: PluginType): Record<string, unknown> {
+        return type === 'ui' ? { type, staticPath: '/srv/ui/dist', slug: 'ui' } : { type };
+    }
+
     it('every union member parses through PluginSchema', () => {
         for (const type of UNION_MEMBERS) {
-            const result = PluginSchema.safeParse({ type });
+            const result = PluginSchema.safeParse(minimalLegal(type));
             expect(result.success, `PluginSchema refused union member '${type}'`).toBe(true);
         }
     });

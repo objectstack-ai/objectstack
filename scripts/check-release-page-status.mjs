@@ -972,10 +972,18 @@ function main() {
       problems.push(`${INDEX_PATH} is missing — there is no releases index to check entries against.`);
     }
     for (const major of checked) {
-      const pagePath = `${RELEASES_DIR}/v${major}.mdx`;
-      if (!existsSync(pagePath)) {
+      // Two layouts, both first-class. v16 and earlier are one flat `v16.mdx`;
+      // v17 onwards is a folder whose `index.mdx` is the major's landing page,
+      // with one file per minor beside it. The status blockquote lives on the
+      // landing page in both, so this gate only has to find it — ⛔ it does not
+      // care which layout a major uses, and ⛔ neither layout is deprecated.
+      const pagePath = [`${RELEASES_DIR}/v${major}.mdx`, `${RELEASES_DIR}/v${major}/index.mdx`].find(
+        existsSync,
+      );
+      if (pagePath === undefined) {
         problems.push(
-          `${pagePath} is missing — @objectstack/spec ${major}.x is GA but there is no release page to `
+          `${RELEASES_DIR}/v${major}.mdx (or ${RELEASES_DIR}/v${major}/index.mdx) is missing — `
+          + `@objectstack/spec ${major}.x is GA but there is no release page to `
           + 'check. (check:release-notes is the gate that owns page existence; this one owns what the '
           + 'page SAYS.)',
         );

@@ -22,6 +22,46 @@ Architecture alignment:
 - Microsoft Dynamics: Web API with entity operations
 - Strapi: Auto-generated REST endpoints
 
+WHO CAN WRITE THIS CONFIG (#15543) — read this before planning a deployment
+around any key below. A `RestServerConfig` is the ARGUMENT a host passes when
+it constructs the server: never a stack collection member and never a stored
+metadata row.
+
+There is exactly ONE door, and it is programmatic:
+`createRestApiPlugin({ api })` (`packages/rest/src/rest-api-plugin.ts`),
+whose `start()` is the only non-test site that reaches `new RestServer(...)`.
+⚠️ `HonoServerPlugin` (`packages/plugins/plugin-hono-server`) declares a
+`restConfig?: RestServerConfig` option, but it is NOT a second door: its one
+reader takes `api.basePath` for the SPA fallback, and that plugin never
+constructs a REST server, so nothing below `api.basePath` reaches anything.
+
+No shipped boot path opens that door with a config of its own. `os serve`
+(`packages/cli/src/commands/serve.ts`) reads the stack config's own top-level
+`api:` block and forwards exactly two keys out of it —
+`api.enableProjectScoping` and `api.projectResolution` — into a fixed
+argument, through an `as any` cast; the dev plugin
+(`packages/plugins/plugin-dev/src/dev-plugin.ts`) calls
+`createRestApiPlugin()` with no config at all. So the CLI does read a config
+file — it just forwards those two keys and nothing else.
+
+⇒ On a CLI-started deployment every OTHER key here is EMBEDDER-ONLY: the
+whole of `crud`, `metadata` and `batch`, and the rest of `api`. Its value is
+whatever the `.default()` below says, and no flag, config file or CLI option
+moves it.
+
+⚠️ ONE CARVE-OUT, and it is the security-relevant key: the REST server's
+`normalizeConfig` folds the environment into the effective value of
+`metadata.maskObjectFields` — `OS_ALLOW_UNMASKED_OBJECT_METADATA` turns the
+ADR-0106 D8 mask OFF for a deployment that cannot otherwise reach the key.
+That env var is the only thing outside an embedder's argument that changes
+any value here. See `maskObjectFields` below.
+
+This is the recorded posture, not a gap awaiting a fix: the keys keep their
+runtime reads and their embedder consumer, and the reachability answer
+ADR-0049 asks for is written per key in the liveness ledger
+(`packages/spec/liveness/crud_endpoints.json`, `metadata_endpoints.json`,
+`batch_endpoints.json`).
+
 <Callout type="info">
 **Source:** `packages/spec/src/api/rest-server.zod.ts`
 </Callout>
@@ -205,7 +245,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **enableBatch** | `boolean` | optional (default: `true`) | Enable batch operation endpoints |
 | **enableDiscovery** | `boolean` | optional (default: `true`) | Enable API discovery endpoint |
 | **enableOpenApi** | `boolean` | optional (default: `true`) | Enable OpenAPI 3.1 spec & docs viewer endpoints |
-| **enableSearch** | `boolean` | optional (default: `true`) | Enable structured search endpoints (deployment-wide search opt-out) |
+| **enableSearch** | `boolean` | optional (default: `true`) | Enable structured search endpoints (server-wide search opt-out; embedder-only, not settable from `os serve`) |
 | **enableProjectScoping** | `boolean` | optional (default: `false`) | Enable project-scoped routing for data/meta/AI APIs |
 | **projectResolution** | `Enum<'required' \| 'optional' \| 'auto'>` | optional (default: `"auto"`) | Project ID resolution strategy |
 | **requireAuth** | `never` | optional | [REMOVED] `api.requireAuth` was removed in @objectstack/spec 17. Anonymous access to object data is now always denied — auth is a kernel concern, not a deployment posture. Delete the key. To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of opening the whole data plane. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
@@ -242,9 +282,9 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **api** | `{ version: string; basePath: string; apiPath?: string; enableCrud: boolean; … }` | optional | REST API configuration |
-| **crud** | `{ operations?: object; dataPrefix: string }` | optional | CRUD endpoints configuration |
-| **metadata** | `{ prefix: string; enableCache: boolean; maskObjectFields: boolean; endpoints?: object }` | optional | Metadata endpoints configuration |
-| **batch** | `{ maxBatchSize: integer; enableBatchEndpoint: boolean; operations?: object }` | optional | Batch endpoints configuration |
+| **crud** | `{ operations?: object; dataPrefix: string }` | optional | CRUD endpoints configuration (embedder-only: written by a host that constructs this config, never by `os serve` or the dev plugin) |
+| **metadata** | `{ prefix: string; enableCache: boolean; maskObjectFields: boolean; endpoints?: object }` | optional | Metadata endpoints configuration (embedder-only: written by a host that constructs this config, never by `os serve` or the dev plugin) |
+| **batch** | `{ maxBatchSize: integer; enableBatchEndpoint: boolean; operations?: object }` | optional | Batch endpoints configuration (embedder-only: written by a host that constructs this config, never by `os serve` or the dev plugin) |
 | **routes** | `{  }` | optional | Route generation configuration |
 | **openApi31** | `never` | optional | [REMOVED] `RestServerConfig.openApi31` was removed in @objectstack/spec 17 (ADR-0049) — no runtime ever read it: the REST server forwards only `api`/`crud`/`metadata`/`batch`/`routes`, and the served /openapi.json is the pre-generated contract enriched with the live server URL and the registered objects, so webhook/callback definitions declared here never appeared in it. Delete the key. Config-driven OpenAPI 3.1 webhooks/callbacks documentation is a new capability and must arrive via the enforce route of ADR-0049 (a new ADR), not by re-declaring the key; for a real outbound webhook use `Webhook` from `@objectstack/spec/automation`. |
 
@@ -261,7 +301,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **enableBatch** | `boolean` | optional (default: `true`) | Enable batch operation endpoints |
 | **enableDiscovery** | `boolean` | optional (default: `true`) | Enable API discovery endpoint |
 | **enableOpenApi** | `boolean` | optional (default: `true`) | Enable OpenAPI 3.1 spec & docs viewer endpoints |
-| **enableSearch** | `boolean` | optional (default: `true`) | Enable structured search endpoints (deployment-wide search opt-out) |
+| **enableSearch** | `boolean` | optional (default: `true`) | Enable structured search endpoints (server-wide search opt-out; embedder-only, not settable from `os serve`) |
 | **enableProjectScoping** | `boolean` | optional (default: `false`) | Enable project-scoped routing for data/meta/AI APIs |
 | **projectResolution** | `Enum<'required' \| 'optional' \| 'auto'>` | optional (default: `"auto"`) | Project ID resolution strategy |
 | **requireAuth** | `never` | optional | [REMOVED] `api.requireAuth` was removed in @objectstack/spec 17. Anonymous access to object data is now always denied — auth is a kernel concern, not a deployment posture. Delete the key. To publish something publicly, declare it: a public form view (`sharing.allowAnonymous`), a share link, or `book.audience: 'public'` — each derives its own narrow authorization instead of opening the whole data plane. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |

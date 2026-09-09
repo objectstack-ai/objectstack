@@ -94,6 +94,49 @@ is registered here — and if it merely re-spells a standard member, that
 registration is a recorded waiver, never drift. A code registered NOWHERE
 (a tenant app's own spelling) still reaches the wire, in `declaredCode`.
 
+## Door or no door — every code that ships in `dist` is registered (#16404)
+
+Ruled by the director seat (decision batch #62, 2026-09-07, option D;
+maintainer 「同意」): **the published contract face for error codes is THIS
+ledger together with `StandardErrorCode`.** Any `code` that ships in a
+package's `dist` is registered here whether or not an HTTP door can ever
+answer with it — a thrown value's `code` is what a consumer's
+`catch (e) { switch (e.code) }` pins, and once shipped it cannot be renamed
+without breaking that consumer. Registering a code widens this face and is
+therefore a Clause-② change (`needs:contract-review`), door or no door; a
+code present in `dist` and absent here is a protocol gap, not a tier
+question.
+
+ONE shape, no second list: a `door: 'none'` code is a row like any other —
+the string under the package that stamps it, and a comment that states its
+`status` and the reachability reading ("no HTTP door on this tree; the
+thrown value is the boundary"). Until #16649 the dispatcher vocabulary
+(`packages/runtime/src/dispatcher-error-vocabulary.ts`) carried a
+`boot-refusal` verdict that recorded that same reachability for the codes
+NOT yet registered; it is RETIRED, because the gate below now refuses it —
+and every verdict like it — under any published package's `src/`. The one
+verdict that still parks a site there is `pending-registration`, and only
+outside `packages/spec/src/**`, under the dated allowance spelled out below.
+So a `door: 'none'` code has no resting place short of a row here, and the
+ratchet is the one `pending-registration` already had: a row here makes the
+site vanish from that scan. What registration changes
+for such a code is the face,
+not the wire: nothing demotes today, and if a door ever does answer with
+it, `error.code` carries the specific code instead of the status-derived
+member plus `declaredCode`. The `declaredCode` demotion (#9106) stays for
+genuinely unknown / third-party spellings only.
+
+EVERY published package's `src/**` is held to this mechanically — #16649
+widened the rule from `packages/spec/src/**` alone, which is all #16449
+could afford to measure. `check:dispatcher-error-vocabulary` refuses to
+classify a stamp site under one as anything but `foreign-vocabulary` (a
+different vocabulary that merely spells itself `code`) or `runtime-pinned`,
+and the only way out is the row here. Under `packages/spec/src/**` that is
+the whole rule, so a `pending-registration` row for a spec site is a finding
+(`spec-face-unregistered`); outside it, a `pending-registration` row keeps a
+named, dated allowance owed to #8846 and any OTHER verdict is a finding
+(`published-face-unregistered`).
+
 A code emitted by several packages is listed once per emitting package —
 the union dedupes; the per-package rows are provenance, not identity.
 
@@ -126,6 +169,16 @@ aborts, and the one request-reachable trigger sits inside a documented
 best-effort catch that logs and continues. Its throw site and constant
 (`MULTI_TENANT_UNSUPPORTED_CODE`, `@objectstack/driver-mongodb`) live on:
 host boot matching is not wire vocabulary.
+⚠️ That SECOND ground is superseded by #16404 ("Door or no door" above): a
+boot refusal that ships in `dist` is owed a row, so the codes left out or
+retired on the "not wire vocabulary" reasoning were registrations owed
+under the ruling, not re-argued per card — #16449 registered the nine
+measured on its tree, and #16649 the fourteen `boot-refusal` rows
+`dispatcher-error-vocabulary.ts` still carried, among them
+`MONGODB_MULTI_TENANT_UNSUPPORTED` itself, back under
+`@objectstack/driver-mongodb` with the #8035 removal reversed on the
+record. What still retires a row is the FIRST ground only: no producer
+left anywhere in `packages/**` source.
 Before deleting a row, check that no producer remains repo-wide AND
 that no consumer — including `objectui` and `cloud` — reads the literal;
 tests that merely CONSTRUCT the code are not producers, and a test pinned to
@@ -205,9 +258,11 @@ const result = ErrorCode.parse(data);
 * `INTEGRATION_ERROR`
 * `WEBHOOK_DELIVERY_FAILED`
 * `ACCOUNT_LOCKED`
+* `ACTION_CONFIRMATION_REQUIRED`
 * `ACTION_DISABLED`
 * `ALREADY_REVERTED`
 * `AMBIGUOUS_MATCH`
+* `ANALYTICS_DATE_RANGE_UNRECOGNIZED`
 * `ANALYTICS_QUERY_FAILED`
 * `APPROVAL_ACTIONS_FAILED`
 * `APPROVAL_APPROVE_FAILED`
@@ -248,6 +303,7 @@ const result = ErrorCode.parse(data);
 * `DATASET_INVALID`
 * `DATASOURCE_ADMIN_ERROR`
 * `DELEGABLE_SCOPE_FAILED`
+* `DELETE_HOOK_RESULT_NOT_WRITE_SHAPE`
 * `DELIVERY_NEVER_SENT`
 * `DELIVERY_NOT_ELIGIBLE`
 * `DESTRUCTIVE_CHANGE`
@@ -255,6 +311,8 @@ const result = ErrorCode.parse(data);
 * `DOMAIN_VERIFICATION_DISABLED`
 * `DOMAIN_VERIFICATION_FAILED`
 * `DRIVER_UNAVAILABLE`
+* `DUPLICATE_ARTIFACT_OBJECT_NAME`
+* `DUPLICATE_ARTIFACT_PACKAGE`
 * `DUPLICATE_REQUEST`
 * `DUPLICATE_SOURCE_NOT_A_BASE`
 * `ELIGIBILITY_UNEVALUABLE`
@@ -297,6 +355,7 @@ const result = ErrorCode.parse(data);
 * `FILTER_TOKEN_UNKNOWN`
 * `FILTER_TOKEN_UNRESOLVED`
 * `FIND_HOOK_RESULT_NOT_ARRAY`
+* `FIND_ONE_HOOK_RESULT_NOT_RECORD`
 * `FLOW_CONVERSION_CONFLICT`
 * `FLOW_DISABLED`
 * `FLOW_FAILED`
@@ -309,6 +368,8 @@ const result = ErrorCode.parse(data);
 * `IMPORT_JOB_CREATE_FAILED`
 * `IMPORT_ROW_FAILED`
 * `INTERNAL`
+* `INVALID_ARTIFACT_PACKAGES`
+* `INVALID_ARTIFACT_PACKAGE_ENTRY`
 * `INVALID_EMAIL`
 * `INVALID_EXPIRY`
 * `INVALID_METADATA`
@@ -335,10 +396,13 @@ const result = ErrorCode.parse(data);
 * `MARKETPLACE_PROXY_FAILED`
 * `MARKETPLACE_STORAGE_FAILED`
 * `MARKETPLACE_UNAVAILABLE`
+* `MEMORY_MULTI_TENANT_UNSUPPORTED`
 * `METADATA_BRANCH`
 * `METADATA_CONFLICT`
 * `METADATA_NOT_FOUND`
 * `METADATA_SCHEMA_INVALID`
+* `MIXED_ARTIFACT_COLLECTION_SHAPE`
+* `MONGODB_MULTI_TENANT_UNSUPPORTED`
 * `MULTI_UPDATE_HOOK_KEY_DIVERGENCE`
 * `NAMESPACE_CONFLICT`
 * `NAMESPACE_PREFIX`
@@ -346,6 +410,7 @@ const result = ErrorCode.parse(data);
 * `NODE_FAILURE`
 * `NOTHING_TO_PURGE`
 * `NOT_ATTEMPTED`
+* `NOT_COMPENSABLE`
 * `NOT_CREATABLE`
 * `NOT_FOUND`
 * `NOT_OVERRIDABLE`
@@ -355,10 +420,12 @@ const result = ErrorCode.parse(data);
 * `NO_IDENTITY`
 * `NO_MATCH`
 * `NO_PENDING_VERIFICATION`
+* `NO_SUCH_RUN`
 * `OAUTH_REGISTER_FAILED`
 * `OBJECT_API_DISABLED`
 * `OBJECT_API_METHOD_NOT_ALLOWED`
 * `OBJECT_OVERLAY_PACKAGE_MISMATCH`
+* `OBJECT_OWNERSHIP_CONFLICT`
 * `OBJECT_PACKAGE_DISABLED`
 * `OPENAPI_UNAVAILABLE`
 * `OS_PROTOCOL_INCOMPATIBLE`
@@ -373,9 +440,13 @@ const result = ErrorCode.parse(data);
 * `PAYLOAD_TOO_LARGE`
 * `PERMISSION_NOT_ALLOWED`
 * `PHONE_NOT_ENABLED`
+* `PLAN_CHANGED`
+* `PLUGIN_CONTRACT_VIOLATION`
 * `PLUGIN_INSTALL_FAILED`
 * `PLUGIN_MANIFEST_INVALID`
 * `PLUGIN_REGISTER_FAILED`
+* `PLUGIN_UI_REQUIRED_KEY_MISSING`
+* `PREFLIGHT_FAILED`
 * `PROJECT_MEMBERSHIP_REQUIRED`
 * `PROJECT_NOT_FOUND`
 * `PROJECT_PROVISIONING`
@@ -414,6 +485,7 @@ const result = ErrorCode.parse(data);
 * `SCHEDULES_LIST_FAILED`
 * `SCHEDULE_DELETE_FAILED`
 * `SELF_REGISTRATION_CLOSED`
+* `SERVICE_NOT_REGISTERED`
 * `SETTINGS_ACTION_FAILED`
 * `SETTINGS_CRYPTO_UNAVAILABLE`
 * `SETTINGS_ENGINE_NOT_BOUND`
@@ -430,6 +502,13 @@ const result = ErrorCode.parse(data);
 * `SQL_DIALECT_EMISSION_UNSUPPORTED`
 * `SSO_REGISTER_FAILED`
 * `SSO_REGISTER_FORBIDDEN`
+* `STACK_CAPABILITY_UNKNOWN`
+* `STACK_CROSS_REFERENCE_INVALID`
+* `STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED`
+* `STACK_NAMESPACE_PREFIX_INVALID`
+* `STACK_SCHEMA_INVALID`
+* `STACK_SINGLE_APP_VIOLATION`
+* `STACK_TRIGGER_CAPABILITY_REQUIRED`
 * `STORED_TYPE_NOT_CANONICAL`
 * `STORE_UNAVAILABLE`
 * `SUGGESTION_CONFIRM_FAILED`
@@ -448,6 +527,7 @@ const result = ErrorCode.parse(data);
 * `UNSUPPORTED`
 * `UNSUPPORTED_QUERY_PARAM`
 * `UNSUPPORTED_TRANSFORM`
+* `UPDATE_HOOK_RESULT_NOT_WRITE_SHAPE`
 * `UPDATE_ID_MISMATCH`
 * `UPLOAD_SESSION_EXPIRED`
 * `UPLOAD_SESSION_NOT_FOUND`
@@ -456,6 +536,7 @@ const result = ErrorCode.parse(data);
 * `VALIDATION_FAILED`
 * `VERSION_NOT_FOUND`
 * `VERSION_NOT_RESTORABLE`
+* `WALLED_MEMBERSHIP_POLICY_UNDECLARED`
 * `WRITABLE_PACKAGE_REQUIRED`
 * `WRONG_PASSWORD`
 

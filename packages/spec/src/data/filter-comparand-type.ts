@@ -84,10 +84,11 @@
  *   #7597 pins the hand-authored implicit form's fate). The door steps around
  *   every one of those decisions.
  * - **Arrays outside `$in`/`$nin`/`$between`.** An array in an implicit or
- *   scalar-operator position is answered per driver today (`driver-sql` refuses
- *   it with its own message; the document stores give it array-equality
- *   semantics); the matrix did not measure it and the ruling does not name it,
- *   so the door leaves it to the layers that already answer it.
+ *   scalar-operator position is answered per driver today (`driver-sql` and
+ *   `driver-memory` refuse it, each with its own message; `driver-mongodb`
+ *   hands it to MongoDB and inherits that engine's array semantics); the matrix
+ *   did not measure it and the ruling does not name it, so the door leaves it
+ *   to the layers that already answer it.
  * - **An operator outside the declared vocabulary** (`$wat`, retired `$regex`):
  *   the unknown-/retired-operator refusals downstream carry the specific
  *   prescriptions (`RETIRED_FILTER_OPERATORS`), which a generic type refusal

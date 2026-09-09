@@ -88,6 +88,34 @@ All routes are mounted at `/api/v1/storage` (configurable via `basePath`).
 | PUT | `/_local/raw/:token` | Local raw upload (presigned) |
 | GET | `/_local/raw/:token` | Local raw download (presigned) |
 
+### Mounting the routes from a host (kernels with no `http-server` service)
+
+`StorageServicePlugin` mounts the table above itself, at `kernel:ready`, on the
+kernel's `http-server` service. A kernel that registers no such service — a
+hosted per-environment tenant kernel — keeps the storage service, `sys_file`,
+the lifecycle hooks and the reap guards, but has no HTTP door. A host that
+owns the HTTP surface mounts the same routes with `mountStorageRoutes`:
+
+```typescript
+import { mountStorageRoutes } from '@objectstack/service-storage';
+
+// `http` is whatever the host registers routes on — an `IHttpServer` adapter,
+// or the host's own route-collecting shim that later dispatches into this
+// kernel. `kernel` is the environment kernel, AFTER it has bootstrapped.
+const report = mountStorageRoutes(http, kernel, { basePath: '/api/v1/storage' });
+// report: { basePath, sessionResolver, downloadAuthorizer, tombstoneHolderResolver, metadataStore }
+```
+
+The door composes the upload session resolver, the download authorization
+gate (ADR-0104 D3) and the tombstone holder predicate from the kernel's own
+`auth` service and data engine — through the same composition the plugin's
+own mount uses. The options carry wire knobs only (`basePath`, the TTLs, a
+logger): none of the three gates can be supplied, replaced or omitted by the
+host, so the platform keeps exactly one definition of who may download a
+file. A kernel with no `storage` service throws; a kernel with no `auth`
+service or no data engine mounts with the matching gate off and says so at
+`warn`, exactly the bare-kernel behaviour the plugin has.
+
 ## Client SDK Usage
 
 ```typescript

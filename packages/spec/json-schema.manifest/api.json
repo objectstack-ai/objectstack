@@ -355,6 +355,7 @@
     "api/RestApiRouteRegistration",
     "api/RestQueryAdapter",
     "api/RestServerConfig",
+    "api/ResumeFailureDetails",
     "api/RetryStrategy",
     "api/RevertPackageCommitResponse",
     "api/RollbackMetaItemResponse",

@@ -1,5 +1,395 @@
 # @objectstack/driver-sql
 
+## 17.4.0
+
+### Minor Changes
+
+- 54bb2f1: The analytics SQL compilers compile the case-sensitive text family per dialect, so a `$contains` policy on SQLite stops admitting rows it excludes (#15684)
+  
+  `$contains` / `$notContains` / `$startsWith` / `$endsWith` are case-SENSITIVE on every backend (#4706 Q2 = A). All three of `service-analytics`' SQL compilers emitted `col LIKE ? ESCAPE ?` on every dialect, and SQLite's `LIKE` folds ASCII case unconditionally — the fold cannot be turned off per statement, because `PRAGMA case_sensitive_like` is a connection-global switch. Measured on sql.js over the shared `FILTER_TEXT_ROWS` fixture, `{ name: { $contains: 'acme' } }` answered `['1','2']` — `ACME Corp` **and** `acme corp` — where `FILTER_TEXT_CASES` says `['2']`.
+  
+  On two of the three compilers that is a wrong chart. The third is `read-scope-sql.ts`, the ADR-0021 D-C read scope: a scope that **admits** rows the policy's case-sensitive predicate excludes is over-reach, not a loose filter — the same reading that file already applied to its own `LIKE` escaping. The `/analytics/sql` echo was wrong in a third way: it printed `LIKE` while the statement it claims to reproduce ran through a driver that has emitted `GLOB` on the SQLite dialects since #6518.
+  
+  What changed:
+  
+  - **The construct is chosen per dialect** (`text-match-sql.ts`), arm for arm with `driver-sql`'s own table: `GLOB` on SQLite (case-exact by definition, with its own `*` / `?` / `[` escaped class and no `ESCAPE` clause), `LIKE` over `CAST(… AS BINARY)` on MySQL, and `LIKE` **unchanged** on Postgres, where it is already exactly the ruled semantics. There is no single construct that is case-exact and parses on all three, so the dialect had to become an input rather than a guess.
+  - **The dialect arrives from the driver that will execute the statement.** New optional `AnalyticsServiceConfig.sqlDialect`, wired by `AnalyticsServicePlugin` from `IDataEngine.getDriverForObject`. `SqlDriver.dialectName` is now public so that answer can be read without a second dialect-resolution table drifting behind the driver's own knex spellings; it is derived and read-only.
+  - **A host that answers no dialect keeps the `LIKE` it always got** — "cannot answer, do not block". Postgres deployments see byte-identical SQL.
+  
+  `$icontains` is untouched: it keeps its own ASCII-only fold on both sides, and collapsing the two families onto one path would hand the case-exact family back the fold the ruling took away from it. `LIKE` escaping is unchanged wherever a `LIKE` is still emitted.
+- 6d4d5d3: `SqlDriver.aggregate` answers `0` — not `null` — for a `sum` over a group whose aggregand is NULL in every row, matching the engine's in-memory aggregate tier and the identity `emptyGroupValueFor` already declares (#15546; maintainer ruling 2026-09-07, option A: a non-empty group whose aggregand is absent and an empty group are the SAME case for `sum`, and the SQL face is the one that moves).
+  
+  SQL `SUM` skips NULLs and answers NULL once it has skipped everything, so on every dialect this driver targets (measured on better-sqlite3, live PostgreSQL 16.13 and live MySQL 8.0.46) a grouped list view with a `sum` summary on a nullable number or currency column rendered a BLANK total for a group whose column was empty in every row — while the same view on a deployment whose query took the engine's in-memory path rendered `0`. Which path answered was decided by a driver capability bit the caller never sees. The fold is part of the driver's aggregate presentation (`foldEmptyAggregateAnswers`): the compiled statement is unchanged (no `COALESCE`), the answer is the JS number `0` on every dialect, and `avg`/`min`/`max` — which have no identity over nothing — still answer `null`. The identity is read from `emptyGroupValueFor` rather than restated, so the two faces cannot drift apart on it again.
+  
+  `@objectstack/driver-turso`: the REMOTE transport's `aggregate` carries the same fold (`RemoteTransport.foldEmptyAggregateAnswers`). `TursoDriver` picks the remote compiler or the local `SqlDriver` one from `url`, so without it the same driver would have answered the all-NULL `sum` as `0` locally and `null` remotely — one query, two answers, decided by a connection string, the seam the shared conformance table exists to close. Measured `null` on the enrolled remote face before the fold.
+  
+  `@objectstack/spec`: the aggregate-vocabulary conformance fixture gains a NULLABLE numeric column. `AggregationRow.amount` (`number | null`) is NULL in every row of the `east` group and in two of the four `west` rows, and `AGGREGATION_CASES` gains the three cases that pin the ruled answer on every enrolled face — `sum(amount)` grouped by region (`east` 0 / `west` 40), its `count(amount)` reachability control (`east` 0 / `west` 2, which is what proves the nulls were stored as nulls), and the ungrouped partial-null control (40). A harness that runs the table MUST declare `amount` as a nullable numeric column and seed its nulls AS nulls, exactly as it already must for `stage`; a `0` written in place of a null turns the cell green for the wrong reason.
+- 45cfa1b: The record read doors present the builtin audit stamps (`created_at`, `updated_at`) and every declared `Field.datetime` column as the canonical instant text `YYYY-MM-DDTHH:MM:SS.sssZ` on EVERY dialect — Postgres and MySQL now included, exactly as SQLite always has (ADR-0053 addendum D-F1..D-F3, #13973).
+  
+  **Consumer-visible change, Postgres and MySQL only.** An in-process consumer reading such a column off a `find()` / `findOne()` row, off the row `create()` / `update()` / `upsert()` / `bulkCreate()` / `bulkUpdate()` return, or out of `aggregate()` (`min` / `max`, a raw temporal group key) or `distinct()`, receives a `string` where it received a JS `Date`. The wire is unchanged: `JSON.stringify` already serialised that `Date` as the same ISO text, so REST, MCP and SDK callers see nothing move. A consumer that called a `Date` method directly on the field (`.getTime()`, `.toISOString()`, `.getFullYear()`) now fails loudly with a `TypeError` instead of silently working on one dialect; the sweep behind this change found none in the repository's non-test sources. A consumer that compared, sorted, keyed or formatted the value as text — the shape eight production-driver defects had (#13382, #13993–#13999) — is now correct by construction on every dialect.
+  
+  - **Where the fold happens.** At the driver's own read boundary (`formatOutput` for rows, `presentReadValue` for the aggregate/distinct doors). The `pg` and `mysql2` client parsers are untouched: a `Date` is still what the client materialises, and a raw knex read still hands it back. Only the driver's read doors changed.
+  - **The builtin audit columns gain an `aggregate()` / `distinct()` arm on every dialect.** `max(updated_at)` and `distinct('created_at')` had no read presentation at all before — on SQLite they even missed ADR-0074's legacy-row repair — and now present exactly what `find()` presents.
+  - **An Invalid `Date` is the one shape the fold hands through unchanged** (#14078: a MySQL zero `DATETIME`; a Postgres year past 275760). It has no canonical text; the fold never throws on it, and the consumer-side guards #14078 landed absorb it as before.
+  
+  The per-site canonicalisations landed for #13993–#13999 and #14078 stay correct and become no-ops on driver rows; nothing is removed here.
+- 7862fb7: `SqlDriver`'s object-definition parameters now DECLARE every key they read. `initObjects` accepts `lifecycle`, and the whole rotation chain — `rotateShards`, `ensureRotation`, `ensureShardTable` — accepts `tenancy` and `indexes`, spelled as a **fresh object literal** rather than only as a value bound to a variable first.
+  
+  The driver read those keys off caller objects all along, through `(obj as any).<key>`, while the parameter's own inline type listed none of them. That is refused or accepted depending only on where the object is spelled: TypeScript's excess-property check fires on a fresh literal and not on one hoisted to a variable, so the same call compiles in one shape and is `TS2353` in the other. The loud outcome is the harmless one. The bad one is an author — or an AI reading the signature — concluding the key is not accepted and DROPPING it, at which point a declared UNIQUE is never synced and an ADR-0057 rotation policy is never armed, with nothing anywhere saying so.
+  
+  This is the third instance of one class, not a third coincidence: `tenancy` (#4311) and `indexes` (#16570) were the first two, each fixed one key at a time. The class is now held by a gate — `scripts/check-object-def-param-keys.mjs` — that reads parameter lists as an AST and covers the shape no in-file check could see: a subclass in another published package overriding one of these methods with a narrower literal.
+  
+  - **What widened.** `rotateShards(objectDef)` gains `tenancy?: any` and `indexes?: any[]`; `ensureRotation(…, obj, …)` gains the same two; `ensureShardTable(…, obj)` gains `indexes?: any[]`; `initObjects(objects)` gains `lifecycle?: any`. All three rotation links carry the keys, not just the leaf that reads them — declaring them only on the leaf would leave the two links above still narrowing the same value in flight, so a fresh literal handed to the public entry point would still have been refused.
+  - **What did NOT widen, deliberately.** The accept set still has a boundary: a misspelling (`indexs`, `tenancyy`, `lifecycl`) on a fresh literal is still `TS2353`, pinned by `@ts-expect-error` in `src/sql-driver-16711-object-def-param-keys.test.ts`. A "fix" that relaxed these parameters to `any`, or gave them an index signature, would have turned every other assertion green while deleting the entire layer of protection.
+  - **Four `as any` casts deleted**, including the residual one in `detectManagedDrift`, whose parameter had declared `indexes` all along. Behaviour is unchanged in every case — the keys were already being read.
+- a646120: A text operator over a column whose declared type stores no text (`Field.number` and its numeric siblings, `Field.boolean`) now compiles to the contract's declared answer on every dialect, instead of a dialect accident.
+  
+  Before: `{ score: { $contains: '5' } }` over a numeric column compiled `col GLOB '*5*'` on SQLite and coerced the REAL in its storage class's spelling (`5` as `'5.0'`, so `$endsWith: '0'` matched every row), `col LIKE $1 ESCAPE $2` on Postgres and was refused at query time with SQLSTATE 42883 (`operator does not exist: real ~~ text` — a 500 for a filter the spec accepts), and `CAST(col AS BINARY) LIKE ?` on MySQL.
+  
+  Now (`FILTER_TEXT_CASES`' `score` rows, maintainer ruling 2026-09-05): the positive operators (`$contains` / `$startsWith` / `$endsWith` / `$icontains` / `$like` / `$ilike`) compile to `1 = 0` and `$notContains` to `1 = 1` — the same row set as every JS face, decided from the declared type at compile time because the stored value is not visible until run time. Postgres: a 500 becomes a result. The gate reads the `numericFields` / `booleanFields` registries `initObjects` and `registerExternalObject` already fill; a table this driver was never told about keeps the `LIKE` / `GLOB` it always compiled, every comparand refusal still runs first, and the constants compose with the NULL-safe rules (`$notContains` admits a NULL row already) and the `$not` rewrite. Temporal columns are untouched: their stored value IS text on SQLite, so the contract declares nothing for them.
+  
+  `driver-sqlite-wasm` and `driver-turso`'s local transport inherit this compiler.
+- 2200f8e: feat(driver-sql): `update()` publishes its honest type — the contract's `Record<string, unknown> | null`, not `any` (#14438)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, shipped as `minor` under the launch-window convention (the one PR #14434 used for the same door on `@objectstack/driver-memory`). `SqlDriver.update()` was written out with an explicit `Promise<any>` while it has always answered a missing id with `null` (`formatOutput(...) || null` on the un-rotated path, `null` once every rotation shard has been probed). `IDataDriver.update()` declares `Promise<Record<string, unknown> | null>`, and an explicit `any` satisfies that structurally — so the emitted `.d.ts` read `Promise<any>` and no caller holding a `SqlDriver`, or a `SqliteWasmDriver` (which inherits the door unchanged), was ever asked to narrow. It is now declared as the contract declares it, and the protected rotation-path producer `rotatedUpdateById()` carries the same type. A caller that read fields off `update()`'s result through the `any` now narrows the `null` arm first; a caller that leaned on `any` to read undeclared members now types them. No runtime behaviour changes.
+  
+  `@objectstack/driver-sqlite-wasm` re-declares no `update` member of its own (measured on its emitted `.d.ts`), so it carries no entry: the narrowing reaches its consumers through this package's `.d.ts`. `@objectstack/driver-turso` overrides the door and carries its own entry.
+  
+  <!-- adr-0087: not-required (type-surface-only packages/drivers/driver-sql/src/sql-driver.ts#update) A published driver method's declared return moves off an explicit `any` onto the contract's own shape. No metadata key is removed, renamed or re-shaped, `packages/spec` is untouched, and nothing exists for `objectstack migrate meta`, `spec-changes.json` or the upgrade guide to rewrite; the obligation is a TypeScript narrowing at the consumer's own call site, delivered by the compiler. -->
+- 33e939f: Schema drift now reports a SINGLE-VALUE JSON-class column that a stale `varchar`/`text` column is holding — the population the detector could never see.
+  
+  The driver decides a field's column type with `JSON_COLUMN_TYPES.has(type) || !!field.multiple`: `createColumn` gives a json column to every JSON-class TYPE, and `isJsonField` — the read-side deserializer — asks the same question. The drift detector asked only `field.multiple === true`. So a single-value `file` / `image` / `location` / `address` / `record` / `vector` / `json` field (and the option families) sitting on a `varchar` or `text` column was written as JSON by the writer and did not exist to the differ. Because the additive sync never migrates a column's type, that column stayed wrong permanently and nothing reported it. Measured on the previous tree, one call per type: all fifteen JSON-class types the spec declares returned zero findings over a `character varying(2048)` column on `postgres` and `mysql`, while the same column under a `multiple: true` field returned one in the same run.
+  
+  The detector now reads the writer's own predicate, so the two halves can no longer disagree about which declarations get a json column. `SQLite is unchanged and still reports nothing`: its read path parses a textual column regardless of what the column calls itself, re-measured on an in-memory cell as a byte-identical round-trip between the stale column and the driver's own.
+  
+  **The remedy is offered to the array-valued half only.** `os migrate multi-value-columns` repairs a stale column by wrapping each stored value in a one-element JSON array, which is the right repair for a field whose value is a list and the wrong one for a field whose value is a scalar or an object. Findings for array-valued fields (`multiple: true`, and the inherently-multi option types) keep their message character for character, so that command keeps recovering the dialect from it and keeps working exactly as before. Findings for single-value JSON-class fields carry a message of their own that names neither the command nor its statement, explains why the automated route is withheld, and describes the by-hand conversion; the command refuses such an entry (`remedy_not_recognized`) instead of running array SQL over scalar rows.
+  
+  Also fixed by the same predicate: a single-value JSON-class field declaring a `maxLength` over a wider `varchar` column used to be reported as `narrow_varchar` at category `destructive` — inviting `os migrate apply --allow-destructive` to rewrite the column to a narrower varchar, the opposite of the repair it needs. It is now reported once, as the base-type divergence.
+- b72226f: `SqlDriver.initObjects()` and `SqlDriver.registerObjectMetadata()` now declare the `indexes` key they have always read.
+  
+  Both entry points took `Array<{ name; fields?; tenancy? }>`, with no `indexes` in the type. The key was read out of those very objects one call deep anyway, through an `as any`, in `registerManagedObjectMetadata` — and the map it fills, `managedObjectIndexes`, is what `syncDeclaredIndexes` renders every declared UNIQUE from. So the driver's whole index-sync path was driven by a key its own signature said did not exist, while the sibling `detectManagedDrift` on the same class had always declared `indexes?: any[]`: the two halves of one class disagreed about the shape of the same input.
+  
+  That is the shape #4311 already addressed for `tenancy`, one key over, and the comment it left above `initObjects` described `indexes` word for word.
+  
+  **Why nothing tripped over it.** TypeScript's excess-property check fires on a fresh object literal and not on one bound to a variable first, so the same object was accepted or rejected by nothing but where it was spelled — `await driver.initObjects([{ ...bare, indexes: [] }])` was rejected with TS2353, `const o = { ...bare, indexes: [] }; await driver.initObjects([o])` was accepted, and the index was synced either way. Every caller happened to bind first, so the package typechecked green for a reason unrelated to correctness.
+  
+  **Why this matters beyond a compile error.** The loud symptom was a rejected correct call. The quiet one is the reachable branch: an author — or an AI — reading the signature concludes `indexes` is not accepted and drops the key, and a declared UNIQUE is then never synced, with no error at authoring time and no error at boot. The schema says those rows cannot collide; they can.
+  
+  What changed, all inside `SqlDriver`:
+  
+  - `registerObjectMetadata(objects)`, `initObjects(objects)` and the shared `registerManagedObjectMetadata(obj)` helper each gained `indexes?: any[]`, spelled exactly as `detectManagedDrift` already spells it.
+  - Every `(obj as any)` cast reading `indexes` off those parameters is gone — the one at the `managedObjectIndexes.set` site and the two inside `initObjects`' own create/alter path. The cast was the evidence that the declaration and the read disagreed; leaving any of them would have fixed the signature while keeping the "the type does not admit me but I read it anyway" path alive. That path is now closed on this parameter.
+  
+  **What the accept set does, precisely — it moves in both directions.** For a **fresh object literal**, which is what an author writes and what the excess-property check judges, this is purely a widening: `{ ...bare, indexes: [...] }` was rejected and is now accepted. For a **variable-bound** argument, which bypasses that check and is judged by ordinary assignability, it is a narrowing: `indexes` spelled as a record, as a `readonly` tuple (`as const`), or as `null` compiled under the previous signatures and is now rejected with TS2322. Measured in both directions, all three shapes, on this package's own `tsc`.
+  
+  That narrowing is deliberate, and the three shapes did **not** all behave the same way before it — the difference is worth stating exactly, because only one of them ever worked:
+  
+  - A **record** and **`null`** never survived the `Array.isArray(obj.indexes)` guard the driver has always applied. That author got no index and no diagnostic — silently, at run time. Rejecting those two at compile time is precisely the failure this change exists to make impossible.
+  - A **`readonly` tuple (`as const`)** is a different case, and the only one with anything to lose. `as const` is type-only: at run time the value is a plain array, `Array.isArray` returns `true`, and the index **was** synced. That caller compiled and worked, and is now rejected at compile time. Nothing about its run-time behaviour changed — the rejection is entirely on the type surface.
+  
+  No migration is owed even so. No caller in this repository is affected, and the shape could never have reached `detectManagedDrift` on the same class either, which publishes the very same `any[]` spelling for the very same key — so a `readonly` caller was already unable to use half of this driver's declared-index surface. A caller in that position spells the array without `as const`, or widens it at the call site.
+  
+  The disposition on that corrected ground, recorded here because the ground itself moved: **no `BREAKING` banner and no ADR-0087 disposition**, resting on grounds (i) and (iii) alone — zero affected callers, and the `any[]` spelling already published on `detectManagedDrift` for the same key on the same class. The ground that every newly rejected shape had already been discarded at run time is **not** among them: it is false for the `readonly` tuple, and nothing here leans on it.
+  
+  `@objectstack/driver-sqlite-wasm` is named because `SqliteWasmDriver extends SqlDriver` and overrides neither method, so both widened signatures land in its own published `.d.ts` and its consumers see the identical change. The two packages are in the same fixed version group, so this is a CHANGELOG effect rather than a version one.
+  
+  The `IDataDriver` contract itself did not move: `registerObjectMetadata?(schemas: unknown[])` in `@objectstack/spec` already accepted `unknown[]`, and `SqlDriver` narrowed it on its own. What grew is `SqlDriver`'s own published accept set.
+- 78bc4ad: fix(driver-sql)!: `findWithWindowFunctions()` presents its rows like every other read door — a declared boolean answers `true`, not `1` (#16609)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves: no spec key, export, config field or stored metadata changes spelling or shape, `packages/spec` is untouched, no DDL and no stored bytes change, and `objectstack migrate meta` has nothing to rewrite. What moves is the PRESENTATION one driver door applies to values it reads back — `findWithWindowFunctions()` now runs each row through the same `formatOutput` pass `find()` has always run — so the door stops disagreeing with the driver's own declared read contract. The consumer note below is guidance for code that had compensated for the old storage forms; it prescribes no rewrite of any authored artifact. -->
+  
+  **BREAKING** on the rows returned by `SqlDriver#findWithWindowFunctions()`.
+  Shipped as `minor` under the repo's launch-window convention for breaking
+  changes, matching #3849 — the `aggregate()` / `distinct()` half of this same
+  gap, which graded `minor` for the same boolean-shape move.
+  
+  **What was wrong.** `findWithWindowFunctions()` was the one record read door
+  that returned `await builder` with no presentation at all: no `formatOutput`
+  (which every `find()` / `findOne()` row gets) and no `presentReadValue` (which
+  `aggregate()` / `distinct()` got under #3797 / #3849). So it handed back
+  STORAGE forms where every other door hands back the declared type's
+  presentation. Measured on SQLite against the built package, one row through the
+  two doors:
+  
+  ```
+  find():                    { ok: true, closed_at: '2026-01-10T09:00:00.123Z', meta: { k: 1 } }
+  findWithWindowFunctions(): { ok: 1,    closed_at: '2026-01-10T09:00:00.123Z', meta: '{"k":1}', rn: 1 }
+  ```
+  
+  A declared `Field.boolean` answered `1` where `find()` answered `true`; a
+  declared `Field.object` answered the stored JSON TEXT where `find()` answered
+  the parsed object. On Postgres and MySQL the same door handed out the client
+  library's `Date` for `Field.datetime` and the audit stamps — the one shape every
+  other read door no longer produces — so on the live dialects the divergence was
+  between this door and the driver's own declared read contract, not merely
+  between dialects.
+  
+  **What moves, per column class and per dialect (storage form → presented form).** Routing this door
+  through `formatOutput` moves SEVEN classes, not only the boolean and JSON ones
+  the defect was reported as. `unchanged` means the storage form on that dialect
+  already WAS the presented form, so the row is byte-identical there — it is
+  recorded rather than omitted, because the same code path now runs for it.
+  
+  | class | sqlite | postgres | mysql |
+  |---|---|---|---|
+  | `Field.boolean` | `1` / `0` → `true` / `false` | unchanged (native `boolean`) | `1` / `0` → `true` / `false` |
+  | `Field.object` (JSON) | `'{"k":1}'` TEXT → `{ k: 1 }` | unchanged (native `jsonb`) | unchanged (mysql2 parses JSON) |
+  | numeric fields | `'4'` → `4` (a numeric STRING off a legacy TEXT-affinity column) | unchanged | unchanged |
+  | `Field.datetime` + `created_at` / `updated_at` | unchanged — already the canonical text since #3912; a legacy zone-naive row is repaired to it | `Date` → `'2026-01-10T09:00:00.123Z'` | `Date` → `'2026-01-10T09:00:00.123Z'` |
+  | `Field.date` | unchanged (`toDateOnly` on text is identity) | unchanged (the driver pins the `date` OID parser to text) | `Date` → `'2026-01-10'` |
+  | `Field.time` | unchanged | `'09:30:00.5'` → `'09:30:00.500'` | → canonical `HH:MM:SS[.fff]` |
+  | `external.columnMap` | the row KEY renames: remote column key → local field key | same | same |
+  
+  The instant TO is the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` TEXT **on every
+  dialect**, never a JS `Date` — that is ADR-0053 D-F1 as #16619 landed it, and
+  this door now runs the same presenter, so it answers the same shape the other
+  read doors do.
+  
+  `external.columnMap` is the one class nobody named on the card, and it is a KEY
+  move rather than a value move: on an external object with a `columnMap`, the row
+  this door returns is now keyed by the LOCAL field names, as `find()` has always
+  keyed it, instead of by the remote physical column names.
+  
+  **What to do.** Code that compensated for the storage forms stops being
+  correct and should simply drop the compensation:
+  
+  - `if (row.ok === 1)` → `if (row.ok)`; the value is a real boolean now.
+  - `JSON.parse(row.meta)` → `row.meta`; it is already the parsed value, and
+    parsing an object throws.
+  - `Number(row.amount)` → `row.amount`; a numeric column is a `number`.
+  - A `Field.datetime` / `Field.date` / `Field.time` / `created_at` / `updated_at`
+    read through this door is now the same presented value `find()` gives, so a
+    branch that re-normalised it — or that called `Date` methods on it — can go.
+  - A reader of an external object with a `columnMap` indexes the row by the LOCAL
+    field key, not the remote column key.
+  
+  **The alias columns are carved out**, which is the design question this door
+  raised. A window alias is a computed value, not a declared field, so no declared
+  field's presentation rule touches it. When an alias is spelled the same as a
+  declared field, SQL had already decided which value wins the key — `select *`
+  plus `<window> as ok` projects two columns named `ok` and the row keeps the
+  LAST, so the computed value wins and the declared column's value is not in the
+  row at all. That is unchanged. What is now ruled is that the winning value stays
+  RAW: presenting a `row_number` of `1` and `2` as the declared boolean would fold
+  both to `true` and destroy the value the caller asked for. This is the same
+  ruling `aggregate()` already makes for a date-bucketed column aliased as its own
+  field name.
+
+### Patch Changes
+
+- f2b5e46: fix(spec): withdraw the `field-required-notnull-explicit` ADR-0087 conversion — `required: true` no longer stamps `storage.notNull: true` on anybody's fields (#16693)
+  
+  ADR-0113 split the pre-17 `required` tri-binding on purpose: `required` is the **write-time contract** and is NOT a column constraint, and `storage.notNull` alone binds the physical column (`sql-driver.ts#createColumn` has keyed off it alone since that ADR's P0). The `field-required-notnull-explicit` conversion asserted exactly the implication the ADR abolished — it added `storage: { notNull: true }` to every field it found `required: true` on — so it is removed from the conversion registry and from protocol 17's ADR-0087 ledger entry.
+  
+  **Who this was reaching, and why it was not confined to old artifacts.** The entry carried `retiredFromLoadPath: true` and a docblock stating that "only `os migrate meta --from <16 or lower>` may apply it". That was not true of this tree. The artifact-ingestion door replays the whole chain with `includeRetired: true` (`applyArtifactForwardConversions`, `@objectstack/metadata-core`) and keys the replay off the artifact's declared `engines.protocol` **floor**, not its age — so any artifact declaring `^17.0.0`, which is the range `create-objectstack` stamps, was converted at boot. Measured on this tree at that seam: an artifact declaring `^17.0.0` on a 17.3.0 runtime came back from the door with `storage.notNull: true` written onto a field its author wrote as nullable-and-write-gated, and the boot logged `converted N site(s) forward` with a remedy sentence telling the author to write the same tightening into the source. On a populated database that instruction is a `tighten_not_null` / `severity: error` / `category: destructive` migration — prescribed as the remedy for a deprecation notice.
+  
+  **What moves for consumers.**
+  
+  - `applyConversions(stack, { includeRetired: true })` — the artifact-ingestion door and `os migrate meta` — no longer emits or applies this rewrite. The default load posture (`includeRetired: false`) is unchanged: the conversion was already skipped there.
+  - `os migrate meta --from 16` no longer lists it, and a `required: true` field crosses 16 → 17 carrying its write contract and nothing else.
+  - Boot no longer warns about it, so an artifact whose only conversion was this one now boots with that warning gone.
+  - Nothing is authored differently and nothing is refused that was accepted before. `required` and `storage.notNull` both remain authorable and both keep their ADR-0113 meanings. A column is NOT NULL because its author wrote `storage: { notNull: true }`, and for no other reason.
+  
+  **No migration is owed to anyone** (maintainer ruling, 2026-09-08, decision batch #85, option A). Genuinely pre-ADR-0113 artifacts are not measured to exist, existing columns are left exactly as they are, and an app that wants NOT NULL columns declares `storage.notNull` deliberately — which is what the app that reported this had already done.
+  
+  The protocol-17 ledger entry and the generated upgrade guide now say this in the other direction too, and the falsified sentence in `sql-driver.ts` — "sources authored before protocol 17 carry `storage.notNull` explicitly via the `field-required-notnull-explicit` conversion, so their columns come out exactly as they always did" — is corrected where it stood.
+  
+  Two sentences in `@objectstack/driver-sql` that this withdrawal falsifies are corrected with it, and no drift behaviour changes. The `relax_not_null` finding — raised when a column is NOT NULL and the metadata declares no `storage` constraint — used to prescribe "(pre-protocol-17 sources: `os migrate meta` stamps it for every previously-required field)"; it now says the constraint has to be declared by its author, because nothing supplies it any more. The comment beside it, which closed with "`os migrate meta` ratifies it whenever the source is next migrated", says so too. The deliberate SILENCE for a `required: true` field whose column is already NOT NULL is unchanged — this corrects the sentences, never the finding.
+- d5d8d50: Correct the documented reason for rejecting `CAST(col AS BLOB) LIKE ?` as a portable case-exact construct.
+  
+  Four headers stated, as a universal fact about SQLite, that the construct "was measured to return NOTHING". That is not a property of SQLite: whether `LIKE` is false for a BLOB operand is fixed when SQLite is compiled, by `SQLITE_LIKE_DOESNT_MATCH_BLOBS`, and the two SQLite builds this project ships disagree about it. Measured over the shared `FILTER_TEXT_ROWS` fixture, `{ name: { $contains: 'acme' } }` compiled to that construct returns `[]` on better-sqlite3 13.0.3 (SQLite 3.53.4, flag compiled in) and `['1','2']` on sql.js 1.14.1 (SQLite 3.49.1, flag absent) — the latter being exactly the ASCII case-folding defect the construct was being considered to avoid.
+  
+  No behaviour changes and no conclusion changes: all four sites still reject the construct and still choose `GLOB`. The rejection is now stated in a form that does not depend on any particular return value — a construct whose meaning is decided by an upstream compile flag cannot carry a read scope, because it means two different things on the two builds shipped here. Two supporting readings are recorded alongside it: `typeof CAST(name AS BLOB)` is `'blob'` on both builds, so the CAST is not the part that differs, and `GLOB` answers identically on both.
+  
+  Documentation only. `@objectstack/spec` and `@objectstack/driver-turso` ship the corrected text in their published type declarations (and `spec` also publishes the corrected source file directly, via its `src/**/*.zod.ts` entry); for `@objectstack/driver-sql` and `@objectstack/service-analytics` the change reaches published output only through sourcemaps.
+- 001a83b: `SqlDriver.execute()` — the raw-SQL path the analytics compilers run on — now declares a backend refusal the way the typed read exits (`find` / `count` / `aggregate`) have since #8931: `code: DATABASE_ERROR`, `status: 500`, a composed message that carries none of the dialect's words, and the dialect error whole under a non-enumerable `cause`. `TursoDriver` in remote mode — the one transport that hands the engine's text back with no statement in front of it — declares through the same terminal, so both transports leave the driver with one envelope. **Graded `patch`** on AGENTS.md's changeset rule ("A bug fix in a released package takes a `patch` changeset"; breaking is what removes or renames something an author can write — a spec key, an export, a config field — and nothing here does: `execute()` stays `Promise` of `any`, and `code` / `status` were untyped before) and on the precedent of the identical change on the typed read exits, #8931 via PR #9273, which shipped `@objectstack/driver-sql: patch`.
+  
+  **The defect this closes (#16019, folding in the envelope half of #16028).** `no such function: translate` — what SQLite answers when a compiler emits a function the dialect lacks — left `execute()` as knex's own error: `code: 'SQLITE_ERROR'`, no `status`, message `<statement> - no such function: translate`. Undeclared, it fell to the HTTP doors' phrasing heuristic (`looksLikeInternalErrorLeak`), which recognises `no such column:` and not `no such function:`, so whether the caller saw the engine's text depended on which limb the message happened to match: through knex it was withheld by accident (the statement prefix starts with `select`), through the Turso remote transport it was withheld by a different accident (`SQLITE_ERROR:` in front), and a bare `Error('no such function: translate')` reached the body verbatim. Maintainer ruling 2026-09-06 (decision batch #57, option 3): the substring list is not grown; the driver declares its own fault and the doors classify on the declaration. The heuristic stays as the last-resort fallback for an error that arrives with no declaration.
+  
+  **What moves on the wire — three doors, each because a declared fault is relayed where an undeclared one was re-labelled.**
+  
+  - `POST /api/v1/analytics/dataset/query`: a driver fault on the raw path answers `500 {"code":"DATABASE_ERROR","error":"Internal server error"}` — the declared-fault relay, the same answer the `/data` door and `/analytics/query` already give a declared 5xx — where it was `500 {"code":"ANALYTICS_QUERY_FAILED","error":"Internal server error"}` when the phrasing heuristic happened to fire and the raw engine text when it did not. Status unchanged; the code is now the producer's, exactly as the typed read exits' faults have answered at this door since PR #9273.
+  - The same door, a dataset over a backing table that is NOT present, on the native-SQL strategy (the strategy every deployment whose data engine exposes `execute()` runs): `500 DATABASE_ERROR` where it was `200 {"rows":[],"fields":[],"totals":[]}` plus a `warn`. `queryDataset`'s missing-source degrade sits behind its declared-envelope re-throw (#5717 defence B: a declared envelope is re-thrown untouched, whatever it says), so a driver-raised missing table no longer reaches it — the answer the ObjectQL-aggregate strategy has given since #9273, now on both strategies. The degrade still applies to an undeclared producer (an embedder's own `executeRawSql`, the framework's not-registered signals).
+  - `POST /api/v1/packages/publish` and `DELETE /api/v1/packages/:id`: a raw-exec driver fault under `sys_packages` answers `500 {"code":"DATABASE_ERROR"}` with the composed sentence as its message — `PackageService.publish` / `delete` re-throw a throw that declares an HTTP answer (`declaresHttpAnswer`, whose docblock already says a declared 5xx is re-thrown too) and the door's `sendThrownError` relays it — where it was `500 PACKAGE_PUBLISH_FAILED` / `500 PACKAGE_DELETE_FAILED` from the swallowing branch. Same status band, no dialect text on the wire either way; the ledgered `code` on those two doors moves.
+  
+  **What a consumer of `execute()` sees.** `error.message` is the composed sentence; `error.code` is `DATABASE_ERROR` where it was the backend's errno; `error.status` is `500` where it was absent. The backend's error object — its errno, its diagnostic, and on the dialects that inline them the bound literals — is on `error.cause` (non-enumerable, so it does not serialise), and the driver writes it, with the statement, to its warn log before composing. Cause-following predicates are unaffected: `isMissingTableError(err, readObject)` still classifies a missing table raised on this path. An error that already declares a `status` is passed through untouched, never double-wrapped. A caller that read the dialect's text off `error.message` (a migration preflight recording it as its `detail`, say) now reads the composed sentence there and finds the dialect text on `cause` and in the log; the in-repo sites of that class are tracked as #16657 (read `cause` there).
+- 1ca95df: MySQL: a plain unique index over existing duplicate rows no longer takes the boot down when the index has to be carried by a hash shadow.
+  
+  `syncDeclaredIndexes` handles a declared unique that the database refuses in one `catch`, and that `catch` has two arms: the DIRECT one, and the hash-shadow one MySQL takes when a key part is wider than the 768-char utf8mb4 ceiling. #14902 taught the direct arm that a uniqueness violation over existing rows is a durability degradation rather than a fatal — log it, name the conflicting rows and the remedy, let the boot continue. The shadow arm kept the older guard, which also required a NULL-safe organization key part, so a PLAIN unique (`tenancy: { enabled: false }`, or an explicit `unique: 'global'`) matched neither branch.
+  
+  Measured on live MySQL 8.0.46: the boot died carrying `ER_BLOB_KEY_WITHOUT_LENGTH` — a refusal about an unkeyable TEXT column, telling the operator to declare a `maxLength` the field already declared — while the real cause was two duplicate rows it never mentioned. It named no rows and no remedy.
+  
+  The two arms now agree, and they say different things because they mean different things. The NULL-safe arm keeps its wording (existing rows violate the NULL-safe key, duplicating what the previous void constraint admitted); the plain arm gets the direct arm's reviewed sentence, because neither of those clauses is true of a plain unique — nothing admitted the rows, and there is no NULL-safe key. Widening the guard alone would have shipped a factually false durability log, which is worse than the throw it replaces.
+  
+  `os migrate plan` already reported this operation as `destructive` with the row report and is unchanged.
+- 8f2ecb3: The hash-shadow NULL-safe durability log now counts its overflow duplicate groups in the same words as the other three reports that render the same rows (#16289)
+  
+  `formatDuplicateGroups` is module-local in `sql-driver.ts` for one stated reason, quoted from its own docblock: the sites that report a blocked unique "must name the SAME rows in the SAME shape, and a second hand-rolled `.slice(0, 5).join('; ')` is exactly how the plain and the NULL-safe path drifted apart in the first place". Four sites render duplicate groups — the drift entry, the direct arm's plain-unique log, the hash-shadow arm's plain-unique log, and the hash-shadow arm's NULL-safe branch — and the fourth still hand-rolled that exact shape.
+  
+  So the drift the helper exists to prevent had already recurred, in the overflow tail: the helper writes `; …and N more group(s)`, the hand-rolled copy wrote `; …and N more`. Two durability logs about the same failure class, emitted from the same `catch`, disagreed on how they say "there are more".
+  
+  What an operator sees: when a hash-shadow NULL-safe unique index is blocked by more than five conflicting groups in one table, the boot-time durability line now ends `; …and N more group(s).` instead of `; …and N more.`. The surrounding ` Conflicting group(s): ….` framing, the five groups rendered in full, their `(key) × N rows` spelling and their order are unchanged, and so is every other line. No behaviour, no data effect, no API movement — the five-then-count rendering is now owned in one place for all four sites.
+- 61821e5: A plain unique index over existing duplicate rows no longer kills the boot with the database's raw error, and `os migrate plan` no longer calls that op `safe`.
+  
+  Declaring a column unique over a table that already holds duplicates had two very different outcomes depending on one branch in the SQL driver, and only one of them was survivable.
+  
+  - **An organization-scoped unique** (the `unique: 'organization'` default, materialised as the NULL-safe `COALESCE(organization_id, '__global__')` composite) kept the boot up: the driver logged at `error` naming the index, the constraint that is not enforced and the remedy, and the ADR-0120 D4 duplicate pre-flight reported the blocked `create_index` as `category: 'destructive'` / `severity: 'error'` with the conflicting key groups and their row counts.
+  - **A plain unique** — no organization key part at all, reached by an object with `tenancy: { enabled: false }` or by any explicit `unique: 'global'` — took the process down: `initObjects` threw the database's own error, which names the index and the column and no rows and no remedy, nothing reached the durability channel, and `detectManagedDrift` (what `os migrate plan` reports) classified the very same op `category: 'safe'`, `severity: 'warning'`, so `os migrate apply` and dev `autoMigrate: 'safe'` walked straight into the raw failure.
+  
+  The plain path now reaches the same posture as the scoped one:
+  
+  - **The boot survives and says what is not enforced.** `syncDeclaredIndexes` absorbs a uniqueness violation on a plain unique index the way it already absorbed one on the NULL-safe composite: the failure is logged on the durability channel (`error`) naming the index, the conflicting key groups with their row counts, the constraint that is NOT enforced, and `os migrate plan` as the way out. A non-unique index and any failure that is not a uniqueness violation still surface as before.
+  - **The duplicate pre-flight covers it.** The ADR-0120 D4 probe no longer skips ops whose NULL-safe column set is empty, so a plain unique `create_index` over dirty data is reported `destructive` / `error` with the same row report instead of `safe`. Nothing new probes it: the existing probe already groups by the bare columns when there is no NULL-safe key part, so both key shapes share one pre-flight rather than a second copy that can drift from the first.
+  
+  Consumers of the classification see the op move from the "Safe" group to "Destructive (requires --allow-destructive)" in `os migrate plan` and `os diff`; `os migrate apply` defers it instead of attempting it; the artifact boot gate refuses with a named destructive-drift refusal instead of crashing; and dev `autoMigrate: 'safe'` leaves it alone. Clean data is unaffected — the probe finds nothing and the index is created exactly as before.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [51ae731]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [4771bd9]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f89812e]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+  - @objectstack/spec@17.4.0
+  - @objectstack/core@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/observability@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

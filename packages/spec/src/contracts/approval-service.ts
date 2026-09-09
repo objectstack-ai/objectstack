@@ -25,6 +25,8 @@
 // (ADR-0095 D2) and `tabPermissions` — see item 3 of the module doc in
 // `./sharing-service.js` for the boundary and the measured consequence.
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
+import type { ErrorCode } from '../api/error-code-ledger.zod.js';
+import type { ResumeFailureDetails } from '../api/automation-api.zod.js';
 
 /**
  * Lifecycle states of an approval request, in the order the
@@ -552,6 +554,69 @@ export interface ApprovalRecallInput {
   comment?: string;
 }
 
+/**
+ * The machine-readable half of a resume failure, as a SUCCESS envelope tells
+ * it (the #16472 family ruling — maintainer 2026-09-07, decision batch #76).
+ *
+ * The rule: when a resume failure is told to the caller, it is told in a
+ * shape the caller can act on — a registered error code, the `runId` of the
+ * run that is actually stranded, and `repairable` — and the door's status
+ * code does not change because of it. A decision whose own run advanced still
+ * answers success, with the failure behind it carried as an optional,
+ * additive member of that success answer: {@link ApprovalRecallResult} and
+ * {@link ApprovalDecisionResult} carry it as `resumeFailure`.
+ *
+ * Declared ONCE, by reuse. The members every carrier shares — `runId`,
+ * `status`, `repairable` — ARE {@link ResumeFailureDetails}
+ * (`api/automation-api.zod.ts`), the structure the automation resume door
+ * already publishes inside its `400 FLOW_FAILED` `error.details` (#15221, the
+ * ruling's third carrier). They are inherited here, never re-spelled, so the
+ * two cannot drift, and a caller that parses this member with
+ * `ResumeFailureDetailsSchema` reads the same three facts it reads off that
+ * door. What this adds is the one member a success envelope cannot leave to
+ * its envelope: on the resume door the registered code is the answer's own
+ * `code`; on a success answer nothing else names the failure class, so it
+ * rides here as {@link code}.
+ *
+ * ⛔ No new error code is minted under the ruling. `code` is typed as
+ * `ErrorCode` — the ADR-0112 vocabulary `ApiErrorSchema.code` parses
+ * against — so an unregistered spelling fails `tsc` instead of reaching the
+ * wire; a consumer that needs a distinct code to branch is its own card, and
+ * a new code is a ledger event (#16404).
+ *
+ * ⛔ Not `StrandedDecisionDetails` (`@objectstack/types`): that is the
+ * ERROR-envelope carrier of the `decide` door's OWN strand (#13807 — the
+ * thrown `RESUME_FAILED` whose `finalized` / `decision` say the decision
+ * stands), and it stays exactly as it is. This structure is what a success
+ * answer carries, and `finalized` / `decision` are already top-level members
+ * of the results that carry it. The two share the `runId` / `repairable`
+ * vocabulary through the spec declaration, on purpose.
+ *
+ * Two halves of ONE telling. The prose `resumeError` beside this member is
+ * the human-readable half; this is the machine-readable half. A producer
+ * that tells one tells both, about the same event — a strand, a lost run, a
+ * composition with no engine to advance the run, or a tolerated concurrent
+ * duplicate (`RESUME_IN_PROGRESS`, `repairable: false`) — so a caller
+ * branches on {@link code} and {@link repairable}, never on the text.
+ *
+ * The absence rule, and it is load-bearing: the member is optional because
+ * it is ADDITIVE, and an absent member means no report was made — a producer
+ * that predates this field, a door that never resumes — never that no run is
+ * stranded. A consumer may branch on presence to READ a failure; it must not
+ * branch on absence to CONCLUDE health. Reading an absent discriminator as a
+ * negative is #15555's false-negative class, the misreading #15358 measured.
+ */
+export interface ResumeFailureReport extends ResumeFailureDetails {
+  /**
+   * The registered error code the failure is told under (ADR-0112 ledger):
+   * `RESUME_FAILED` for a run that could not be advanced,
+   * `RESUME_TARGET_LOST` when the run behind the request no longer exists,
+   * `RESUME_IN_PROGRESS` for the tolerated duplicate. Required here, on
+   * purpose: a success answer has no envelope `code` to fall back on.
+   */
+  code: ErrorCode;
+}
+
 /** Result of a recall. */
 export interface ApprovalRecallResult {
   request: ApprovalRequestRow;
@@ -562,14 +627,38 @@ export interface ApprovalRecallResult {
    * `output.decision = 'recall'`) so it doesn't stay suspended forever. The
    * engine has no run-cancel primitive yet; the reject edge is the closest
    * "did not pass" semantics.
+   *
+   * `true` says THIS door's own resume completed. It does not say every run
+   * behind it advanced: a resume that completed and then stranded a run
+   * further up (a subflow's parent, #15556) still answers `true`, with the
+   * strand told on {@link resumeFailure}.
    */
   resumed?: boolean;
   /**
-   * Why the run was not resumed, when `resumed` is false but the recall itself
-   * succeeded. A recall abandons the request, so a lost run does not fail the
-   * call — but it must not read as a clean resume either (#4420).
+   * Why a run was not resumed, in prose — the human-readable half. A recall
+   * abandons the request, so a lost run does not fail the call — but it must
+   * not read as a clean resume either (#4420).
+   *
+   * ⛔ Not gated on `resumed` being false. Since the #16472 ruling a resume
+   * failure can ride a `resumed: true` answer (the run this door resumed
+   * advanced; one behind it did not), so presence is decided by whether a
+   * failure was TOLD, never by `resumed`. The machine-readable half of the
+   * same telling is {@link resumeFailure}; a caller branches on that, never
+   * on this text.
    */
   resumeError?: string;
+  /**
+   * The machine-readable half of a resume failure this recall tolerated
+   * (#15970; the #16472 ruling): the registered code, the `runId` of the run
+   * that is actually stranded — which need not be {@link runId}, the run this
+   * request gated — and whether the engine says it is repairable.
+   *
+   * Optional and ADDITIVE. ⚠️ An absent member means no report was made,
+   * never that no run is stranded: a producer that predates this field
+   * answers exactly what it always did, so absence is not a reading of
+   * health. Presence is the signal; absence is not its negation.
+   */
+  resumeFailure?: ResumeFailureReport;
 }
 
 /** Input for sending a pending request back for revision (ADR-0044). */
@@ -634,19 +723,66 @@ export interface ApprovalDecisionResult {
   /**
    * True when the owning flow run was resumed as a result of this decision.
    *
-   * A decision that finalises a flow-bound request and CANNOT resume its run
-   * throws rather than returning `resumed: false` — a recorded decision whose
-   * flow never advances is the zombie half-state of #4420. `false` here means
-   * either there was nothing to resume (no run, not finalised, no automation
-   * attached) or a benign duplicate, in which case see {@link resumeError}.
+   * A decision that finalises a flow-bound request and CANNOT resume its OWN
+   * run throws rather than returning `resumed: false` — a recorded decision
+   * whose flow never advances is the zombie half-state of #4420. `false` here
+   * means either there was nothing to resume (no run, not finalised, no
+   * automation attached) or a benign duplicate, in which case see
+   * {@link resumeError} and {@link resumeFailure}.
+   *
+   * `true` says this door's own resume completed. It does not say every run
+   * behind it advanced: a decision inside a subflow whose child resumed and
+   * whose parent then stranded (#15556) still answers `true`, and the
+   * parent's strand is told on {@link resumeFailure} — carried on the
+   * success answer per the #16472 ruling, never thrown.
+   *
+   * What that throw carries is published, not prose only (#13807, maintainer
+   * ruling 2026-09-04, decision batch #37). The status code does not move — a
+   * durable decision over a run that will not advance is still a failure —
+   * but the 500-class `RESUME_FAILED` it raises names, on its ERROR body, the
+   * four facts a caller needs: `finalized` (the decision stands), `decision`,
+   * `runId`, and `repairable` — the engine's own `'stranded'` discriminator
+   * carried through, never inferred from the message text. That envelope is
+   * `StrandedDecisionDetails` (`@objectstack/types`), attached by
+   * `strandedDecisionFailure` and read back by `strandedDecisionDetails`; the
+   * REST approvals door merges it into the `RESUME_FAILED` response body.
+   * Those four facts are the published way to read the posture this member
+   * declares — a caller holding only the status code reads a bare 500 as "the
+   * decision did not happen", and the row IS terminal.
+   *
+   * ⛔ They are not members of this result and must never be added to it:
+   * they ride the ERROR, so declaring them here would declare a success shape
+   * that never carries them. ⛔ Nor are they {@link resumeFailure}, which
+   * reports the other event of the #16472 ruling — a resume failure behind an
+   * answer that still succeeded.
    */
   resumed?: boolean;
   /**
-   * Why the run was not resumed, on the one path that tolerates it: a
-   * concurrent duplicate resume (`RESUME_IN_PROGRESS`) — the other caller is
-   * already advancing the run, so this decision is complete and correct.
+   * Why a run was not resumed, in prose — the human-readable half.
+   *
+   * Before the #16472 ruling this was set on exactly one path, the tolerated
+   * concurrent duplicate (`RESUME_IN_PROGRESS` — the other caller is already
+   * advancing the run, so this decision is complete and correct), and only
+   * beside `resumed: false`. ⛔ Not gated on `resumed` being false any more:
+   * a failure behind a `resumed: true` answer is told here too, so presence
+   * is decided by whether a failure was TOLD, never by `resumed`. The
+   * machine-readable half of the same telling is {@link resumeFailure}; a
+   * caller branches on that, never on this text.
    */
   resumeError?: string;
+  /**
+   * The machine-readable half of a resume failure told on this success
+   * answer (#15556; the #16472 ruling): the registered code, the `runId` of
+   * the run that is actually stranded — the PARENT's when the strand is a
+   * subflow's bubble-up, never the healthy child's that {@link runId} names —
+   * and whether the engine says it is repairable.
+   *
+   * Optional and ADDITIVE. ⚠️ An absent member means no report was made,
+   * never that no run is stranded: a producer that predates this field
+   * answers exactly what it always did, so absence is not a reading of
+   * health. Presence is the signal; absence is not its negation.
+   */
+  resumeFailure?: ResumeFailureReport;
 }
 
 /**

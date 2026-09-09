@@ -23,8 +23,9 @@ import {
   GetRunResponseSchema,
   AutomationApiErrorCode,
   AutomationApiContracts,
+  ResumeFailureDetailsSchema,
 } from './automation-api.zod';
-import type { TriggerFlowResponse } from './automation-api.zod';
+import type { TriggerFlowResponse, ResumeFailureDetails } from './automation-api.zod';
 import { ExecutionStatus } from '../automation/execution.zod';
 import type { AutomationResult } from '../contracts/automation-service';
 
@@ -50,6 +51,22 @@ type Assert< T extends true > = T;
  * `@ts-expect-error`-style pin no program compiles is no pin at all.
  */
 export type TriggerFlowDataMatchesContract = Assert< Eq< TriggerFlowResponse['data'], AutomationResult > >;
+
+/**
+ * #15221 — the resume door's `400 FLOW_FAILED` details forward the ENGINE's
+ * verdict, so the `status` the details schema declares must be exactly the
+ * terminal-failure subset of the contract's own union: rename or remove
+ * `'stranded'` / `'failed'` on `AutomationResult.status` and `Extract` yields
+ * fewer members, which reds this alias by name. Deliberately a SUBSET pin,
+ * not an identity: `'completed'` / `'paused'` / `'refused'` are `success: true`
+ * verdicts and can never reach a 400.
+ *
+ * Exported for the same reason as the pin above (TS6196 otherwise).
+ */
+export type ResumeFailureStatusIsTheContractsTerminalFailureSubset = Assert< Eq<
+  NonNullable<ResumeFailureDetails['status']>,
+  Extract<NonNullable<AutomationResult['status']>, 'failed' | 'stranded'>
+> >;
 
 // ==========================================
 // Path Parameters
@@ -483,6 +500,67 @@ describe('TriggerFlowResponseSchema', () => {
         },
       })
     ).toThrow();
+  });
+});
+
+// ==========================================
+// Resume failure details (#15221)
+// ==========================================
+
+describe('ResumeFailureDetailsSchema', () => {
+  // The stranded arm: the whole point of the schema — a client reads
+  // `repairable` off a typed structure and never regexes the message.
+  it('accepts the stranded verdict — runId, status and repairable', () => {
+    const result = ResumeFailureDetailsSchema.parse({
+      runId: 'run_1',
+      status: 'stranded',
+      repairable: true,
+    });
+    expect(result).toEqual({ runId: 'run_1', status: 'stranded', repairable: true });
+  });
+
+  // The plain terminal arm as the engine emits it today (a subflow child that
+  // failed terminally stamps NO status): `status` is optional, `repairable`
+  // is not — present-and-false is the contract, not absence.
+  it('accepts a verdict with no status — repairable stays required', () => {
+    const result = ResumeFailureDetailsSchema.parse({ runId: 'run_1', repairable: false });
+    expect(result).toEqual({ runId: 'run_1', repairable: false });
+    expect(ResumeFailureDetailsSchema.safeParse({ runId: 'run_1' }).success).toBe(false);
+    expect(ResumeFailureDetailsSchema.safeParse({ runId: 'run_1', repairable: 'yes' }).success).toBe(false);
+  });
+
+  it('accepts the plain `failed` verdict', () => {
+    const result = ResumeFailureDetailsSchema.parse({ runId: 'run_1', status: 'failed', repairable: false });
+    expect(result.status).toBe('failed');
+  });
+
+  // The two terminal-failure members and nothing else: a `success: true`
+  // verdict (`paused` / `completed` / `refused`) never reaches a 400, so the
+  // schema refuses it rather than describing an arm that does not exist.
+  it('refuses a status that is not a terminal failure', () => {
+    for (const status of ['paused', 'completed', 'refused', 'bogus']) {
+      expect(ResumeFailureDetailsSchema.safeParse({ runId: 'run_1', status, repairable: false }).success, status).toBe(false);
+    }
+    expect(ResumeFailureDetailsSchema.shape.status.unwrap().options).toEqual(['failed', 'stranded']);
+  });
+
+  it('requires the runId', () => {
+    expect(ResumeFailureDetailsSchema.safeParse({ repairable: true, status: 'stranded' }).success).toBe(false);
+  });
+
+  // On the wire the structure rides INSIDE the same `error.details` object as
+  // the run's two artefacts; a client hands the whole `details` to this
+  // schema and gets the verdict back — the artefacts are neither required
+  // nor refused.
+  it('parses the whole `details` object the resume door emits — the artefacts ride beside it', () => {
+    const result = ResumeFailureDetailsSchema.parse({
+      runId: 'run_1',
+      status: 'stranded',
+      repairable: true,
+      errorMessage: 'Please contact support',
+      summary: { nodes: [] },
+    });
+    expect(result).toEqual({ runId: 'run_1', status: 'stranded', repairable: true });
   });
 });
 

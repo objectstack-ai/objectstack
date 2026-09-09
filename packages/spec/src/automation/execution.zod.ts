@@ -83,6 +83,32 @@ export type ExecutionStatus = z.input<typeof ExecutionStatus>;
  * reports, alongside a declared write whose dispatch failed (the upstream may
  * have been reached) and a `script` step calling a function declared
  * `'writes'` (#4396).
+ *
+ * `failures` is the fourth answer, and it exists for one shape: a node that
+ * DELEGATES to a child run — a `subflow`, or each item of a `map` — whose
+ * child completed while containing failures of its own (#15617). The child's
+ * steps live in the child's log, so the parent's per-node fold cannot see
+ * them; `selected` / `acted` already ride up through these metrics so that a
+ * parent answers "what did this run cause", and until this slot existed the
+ * failure count did not: a parent whose child lost a row read `failed: 0`,
+ * which is the misreading the run-level `failed` was added to prevent
+ * (#13681), one level up. The slot carries a COMPLETED child's
+ * `summary.failed` and folds into the delegating node's `failures` — the same
+ * fold shape `acted` has, so `failed = Σ nodes[].failures` keeps holding with
+ * the child counted in. It is NOT the same rule as `acted` at the failed-child
+ * boundary, below.
+ *
+ * It is NOT this execution's own outcome. A step that failed is
+ * `status: 'failure'` and counts once, in `nodes[].failures`, as it always
+ * has — and that is also the whole answer for a child that FAILED, whether or
+ * not it also contained failures before it failed: the delegating step is the
+ * failure, the child's own `failed` (contained and fatal alike) stays on the
+ * child's run row, and nothing rides up here, so one failure is never counted
+ * twice. Unlike `acted`, which does carry a failed child's writes up (rows it
+ * wrote before it died), this slot carries nothing from a failed child.
+ * Absent ⇒ this execution delegated nothing, or its child tracked no count
+ * (an older run), or the producer did not track it (a step recorded before
+ * its executor populated the slot); in every case it is not `0`.
  */
 export const ExecutionStepMetricsSchema = lazySchema(() => z.object({
   selected: z.number().int().min(0).optional()
@@ -91,6 +117,8 @@ export const ExecutionStepMetricsSchema = lazySchema(() => z.object({
     .describe('Records this node WROTE (created / updated / deleted) or effects it dispatched (notifications delivered)'),
   unmeasuredEffect: z.boolean().optional()
     .describe('This execution may have caused an effect the platform cannot count (an external write through a connector). NOT interchangeable with `acted: 0` — it says the count is unknown, not that it is zero.'),
+  failures: z.number().int().min(0).optional()
+    .describe('Node executions that failed inside a child run this execution delegated to and went on from — a `subflow` child or a `map` item whose run COMPLETED while containing failures: its `summary.failed`, rolled up so the parent answers "what did this run cause". Folds into this node\'s `failures` and so into the run-level `failed`. NOT this execution\'s own outcome: a step that failed is `status: \'failure\'` and counts once through `nodes[].failures`, and a child that FAILED — whether or not it also contained failures before it failed — is exactly that step failure: its own `failed`, contained and fatal alike, stays on the child\'s run row and nothing rides up here (unlike `acted`, which does carry a failed child\'s writes). Absent = delegated nothing, or the child tracked no count, or the producer did not track it; never zero.'),
 }));
 export type ExecutionStepMetrics = z.input<typeof ExecutionStepMetricsSchema>;
 
@@ -159,7 +187,7 @@ export const ExecutionStepLogSchema = lazySchema(() => z.object({
   // #4354: what the step did to the data, and — for a `skipped` step — which
   // gate stopped it. Both feed the run summary aggregated on ExecutionLog.
   metrics: ExecutionStepMetricsSchema.optional()
-    .describe('Records this step selected / acted on, as reported by the node executor'),
+    .describe('Records this step selected / acted on — and, for a step that delegated to a child run (`subflow`, a `map` item), the failures that child contained — as reported by the node executor'),
   skippedBy: ExecutionStepSkipReasonSchema.optional()
     .describe('The gate that closed, when `status` is `skipped`'),
 }));
@@ -178,9 +206,9 @@ export const FlowRunNodeSummarySchema = lazySchema(() => z.object({
   nodeType: z.string().describe('Node action type (e.g., "get_record", "decision")'),
   nodeLabel: z.string().optional().describe('Human-readable node label'),
   status: z.enum(['success', 'failure', 'skipped'])
-    .describe('Terminal status of the node across the run — `failure` if any execution failed, else `success` if any succeeded, else `skipped`'),
+    .describe('Terminal status of the node across the run — `failure` if any execution failed, else `success` if any succeeded, else `skipped`. Judged on this node\'s OWN executions: a delegating node (`subflow` / `map`) whose child completed while containing failures reads `success` here with `failures > 0`'),
   runs: z.number().int().min(0).describe('Times the node executed (loop iterations and parallel branches each count)'),
-  failures: z.number().int().min(0).describe('Executions that failed — a failure a `try_catch` caught or a `fault` edge routed counts here too; the run-level `failed` is the sum of this across `nodes`'),
+  failures: z.number().int().min(0).describe('Executions that failed — a failure a `try_catch` caught or a `fault` edge routed counts here too — plus what a delegating execution rolled up from a child run that COMPLETED (`metrics.failures`: the contained failures of a `subflow` child or a `map` item). On a delegating node this may therefore exceed `runs` and is no longer only this node\'s own failed executions; a child that FAILED adds only the step\'s own failure (unlike `acted`, which carries a failed child\'s writes too); the run-level `failed` is the sum of this across `nodes`'),
   skipped: z.number().int().min(0).describe('Times a closed gate kept this node from running at all'),
   selected: z.number().int().min(0).optional().describe('Records read across every execution — omitted for a node that reads none'),
   acted: z.number().int().min(0).optional().describe('Records written / effects dispatched across every execution — omitted for a node that writes none'),
@@ -222,9 +250,21 @@ export type FlowRunGateSummary = z.input<typeof FlowRunGateSummarySchema>;
  *
  * Totals are sums over `nodes`, which is itself a fold of the run's step log,
  * so a loop that ran a write 30 times contributes 30 to `acted`. A `subflow`
- * node rolls its child run's totals up into this one — the child keeps its own
- * run row, so the child's work is counted there too, deliberately: this summary
- * answers "what did this run cause", not "what did this run's own nodes do".
+ * node — and each item of a `map` — rolls its child run up into this one
+ * through the delegating step's metrics, total by total, each on its own
+ * rule: `selected` and `acted` as totals, from a completed and a failed child
+ * alike; `unmeasured` as ONE per-execution flag (N uncountable effects in the
+ * child collapse to one on the parent's step, so this total counts parent
+ * executions, not the child's effects); `failed` as the child's contained
+ * failures, from a child that COMPLETED only, on `metrics.failures`, folding
+ * into that node's `failures` and so into `failed` (#15617); and `skipped`
+ * not at all — a child's closed gates stay on the child's row. The child
+ * keeps its own run row, so the child's work is counted there too,
+ * deliberately: this summary answers "what did this run cause", not "what did
+ * this run's own nodes do". A child that FAILED — whether or not it also
+ * contained failures before it failed — is the delegating step's own failure,
+ * counted once, as it always was; nothing of that child's `failed` rides up,
+ * which is the one place this rule parts from `acted`'s.
  */
 export const FlowRunSummarySchema = lazySchema(() => z.object({
   selected: z.number().int().min(0).describe('Total records read by the run'),
@@ -259,7 +299,18 @@ export const FlowRunSummarySchema = lazySchema(() => z.object({
    *
    * Every node execution that failed counts — on a run that completed all of
    * them were contained (caught by a `try_catch` or routed down a `fault`
-   * edge); on a run that failed, the fatal one is in the count too.
+   * edge); on a run that failed, the fatal one is in the count too. And the
+   * fold INCLUDES what a delegating node rolled up from its child (#15617): a
+   * `subflow` or `map` child that completed while containing failures reports
+   * them on the delegating step's `metrics.failures`, which folds into that
+   * node's `failures` and so arrives here. Before that slot existed the fold
+   * could not see them, so a parent whose child lost rows read `failed: 0`
+   * while the paragraph above promised "what did this run cause"; the two now
+   * agree. A child that FAILED — whether or not it also contained failures
+   * before it failed — is the delegating step's own failure, counted once
+   * here as it always was; its own `failed`, contained and fatal alike, stays
+   * on its own run row and nothing of it rides up (unlike `acted`, which
+   * carries a failed child's writes).
    *
    * Same convention as `unmeasured`, for the same reason: optional, and absent
    * is NOT zero. A run recorded before this field existed did not carry the
@@ -267,7 +318,7 @@ export const FlowRunSummarySchema = lazySchema(() => z.object({
    * about a run nobody measured.
    */
   failed: z.number().int().min(0).optional()
-    .describe('Total node executions that failed — a fold of `nodes[].failures`. On a run that completed every one of them was contained (caught by a `try_catch` or routed down a `fault` edge) and the run went on. Absent = not tracked (an older run), which is not the same as zero.'),
+    .describe('Total node executions that failed — a fold of `nodes[].failures`, INCLUDING what a delegating node (`subflow` / `map`) rolled up from a child run that COMPLETED while containing failures: this total answers "what did this run cause", subflows included, so a parent whose child lost rows does not read `failed: 0`. A child that FAILED — whether or not it also contained failures before it failed — counts once, as the delegating step\'s own failure, and its own `failed` stays on its row (unlike `acted`, which carries a failed child\'s writes). On a run that completed every one of them was contained (caught by a `try_catch` or routed down a `fault` edge) and the run went on. Absent = not tracked (an older run), which is not the same as zero.'),
   nodes: z.array(FlowRunNodeSummarySchema).describe('Per-node breakdown, in first-execution order'),
   gates: z.array(FlowRunGateSummarySchema).describe('Gates that closed during the run, most-skipped first'),
   detailOmitted: z.boolean().optional()

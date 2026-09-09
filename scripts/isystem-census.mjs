@@ -79,6 +79,7 @@ import { requireDefaultExport } from './import-prerequisite.mjs';
 const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 
 import { isEntrypoint } from './invoked-as.mjs';
+import { symbolResolutionClass } from './symbol-anchors.mjs';
 import { parseSourceFile } from './ts-parse.mjs';
 
 export const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -184,19 +185,141 @@ export function packageOf(relPath, root = ROOT) {
 }
 
 /**
+ * ── Where a read LIVES, named so an anchor can survive a line shift (#15921) ──
+ *
+ * The page used to anchor a read by `file:line`, and a line number rots on every
+ * unrelated edit above it. It now anchors `path#symbol`, so the census has to
+ * answer a second question about each site: WHICH DECLARATION encloses it.
+ *
+ * ## The rule, and why it is the OUTERMOST function-like scope
+ *
+ * A site sits inside a stack of named things -- a local arrow, the method that
+ * built it, the class the method is on. The innermost name is the most precise
+ * and the WORST anchor: locals are called `handler`, `context` and `isSystem`,
+ * they are renamed by refactors that change no behaviour, and several of them
+ * per file are indistinguishable to a reader who opens the file looking for the
+ * row. Measured over this corpus, the innermost rule picked `handler`,
+ * `session`, `permitted`, `context` and -- for the getter on the engine's
+ * context wrapper -- the string `isSystem` itself.
+ *
+ * So the answer is the OUTERMOST function-like scope: the module-level function,
+ * or the class member (a class is not function-like, so a method stops the walk
+ * at itself rather than collapsing every method onto the class name). That is the
+ * declaration a reader greps for, and the one a rename has to move.
+ *
+ * ⭐ The chosen name is only accepted when the SHARED resolver would resolve it
+ * -- `symbolResolutionClass(...) === 'declaration'`, the same predicate
+ * `scripts/check-adr-symbol-anchors.mjs` sweeps with. A census that named a
+ * symbol the gate's resolver cannot bind would publish a population the page can
+ * never satisfy, which is the one failure mode a population check cannot survive.
+ *
+ * ## The fallbacks, in order, and the honest bottom
+ *
+ *   1. the outermost function-like named scope that resolves;
+ *   2. failing that, the innermost enclosing named declaration that resolves
+ *      (a class, an interface, a `const` binding -- a read at module top level);
+ *   3. failing that, `null` -- and `null` is NOT an error and NOT a guess. It
+ *      means no declaration in that file can be named, and the page anchors the
+ *      FILE. A file-level anchor stays checked (the file must exist) and it is
+ *      the one honest answer when there is no symbol; ⛔ inventing one would put
+ *      a name in the page that no rename can ever red.
+ *
+ * ⚠️ What this costs, stated where it is derived: several sites inside ONE symbol
+ * collapse onto ONE anchor. `check-system-context-census.mjs` carries the
+ * measurement and the consequence for what the gate can and cannot catch.
+ */
+function isFunctionLike(node) {
+  return (
+    ts.isFunctionDeclaration(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) ||
+    ts.isSetAccessorDeclaration(node) ||
+    ts.isConstructorDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node)
+  );
+}
+
+/** The name a node declares, or `null` when it declares none this census can cite. */
+function declaredName(node, sourceFile) {
+  if (
+    ts.isFunctionDeclaration(node) ||
+    ts.isClassDeclaration(node) ||
+    ts.isInterfaceDeclaration(node) ||
+    ts.isEnumDeclaration(node) ||
+    ts.isTypeAliasDeclaration(node) ||
+    ts.isModuleDeclaration(node)
+  ) {
+    return node.name && ts.isIdentifier(node.name) ? node.name.text : null;
+  }
+  if (ts.isMethodDeclaration(node) || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node)) {
+    const name = node.name;
+    return name && (ts.isIdentifier(name) || ts.isStringLiteral(name)) ? name.text : null;
+  }
+  if (ts.isConstructorDeclaration(node)) return 'constructor';
+  if (ts.isVariableDeclaration(node) || ts.isPropertyAssignment(node) || ts.isPropertyDeclaration(node)) {
+    const name = node.name;
+    return name && (ts.isIdentifier(name) || ts.isStringLiteral(name)) ? name.text : null;
+  }
+  return null;
+}
+
+/**
+ * The symbol a page anchor should name for a node, by the rule documented above.
+ *
+ * @param {import('typescript').Node} node
+ * @param {import('typescript').SourceFile} sourceFile
+ * @param {string} relPath
+ * @param {string} text  the target's own source, for the resolver
+ * @returns {string|null}
+ */
+export function enclosingSymbol(node, sourceFile, relPath, text) {
+  const functionLike = [];
+  const anyNamed = [];
+  for (let p = node.parent; p; p = p.parent) {
+    const name = declaredName(p, sourceFile);
+    if (name === null) continue;
+    anyNamed.push(name);
+    /* A function or arrow bound to a name is function-like scope under the name
+     * it is bound to -- so the walk records the BINDING's name, not the anonymous
+     * expression's absence of one. */
+    if (isFunctionLike(p) || (p.initializer !== undefined && p.initializer !== null && isFunctionLike(p.initializer))) {
+      functionLike.push(name);
+    }
+  }
+  const resolves = (name) => symbolResolutionClass(text, relPath, name) === 'declaration';
+  for (let i = functionLike.length - 1; i >= 0; i -= 1) {
+    if (resolves(functionLike[i])) return functionLike[i];
+  }
+  for (const name of anyNamed) {
+    if (resolves(name)) return name;
+  }
+  return null;
+}
+
+/**
  * Every syntactic role the identifier takes in one parsed source.
  *
- * @returns {{ role: string, line: number, receiver: string|null, text: string }[]}
+ * @returns {{ role: string, line: number, receiver: string|null, text: string,
+ *             symbol: string|null }[]}
  */
 export function classifyFile(relPath, text) {
   const sourceFile = parseSourceFile(relPath, text);
   const lines = text.split('\n');
-  /** @type {{ role: string, line: number, receiver: string|null, text: string }[]} */
+  /** @type {{ role: string, line: number, receiver: string|null, text: string,
+   *           symbol: string|null }[]} */
   const found = [];
 
   const record = (node, role, receiver) => {
     const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
-    found.push({ role, line: line + 1, receiver, text: (lines[line] ?? '').trim() });
+    found.push({
+      role,
+      line: line + 1,
+      receiver,
+      text: (lines[line] ?? '').trim(),
+      /* Only a READ is ever anchored, so only a read pays the ancestor walk. */
+      symbol: role === 'read' ? enclosingSymbol(node, sourceFile, relPath, text) : null,
+    });
   };
 
   const visit = (node) => {
@@ -236,7 +359,8 @@ function nonElevationRowFor(relPath, receiver) {
  * Run the census.
  *
  * @returns {{
- *   sites: { file: string, line: number, receiver: string, package: string|null }[],
+ *   sites: { file: string, line: number, receiver: string, package: string|null,
+ *            symbol: string|null }[],
  *   nonElevationReads: { file: string, line: number, receiver: string, field: string }[],
  *   roleCounts: Record<string, number>,
  *   packages: string[],
@@ -282,6 +406,7 @@ export function runCensus({ root = ROOT } = {}) {
         receiver: hit.receiver,
         package: packageOf(relPath, root),
         text: hit.text,
+        symbol: hit.symbol,
       });
     }
   }
@@ -333,9 +458,38 @@ export function countText(root = ROOT) {
   };
 }
 
-/** `file:line` keys for the elevation sites -- the census's comparable form. */
+/** `file:line` keys for the elevation sites -- the census's positional form. */
 export function siteKeys(census) {
   return new Set(census.sites.map((s) => `${s.file}:${s.line}`));
+}
+
+/**
+ * The census's ANCHORABLE form: per file, the distinct symbols its read sites live
+ * in, and whether any of them has no nameable symbol at all.
+ *
+ * ⭐ This is the population `check-system-context-census.mjs` holds the page to,
+ * and it is deliberately smaller than `siteKeys` above: several sites inside one
+ * symbol collapse to one entry. The two are both kept because they answer
+ * different questions -- `siteKeys` is what the census COUNTS, this is what the
+ * page can CITE without encoding a position.
+ *
+ * @param {{ sites: { file: string, symbol: string|null }[] }} census
+ * @returns {Map<string, { symbols: Set<string>, fileLevel: boolean, sites: number }>}
+ */
+export function symbolPopulation(census) {
+  /** @type {Map<string, { symbols: Set<string>, fileLevel: boolean, sites: number }>} */
+  const byFile = new Map();
+  for (const site of census.sites) {
+    let entry = byFile.get(site.file);
+    if (!entry) {
+      entry = { symbols: new Set(), fileLevel: false, sites: 0 };
+      byFile.set(site.file, entry);
+    }
+    entry.sites += 1;
+    if (site.symbol === null) entry.fileLevel = true;
+    else entry.symbols.add(site.symbol);
+  }
+  return byFile;
 }
 
 function main(argv) {

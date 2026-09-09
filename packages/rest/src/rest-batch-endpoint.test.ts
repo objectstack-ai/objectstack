@@ -305,11 +305,17 @@ describe('POST {basePath}/batch — cross-object transactional batch', () => {
 
   // ── create ingress parity (#3835) ─────────────────────────────────────────
   //
-  // The engine's INSERT path is static-`readonly`-exempt by design (#3413), so
-  // the #3043 strip that stops a non-system caller from seeding a read-only
-  // column lives at the protocol's create ingress. This route used to call
-  // `ql.insert` directly and skip it, so `readonly` meant two different things
-  // depending on which create endpoint you used.
+  // When this was written the #3043 strip that stops a non-system caller from
+  // seeding a read-only column lived at the protocol's create ingress, because
+  // the engine's INSERT path was static-`readonly`-exempt (#3413). This route
+  // used to call `ql.insert` directly and skip that ingress, so `readonly`
+  // meant two different things depending on which create endpoint you used.
+  // Since the maintainer ruling of 2026-09-03 (option C, #14147) the strip
+  // runs inside `engine.insert` for every non-system caller and the ingress
+  // copy is deleted, so both create routes are stripped identically. The
+  // routing pinned below stands on what the ingress still owns: the #3770
+  // object-existence gate, the #7823 `internal: true` response strip and the
+  // `droppedFields` relay — one create ingress, one response contract.
 
   it('routes create ops through the protocol create ingress, not ql.insert', async () => {
     const ql = makeQl();

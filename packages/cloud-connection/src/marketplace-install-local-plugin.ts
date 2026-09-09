@@ -49,15 +49,12 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import {
     resolveAuthzContext,
     isAuthzStoreUnavailableError,
-    // [#15353] The three symbols the ADMISSION seam's posture derivation needs
-    // — the same set `packages/rest`'s repaired seam imports, for the same
-    // reason. `effectiveTenancyPosture` reads the posture IN FORCE off the
-    // kernel's `tenancy` service; the other two are decision-1-option-A's
-    // classification (#13906): never-registered is branded and quiet, every
-    // other rejection is the outage it is.
-    effectiveTenancyPosture,
-    isServiceNotRegisteredError,
-    AuthzStoreUnavailableError,
+    // [#16013] The ADMISSION seam's posture derivation, in ONE call — the same
+    // symbol `packages/rest`'s seam now imports, for the same reason. It reads
+    // the posture IN FORCE off the kernel's `tenancy` service and carries
+    // decision-1-option-A's classification (#13906): never-registered is
+    // branded and quiet, every other rejection is the outage it is.
+    classifyAdmissionTenancyPosture,
     type TenancyPostureSource,
 } from '@objectstack/core';
 import {
@@ -1673,15 +1670,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * ⛔ Do not wire either of them into this seam, and ⛔ do not add a
      * `catch { undefined }` here.
      *
-     * ## The classification, decision 1 option A (#13906)
+     * ## The classification, decision 1 option A (#13906) — no longer here
      *
-     * - **Never registered** ⇒ branded (`isServiceNotRegisteredError`), quiet
-     *   `undefined`. A lean embedding with no `plugin-auth` is a SUPPORTED
-     *   composition, and behaviour there is exactly what it was.
-     * - **Registered and unable to answer** ⇒ `AuthzStoreUnavailableError`
-     *   (ADR-0112 `SERVICE_UNAVAILABLE` / 503). Admission was never DECIDED, so
-     *   it must not be answered. {@link resolveInstallPrincipal}'s `catch`
-     *   already re-raises this brand rather than collapsing it to `null` (401).
+     * [#16013] `classifyAdmissionTenancyPosture` (`@objectstack/core`) owns the
+     * branded/unbranded decision for every admission seam: never registered ⇒
+     * quiet `undefined`; every other rejection ⇒ `AuthzStoreUnavailableError`
+     * (ADR-0112 `SERVICE_UNAVAILABLE` / 503), because admission was never
+     * DECIDED and must not be answered.
+     *
+     * ⚠️ What that means AT THIS DOOR is still this door's own: a lean
+     * embedding with no `plugin-auth` is a SUPPORTED composition and behaviour
+     * there is exactly what it was, and on the loud arm
+     * {@link resolveInstallPrincipal}'s `catch` already re-raises this brand
+     * rather than collapsing it to `null` (401).
      *
      * ⚠️ The brand exists only on the ASYNC resolution path: `PluginContext.getService`
      * throws two UNBRANDED plain `Error`s (`… not found` and `… is async - use
@@ -1703,16 +1704,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             | { getServiceAsync?: <T>(name: string, scopeId?: string) => Promise<T> }
             | undefined;
         if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
-        try {
-            return effectiveTenancyPosture(
-                await kernel.getServiceAsync<TenancyPostureSource>('tenancy'),
-            );
-        } catch (err) {
-            if (!isServiceNotRegisteredError(err)) {
-                throw new AuthzStoreUnavailableError('tenancy', err);
-            }
-            return undefined;
-        }
+        return classifyAdmissionTenancyPosture(() =>
+            kernel.getServiceAsync!<TenancyPostureSource>('tenancy'),
+        );
     };
 
     private resolveInstallPrincipal = async (

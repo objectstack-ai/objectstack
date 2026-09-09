@@ -41,8 +41,12 @@ model: opus
 3. **范围 = 这张 issue,别无其它。** 顺路发现 ⛔ 不在本 PR 修,只有三类立卡且不打标签:
    - (a) 可复现缺陷(复现或失败探针具名);(b) 违背已声明契约(引契约原文);
    - (c) 让 AI 写出运行时拒收或静默丢弃的元数据的陷阱;三类内 ⛔ 不因看着小揣着不报。
+   - (a) 分错误与不完整,不分文档与代码:示例照抄即失败是 (a),漏列成员不是。
+   - (c) 元数据 = 由写它的人以外的人存储并再作者化的键:React prop 不是,存储视图配置是。
+   - 把作者引向运行时会兑现却让事情更糟的元数据的警告不在 (c) 内,记为边界不扩类。
    - 其余 ⛔ 不立卡:观察、死代码、未演练漂移、抛光、风格、文档 nit、命名。
-   - 它们进 PR `## 验收备注`,报告 `out_of_scope_findings` 记 `noted, not filed: …`,席位 ACCEPT 时读。
+   - 它们进 PR `## Acceptance notes`,报告 `out_of_scope_findings` 记 `noted, not filed: …`,席位 ACCEPT 读。
+   - 写 `noted, not filed` 前先答哪一个 PR 或人会碰到这个文件;答不出就写明「承接者:无」。
    - 先搜再立:关键词 + 文件路径扫 open issues;并行 dev 同一小时立的卡只有这一搜能看见。
    - 通道先探后选:同容器先测一条 repo-scoped REST 读;通 ⇒ 走 REST 列表端点 + 本地 grep。
    - 通道对照表见 `.claude/skills/pm-dispatch/references/rest-channel.md`,其 ✓ 按座位实测。
@@ -87,20 +91,18 @@ model: opus
    - 可能是你没推的工作,或路径打错敲进了别的 agent 的活 worktree;先去那里读 `git status`。
 5. ⛔ 永不按进程名杀(`pkill -f` 会带走并行 agent 的运行);记下你启动的 PID,只对它操作。
 6. **整条流水线在前台跑。** build 与 test 都是本任务的步骤:阻塞运行、读真实输出、继续。
-   - ⛔ 永不把验证挂在后台 watcher 上然后停轮;禁令与两种合法终态见干净收尾节。
+   - 宿主事实:你启动的后台作业、watcher、你请求的通知都不会唤醒你;结束一轮就是结束。
+   - 有可展示内容即 commit、push 并开 draft PR,不等验证结束;验证结果到达即补进正文。
+   - 带具名缺口的 PR 是交付进行中的常态,未读到的判决写 `NOT MEASURED: <family>, reason: …`。
    - 平台事实:容器把前台命令钉在约 10 分钟上限,超时 SIGTERM 杀掉(`exit 143`)。
    - 上限划定前台里放什么:重活走规则 1 的锁;仓级扫描归 CI(见本地验证范围节)。
-   - 消融/变异脚本自带还原 trap(硬线在标准条款节的 ablation 条)。
-7. **排队不是停摆,在轮内主动等。** 持锁的是你不拥有的进程,它的完成不会唤醒你。
-   - ⛔ 永不为等锁结束一轮。
+7. **排队不是停摆,在轮内主动等。** 持锁的是你不拥有的进程,其完成同样不会唤醒你。
    - 99 专指没排到,读作 NOT MEASURED;把间隔花在无锁工作上(写测试、changeset、PR 正文)。
    - 再取以同名续位,⛔ 不从队尾重排:`OS_VERIFY_LOCK_SLOT=<稳定名>` 在第一次尝试前就设好。
    - 没排到的调用把排位寄存,同名再来续原到达戳;不设它,每次离开都从队尾重排。
    - 排队约 20 分钟无进展 ⇒ 先看这次检查能否收窄到不必持锁(收窄要申报,见干净收尾)。
    - 收窄不了就停下报 `blocked` 并点名持锁者:`os-verify-lock.sh --status` 打印持锁者与队列。
    - 一动不动的持锁者本身就是真发现;沉默是唯一错误答案。
-   - 等锁、门禁批或任何慢步骤一律在本轮内前台阻塞,锁脚本自己会等。
-   - 判据,写与读报告同一条:最后一句是意图而不是结果 ⇒ 该 dev 已停摆,不是已完成。
 
 ## Toolchain traps
 
@@ -124,12 +126,11 @@ model: opus
 ## 本地验证范围 —— 本地只跑定向门禁,全农场归 CI
 
 - ⛔ 不把 lint workflow 的 `check:*` 全枚举本地跑:CI 会把农场跑满。本地清单如下。
-- ① 先 build 依赖闭包:`pnpm --filter '<pkg>^...' build` 是新 worktree 的第一条命令。
-- 跳过它产出的失败,读起来与你的改动弄坏了 import 一模一样。
+- ① diff 触到某包才有 ①:`pnpm --filter '<pkg>^...' build` 建依赖闭包;不触任何包则报告无 ①。
+- 闭包为空(`packages/spec` 无 workspace 依赖)时 ① 空跑;读 `dist/` 的门禁前先 build 本包。
 - ② 受影响包自己的 `pnpm test` / `pnpm typecheck`,用 `--filter` 圈定。
 - 受影响包 = 本包;import 方只在公开面变化时欠测试:spec 契约、发布的 `exports`、线上形状。
 - 公开面字节不变 ⇒ 只欠本包测试与派生门禁,⛔ 不给每个 import 方补测试。
-- `packages/cli` 只欠 `unit` 层(见 Definition of done 的测试条)。
 - ③ 派发词点名的门禁族,加上你看得出被牵连的。
 - 新 fake engine ⇒ `check:engine-double-contract`;新错误码 ⇒ `check:error-code-casing`。
 - `.claude/agents/**` ⇒ `check:agent-model-declared`;任何编辑 ⇒ `check:nul-bytes`。
@@ -160,6 +161,8 @@ model: opus
 - 报告的 `tests` 字段和 PR 正文两处都要引;门禁日志不带 sha,最后 commit 前的并集量的旧树。
 - 迟到的 commit 挪动的恰是 ratchet 读数;复核后任何一次 push,都在新 head 上重跑并集。
 - 至少重跑 ratchet 族,然后才更新报告或 PR 正文。
+- 收窄引 `turbo ls --affected` 须同句写明盲区:集出自包依赖图,盲于读盘取别包源码的测试。
+- 仓根包不在 `turbo ls` 里,根级套件整个在图外;故只称「不在图上」,永不称「动不了」。
 - 门禁结果的读法:退出码在任何管道之前捕获,报告里引门禁自己印的判定行。
 - 免疫写法只有一种,先重定向再捕获:`cmd > /tmp/out 2>&1; EXIT=$?; tail -40 /tmp/out`。
 - `EXIT=$?` 跟在 `cmd 2>&1 | tail -40` 之后读到的是 `tail` 的状态。
@@ -186,11 +189,12 @@ model: opus
 - 消费者清扫的 filter 方向是前缀:`pnpm --filter '...@objectstack/<pkg>'` = 下游消费者。
 - 后缀形式是上游依赖,方向相反;契约收紧永远落在下游。
 - 报告里写 N 个包全绿必须说方向,否则这句话无法复核。
+- 退役键的清扫默认走退役 playbook 的 tree-scoped 缺席 pin,不为一次缺席检查重建消费者闭包。
 - 跨包类型改动需要一次反向验证:贴进一个新类型会拒绝的键,确认转红,再恢复。
 - 这证明你读的是重建后的 `.d.ts`,不是缓存。
-- `packages/spec`:`gen:schema` 会重写 `authorable-surface.base.json`,这是预期产物。
+- `packages/spec`:`authorable-surface.base.json` 只由 `gen:authorable-surface-base` 写,普通构建从不写。
 - ⛔ 永不回退它、永不为凑某个相等手改它;作数的断言是 `check:authorable-surface` 绿。
-- `baseRev` 允许滞后,一行信息不是错误。
+- `baseRev` 允许滞后,一行信息不是错误;普通构建下该文件动了是 finding,不是产物。
 - ⛔ 永不在 MERGE 态跑 `gen:schema`:HEAD 还是 merge 前的 tip,锚点会静默回滚到旧分叉点。
 - 那样门禁全绿而已落地的推进被吞掉;先 commit merge 再重生成:`bash scripts/pm/os-regen-merge.sh`。
 - `git worktree` 只隔离工作树与 HEAD;`.git/` 下其余一切全 worktree 共享。
@@ -276,7 +280,7 @@ model: opus
 - ⛔ 不写否定式的关单句,它照样关掉点名的卡:解析器无视否定,只匹配关键词 + `#<n>`。
 - 关键词是 `fix/fixes/fixed/close/closes/closed` 与 `resolve/resolves/resolved`;让它们远离其它卡号。
 - 写 `#<n> is not addressed here`、`out of scope: #<n>` 或 `#<n> remains open`。
-- PR 正文与 commit message 分开解析:卡片关系只在正文声明一次,commit ⛔ 不带卡片 trailer。
+- 卡片关系只在 PR 正文声明一次:commit ⛔ 不带卡片 trailer,其 trailer pair 一律 model-free。
 - 标题与散文用英文(见 AGENTS.md);引用的中文裁决保持原文不译,改写引文就是改写裁决。
 - 受管面(见 AGENTS.md)PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空。
 - 五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的;席位定稿成评论。
@@ -290,10 +294,10 @@ model: opus
 - 密度优化只随净减内容的 PR;分界只问折行有没有为新增内容买行。
 - ⛔ 不把不买内容的密度修复当筹行拒掉;删不出等量内容 ⇒ 报 `blocked`,⛔ 不抬 ceiling。
 - 例外:派发令点名测量优先的零余量受管账本 ⇒ 落行、不动上限行、红着报实测行数。
-- `skip-changeset` 标签按仓库分流,先认清目标仓有没有这个机制;判据:不从任何包发布东西。
-- 例:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根工具配置 · 私有 workspace · 注释。
+- `skip-changeset` 唯一判据:没有已发布的东西移动;已发布 = 各包 `files[]` 实际发运的内容。
+- 快速通道:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根配置 · 私有包 · 注释,不发布。
+- 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
 - 本仓库:标签是真实机制,打标签是你的步骤、不是 CI 的,PR 一开出就打。
-- ⛔ 永不等 Check Changeset 转红再补。
 - 写入首选加法端点(REST `POST .../issues/<n>/labels`,不碰已有标签);可达性按会话探,先探后用。
 - 被拒 ⇒ 走回退:MCP 读现值→并集→整组写→必做对比式读回,并申报换道。
 - 读回 diff 现集对 union(读集, 目标):union 有而回读缺 = 被剥的并发标签,重挂并写进报告。
@@ -302,7 +306,7 @@ model: opus
 - 关此步骤的是读回不是写入;读回只验写落了,验不出有门在读:幻影门标签读回照样成功。
 - objectui:同名标签对象在,零 workflow/脚本读它、豁免不了任何东西,pin 测试钉着。
 - 那边用空 frontmatter 的 changeset 声明,门禁判定行是权威;⛔ 永不在 objectui 施加该标签。
-- 报告在 draft PR 时点交付,CI 收敛等待归 PM 不归你:分支一推上、PR 一开出,立刻交报告。
+- 报告在本地验证走完时交付,CI 收敛等待归 PM 不归你:⛔ 不为等 CI 结论推迟报告。
 - 门禁状态如实记录,`in_progress` 是诚实值;PR 开出后 ⛔ 永不 sleep、定时等待或空转轮询 CI。
 - 你报告之后才转红的门禁,会作为同一认领上的补丁轮回来。
 - 逐卡例外:派发词明示本单等 CI 只为那一张卡恢复等待,以前台轮询,永不用后台 watcher。
@@ -326,7 +330,6 @@ model: opus
    - 读完一次运行的输出 ⇒ 它的 monitor 也到头了;残留的 monitor 会把整份报告朝 PM 重放。
 2. **monitor 还是响了**,它的第一行要说清看的是什么、那东西是否还活着。
    - 任何唤醒起手先重读真实状态(分支推了吗?PR 开着吗?报告交了吗?)。
-   - 永不单凭一次唤醒重做工作或开第二个 PR。
 3. **守约不等于会被听见,为此做计划。** 进程可能死在 PR push 与报告轮之间。
    - 永不把自己的沉默读作成功(报告缺席直接挡 ACCEPT);PM 的探活-复活循环是常设兜底。
    - PR 开出后被探是正常形状,不是训斥;被探时重读状态、从 transcript 交付报告。
@@ -337,14 +340,11 @@ model: opus
    - 两条合法出路:在轮内同步等它(资源纪律的排队条款:限时获取 ⇒ 无锁工作 ⇒ 再取)。
    - 或者收窄这次检查的范围并在报告里申报:已申报的收窄是被接受的偏差,CI 跑满农场。
    - PM 复核的是 CI 收敛,不是你本地的覆盖面;未申报的收窄不在此列,那是漏跑。
-   - 反轮询与不停轮由同一个形状同时满足,而且只有这一个:一次前台阻塞等待。
-   - 形状是 Monitor 带 until 条件,或干脆在前台把那套件跑完。
-   - ⛔ 不以结束一轮当反轮询解法:停轮不是合规替代,它恰是本条禁止的终点。
+   - 唯一同时反轮询又不停轮的形状是一次前台阻塞等待:前台跑完,或 `tail --pid` 等它退出。
+   - 比回合长的门禁在写报告那一刻读日志(重定向目标);未完成的记 NOT MEASURED 并写原因。
    - 自检是机械的,不看你怎么形容这次等待:终消息只能是报告 JSON 或 `blocked` 报告。
-   - 其它任何收尾文本按定义即停摆;⛔ 不指望后台 monitor 唤醒你,完成通知本身就是停轮。
    - 结束一轮之前自检:最后一条消息是否在描述你不拥有的进程给你的唤醒?
    - 排队的锁、别的 agent 的 build、脱管的 watcher 都不会来;保持这一轮活着,自己收退出码。
-   - 报告不违反此条:它以结果结束一轮,不是等别的东西来恢复的承诺。
 
 ## 何时停手不写码
 
@@ -398,6 +398,6 @@ _Generated by [Claude Code](https://claude.ai/code)_                ← bare:评
 _Generated by [Claude Code](https://claude.ai/code/session_<id>)_   ← session-URL:创建 PR 正文用
 ```
 
-- session-URL 形创建用,编辑后原样存活;编辑时不带页脚发送、读回,平台在其下追加裸形块。
+- 页脚形态随通道(MCP / REST)与动作(建 / 改)变,⛔ 不由一条推其余;发你要存的,写后必回读。
 - 评论通路 MCP 与 REST 同判:整块原样存活,缺规则线则不认、再落整块留两个。
 - 耐久归属写进正文散文或评论,⛔ 不循环重贴页脚;完整读数住 AGENTS.md 同条。

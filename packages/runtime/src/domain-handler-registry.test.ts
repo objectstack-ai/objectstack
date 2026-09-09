@@ -5,8 +5,10 @@
  *
  * Two layers under test:
  *  1. `DomainHandlerRegistry` matching semantics (first-match, exact vs
- *     prefix, method restriction) — deliberately faithful to the legacy
- *     if-chain, rough edges included.
+ *     segment vs prefix, method restriction). These were deliberately
+ *     faithful to the legacy if-chain, rough edges included, until #16263
+ *     made `'segment'` the default; the legacy bare-`startsWith` claim is
+ *     still available to a route that declares `match: 'prefix'`.
  *  2. `HttpDispatcher` integration: the four seeded builtin domains
  *     (/health /ready /analytics /i18n) behave exactly as their legacy
  *     if-chain branches did, and `registerDomainHandler` is the public
@@ -65,15 +67,41 @@ describe('DomainHandlerRegistry', () => {
         expect(registry.resolve('/a/x', 'GET')?.handler).toBe(first);
     });
 
-    it("match: 'exact' does not claim sub-paths; default prefix match does (legacy startsWith, rough edges included)", () => {
+    it("match: 'exact' does not claim sub-paths; the DEFAULT claims the prefix and everything under it, and stops there", () => {
         const registry = new DomainHandlerRegistry();
         registry.register({ prefix: '/health', match: 'exact', handler: okHandler('h') });
         registry.register({ prefix: '/i18n', handler: okHandler('i') });
         expect(registry.resolve('/health', 'GET')).toBeDefined();
         expect(registry.resolve('/health/deep', 'GET')).toBeUndefined();
+        expect(registry.resolve('/i18n', 'GET')).toBeDefined();
         expect(registry.resolve('/i18n/locales', 'GET')).toBeDefined();
-        // Faithful legacy semantics: bare startsWith also matches '/i18nxx'.
+        // [#16263] The default is `'segment'`. This assertion USED TO READ
+        // `toBeDefined()` and pinned the legacy rough edge on purpose
+        // ("bare startsWith also matches '/i18nxx'"); the edge is the defect
+        // #16263 removed, so the pin is inverted rather than deleted — the
+        // sibling namespace must be provably released, not merely unasserted.
+        expect(registry.resolve('/i18nxx', 'GET')).toBeUndefined();
+    });
+
+    it("match: 'prefix' still buys the legacy bare-startsWith claim — it is declared now, not inherited", () => {
+        const registry = new DomainHandlerRegistry();
+        registry.register({ prefix: '/i18n', match: 'prefix', handler: okHandler('i') });
+        expect(registry.resolve('/i18n', 'GET')).toBeDefined();
+        expect(registry.resolve('/i18n/locales', 'GET')).toBeDefined();
         expect(registry.resolve('/i18nxx', 'GET')).toBeDefined();
+    });
+
+    it("a `?`-suffixed prefix is why 'prefix' survives: no '/' follows the '?', so 'segment' cannot express it", () => {
+        const registry = new DomainHandlerRegistry();
+        registry.register({ prefix: '/keys', match: 'segment', handler: okHandler('k') });
+        registry.register({ prefix: '/keys?', match: 'prefix', handler: okHandler('kq') });
+        expect(registry.resolve('/keys', 'GET')?.prefix).toBe('/keys');
+        expect(registry.resolve('/keys/rotate', 'GET')?.prefix).toBe('/keys');
+        expect(registry.resolve('/keys?scope=x', 'GET')?.prefix).toBe('/keys?');
+        // …and the segment route alone would NOT have claimed the query form.
+        const segmentOnly = new DomainHandlerRegistry();
+        segmentOnly.register({ prefix: '/keys', match: 'segment', handler: okHandler('k') });
+        expect(segmentOnly.resolve('/keys?scope=x', 'GET')).toBeUndefined();
     });
 
     it('restricts by method when `methods` is set (case-insensitive on input)', () => {

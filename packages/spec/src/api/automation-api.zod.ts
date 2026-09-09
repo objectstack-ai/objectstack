@@ -14,6 +14,7 @@ import { ExecutionLogSchema, ExecutionStatus, FlowRunSummarySchema } from '../au
  * Base path: /api/automation
  *
  * @example Endpoints
+ * ```
  * GET    /api/automation                         — List flows
  * GET    /api/automation/:name                   — Get flow
  * POST   /api/automation                         — Create flow
@@ -23,6 +24,7 @@ import { ExecutionLogSchema, ExecutionStatus, FlowRunSummarySchema } from '../au
  * POST   /api/automation/:name/toggle            — Enable/disable flow
  * GET    /api/automation/:name/runs              — List execution runs
  * GET    /api/automation/:name/runs/:runId       — Get single execution run
+ * ```
  */
 
 // ==========================================
@@ -385,6 +387,76 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
 export type TriggerFlowResponse = z.input<typeof TriggerFlowResponseSchema>;
 /** Post-parse shape of {@link TriggerFlowResponse} — defaults applied, transforms run (ADR-0122). */
 export type TriggerFlowResponseParsed = z.infer<typeof TriggerFlowResponseSchema>;
+
+// ==========================================
+// 7b. Resume failure details (POST /api/automation/:name/runs/:runId/resume, 400 FLOW_FAILED)
+// ==========================================
+
+/**
+ * The machine-readable half of a resume failure, as it reaches the caller
+ * (#15221; the #16472 family ruling, maintainer 2026-09-07, option A).
+ *
+ * `POST /api/automation/:name/runs/:runId/resume` answers a run that consumed
+ * its pause and then failed with `400 FLOW_FAILED` (#8684), and the
+ * `error.details` of that answer carried the run's two artefacts only — the
+ * author's `errorMessage` and the per-node `summary`. The engine's own verdict
+ * was not forwarded: `AutomationResult.status: 'stranded'` (#14384, the
+ * #13937 shape-4 ruling) names the terminally-failed-but-REPAIRABLE run — the
+ * pause a durable decision was waiting on is gone with the failure, and only
+ * an explicit operator verb can re-arm it — and it is distinct from a plain
+ * terminal failure on purpose. Both exits reached the wire as one and the same
+ * `400 FLOW_FAILED`, so an HTTP-only caller could not tell "this run is beyond
+ * reach" from "this run has a repair waiting", and a console that treats
+ * `400 FLOW_FAILED` as terminal closed on both. `data.status: 'stranded'`,
+ * declared on `TriggerFlowResponseSchema` above and parity-pinned to the
+ * contract, could not appear on the wire through any door.
+ *
+ * The ruling (option A): the resume door's `400 FLOW_FAILED` details carry the
+ * verdict in a shape a client can branch on WITHOUT a message regex — the
+ * registered error code, the `runId` of the run that is actually stranded, and
+ * `repairable`. ⛔ No `FLOW_STRANDED` sibling code is minted under it: a new
+ * code is a ledger event, and if a client needs a distinct code to branch,
+ * that is its own card. This schema is the structure the ruling asks to be
+ * declared ONCE in `packages/spec` and reused by the other carriers it names
+ * (the approvals decision and recall results, #15556 / #15970) — declared here
+ * ahead of them, so they spell the same members rather than their own.
+ *
+ * On the wire it rides INSIDE the same `error.details` object as
+ * `errorMessage` / `summary` (both stay optional and unchanged); a client
+ * parses `details` with this schema and branches on `repairable`. Present on
+ * the resume door's `400 FLOW_FAILED` arm and on no other door: the trigger
+ * door and `/actions` never resume, so "repairable" has no referent there and
+ * their `details` are unchanged — ABSENT there means "not a resume", never
+ * "not repairable".
+ */
+export const ResumeFailureDetailsSchema = lazySchema(() => z.object({
+  runId: z.string().describe(
+    'The run the resume was addressed to - the run that failed, and on the '
+    + '`stranded` arm the run an operator verb can re-arm. Named so a caller '
+    + 'acts on an identifier instead of parsing one out of the message',
+  ),
+  status: z.enum(['failed', 'stranded']).optional().describe(
+    'The engine\'s own lifecycle verdict for the run, forwarded verbatim when '
+    + 'the producer stamped one and never synthesised by the door - absent when '
+    + 'the engine reported no status (a subflow child that failed terminally, '
+    + 'an engine that predates the discriminator). `stranded` is the '
+    + 'terminally-failed-but-repairable run of `AutomationResult.status`; '
+    + '`failed` says the run ran and was rejected. These two terminal-failure '
+    + 'members of that union are the only ones that can reach a 400',
+  ),
+  repairable: z.boolean().describe(
+    'Whether the engine says this run can still be re-armed by an operator '
+    + 'verb - `true` exactly when `status` is `stranded`, derived from the '
+    + 'engine\'s discriminator and never from the message text. Always present '
+    + 'on this arm: `false` is the honest answer for every other exit, the ones '
+    + 'that report no status included, because an absent member would be '
+    + 'indistinguishable from a server that predates this field, and promising '
+    + 'a repair verb that will refuse is worse than promising nothing',
+  ),
+}));
+export type ResumeFailureDetails = z.input<typeof ResumeFailureDetailsSchema>;
+/** Post-parse shape of {@link ResumeFailureDetails} — defaults applied, transforms run (ADR-0122). */
+export type ResumeFailureDetailsParsed = z.infer<typeof ResumeFailureDetailsSchema>;
 
 // ==========================================
 // 8. Toggle Flow (POST /api/automation/:name/toggle)

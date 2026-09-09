@@ -26,6 +26,8 @@ export type {
     SuspensionParkedAt,
     SuspensionClaimOutcome,
     FlowDispatchStore,
+    FlowDispatchClaim,
+    FlowDispatchOutcome,
     // [ADR-0126 §7.2] The packaged-flow activation ledger port and its row —
     // the durable off-switch that REPLACES the retired process-local
     // `flowEnabled` map (#10243). Exported so a host can supply its own
@@ -56,6 +58,18 @@ export type {
     // host store implementing `recordTerminal` / `loadTerminal` writes and
     // reads; unnameable, the field would be writable only by structural luck.
     ConsumedSuspensionDropNotice,
+    // [#15223] The type of `RunRecord.status`, exported for exactly the reason
+    // above: `RunRecord` is barrel-reachable and a host store implementing
+    // `recordTerminal` / `loadTerminal` has to name the field it round-trips.
+    // It is also the set to switch over — a terminal run's four states exist
+    // precisely to be told apart, which is the whole of what this card fixed.
+    TerminalRunStatus,
+    // [#15358] The read-only repairability verdict
+    // (`AutomationEngine.inspectConsumedSuspension`), for the same reason as
+    // `SuspensionRestoreResult` above: the method is barrel-reachable, so a
+    // consumer needs the name to annotate a result or switch exhaustively over
+    // `reason` — the three negatives exist precisely to be branched on.
+    ConsumedSuspensionInspection,
 } from './engine.js';
 
 // [#11997] ADR-0005 overlay precedence for same-named flow definitions. The boot

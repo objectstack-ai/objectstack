@@ -147,6 +147,31 @@ const REAL_CONFIG = {
   occurrenceFloors: { 'content/docs': 100, skills: 10 },
 };
 
+/**
+ * The population declared for `scripts/pm/dispatch-gates.mjs`, which builds a
+ * dispatch's gate list by scanning each gate's source for the path literals it
+ * operates on. "Looks like a path" there means "carries a separator", so of the
+ * two roots above only `content/docs` reaches the hint set on its own —
+ * `skills` does not, and without this declaration a skills-only card is never
+ * told this gate reads its files. `check-corpus-claim-drift.mjs` and
+ * `check-doc-authoring.mjs` carry the identical declaration at this root for
+ * the identical reason.
+ *
+ * ⚠️ Spelled as a LITERAL array, never computed from `REAL_CONFIG.roots`: the
+ * extractor reads SOURCE TEXT, so `roots.map((r) => …)` would contribute
+ * nothing while every runtime assertion about the value stayed green.
+ * `check-watch-hint-literal` enforces that; the self-test below pins the
+ * coupling to `REAL_CONFIG.roots` in both directions.
+ *
+ * The subtree is what this gate reads: of the 47 files tracked under the root
+ * on 91f65c4ea, the walk admits 46 — every `.md`/`.mdx` at any depth, nothing
+ * under it skipped by `skipDirs` or `skipPaths` — so the declaration over-names
+ * by exactly one file (a `.json`), at 97.9% precision. ⛔ The bare root is NOT
+ * declared: it is the population, and the glob is the only spelling the
+ * extractor can turn into a hint.
+ */
+const ROOT_DIR_WATCH_HINTS = ['skills/**'];
+
 /** Segment-spelling variants the detector recognises as "same route, drifted
  * spelling". Plural/singular is computed; everything else is pinned HERE so a
  * new variant class is a reviewed one-line addition, never a loosened
@@ -819,6 +844,19 @@ function selfTest() {
       r.flags.some((f) => f.file.includes('releases')), false);
     expect('no verdict came from node_modules',
       r.flags.some((f) => f.file.includes('node_modules')), false);
+    // The dispatch declaration, pinned to REAL_CONFIG.roots in BOTH directions
+    // so it cannot rot: a root that stops being separatorless, or a hint whose
+    // root leaves the config, reds here rather than silently naming this gate
+    // for a tree it no longer reads.
+    const separatorless = REAL_CONFIG.roots.filter((root) => !root.includes('/'));
+    expect('every separatorless root the walk uses is declared as a watch hint',
+      separatorless.every((root) => ROOT_DIR_WATCH_HINTS.includes(`${root}/**`)), true);
+    expect('…and there is one, so the pin above is not holding over an empty list',
+      separatorless.length > 0, true);
+    expect('every declared hint names a root the walk actually uses',
+      ROOT_DIR_WATCH_HINTS.every((h) => REAL_CONFIG.roots.includes(h.replace(/\/\*+$/, ''))), true);
+    expect('the hint is the SUBTREE, not the bare root (a bare root builds no hint)',
+      REAL_CONFIG.roots.some((root) => ROOT_DIR_WATCH_HINTS.includes(root)), false);
 
     // ── The teeth: measured drift class flags, by name ───────────────────
     battery('The teeth: measured drift class flags, by name');

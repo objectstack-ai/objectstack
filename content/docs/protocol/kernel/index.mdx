@@ -383,6 +383,12 @@ All system configuration lives in Git:
 ## Developer Experience
 
 ### Plugin Development
+
+`os create plugin` scaffolds a **kernel code plugin** — TypeScript implementing the
+`Plugin` contract this page describes. It is not the **metadata package** that
+`os init -t plugin` writes, which holds declarative objects and no kernel code;
+[Which scaffolder?](/docs/deployment/cli#os-init) routes between the two by artifact.
+
 ```bash
 # Scaffold new plugin (created as ./plugin-<name>/ in the current directory)
 os create plugin slack-integration

@@ -85,7 +85,7 @@ function Page() {
 
       <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 24, alignItems: 'start' }}>
         <section style={{ ...card, padding: 8 }}>
-          <ListView key={reloadKey} objectName="showcase_project"
+          <ListView key={reloadKey} data={{ provider: 'object', object: 'showcase_project' }}
             fields={['name', 'status', 'health', 'budget', 'owner']}
             navigation={{ mode: 'none' }} onRowClick={onRowClick} />
         </section>

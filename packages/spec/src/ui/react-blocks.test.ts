@@ -10,6 +10,7 @@ import { z } from 'zod';
 import {
   REACT_BLOCKS,
   REACT_OVERLAY_SHADOWS,
+  REACT_RETIRED_OVERLAY_PROPS,
   REACT_RECORD_BLOCK_ALTERNATIVES,
   RECORD_CONTEXT_BLOCK_TAGS,
   isRecordContextBlockType,
@@ -125,6 +126,10 @@ describe('REACT_BLOCKS — the record:* family is out (#4413)', () => {
     const tags = REACT_BLOCKS.map((b) => b.tag);
     expect(REACT_RECORD_BLOCK_ALTERNATIVES['record:related_list']).toContain('ListView');
     expect(REACT_RECORD_BLOCK_ALTERNATIVES['record:details']).toContain('ObjectForm');
+    // #14791: the related-list prescription binds in the only spelling the
+    // contract publishes — never the retired `objectName` alias.
+    expect(REACT_RECORD_BLOCK_ALTERNATIVES['record:related_list']).toContain("provider: 'object'");
+    expect(REACT_RECORD_BLOCK_ALTERNATIVES['record:related_list']).not.toContain('objectName');
     expect(tags).toContain('ListView');
     expect(tags).toContain('ObjectForm');
   });
@@ -132,13 +137,14 @@ describe('REACT_BLOCKS — the record:* family is out (#4413)', () => {
 
 /**
  * #11284 — the react tier converges on the metadata-tier vocabulary,
- * deprecate-first (maintainer ruling 2026-08-23, recorded on-card). This step
- * declares the canonical spellings and keeps the old ones as deprecated
- * aliases; REMOVAL is a later card, so these pins hold the window open in both
- * directions: the canonical props must be published, and the aliases must not
- * quietly disappear before their card.
+ * deprecate-first (maintainer ruling 2026-08-23, recorded on-card): the
+ * canonical spellings were declared and the old ones kept as deprecated
+ * aliases. #14791 (maintainer ruling 2026-09-07) is the removal card: the
+ * ListView aliases are RETIRED with no window, and these pins hold that in
+ * both directions — the canonical props must be published, and a retired
+ * spelling must not quietly come back (or stay published beside its tombstone).
  */
-describe('REACT_BLOCKS — deprecate-first vocabulary convergence (#11284)', () => {
+describe('REACT_BLOCKS — vocabulary convergence (#11284) and the ListView alias retirement (#14791)', () => {
   it('every curated dataProps entry resolves to a real schema prop', () => {
     // `build-react-blocks-contract`'s allow-list FILTERS the schema's props, so
     // a curated name the schema does not declare is silently dropped from the
@@ -174,23 +180,46 @@ describe('REACT_BLOCKS — deprecate-first vocabulary convergence (#11284)', () 
     }
   });
 
-  it('ListView: objectName→data and viewType→type, canonical props surfaced, aliases still published', () => {
+  it('ListView: objectName / viewType are RETIRED — data / type are the only spellings, data required (#14791)', () => {
     const lv = REACT_BLOCKS.find((b) => b.tag === 'ListView')!;
-    const dep = Object.fromEntries(
-      lv.interactions.filter((i) => i.deprecated).map((i) => [i.name, i.deprecated!.replacedBy]),
-    );
-    // The ruled mapping, exactly — objectui#2890 A6 (`objectName` →
-    // `data: { provider: 'object', object }`) and its sibling `viewType` → `type`.
-    expect(dep).toEqual({ objectName: 'data', viewType: 'type' });
+    const names = lv.interactions.map((i) => i.name);
+    // No alias and no deprecation row: retired with no window.
+    expect(names).not.toContain('objectName');
+    expect(names).not.toContain('viewType');
+    expect(lv.interactions.filter((i) => i.deprecated)).toEqual([]);
+    // The canonical spellings are published — `type` from the schema, `data`
+    // restated as the required binding (ledgered in REACT_OVERLAY_SHADOWS):
+    // a react page has no host to stamp the object, so "bind something" is
+    // still said by the contract, now in the metadata-tier spelling.
     expect(lv.dataProps).toContain('type');
     expect(lv.dataProps).toContain('data');
-    // Deprecate-first: the aliases stay for the whole window.
-    const names = lv.interactions.map((i) => i.name);
-    expect(names).toContain('objectName');
-    expect(names).toContain('viewType');
-    // The binding requirement survives the deprecation (the lint lets the
-    // canonical `data` prop satisfy it — see validate-react-page-props).
-    expect(lv.interactions.find((i) => i.name === 'objectName')!.required).toBe(true);
+    const data = lv.interactions.find((i) => i.name === 'data')!;
+    expect(data.kind).toBe('binding');
+    expect(data.required).toBe(true);
+    expect(REACT_OVERLAY_SHADOWS.ListView).toContain('data');
+  });
+
+  it('a retired overlay prop is gone from its block, names a real prop, and carries a fix', () => {
+    const tags = new Set(REACT_BLOCKS.map((b) => b.tag));
+    for (const [tag, props] of Object.entries(REACT_RETIRED_OVERLAY_PROPS)) {
+      expect(tags.has(tag), `${tag} is not a block`).toBe(true);
+      const b = REACT_BLOCKS.find((x) => x.tag === tag)!;
+      const live = new Set([
+        ...b.interactions.map((i) => i.name),
+        ...(b.schema ? schemaPropNames(b.schema) : []),
+      ]);
+      for (const [name, r] of Object.entries(props)) {
+        // A tombstone beside a live prop of the same name would make the lint
+        // refuse what the contract still publishes.
+        expect(live.has(name), `<${tag}> ${name} is retired AND still published`).toBe(false);
+        expect(live.has(r.replacedBy), `<${tag}> ${name} → "${r.replacedBy}" names no prop on the block`).toBe(true);
+        expect(r.note.length).toBeGreaterThan(0);
+      }
+    }
+    // The ruled pair, exactly — objectui#2890 A6's mapping, now as tombstones.
+    expect(
+      Object.fromEntries(Object.entries(REACT_RETIRED_OVERLAY_PROPS.ListView).map(([k, v]) => [k, v.replacedBy])),
+    ).toEqual({ objectName: 'data', viewType: 'type' });
   });
 
   it('ObjectForm and ObjectChart objectName are NOT converged by this step', () => {

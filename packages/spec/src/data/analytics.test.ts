@@ -351,7 +351,7 @@ describe('AnalyticsQuerySchema', () => {
       timeDimensions: [{
         dimension: 'orders.created_at',
         granularity: 'month',
-        dateRange: 'Last 7 days',
+        dateRange: 'last_7_days',
       }],
       order: { 'orders.count': 'desc' },
       limit: 100,

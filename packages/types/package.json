@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/types",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "Shared interfaces describing the ObjectStack Runtime environment",
   "main": "dist/index.js",
@@ -20,14 +20,15 @@
   "scripts": {
     "build": "tsup && node ../../scripts/check-dts-emitted.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --project local",
+    "test:repo": "vitest run --project repo"
   },
   "dependencies": {
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "objectstack",

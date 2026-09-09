@@ -34,8 +34,7 @@ const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 /**
  * A stack authored against protocol 16: every line marked `// 16:` is a shape
  * the v17 chain must rewrite, spanning each conversion family — renames
- * (action execute→target, sharing full→edit), the required→storage.notNull
- * explicitization, and the #3896 close-out removals (rls.priority, the four
+ * (action execute→target, sharing full→edit) and the #3896 close-out removals (rls.priority, the four
  * tool keys, flow active/template/outputSchema/fallbackNodeId, view/dashboard
  * inert keys, agent.knowledge, skill.triggerPhrases).
  */
@@ -48,7 +47,7 @@ export default {
     name: 'e2e_ticket',
     label: 'Ticket',
     fields: {
-      title: { type: 'text', label: 'Title', required: true },      // 16: required implied NOT NULL
+      title: { type: 'text', label: 'Title', required: true },      // 16: required implied NOT NULL — v17 does NOT write that down (#16693)
       notes: { type: 'textarea', label: 'Notes' },
     },
   }],
@@ -147,7 +146,6 @@ const EXPECTED_CONVERSIONS = [
   'skill-trigger-phrases-removed',
   'tool-inert-authoring-keys-removed',
   'permission-rls-priority-removed',
-  'field-required-notnull-explicit',
   'sharing-rule-access-level-full-to-edit',
 ];
 
@@ -187,6 +185,21 @@ describe('os migrate meta --from 16 (e2e over the real CLI)', () => {
     }
   });
 
+  /**
+   * ⛔ The negative half of the assertion above (#16693). A conversion that
+   * stamps `storage: { notNull: true }` onto every `required: true` field
+   * asserts the implication ADR-0113 abolished, so `migrate meta` must
+   * attribute NOTHING to it — on a source (`title`) that would have triggered
+   * it, which is what keeps this from passing vacuously.
+   */
+  it('attributes nothing to the withdrawn required→storage.notNull conversion', () => {
+    const ids = new Set(out.parsed.applied.map((a: any) => a.conversionId));
+    expect(ids.has('field-required-notnull-explicit')).toBe(false);
+    // Anti-vacuity: the same run DID attribute rewrites, so an empty `applied`
+    // cannot be what makes the line above green.
+    expect(ids.size).toBeGreaterThan(0);
+  });
+
   it('surfaces the semantic TODOs instead of auto-applying them', () => {
     expect(Array.isArray(out.parsed.todos)).toBe(true);
     expect(out.parsed.todos.length).toBeGreaterThan(0);
@@ -217,9 +230,16 @@ describe('os migrate meta --from 16 (e2e over the real CLI)', () => {
     expect(snap.tools[0].category).toBeUndefined();
     expect(snap.permissions[0].rowLevelSecurity[0].priority).toBeUndefined();
     expect(snap.sharingRules[0].accessLevel).toBe('edit');
-    // ADR-0113 explicitization: the pre-17 required field carries its column
-    // constraint in writing; the optional field gains nothing.
-    expect(snap.objects[0].fields.title.storage).toEqual({ notNull: true });
+    // ⛔ ADR-0113, #16693: the chain does NOT write a column constraint for the
+    // author. `required: true` crosses 16→17 as the write-time contract and
+    // nothing else, so `title` comes out with NO `storage` block — exactly like
+    // the optional field beside it. The withdrawn `field-required-notnull-
+    // explicit` conversion used to make this line read `{ notNull: true }`, and
+    // an app that followed the boot warning it raised was performing a
+    // destructive `tighten_not_null` migration on a populated database while
+    // believing it was clearing a deprecation notice.
+    expect(snap.objects[0].fields.title.required, 'the write contract survives the chain').toBe(true);
+    expect(snap.objects[0].fields.title.storage, 'no column constraint is invented').toBeUndefined();
     expect(snap.objects[0].fields.notes.storage).toBeUndefined();
   });
 

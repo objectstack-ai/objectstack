@@ -1455,6 +1455,63 @@ export function actionRecordLoadSignal(load: ActionSubjectRecordLoad): { recordL
 }
 
 /**
+ * [#16370] Contract point 3, as the ONE function all three action doors call.
+ *
+ * ## What was wrong
+ *
+ * {@link loadActionSubjectRecord} computes the caller-scope load's verdict for
+ * every door, and exactly ONE door consumed it as a refusal — the declarative
+ * update (#15079). The flow door and the script/body door spread the same
+ * verdict into the context as a field and PROCEEDED: MCP `run_action` on a
+ * `type: 'flow'` action answered `ok: true` and started a persisted run for a
+ * `recordId` the caller cannot read — and for an id that names nothing at all —
+ * while `get_record` answered "not found" and `update_record` answered "no
+ * access" for that same id, in the same session.
+ *
+ * #15168 made the verdict AVAILABLE to an author's opt-in guard, which is not
+ * the same thing as the platform enforcing it, and its own note said so: the
+ * reading it left open ("whether the automation engine acts on it … is a
+ * separate reading") is this function. A swallowed load must never become an
+ * implicit grant — the rule is #15079's, and a rule implemented at one of three
+ * doors is the failure class #14143 and #15168 each already paid for here.
+ *
+ * ## The predicate is the LOAD's verdict — ⛔ never the action's `locations`
+ *
+ * `recordLoadDenied` is `true` exactly when a caller-scope load was ATTEMPTED
+ * and did not deliver the row: a `recordId` was supplied AND the action key is
+ * not object-less. So the two shapes that must not change are excluded BY
+ * CONSTRUCTION rather than by a second test that could drift out of step with
+ * the producer — a **record-less** action (object-less key) and a **new-record**
+ * action (no `recordId`) never attempt a load, so their verdict is never `true`
+ * and their stamp behaviour is byte-for-byte what it was.
+ *
+ * ⛔ NOT {@link summarizeAction}'s `requiresRecord`, which is derived from
+ * `locations` — optional metadata an author may omit entirely, which is exactly
+ * why contract point 7 refuses to be left to it. An authorization refusal keyed
+ * on optional metadata is absent for precisely the authors who declared least.
+ *
+ * ⚠️ The refusal is the SHARED not-found envelope (`recordNotFoundError`, 404
+ * `RECORD_NOT_FOUND`) — ⛔ never a 403, ⛔ never a new "denied" code. The read
+ * path collapses "filtered out by RLS" and "this id names nothing" on purpose
+ * (existence non-disclosure), nothing in the caught error separates them, and a
+ * refusal that distinguished the two would make this door the existence oracle
+ * every other door declines to be. #15079 argued it; this consumes the argument
+ * rather than reopening it.
+ */
+export function refuseDeniedSubjectLoad(
+    objectName: string,
+    recordId: string | undefined,
+    subject: ActionSubjectRecordLoad,
+): void {
+    if (!subject.recordLoadDenied) return;
+    // The producer never attempts a load without a `recordId`, so the verdict
+    // cannot be `true` without one. The `??` names the id in the envelope; it is
+    // ⛔ NOT a second condition — a guard whose extra clause can switch it off is
+    // the inert-guard shape this whole seam exists to remove.
+    throw recordNotFoundError(objectName, recordId ?? '');
+}
+
+/**
  * [#15079] The prior/next value pair a successful declarative update hands back
  * when the action declares `undoable: true` — the anchor that key never had.
  *
@@ -1651,9 +1708,11 @@ export async function executeDeclarativeUpdateAction(
     }
 
     // ── contract point 3: the caller-scope load's VERDICT, consumed ──────────
-    if (subject.recordLoadDenied) {
-        throw recordNotFoundError(objectName, recordId);
-    }
+    // [#16370] Through {@link refuseDeniedSubjectLoad}, the ONE implementation
+    // the flow door and the script/body door now call too. Behaviour here is
+    // unchanged to the byte — what changed is that this is no longer the only
+    // door that reads the verdict, so the rule cannot be inert two doors over.
+    refuseDeniedSubjectLoad(objectName, recordId, subject);
 
     // ── contract point 2: ONE data-plane update, AS THE CALLER ───────────────
     // ⛔ `ec`, never `buildActionExecutionContext(ec)`. See the docblock — this
@@ -1811,6 +1870,20 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         });
         return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result };
     }
+
+    // ── contract point 3: the caller-scope load's VERDICT, consumed ──────────
+    // [#16370] The flow door and the script/body door, on the SAME rule the
+    // declarative door has enforced since #15079 — one implementation, three
+    // doors. Placed HERE deliberately:
+    //
+    //  - AFTER the declarative branch above, whose own points 7 and 4 answer a
+    //    LOCATED 400 before point 3 ever runs; hoisting the refusal over them
+    //    would re-label those prescriptions as a 404;
+    //  - BEFORE the identity resolution and everything below it, so no
+    //    persisted automation run exists and no trusted body has been entered
+    //    when the refusal lands. `ok: true` on a row the caller cannot read is
+    //    the defect; refusing after the run was created would only describe it.
+    refuseDeniedSubjectLoad(objectName, recordId, subject);
 
     // [#5372] One shared producer for the user shape (`security/actor-user.ts`),
     // the same one the REST `/actions` route and the AI routes use. What stood

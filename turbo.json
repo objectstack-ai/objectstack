@@ -11,6 +11,12 @@
     "test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
+    },
+    "test:repo": {
+      "dependsOn": ["^build"],
+      "outputs": [],
       "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
     },
     "typecheck": {
@@ -26,6 +32,7 @@
     "@objectstack/service-settings#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -38,6 +45,7 @@
     "@objectstack/metadata#test": {
       "dependsOn": ["build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -50,11 +58,464 @@
     "@objectstack/spec#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**"
+      ]
+    },
+    "@objectstack/core#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**"
+      ]
+    },
+    "@objectstack/types#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**"
+      ]
+    },
+    "@objectstack/organizations#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
+        "$TURBO_ROOT$/packages/**/package.json"
+      ]
+    },
+    "@objectstack/cli#test": {
+      "dependsOn": ["build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "!**/node_modules/**",
+        "$TURBO_ROOT$/scripts/nightly-tiers.mjs",
+        "$TURBO_ROOT$/scripts/nightly-tiers.d.mts",
+        "$TURBO_ROOT$/packages/verify/src/**",
+        "$TURBO_ROOT$/packages/plugins/plugin-security/src/**",
+        "$TURBO_ROOT$/packages/services/service-cluster/src/**",
+        "$TURBO_ROOT$/packages/connectors/connector-mcp/src/connector-mcp-plugin.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/views/contact.view.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/data/objects/semantic-zoo.object.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/task-triage.page.ts",
+        "$TURBO_ROOT$/content/docs/deployment/cli.mdx",
+        "$TURBO_ROOT$/content/docs/deployment/index.mdx",
+        "$TURBO_ROOT$/content/docs/deployment/troubleshooting.mdx",
+        "$TURBO_ROOT$/content/docs/getting-started/index.mdx",
+        "$TURBO_ROOT$/content/docs/permissions/authentication.mdx",
+      "$TURBO_ROOT$/content/docs/plugins/index.mdx",
+      "$TURBO_ROOT$/content/docs/protocol/kernel/index.mdx",
+      "$TURBO_ROOT$/content/docs/protocol/kernel/plugin-spec.mdx",
+        "$TURBO_ROOT$/scripts/check-nul-bytes.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+        "$TURBO_ROOT$/scripts/cli-unbuilt-workspace-lead.mjs",
+        "$TURBO_ROOT$/scripts/cli-unbuilt-workspace-lead.d.mts",
+        "$TURBO_ROOT$/scripts/cli-build-prerequisite.mjs",
+        "$TURBO_ROOT$/scripts/cross-package-test-inputs.mjs",
+        "$TURBO_ROOT$/packages/spec/src/system/translation.zod.ts",
+        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
+        "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/packages/create-objectstack/bin/create-objectstack.js",
+        "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/package.json",
+        "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/.github/workflows/ci.yml",
+        "$TURBO_ROOT$/scripts/sync-scaffold-emission-policy.mjs",
+        "$TURBO_ROOT$/packages/drivers/driver-sql/src/sql-driver.ts",
+        "$TURBO_ROOT$/packages/drivers/driver-sql/src/schema-drift.ts",
+        "$TURBO_ROOT$/packages/spec/src/data/field.zod.ts"
+      ]
+    },
+    "@objectstack/client#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "!**/node_modules/**",
+        "$TURBO_ROOT$/packages/runtime/src/route-ledger.ts",
+        "$TURBO_ROOT$/packages/rest/src/rest-route-ledger.ts",
+        "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.ts",
+        "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.ts",
+        "$TURBO_ROOT$/packages/services/service-datasource/src/datasource-route-ledger.ts",
+        "$TURBO_ROOT$/packages/plugins/plugin-auth/src/auth-route-ledger.ts",
+        "$TURBO_ROOT$/packages/runtime/src/route-ledger.conformance.test.ts",
+        "$TURBO_ROOT$/packages/rest/src/rest-route-ledger.conformance.test.ts",
+        "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.conformance.test.ts",
+        "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.conformance.test.ts",
+        "$TURBO_ROOT$/packages/services/service-datasource/src/datasource-route-ledger.conformance.test.ts",
+        "$TURBO_ROOT$/packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts",
+        "$TURBO_ROOT$/scripts/check-route-envelope.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+        "$TURBO_ROOT$/scripts/**"
+      ]
+    },
+    "@objectstack/lint#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "!**/node_modules/**",
+        "$TURBO_ROOT$/packages/cli/src/commands/**",
+        "$TURBO_ROOT$/packages/metadata-protocol/src/**",
+        "$TURBO_ROOT$/packages/objectql/src/validation/**",
+        "$TURBO_ROOT$/packages/services/service-automation/src/**",
+        "$TURBO_ROOT$/examples/app-showcase/src/data/objects/contact.object.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/system/translations/index.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/views/contact.view.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/capability-map.page.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/command-center-jsx.page.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/start-here.page.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/task-visualizations.pages.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/data/objects/task.object.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/views/task.view.ts",
+        "$TURBO_ROOT$/sdui.manifest.json"
+      ]
+    },
+    "@objectstack/cloud-connection#test": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
+    "@objectstack/plugin-email#test": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
+    "@objectstack/platform-objects#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "!**/node_modules/**",
+        "$TURBO_ROOT$/packages/**/*.object.ts",
+      "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+      "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+      "$TURBO_ROOT$/packages/lint/src/page-envelope-audit.test.ts",
+      "$TURBO_ROOT$/packages/cloud-connection/src/cloud-connection-ui.ts"
+      ]
+    },
+    "@objectstack/mcp#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
+    "@objectstack/runtime#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**"
+      ]
+    },
+    "@objectstack/objectql#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**"
+      ]
+    },
+    "@objectstack/driver-sql#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
+    "@objectstack/example-showcase#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
+    "@objectstack/plugin-auth#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "!**/node_modules/**",
+        "$TURBO_ROOT$/packages/**/*.object.ts",
+        "$TURBO_ROOT$/packages/core/src/security/**",
+        "$TURBO_ROOT$/packages/runtime/src/**",
+        "$TURBO_ROOT$/packages/services/service-sms/src/**",
+        "$TURBO_ROOT$/scripts/check-published-files.mjs",
+        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
+        "$TURBO_ROOT$/packages/types/src/node-isolation.test.ts",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
+    "@objectstack/plugin-auth#typecheck": {
+      "dependsOn": ["build"],
+      "outputs": [],
+      "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
+    },
+    "@objectstack/trigger-api#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+      ]
+    },
+    "@objectstack/trigger-record-change#test": {
+      "dependsOn": ["^build"],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/runtime/src/expected-read-refusal-noise.ts",
+        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
+        "$TURBO_ROOT$/scripts/slot-lookup-baseline.json",
+        "$TURBO_ROOT$/packages/core/src/kernel.ts"
+      ],
+      "outputs": []
+    },
+    "@objectstack/plugin-approvals#test": {
+      "dependsOn": ["^build"],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/runtime/src/expected-read-refusal-noise.ts",
+        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
+        "$TURBO_ROOT$/packages/plugins/plugin-sharing/src/team-graph.ts"
+      ],
+      "outputs": []
+    },
+    "@objectstack/plugin-security#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "!**/node_modules/**",
+        "$TURBO_ROOT$/packages/spec/src/security/**",
+        "$TURBO_ROOT$/packages/spec/src/identity/**"
+      ]
+    },
+    "@objectstack/dogfood#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "!**/node_modules/**",
+        "$TURBO_ROOT$/packages/client/src/**",
+        "$TURBO_ROOT$/packages/mcp/src/**",
+        "$TURBO_ROOT$/packages/plugins/plugin-hono-server/src/**",
+        "$TURBO_ROOT$/packages/rest/src/**",
+        "$TURBO_ROOT$/packages/runtime/src/**",
+        "$TURBO_ROOT$/packages/services/service-realtime/src/**",
+        "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.ts",
+        "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.ts",
+        "$TURBO_ROOT$/packages/services/service-settings/src/settings-route-ledger.ts",
+        "$TURBO_ROOT$/packages/spec/src/automation/**",
+        "$TURBO_ROOT$/packages/spec/src/data/**",
+        "$TURBO_ROOT$/examples/app-showcase/**",
+        "$TURBO_ROOT$/packages/cli/src/commands/**",
+        "$TURBO_ROOT$/packages/metadata/src/**",
+        "$TURBO_ROOT$/content/docs/protocol/kernel/realtime-protocol.mdx"
+      ]
+    },
+    "@objectstack/rest#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**"
+      ]
+    },
+    "@objectstack/formula#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "!**/node_modules/**",
+        "$TURBO_ROOT$/packages/spec/src/security/rls.zod.ts",
+        "$TURBO_ROOT$/skills/objectstack-formula/**"
+      ]
+    },
+    "@objectstack/metadata-protocol#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/check-durability-degradation-log-level.mjs"
+      ]
+    },
+    "@objectstack/downstream-contract#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "!**/node_modules/**",
+        "$TURBO_ROOT$/packages/spec/src/**",
+        "$TURBO_ROOT$/packages/spec/package.json"
+      ]
+    },
+    "create-objectstack#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "!**/node_modules/**",
+        "$TURBO_ROOT$/content/**",
+        "$TURBO_ROOT$/scripts/sync-template-versions.mjs",
+        "$TURBO_ROOT$/scripts/invoked-as.mjs",
+        "$TURBO_ROOT$/.github/workflows/scaffold-e2e.yml",
+        "$TURBO_ROOT$/packages/cli/src/commands/serve.ts",
+        "$TURBO_ROOT$/scripts/gen-sdui-manifest.sh",
+        "$TURBO_ROOT$/scripts/publish-smoke.sh",
+        "$TURBO_ROOT$/packages/cli/src/commands/init.ts"
+      ]
+    },
+    "test:smoke": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "outputs": ["test-results/**"],
+      "inputs": ["src/**", "e2e/**", "playwright.config.ts"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "clean": {
+      "cache": false
+    },
+    "gen:schema": {
+        "dependsOn": ["^build"]
+    },
+    "gen:skill-refs": {
+        "dependsOn": ["^build"]
+    },
+    "@objectstack/spec#test:repo": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/**/*.object.ts",
         "$TURBO_ROOT$/packages/lint/src/**",
         "$TURBO_ROOT$/content/docs/references/**",
@@ -87,7 +548,7 @@
         "$TURBO_ROOT$/content/**"
       ]
     },
-    "@objectstack/core#test": {
+    "@objectstack/core#test:repo": {
       "dependsOn": ["^build"],
       "outputs": [],
       "inputs": [
@@ -95,10 +556,11 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/**/*.ts"
       ]
     },
-    "@objectstack/types#test": {
+    "@objectstack/types#test:repo": {
       "dependsOn": ["^build"],
       "outputs": [],
       "inputs": [
@@ -106,10 +568,11 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/**/*.ts"
       ]
     },
-    "@objectstack/organizations#test": {
+    "@objectstack/runtime#test:repo": {
       "dependsOn": ["^build"],
       "outputs": [],
       "inputs": [
@@ -117,167 +580,14 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
-        "$TURBO_ROOT$/packages/**/package.json"
-      ]
-    },
-    "@objectstack/cli#test": {
-      "dependsOn": ["build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/packages/verify/src/**",
-        "$TURBO_ROOT$/packages/plugins/plugin-security/src/**",
-        "$TURBO_ROOT$/packages/services/service-cluster/src/**",
-        "$TURBO_ROOT$/packages/connectors/connector-mcp/src/connector-mcp-plugin.ts",
-        "$TURBO_ROOT$/examples/app-showcase/src/ui/views/contact.view.ts",
-        "$TURBO_ROOT$/examples/app-showcase/src/data/objects/semantic-zoo.object.ts",
-        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/task-triage.page.ts",
-        "$TURBO_ROOT$/content/docs/deployment/cli.mdx",
-        "$TURBO_ROOT$/content/docs/deployment/index.mdx",
-        "$TURBO_ROOT$/content/docs/deployment/troubleshooting.mdx",
-        "$TURBO_ROOT$/content/docs/getting-started/index.mdx",
-        "$TURBO_ROOT$/content/docs/permissions/authentication.mdx",
-      "$TURBO_ROOT$/content/docs/plugins/index.mdx",
-      "$TURBO_ROOT$/content/docs/protocol/kernel/index.mdx",
-      "$TURBO_ROOT$/content/docs/protocol/kernel/plugin-spec.mdx",
-        "$TURBO_ROOT$/scripts/check-nul-bytes.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
-        "$TURBO_ROOT$/scripts/cli-unbuilt-workspace-lead.mjs",
-        "$TURBO_ROOT$/scripts/cli-unbuilt-workspace-lead.d.mts",
-        "$TURBO_ROOT$/scripts/cli-build-prerequisite.mjs",
-        "$TURBO_ROOT$/scripts/cross-package-test-inputs.mjs",
-        "$TURBO_ROOT$/packages/spec/src/system/translation.zod.ts",
-        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
-        "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml",
-        "$TURBO_ROOT$/packages/drivers/driver-sql/src/sql-driver.ts",
-        "$TURBO_ROOT$/packages/drivers/driver-sql/src/schema-drift.ts",
-        "$TURBO_ROOT$/packages/spec/src/data/field.zod.ts"
-      ]
-    },
-    "@objectstack/client#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/packages/runtime/src/route-ledger.ts",
-        "$TURBO_ROOT$/packages/rest/src/rest-route-ledger.ts",
-        "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.ts",
-        "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.ts",
-        "$TURBO_ROOT$/packages/services/service-datasource/src/datasource-route-ledger.ts",
-        "$TURBO_ROOT$/packages/plugins/plugin-auth/src/auth-route-ledger.ts",
-        "$TURBO_ROOT$/packages/runtime/src/route-ledger.conformance.test.ts",
-        "$TURBO_ROOT$/packages/rest/src/rest-route-ledger.conformance.test.ts",
-        "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.conformance.test.ts",
-        "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.conformance.test.ts",
-        "$TURBO_ROOT$/packages/services/service-datasource/src/datasource-route-ledger.conformance.test.ts",
-        "$TURBO_ROOT$/packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts",
-        "$TURBO_ROOT$/scripts/check-route-envelope.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
-        "$TURBO_ROOT$/scripts/**"
-      ]
-    },
-    "@objectstack/lint#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/packages/cli/src/commands/**",
-        "$TURBO_ROOT$/packages/metadata-protocol/src/**",
-        "$TURBO_ROOT$/packages/objectql/src/validation/**",
-        "$TURBO_ROOT$/packages/services/service-automation/src/**",
-        "$TURBO_ROOT$/examples/app-showcase/src/data/objects/contact.object.ts",
-        "$TURBO_ROOT$/examples/app-showcase/src/system/translations/index.ts",
-        "$TURBO_ROOT$/examples/app-showcase/src/ui/views/contact.view.ts",
-        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/capability-map.page.ts",
-        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/command-center-jsx.page.ts",
-        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/start-here.page.ts",
-        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/task-visualizations.pages.ts",
-        "$TURBO_ROOT$/examples/app-showcase/src/data/objects/task.object.ts",
-        "$TURBO_ROOT$/examples/app-showcase/src/ui/views/task.view.ts",
-        "$TURBO_ROOT$/sdui.manifest.json"
-      ]
-    },
-    "@objectstack/cloud-connection#test": {
-      "dependsOn": [
-        "^build"
-      ],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
-      ]
-    },
-    "@objectstack/plugin-email#test": {
-      "dependsOn": [
-        "^build"
-      ],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
-      ]
-    },
-    "@objectstack/platform-objects#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/packages/**/*.object.ts",
-      "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-      "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
-      "$TURBO_ROOT$/packages/lint/src/page-envelope-audit.test.ts",
-      "$TURBO_ROOT$/packages/cloud-connection/src/cloud-connection-ui.ts"
-      ]
-    },
-    "@objectstack/mcp#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
-      ]
-    },
-    "@objectstack/runtime#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
         "$TURBO_ROOT$/packages/**/*.ts",
         "$TURBO_ROOT$/scripts/cross-package-test-inputs.mjs"
       ]
     },
-    "@objectstack/objectql#test": {
+    "@objectstack/objectql#test:repo": {
       "dependsOn": ["^build"],
       "outputs": [],
       "inputs": [
@@ -285,11 +595,12 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/**/*.ts",
         "$TURBO_ROOT$/scripts/cross-package-test-inputs.mjs"
       ]
     },
-    "@objectstack/driver-sql#test": {
+    "@objectstack/rest#test:repo": {
       "dependsOn": ["^build"],
       "outputs": [],
       "inputs": [
@@ -297,208 +608,13 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
-        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
-      ]
-    },
-    "@objectstack/example-showcase#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
-      ]
-    },
-    "@objectstack/plugin-auth#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/packages/**/*.object.ts",
-        "$TURBO_ROOT$/packages/core/src/security/**",
-        "$TURBO_ROOT$/packages/runtime/src/**",
-        "$TURBO_ROOT$/packages/services/service-sms/src/**",
-        "$TURBO_ROOT$/scripts/check-published-files.mjs",
-        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
-        "$TURBO_ROOT$/packages/types/src/node-isolation.test.ts",
-        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
-      ]
-    },
-    "@objectstack/plugin-auth#typecheck": {
-      "dependsOn": ["build"],
-      "outputs": [],
-      "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
-    },
-    "@objectstack/trigger-api#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
-      ]
-    },
-    "@objectstack/trigger-record-change#test": {
-      "dependsOn": ["^build"],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/packages/runtime/src/expected-read-refusal-noise.ts",
-        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
-        "$TURBO_ROOT$/scripts/slot-lookup-baseline.json",
-        "$TURBO_ROOT$/packages/core/src/kernel.ts"
-      ],
-      "outputs": []
-    },
-    "@objectstack/plugin-approvals#test": {
-      "dependsOn": ["^build"],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/packages/runtime/src/expected-read-refusal-noise.ts",
-        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
-        "$TURBO_ROOT$/packages/plugins/plugin-sharing/src/team-graph.ts"
-      ],
-      "outputs": []
-    },
-    "@objectstack/plugin-security#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/packages/spec/src/security/**",
-        "$TURBO_ROOT$/packages/spec/src/identity/**"
-      ]
-    },
-    "@objectstack/dogfood#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/packages/client/src/**",
-        "$TURBO_ROOT$/packages/mcp/src/**",
-        "$TURBO_ROOT$/packages/plugins/plugin-hono-server/src/**",
-        "$TURBO_ROOT$/packages/rest/src/**",
-        "$TURBO_ROOT$/packages/runtime/src/**",
-        "$TURBO_ROOT$/packages/services/service-realtime/src/**",
-        "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.ts",
-        "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.ts",
-        "$TURBO_ROOT$/packages/services/service-settings/src/settings-route-ledger.ts",
-        "$TURBO_ROOT$/packages/spec/src/automation/**",
-        "$TURBO_ROOT$/packages/spec/src/data/**",
-        "$TURBO_ROOT$/examples/app-showcase/**",
-        "$TURBO_ROOT$/packages/cli/src/commands/**",
-        "$TURBO_ROOT$/packages/metadata/src/**",
-        "$TURBO_ROOT$/content/docs/protocol/kernel/realtime-protocol.mdx"
-      ]
-    },
-    "@objectstack/rest#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/content/docs/protocol/objectql/state-machine.mdx",
         "$TURBO_ROOT$/skills/objectstack-automation/SKILL.md",
         "$TURBO_ROOT$/content/**",
         "$TURBO_ROOT$/docs/**",
         "$TURBO_ROOT$/skills/**"
       ]
-    },
-    "@objectstack/formula#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/packages/spec/src/security/rls.zod.ts",
-        "$TURBO_ROOT$/skills/objectstack-formula/**"
-      ]
-    },
-    "@objectstack/metadata-protocol#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/scripts/check-durability-degradation-log-level.mjs"
-      ]
-    },
-    "@objectstack/downstream-contract#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/packages/spec/src/**",
-        "$TURBO_ROOT$/packages/spec/package.json"
-      ]
-    },
-    "create-objectstack#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!dist/**",
-        "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/content/**",
-        "$TURBO_ROOT$/scripts/sync-template-versions.mjs",
-        "$TURBO_ROOT$/scripts/invoked-as.mjs",
-        "$TURBO_ROOT$/.github/workflows/scaffold-e2e.yml",
-        "$TURBO_ROOT$/packages/cli/src/commands/serve.ts",
-        "$TURBO_ROOT$/scripts/gen-sdui-manifest.sh",
-        "$TURBO_ROOT$/scripts/publish-smoke.sh",
-        "$TURBO_ROOT$/packages/cli/src/commands/init.ts"
-      ]
-    },
-    "test:smoke": {
-      "dependsOn": ["build"],
-      "cache": false,
-      "outputs": ["test-results/**"],
-      "inputs": ["src/**", "e2e/**", "playwright.config.ts"]
-    },
-    "dev": {
-      "cache": false,
-      "persistent": true
-    },
-    "clean": {
-      "cache": false
-    },
-    "gen:schema": {
-        "dependsOn": ["^build"]
-    },
-    "gen:skill-refs": {
-        "dependsOn": ["^build"]
     }
   }
 }

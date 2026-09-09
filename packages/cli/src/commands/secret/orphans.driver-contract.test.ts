@@ -44,6 +44,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -117,10 +118,15 @@ describe('os secret orphans — the concrete driver behind both reads (#14843)',
     }
     savedEnv.OS_ARTIFACT_PATH = process.env.OS_ARTIFACT_PATH;
     savedEnv.NODE_ENV = process.env.NODE_ENV;
+    savedEnv.OS_SECRET_KEY = process.env.OS_SECRET_KEY;
     // Deliberately absent: no compiled artifact, so the boot is the bare data
     // stack plus the two plugins the command passes.
     process.env.OS_ARTIFACT_PATH = join(dir, 'dist', 'objectstack.json');
     process.env.NODE_ENV = 'production';
+    // The key this production-posture boot needs, declared here rather than
+    // inherited from a sibling's persisted `$HOME/.objectstack/dev-crypto-key`
+    // (#16491): a fresh value per run, never written to disk.
+    process.env.OS_SECRET_KEY = randomBytes(32).toString('hex');
     // The command does not pass `projectRoot`, so its boot takes `process.cwd()`
     // for its state directory. Stand in the tempdir so the run under test keeps
     // its state there instead of in whatever directory vitest started in.
@@ -154,7 +160,7 @@ describe('os secret orphans — the concrete driver behind both reads (#14843)',
       if (savedEnv[key] === undefined) delete process.env[key];
       else process.env[key] = savedEnv[key];
     }
-    for (const key of ['OS_ARTIFACT_PATH', 'NODE_ENV'] as const) {
+    for (const key of ['OS_ARTIFACT_PATH', 'NODE_ENV', 'OS_SECRET_KEY'] as const) {
       if (savedEnv[key] === undefined) delete process.env[key];
       else process.env[key] = savedEnv[key];
     }

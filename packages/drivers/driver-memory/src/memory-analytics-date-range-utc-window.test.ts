@@ -45,7 +45,7 @@ import { vi } from 'vitest';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 import { AnalyticsQuerySchema } from '@objectstack/spec/data';
-import type { AnalyticsQuery, Cube } from '@objectstack/spec/data';
+import type { AnalyticsDateRange, AnalyticsQuery, Cube } from '@objectstack/spec/data';
 
 const REAL_TZ = process.env.TZ;
 
@@ -101,7 +101,8 @@ const CUBE: Cube = {
 const asQuery = (input: AnalyticsQuery): AnalyticsQuery => AnalyticsQuerySchema.parse(input);
 
 /** Ask `range` over rows planted at `instants`; answer which probes came back. */
-async function probesSelected(instants: string[], range = 'today'): Promise<string[]> {
+// `range` is the CLOSED contract (#16041): a preset name or an explicit window.
+async function probesSelected(instants: string[], range: AnalyticsDateRange = 'today'): Promise<string[]> {
     const driver = new InMemoryDriver({
         initialData: {
             events: instants.map((iso, i) => ({
@@ -256,30 +257,68 @@ describe('#15825 defect 1 fences', () => {
         });
     });
 
-    it('the unrecognised-range fallback carries no calendar — same answer in every zone', async () => {
-        // This repair touched only the two legs that BUILD a window. The
-        // `return [range, range]` fallback is untouched, and this fence holds
-        // it that way: its answer must not depend on the process timezone.
-        //
-        // ⚠️ It is deliberately NOT asserted to be a sensible answer. Measured
-        // 2026-09-05: an unparseable `dateRange` reaches mingo as
-        // `{$gte: '<garbage>', $lte: '<garbage>'}` and, under BSON cross-type
-        // ordering, matches EVERY `Date`-typed row — so the time filter is
-        // silently dropped rather than refused. That is a different defect
-        // class from this card's (vocabulary, not calendar) and is filed
-        // separately; ⛔ it is not repaired here.
-        const probes = [
-            '2020-01-01T00:00:00.000Z',
-            '2026-09-05T06:00:00.000Z',
-            '2099-01-01T00:00:00.000Z',
-        ];
-        const answers: string[] = [];
+    // ⭐ REINSTATED under #16322, in the form the requirement named.
+    //
+    // The retired fence fed `dateRange: 'not a range at all'` through
+    // `AnalyticsQuerySchema.parse` to pin that the `[range, range]` fallback's
+    // answer did not depend on the process zone. #16041 closed the string arm
+    // to the `date-range-presets.ts` vocabulary, so that input is refused at
+    // the schema door (`400 ANALYTICS_DATE_RANGE_UNRECOGNIZED`) and the
+    // fallback it protected is GONE — this card deleted it rather than
+    // preserving a window that matched every row.
+    //
+    // ⛔ The old assertion was NOT re-spelled: "the fallback carries no
+    // calendar" is a claim about an answer that no longer exists. What replaces
+    // it is the same question asked of the REFUSAL — an unrecognised range is
+    // refused identically in every zone, with the ADR-0112 code and status,
+    // and it is refused rather than answered.
+    //
+    // The cross-driver half (memory and the SQL analytics path refusing with
+    // one envelope) is the shared conformance fixture this card owed:
+    // `packages/core/src/utils/analytics-date-range-conformance.ts`.
+    it('the unrecognised-range REFUSAL carries no calendar — same envelope in every zone', async () => {
+        const seen = new Set<string>();
         for (const zone of ['UTC', 'Asia/Shanghai', 'America/Los_Angeles', 'Pacific/Chatham']) {
             await at(zone, '2026-09-05T12:00:00Z', async () => {
-                answers.push(JSON.stringify(await probesSelected(probes, 'not a range at all')));
+                const driver = new InMemoryDriver({
+                    initialData: {
+                        events: [
+                            { id: 1, probe: 'a', created_at: new Date('2020-01-01T00:00:00.000Z') },
+                            { id: 2, probe: 'b', created_at: new Date('2099-01-01T00:00:00.000Z') },
+                        ],
+                    },
+                });
+                await driver.connect();
+                const service = new MemoryAnalyticsService({ driver, cubes: [CUBE] });
+                // ⛔ Deliberately NOT through `asQuery`: the schema door refuses
+                // this first, and what this pins is the DRIVER's own answer for
+                // an in-process caller past that door — `/analytics/dataset/query`
+                // being the live example, since it types its selection from
+                // `AnalyticsQuery` and never Zod-parses it.
+                const err = await service.query({
+                    cube: 'events',
+                    measures: ['events.count'],
+                    dimensions: ['events.probe'],
+                    timeDimensions: [{ dimension: 'events.createdAt', dateRange: 'not a range at all' }],
+                } as unknown as AnalyticsQuery).then(
+                    (r) => ({ kind: 'answered' as const, rows: r.rows.length }),
+                    (e: Error & { code?: string; status?: number }) => ({
+                        kind: 'refused' as const, code: e.code, status: e.status, message: e.message,
+                    }),
+                );
+                // ⛔ The defect this replaces, named as the thing that must not
+                // happen: an unresolvable window answered, and answered with
+                // EVERY row — 2020 and 2099 both.
+                expect(err.kind, `${zone}: an unresolvable window must not be answered`).toBe('refused');
+                seen.add(JSON.stringify(err));
             });
         }
-        expect(new Set(answers).size, `the fallback answered differently per zone: ${answers.join(' | ')}`).toBe(1);
+        // One envelope, byte for byte, in all four zones — no calendar reaches
+        // a refusal, which is the durable half of what the retired fence said.
+        expect([...seen]).toHaveLength(1);
+        const only = JSON.parse([...seen][0]) as { code: string; status: number };
+        expect(only.code).toBe('ANALYTICS_DATE_RANGE_UNRECOGNIZED');
+        expect(only.status).toBe(400);
     });
 
     it('the process timezone is restored after every case', () => {

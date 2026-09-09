@@ -1213,11 +1213,58 @@ export interface SuspendedRun {
  * A terminal run summary persisted as durable run history (completed / failed)
  * for the "Runs" observability surface — distinct from a live {@link SuspendedRun}.
  */
+/**
+ * [#15223] The terminal states a run can be RECORDED in — the durable
+ * run-history vocabulary, declared ONCE because three sites have to agree on
+ * it: the writer ({@link AutomationEngine.recordLog}'s terminal predicate),
+ * the reader (`ObjectStoreSuspendedRunStore`'s row gate) and the stored
+ * column (`sys_automation_run.status`, whose `Field.select` options and
+ * retention `onlyWhen` scope enumerate the same four). A second copy of this
+ * list is how a widened writer ends up with rows a reader filters away.
+ *
+ * These are exactly the four `ExecutionStatus` members (`@objectstack/spec`)
+ * that mean "this run has stopped and will not resume". `paused`,
+ * `running`, `pending` and `retrying` are live states with no history row;
+ * `refused` is declared by the spec but no engine path produces it today, so
+ * adding it here would enumerate a value nothing can write.
+ */
+export const TERMINAL_RUN_STATUSES = ['completed', 'failed', 'cancelled', 'timed_out'] as const;
+
+/** One member of {@link TERMINAL_RUN_STATUSES}. */
+export type TerminalRunStatus = (typeof TERMINAL_RUN_STATUSES)[number];
+
+/** Whether `status` is one of {@link TERMINAL_RUN_STATUSES}. */
+export function isTerminalRunStatus(status: unknown): status is TerminalRunStatus {
+    return (TERMINAL_RUN_STATUSES as readonly unknown[]).includes(status);
+}
+
 export interface RunRecord {
     runId: string;
     flowName: string;
     flowVersion?: number;
-    status: 'completed' | 'failed';
+    /**
+     * The terminal state this run reached, as the engine observed it.
+     *
+     * [#15223] This declared `'completed' | 'failed'` — TWO members — while
+     * {@link AutomationEngine.recordLog}'s own terminal predicate admitted
+     * FOUR and `ExecutionStatus` (`@objectstack/spec`) declared them all.
+     * Both ends folded: the write mapped everything that was not `completed`
+     * to `failed`, and the read mapped everything that was not `failed` to
+     * `completed`. The information was not hidden by that, it was DESTROYED
+     * at write time, so the same run read `cancelled` in-process (`getRun`
+     * prefers the ring entry) and `failed` after a restart or a ring
+     * eviction.
+     *
+     * ⛔ The narrowing was INHERITED, not chosen — recorded here so the next
+     * reader does not re-derive it. Nothing was paying for it: the column is a
+     * `Field.select` that stores the string whatever its width, so there was
+     * no storage cost to buy, and neither file stated a reason. It is simply
+     * older than what it had to carry — the durable history row (#2585)
+     * predates `cancelRun` (ADR-0044), and `timed_out` was in the spec's
+     * vocabulary the whole time. ⛔ Do not re-narrow it to make a downstream
+     * `switch` exhaustive; widen the switch.
+     */
+    status: TerminalRunStatus;
     startedAt: string;
     startTime?: number;
     /** When the run reached its terminal state. */
@@ -1464,6 +1511,57 @@ export interface SuspensionRestoreResult {
 }
 
 /**
+ * [#15358] What {@link AutomationEngine.inspectConsumedSuspension} answers:
+ * would {@link AutomationEngine.restoreConsumedSuspension} have a consumed
+ * suspension to put back for this run? READ from the same two witnesses that
+ * verb reads, and re-arming nothing.
+ *
+ * Every arm is earned by its own observation, and the three negative ones are
+ * deliberately not folded into one boolean — a consumer that branches on
+ * `repairable` alone reads the middle one wrong in both directions:
+ *
+ *  - `repairable: true` — a consumed-suspension snapshot is held for the run,
+ *    in this process's hot journal or on the durable terminal row (`witness`
+ *    says which). The restore verb re-arms it.
+ *  - `'SNAPSHOT_DROPPED'` — the run DID strand, but the store could not
+ *    persist the snapshot (over its row budget — the row says so,
+ *    {@link RunRecord.consumedSuspensionDropped}) and THIS process holds no
+ *    hot copy of it. Repairable only by the process that stranded it, while
+ *    that process is still running; the restore verb refuses it here naming
+ *    the budget. ⛔ Neither "unrepairable" nor "never a strand".
+ *  - `'NO_CONSUMED_SUSPENSION'` — neither witness holds anything: the run
+ *    reached a terminal state that was NOT a strand (completed, cancelled,
+ *    cascade-failed — `failSuspendedRun` consumes an ancestor's pause and
+ *    journals nothing), never paused at all, or DID strand and its snapshot
+ *    is no longer held (the journal evicted a copy whose write never landed;
+ *    the run was restored and then finished; a store class without
+ *    `loadTerminal`, after a restart). Deliberately does not claim which:
+ *    nothing in the engine can tell those apart, and the restore verb's own
+ *    refusal text names the same three.
+ *  - `'RUN_SUSPENDED'` — a live suspension exists, so the run is resumable
+ *    already (typically: it was restored). Nothing to repair.
+ */
+export type ConsumedSuspensionInspection =
+    | {
+        repairable: true;
+        runId: string;
+        flowName: string;
+        /**
+         * The pause a restore would re-arm — its identity, the pair
+         * {@link SuspendedRunStore.claimSuspension} compares.
+         */
+        nodeId: string;
+        correlation?: string;
+        /** Which of the two witnesses answered (see the restore verb's read). */
+        witness: 'journal' | 'durable';
+        /** When the resume that consumed the suspension failed. */
+        consumedAt: string;
+    }
+    | { repairable: false; runId: string; reason: 'RUN_SUSPENDED'; nodeId: string }
+    | { repairable: false; runId: string; reason: 'SNAPSHOT_DROPPED'; dropped: ConsumedSuspensionDropNotice }
+    | { repairable: false; runId: string; reason: 'NO_CONSUMED_SUSPENSION' };
+
+/**
  * [#14333] Where a suspension was parked when the caller READ it — the
  * condition a {@link SuspendedRunStore.claimSuspension} compare-and-set is
  * taken against.
@@ -1565,17 +1663,57 @@ export interface SuspendedRunStore {
     loadTerminal?(runId: string): Promise<RunRecord | null>;
 }
 
+/** What a claimed dispatch turned into (#14501). */
+export type FlowDispatchOutcome = 'succeeded' | 'failed';
+
 /**
- * Persisted claim ledger for trigger dispatch idempotency (#10220).
+ * One row of the dispatch-claim ledger, as a reader sees it (#14501).
+ *
+ * `outcome: null` is the honest third state, not a missing value: the claim
+ * was taken and never settled — either the dispatch is in flight right now, or
+ * the process that took it died mid-launch, or the row predates #14501. Every
+ * consumer reads all three of those as **not delivered**, which is the safe
+ * direction: an unforced `replay()` re-runs them rather than refusing on a
+ * claim nobody ever settled.
+ */
+export interface FlowDispatchClaim {
+    /** The dispatch key — the ledger row's primary id. */
+    key: string;
+    /** When the key was claimed (ISO-8601), or `null` if the store cannot say. */
+    claimedAt: string | null;
+    /** Terminal outcome, or `null` while the claim is unsettled. */
+    outcome: FlowDispatchOutcome | null;
+    /** When the outcome was recorded (ISO-8601), or `null` while unsettled. */
+    settledAt: string | null;
+}
+
+/**
+ * Persisted claim ledger for trigger dispatch idempotency (#10220), extended
+ * by #14501 to record what each claim turned into.
  *
  * `claim(key)` is check-and-record: `true` means the caller now owns this
  * dispatch key and should launch the flow; `false` means some earlier sweep —
  * possibly in a previous process lifetime — already dispatched it. Backed by
  * `sys_flow_dispatch` in production (see `ObjectStoreFlowDispatchStore`), so
  * dedup survives kernel rebuild.
+ *
+ * `settle` and `read` are OPTIONAL, and their absence is a DECLARED
+ * degradation rather than a silent one — the same posture
+ * {@link SuspendedRunStore.claimSuspension} takes. A store that predates
+ * #14501 implements neither: every claim then reads as unsettled, and the
+ * `replay()` refusal the #14501 ruling adds simply never fires. Dedup is
+ * unchanged; only the refusal is lost, and the engine says so once.
  */
 export interface FlowDispatchStore {
     claim(key: string): Promise<boolean>;
+    /**
+     * Record the outcome of an already-claimed key. A no-op for a key that was
+     * never claimed — settling is a transition on an existing row, never a way
+     * to create one.
+     */
+    settle?(key: string, outcome: FlowDispatchOutcome): Promise<void>;
+    /** The claim for `key`, or `null` when the key was never claimed. */
+    read?(key: string): Promise<FlowDispatchClaim | null>;
 }
 
 /**
@@ -1933,11 +2071,15 @@ export class AutomationEngine implements IAutomationService {
      */
     private flowDispatchStore: FlowDispatchStore | null = null;
     /**
-     * In-process dispatch-claim fallback: key → claim time (epoch ms). Used
-     * when no persisted ledger is attached, and per-key when the ledger
-     * errors. Entries expire after {@link IN_PROCESS_DISPATCH_CLAIM_TTL_MS}.
+     * In-process dispatch-claim fallback: key → claim time (epoch ms) and the
+     * outcome it settled to (#14501), `null` while unsettled. Used when no
+     * persisted ledger is attached, and per-key when the ledger errors.
+     * Entries expire after {@link IN_PROCESS_DISPATCH_CLAIM_TTL_MS}.
      */
-    private readonly inProcessDispatchClaims = new Map<string, number>();
+    private readonly inProcessDispatchClaims = new Map<
+        string,
+        { at: number; outcome: FlowDispatchOutcome | null }
+    >();
     /**
      * Whether this engine has already said its dispatch dedup is in-process
      * only (#10220). Once per instance: a silent fallback hides a permanently
@@ -1953,6 +2095,13 @@ export class AutomationEngine implements IAutomationService {
      * per resume is log spam.
      */
     private advanceClaimDegradationWarned = false;
+    /**
+     * [#14501] Whether this engine has already said that its attached ledger
+     * records no claim OUTCOMES — same once-per-instance reason as the two
+     * fields above: a silent fallback hides a permanently weakened guarantee,
+     * repeating it per replay is log spam.
+     */
+    private dispatchOutcomeDegradationWarned = false;
 
     constructor(logger: Logger, store?: SuspendedRunStore, options?: AutomationEngineOptions) {
         this.logger = logger;
@@ -2027,13 +2176,109 @@ export class AutomationEngine implements IAutomationService {
     /** In-process half of {@link claim}: TTL-pruned check-and-record. */
     private claimInProcess(key: string): boolean {
         const now = Date.now();
-        const cutoff = now - IN_PROCESS_DISPATCH_CLAIM_TTL_MS;
-        for (const [k, t] of this.inProcessDispatchClaims) {
-            if (t < cutoff) this.inProcessDispatchClaims.delete(k);
-        }
+        this.pruneInProcessDispatchClaims(now);
         if (this.inProcessDispatchClaims.has(key)) return false;
-        this.inProcessDispatchClaims.set(key, now);
+        this.inProcessDispatchClaims.set(key, { at: now, outcome: null });
         return true;
+    }
+
+    private pruneInProcessDispatchClaims(now: number): void {
+        const cutoff = now - IN_PROCESS_DISPATCH_CLAIM_TTL_MS;
+        for (const [k, rec] of this.inProcessDispatchClaims) {
+            if (rec.at < cutoff) this.inProcessDispatchClaims.delete(k);
+        }
+    }
+
+    /**
+     * Record what a claimed dispatch turned into (#14501) — the second half of
+     * {@link claim}, and the half `IJobService.replay()` reads to decide
+     * whether a window was DELIVERED or merely attempted.
+     *
+     * Best-effort by construction, in both directions. A settle that throws is
+     * logged and swallowed: the dispatch already happened, and turning a
+     * delivered flow into a thrown one to report a bookkeeping failure is
+     * strictly worse than leaving the row unsettled — an unsettled row reads
+     * as "not delivered", so the only cost is that a later replay is allowed
+     * through instead of refused. A ledger without `settle()` is the same
+     * cost, said once by {@link readDispatch}.
+     *
+     * ⚠️ Not every call writes. `succeeded` is ABSORBING: a claim that already
+     * recorded success stays `succeeded` even if a later forced replay throws,
+     * because rewriting it would silently reopen the unforced re-delivery door
+     * the #14501 ruling closed. The store enforces that (`isSettleAllowed`) and
+     * refuses by not writing, never by throwing — a refusal is the invariant
+     * working, not a failure to report.
+     */
+    async settleDispatch(key: string, outcome: FlowDispatchOutcome): Promise<void> {
+        const store = this.flowDispatchStore;
+        if (store && typeof store.settle === 'function') {
+            try {
+                await store.settle(key, outcome);
+                return;
+            } catch (err) {
+                this.logger.warn(
+                    `[automation] flow-dispatch settle '${key}' → '${outcome}' failed against the persisted ledger — ` +
+                        `the claim stays UNSETTLED, which reads as 'not delivered': a later replay of this window is ` +
+                        `allowed through rather than refused. The store failure is in this record's meta.`,
+                    describeThrownForLog(err),
+                );
+            }
+        }
+        const existing = this.inProcessDispatchClaims.get(key);
+        // Same write rule as the persisted ledger: `succeeded` is absorbing, so
+        // the fallback cannot reopen a re-delivery door the durable path keeps
+        // shut. Kept here rather than imported so the engine stays free of a
+        // dependency on the store module it merely drives.
+        if (existing && !(existing.outcome === 'succeeded' && outcome === 'failed')) {
+            this.inProcessDispatchClaims.set(key, { ...existing, outcome });
+        }
+    }
+
+    /**
+     * Read one dispatch claim (#14501): `null` when the key was never claimed.
+     *
+     * A ledger that cannot answer — none attached, one predating #14501, or a
+     * read that throws — reports the key as UNCLAIMED rather than guessing.
+     * That is the availability-over-strict-once direction this ledger already
+     * takes everywhere else: the caller re-runs, it never refuses on a reading
+     * it could not make.
+     */
+    async readDispatch(key: string): Promise<FlowDispatchClaim | null> {
+        const store = this.flowDispatchStore;
+        if (store && typeof store.read === 'function') {
+            try {
+                return await store.read(key);
+            } catch (err) {
+                this.logger.warn(
+                    `[automation] flow-dispatch read '${key}' failed against the persisted ledger — ` +
+                        `reporting the key as UNCLAIMED (availability over strict-once: a replay proceeds rather ` +
+                        `than being refused on a reading we could not make). The store failure is in this record's meta.`,
+                    describeThrownForLog(err),
+                );
+                return null;
+            }
+        }
+        if (store && !this.dispatchOutcomeDegradationWarned) {
+            this.dispatchOutcomeDegradationWarned = true;
+            // The ledger predates the outcome half of the claim contract.
+            this.logger.warn(
+                '[automation] the attached flow-dispatch ledger has no read() — this message describes the ' +
+                    'ledger that has no read()/settle() AT ALL, where dispatch claims are still deduplicated ' +
+                    'and the in-process fallback still records outcomes and still refuses WITHIN one process ' +
+                    'lifetime, but nothing outlives a restart. A ledger that has settle() but no read() is ' +
+                    'weaker still: outcomes are written durably and never read back, so no replay is ever ' +
+                    'refused, in this lifetime or any other.',
+            );
+        }
+        this.pruneInProcessDispatchClaims(Date.now());
+        const rec = this.inProcessDispatchClaims.get(key);
+        if (!rec) return null;
+        return {
+            key,
+            claimedAt: new Date(rec.at).toISOString(),
+            outcome: rec.outcome,
+            settledAt: null,
+        };
     }
 
     /**
@@ -3992,7 +4237,11 @@ export class AutomationEngine implements IAutomationService {
             id: r.runId,
             flowName: r.flowName,
             flowVersion: r.flowVersion,
-            status: r.status, // 'completed' | 'failed' — both valid ExecutionLog statuses
+            // [#15223] All four {@link TERMINAL_RUN_STATUSES} members, each a
+            // valid `ExecutionLog` status — the schema has declared the whole
+            // vocabulary since before this row existed, and it was the
+            // persistence layer, not the contract, that reported only two.
+            status: r.status,
             startedAt: r.startedAt,
             completedAt: r.finishedAt,
             durationMs: r.durationMs,
@@ -6440,6 +6689,102 @@ export class AutomationEngine implements IAutomationService {
         return hot.persisted === 'landed';
     }
 
+    /**
+     * [#15358] The two-witness READ of a run's consumed suspension — this
+     * process's hot journal against the durable terminal row — factored out of
+     * {@link restoreConsumedSuspension} so that {@link inspectConsumedSuspension}
+     * answers from the same reading and the two cannot disagree. PURE: it
+     * mutates nothing. A hot copy the row proves stale is REPORTED
+     * (`staleHot`) for the restore verb to drop; the read-only verb leaves it.
+     *
+     * [#13937] Two witnesses of one strand, and neither is trusted alone —
+     * the contract review of that ruling's services half measured both
+     * single-witness readings wrong, one store class apart:
+     *
+     *  - This process's HOT copy is the verbatim object the failure was
+     *    journalled from: the pause's own node, variables, step log as of the
+     *    pause. It is a per-process cache. The replica that stranded a run
+     *    keeps it after another replica restored, resumed and FINISHED the
+     *    run, and re-arming it then re-runs every node after the pause —
+     *    shape 2's silent double-run, through the restore verb's side door
+     *    (pinned in `stranded-run-status.test.ts`, red on the hot-only tree).
+     *  - The DURABLE row is the record every replica can read, and a
+     *    flattened, column-bounded copy of the same snapshot: the object
+     *    store rebuilds it from columns, DROPS it over a byte budget — and
+     *    says so in the row, `consumedSuspensionDropped` — and receives it
+     *    fire-and-forget. Read alone, a snapshot-less row sent a run the
+     *    store could not persist into NO_CONSUMED_SUSPENSION on the very
+     *    replica holding its copy (pinned in `stranded-run-object-store.test.ts`,
+     *    red on the durable-first tree).
+     *
+     * So: the hot copy is preferred whenever both describe the SAME pause
+     * ({@link rowSupersedesJournal}). When they describe different pauses,
+     * the newest strand wins — a hot copy whose own write never landed
+     * (`persisted` is not `'landed'`: the #13617 exception, a row the store
+     * was never handed says nothing) beats the older row, and a landed hot
+     * copy yields to the later strand another replica recorded. A row with
+     * neither a snapshot nor a drop notice is "the run moved on" only for a
+     * hot copy whose write did land — that copy is then stale rather than
+     * honoured. A hot copy answers alone where there is no row to ask: no
+     * store, no run history, a write that never landed or is still in flight.
+     *
+     * ⚠️ Sampling instant (#15358 contract review): the hot copy is read HERE,
+     * i.e. AFTER the caller's `await loadTerminal(...)`, where the inline read
+     * this replaced took it BEFORE that await. The decision table is the same;
+     * the sample time is later. With {@link MAX_CONSUMED_SUSPENSIONS} bounding
+     * the journal, an eviction that lands during that await now answers a
+     * refusal (`NO_CONSUMED_SUSPENSION`) where the old read would have restored
+     * from the copy it had already captured. The direction is refusal, never a
+     * double-run — the copy is gone either way; only which of the two verbs
+     * notices moved.
+     *
+     * @param terminal - The durable terminal row, already loaded by the
+     *   caller (each caller owns its own outage posture for that read).
+     */
+    private resolveConsumedSuspensionWitnesses(
+        runId: string,
+        terminal: RunRecord | null,
+    ): {
+        consumed?: ConsumedSuspension;
+        witness?: 'journal' | 'durable';
+        dropped?: ConsumedSuspensionDropNotice;
+        /** The hot copy describes a pause the run has since LEFT. */
+        staleHot: boolean;
+    } {
+        const hot = this.consumedSuspensions.get(runId);
+        if (!terminal) {
+            return hot ? { consumed: hot, witness: 'journal', staleHot: false } : { staleHot: false };
+        }
+        if (terminal.consumedSuspension) {
+            const durable: ConsumedSuspension = {
+                run: terminal.consumedSuspension,
+                consumedAt: terminal.finishedAt ?? terminal.startedAt,
+                error: terminal.error ?? '',
+            };
+            if (hot && !this.rowSupersedesJournal(hot, durable.run)) {
+                return { consumed: hot, witness: 'journal', staleHot: false };
+            }
+            return { consumed: durable, witness: 'durable', staleHot: hot !== undefined };
+        }
+        if (terminal.consumedSuspensionDropped) {
+            const dropped = terminal.consumedSuspensionDropped;
+            if (hot && !this.rowSupersedesJournal(hot, dropped)) {
+                return { consumed: hot, witness: 'journal', dropped, staleHot: false };
+            }
+            return { dropped, staleHot: hot !== undefined };
+        }
+        if (hot && hot.persisted !== 'landed') {
+            // The row predates this strand — this process's own write for it
+            // never reached the store (in flight, or failed and reported at
+            // `error`). The store's silence says nothing.
+            return { consumed: hot, witness: 'journal', staleHot: false };
+        }
+        // A later terminal record with no snapshot and no drop notice:
+        // completed, cancelled or cascade-failed after any hot copy was
+        // taken. Stale by definition.
+        return { staleHot: hot !== undefined };
+    }
+
     /** Build a refusal from {@link restoreConsumedSuspension}. */
     private refuseRestore(
         runId: string,
@@ -6609,40 +6954,11 @@ export class AutomationEngine implements IAutomationService {
             }
 
             // [#13937] Two witnesses of one strand, and neither is trusted
-            // alone — the contract review of this ruling's services half
-            // measured both single-witness readings wrong, one store class
-            // apart:
-            //
-            //  - This process's HOT copy is the verbatim object the failure
-            //    was journalled from: the pause's own node, variables, step
-            //    log as of the pause. It is a per-process cache. The replica
-            //    that stranded a run keeps it after another replica restored,
-            //    resumed and FINISHED the run, and re-arming it then re-runs
-            //    every node after the pause — shape 2's silent double-run,
-            //    through this verb's side door (pinned in
-            //    `stranded-run-status.test.ts`, red on the hot-only tree).
-            //  - The DURABLE row is the record every replica can read, and a
-            //    flattened, column-bounded copy of the same snapshot: the
-            //    object store rebuilds it from columns, DROPS it over a byte
-            //    budget — and says so in the row, `consumedSuspensionDropped`
-            //    — and receives it fire-and-forget. Read alone, a snapshot-less
-            //    row sent a run the store could not persist into
-            //    NO_CONSUMED_SUSPENSION on the very replica holding its copy
-            //    (pinned in `stranded-run-object-store.test.ts`, red on the
-            //    durable-first tree).
-            //
-            // So: the hot copy is preferred whenever both describe the SAME
-            // pause (`rowSupersedesJournal`). When they describe different
-            // pauses, the newest strand wins — a hot copy whose own write never
-            // landed (`persisted` is not `'landed'`: the #13617 exception, a
-            // row the store was never handed says nothing) beats the older
-            // row, and a landed hot copy yields to the later strand another
-            // replica recorded. A row with neither a snapshot nor a drop notice
-            // is "the run moved on" only for a hot copy whose write did land —
-            // that copy is then DROPPED rather than honoured. A hot copy
-            // answers alone where there is no row to ask: no store, no run
-            // history, a write that never landed or is still in flight.
-            const hot = this.consumedSuspensions.get(runId);
+            // alone — the read is {@link resolveConsumedSuspensionWitnesses},
+            // shared with the read-only {@link inspectConsumedSuspension} so
+            // what that verb calls repairable is what this one restores. The
+            // durable row is loaded HERE because this verb's posture on an
+            // unreadable history is its own: a refusal, never a guess.
             let terminal: RunRecord | null = null;
             if (this.store?.loadTerminal) {
                 try {
@@ -6664,38 +6980,10 @@ export class AutomationEngine implements IAutomationService {
                 }
             }
 
-            let consumed: ConsumedSuspension | undefined;
-            let dropped: ConsumedSuspensionDropNotice | undefined;
-            if (!terminal) {
-                consumed = hot;
-            } else if (terminal.consumedSuspension) {
-                const durable: ConsumedSuspension = {
-                    run: terminal.consumedSuspension,
-                    consumedAt: terminal.finishedAt ?? terminal.startedAt,
-                    error: terminal.error ?? '',
-                };
-                consumed = hot && !this.rowSupersedesJournal(hot, durable.run) ? hot : durable;
-                // A hot copy of a pause the run has since LEFT — re-arming it
-                // would send the run back through work it already did.
-                if (hot && consumed !== hot) this.consumedSuspensions.delete(runId);
-            } else if (terminal.consumedSuspensionDropped) {
-                dropped = terminal.consumedSuspensionDropped;
-                if (hot && !this.rowSupersedesJournal(hot, dropped)) {
-                    consumed = hot;
-                } else if (hot) {
-                    this.consumedSuspensions.delete(runId);
-                }
-            } else if (hot && hot.persisted !== 'landed') {
-                // The row predates this strand — this process's own write for
-                // it never reached the store (in flight, or failed and
-                // reported at `error`). The store's silence says nothing.
-                consumed = hot;
-            } else if (hot) {
-                // A later terminal record with no snapshot and no drop notice:
-                // completed, cancelled or cascade-failed after this copy was
-                // taken. Stale by definition.
-                this.consumedSuspensions.delete(runId);
-            }
+            const { consumed, dropped, staleHot } = this.resolveConsumedSuspensionWitnesses(runId, terminal);
+            // A hot copy of a pause the run has since LEFT — re-arming it
+            // would send the run back through work it already did.
+            if (staleHot) this.consumedSuspensions.delete(runId);
 
             if (!consumed) {
                 // Nothing to restore — say WHICH nothing. The remedy differs for
@@ -6826,6 +7114,80 @@ export class AutomationEngine implements IAutomationService {
         } finally {
             this.restoring.delete(runId);
         }
+    }
+
+    /**
+     * [#15358] **Read-only**: would {@link restoreConsumedSuspension} have a
+     * consumed suspension to put back for `runId`? Answers from the SAME two
+     * witnesses that verb reads — this process's hot journal and the durable
+     * terminal row, reconciled by {@link resolveConsumedSuspensionWitnesses}
+     * — and re-arms nothing and writes nothing. The one incidental mutation is
+     * the strict suspension read's own: {@link loadSuspendedRunStrict} may
+     * evict a phantom `suspendedRuns` entry the store has already answered
+     * "no row" for (#15832; `evictConsumedSuspension` touches `suspendedRuns`
+     * only, never the consumed-suspension journal) — identical to
+     * {@link hasSuspendedRun} today. A stale hot copy the row supersedes is
+     * REPORTED by the shared read and left in place; only the restore verb
+     * drops it.
+     *
+     * ## Why a dedicated member, and not a field on the run
+     *
+     * The discriminator lives on the durable {@link RunRecord}
+     * (`consumedSuspension` / `consumedSuspensionDropped`) and in this
+     * process's journal; {@link getRun} answers an {@link ExecutionLogEntry},
+     * which carries neither ON PURPOSE — `recordLog` keeps the snapshot off
+     * that interface because `GET /automation/:name/runs/:runId` serves it
+     * verbatim. So a consumer reading `getRun` sees `status: 'failed'` and
+     * cannot tell the #13909 strand (repairable by the restore verb) from a
+     * cascade-failed ancestor (`failAncestors` → `failSuspendedRun`, which
+     * consumes the ancestor's pause and journals nothing — repairable by
+     * nothing; #15222's shape). Ruled on #15358 (B′, 2026-09-07): the answer is
+     * published as a dedicated read-only engine member, never on the wire.
+     * plugin-approvals' stranded-request inspection is the first consumer.
+     *
+     * ⛔ Not a single `loadTerminal` read. A snapshot-less row is "the run
+     * moved on" only when this process holds no hot copy whose write never
+     * landed, and a drop notice is repairable from the hot copy on the very
+     * replica that stranded the run — both measured wrong under a
+     * single-witness reading (#13937's contract review). Sharing the read
+     * with the restore verb is what keeps that from regressing in one of the
+     * two alone.
+     *
+     * ## What it does NOT judge
+     *
+     * Whether re-arming would be SAFE at this instant — the `restoring` /
+     * `resuming` guards — is the restore verb's own pre-flight. A verdict
+     * here is about what survives, not about the moment.
+     *
+     * @throws when a store read fails — the suspended-run store or the run
+     *   history. An unreadable store is UNKNOWN, and a read-only verdict that
+     *   turned an outage into `NO_CONSUMED_SUSPENSION` would send an operator
+     *   (or a sweep) to give up on a run that is repairable. Same posture as
+     *   {@link hasSuspendedRun}; the restore verb answers `STORE_UNAVAILABLE`
+     *   for the same observation.
+     */
+    async inspectConsumedSuspension(runId: string): Promise<ConsumedSuspensionInspection> {
+        // Already resumable? STRICT read — a store outage throws through.
+        const live = await this.loadSuspendedRunStrict(runId);
+        if (live) return { repairable: false, runId, reason: 'RUN_SUSPENDED', nodeId: live.nodeId };
+
+        let terminal: RunRecord | null = null;
+        if (this.store?.loadTerminal) terminal = await this.store.loadTerminal(runId);
+
+        const { consumed, witness, dropped } = this.resolveConsumedSuspensionWitnesses(runId, terminal);
+        if (consumed && witness) {
+            return {
+                repairable: true,
+                runId,
+                flowName: consumed.run.flowName,
+                nodeId: consumed.run.nodeId,
+                ...(consumed.run.correlation !== undefined ? { correlation: consumed.run.correlation } : {}),
+                witness,
+                consumedAt: consumed.consumedAt,
+            };
+        }
+        if (dropped) return { repairable: false, runId, reason: 'SNAPSHOT_DROPPED', dropped };
+        return { repairable: false, runId, reason: 'NO_CONSUMED_SUSPENSION' };
     }
 
     /**
@@ -7063,11 +7425,13 @@ export class AutomationEngine implements IAutomationService {
         // store so "did it run / fail, and why?" survives a restart and the
         // in-memory ring-buffer eviction. Best-effort + fire-and-forget: a
         // history write must NEVER block or break the run that produced it.
-        const terminal =
-            entry.status === 'completed' ||
-            entry.status === 'failed' ||
-            entry.status === 'cancelled' ||
-            entry.status === 'timed_out';
+        // [#15223] ONE vocabulary, not a fourth copy of the list: this
+        // predicate decides both WHETHER a history row is written and WHAT its
+        // `status` says. Keeping the narrowed value in a `const` is what makes
+        // the record below type-check without a cast — and a cast is precisely
+        // how the fold this card is about survived four members for two.
+        const terminalStatus = isTerminalRunStatus(entry.status) ? entry.status : undefined;
+        const terminal = terminalStatus !== undefined;
 
         // The MVP of #4354, and the half that needs no console: one structured
         // line per terminal run. `selected=30 acted=0` in a log file is the
@@ -7102,13 +7466,20 @@ export class AutomationEngine implements IAutomationService {
             else this.logger.info(line, meta);
         }
 
-        if (terminal && this.store?.recordTerminal) {
+        if (terminalStatus && this.store?.recordTerminal) {
             const lastStep = entry.steps[entry.steps.length - 1];
             const record: RunRecord = {
                 runId: entry.id,
                 flowName: entry.flowName,
                 flowVersion: entry.flowVersion,
-                status: entry.status === 'completed' ? 'completed' : 'failed',
+                // [#15223] The status the run actually reached. This used to be
+                // `entry.status === 'completed' ? 'completed' : 'failed'` — a
+                // fold applied at WRITE time, so a cancelled or timed-out run's
+                // distinction was not merely unshown, it was never stored and
+                // could not be recovered afterwards. ⛔ Never re-introduce a
+                // conditional here: whatever the terminal predicate above
+                // admits is what the row must carry.
+                status: terminalStatus,
                 startedAt: entry.startedAt,
                 finishedAt: entry.completedAt,
                 durationMs: entry.durationMs,

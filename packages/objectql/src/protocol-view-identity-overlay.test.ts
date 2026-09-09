@@ -53,61 +53,76 @@ interface Row {
 }
 
 function makeStubEngine(registryViews: Record<string, unknown> = {}) {
-    const rows = new Map<string, Row>();
+    // ⚠️ Keyed BY TABLE, and that is a correctness property of this harness
+    // rather than tidiness. One flat row map answers a read of `sys_metadata`
+    // with rows the protocol wrote to `sys_metadata_history` and
+    // `sys_metadata_commit`: a DRAFT save appends a history row carrying no
+    // `state`, the declared `defaultValue: 'active'` modelled below fills it
+    // in, and the draft comes back as an ACTIVE metadata row. Measured in
+    // #16223, where one assertion's polarity was the only thing that caught it.
+    const tables = new Map<string, Map<string, Row>>();
+    const tableOf = (table: string): Map<string, Row> => {
+        const existing = tables.get(table);
+        if (existing) return existing;
+        const created = new Map<string, Row>();
+        tables.set(table, created);
+        return created;
+    };
+    /** The store table these tests assert on; the journals get their own. */
+    const rows = tableOf('sys_metadata');
     let nextId = 0;
     const keyOf = (w: Record<string, unknown>) => `${w.type}|${w.name}|${w.organization_id ?? '__env__'}`;
-    const findRow = (w: Record<string, unknown>) => {
+    const findRow = (table: string, w: Record<string, unknown>) => {
         if (w.id !== undefined) {
-            for (const [k, r] of rows) if (r.id === w.id) return { key: k, row: r };
+            for (const [k, r] of tableOf(table)) if (r.id === w.id) return { key: k, row: r };
             return null;
         }
-        const r = rows.get(keyOf(w));
+        const r = tableOf(table).get(keyOf(w));
         return r ? { key: keyOf(w), row: r } : null;
     };
     const engine: any = {
-        async findOne(_t: string, opts: { where: Record<string, unknown> }) {
+        async findOne(table: string, opts: { where: Record<string, unknown> }) {
             // [#11957] Pinned to ObjectQL.findOne's OWN #4419 predicate: `findOne`
             // applies limit: 1, so a query naming no record returns an ARBITRARY row
             // and the engine REFUSES it. A double that answers it anyway is how
             // #11767 shipped a bootstrap bypass that was inert on every real
             // deployment while a 641-line unit matrix stayed green.
-            assertEngineFindOnePredicate(_t, opts);
-            return findRow(opts.where)?.row ?? null;
+            assertEngineFindOnePredicate(table, opts);
+            return findRow(table, opts.where)?.row ?? null;
         },
-        async find(_t: string, opts: { where: Record<string, unknown> }) {
-            return Array.from(rows.values()).filter((r) => {
+        async find(table: string, opts: { where: Record<string, unknown> }) {
+            return Array.from(tableOf(table).values()).filter((r) => {
                 if (opts.where.type && r.type !== opts.where.type) return false;
                 if (opts.where.organization_id !== undefined && r.organization_id !== opts.where.organization_id) return false;
                 if (opts.where.state && r.state !== opts.where.state) return false;
                 return true;
             });
         },
-        async insert(_t: string, data: Record<string, unknown>) {
-            if (_t === 'sys_metadata_audit') return { id: 'audit_skip' };
+        async insert(table: string, data: Record<string, unknown>) {
             nextId += 1;
             const row = { id: `r_${nextId}`, ...(data as any) } as Row;
-            rows.set(keyOf(data), row);
+            tableOf(table).set(keyOf(data), row);
             return { id: row.id };
         },
-        async update(_t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
+        async update(table: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
             // [#5480] Pinned to ObjectQL.update's OWN dispatch predicate, the
             // twin of the delete pin below and on the same argument: this file
             // could bind one write verb to the producer and not the other only
             // because `update` had no shared predicate to bind to.
             assertEngineUpdateDispatch(data, opts);
-            const found = findRow(opts.where);
+            const found = findRow(table, opts.where);
             if (!found) return { id: null };
-            rows.set(found.key, { ...found.row, ...(data as any) });
+            tableOf(table).set(found.key, { ...found.row, ...(data as any) });
             return { id: found.row.id };
         },
-        async delete(_t: string, opts: { where: Record<string, unknown> }) {
+        async delete(table: string, opts: { where: Record<string, unknown> }) {
             // [#4550] Pinned to ObjectQL.delete's OWN dispatch predicate. A double
             // looser than the engine it stands in for is how #4434 shipped a REST
             // route that answered 500 to every caller with its suite green.
             assertEngineDeleteDispatch(opts);
-            const found = findRow(opts.where);
+            const found = findRow(table, opts.where);
             if (!found) return { deleted: 0 };
-            rows.delete(found.key);
+            tableOf(table).delete(found.key);
             return { deleted: 1 };
         },
         registry: {

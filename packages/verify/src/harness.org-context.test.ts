@@ -180,7 +180,7 @@ describe('bootStack orgContext (#7762)', () => {
     async () => {
       // The dangerous half. `'posture-only'` requests the `isolated` posture,
       // and the open default-org bootstrap abstains under every walled posture
-      // (ADR-0081 D1), so the combination would hand back an org-LESS admin
+      // (cloud ADR-0081 D1), so the combination would hand back an org-LESS admin
       // from a call that reads as org-bound — vacuity wearing the mask of
       // coverage, which is the entire defect class #7762 exists to close.
       await expect(bootStack(app, { orgContext: true, multiTenant: 'posture-only' })).rejects.toThrow(

@@ -1,0 +1,113 @@
+{
+  "$comment": [
+    "Shrink-only ledger for the never-published ratchet in scripts/build-schemas.ts (#16431).",
+    "Each entry records one exported `z.ZodType` that this build emits NO JSON Schema for, so it",
+    "reaches no file under json-schema/, no line in json-schema.manifest/, and — because",
+    "content/docs/references/** renders from that directory — no reference section.",
+    "",
+    "WHY THE LEDGER EXISTS. The sibling disappearance ratchet (#2978 / #4725) guards one",
+    "direction: a def key the manifest records that a build stops emitting. It is structurally",
+    "blind to the other — an export never emitted was never in the manifest, so there is nothing",
+    "for it to miss. Until this file, the entire record of such an export was one `console.warn`",
+    "in a build that exits 0, which made 'deliberately not a published JSON-Schema surface' and",
+    "'a contract whose prose reaches no reader' the same colour on every instrument this repo had.",
+    "",
+    "HAND-EDITED, NEVER GENERATED, and deliberately so — the same reason",
+    "entry-nameability.baseline.json and dual-source-exports.baseline.json are: a `gen:` script",
+    "for this file would let a new un-emitted export be admitted by running a command instead of",
+    "by a decision, which is the whole failure mode being closed.",
+    "",
+    "SHRINK-ONLY IN BOTH DIRECTIONS. An un-emitted export that is not recorded here fails the",
+    "build. An entry whose export now emits — or no longer exists — ALSO fails, with an",
+    "instruction to delete the line: a ledger that keeps entries after the tree moved has stopped",
+    "describing it and started covering for it, and a stale line is exactly the room a new member",
+    "needs to arrive looking like the old one. `cause` is re-checked against what the build",
+    "observes, and `reason` may not be empty: a baseline that records only a COUNT cannot show",
+    "which member was replaced.",
+    "",
+    "SEEDED FROM THE TREE AS IT STOOD, not as anyone wishes it were. Several entries below record",
+    "a real documentation gap rather than blessing one — that is the point. This ratchet reports;",
+    "it repairs nothing and makes nothing start or stop publishing.",
+    "",
+    "FIVE ENTRIES HAVE ALREADY LEFT, which is the direction this ledger is FOR. #16431 option (a)",
+    "taught the generator to project a union BRANCH-BY-BRANCH (scripts/lib/union-branch-projection.ts),",
+    "and the four `Data` filter entries plus `Data.HookSchema` now emit; the ratchet reported each of",
+    "them as `repaired` and refused the build until the line went. What remains below is what a",
+    "per-branch projection cannot reach: an unprojectable node that is not itself a union member —",
+    "an object property, a record value — where dropping it would publish a shape no runtime value has."
+  ],
+  "entries": {
+    "Automation.FlowFunctionDeclarationSchema": {
+      "cause": "function",
+      "reason": "A `functions` map entry as AUTHORED in TypeScript: `handler` is the live callable (`z.function()`, automation/flow-function.zod.ts), so there is no JSON document of this shape to describe. `objectstack build` lowers every callable to a string ref before a stack is parsed, and the lowered record — FlowFunctionLoweredDeclarationSchema — is the serialisable half; that is the one a manifest reader needs and it publishes normally."
+    },
+    "Automation.FlowFunctionEntrySchema": {
+      "cause": "function",
+      "reason": "The union of all four `functions` entry shapes. Its first member IS the bare `z.function()` above, and #16431 (a)'s per-branch projection does drop that member — measured: 1 branch pruned — but the union still does not publish, because the member behind it is FlowFunctionDeclarationSchema, whose required `handler` is itself a live callable. An unprojectable node in a PROPERTY position is not droppable: every document the declaration accepts has that key, so publishing the record without it would describe a shape no runtime value has. Both lowered members are plain JSON and would publish on their own; what this entry now records is a union that cannot be projected while one of its branches requires a callable."
+    },
+    "Cloud.EnvironmentArtifactSchema": {
+      "cause": "function",
+      "reason": "Re-export of System.EnvironmentArtifactSchema (system/environment-artifact.zod.ts) — see that entry. Both export names are recorded because the ratchet is keyed by EXPORT, which is the unit that reaches or fails to reach a published surface."
+    },
+    "Data.DataEngineContractSchema": {
+      "cause": "function",
+      "reason": "The engine method contract — `find`/`findOne`/`insert`/`update`/`delete` are `z.function()` members. A CODE interface implemented by an engine, never a document anyone authors or transmits, so no reader loses a reference page."
+    },
+    "Data.DriverInterfaceSchema": {
+      "cause": "function",
+      "reason": "The driver method contract (`connect`, `disconnect`, `checkHealth`, `getPoolStats`, `execute` …), all `z.function()`. A code interface implemented by a driver package; nothing is authored against it."
+    },
+    "Data.CustomPersistenceConfigSchema": {
+      "cause": "function",
+      "reason": "The `{ type: 'custom', adapter }` branch of the memory driver's persistence config: `adapter` is a live PersistenceAdapter whose members are functions. The branch exists to let a HOST pass an object it constructed in code, so it has no JSON form by construction — the file/local/auto branches, which are what an author writes, publish normally."
+    },
+    "Data.MemoryConfigSchema": {
+      "cause": "function",
+      "reason": "⚠ A REAL GAP: this is a memory datasource's authorable `config`, and it is unprojectable only because ONE branch of its `persistence` union is the code-only custom adapter above. Everything an author can write in YAML is representable. #16431 (a)'s per-branch projection does NOT reach it — measured: the unprojectable node is `#/properties/persistence/anyOf/0/anyOf/4/properties/adapter/properties/load`, a function nested two levels INSIDE a union branch rather than being that branch, and the pruner drops only direct members. Excluding the custom branch from the published shape — or lifting the adapter out of the authorable `config` — would give this type its reference page back."
+    },
+    "Data.MemoryPersistenceConfigSchema": {
+      "cause": "function",
+      "reason": "⚠ A REAL GAP, same cause and same remedy as MemoryConfigSchema: the union of five persistence shapes, four of them plain JSON, unprojectable because the fifth carries the live adapter — as a nested property of that branch, not as the branch itself, which is why the per-branch projection leaves it here too."
+    },
+    "Data.PersistenceAdapterSchema": {
+      "cause": "function",
+      "reason": "The adapter interface itself — `load`, `save`, `flush`, all `z.function()`. A code contract a host implements; no document has this shape."
+    },
+    "Kernel.PluginContextSchema": {
+      "cause": "function",
+      "reason": "The runtime context the kernel hands a plugin's `init(ctx)` — `ql.object`, `ql.query`, `getCurrentUser`, `getConfig` … all `z.function()`. Constructed only by the kernel and exposed to nobody; it is a TypeScript surface, and the reference tree documents it as prose in the plugin pages rather than as a schema section."
+    },
+    "System.BatchTask": {
+      "cause": "function",
+      "reason": "Alias export of BatchTaskSchema (system/worker.zod.ts) — see that entry. Both names are recorded because the ratchet is keyed by export."
+    },
+    "System.BatchTaskSchema": {
+      "cause": "function",
+      "reason": "A batch task handed to the worker at RUNTIME: `onProgress` is a `z.function()` callback the caller supplies. Callbacks do not survive serialisation, so this record is not a document and no author writes one."
+    },
+    "System.WorkerConfig": {
+      "cause": "function",
+      "reason": "Alias export of WorkerConfigSchema (system/worker.zod.ts) — see that entry."
+    },
+    "System.WorkerConfigSchema": {
+      "cause": "function",
+      "reason": "Worker construction options: `handlers` is a `z.record(z.string(), z.function())` of task handlers registered in code. A host builds this object; it is never authored as metadata."
+    },
+    "System.EnvironmentArtifactSchema": {
+      "cause": "function",
+      "reason": "The environment-artifact envelope the control plane assembles for `GET /api/v1/cloud/environments/:id/artifact`. Unprojectable through `metadata.onEnable`, a plugin lifecycle hook that rides on the compiled metadata block. Machine-produced and machine-consumed rather than authored — but it IS a wire contract between two services, so it is the strongest candidate in this ledger for a future repair that lifts the callable members out of the transmitted shape."
+    },
+    "UI.ViewMetadataSchema": {
+      "cause": "undefined",
+      "reason": "The view metadata DOOR — the union that decides which view shapes are legal — whose flattened-overlay members exclude their siblings with `config: z.undefined()` guards (ui/view.zod.ts). `z.undefined()` has no JSON Schema form, so the door is unprojectable while the contract underneath it is not: `ui/View` publishes normally and carries the authorable keys, so an author reading the reference pages is not missing the View shape itself, only the union envelope."
+    },
+    "UI.AssembledViewArtifactSchema": {
+      "cause": "undefined",
+      "reason": "The non-container half of the same union, for artifacts travelling in a runtime-assembled manifest's `viewItems:`. Same `z.undefined()` guard, same conclusion — machine-assembled (package export, environment artifact), never hand-authored."
+    },
+    "UI.FieldWidgetPropsSchema": {
+      "cause": "function",
+      "reason": "A REACT PROPS CONTRACT, not authorable metadata — `onChange` is a `z.function()`. The docblock above the export already states this and states the consequence ('so no JSON Schema is emitted'); this entry is that statement moved somewhere a gate can read it."
+    }
+  }
+}

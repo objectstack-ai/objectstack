@@ -465,6 +465,197 @@ describe('ReportService', () => {
     expect(engine._tables['sys_report_schedule'][0].last_status).toBe('ok');
   });
 
+  // ─── Schedule timezone (#16291) ─────────────────────────────────
+  //
+  // croner 10.0.1 has a THREE-state answer to a non-member IANA zone, and only
+  // the middle one was ever reached here (measured on Node v22.22.2):
+  //
+  //   new Cron('0 9 * * *', { timezone: 'Mars/Olympus' })                 -> constructs FINE
+  //     .nextRun(from)                                                    -> TypeError: CronDate …
+  //   new Cron('0 9 * * *', { timezone: 'Mars/Olympus' }, async () => {}) -> throws at construction
+  //
+  // So the create-time guard, which used the callback-less form, validated the
+  // expression and was blind to the zone; and `nextRunAt` caught the deferred
+  // throw and fell back to `interval_minutes` — turning "weekdays 09:00
+  // Asia/Shanghai" into "every 1440 minutes, forever", logged as a complaint
+  // about a cron expression that was perfectly good.
+  describe('schedule timezone', () => {
+    const BAD_TZ = 'Mars/Olympus';
+
+    /** Store a schedule row directly — the shape a pre-#15872 row has. */
+    function seedScheduleRow(reportId: string, patch: Record<string, unknown>) {
+      const row = {
+        id: 'rsch_legacy',
+        report_id: reportId,
+        name: null,
+        interval_minutes: 1440,
+        cron_expression: null,
+        timezone: 'UTC',
+        active: true,
+        recipients: 'ops@t',
+        format: 'html_table',
+        subject_template: null,
+        owner_id: 'u1',
+        next_run_at: new Date(now.getTime() - 1000).toISOString(),
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+        ...patch,
+      };
+      (engine._tables['sys_report_schedule'] ??= []).push(row);
+      return row;
+    }
+
+    // ── The create-time door ──
+
+    it('scheduleReport: refuses a non-member timezone instead of storing it', async () => {
+      const r = await svc.saveReport({ name: 'A', object: 'lead', query: {} }, CTX);
+      await expect(svc.scheduleReport({
+        reportId: r.id, recipients: ['x@t'], cronExpression: '0 9 * * *', timezone: BAD_TZ,
+      }, CTX)).rejects.toThrow(/VALIDATION_FAILED/);
+      // Names the input that is actually wrong — not the cron expression, which
+      // is valid, and which the old guard was the only thing to mention.
+      await expect(svc.scheduleReport({
+        reportId: r.id, recipients: ['x@t'], cronExpression: '0 9 * * *', timezone: BAD_TZ,
+      }, CTX)).rejects.toThrow(new RegExp(`timezone '${BAD_TZ}'`));
+      expect(engine._tables['sys_report_schedule'] ?? []).toHaveLength(0);
+    });
+
+    it('scheduleReport: refuses a non-member timezone with no cron_expression too', async () => {
+      // One answer at both doors. `sys_report_schedule.timezone` carries
+      // `valueDomain: 'iana_time_zone'` (#15872), which refuses the value on
+      // WRITE whether or not a cron is set; a guard that accepted it here for
+      // interval schedules would hand the engine a row it is about to reject and
+      // report the divergence as a generic field error.
+      const r = await svc.saveReport({ name: 'A', object: 'lead', query: {} }, CTX);
+      await expect(svc.scheduleReport({
+        reportId: r.id, recipients: ['x@t'], intervalMinutes: 60, timezone: BAD_TZ,
+      }, CTX)).rejects.toThrow(new RegExp(`VALIDATION_FAILED.*timezone '${BAD_TZ}'`));
+    });
+
+    it('scheduleReport: the guard uses the shared predicate, so real zones still pass', async () => {
+      const r = await svc.saveReport({ name: 'A', object: 'lead', query: {} }, CTX);
+      for (const tz of ['UTC', 'Asia/Shanghai', 'America/New_York', 'Etc/GMT+8']) {
+        const s = await svc.scheduleReport({
+          reportId: r.id, recipients: ['x@t'], cronExpression: '0 9 * * *', timezone: tz,
+        }, CTX);
+        expect(s.timezone).toBe(tz);
+      }
+    });
+
+    it('scheduleReport: stores the same zone string the scheduler evaluates', async () => {
+      // `''` is not an `iana_time_zone` member, but every `new Cron` call site
+      // reads it as UTC via `|| 'UTC'`. The row must not keep a value the storage
+      // gate refuses while the scheduler quietly treats it as something else.
+      const r = await svc.saveReport({ name: 'A', object: 'lead', query: {} }, CTX);
+      const s = await svc.scheduleReport({
+        reportId: r.id, recipients: ['x@t'], cronExpression: '0 9 * * *', timezone: '',
+      }, CTX);
+      expect(s.timezone).toBe('UTC');
+      expect(engine._tables['sys_report_schedule'][0].timezone).toBe('UTC');
+      expect(s.next_run_at).toBe('2026-01-16T09:00:00.000Z');
+    });
+
+    // ── The stored-row door: rows written before #15872 ──
+
+    it('dispatchDue: a stored non-member timezone stops the schedule instead of rescheduling it', async () => {
+      const r = await svc.saveReport({ name: 'A', object: 'lead', query: {} }, CTX);
+      const seeded = seedScheduleRow(r.id, {
+        cron_expression: '0 9 * * 1-5', timezone: BAD_TZ, format: 'csv',
+      });
+
+      const result = await svc.dispatchDue();
+
+      expect(result).toEqual({ fired: 0, failed: 1, skipped: 0 });
+      expect(email._sent).toHaveLength(0);
+      const stored = engine._tables['sys_report_schedule'][0];
+      expect(stored.last_status).toBe('failed');
+      expect(stored.last_error).toContain(BAD_TZ);
+      expect(stored.last_error).toContain('0 9 * * 1-5');
+      // NOT advanced to `now + interval_minutes` — the whole defect was that it
+      // was, on every sweep, forever.
+      expect(stored.next_run_at).toBe(seeded.next_run_at);
+      expect(stored.next_run_at).not.toBe(new Date(now.getTime() + 1440 * 60_000).toISOString());
+    });
+
+    it('dispatchDue: an interval-only schedule with a stored bad zone is left alone', async () => {
+      // The zone is load-bearing only for cron evaluation; interval arithmetic
+      // never consults it. Quarantining these would stop deliveries that are
+      // landing exactly when their author asked for them.
+      const r = await svc.saveReport({ name: 'A', object: 'lead', query: {} }, CTX);
+      seedScheduleRow(r.id, { cron_expression: null, interval_minutes: 60, timezone: BAD_TZ });
+
+      const result = await svc.dispatchDue();
+
+      expect(result.fired).toBe(1);
+      expect(email._sent).toHaveLength(1);
+      const stored = engine._tables['sys_report_schedule'][0];
+      expect(stored.last_status).toBe('ok');
+      expect(stored.next_run_at).toBe(new Date(now.getTime() + 60 * 60_000).toISOString());
+    });
+
+    it('dispatchDue: correcting the stored zone resumes the schedule with no other action', async () => {
+      // Why the quarantine leaves `active` set and `next_run_at` in the past:
+      // the row stays due, so the sweep picks it up again by itself.
+      const r = await svc.saveReport({ name: 'A', object: 'lead', query: {} }, CTX);
+      seedScheduleRow(r.id, { cron_expression: '0 9 * * *', timezone: BAD_TZ, format: 'csv' });
+
+      expect((await svc.dispatchDue()).failed).toBe(1);
+      engine._tables['sys_report_schedule'][0].timezone = 'Asia/Shanghai';
+
+      const result = await svc.dispatchDue();
+      expect(result.fired).toBe(1);
+      expect(email._sent).toHaveLength(1);
+      const stored = engine._tables['sys_report_schedule'][0];
+      expect(stored.last_status).toBe('ok');
+      // 09:00 Asia/Shanghai (UTC+8) on the 16th = 01:00Z — the instant its author
+      // actually asked for, not `now + 1440m`.
+      expect(stored.next_run_at).toBe('2026-01-16T01:00:00.000Z');
+    });
+
+    // ── The warning text: both paths, neither pointing at the wrong input ──
+
+    it('nextRunAt: the no-occurrence warning names the timezone as well as the cron', async () => {
+      const warn = vi.fn();
+      const logged = new ReportService({
+        engine: engine as any, email, clock: { now: () => now }, logger: { warn },
+        resolveOwnerContext: async (id: string) => ({ userId: id, positions: [], permissions: [] }),
+      });
+      const r = await logged.saveReport({ name: 'A', object: 'lead', query: {} }, CTX);
+      // 30 February never occurs; croner returns null rather than throwing.
+      await logged.scheduleReport({
+        reportId: r.id, recipients: ['x@t'], cronExpression: '0 0 30 2 *', timezone: 'Asia/Shanghai',
+      }, CTX);
+
+      const line = warn.mock.calls.map(c => String(c[0])).find(m => m.includes('no next occurrence'));
+      expect(line).toBeDefined();
+      expect(line).toContain("timezone 'Asia/Shanghai'");
+      expect(line).toContain("cron '0 0 30 2 *'");
+    });
+
+    it('nextRunAt: the un-evaluatable warning names the timezone and stops calling the cron invalid', async () => {
+      const warn = vi.fn();
+      const logged = new ReportService({
+        engine: engine as any, email, clock: { now: () => now }, logger: { warn },
+        resolveOwnerContext: async (id: string) => ({ userId: id, positions: [], permissions: [] }),
+      });
+      const r = await logged.saveReport({ name: 'A', object: 'lead', query: {} }, CTX);
+      // A row whose cron the create-time guard would have refused — the shape
+      // that reaches `nextRunAt` through `advanceSchedule` on a sweep.
+      seedScheduleRow(r.id, { cron_expression: 'not a cron', timezone: 'Asia/Shanghai' });
+
+      await logged.dispatchDue();
+
+      const line = warn.mock.calls.map(c => String(c[0])).find(m => m.includes('could not be evaluated'));
+      expect(line).toBeDefined();
+      expect(line).toContain("timezone 'Asia/Shanghai'");
+      expect(line).toContain("cron 'not a cron'");
+      // The old text asserted the expression was the broken half. On a timezone
+      // fault that accusation was simply false, and it is the reason this card
+      // treats the warning as part of the defect rather than as cosmetics.
+      expect(warn.mock.calls.map(c => String(c[0])).join('\n')).not.toContain('invalid cron');
+    });
+  });
+
   // ─── Authorization (#2980) ──────────────────────────────────────
   describe('access control', () => {
     const OTHER = { userId: 'u2', tenantId: 't1', positions: [], permissions: [] };

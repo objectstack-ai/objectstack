@@ -7,6 +7,7 @@ import type {
   JobExecution,
   JobRunOutcome,
   JobScheduleOptions,
+  JobReplayOptions,
 } from '@objectstack/spec/contracts';
 import { IntervalJobAdapter } from './interval-job-adapter.js';
 import { runWithPolicy } from './run-with-policy.js';
@@ -65,6 +66,62 @@ function withoutPolicy(options?: JobScheduleOptions): JobScheduleOptions | undef
   return Object.keys(rest).length > 0 ? (rest as JobScheduleOptions) : undefined;
 }
 
+/**
+ * What a {@link ReplayGuard} answers (#14501 — the behaviour half of the
+ * maintainer's A + a2 ruling on #14501; the contract half is
+ * {@link IJobService.replay}'s TSDoc, landed by #14766).
+ */
+export type ReplayGuardDecision =
+  | { readonly allow: true }
+  | {
+      readonly allow: false;
+      /** Human-readable identity of the window that was already delivered. */
+      readonly window: string;
+      /** When that window's claim was taken (ISO-8601), if the ledger knows. */
+      readonly claimedAt: string | null;
+    };
+
+/**
+ * A per-job pre-flight for `replay()`, registered by whoever owns the job's
+ * idempotency (#14501).
+ *
+ * This adapter deliberately knows nothing about flows, tick windows or the
+ * `sys_flow_dispatch` ledger — it cannot: a job name is an opaque string here,
+ * and the ledger lives two packages away. What it owns is the REFUSAL: the
+ * ADR-0112 envelope, the `force` door past it, and the guarantee that a
+ * refusal is loud rather than a silent no-op. The party that scheduled the job
+ * — for a scheduled flow, `@objectstack/trigger-schedule` — registers a guard
+ * that answers for its own window.
+ *
+ * A guard is asked once per replay and it also PREPARES: `{ allow: true }`
+ * means the guard has already armed whatever its owner needs to let the
+ * replayed run past its own idempotency gate. So this adapter never calls a
+ * guard for a replay it then abandons.
+ */
+export type ReplayGuard = (options: { readonly force: boolean }) => Promise<ReplayGuardDecision>;
+
+/**
+ * The ADR-0112 envelope `replay()` refuses a delivered window with.
+ *
+ * `RESOURCE_CONFLICT` is the standard-catalog member HTTP 409 derives
+ * (`HttpStatusErrorCodeMap[409]`) and the code the `domain:spec` seat ruled for
+ * this refusal — ⛔ no service extension code is minted for a case that
+ * already has one. Consumers assert on `code` and `status`; the message is for
+ * the operator reading it, and names both halves of the refusal: the window
+ * that was asked for and the claim that refused it.
+ */
+function replayConflict(name: string, decision: Extract<ReplayGuardDecision, { allow: false }>): Error {
+  const claimed = decision.claimedAt ? ` (claimed at ${decision.claimedAt})` : '';
+  const err = new Error(
+    `Job "${name}" has already delivered its ${decision.window}${claimed}, and that dispatch claim recorded ` +
+      `SUCCESS. Replaying it would deliver the same window a second time. Pass { force: true } to replay it ` +
+      `anyway, knowing the delivery is a duplicate.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = 'RESOURCE_CONFLICT';
+  err.status = 409;
+  return err;
+}
+
 function uid(prefix: string): string {
   const g: any = globalThis as any;
   if (g.crypto?.randomUUID) return `${prefix}_${g.crypto.randomUUID()}`;
@@ -103,6 +160,8 @@ export class DbJobAdapter implements IJobService {
   private readonly engine: JobEngineLike;
   private readonly logger?: JobLoggerLike;
   private readonly recordRuns: boolean;
+  /** job name → its `replay()` pre-flight (#14501). See {@link ReplayGuard}. */
+  private readonly replayGuards = new Map<string, ReplayGuard>();
 
   constructor(args: {
     engine: JobEngineLike;
@@ -206,6 +265,7 @@ export class DbJobAdapter implements IJobService {
   }
 
   async cancel(name: string): Promise<void> {
+    this.replayGuards.delete(name);
     await this.inner.cancel(name);
     if (this.cron && typeof this.cron.cancel === 'function') {
       try { await this.cron.cancel(name); } catch { /* ignore */ }
@@ -226,6 +286,17 @@ export class DbJobAdapter implements IJobService {
   }
 
   /**
+   * Register (or with `null`, clear) the `replay()` pre-flight for one job —
+   * #14501's behaviour half. NOT part of `IJobService`: a job service without
+   * this method installs no guard and replays exactly as it always did, which
+   * is why the caller treats it as optional. See {@link ReplayGuard}.
+   */
+  setReplayGuard(name: string, guard: ReplayGuard | null): void {
+    if (guard) this.replayGuards.set(name, guard);
+    else this.replayGuards.delete(name);
+  }
+
+  /**
    * Replay a job's most recent execution, tagging its run `trigger: 'replay'`.
    *
    * The synthetic `sys_job_run` row this writes is governed by
@@ -234,11 +305,41 @@ export class DbJobAdapter implements IJobService {
    * this synthetic one, and not the per-attempt row the execution itself
    * would produce. `sys_job_run` is run history, not an audit trail; an
    * operator who switched history off gets nothing durable from this path.
+   *
+   * **Once-only delivery on the scheduled path (#14501).** A job carrying a
+   * {@link ReplayGuard} — a scheduled flow, registered by the schedule trigger
+   * — has its current dispatch window checked first. A window whose
+   * `(flow, tick-window)` claim recorded SUCCESS is refused with the ADR-0112
+   * `RESOURCE_CONFLICT` / 409 envelope the contract declares, and the promise
+   * REJECTS: an operator who pressed replay and saw nothing happen is the
+   * experience the ruling rejected outright. Absent, failed and unsettled
+   * claims re-run exactly as before, and `{ force: true }` skips the check
+   * entirely — the operator is stating the duplicate is wanted.
+   *
+   * A guard that THROWS lets the replay through, logged: this is the same
+   * availability-over-strict-once posture the claim ledger takes everywhere
+   * else. A refusal is a positive reading, never the absence of one.
    */
-  async replay(name: string, data?: unknown): Promise<void> {
+  async replay(name: string, data?: unknown, options?: JobReplayOptions): Promise<void> {
     // Same execution path as trigger but tag the run as 'replay'.
     const handlers = (this.inner as any).jobs?.get?.(name);
     if (!handlers) throw new Error(`Job "${name}" not found`);
+
+    const guard = this.replayGuards.get(name);
+    if (guard) {
+      const force = options?.force === true;
+      let decision: ReplayGuardDecision | undefined;
+      try {
+        decision = await guard({ force });
+      } catch (err) {
+        this.logger?.warn(
+          `DbJobAdapter: replay pre-flight for job "${name}" failed — replaying anyway ` +
+            '(availability over strict-once: a refusal is a positive reading, never the absence of one)',
+          err as any,
+        );
+      }
+      if (decision && decision.allow === false) throw replayConflict(name, decision);
+    }
     // Reuse trigger; the wrap function uses a closure flag — simpler:
     // expose by calling inner.trigger with a marker via data is intrusive,
     // so we record a synthetic run row before/after to ensure 'replay' tag.

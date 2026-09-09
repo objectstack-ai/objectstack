@@ -549,6 +549,37 @@ export const InterfacePageConfigSchema = lazySchema(() => strictObject({
 }).describe('Interface-level page configuration (Airtable parity)'));
 
 /**
+ * The `kind` ⇄ `source` completeness check attached to {@link PageSchema}
+ * (ADR-0080/0081 + ADR-0078): an `html` / `react` / `jsx` page with no
+ * `source` is silently inert — it validates and then renders nothing — so it
+ * is refused at author time, at `source`, naming the kind. A `kind` that is
+ * absent is the spec default (`full`), which carries no source: nothing to
+ * check.
+ *
+ * Exported (#16489, the spec half of objectui#7715) so a downstream mirror
+ * that derives its schema from `PageSchema.shape` — which carries the FIELDS
+ * by reference and drops every object-level check — can re-attach exactly
+ * this rule with `.superRefine(checkPageSourceCompleteness)` instead of
+ * re-implementing it. One function per refinement, no bundle. `PageSchema`
+ * attaches this same binding, so the export IS the check the schema runs —
+ * pinned in `object-refinement-check-exports.test.ts`.
+ */
+export function checkPageSourceCompleteness(
+  page: { kind?: string; source?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const sourceKinds = ['html', 'react', 'jsx'];
+  if (page.kind === undefined || !sourceKinds.includes(page.kind)) return;
+  if (!(typeof page.source === 'string' && page.source.trim().length > 0)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['source'],
+      message: `A ${page.kind} page requires a non-empty \`source\` (the source is the source-of-truth).`,
+    });
+  }
+}
+
+/**
  * Page Schema
  * Defines a composition of components for a specific context.
  * Supports both platform pages (Salesforce FlexiPage style: record, home, app, utility)
@@ -748,18 +779,12 @@ export const PageSchema = lazySchema(() => strictObject({
   // parse — protection metadata lost on round-trip, and a hard 422 the day this
   // shape closed.
   ...MetadataProtectionFields,
-}).superRefine((page, ctx) => {
+})
   // ADR-0080/0081 + ADR-0078 (completeness): an html/react/jsx page with no
   // `source` is silently inert — fail loudly at author time, never render empty.
-  const sourceKinds = ['html', 'react', 'jsx'];
-  if (sourceKinds.includes(page.kind) && !(typeof page.source === 'string' && page.source.trim().length > 0)) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['source'],
-      message: `A ${page.kind} page requires a non-empty \`source\` (the source is the source-of-truth).`,
-    });
-  }
-}));
+  // Attached by identifier, not inlined: the export is the rule a `.shape`
+  // mirror re-attaches (#16489), and it must be this binding, not a copy.
+  .superRefine(checkPageSourceCompleteness));
 // PageSchema's only cross-field rule is the ADR-0080 jsx-source completeness
 // check above. It once also required `recordReview`/`blankLayout` and `slots`
 // (all removed — unrendered roadmap / "required-but-unauthorable" Studio traps).

@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-reports",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "Saved reports + scheduled email digests for ObjectStack — sys_saved_report + sys_report_schedule + IReportService.",
   "main": "dist/index.js",
@@ -30,7 +30,7 @@
     "@types/node": "^26.2.0",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "objectstack",
@@ -39,6 +39,11 @@
     "scheduling",
     "email"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/plugins/plugin-reports"
+  },
   "files": [
     "dist",
     "README.md",

@@ -18,14 +18,21 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { loadDisabledPackageIds, setPackageDisabled } from './package-state-store.js';
+import { loadDisabledPackageIds, packageStateFileName, setPackageDisabled } from './package-state-store.js';
 
 let home: string;
 const envSnapshot = { OS_HOME: process.env.OS_HOME, OS_ENVIRONMENT_ID: process.env.OS_ENVIRONMENT_ID };
 
-/** Absolute path of the state file the store is expected to use. */
+/**
+ * Absolute path of the state file the store is expected to use.
+ *
+ * The name carries the PROJECT as well as the environment id (#15969), and the
+ * project this suite runs as is its own working directory — so it is asked for
+ * by the same function the store names files with, rather than spelled out.
+ * The naming convention itself is pinned in `package-state-project-key.test.ts`.
+ */
 function stateFile(environmentId: string): string {
-    return join(home, 'package-state', `${environmentId}.json`);
+    return join(home, 'package-state', packageStateFileName(environmentId, process.cwd()));
 }
 
 beforeEach(() => {

@@ -61,9 +61,12 @@ export type WebSocketMessageType = z.input<typeof WebSocketMessageType>;
 // Nothing imported any of it — not this repo, not objectui, not cloud — and no
 // runtime ever evaluated an event filter: `matchesSubscription` matches on
 // object name and event type only (see `contracts/realtime-service.ts`), and the
-// subscription shape the transports actually carry is the separate, deliberately
-// unvalidated `filters: z.unknown()` on `SubscriptionEventSchema`
-// (`api/realtime.zod.ts`).
+// subscription shape the transports actually carry is a plain TS interface one
+// directory over — `contracts/realtime-service.ts#RealtimeSubscriptionOptions`,
+// whose `object` and `eventTypes` are the only two fields that predicate reads.
+// The separate, deliberately unvalidated `filters: z.unknown()` on
+// `SubscriptionEventSchema` (`api/realtime.zod.ts`) is a sibling declaration of
+// the same unenforced kind, not a shape any transport carries.
 //
 // So this was a *second* spelling of event filtering, disagreeing with both the
 // live one and with `VALID_AST_OPERATORS`, and it described a capability no code

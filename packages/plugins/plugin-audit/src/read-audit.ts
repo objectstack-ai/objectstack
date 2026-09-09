@@ -454,10 +454,31 @@ export function installReadAuditWriter(
    * vocabulary. Same reasoning as `persistAuditTrailRow` / `persistAuthEventAuditRow`.
    */
   const persistReadAuditRows = async (rows: Record<string, unknown>[]): Promise<void> => {
-    // `sys_audit_log` exposes only `get`/`list` on the API and every field is
-    // `readonly`, so a user-context write would be refused. The system context
-    // is also what lets the row keep its VIEW timestamp — see `buildRow`.
-    await engine.insert('sys_audit_log', rows as any, { context: { isSystem: true } } as any);
+    // TWO context keys, for two different layers. ⛔ Neither substitutes for
+    // the other, and dropping either one breaks a different thing (#16829).
+    //
+    //   - `isSystem` → the READONLY STRIP. `sys_audit_log` exposes only
+    //     `get`/`list` on the API and every field is `readonly: true`, so a
+    //     user-context write would be refused.
+    //   - `preserveAudit` → the AUDIT STAMP HOOK, which is the layer that
+    //     decides `created_at` on an insert. `sys_stamp_audit_insert`
+    //     (`objectql/src/plugin.ts`) reads `session.preserveAudit === true` and
+    //     has never read `isSystem`. Without this key its ordinary branch
+    //     stamps `now` — the FLUSH instant — over the view instant `buildRow`
+    //     put on the row, which is exactly the collapse that field exists to
+    //     prevent.
+    //
+    // `preserveAudit` is the RULED historical-import channel (#3493, reaffirmed
+    // by #15964's ruling of 2026-09-06): the door audit left open for
+    // reinstating an ORIGINAL TIMELINE, not a bypass of audit. A record-view
+    // row's original timeline is the moment of the view, so this use is inside
+    // that declared purpose rather than beside it — the row is back-dated to
+    // when the thing it describes actually happened, never to hide anything.
+    await engine.insert(
+      'sys_audit_log',
+      rows as any,
+      { context: { isSystem: true, preserveAudit: true } } as any,
+    );
   };
 
   let failureReported = false;
@@ -504,11 +525,37 @@ export function installReadAuditWriter(
       // off the request path by design, so `created_at`'s `NOW()` default would
       // stamp every row in a batch with one flush timestamp up to
       // `flushIntervalMs` after the fact — a ledger that answers "when did they
-      // look?" with the time its own buffer drained. `created_at` is
-      // engine-owned and stripped from ordinary writes (#4447), and a
-      // system-context write is the declared exemption (pinned by
-      // `engine-audit-anchor-write.test.ts`: "a system-context write is still
-      // exempt"), which is exactly the context `persistReadAuditRows` uses.
+      // look?" with the time its own buffer drained.
+      //
+      // What carries this value through to the row is `context.preserveAudit`
+      // on `persistReadAuditRows`'s write. ⛔ Read that call site before
+      // touching this field: the two are one mechanism split over two places.
+      //
+      // ⚠️ [#16829] This comment used to name `isSystem` as that mechanism, on
+      // the authority of `engine-audit-anchor-write.test.ts`'s "a system-context
+      // write is still exempt". Both halves were wrong, and the citation is why
+      // nobody re-checked them:
+      //
+      //   - `isSystem` exempts a write from the READONLY STRIP (#4447). It has
+      //     never been consulted by the audit stamp hook, which is the layer
+      //     that decides `created_at` on an insert.
+      //   - that cited case calls `engine.update`, and `sys_stamp_audit_update`
+      //     never writes `created_at` in any branch — the assignment is guarded
+      //     by `if (isInsert)`. It is green whatever the insert path does. The
+      //     insert path this writer actually uses had no pin at all.
+      //
+      // What was really carrying the value was the hook's pre-#15964 line,
+      // `record.created_at = record.created_at ?? now` — client-preferred on
+      // EVERY insert, with no flag and no privilege required. #15964 closed
+      // that accident, and the reliance stated here turned out never to have
+      // existed.
+      //
+      // The pin that DOES cover this path is
+      // `read-audit-view-instant-preservation.integration.test.ts`: a real
+      // kernel, the real `ObjectQLPlugin`, the real `sys_stamp_audit_insert`
+      // hook and a real driver. ⛔ A suite whose engine runs no hooks cannot
+      // see this field's behaviour at all — it reads green on both sides of the
+      // change, which is how this defect shipped.
       created_at: event.viewedAt,
       user_id: event.userId ?? null,
       object_name: event.objectName,

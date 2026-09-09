@@ -15,7 +15,8 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *
  * Lifecycle: one row per *currently* suspended run (`status: 'paused'`, id =
  * raw `runId`, removed on terminal completion) plus bounded terminal history
- * (`status: 'completed' | 'failed'`, id = `run_`-prefixed). History rows are
+ * (`status` = any of the four terminal members `completed` / `failed` /
+ * `cancelled` / `timed_out`, id = `run_`-prefixed). History rows are
  * subject to retention (#2585, ADR-0057 posture): a write-time per-flow cap
  * (default 100) plus a periodic age sweep (default 30 days) — see
  * `ObjectStoreSuspendedRunStore` / `AutomationServicePluginOptions`. Paused
@@ -48,14 +49,22 @@ export const SysAutomationRun = ObjectSchema.create({
   // in-flight (`running`) rows never match. The write-time per-flow overflow
   // cap (ObjectStoreSuspendedRunStore.pruneFlowOverflow, #2585) stays in the
   // store — a count bound the declarative contract can't express.
+  //
+  // [#15223] ALL FOUR terminal members, not the two this scope used to name.
+  // The list is a $in over stored values, so it is the third copy of the
+  // vocabulary `TERMINAL_RUN_STATUSES` declares (engine.ts) — and the one with
+  // the quietest failure: a widened writer plus a two-member sweep scope means
+  // `cancelled` and `timed_out` history rows are simply never aged out, on a
+  // table whose whole retention posture (ADR-0057) is that history is
+  // telemetry. ⛔ Widen this in the same change as the writer, always.
   lifecycle: {
     class: 'telemetry',
     retention: {
       maxAge: '30d',
-      onlyWhen: { status: { $in: ['completed', 'failed'] } },
+      onlyWhen: { status: { $in: ['completed', 'failed', 'cancelled', 'timed_out'] } },
     },
   },
-  description: 'Durable automation run state: live suspended runs (resumable, ADR-0019) and terminal run history (completed / failed, for observability).',
+  description: 'Durable automation run state: live suspended runs (resumable, ADR-0019) and terminal run history (completed / failed / cancelled / timed_out, for observability).',
   displayNameField: 'id',
   nameField: 'id', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{flow_name} · {node_id}',
@@ -141,13 +150,23 @@ export const SysAutomationRun = ObjectSchema.create({
       group: 'State',
     }),
 
+    // [#15223] The four terminal members are the ones the engine's own
+    // terminal predicate admits (`TERMINAL_RUN_STATUSES`, engine.ts). This
+    // option set used to stop at `failed`, and both ends of the store folded to
+    // match it: a cancelled or timed-out run was written as `failed`, so the
+    // distinction was destroyed at write time rather than merely unshown, and a
+    // restart or ring eviction turned an operator's deliberate `cancelRun`
+    // (ADR-0044) into an indistinguishable failure. `refused` is deliberately
+    // ABSENT: `ExecutionStatus` declares it (#14945) but no engine path
+    // produces it, and an option nothing can write is a declared-but-inert
+    // value (ADR-0078).
     status: Field.select(
-      ['running', 'paused', 'completed', 'failed'],
+      ['running', 'paused', 'completed', 'failed', 'cancelled', 'timed_out'],
       {
         label: 'Status',
         required: true,
         defaultValue: 'paused',
-        description: 'paused = a live suspended run (resumable); completed / failed = a terminal run kept as durable history.',
+        description: 'paused = a live suspended run (resumable); completed / failed / cancelled / timed_out = a terminal run kept as durable history.',
         group: 'State',
       },
     ),
@@ -330,6 +349,31 @@ export const SysAutomationRun = ObjectSchema.create({
     // the failure mode is silent: a detector that fires during normal operation
     // gets muted, and a muted broken-sweep detector is the same silence #4347
     // produced — except it now looks monitored.
+    //
+    // [#15606] And `failed` deliberately does NOT get one — the asymmetry
+    // below is a decision, not an oversight, recorded here because this is the
+    // paragraph that provokes the question. The four counters exist because
+    // ONE filter expression needs them in ONE row: `selected_count > 0 AND
+    // acted_count = 0`, qualified by `unmeasured_count`. A WHERE clause cannot
+    // reach into a JSON blob for an operand, so every operand of that one
+    // expression has to be a column or the expression cannot be written at
+    // all. `failed` is not one of its operands. It would be its OWN predicate
+    // (`failed_count > 0`), nobody alerts on it today, and a caller that wants
+    // it has already fetched `summary_json` — where the fold
+    // `failed = Σ nodes[].failures` sits, and which says so in its own
+    // description (pinned by `sys-automation-run-failed-count-verdict.test.ts`,
+    // so this explanation cannot rot into a lie about the schema).
+    //
+    // Re-open condition, stated so it is not a matter of taste later: the
+    // FIRST real need to ALERT on "which runs lost rows this week" is the card
+    // that adds `failed_count`, mirroring `unmeasured_count` — null on rows
+    // written before the column existed, ⛔ never `0`, because "not tracked"
+    // and "nothing failed" are different answers and only one of them should
+    // stay quiet. One column on an ADR-0103 engine-owned object: a human-floor
+    // change, never a rider. Until such a need is named, "readable but not
+    // queryable" is the right trade for this one counter — which is the same
+    // sentence as the first paragraph above, reaching the opposite conclusion
+    // because the input differs: there, an alarm existed to serve.
     selected_count: Field.number({
       label: 'Records Selected',
       required: false,
@@ -361,7 +405,7 @@ export const SysAutomationRun = ObjectSchema.create({
     summary_json: Field.textarea({
       label: 'Run Summary',
       required: false,
-      description: 'JSON per-node breakdown (terminal status, runs, failures, selected/acted) plus which gates closed and how often. Folded from the FULL step log, so its counts stay exact even when `steps_json` is compacted.',
+      description: 'JSON per-node breakdown (terminal status, runs, failures, selected/acted) plus which gates closed and how often — AND the run-level totals, which is where `failed` lives: the count of node executions that failed (`failed = Σ nodes[].failures`, contained ones included, so a green run can carry a non-zero `failed`). READ LOST-ROW COUNTS FROM HERE — `failed` has no column of its own, deliberately (see the comment above `selected_count`), so "which runs lost rows?" is answered by parsing this blob, not by a WHERE clause. Absent `failed` = not tracked (an older run), which is not the same as zero. Folded from the FULL step log, so its counts stay exact even when `steps_json` is compacted — and the totals survive this blob\'s own compaction too, which drops only the per-node detail (`detailOmitted`).',
       group: 'Outcome',
     }),
 

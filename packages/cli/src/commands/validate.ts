@@ -13,6 +13,7 @@ import {
   type ConversionNotice,
 } from '@objectstack/spec';
 import { loadConfig } from '../utils/config.js';
+import { lowerCallables } from '../utils/lower-callables.js';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveSduiManifest } from '../utils/sdui-manifest.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
@@ -204,7 +205,62 @@ export default class Validate extends Command {
         ...lintUnknownStackKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
         ...lintUnknownAuthoringKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
       ].map(formatUnknownAuthoringKey);
-      const result = ObjectStackDefinitionSchema.safeParse(normalized);
+      // 2b. [#16544] Lower inline `function` handlers (Hook.handler, action
+      //     `target`, top-level `functions`) to a metadata `body` + string ref
+      //     BEFORE the parse — the same `lowerCallables` call `os build` makes
+      //     at its step 2b and `os lint` makes in `lintConfig`, not a copy.
+      //
+      //     Every rule in the `hook-body-*` / `hook-api-update-readonly-*`
+      //     family opens on `body.language === 'js'`. A hook authored as
+      //     `handler: async (ctx) => { … }` carries no `body`, so on the
+      //     un-lowered stack the whole family returned before reading
+      //     anything, and this command passed (exit 0, no finding) a stack
+      //     `os build` refuses with `hook-api-update-readonly-field` — the
+      //     #3782 / #4409 class one door over, on the shape the reference app
+      //     uses for 39 of 39 hooks. The body-authored control fired here all
+      //     along, so the silence was the door, not the rule.
+      //
+      //     POSITION IS LOAD-BEARING: after the two pre-parse unknown-key
+      //     lints above, which keep reading `normalized` exactly as before,
+      //     and before the parse, which now reads the lowered view. That is
+      //     `compile.ts`'s lower-BEFORE-parse order exactly; its key lints sit
+      //     AFTER its parse, so on both doors what protects the lints' input
+      //     is non-mutation, not ordering: `lowerCallables` returns a NEW
+      //     top-level object and never mutates its input, so `normalized` —
+      //     the registry's `normalized` tier below, `collectMetadataStats(
+      //     config)`, the structural advisories — is byte-for-byte what it
+      //     was; only what the parse and the registry's `parsed` tier see
+      //     changes.
+      //
+      //     NOT A PURE NARROWING. The same pass also lowers an inline action
+      //     `target` callable (`actions[*]`, `objects[*].actions[*]`) to a ref
+      //     string plus `body`, and names a nameless `functions` ARRAY entry
+      //     (`[{ handler: fn }]`) `anon_fn`. `ActionSchema.target` is
+      //     `z.string()`, the array entry requires `name`, and
+      //     `normalizeStackInput` touches neither, so before this step the
+      //     un-lowered parse REFUSED both configs (`invalid_type` at
+      //     `actions.0.target`; `invalid_union` at `functions`; exit 1) while
+      //     `os build` accepted them all along. Both are accepted here now —
+      //     accepted-set relaxations on this command, each measured through
+      //     the real CLI on both sides and pinned in
+      //     `test/lint-hook-rules-reach-handler-hooks.e2e.test.ts`. Not
+      //     limbs: `hooks[*].handler` accepts a function un-lowered, and the
+      //     `functions` MAP forms parse either way. Parity with the build is
+      //     the intent, and it is declared rather than assumed because a
+      //     sibling's acceptance is evidence of intent, not a declaration on
+      //     this command's face.
+      //
+      //     Nothing is emitted, so `lowering.functions` is unused here, and
+      //     the extraction refusals in `bodyExtractionWarnings` are NOT
+      //     surfaced: a handler the extractor refuses is left with no `body`
+      //     on every door, the family stays silent on it, and the refusal is
+      //     `os lint`'s `hook-body/*` rules' to report. Publishing it here
+      //     would add a key to this command's `--json` payload, which is its
+      //     own contract decision (`compile.ts` records why the key is
+      //     build's alone). No step line is printed either: the text face is
+      //     byte-for-byte what it was, and the docs transcripts stay true.
+      const { lowered } = lowerCallables(normalized as Record<string, unknown>);
+      const result = ObjectStackDefinitionSchema.safeParse(lowered);
 
       if (!result.success) {
         if (flags.json) {

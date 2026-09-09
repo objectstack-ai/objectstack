@@ -383,6 +383,95 @@ export function declareUnprovisionedCell(cell: DialectCell, matrix: string): voi
 }
 
 /**
+ * [#16434] The per-test budget a LIVE cell runs under — the one the matrix was
+ * missing, and the reason a merge-queue build dequeued an unrelated PR.
+ *
+ * ## Why a live cell needs its own budget at all
+ *
+ * This package sets no `testTimeout`, so every cell inherited vitest's default
+ * 5000 ms — the SQLite cell, which does no I/O, and the live cells, which talk
+ * to a separate server over a socket. Measured against a live Postgres 16.13
+ * and a live MySQL 8.0.46 in ONE run, on the cell that actually timed out:
+ * `sql-driver-11224-update-stamp-precision.test.ts` §2 on live mysql (six
+ * rounds of create → read → update → a server-side cursor comparison, so 24
+ * live round-trips in one test body):
+ *
+ * ```
+ *   §2               idle loop    loop held by a re-scheduling 12 ms hog (8 on 4 CPUs)
+ *   sqlite              21 ms                                            24 ms
+ *   live postgres       50 ms                                            50 ms
+ *   live mysql          64 ms                                           121 ms
+ * ```
+ *
+ * ⚠️ Read what that does NOT license, in three directions.
+ *
+ *  - It does not derive this number, and cannot. The queue build that dequeued
+ *    PR #16430 spent MORE than 5000 ms in that same live-mysql body — 40x to
+ *    75x the figures above. A budget written as "measured cost times a margin"
+ *    would have landed in the low hundreds of milliseconds and been wrong by
+ *    two orders of magnitude. What the measurement establishes is the opposite:
+ *    the cost of the WORK is not what sets this bound, so the bound is derived
+ *    from what it has to sit BETWEEN instead.
+ *  - It is not the cost of live cells in general. This file is one of the
+ *    heavier ones; `sql-driver-12998-shadow-null-safe-key.test.ts`'s live cells
+ *    were measured on this same container at 248 ms for the slowest of them.
+ *    ⛔ Nothing here claims any live cell is normally near this ceiling.
+ *  - The numbers above are ONE world. Earlier readings taken on this container
+ *    with only `OS_TEST_POSTGRES_URL` set are not comparable with them: the box
+ *    and the cell population both differ. Whole-row comparisons only.
+ *
+ * ## The two bounds it sits between, both read off the code it guards
+ *
+ * FLOOR — the driver's own longest LEGAL wait for one connection. `SqlDriver`
+ * bounds every live connection itself: a per-dialect connect timeout of
+ * 10_000 ms and a deliberately looser `pool.createTimeoutMillis` backstop of
+ * 15_000 ms ("The two bounds must not be equal. They race, and knex wins a
+ * tie", `withConnectBound`). Any live round-trip may have to acquire a pooled
+ * connection, so 15_000 ms is a wait the driver is ENTITLED to inside a test
+ * body. A budget at or below it pre-empts the driver's own envelope: vitest
+ * kills the test with `Test timed out in Nms` while the driver was still inside
+ * a legal wait, and the accurate message the black-hole test pins (`timeout
+ * expired` from pg, `connect ETIMEDOUT` from mysql2) never prints.
+ * ⇒ the budget must be strictly ABOVE 15_000 ms.
+ * ⭐ Note where that leaves the status quo: 5000 ms is below even the 10_000 ms
+ * dialect connect bound, so an unbudgeted live cell could never report a
+ * connect fault at all — vitest always won that race.
+ *
+ * CEILING — the stall guard the live job wraps this suite in
+ * (`run-with-stall-guard.mjs --stall-minutes 10`, ci.yml). A per-test budget at
+ * or above ten minutes of silence never fires first: the guard kills the
+ * process group and reports an unattributed stall, losing WHICH test hung.
+ * ⇒ the budget must be well BELOW 600_000 ms.
+ *
+ * ## The point inside that corridor, stated as a choice rather than a measurement
+ *
+ * Nothing in the corridor (15_000, 600_000) is distinguishable by measurement,
+ * so the value is fixed by this package's OWN existing answer for live-touching
+ * sites: 60 explicit `60_000` budgets across 22 files — #13688 and its sweep
+ * #13902 put them on live test BODIES, #14213 and #14628 on the hooks that pay
+ * a live connect. Adopting it leaves the live matrix with ONE live budget
+ * instead of two, so a red at 60_000 ms is unambiguous about which bound it hit.
+ *
+ * ⭐ That convention states its own reasoning, and states its own limit —
+ * `sql-driver-12998-shadow-null-safe-key.test.ts`, on the four budgets #13902
+ * gave it: "Sized like this package's siblings — 60_000 is 7 of its 9 explicit
+ * budgets — and NOT an assertion that these tests are normally anywhere near
+ * that slow." So the precedent picked the value by convention and said so; what
+ * it never had is a CORRIDOR the value must lie in. That is what this constant
+ * adds, and it is the half that is derived. ⛔ It is NOT `driver-mongodb`'s 30_000 carried over
+ * by analogy — that is that package's number, and this one is this package's.
+ *
+ * It clears the derived floor by 4x — arithmetically, room for four
+ * full-length pool creations inside one test body before the budget could
+ * pre-empt the driver — and sits an order of magnitude under the derived
+ * ceiling. `live-dialect-matrix.budget.test.ts` pins both inequalities
+ * against the bound the driver ACTUALLY installs, read off a constructed
+ * connection rather than copied here, so the two halves cannot drift apart in
+ * silence.
+ */
+export const LIVE_CELL_TIMEOUT_MS = 60_000;
+
+/**
  * Run a cell EITHER WAY — measured when it is provisioned, declared un-run when
  * it is not — with no third outcome available to the caller.
  *
@@ -423,7 +512,30 @@ export function declareDialectCell(
     declareUnprovisionedCell(cell, matrix);
     return;
   }
-  measure(cell);
+  // [#16434] LIVE cells only — the budget is applied HERE, at the one seam
+  // every matrix consumer already goes through, rather than at each `it` in the
+  // 40 files that call this. Same argument the rest of this module makes: a
+  // guard copy-pasted per suite is a guard that can weaken in one copy and
+  // nowhere else, and a new live file would arrive without it.
+  //
+  // ⛔ Deliberately NOT a package-wide `testTimeout` in `vitest.config.ts`.
+  // That is the one knob with no cell-level discrimination, so it would raise
+  // the ceiling for the SQLite cell too — measured at 21 ms idle / 24 ms hogged
+  // for the same test body the live-mysql cell spends 64-121 ms on — and this
+  // package's fast in-memory cells are where a 5 s guard is doing real work.
+  //
+  // A suite-level `timeout` cascades to the tests the consumer's own describes
+  // declare, and an explicit per-`it` third argument still wins over it — both
+  // asserted in `live-dialect-matrix.budget.test.ts`, so the 62 explicit
+  // budgets already in this package (60 x 60_000, one 40_000, one 120_000)
+  // keep the value their own site chose.
+  if (!cell.live) {
+    measure(cell);
+    return;
+  }
+  describe(`live cell budget (${LIVE_CELL_TIMEOUT_MS} ms)`, { timeout: LIVE_CELL_TIMEOUT_MS }, () => {
+    measure(cell);
+  });
 }
 
 /** What a server reports about its own timezone. */

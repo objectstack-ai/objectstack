@@ -696,6 +696,22 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
             return { handled: true, response: deps.success(result) };
         }
 
+        // ── contract point 3: the caller-scope load's VERDICT, consumed ──────
+        // [#16370] The same shared refusal the MCP `run_action` bridge calls at
+        // the same point in its own sequence — ONE implementation of the rule
+        // #15079 wrote into the declarative executor, now read by the flow door
+        // and the script/body door as well. A signal only one of three doors
+        // consumed is an authorization rule silently inert on the other two,
+        // which is the #14143 / #15168 failure class on this exact seam.
+        //
+        // Inside the `try`, like the declarative branch above, so the 404 takes
+        // the ONE catch this door already has and is served with its `.status` /
+        // `.code` intact. Ahead of `actionContext` on purpose: the trusted-mode
+        // audit line and the RLS/FLS-bypassing `ctx.engine` / `ctx.api` are
+        // built below, and none of them may exist for a caller who has not
+        // demonstrated read access to the subject row.
+        actionExec.refuseDeniedSubjectLoad(objectName, recordId, subject);
+
         const actionContext: any = {
             record,
             // [#14143] The caller-scope load's verdict — see

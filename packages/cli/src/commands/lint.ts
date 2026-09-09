@@ -13,6 +13,7 @@ import { resolveSduiManifest } from '../utils/sdui-manifest.js';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { scoreMetadata } from '../lint/score.js';
 import { checkHookBodyLowering } from '../lint/hook-body-lowering.js';
+import { lowerCallables } from '../utils/lower-callables.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
 import { DEFAULT_METADATA_EVAL_CORPUS } from '../lint/corpus.js';
 import {
@@ -481,7 +482,40 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   // give), so the registry runs both stack tiers against the normalized input —
   // which is what this command already did for the reference-integrity suite
   // and the security linter.
-  for (const f of runAuthoringRules('lint', { normalized: config, sduiManifest: opts.sduiManifest })) {
+  //
+  // ── The `parsed` tier is handed the LOWERED view (#16095) ──
+  // A hook authored as an inline `handler` function carries no `body`, and the
+  // `hook-body-*` / `hook-api-update-readonly-*` family opens on
+  // `body.language === 'js'` — so on the un-lowered stack the whole family
+  // returned before reading anything, while the reference app authors 39 of
+  // 39 hooks that way. `os build` never had that gap: it runs `lowerCallables`
+  // BEFORE its parse and judges the lowered stack, so the same rules fire
+  // there. This is the same call on the same normalized input, so what the
+  // family sees here cannot drift from what `os build` sees (the parity
+  // `checkHookBodyLowering` above already claims for the refusal side).
+  //
+  // What this changes and what it does not:
+  //   - `parsed`-tier rules see `body: { language: 'js', source }` on every
+  //     hook/action whose handler extracts, and `handler: '<ref>'` in place of
+  //     the function — exactly the stack `os build` parses. Still unparsed:
+  //     no defaults are filled, which is the standing condition of this tier
+  //     under `os lint` and one every rule already tolerates.
+  //   - `normalized`-tier rules keep the un-lowered input, as they do in `os
+  //     build` (which hands them `normalized`, not `lowering.lowered`).
+  //   - `lowerCallables` returns a NEW top-level object and re-maps the slots
+  //     it touches (`hooks`, `objects[*].actions`, `actions`, `functions`,
+  //     `packages[*].manifest`); the caller's stack is never mutated, so the
+  //     function-reading rule above and `scoreMetadata` keep their live
+  //     callables. A handler the extractor refuses is left with no `body` —
+  //     the family stays silent on it and `checkHookBodyLowering` is what
+  //     reports it, so no verdict is ever given about a body that was not
+  //     produced. Nothing here touches what `os build` accepts (#13838).
+  const { lowered } = lowerCallables(config as Record<string, unknown>);
+  for (const f of runAuthoringRules('lint', {
+    normalized: config,
+    parsed: lowered,
+    sduiManifest: opts.sduiManifest,
+  })) {
     issues.push({
       severity: f.severity === 'info' ? 'suggestion' : f.severity,
       rule: f.rule,
@@ -926,6 +960,61 @@ export default class Lint extends Command {
         const { mod } = await bundleRequire({
           filepath: flags.generator,
           external: BUNDLE_REQUIRE_EXTERNALS,
+          // [#16358] Under `--json` this call site had TWO channels, and only
+          // one of them was ours. esbuild's own logger writes straight to
+          // stderr from inside the bundle, BEFORE anything throws, so the
+          // `catch` below — which does produce a correct one-key `{error}`
+          // document on stdout — never gets the chance to suppress it.
+          // Measured on this entry at 7f96e1417e, both doors:
+          //
+          //   os lint --eval --json --generator /tmp/os16358/nope.mjs
+          //     exit 1 · stdout 143 B (well-formed `{error}`) · stderr 55 B
+          //     `✘ [ERROR] Could not resolve "/tmp/os16358/nope.mjs"`
+          //   os lint --eval --json --generator ./warns-but-loads.mjs
+          //     exit 0 · stdout 3158 B (the eval report) · stderr 340 B
+          //     `▲ [WARNING] The "typeof" operator will never evaluate to …`
+          //
+          // ⇒ the leak is NOT confined to the failure branch. `--json` is a
+          // machine face; anything on stderr is a human-channel emission the
+          // caller did not ask for, and both of those are an internal
+          // bundler's diagnostic rather than an ObjectStack refusal.
+          //
+          // ⛔ NOTHING is lost from the refusal. esbuild still THROWS its
+          // `BuildFailure` with `errors` populated — `logLevel` governs only
+          // whether esbuild PRINTS — and that message is already the tail of
+          // the `{error}` string the `catch` builds:
+          // `… Build failed with 1 error:\nerror: Could not resolve "…"`.
+          // Silencing the logger must not silence the refusal, and it does
+          // not; `test/lint-eval-generator-load-envelope.e2e.test.ts` pins
+          // both halves on the same run.
+          //
+          // ⚠️ WHAT THIS DOES SUPPRESS, stated rather than shipped quietly:
+          // under `--json`, an esbuild WARNING on a generator that loads fine
+          // (the second run above) reached stderr before and now reaches
+          // nothing — a warning is not thrown, so no `catch` carries it onto
+          // stdout. That is inside the defect, not beyond it: the property
+          // the sibling pin's comment states is about the `--json` face as a
+          // whole, not about its error branch.
+          //
+          // ⛔ The human face is NOT touched, and is not touched BY
+          // CONSTRUCTION rather than by restating a default: when `--json` is
+          // absent this passes no `esbuildOptions` at all, so bundle-require's
+          // own esbuild defaults apply exactly as before. A `logLevel:
+          // 'warning'` written out here would be me copying a default I would
+          // then own.
+          //
+          // ⛔ Scope is this ONE call site. The other `bundleRequire` callers
+          // in this package (`utils/config.ts`, `utils/scaffold-validate.ts`,
+          // `commands/serve.ts`) keep their diagnostics; a global esbuild
+          // silence would trade one under-read for a larger one.
+          //
+          // Why `logLevel` and not the two alternatives the card left open:
+          // esbuild's JS API exposes no logger hook to install (its whole
+          // logging surface is `logLevel` plus the `errors`/`warnings` arrays
+          // on the result), and capturing `process.stderr.write` around an
+          // await is a process-global monkey-patch that would swallow
+          // concurrent writes that are not esbuild's.
+          ...(flags.json ? { esbuildOptions: { logLevel: 'silent' as const } } : {}),
         });
         const fn = (mod as any).default ?? (mod as any).generate;
         if (typeof fn !== 'function') {
@@ -933,7 +1022,34 @@ export default class Lint extends Command {
         }
         generate = fn;
       } catch (error: any) {
-        const msg = `Failed to load generator "${flags.generator}": ${error?.message || error}`;
+        // [#16359] Our separator `": "` already carries the ONE space between
+        // the quoted value and the reason; the detail must not bring a second.
+        // `bundle-require` composes its own refusal as
+        // `${filepath} is not a valid JS file`, so an EMPTY filepath
+        // contributes no characters and that fragment arrives with a LEADING
+        // space, which lands against ours. Re-driven at 923caede80 through
+        // `od -c`, both faces, `bin/run-dev.js`, `NO_COLOR=1`:
+        //
+        //   os lint --eval        --generator ""   -> `generator "":  is not a valid JS file`
+        //   os lint --eval --json --generator ""   -> the same two spaces inside `{error}`
+        //   os lint --eval [--json] --generator <unresolvable path>  -> ONE space
+        //
+        // ⛔ This is NOT a branch on the empty value. #16161 ruled that the
+        // empty string must answer through the door an unresolvable path
+        // already answers through, and a bespoke message for it would be the
+        // second refusal shape that card exists to avoid. The normalisation
+        // below reads the SEAM and never `flags.generator`, and applies to
+        // every detail alike — so both inputs still reach this one `catch`,
+        // this one composition, this one envelope and this one exit code, and
+        // every detail that does not open with a space is byte-identical.
+        //
+        // Leading SPACES only, deliberately not `trimStart()`: a detail that
+        // opens with a newline is a different shape (our space then a line
+        // break), not a doubled separator, and stays exactly as it prints
+        // today. `test/lint-eval-generator-refusal-separator.test.ts` pins the
+        // bytes on both faces, with the unresolvable path as the control.
+        const detail = `${error?.message || error}`.replace(/^ +/, '');
+        const msg = `Failed to load generator "${flags.generator}": ${detail}`;
         // [#15549] The ADR-0112 carriers, spread from the SAME helper the
         // project-lint catch-all in `run()` uses — not a second shape invented
         // here. Before this, the `catch` built `msg` and DISCARDED `error`, so

@@ -226,13 +226,18 @@ export const HOOK_BODY_WRITE_PATTERNS: readonly HookBodyWritePattern[] = [
     },
   },
   {
+    // [#16249] `.create({…})` was advertised here and mapped in
+    // `API_WRITE_METHODS`, and it is WITHDRAWN — the syntax line is what an
+    // author reads as "this is how you write it", and this spelling cannot run:
+    // see the note on `API_WRITE_METHODS` below for the sandbox reading and the
+    // build-time refusal that now backs it.
     id: 'api-crud-literal',
     syntax:
-      "ctx.api.object('<object>').insert({…}) | .create({…}) | .update({…}) | .updateById(id, {…})",
+      "ctx.api.object('<object>').insert({…}) | .update({…}) | .updateById(id, {…})",
     example: {
       // Real ObjectRepository signatures: the record payload is argument 0 for
-      // insert/create/update and argument 1 for updateById. (`update(data)` —
-      // NOT `update(id, data)`; the id travels inside the payload/options.)
+      // insert/update and argument 1 for updateById. (`update(data)` — NOT
+      // `update(id, data)`; the id travels inside the payload/options.)
       source:
         "await ctx.api.object('audit_log').insert({ event: 'won' }); " +
         "await ctx.api.object('crm_deal').updateById(id, { stage: 'won' });",
@@ -284,13 +289,38 @@ const HOOK_APPLICABLE_IDS: ReadonlySet<string> = new Set(HOOK_BODY_WRITE_PATTERN
 
 /**
  * `ctx.api.object(name)` write methods → index of the record-payload argument.
- * Mirrors `ObjectRepository` in packages/objectql (the surface hooks actually
- * receive): `upsert` exists only on the last-resort engine facade actions may
- * fall back to, never on the hook path, so it is deliberately absent.
+ * Mirrors what a BODY's `ctx.api` actually installs — not the host
+ * `ObjectRepository` class, which is a superset of it.
+ *
+ * Two absences, each measured, so the next reader can tell "excluded" from
+ * "overlooked":
+ *
+ *   `upsert`  exists only on the last-resort engine facade actions may fall
+ *             back to, never on the hook path.
+ *   `create`  [#16249] WITHDRAWN. The host `ObjectRepository` does alias
+ *             `create(data)` to `insert(data)`, but this map grades L2
+ *             (`language:'js'`) BODIES, which run in QuickJS, and `installCtx`
+ *             (runtime/src/sandbox/quickjs-runner.ts) installs exactly
+ *             `insert / update / delete / updateMany / deleteMany / upsert` as
+ *             the `ctx.api.object()` write leaves. The spec contract agrees and
+ *             is the authority: `IScopedObjectRepository`
+ *             (packages/spec/src/contracts/scoped-context.ts) declares `insert`
+ *             and names `create` as measured-and-excluded. So a body's
+ *             `.create()` is `TypeError: not a function` on its first run —
+ *             grading its payload as a live write told an author the call was
+ *             fine and the field was the only question, and staying silent when
+ *             the field existed read as a clean bill of health for a call that
+ *             cannot run. Since #16249 `objectstack build` refuses `.create(`
+ *             at lowering (`FORBIDDEN_PATTERNS` in
+ *             packages/cli/src/utils/extract-hook-body.ts), so the shape no
+ *             longer reaches a `body.source` at all.
+ *
+ * ⛔ Re-adding `create` here without re-adding it to the sandbox AND to the
+ * contract puts the ledger back in front of both — the defect #16249 names.
+ * `validate-readonly-hook-writes.test.ts` pins the partition and reddens on it.
  */
 const API_WRITE_METHODS: ReadonlyMap<string, number> = new Map([
   ['insert', 0],
-  ['create', 0],
   ['update', 0],
   ['updateById', 1],
 ]);
@@ -711,6 +741,43 @@ export function extractHookBodyWriteSet(source: string): ExtractedHookBodyWriteS
 /**
  * Validate L2 hook-body writes against target-object field declarations.
  * Pure `(stack) => Finding[]` (ADR-0019); safe on pre- or post-parse stacks.
+ *
+ * ## Which intakes reach a hook authored as an inline `handler` (#16095)
+ *
+ * This rule opens on `body.language === 'js'`. A hook written as
+ * `handler: async (ctx) => { … }` carries no `body`, so whether it is judged
+ * is a property of the DOOR — what each caller hands this function — not of
+ * the rule. Measured (`packages/cli/test/lint-hook-rules-reach-handler-hooks*`):
+ *
+ * Every leg below was measured with the body-authored control beside it, so a
+ * silent leg is a reading about that door and never about this rule. The doors
+ * are the call sites of `runAuthoringRules`, enumerated — not the three `os *`
+ * commands, which are fewer than the doors:
+ *
+ *   `os build` union        `compile.ts` lowers every inline handler to a
+ *                           metadata body BEFORE its parse (`lowerCallables`)
+ *                           and judges the parsed result — REACHED, always was.
+ *   `os build` per-package  same lowered `result.data`, re-entered one package
+ *                           manifest at a time — REACHED, always was.
+ *   `os lint`               hands the registry's `parsed` tier that same
+ *                           lowered view — REACHED since #16095.
+ *   scaffold validate       `runScaffoldAuthoringRules` (`os init` / `dev` over
+ *                           a rendered template) lowers before it parses too —
+ *                           REACHED, always was, and pinned since #16095.
+ *   `os validate`           lowers before it parses since #16544 — the same
+ *                           `lowerCallables` call, between its pre-parse
+ *                           unknown-key lints and its parse — REACHED since
+ *                           #16544. Measured NOT reached under #16095, when it
+ *                           parsed the normalized stack without lowering while
+ *                           the body-authored control fired; closing it was
+ *                           its own accept/reject decision, taken on #16544.
+ *   direct call             judges exactly the stack it is given — NOT reached
+ *                           unless the caller lowers first; measured both ways.
+ *
+ * A handler the extractor refuses (forbidden token, free identifier,
+ * unparseable) is left with no `body` on every door, so this rule stays silent
+ * on it; the refusal itself is reported by `os lint`'s `hook-body/*` rules and
+ * by `os build`'s warn-and-bundle line, never guessed at here.
  */
 export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
   const findings: HookBodyWriteFinding[] = [];

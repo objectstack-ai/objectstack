@@ -204,6 +204,8 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
+// dispatch-gates: wide-population -- discover() and discoverResponseWriters() (the two walks behind MODULES and the Hono/Express surfaces) both root at join(ROOT, 'packages') and admit every non-test .ts file there before an AST pass decides which of them write a response -- a file-KIND filter, not a filename one, so no glob spells the population short of the whole subtree. Measured fresh on this tree: 2403 of 6491 tracked packages/ files are non-test .ts source (37.0%), corroborating the independent fs-trace in scripts/pm/bare-root-worklist.mjs's CENSUS_REFUSE_WIDE ("check:route-envelope packages", 2181/5837 = 37.4% at 2aa8456cf, verdict REFUSE-WIDE) -- the same width trade that table already recorded for this gate, now acted on here (#16828). The MODULES table's own keys stay as exact-file hints below, so a card touching an ALREADY-declared module still MATCHES precisely; this marker only stops a file the walk discovers but MODULES does not yet list -- the #16730 case -- from reading as Silent. packages/runtime/src/domains (DISPATCHER_DOMAIN_DIR) is a second, separately audited surface: discoverDomains() enumerates it exhaustively against DISPATCHER_DOMAINS below, independent of the response-writer population this marker is about.
+
 /**
  * Every route module in the repo, with the envelope structure it is DECLARED to
  * have. A module the scan finds that is not listed here fails — see the header.
@@ -253,6 +255,18 @@ const MODULES = {
   // through `unwrapResponse`; it converged onto the shapes its dispatcher twin
   // (`runtime/src/domains/share-links.ts`) had always returned.
   'packages/plugins/plugin-sharing/src/share-link-routes.ts': { responses: 0, ok: 0, err: 0 },
+
+  // [#15169] The host door. `mountStorageRoutes` composes `/api/v1/storage/*`
+  // onto an HTTP surface the HOST owns, for a hosted kernel that registers no
+  // `http-server` service. It matches the `*-routes.ts` convention and so is
+  // discovered, but it answers nothing itself: it binds the three package-internal
+  // seams and hands the surface to `registerStorageRoutes`, so every body on that
+  // prefix is still written by `storage-routes.ts` above, through the shared pair.
+  // Zero is therefore structural rather than measured-and-hoped: a write site
+  // appearing here would mean the door started building bodies of its own, which is
+  // exactly the review this number exists to force. Declared in the same PR that
+  // created the module so the gap never exists.
+  'packages/services/service-storage/src/mount-storage-routes.ts': { responses: 0, ok: 0, err: 0 },
 
   // ── Exempt ──────────────────────────────────────────────────────────────
 
@@ -757,6 +771,30 @@ const PLUGIN_ROUTE_MODULES = {
   // pre-auth exemption here: these bodies are read by SDKs and codegen, not by
   // our own shells, and the migration was one key.
   'packages/adapters/hono/src/index.ts': {},
+
+  // [#16569] FIRST AUDIT — swept in by the walk, verdict conformant. The module
+  // rebuilds better-auth's `/organization/list-user-invitations` endpoint in place
+  // so the DECLARED `requireEmailVerificationOnInvitation` is honoured, and it
+  // BUILDS exactly ONE body: `return ctx.json(pendingInvitations)`. The argument
+  // is an IDENTIFIER, so the counters read it as relayed — the same deliberate
+  // blindness `inbound-rate-limit.ts` sits behind on surface 4 — and what it names
+  // is better-auth's own rows: the vendor's exported
+  // `getOrgAdapter(ctx.context, options).listUserInvitations(email)` produces them
+  // and the vendor's `status === 'pending'` post-filter narrows them. No shape is
+  // minted here, so there is no literal for a counter to read and none to hoist.
+  // The three refusals are `throw APIError.*` — the vendor's flat
+  // `{ message, code }`, RAISED rather than written — which this surface does not
+  // count either; the single countable write is therefore the file's whole visible
+  // departure, not a sample of it.
+  //
+  // Worth keeping distinct from its twin: `admin-impersonate-endpoint.ts` below
+  // takes the SAME in-place-rebuild door in this same package and needed the
+  // `vendorWire` ruling, because reimplementing that handler turned a relay into a
+  // BUILT literal (`ctx.json({ session, user })`) and made a vendor-owned shape
+  // visible to the counters. Here the rebuild never re-shapes the body, so nothing
+  // became visible and no ruled state applies. Read this `{}` for what it is:
+  // nothing this file BUILDS departs from the envelope.
+  'packages/plugins/plugin-auth/src/list-user-invitations-verification.ts': {},
 
   // ── Ratchet: real, tracked, NOT blessed ─────────────────────────────────
   //

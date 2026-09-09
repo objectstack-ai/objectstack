@@ -3,18 +3,37 @@
 // COMPILE-TIME pins for the closed `Plugin.type` set on the PUBLISHED surface
 // of `@objectstack/core` (#13925): `type?: PluginType`, a union DERIVED from
 // the spec's `CORE_PLUGIN_TYPES` (`'standard' | (typeof CORE_PLUGIN_TYPES)[number]`),
-// replacing the `type?: string` that let any spelling through while the Zod
-// gate (`PluginSchema.type`) refused it at parse.
+// replacing the `type?: string` that let any spelling through.
 //
-// Why the pins live in THIS package: `@objectstack/core` has no `typecheck`
-// script (it is a type-check DEBT ledger entry), so a `@ts-expect-error` there
-// is a phantom pin — no tsc program a `typecheck` script runs ever evaluates
-// it, and `check:type-check-coverage` refuses it. This package's
-// `tsconfig.test.json` program IS run by its `typecheck` script
-// (`check:test-typecheck`, EXACT per-file ratchet: an unlisted file must stay
-// at zero errors), and it resolves `@objectstack/core` to the BUILT
-// `dist/index.d.ts` — so these directives pin the contract consumers actually
-// see. Same placement as `plugin-metadata-retired-fields.pin.test.ts`.
+// ⚠️ This header used to end that sentence "while the Zod gate
+// (`PluginSchema.type`) refused it at parse". Measured false (#16049, from
+// #15638): `PluginSchema` had no runtime caller, kernel plugin objects were
+// never parsed, and an off-set `type` was accepted and stored verbatim — the
+// compiler was the only arm there was. Since #16049 the runtime arm is on the
+// BOOT path: `PluginLoader.validatePluginContract` runs `PluginSchema` over
+// every plugin object `kernel.use()` loads and raises
+// `PLUGIN_CONTRACT_VIOLATION` naming the first violated key.
+// `packages/core/src/types.ts` was corrected when that was measured; this
+// header carried the same wording and was missed.
+//
+// Why the pins live in THIS package: this package's `tsconfig.test.json`
+// program IS run by its `typecheck` script (`check:test-typecheck`, EXACT
+// per-file ratchet: an unlisted file must stay at zero errors), and it
+// resolves `@objectstack/core` to the BUILT `dist/index.d.ts` — so these
+// directives pin the contract consumers actually see.
+//
+// ⚠️ NOT because core cannot compile a pin — this header used to say
+// `@objectstack/core` "has no `typecheck` script (it is a type-check DEBT
+// ledger entry)", and that is false on this tree. #14613 split a
+// `tsconfig.test.json` out of core's build config and core's `typecheck`
+// NAMES it (via `check:test-typecheck --project`), so a `@ts-expect-error`
+// over there is compiled rather than the phantom pin
+// `check:type-check-coverage` refuses, and core holds no DEBT entry. What
+// core's program cannot do is read core's own PUBLISHED surface: it compiles
+// `src`, so a pin there would read `./types.ts` — the declaration — not the
+// `.d.ts` the build emits from it. That reason is durable where the
+// script-list one was not. Same placement as
+// `plugin-metadata-retired-fields.pin.test.ts`.
 //
 // Failure channel, proven able to fail by ablation on the narrowing PR:
 // reverting `type?: PluginType` to `type?: string` (and rebuilding core's
@@ -89,5 +108,12 @@ describe('Plugin.type closed set — published-surface pins (#13925)', () => {
         // unassignable to it.
         const complete: Equal<Exclude<PluginType, (typeof members)[number]>, never> = true;
         expect(complete).toBe(true);
+
+        // #16334: `Plugin.type` is INHERITED from `PluginDefinition` now, not
+        // spelled on the interface — so "the interface's key IS this union" has
+        // to be pinned, or the inherited key and the exported alias could drift
+        // apart with every directive above still green.
+        const inherited: Equal<NonNullable<Plugin['type']>, PluginType> = true;
+        expect(inherited).toBe(true);
     });
 });

@@ -80,7 +80,8 @@ import type { SettingsContext } from './settings-service.types.js';
  * need it and neither is visible from a response body:
  *
  *  - the ADR-0112 envelope the broken-`tenancy` arm raises, which the settings
- *    route layer flattens to `500 INTERNAL_ERROR` (see the 503 describe below);
+ *    route layer RELAYS as `503 SERVICE_UNAVAILABLE` since #15999 — it used to
+ *    flatten it to `500 INTERNAL_ERROR` (see the 503 describe below);
  *  - the `tenantId` this seam RETURNS, which is the half of this card that is
  *    not about admission at all.
  */
@@ -608,21 +609,25 @@ describe('#15351 — decision 1 option A: a BROKEN tenancy service is an outage,
   it('the door does NOT admit, and nothing lands', async () => {
     const m = await mount({ kind: 'factory-throws' });
     const res = await put(m, KEY(RAW_EXMEMBER_KEY));
-    // ⚠️ MEASURED, not endorsed: the settings route layer has no
-    // `isAuthzStoreUnavailableError` arm, so the branded 503 the seam raises is
-    // flattened into `500 INTERNAL_ERROR` here. That flattening is PRE-EXISTING
-    // — #13279's permission-store re-raise already reached this same `else`
-    // branch — and repairing the transport's envelope mapping is a different
-    // defect from supplying the posture, so it is filed rather than ridden in.
-    // What this card owns is pinned either way: the outage is NOT a quiet
-    // admit.
-    expect(res.status).toBe(500);
+    // ⭐ THE 500 ARM RETIRED HERE (#15999 ruling item 3). This line read
+    // `expect(res.status).toBe(500)` and carried a note saying so was MEASURED
+    // and not endorsed: the settings route layer had no
+    // `isAuthzStoreUnavailableError` arm, so the branded 503 the seam raises
+    // was flattened into `500 INTERNAL_ERROR` by the same untyped `else` branch
+    // #13279's permission-store re-raise already reached. All four route
+    // catches now RELAY the declared envelope instead.
+    //
+    // What THIS card owns is unchanged and still asserted: the outage is not a
+    // quiet admit, and nothing lands.
     expect(m.settingRows()).toHaveLength(0);
+    expect(res.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
+    expect((res.body as any)?.error?.code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
   });
 
   it('the GET listing is an outage too, never a silently empty list', async () => {
     const m = await mount({ kind: 'factory-throws' });
     const res = await listNs(m, KEY(RAW_MEMBER_KEY));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
+    expect((res.body as any)?.error?.code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
   });
 });

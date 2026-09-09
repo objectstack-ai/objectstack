@@ -9,6 +9,8 @@ import {
   ConcurrencyPolicySchema,
   ScheduleStateSchema,
   FlowRunSummarySchema,
+  FlowRunNodeSummarySchema,
+  ExecutionStepMetricsSchema,
 } from './execution.zod';
 
 // ==========================================
@@ -46,6 +48,52 @@ describe('ExecutionStatus', () => {
 // ==========================================
 // Execution Step Log
 // ==========================================
+
+describe('ExecutionStepMetricsSchema', () => {
+  // #15617 — the failure slot a delegating node rolls its child's contained
+  // failures through. `z.object` STRIPS an undeclared key on parse, so keeping
+  // the value through the parse is what proves the declaration exists.
+  it('declares `failures` — a delegating step keeps its child\'s contained-failure count through the parse', () => {
+    const metrics = ExecutionStepMetricsSchema.parse({ selected: 5, acted: 4, failures: 1 });
+    expect(metrics.failures).toBe(1);
+    expect(metrics).toEqual({ selected: 5, acted: 4, failures: 1 });
+  });
+
+  it('leaves `failures` absent on a step that delegated nothing — absent is not zero, and is not defaulted', () => {
+    const metrics = ExecutionStepMetricsSchema.parse({ selected: 1, acted: 1 });
+    expect(metrics.failures).toBeUndefined();
+    expect(Object.keys(metrics)).not.toContain('failures');
+  });
+
+  it('rejects a negative or fractional `failures`', () => {
+    expect(ExecutionStepMetricsSchema.safeParse({ failures: -1 }).success).toBe(false);
+    expect(ExecutionStepMetricsSchema.safeParse({ failures: 1.5 }).success).toBe(false);
+  });
+
+  it('says at the point of use which shape it is for, and that it is not the step\'s own outcome', () => {
+    // The carve-out has to be readable where a consumer reads the field, not
+    // only in a paragraph above the schema: the describe names both delegating
+    // node kinds and separates the slot from the step's own `status`.
+    const doc = ExecutionStepMetricsSchema.shape.failures.description ?? '';
+    expect(doc).toContain('`subflow`');
+    expect(doc).toContain('`map`');
+    expect(doc).toContain('`summary.failed`');
+    expect(doc).toContain('NOT this execution');
+  });
+
+  it('states the failed-child rule for the MIXED case, the departure from `acted`, and the third absence arm — at the point of use', () => {
+    // A child that contained failures and THEN failed is not a third case: the
+    // failed-child rule holds whether or not the child also contained, and
+    // that has to be readable on the field, because `acted` does the opposite
+    // (it carries a failed child's writes) and an implementer who mirrors
+    // `acted` here double-counts on the failed arm. The third absence arm is
+    // the window between this landing and the producer populating the slot.
+    const doc = ExecutionStepMetricsSchema.shape.failures.description ?? '';
+    expect(doc).toContain('whether or not it also contained failures before it failed');
+    expect(doc).toContain('unlike `acted`');
+    expect(doc).toContain('or the producer did not track it');
+  });
+});
 
 describe('ExecutionStepLogSchema', () => {
   it('should accept a valid step log', () => {
@@ -155,6 +203,24 @@ describe('ExecutionStepLogSchema', () => {
     expect(step.regionKind).toBe('parallel-branch');
     expect(step.iteration).toBe(3);
     expect(step.branch).toBe(1);
+  });
+
+  it('a `success` step that delegated to a child carries the child\'s contained failures on `metrics.failures` (#15617)', () => {
+    // The card's shape: `loop { subflow(child) }`, one iteration whose child
+    // COMPLETED while losing a row. The subflow step itself succeeded — the
+    // failure is the child's, contained — so `status` stays `success` and the
+    // count rides on the metrics, not on the step's own outcome.
+    const step = ExecutionStepLogSchema.parse({
+      nodeId: 'call',
+      nodeType: 'subflow',
+      status: 'success',
+      startedAt: '2026-09-05T00:00:00Z',
+      iteration: 4,
+      regionKind: 'loop-body',
+      metrics: { selected: 1, acted: 0, failures: 1 },
+    });
+    expect(step.status).toBe('success');
+    expect(step.metrics?.failures).toBe(1);
   });
 
   it('`branch: 0` — the first branch — survives the parse as 0', () => {
@@ -348,6 +414,87 @@ describe('FlowRunSummarySchema', () => {
     });
     expect(summary.failed).toBe(2);
     expect(summary.failed).toBe(summary.nodes.reduce((sum, node) => sum + node.failures, 0));
+  });
+
+  it('`failed` is the fold INCLUDING what a delegating node rolled up from its child — the card\'s measured shape, as ruled (#15617)', () => {
+    // Parent `loop { subflow(child) }` over five rows; the child COMPLETED on
+    // every iteration and contained one failure on the last. The subflow node
+    // succeeded five times — `status: success`, its own executions never
+    // failed — and carries the rolled-up count on `failures`, exactly as it
+    // carries the child's writes on `acted`. The fold then sees it, so the
+    // parent no longer reads `failed: 0` while a child lost a row.
+    const summary = FlowRunSummarySchema.parse({
+      selected: 5, acted: 4, skipped: 0, failed: 1,
+      nodes: [
+        { nodeId: 'each', nodeType: 'loop', status: 'success' as const, runs: 1, failures: 0, skipped: 0 },
+        { nodeId: 'call', nodeType: 'subflow', status: 'success' as const, runs: 5, failures: 1, skipped: 0, selected: 5, acted: 4 },
+      ],
+      gates: [],
+    });
+    expect(summary.failed).toBe(1);
+    expect(summary.failed).toBe(summary.nodes.reduce((sum, node) => sum + node.failures, 0));
+    // Declared shape: a delegating node's status is judged on its OWN
+    // executions, so `success` beside `failures: 1` is the contract, not a
+    // contradiction.
+    const call = summary.nodes.find((node) => node.nodeId === 'call');
+    expect(call?.status).toBe('success');
+    expect(call?.failures).toBe(1);
+  });
+
+  it('the control keeps counting as before: a child that FAILED is the delegating step\'s own failure, counted once (#15617)', () => {
+    // Same parent, but the child FAILED on the last row rather than containing
+    // the failure. That is the subflow step's own `status: failure` — one
+    // execution failed — and nothing rides up on top of it: the child's own
+    // `failed` stays on the child's run row, so the parent reads 1, not 2.
+    const summary = FlowRunSummarySchema.parse({
+      selected: 5, acted: 4, skipped: 0, failed: 1,
+      nodes: [
+        { nodeId: 'each', nodeType: 'loop', status: 'success' as const, runs: 1, failures: 0, skipped: 0 },
+        { nodeId: 'call', nodeType: 'subflow', status: 'failure' as const, runs: 5, failures: 1, skipped: 0, selected: 5, acted: 4 },
+      ],
+      gates: [],
+    });
+    expect(summary.failed).toBe(1);
+    expect(summary.failed).toBe(summary.nodes.reduce((sum, node) => sum + node.failures, 0));
+  });
+
+  it('declares the roll-up at the point of use — the field describes say so, not only the paragraph above the schema (#15617)', () => {
+    // Triage's explicit failure mode for this card: a reconciliation that
+    // leaves `failed`'s own `.describe()` saying the narrow thing. A consumer
+    // reads the field's description, so the widened rule has to be there.
+    const failedDoc = FlowRunSummarySchema.shape.failed.description ?? '';
+    expect(failedDoc).toContain('a fold of `nodes[].failures`');
+    expect(failedDoc).toContain('INCLUDING');
+    expect(failedDoc).toContain('`subflow`');
+    expect(failedDoc).toContain('`map`');
+    expect(failedDoc).toContain('what did this run cause');
+
+    const nodeFailuresDoc = FlowRunNodeSummarySchema.shape.failures.description ?? '';
+    expect(nodeFailuresDoc).toContain('`metrics.failures`');
+    expect(nodeFailuresDoc).toContain('the run-level `failed` is the sum of this across `nodes`');
+
+    const nodeStatusDoc = FlowRunNodeSummarySchema.shape.status.description ?? '';
+    expect(nodeStatusDoc).toContain('OWN executions');
+    expect(nodeStatusDoc).toContain('`failures > 0`');
+
+    // The mixed case and the departure from `acted` are stated on the total
+    // itself, not only on the slot that feeds it.
+    expect(failedDoc).toContain('whether or not it also contained failures before it failed');
+    expect(failedDoc).toContain('unlike `acted`');
+  });
+
+  it('a delegating node\'s `failures` may exceed its `runs` — `runs: 5, failures: 15` is a legal shape, and the describe says so', () => {
+    // Five subflow executions whose children each contained three failures:
+    // the node ran five times, succeeded five times, and rolled fifteen up.
+    // `failures` is no longer only this node's own failed executions.
+    const node = FlowRunNodeSummarySchema.parse({
+      nodeId: 'call', nodeType: 'subflow', status: 'success' as const, runs: 5, failures: 15, skipped: 0, selected: 5, acted: 5,
+    });
+    expect(node.failures).toBe(15);
+    expect(node.runs).toBe(5);
+    const nodeFailuresDoc = FlowRunNodeSummarySchema.shape.failures.description ?? '';
+    expect(nodeFailuresDoc).toContain('may therefore exceed `runs`');
+    expect(nodeFailuresDoc).toContain('no longer only this node');
   });
 
   it('leaves `failed` absent on a run that never tracked it — absent is not zero, and is not defaulted', () => {

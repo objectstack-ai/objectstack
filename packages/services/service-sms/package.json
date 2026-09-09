@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-sms",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "SMS service for ObjectStack — ISmsService + transport-pluggable outbound delivery (Aliyun / Twilio / log).",
   "main": "dist/index.js",
@@ -28,7 +28,7 @@
     "@objectstack/service-settings": "workspace:*",
     "@types/node": "^26.2.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "objectstack",
@@ -37,6 +37,11 @@
     "aliyun",
     "twilio"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/services/service-sms"
+  },
   "files": [
     "dist",
     "README.md",

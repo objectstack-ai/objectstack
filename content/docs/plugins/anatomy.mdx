@@ -69,8 +69,9 @@ ObjectStack uses `type` discrimination to optimize runtime behavior, allowing th
 *   **Behavior:**
     *   **Passive:** Driven by `plugin-hono-server` (or other HTTP adapters).
     *   **Static Assets:** Must provide `staticPath` pointing to a build output (e.g., `dist/`).
-    *   **Routing:** Automatically mounted to `/{slug}` with SPA fallback support.
+    *   **Routing:** Must provide `slug`; automatically mounted to `/{slug}` with SPA fallback support.
     *   **Assets:** Files are served locally under `/{slug}/assets`.
+    *   **Enforced at registration:** a `type: 'ui'` plugin missing `staticPath` or `slug` is refused by `kernel.use()` with `PLUGIN_CONTRACT_VIOLATION` — on `ObjectKernel` and `LiteKernel` alike — so a UI plugin that boots in a `LiteKernel` test harness is one that also boots in production.
 
 ### 3. App Plugin (`app`)
 *   **Role:** Vertical Business Solution.
@@ -259,6 +260,7 @@ Plugins follow a strict three-phase lifecycle managed by the kernel:
                 └──────────────────────┘
 ```
 
+0. **kernel.use()** — Registers the plugin. Before storing it, both kernels check the object against the declared plugin contract (`PluginSchema` in `@objectstack/spec`) and refuse one that violates it with `PLUGIN_CONTRACT_VIOLATION`, naming the first violated key — a `type` outside the closed set, a non-URL `homepage`, a `null` on a declared key, or a `type: 'ui'` plugin missing `staticPath` / `slug`. The object is validated, never replaced: what is stored is the very instance you passed in, prototype and all.
 1. **init()** — Called during kernel initialization. Register services that other plugins may depend on.
 2. **start()** — Called after *all* plugins have initialized. Start servers, connect to databases, or execute main logic.
 3. **destroy()** — Called during shutdown, in reverse order. Clean up connections, timers, and resources.

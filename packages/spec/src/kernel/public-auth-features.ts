@@ -122,7 +122,7 @@ export const PUBLIC_AUTH_FEATURES = {
       'sys_team_member.actions.add_team_member',
       'sys_team_member.actions.remove_team_member',
     ],
-    notes: 'Org CAPABILITY gate, not multi-org (ADR-0081 D1).',
+    notes: 'Org CAPABILITY gate, not multi-org (cloud ADR-0081 D1).',
   },
   multiOrgEnabled: {
     surface: 'crud',

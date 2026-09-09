@@ -31,12 +31,18 @@ export const SysMetadataCommitObject = ObjectSchema.create({
   description: 'Package-scoped commit log grouping a turn’s metadata changes (ADR-0067).',
 
   fields: {
-    /** Primary Key — the commit id. */
+    /**
+     * Primary Key — the commit id.
+     *
+     * ⛔ No `maxLength`: the platform emits this column itself (`varchar(255)`),
+     * so a declared bound is discarded and the SQL driver says so on every boot
+     * (#12015). The clean shape is the one every other system object already
+     * carries after #12131 — declare the honoured half only.
+     */
     id: Field.text({
       label: 'ID',
       required: true,
       readonly: true,
-      maxLength: 64,
     }),
 
     /** The app/package this commit belongs to (the unit a user reverts). */

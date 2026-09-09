@@ -481,14 +481,22 @@ const step17: MigrationStep = {
       'tombstoned with its prescription.\n\n',
       'ADR-0113 splits the `required` tri-binding: post-17, `required` is ONLY the ',
       'write-time contract (insert must provide; update may not null out; legacy null ',
-      'rows rest), and the physical NOT NULL is the explicit `storage.notNull`. The ',
-      '`field-required-notnull-explicit` conversion preserves every pre-17 source ',
-      'verbatim-in-meaning by stamping `storage.notNull: true` onto each required ',
-      'field — under the old semantics that column WAS created NOT NULL, so the ',
-      'rewrite writes down what the text already meant. Migration-chain-only ',
-      '(retired from the load path): this is a default flip, not a rename, and a ',
-      'loader that auto-applied it would stamp the constraint onto 17-authored ',
-      'sources that deliberately omit it.\n\n',
+      'rows rest), and the physical NOT NULL is the explicit `storage.notNull`. ',
+      '⚠️ NOTHING converts the column half for you, and nothing tightens a column you ',
+      'already have. A `field-required-notnull-explicit` conversion did stamp ',
+      '`storage.notNull: true` onto every `required: true` field; it was WITHDRAWN ',
+      '(maintainer ruling 2026-09-08), because stamping the constraint wherever ',
+      '`required: true` appears is exactly the implication the ADR abolished — and ',
+      'because the artifact-ingestion door replays retired conversions, so the LOADER ',
+      'applied it to 17-authored sources that deliberately omit it and then told their ',
+      'authors to write the same tightening into the source, which on a populated ',
+      'database is a destructive `tighten_not_null` migration prescribed as the remedy ',
+      'for a deprecation notice. Post-17 a column is NOT NULL because its author wrote ',
+      '`storage: { notNull: true }`, and for no other reason. If you are upgrading a ',
+      'pre-17 source whose columns ARE NOT NULL and you want them to stay that way, ',
+      'add `storage: { notNull: true }` to those fields yourself — deliberately, and ',
+      'knowing that doing it to a field whose column is currently nullable is a ',
+      'destructive migration with a backfill ceremony.\n\n',
       'On the wire contract it also retires the `/analytics/query` request ENVELOPE ',
       '(#3878): `AnalyticsQueryRequestSchema` used to describe `{ cube, query: {...}, ',
       'format }` — the dialect of the retired degraded analytics shim (#3891) that the ',
@@ -1388,7 +1396,6 @@ const step17: MigrationStep = {
     'tool-inert-authoring-keys-removed',
     'app-dead-authoring-keys-removed',
     'app-area-fail-open-gates-removed',
-    'field-required-notnull-explicit',
     'action-inert-keys-removed',
     'flow-inert-keys-removed',
     'view-inert-keys-removed',
@@ -4569,9 +4576,14 @@ const step17: MigrationStep = {
       id: 'tool-requires-confirmation-retired',
       surface: 'ai.tool.requiresConfirmation',
       replacement:
-        'put the operation behind an ACTION and set `ai.requiresConfirmation: true` there — that '
-        + 'is the flag the HITL approval queue actually reads, and the only path that stops '
-        + 'execution',
+        'put the operation behind an ACTION and set `ai.requiresConfirmation: true` there — the '
+        + 'flag the platform confirmation CONTRACT is written against. That contract DECLARES '
+        + 'that an AI-facing call on an action declaring the flag must carry an explicit '
+        + 'confirmation member on the request and is to be refused without it with '
+        + '`ACTION_CONFIRMATION_REQUIRED`, the refusal naming the action and the exact member to '
+        + 'set. A gate, not a queue: nothing is parked. ⚠ The refusal is DECLARED, not yet '
+        + 'performed — the runtime door lands in #15942, so until then the flag stops nothing on '
+        + 'its own and the human in the loop is still yours to arrange',
       reason:
         '`ToolSchema.requiresConfirmation` accepted `true` and no execution path ever read it: '
         + 'not the LLM tool set (a tool reaches the model as name / description / parameters '
@@ -4604,8 +4616,13 @@ const step17: MigrationStep = {
         + 'load-bearing half is what happens NEXT, and no gate can check it for you: for every '
         + 'tool that carried the flag, decide whether that operation genuinely needs a human in '
         + 'the loop. If it does, move it behind an action carrying `ai.requiresConfirmation: '
-        + 'true` and prove the pause exists — invoke it and observe the approval queue hold it, '
-        + 'rather than assuming the declaration. If it does not, delete the key knowingly. '
+        + 'true`, which is what the confirmation contract (#16293) gates on. ⛔ Do NOT try to '
+        + '"prove the gate" by invoking the operation without the confirmation member: the '
+        + 'runtime door that refuses lands in #15942, so before that ships the call is not '
+        + 'refused, it RUNS the destructive operation. Until then the declaration is a contract '
+        + 'and the human in the loop is still yours to arrange — which is the decision this '
+        + 'criterion is asking you to make, not a test to run. If the operation does not need '
+        + 'a human, delete the key knowingly. '
         + 'Deleting it without that decision leaves exactly the state the retirement exists to '
         + 'end: a destructive tool nobody is approving, now without even the false flag to show '
         + 'that somebody once meant to.',
@@ -5377,7 +5394,15 @@ const step18: MigrationStep = {
     'and `NoSQLQueryOptions.timeout`, a per-call driver argument — are retiredKey ' +
     'tombstones with a semantic entry each. That remainder is what takes ' +
     '`check:duration-unit-keys` to zero offenders over `packages/spec/src/**`; the gate ' +
-    'goes red again by design when its declared population widens beyond that subtree.',
+    'goes red again by design when its declared population widens beyond that subtree. ' +
+    'It also retires the three outer keys of `MetadataManagerConfig.cache` — `enabled`, ' +
+    '`ttlSeconds` (the #14478 respelling of `ttl`, never shipped) and `maxSize` — that the ' +
+    'rename above surfaced (#15624, ADR-0049 enforce-or-remove): declared, defaulted and ' +
+    'published, read by nothing — `MetadataManager` hands only `cache.databaseLoader` to the ' +
+    'loader — so `cache: { enabled: false }` switched nothing off. All three are retiredKey ' +
+    'tombstones registered in RETIRED_KEYS_BY_MAJOR[18] with one D3 semantic entry and no D2 ' +
+    'conversion (a manager config is no stack collection member); the rename is folded into ' +
+    'the removal, so `cache.ttl` now prescribes deletion rather than a hop to a retired key.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5624,6 +5649,62 @@ const step18: MigrationStep = {
         + 'keys at every level (cube, refreshKey, measures, dimensions, joins); '
         + 'every `/analytics/query` body\'s `timeDimensions[]` items carry only '
         + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
+    },
+    {
+      id: 'analytics-time-dimension-date-range-vocabulary-closed',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
+      surface:
+        'the bare-STRING arm of timeDimensions[].dateRange on an analytics query — '
+        + 'AnalyticsQuerySchema / the POST /analytics/query and /analytics/sql bodies, a dataset '
+        + 'selection\'s timeDimensions, and any AnalyticsQuery a host passes to '
+        + 'AnalyticsService.query in-process — authored as anything other than one of the '
+        + 'thirteen declared date-range preset names (today, yesterday, this_week, last_week, '
+        + 'this_month, last_month, this_quarter, last_quarter, this_year, last_year, last_7_days, '
+        + 'last_30_days, last_90_days): the display spelling "Last 7 days" the schema comment used '
+        + 'to show, the driver-memory dialect "last N days" / "last 3 months", or a bare ISO date '
+        + 'such as "2026-01-20" (the SQL strategies\' single-day dialect)',
+      replacement:
+        'a preset name from the closed vocabulary — `\'last_7_days\'` for "Last 7 days" / "last 7 '
+        + 'days", `\'last_30_days\'`, `\'this_month\'`, and so on (`DATE_RANGE_PRESETS` in '
+        + '`@objectstack/spec/data` is the list; the rejection prints it) — or, for an explicit '
+        + 'window, the two-element array the array arm always accepted: `[\'2026-01-20\', '
+        + '\'2026-01-20\']` for the single day a bare ISO string used to mean on SQL, '
+        + '`[\'2026-01-01\', \'2026-01-31\']`, or `[\'{7_days_ago}\', \'{today}\']` in date-macro tokens',
+      reason:
+        'Maintainer ruling on #16041 (decision batch #57, option A — contract first, 2026-09-06): '
+        + 'the protocol is the baseline, so the vocabulary is declared once in the schema and the '
+        + 'drivers align to it (#16322) instead of each guessing. The arm was a bare `z.string()` '
+        + 'whose only documented example, `"Last 7 days"`, no driver could parse: driver-memory '
+        + 'recognised exactly `today` and a case-sensitive `last N <unit>` and fell every other '
+        + 'string through to a `[range, range]` pseudo-window that — measured through mingo on '
+        + '2026-09-05 — matched EVERY `Date`-typed row, 2099 included, because a `Date` compares '
+        + 'above a `String` under BSON cross-type ordering; the SQL strategies read the same string '
+        + 'as a single ISO day. A dashboard asking for one week silently got all of history on one '
+        + 'backend and one day on the other, with no error on either. The string arm is now '
+        + '`z.enum(DATE_RANGE_PRESETS)` — derived from `data/date-range-presets.ts`, the vocabulary\'s '
+        + 'single source of truth since #4614, so the two cannot drift — and any other string is '
+        + 'refused at parse time with one prescriptive issue at the field\'s own path; the runtime '
+        + 'door answers the ADR-0112 envelope `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` '
+        + '(`api/error-code-ledger.zod.ts`). ⚠️ No D2 conversion and no stored-metadata rewrite: '
+        + 'this value is a QUERY-time request field, not a `sys_metadata` shape, and the two '
+        + 'retired dialects meant different windows on different backends, so coercing one would '
+        + 'be the platform guessing which the author meant. Measured in this repository at the '
+        + 'ruling: three authored `\'Last 7 days\'`, all in spec tests, and no published dashboard '
+        + 'authors the string arm at all (the shipped console lowers presets to the array arm). '
+        + 'ADR-0049 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep every authored `timeDimensions[].dateRange` string — dashboard datasets, saved '
+        + 'analytics queries, SDK / MCP callers, in-process `AnalyticsService.query` calls — and '
+        + 'rewrite each bare string that is not one of the thirteen preset names: a relative '
+        + 'phrase to its preset (`\'last_7_days\'`), an ISO day to the two-element array '
+        + '`[day, day]`. `POST /analytics/query` now answers `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` '
+        + 'naming the value and the vocabulary, so a sweep is mechanical; `AnalyticsQuerySchema.'
+        + 'safeParse` reports the same issue at `timeDimensions.N.dateRange`. Preset names and '
+        + '`[start, end]` arrays parse byte-identically to before. A query that carried one of the '
+        + 'retired spellings was never returning the window it named (all rows on driver-memory, '
+        + 'one day on SQL), so re-check what the widget was supposed to show rather than trusting '
+        + 'the old result set.',
     },
     {
       id: 'api-error-retry-after-unit-in-key',
@@ -6781,6 +6862,36 @@ const step18: MigrationStep = {
         + 'an unrelated row on that table — audit the object for rows whose business key is '
         + 'correct but whose other columns belong to a different record, since no error was ever '
         + 'raised for those writes.',
+    },
+    {
+      id: 'driver-turso-config-local-path-wasm-retired',
+      surface: '`@objectstack/driver-turso`\'s published `TursoConfigSchema` — the Spec / Studio mirror '
+        + 'of the turso connection config a host may render configuration UI from — keys `localPath` '
+        + 'and `wasm`',
+      replacement: 'delete both keys. The embedded replica\'s local file is named by `url` '
+        + '(`file:./replica.db`) with `syncUrl` pointing at the remote primary, which is what the driver '
+        + 'has always read; nothing selects a WASM build of libSQL, and a runtime that cannot load native '
+        + 'bindings uses the remote arm (`libsql://` / `https://`), which needs none',
+      reason:
+        'ADR-0049 enforce-or-remove, ruled per key on the card that measured them (#16024): both keys '
+        + 'were declared on the package schema with a describe promising behaviour ("Local file path for '
+        + 'embedded replica", "Use WASM build for edge/browser environments") and were read by no code '
+        + '— the driver names the replica file via `url`, and no mechanism picks a WASM build. Forwarding '
+        + '`localPath` would have created a second way to say what `url` says; forwarding `wasm` would '
+        + 'have meant building a WASM selection that does not exist. Why a semantic entry and not a D2 '
+        + 'conversion: `@objectstack/spec`\'s own turso contract (`data/TursoConfig`, strict) never '
+        + 'declared either key, so no stack source or stored datasource row that passed the spec door can '
+        + 'carry them, and a value that never did anything has no lossless rewrite — the key is deleted by '
+        + 'hand. Both stay declared on the package schema as `z.never()` tombstones (the shape is a plain '
+        + 'z.object, so a bare deletion would strip in silence) carrying this prescription. The third key '
+        + 'the same card measured, `TursoDriverConfig.timeout`, was forwarded rather than removed and '
+        + 'needs no entry. ADR-0049, ADR-0087.',
+      acceptanceCriteria:
+        'No `TursoConfigSchema.parse(…)` input spells `localPath` or `wasm`; authoring either fails to '
+        + 'compile (input type `never`) and fails to parse with the prescription naming the key. A replica '
+        + 'config that named its file only through `url` + `syncUrl` parses byte-identically to before, '
+        + 'and every other declared key — `url`, `authToken`, `encryptionKey`, `concurrency`, `syncUrl`, '
+        + '`sync`, `timeoutMs` — keeps its bound, default and optionality.',
     },
     {
       id: 'element-number-filter-rule-array',
@@ -8165,8 +8276,10 @@ const step18: MigrationStep = {
     {
       id: 'metadata-manager-config-cache-ttl-unit-in-key',
       surface: 'MetadataManagerConfig `cache.ttl` / `cache.databaseLoader.ttl` (kernel/metadata-loader.zod.ts)',
-      replacement: '`cache.ttlSeconds` (seconds, default 3600) and `cache.databaseLoader.ttlMs` '
-        + '(milliseconds, default 60000) — rename each key; the values are unchanged',
+      replacement: '`cache.databaseLoader.ttlMs` (milliseconds, default 60000) — rename the nested key; the '
+        + 'value is unchanged. The outer `cache.ttl` has NO replacement: its respelling `ttlSeconds` '
+        + 'was retired before it shipped (#15624, see `metadata-manager-config-inert-cache-keys-retired`) '
+        + '— delete the key; nothing ever read it',
       reason:
         'Maintainer ruling 2026-09-02 on #14478 (ruled B — no grandfathered baseline): the unit of a '
         + 'duration-shaped `z.number()` key lives in the key NAME or in a unit-carrying value, never '
@@ -8182,13 +8295,58 @@ const step18: MigrationStep = {
         + '`metadata-plugin-additional-types-retired` precedent). The one in-repo reader, '
         + '`DatabaseLoader` (`packages/metadata`), reads `cache.databaseLoader.ttlMs` at the same '
         + 'magnitude it read `ttl`; the outer `cache.ttl` had no runtime reader (measured on '
-        + 'ca46f8f12, and filed separately).',
+        + 'ca46f8f12, filed as #15624 and retired there under ADR-0049 before this rename shipped — '
+        + 'so this entry\'s outer half is a deletion, not a rename, and the `ttlSeconds` spelling '
+        + 'never reached a published release).',
       acceptanceCriteria:
         'Every `new MetadataManager({ cache: … })` / `MetadataManagerConfigSchema.parse(…)` site spells '
-        + '`cache.ttlSeconds` and `cache.databaseLoader.ttlMs`; authoring either old `ttl` fails to '
-        + 'compile (input type `never`) and fails to parse with the rename prescription naming the '
-        + 'suffixed key; a DatabaseLoader configured with `ttlMs: 60000` expires entries after 60 '
-        + 'seconds exactly as `ttl: 60000` did.',
+        + '`cache.databaseLoader.ttlMs` and no outer TTL at all; authoring either old `ttl` fails to '
+        + 'compile (input type `never`) and fails to parse with a prescription — the nested one naming '
+        + '`ttlMs`, the outer one prescribing deletion and naming `cache.databaseLoader.ttlMs`; a '
+        + 'DatabaseLoader configured with `ttlMs: 60000` expires entries after 60 seconds exactly as '
+        + '`ttl: 60000` did.',
+    },
+    {
+      id: 'metadata-manager-config-inert-cache-keys-retired',
+      surface: 'MetadataManagerConfig `cache.enabled` / `cache.ttlSeconds` (formerly `cache.ttl`) / '
+        + '`cache.maxSize` (kernel/metadata-loader.zod.ts; tombstoned, see `RETIRED_KEYS_BY_MAJOR[18]`)',
+      replacement: 'nothing to re-declare — delete the three outer keys. The cache that actually runs '
+        + 'is the DatabaseLoader read-through LRU under `cache.databaseLoader`: its `enabled` '
+        + '(default true) is the switch, `ttlMs` (milliseconds, default 60000) the TTL and `maxSize` '
+        + '(an entry count, default 500) the cap',
+      reason:
+        'ADR-0049 enforce-or-remove (#15624, PM ruling on the card, conditioned on the measurement '
+        + 'it carries and re-taken on the merged ref): the outer `cache` block of '
+        + '`MetadataManagerConfig` advertised three knobs — `enabled` (default true), `ttlSeconds` '
+        + '(default 3600; `ttl` until #14478) and `maxSize` ("bytes") — that no runtime read. The '
+        + 'only consumer of the block is `MetadataManager` (`packages/metadata`), which hands '
+        + '`cache.databaseLoader` and nothing else to `new DatabaseLoader({ cache })`; a '
+        + 'repo-wide reader census over `packages/**` (tests and changelogs excluded) found no '
+        + 'runtime reader of any outer key, while the same grep shape found the nested '
+        + '`cache?.databaseLoader` read twice (the positive control). An author writing '
+        + '`cache: { enabled: false }` or `cache: { ttlSeconds: 60 }` got a clean parse and a '
+        + 'cache that behaved exactly as before, and the published reference page documented '
+        + 'all three as if they configured something. All three are retiredKey tombstones (the '
+        + 'nested object is not strict; a bare deletion would strip them in silence — the same '
+        + 'no-op one layer down). The #14478 `ttl` → `ttlSeconds` rename, registered under this '
+        + 'same major and never shipped, is folded into the removal: `cache.ttl`\'s tombstone now '
+        + 'prescribes deletion rather than a rename to a key that is itself retired, so a 17.x '
+        + 'author sees one hop. Why a semantic entry and not a D2 conversion: `MetadataManagerConfig` '
+        + 'is the runtime MetadataManager\'s constructor config, not a stack collection member and '
+        + 'never a stored row, so the chain has no seam that ever runs on it (the '
+        + '`kernel/MetadataManagerConfig:persistence.overlayWritable` precedent). The other '
+        + 'candidate — wiring readers for a second cache layer — was not taken: no consumer for '
+        + 'one exists, and an implementation for an unmeasured need is the shape ADR-0049 refuses.',
+      acceptanceCriteria:
+        'No `new MetadataManager({ cache: … })` / `MetadataManagerConfigSchema.parse(…)` site '
+        + 'spells `cache.enabled`, `cache.ttlSeconds`, `cache.ttl` or `cache.maxSize` (TypeScript '
+        + 'authors get the refusal at compile time — the keys are typed `never` — and a value '
+        + 'reaching the parse is refused with the prescription at the key\'s path, naming '
+        + '`cache.databaseLoader`). ⚠️ Runtime behaviour is deliberately UNCHANGED and must be '
+        + 'verified as such: the DatabaseLoader read-through cache configured under '
+        + '`cache.databaseLoader` (`enabled` / `maxSize` / `ttlMs`) behaves exactly as before, and a '
+        + 'config that never wrote the outer keys parses to the same output minus the two former '
+        + 'defaults (`enabled: true`, `ttlSeconds: 3600`) that were materialized and never consulted.',
     },
     {
       id: 'metadata-plugin-additional-types-retired',
@@ -9764,6 +9922,34 @@ const step18: MigrationStep = {
         + 'against objectui, not a metadata key.',
     },
     {
+      id: 'ui-react-list-view-binding-aliases-retired',
+      surface: '`kind:\'react\'` page source — `<ListView objectName="…">` and `<ListView viewType="…">` '
+        + '(the react-tier overlay aliases #11284 had published as deprecated)',
+      replacement: '`<ListView data={{ provider: \'object\', object: \'…\' }} type="…">` — ListViewSchema\'s own '
+        + '`data` data source and `type` view kind, the same two keys a metadata list view authors. '
+        + '`objectName="x"` → `data={{ provider: \'object\', object: \'x\' }}`; `viewType="kanban"` → '
+        + '`type="kanban"`. A `<ListView>` with no `data` at all is refused too: on a react page no '
+        + 'host stamps the object, so the data source is the required binding there.',
+      reason:
+        'A react page\'s source is a JSX string, not a keyed document: `objectstack migrate meta` '
+        + 'rewrites stored metadata by key and cannot rewrite props inside authored source, so the '
+        + 'move is by hand. The contract deprecated both aliases in favour of the metadata-tier '
+        + 'spelling (#11284) while objectui\'s ListView still read only `objectName`, so the canonical '
+        + 'spelling validated green and rendered an empty list. The consumer fold has landed (objectui '
+        + '`normalizeListViewSchema`, console pin a472b071: `data.provider === \'object\'` → '
+        + '`objectName`, and the author\'s `type` read for the view kind), and the maintainer ruled the '
+        + 'aliases retired with no deprecation window (#14791, 2026-09-07). Writing either alias is now '
+        + 'a publish-time `react-prop-retired` error carrying this prescription — never a silent pass '
+        + 'on a key the renderer happens to still read.',
+      acceptanceCriteria:
+        '`objectstack validate` reports no `react-prop-retired` and no `react-prop-missing-required` '
+        + 'finding on any `kind:\'react\'` page; every `<ListView>` carries `data={{ provider: '
+        + '\'object\', object }}` (or another ViewData provider) and, where a view kind was chosen, '
+        + '`type`; in the console each rewritten list renders the same rows and visualization it '
+        + 'rendered under the alias spelling. The platform\'s own sites are the reference: the '
+        + 'showcase `crm-workbench`, `renewals-pipeline` and `task-desk` pages pass with zero findings.',
+    },
+    {
       id: 'ui-record-blocks-unknown-keys-refused',
       surface: 'page `record:alert` / `record:quick_actions` / `record:history` / '
         + '`record:discussion` components — `properties` (undeclared keys, notably a typo\'d '
@@ -11228,6 +11414,65 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `contributes.kinds` (metadata kinds), `navigationContributions`
     // (ADR-0029 D7), and plugin code itself (`init`/`start`).
     'kernel/Manifest:extensions',
+    // #15624 — ADR-0049 enforce-or-remove (PM ruling on the card, conditioned on
+    // the measurement it carries). `MetadataManagerConfig.cache.enabled` was
+    // declared, defaulted (`true`), documented on the published reference page —
+    // and read by nothing: the only runtime consumer of the `cache` block is
+    // `MetadataManager`, which hands `cache.databaseLoader` (and only that) to
+    // `new DatabaseLoader({ cache })`. `enabled: false` switched nothing off.
+    // Tombstoned with `retiredKey()` (the nested object is not strict; a bare
+    // deletion would strip the key in silence — the same no-op one layer down).
+    // The switch that is honoured is `cache.databaseLoader.enabled`.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts` — the
+    // `kernel/MetadataManagerConfig:persistence.overlayWritable` reasoning: a
+    // metadata-manager config is not a stack collection member, so a
+    // MetadataConversion would be a transform with no seam that ever runs. The
+    // prescription reaches authors through the tombstone (`tsc` + the parse) and
+    // the D3 semantic entry `metadata-manager-config-inert-cache-keys-retired`.
+    'kernel/MetadataManagerConfig:cache.enabled',
+    // #15624 — ADR-0049 enforce-or-remove. `MetadataManagerConfig.cache.maxSize`
+    // ("Max cache size in bytes") was declared and documented, and read by nothing
+    // — the outer `cache` block has no runtime consumer; only
+    // `cache.databaseLoader` reaches `DatabaseLoader`, whose own `maxSize` is an
+    // ENTRY COUNT (default 500), not bytes. Tombstoned with `retiredKey()`. The
+    // cap that is honoured is `cache.databaseLoader.maxSize`.
+    //
+    // No D2 conversion, the `persistence.overlayWritable` reasoning: a
+    // metadata-manager config is not a stack collection member. D3 semantic entry:
+    // `metadata-manager-config-inert-cache-keys-retired`.
+    'kernel/MetadataManagerConfig:cache.maxSize',
+    // #14478 tombstoned `MetadataManagerConfig.cache.ttl` as a RENAME to
+    // `ttlSeconds` (D3 `metadata-manager-config-cache-ttl-unit-in-key`) without
+    // registering the key here — a nested key the authorable-surface walk does not
+    // reach, so gate (b) never asked for it. #15624 then retired `ttlSeconds`
+    // itself before the rename ever shipped (ADR-0049 enforce-or-remove: the
+    // outer `cache` block was read by nothing), so the rename is folded into the
+    // removal and `cache.ttl`'s tombstone now prescribes deletion — an author
+    // upgrading from a published 17.x sees one hop, not two. Registered as the
+    // deletion it now is. The TTL that is honoured is
+    // `cache.databaseLoader.ttlMs`.
+    //
+    // No D2 conversion (a metadata-manager config is not a stack collection
+    // member). D3 semantic entry: `metadata-manager-config-inert-cache-keys-retired`.
+    'kernel/MetadataManagerConfig:cache.ttl',
+    // #15624 — ADR-0049 enforce-or-remove. `MetadataManagerConfig.cache.ttlSeconds`
+    // (the #14478 respelling of `cache.ttl`, registered under this same major and
+    // never shipped) was declared, defaulted (3600) and documented, and read by
+    // nothing — the outer `cache` block has no runtime consumer; only
+    // `cache.databaseLoader` reaches `DatabaseLoader`. Tombstoned with
+    // `retiredKey()`; the rename is folded into the removal (`cache.ttl`'s own
+    // tombstone now prescribes deletion too — see the sibling entry). The TTL that
+    // is honoured is `cache.databaseLoader.ttlMs` (milliseconds).
+    //
+    // No D2 conversion, the `persistence.overlayWritable` reasoning: a
+    // metadata-manager config is not a stack collection member. D3 semantic entry:
+    // `metadata-manager-config-inert-cache-keys-retired`.
+    'kernel/MetadataManagerConfig:cache.ttlSeconds',
     // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
     // #12057, adopting retirement; re-charter #13135 executes the widened
     // surface). `persistence.overlayWritable` gated exactly one method —

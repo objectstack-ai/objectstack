@@ -85,11 +85,42 @@
  * tokens that must track the predicate, which is the exact class of copy this
  * change exists to delete. Revisit only with a measurement that says it costs
  * something real.
+ *
+ * ## The NIGHTLY tiers are a second, orthogonal cut — by NAME (#16455)
+ *
+ * The two tiers above answer "what does this file DO" and decide which
+ * project collects it. `OS_TEST_TIERS` answers a different question — "which
+ * RUN is this" — and is decided by the file's NAME alone: `*.e2e.test.*` and
+ * `*.live.test.*` are the nightly tiers, everything else is the queue's. The
+ * switch is read ONCE, in `scripts/nightly-tiers.mjs` (the values, the default
+ * and the refusal of anything else live there), and applied here in
+ * `testFilesOnDisk()` — the one walk both `integrationTestFiles()` and
+ * `unitTestFiles()` derive from — so the setting narrows the POPULATION and
+ * the behavioural predicate then partitions whatever is left:
+ *
+ *   OS_TEST_TIERS unset / queue   population = every test file that is NOT nightly-tier
+ *   OS_TEST_TIERS=nightly         population = exactly the nightly-tier files
+ *
+ * Both projects stay a partition of that population BY CONSTRUCTION
+ * (`unit` = population − predicate, `integration` = population ∩ predicate),
+ * and `test/vitest-tiers-partition.test.ts` still measures it under whichever
+ * setting it runs in: its `vitest list` child inherits the switch through
+ * `childEnv()` and its filesystem walk is this function, so the two sides of
+ * every equality it asserts are read under the same setting.
+ *
+ * ⛔ The two cuts deliberately disagree on 5 files and that is not a defect:
+ * a file that carries the `.e2e` name and spawns plain node is nightly-tier
+ * (name) AND `unit` (behaviour); a file that spawns the CLI without the name
+ * is queue (name) AND `integration` (behaviour). The ruling that landed the
+ * nightly selects by the existing filename tiers only and renames nothing, so
+ * the name decides the run and the behaviour decides the project, and no file
+ * is renamed to make the two agree.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { maskComments } from '../../scripts/js-comment-mask.mjs';
+import { readTierMode, selectTierFiles } from '../../scripts/nightly-tiers.mjs';
 
 // ---------------------------------------------------------------------------
 // The predicate
@@ -164,7 +195,13 @@ export function tierOfFile(pkgRoot: string, relPath: string): TierSignals {
 const TEST_FILE_RE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage']);
 
-/** `pkgRoot`-relative, POSIX-separated paths of every test file on disk, sorted. */
+/**
+ * `pkgRoot`-relative, POSIX-separated paths of every test file on disk that
+ * the current `OS_TEST_TIERS` setting selects, sorted — the nightly-tier files
+ * under `nightly`, everything else under `queue` (the default). See "The
+ * NIGHTLY tiers" in the header: this is the ONE place the switch narrows this
+ * package's population, and both tier derivations below read from it.
+ */
 export function testFilesOnDisk(pkgRoot: string): string[] {
   const out: string[] = [];
   const walk = (dir: string): void => {
@@ -176,16 +213,33 @@ export function testFilesOnDisk(pkgRoot: string): string[] {
     }
   };
   walk(pkgRoot);
-  return out.sort();
+  return selectTierFiles(out.sort(), readTierMode());
 }
 
 /**
- * The integration tier: every test file on disk the predicate calls integration.
+ * The integration tier: every selected test file the predicate calls integration.
  *
  * This is what `vitest.config.ts` feeds to the `integration` project's
- * `include` and the `unit` project's `exclude`, so the two projects stay a
+ * `include`; `unitTestFiles()` is its complement, so the two projects stay a
  * partition of the population by CONSTRUCTION rather than by maintenance.
  */
 export function integrationTestFiles(pkgRoot: string): string[] {
   return testFilesOnDisk(pkgRoot).filter((file) => isIntegration(tierOfFile(pkgRoot, file)));
+}
+
+/**
+ * The unit tier: the selected population MINUS the integration tier — the exact
+ * complement of `integrationTestFiles()` over the same walk, handed to the
+ * `unit` project's `include`. Spelled as an include list rather than as
+ * `exclude: INTEGRATION_FILES` so that BOTH projects read the switched
+ * population above; an exclude-shaped unit tier would fall back to vitest's
+ * default `include` and collect nightly-tier files the queue must not run.
+ *
+ * `integration` defaults to a fresh derivation; the config passes the list it
+ * already derived so the second tier costs one walk (~10ms) and no second
+ * classification pass (~250ms measured on the box this landed on).
+ */
+export function unitTestFiles(pkgRoot: string, integration: readonly string[] = integrationTestFiles(pkgRoot)): string[] {
+  const integrationSet = new Set(integration);
+  return testFilesOnDisk(pkgRoot).filter((file) => !integrationSet.has(file));
 }

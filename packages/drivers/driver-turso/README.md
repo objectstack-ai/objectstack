@@ -160,6 +160,24 @@ const driver = new TursoDriver({
 await driver.connect();
 ```
 
+In **remote** mode a pre-configured client may not be combined with a non-zero
+`timeout`: the driver installs that window as the `fetch` it hands
+`@libsql/client` while creating the client, so it has no way to apply it to one
+you built yourself, and the constructor refuses the pair
+(`VALIDATION_ERROR` / 400) instead of accepting a bound it cannot deliver. Build
+the bound into your own client if you need both:
+
+```typescript
+const client = createClient({
+  url: 'libsql://my-db.turso.io',
+  authToken: process.env.TURSO_AUTH_TOKEN,
+  fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(30_000) }),
+});
+```
+
+Replica mode is unaffected — `sync()`, the one remote operation on that arm, is
+bounded by `timeout` whatever client is in use.
+
 ## Multi-Tenant Routing
 
 **Not shipped by this package.** Database-per-tenant routing on top of
@@ -208,7 +226,24 @@ interface TursoDriverConfig {
 
   /**
    * Operation timeout in milliseconds for remote operations.
-   * Effective in replica and remote modes.
+   * Effective in replica and remote modes; 0 or unset = no bound.
+   * - Remote mode over HTTP (libsql:// / https:// / http://): every request the
+   *   client makes is aborted once the window elapses, and the operation fails
+   *   as TIMEOUT / 504 instead of hanging — when THIS driver creates the
+   *   client. Two remote compositions cannot carry the window, and both are
+   *   REFUSED at construction (VALIDATION_ERROR / 400) rather than accepted and
+   *   never delivered:
+   *   - a wss:// or ws:// URL, which uses the WebSocket transport and has no
+   *     such seam: drop the key, or use a libsql:// / https:// URL;
+   *   - a pre-configured `client`, which arrives with its transport already
+   *     built: drop `client`, or drop `timeout` and build the bound into that
+   *     client yourself.
+   * - Replica mode: bounds sync(), the one remote operation on that arm. A
+   *   sync still running when the window closes rejects with the same
+   *   envelope; the native binding's own sync is not cancelled, only no longer
+   *   awaited.
+   * Not the libSQL busy timeout (`Config.timeout`), which is a local-file
+   * lock-contention setting that remote clients ignore.
    */
   timeout?: number;
 
@@ -221,6 +256,11 @@ interface TursoDriverConfig {
   /**
    * Pre-configured @libsql/client instance.
    * Useful for custom caching, connection pooling, or testing.
+   * In REMOTE mode it may not be combined with a non-zero `timeout` — the
+   * constructor refuses that pair (VALIDATION_ERROR / 400), because the window
+   * is installed while creating the client and a client the driver did not
+   * create cannot carry it. Replica mode is unaffected: sync() is bounded
+   * whatever client is in use.
    */
   client?: Client;
 }

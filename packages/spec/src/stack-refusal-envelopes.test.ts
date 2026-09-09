@@ -32,6 +32,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { defineStack } from './stack.zod';
+import { ERROR_CODE_LEDGER, ErrorCode } from './api/error-code-ledger.zod';
 
 /** The error shape every assertion below reads — the ADR-0112 envelope. */
 type Envelope = Error & { code?: string; status?: number; issues?: readonly unknown[] };
@@ -237,6 +238,17 @@ describe('#15963 — every defineStack refusal carries an ADR-0112 envelope', ()
     it('no site is named `ValidationError` — the record-validation duck-type in @objectstack/types', () => {
       for (const config of everySite) {
         expect(refusal(config)?.name).not.toBe('ValidationError');
+      }
+    });
+
+    it('every code is a member of the closed `ErrorCode` union, registered under @objectstack/spec (#16449)', () => {
+      // The #16404 ruling: a code that ships in `dist` is the published face,
+      // door or no door — so each refusal's spelling is a ledger row, and a
+      // consumer's `switch (e.code)` is exhaustive over the union it ships with.
+      for (const config of everySite) {
+        const code = refusal(config)?.code;
+        expect(ErrorCode.safeParse(code).success, `${code} parses against ErrorCode`).toBe(true);
+        expect(ERROR_CODE_LEDGER['@objectstack/spec']).toContain(code);
       }
     });
   });

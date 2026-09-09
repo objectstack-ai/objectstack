@@ -101,12 +101,12 @@
 // conclusion that gets re-derived from scratch otherwise:
 //
 // WHAT THE LEDGERS DO COVER — richly, and more than this table ever has.
-//   `packages/rest/src/rest-route-ledger.ts`: 94 audited rows over 19 families,
+//   `packages/rest/src/rest-route-ledger.ts`: 91 audited rows over 19 families,
 //     every route `@objectstack/rest` mounts, enumerated through
 //     `RestServer.getRoutes()` on a booted server and guarded per route by
 //     `rest-route-ledger.conformance.test.ts`. It reaches all 17 registrars;
 //     this table reaches 1.
-//   `packages/runtime/src/route-ledger.ts`: 80 rows over 21 domains. Its
+//   `packages/runtime/src/route-ledger.ts`: 82 rows over 21 domains. Its
 //     machine contract is DOMAIN-level, by live registry introspection
 //     (`domainRegistry.list()`), the per-route rows being documentation. It
 //     covers all 15 `async handle*(` methods in `http-dispatcher.ts` and all
@@ -125,26 +125,74 @@
 //
 //  1. NO NOTION OF "GATED", and this ratchet's promise is about UNGATED
 //     routes. Ledger dispositions grade SDK expressibility, not authorization:
-//     REST reads `sdk` 84 / `server-only` 7 / `public` 3. Cross-checked
-//     directly rather than assumed — of the 8 REST route mounts measured to
+//     REST reads `sdk` 81 / `server-only` 7 / `public` 3. Cross-checked
+//     directly rather than assumed — of the 7 REST route mounts measured to
 //     carry no `enforceAuth`, the ledger grades 3 `server-only`, 3 `public`
-//     and 2 `sdk`; and one of those two `sdk` rows is
+//     and 1 `sdk`, and that one row is `GET /api/v1/discovery`.
+//
+//     ⚠️ RE-MEASURED 2026-09-09 against `f6b7c53db7`. Both halves of the
+//     sentence above moved, FOR TWO UNRELATED REASONS, and separating them is
+//     the whole value of re-recording it.
+//
+//     THE SET LOST A ROW: 8 -> 7, and the row it lost is
 //     `GET /api/v1/ui/view/:object/:type`, the single route in this whole
-//     population ever measured unguarded. Its ledger row is shape-identical to
-//     the 83 `sdk` rows that ARE gated. `public` states INTENT for 3
-//     browser-facing form routes; it is not a gate measurement and was never
-//     built as one.
+//     population ever measured unguarded. Guarding it at `cc837dbfec` is the
+//     same repair that moved 30 ungated to 29 one paragraph below, so it is
+//     gated at the call site now and leaves this set, taking the second `sdk`
+//     with it: 3 / 3 / 2 became 3 / 3 / 1. ⛔ Its LEDGER row did not move at
+//     all — still `sdk`, still shape-identical to every other `sdk` row, the
+//     79 that are gated and the 1 that is not. That is this blocker restated
+//     by a live example: the grade did not notice the gate arriving, and it
+//     would not notice one leaving either.
+//
+//     THE LEDGER TOTAL MOVED FOR A REASON THAT IS NOT ABOUT GATES AT ALL, and
+//     ⛔ must not be read as evidence about them: `sdk` 84 -> 81 when #14503
+//     took the three REST package read/delete rows out of the ledger
+//     (94 rows -> 91, already recorded on the `rest-route-ledger.ts` probe row
+//     in the PROBES table below). It is written down here only because both
+//     figures live in one sentence, where a reader has no way to tell which of
+//     them moved for which reason — the failure this whole census is named for.
+//
+//     `public` states INTENT for 3 browser-facing form routes; it is not a
+//     gate measurement and was never built as one.
 //
 //  2. DERIVING "gated" FROM SOURCE SYNTAX IS UNSAFE — measured, not assumed.
-//     Scanning each of the 80 `this.routeManager.register(` call sites in
-//     `rest-server.ts` for `enforceAuth` reads 50 gated / 30 ungated, and 22 of
-//     those 30 are FALSE, in two structural shapes: `registerMetadataEndpoints`
+//     Scanning each of the 80 registration sites in `rest-server.ts` for
+//     `enforceAuth` — the SAME two spellings the `populationRule` below counts,
+//     72 direct `this.routeManager.register(` call sites plus 8
+//     `registerPerItemRoute(` calls — reads 51 gated / 29 ungated, and 22 of
+//     those 29 are FALSE, in two structural shapes: `registerMetadataEndpoints`
 //     installs a wrapping `guardedRouteManager` so its 19 inner routes are
 //     gated with no `enforceAuth` at the call site, and
 //     `registerSecurityExplainEndpoints` shares one `handler` const declared
-//     outside its 3 `register(` calls. A 73% false-ungated rate, concentrated
+//     outside its 3 `register(` calls. A 76% false-ungated rate, concentrated
 //     on the largest registrar, and hand-annotating the exceptions is the same
 //     rot this instrument already has.
+//
+//     ⚠️ RE-MEASURED 2026-09-08 against `5abca1792e`, because the 19 is a count
+//     inside the very registrar the per-item helper re-spelled, and because
+//     this paragraph attributed all 80 sites to the direct spelling alone
+//     while `:82` above already knew there were two — the authority on this
+//     population contradicting itself 57 lines apart.
+//
+//     WHAT DID NOT MOVE: 22 = 19 + 3. The same 19 routes, 11 still direct and
+//     8 now helper-routed, all through the same wrapping; the same 3 sharing
+//     one handler const; the population still 80. The re-spelling moved none
+//     of the five figures.
+//
+//     WHAT DID MOVE, and not here: 50 gated / 30 ungated became 51 / 29 when
+//     `registerUiEndpoints` — the one route in this file that resolved no
+//     identity, the same repair recorded as `enforceAuth` 61 -> 64 on the
+//     rest-server.ts row below — was guarded. That landed the day AFTER this
+//     paragraph was first written and hours BEFORE it was copied into
+//     `rest-route-ledger.ts`, `route-ledger.ts` and `authz-conformance.test.ts`,
+//     which is why four sites carried 50/30 in step. ⛔ Written down as a
+//     checked figure rather than left as one nobody dared touch: the two read
+//     identically on the page, and only this note tells them apart.
+//
+//     ⛔ The rejection stands whatever the numbers do, and the second spelling
+//     strengthens it: a naive scanner now has to know both spellings before it
+//     can read the file even this badly.
 //
 //  3. A LEDGER IS A DERIVED DATA FILE, ONE GUARDED STEP BEHIND THE SOURCE.
 //     Adding a route to a registrar in `rest-server.ts` does not touch
@@ -184,7 +232,7 @@
 // point, where a new route is already being read.
 //
 // ⛔ Two readings stay REJECTED and are recorded here so they are not
-// re-proposed: deriving "gated" from source syntax (73% false-ungated), and
+// re-proposed: deriving "gated" from source syntax (76% false-ungated), and
 // taking a ledger disposition as an authorization fact (blocker 1).
 
 import { readFileSync } from 'node:fs';
@@ -277,29 +325,41 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     kinds: ['ROUTE_ENUMERATION'],
     probes: 1,
     keys: 19,
-    population: 94,
-    reachable: 94,
+    population: 91,
+    reachable: 91,
     blindSpot: 0,
     populationRule: 'ledger rows inside REST_ROUTE_LEDGER; reachable = rows carrying a `family` (each distinct value mints a key)',
-    controls: { "route: '": 94, "family: '": 94, RestRouteLedgerEntry: 2 },
+    controls: { "route: '": 91, "family: '": 91, RestRouteLedgerEntry: 2 },
     note:
       'The audited disposition of every route @objectstack/rest mounts, enumerated through ' +
       'RestServer.getRoutes() on a booted server and guarded per route by rest-route-ledger.conformance.test.ts. ' +
       'That guard is why this file can be a population source and a regex table cannot: a mounted route with no ' +
       'row here is already RED in another package, so a new family cannot be silently absent from this file, ' +
       'and therefore cannot be silently absent from the authz ratchet either. 19 families; 1 classified by a ' +
-      'matrix row (metadata), 18 enumerated in the shrink-only baseline.',
+      'matrix row (metadata), 18 enumerated in the shrink-only baseline. Re-measured 94 -> 91 when the ' +
+      'three REST package read/delete rows (GET /packages, GET /packages/:id, DELETE /packages/:id) left the ' +
+      'ledger with their routes; each carried `family: packages`, so `reachable` moved with ' +
+      '`population` (91/91) and the blind spot stays 0 -- the family itself survives on the publish row.',
+    // The 94 -> 91 re-measurement above landed with #14503 (the REST registrar
+    // keeps only POST /packages/publish; the dispatcher domain is the single
+    // implementation of the reads and the delete). The id lives here, not in
+    // the string: a runtime string reaches readers who cannot resolve it.
   },
   {
     file: 'packages/runtime/src/route-ledger.ts',
     kinds: ['ROUTE_ENUMERATION'],
     probes: 1,
     keys: 21,
-    population: 80,
-    reachable: 80,
+    // [#13953] 80 -> 82: the two operator run-lifecycle rows
+    // (`POST /automation/:name/runs/:runId/cancel` and `.../restore-suspension`).
+    // Both carry `domain: '/automation'`, an EXISTING key, so `reachable` moves
+    // with `population`, `blindSpot` stays 0 and `keys` stays 21 — a population
+    // that grows inside an already-classified domain mints nothing new.
+    population: 82,
+    reachable: 82,
     blindSpot: 0,
     populationRule: 'ledger rows inside ROUTE_LEDGER; reachable = rows carrying a `domain` (each distinct value mints a key)',
-    controls: { "route: '": 80, "domain: '": 80, RouteLedgerEntry: 2 },
+    controls: { "route: '": 82, "domain: '": 82, RouteLedgerEntry: 2 },
     note:
       'The dispatcher half. Its machine contract is DOMAIN-level by live registry introspection ' +
       '(domainRegistry.list()), guarded in BOTH directions by route-ledger.conformance.test.ts: every ' +
@@ -319,7 +379,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     blindSpot: 61,
     populationRule:
       'route registration sites — `this.routeManager.register(` call sites, LESS the one inside ' +
-      '`registerPerItemRoute` (the shared forwarder, not a route), PLUS `registerPerItemRoute(` call sites; ' +
+      '`registerPerItemRoute` (the shared forwarder, not a route; its extent is bounded by the declaration\'s own ' +
+      'indentation and the subtrahend is pinned at 1 by the `forwarder slice:` control, never inferred from a ' +
+      'terminator spelling), PLUS `registerPerItemRoute(` call sites; ' +
       'reachable = those inside registerMetadataEndpoints',
     // [#15542 / #15854] ⭐ THE POPULATION RULE LEARNED A SECOND SPELLING, and
     // the numbers it produces did NOT move: 80 / 19 / 61, exactly as before.
@@ -378,6 +440,23 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // the control is 73 today for the spelling reason recorded above, and the
     // population it feeds is still 80. Do not "correct" the paragraph — it is a
     // dated measurement, not a live claim.
+    //
+    // [#16306] ⭐ A THIRD CONTROL, AND WHAT THE OTHER TWO CANNOT SEE. The two
+    // above were measured insufficient rather than argued insufficient. Respell
+    // the helper's terminator `};` as `}` — no semicolon, nothing lints it —
+    // and BOTH stay green (the declaration is still present and still matches;
+    // only its terminator moved) while the rule's old unanchored
+    // `indexOf('\n        };', at)` ran the forwarder slice 5132 → 9004, 3873
+    // lines, swallowing 21 registrations: population read 60 and reachable read
+    // 20, one measurement LOW and one HIGH, from a single edit. Measured
+    // 2026-09-08 against 44c849c7d6, before and after the repair.
+    //
+    // ⚠️ 60 is what a genuine removal of 20 routes reads too, and NOTHING in
+    // this record separated the two. `forwarder slice:
+    // this.routeManager.register(` is the reading that does: it is the
+    // subtrahend itself, pinned at 1, so a low population with it at 1 is a
+    // real drop and a low population with it off 1 is the slice eating too
+    // much. It is deliberately the one SLICE-scoped control on this row.
     controls: {
       'private register*Endpoints(': 17,
       'this.routeManager.register(': 73,
@@ -387,6 +466,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       // shape moved and force this provenance to be re-read.
       'registerPerItemRoute(': 8,
       'const registerPerItemRoute =': 1,
+      'forwarder slice: this.routeManager.register(': 1,
       enforceAuth: 64,
     },
     note:
@@ -589,9 +669,17 @@ export function deriveProbeFileCensus(): {
   // Scoped to the exported array literal, exactly as the probes are: the
   // patterns are the ledger's own row vocabulary, so a doc-comment or a type
   // declaration spelling the same tokens outside the table would inflate the
-  // reading. `controls` stay WHOLE-FILE counts, like every other row here —
-  // they answer "is this still the file I think it is", which is a question
-  // about the file and not about the table.
+  // reading. `controls` here stay WHOLE-FILE counts — they answer "is this
+  // still the file I think it is", which is a question about the file and not
+  // about the table.
+  //
+  // ⚠️ [#16306] That is the rule on every row but one. `rest-server.ts` carries
+  // a single SLICE-scoped control (`forwarder slice:
+  // this.routeManager.register(`) because its population rule SUBTRACTS a
+  // slice, and no whole-file count can see that slice grow — the four
+  // whole-file controls on that row were measured staying green while the
+  // slice ran 3873 lines long. A subtracted slice needs a control on the
+  // slice; the exception is exactly that wide and no wider.
   for (const [rel, marker, keyField] of [
     ['packages/rest/src/rest-route-ledger.ts', 'REST_ROUTE_LEDGER', 'family'],
     ['packages/runtime/src/route-ledger.ts', 'ROUTE_LEDGER', 'domain'],
@@ -641,21 +729,85 @@ export function deriveProbeFileCensus(): {
     const helperDeclRe = /const\s+registerPerItemRoute\s*=/;
 
     /**
+     * The helper's OWN extent, bounded by its OWN indentation.
+     *
+     * ⛔ NEVER a forward search for the terminator's literal text. The rule
+     * this replaced ended the slice at `hay.indexOf('\n        };', at)` — an
+     * unanchored forward search with no upper bound. Respell that terminator
+     * as `}` with no semicolon (the single most ordinary way that line
+     * changes, and nothing lints it — there is no ESLint `semi` rule in this
+     * repo) and `indexOf` does not fail: it finds the NEXT `\n        };`
+     * anywhere later in the file. Measured 2026-09-08 against 44c849c7d6: the
+     * slice ran from line 5132 to line 9004 — 3873 lines — and swallowed 21
+     * direct `this.routeManager.register(` sites.
+     *
+     * The extent ends instead at the first non-blank line indented no deeper
+     * than the declaration itself, whatever that line is spelled as. That is
+     * spelling-independent, so the respelling above moves nothing.
+     *
+     * ⛔ It is still not TRUSTED — see `sites` below. An indentation scan can
+     * land short (a body line dedented to the declaration's own level) or land
+     * long (the closing line indented deeper), so the number of forwarding
+     * calls it returns is read back as an exact control rather than assumed.
+     */
+    const forwarderSlice = (hay: string): string => {
+      const at = hay.search(helperDeclRe);
+      if (at < 0) return '';
+      const indent = at - (hay.lastIndexOf('\n', at) + 1);
+      let cursor = hay.indexOf('\n', at);
+      while (cursor >= 0) {
+        const nl = hay.indexOf('\n', cursor + 1);
+        const line = hay.slice(cursor + 1, nl < 0 ? hay.length : nl);
+        if (line.trim() !== '' && line.length - line.trimStart().length <= indent) {
+          return hay.slice(at, cursor + 1 + line.length);
+        }
+        if (nl < 0) break;
+        cursor = nl;
+      }
+      return '';
+    };
+
+    /**
      * Registration sites in one haystack: direct call sites, LESS the helper's
      * own forwarding call, PLUS the helper's call sites.
      *
-     * ⛔ Fail-loud, like the ledger marker slice above: a helper declaration
-     * that moves out of this shape slices to '' and nothing is subtracted, so
-     * the reading comes out ONE HIGH (81 / 20) and this census goes RED. It
-     * never silently shrinks — a quietly narrower rule is the failure mode the
-     * whole file is built against.
+     * ⭐ THE SUBTRAHEND IS CHECKED, NOT TRUSTED, and that is the repair.
+     * `occurrences(forwarderSlice(hay), mountRe)` is recorded as its own exact
+     * control, pinned at 1 — the helper forwards exactly once. So:
+     *
+     *   slice lands SHORT — declaration gone, or the extent scan stops early
+     *     ⇒ subtrahend 0, the reading comes out ONE HIGH, and the control
+     *       reads 0 against a recorded 1;
+     *   slice lands LONG — the extent scan overshoots the helper's own body
+     *     ⇒ subtrahend > 1, the reading comes out low, and the control reads
+     *       > 1 against a recorded 1.
+     *
+     * ⛔ It never silently shrinks. Not "it cannot shrink" — it can; the word
+     * carrying the weight is SILENTLY. A low reading with the forwarder
+     * control at 1 is a real population drop; a low reading with that control
+     * off 1 is the slice eating too much. Before this control existed the two
+     * were indistinguishable — the day someone genuinely removes 20 routes the
+     * census reads 60 either way — and the two exact controls the spelling
+     * change added (`registerPerItemRoute(` = 8,
+     * `const registerPerItemRoute =` = 1) stay GREEN right through it, because
+     * the declaration is still present and still matches; only its terminator
+     * moved. Both legs measured, not argued.
+     *
+     * The control IS the subtrahend, which is what keeps it from being noise:
+     * it fires exactly when an overshoot actually distorts the reading, and
+     * stays at 1 through an overshoot over text that registers nothing — where
+     * there is no distortion to report.
+     *
+     * ⚠️ The ledger marker slice above is NOT symmetric with this one, which is
+     * why borrowing its "fail-loud" reasoning was the mistake. Its `\n];`
+     * overshoot can only ADD rows, so it reads HIGH; this slice's overshoot
+     * SUBTRACTS registrations, so it reads LOW — and low is the direction that
+     * looks like an ordinary answer.
      */
-    const sites = (hay: string): number => {
-      const at = hay.search(helperDeclRe);
-      const stop = at < 0 ? -1 : hay.indexOf('\n        };', at);
-      const forwarder = at < 0 || stop < 0 ? '' : hay.slice(at, stop);
-      return occurrences(hay, mountRe) - occurrences(forwarder, mountRe) + occurrences(hay, helperCallRe);
-    };
+    const sites = (hay: string): number =>
+      occurrences(hay, mountRe) -
+      occurrences(forwarderSlice(hay), mountRe) +
+      occurrences(hay, helperCallRe);
 
     // Slice the mintable registrar's body: from its declaration to the next one.
     const decls = [...src.matchAll(registrarRe)].map((m) => ({ at: m.index ?? 0, text: m[0] }));
@@ -670,6 +822,12 @@ export function deriveProbeFileCensus(): {
         'this.routeManager.register(': occurrences(src, /this\.routeManager\.register\(/g),
         'registerPerItemRoute(': occurrences(src, /registerPerItemRoute\(/g),
         'const registerPerItemRoute =': occurrences(src, /const\s+registerPerItemRoute\s*=/g),
+        // ⭐ The one control here that is NOT a whole-file count, deliberately:
+        // it is the SHAPE of the slice the population rule subtracts, and it is
+        // the only reading that can tell "the slice ate too much" apart from a
+        // real population drop. The four counts around it cannot — all four are
+        // green while the slice is running 3873 lines long.
+        'forwarder slice: this.routeManager.register(': occurrences(forwarderSlice(src), mountRe),
         enforceAuth: occurrences(src, /enforceAuth/g),
       },
     });

@@ -1,5 +1,654 @@
 # @objectstack/core
 
+## 17.4.0
+
+### Minor Changes
+
+- 2ed6be6: Advisory validation rules no longer flood the startup log, and no longer count a row twice on a clean first boot.
+  
+  A `severity: 'warning'` (or `'info'`) validation rule is advisory: it never blocks a write, and its message is written for a person filling in a form. Evaluated across a seed load it produced one `WARN` line per row, so a clean-database first boot opened with a wall of form hints re-cast as boot diagnostics — and an app could reach "zero warnings" only by bending its data or deleting the rule.
+  
+  Two changes, and neither moves what a rule evaluates to:
+  
+  - **Aggregated reporting on the seed/boot path.** `SeedLoaderService.load()` now runs inside an advisory aggregation scope, and reports one summary line per rule — the rule, the object, the row count, the rule's own message and example rows — instead of one line per row. Off that path (an ordinary interactive write) nothing changes: the same per-write line is emitted verbatim. The new scope is `runWithAdvisoryAggregation` / `recordAdvisoryHit` in `@objectstack/core`.
+  - **Advisory rules are counted by row, not by write.** An `update` whose payload touches only platform-injected system columns — the shape `claimSeedOwnership` writes when it hands seeded rows to the first admin, `{ owner_id }` — changes no business field, so it no longer re-evaluates the object's advisory rules. Previously a seeded row rang once on insert and again when the claim scan rewrote `owner_id`, so anyone counting startup warnings over-estimated by the number of claimed objects.
+  
+  `error`-severity rules are untouched by both changes: an invariant is still enforced on every write, whoever issued it and however little it moved. Membership of the "system column" set is resolved per object by `resolveInjectedSystemColumns`, so an object that declares `ownership: 'org'` (no `owner_id`) or `systemFields: false` is judged on its own columns rather than a fixed list.
+- b0529e1: fix(core): `ResolvedAuthzContext.authRefusal` is removed — a published member nothing ever read (#14273)
+  
+  **BREAKING** published-type narrowing, shipped as `minor` under the repo's
+  launch-window convention for breaking changes. `ResolvedAuthzContext` — the
+  envelope `resolveAuthzContext` answers, exported from `@objectstack/core`'s
+  root entry — loses its optional `authRefusal?: { reason; message }` member.
+  Maintainer ruling 2026-09-02 (option A, ADR-0049 enforce-or-remove),
+  re-affirmed 2026-09-03 as A1 with the carriers a published narrowing owes
+  once the type was measured as public API: the member was written by the two
+  posture-conditional API-key refusals (`organization_required` at admission,
+  `organization_membership_ended` after grants) since #8287 and read by nothing
+  — zero runtime readers across every transport and consumer in the repo for
+  its whole life; only test assertions ever looked at it.
+  
+  What changes:
+  
+  - `ResolvedAuthzContext` no longer declares `authRefusal`. Code that reads
+    `ctx.authRefusal` stops compiling (`TS2339`); at runtime the property was
+    already absent from every resolved context except the two refused ones.
+  - The two refusals themselves are UNCHANGED: they still fire, still fail
+    closed (no `userId`, empty grants), and every transport still answers the
+    generic anonymous `401 UNAUTHENTICATED`. No status code, body or header
+    moves — a holder of someone else's key learns nothing, exactly as before.
+  - The refusal REASON is observable on exactly one surface, and it is not the
+    envelope: the server-side `[security] API key refused (reason) ...` `warn`
+    line at the decision point (#15256 / 2A), which names the key row id,
+    principal and organization for the operator. The pins that kept the two
+    reasons distinguishable through the field now read that line.
+  - `ApiKeyRefusalReason` and `ApiKeyAdmission` are unchanged — the reason
+    vocabulary still exists; it just no longer has a copy on the resolved
+    context.
+  
+  **Migration.** A consumer that read `ctx.authRefusal` deletes the read; there
+  is no replacement on the envelope, by design — disclosing the reason to a
+  caller (option B) was ruled out as a security-boundary question, and the
+  recorded fallback if a reader ever appears is an audit-side outlet (option C),
+  never the wire. Fail-closed handling keys on the absent `userId`, as every
+  in-repo transport already did. An operator who needs the reason reads the
+  server log line.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/resolve-authz-context.ts#ResolvedAuthzContext) A published runtime TypeScript interface lost an optional member. No Zod schema, no `packages/spec` declaration, no object definition and no stored representation is touched — `ResolvedAuthzContext` is a plain interface in `packages/core`, projected from no schema and referenced by no metadata surface — so `objectstack migrate meta` has nothing to rewrite and there is no tombstone to mint. The channel that reaches an affected consumer is the compiler at the read site (`TS2339`), which is more precise than a ledger line. The in-repo census (zero runtime readers; the only readers were test assertions, relocated onto the `warnApiKeyRefusal` line) and the workspace typecheck are recorded on the PR. -->
+- 66dc6ab: Plugin startup elapsed time is now reported as `durationMs` — the unit-bearing name the spec contract for the same result declares. `startTime`, which never held a start time, is deprecated and still populated.
+  
+  `PluginStartupResult.startTime` (`packages/core/src/plugin-loader.ts`) has always been assigned `Date.now() - startTime`, an elapsed duration, on both the success and the failure path. The name therefore asserts the opposite of the value: a reader who correctly takes `startTime` for an instant and writes `Date.now() - result.startTime` gets an age near the epoch rather than a wait. That is the one failure mode a unit convention cannot rescue — an ambiguous name makes someone stop and check, this one lets them proceed confidently wrong.
+  
+  This is not a naming preference but a divergence between what is declared and what is enforced. `packages/spec/src/kernel/startup-orchestrator.zod.ts` declares `durationMs: z.number().min(0)` — "Time taken to start the plugin in milliseconds" — for the same measure on the same result, the outcome of starting one plugin; the bare `duration` spelling is retired there with a `retiredKey()` tombstone whose prescription is "Rename the key to `durationMs`", because a duration-shaped number carries its unit in its key name, never only in describe prose. The contract surface was already correct and `packages/core` had drifted away from it. The same computation already has an honest name twelve lines above the defect in the same file: `PluginLoadResult.loadTime` carries the identical `Date.now() - startTime` under a name that does not lie.
+  
+  Three sites move, and every one of them is additive — nothing is removed, so no consumer has to change anything on this release:
+  
+  - `PluginStartupResult` gains `durationMs?: number`. `startTime?: number` stays, still carrying the same value, marked `@deprecated` with a doc comment that states plainly it is elapsed milliseconds and not an instant.
+  - `ObjectKernel.getPluginStartupDurations()` is added; `getPluginMetrics()` becomes a `@deprecated` delegating alias returning the same map.
+  - The private `pluginStartTimes` map is renamed `pluginStartupDurations` (private; no reader outside `kernel.ts` in this repo or in the pinned `objectui` sibling).
+  
+  Migration, where you want it: read `result.durationMs` where you read `result.startTime`, and `kernel.getPluginStartupDurations()` where you called `kernel.getPluginMetrics()`. The values are identical, so the change can be made at leisure; both old spellings keep working until they are removed.
+  
+  ADR-0087 disposition: no migration-ledger entry, and none is required. Nothing is retired by this release — the old member and the old method both remain, populated and callable, which is ADR-0087's L1 outcome (the old shape keeps loading while the fleet moves) rather than a retirement. There is also nothing for `objectstack migrate meta` to rewrite: `packages/core/src/plugin-loader.ts#PluginStartupResult` is a runtime TypeScript interface with no Zod schema, no `packages/spec` declaration and no stored representation — the `PluginStartupResult` in `packages/spec/src/kernel/startup-orchestrator.zod.ts` is a separate, differently-shaped declaration that this change does not touch, and that schema's own `duration` tombstone entry (`packages/spec/src/migrations/entries/retired-keys/18.kernel__PluginStartupResult__duration.ts`) records that core's interface is not a reader of it. Core simply does not adopt the retired spelling. When the deprecated spellings are removed, that removal is the change that carries the ledger disposition.
+- 2025b1f: `kernel.use()` now enforces the declared plugin contract. A plugin object that `PluginSchema` (`@objectstack/spec`, `kernel/plugin.zod.ts`) refuses is refused at load instead of being stored and mounted.
+  
+  **BREAKING** accept-set narrowing on a published runtime entry point, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). **This refuses input the runtime accepted before**, which is also why it is not a `patch`: `PluginSchema` had zero runtime callers, so every constraint it declared beyond `name`, `init` and semver was a declaration with nothing behind it. The sharpest reading of that gap, one input and two answers: `defineStack` accepted `type: 'ui-plugin'` while `PluginSchema.safeParse` refused it — and only one of those answers was on the path a real plugin takes. Maintainer ruling of 2026-09-06 (ADR-0049 enforce-or-remove): the protocol is the baseline, the runtime aligns to it.
+  
+  **Exactly what is newly refused: all EIGHT declared keys, not three.** The schema declares nine optional keys; the loader excludes `version` (below), so enforcement reaches these eight, each refused with the offending key named in the message:
+  
+  - **`id`** — a non-string, or the empty string (`z.string().min(1)`).
+  - **`type`** — any value outside the closed set `standard`, `ui`, `driver`, `server`, `app`, `theme`, `agent`, `objectql`.
+  - **`staticPath`** — a non-string.
+  - **`slug`** — a non-string, or a string that does not match `/^[a-z0-9-_]+$/`.
+  - **`default`** — a non-boolean.
+  - **`description`** — a non-string.
+  - **`author`** — a non-string. An object such as `{ name: 'x' }` is refused; the declared type is a plain string.
+  - **`homepage`** — a non-string, or a string that is not a URL.
+  
+  **`null` is refused on every one of the eight.** These keys are `.optional()`, which admits absence and `undefined` — never an explicit `null`. A plugin object that spells "no value" as `null` on any of the eight loaded before and is refused now.
+  
+  **What a refusal looks like.** It travels the loader's existing plugin-load error path — no new error channel — carrying the stable code `PLUGIN_CONTRACT_VIOLATION` at the head of the message and on the error's `code` property, and naming the plugin plus the first violated key:
+  
+  ```
+  PLUGIN_CONTRACT_VIOLATION: plugin '@acme/console' is refused by the declared
+  plugin contract at 'type': Invalid option: expected one of "standard"|"ui"|…
+  ```
+  
+  A wrong `type` is therefore diagnosable at boot rather than at route mount. The code is a **boot refusal**, not wire vocabulary: it is raised before any HTTP boundary exists, and no door answers with it.
+  
+  **What is STILL ACCEPTED — the door is not narrowed past those eight keys.** Measured on this tree, not assumed:
+  
+  - **Unknown keys still pass.** `PluginSchema` is a plain `z.object` with **no `.strict()`** — the strip posture — and the parse output is discarded, so a valid plugin carrying four keys the schema never declares loads, and is stored as the very object that was passed in with all of its keys intact. A plugin is refused for what it says about a **declared** key, never for saying something extra.
+  - **A version-less plugin still loads**, exactly as before.
+  - **A plugin declaring no `type` still loads and still stores no `type`**: `PluginSchema`'s `.default('standard')` is **not** written back.
+  - **A class-based plugin keeps its identity, its prototype and its prototype methods.** The plugin object is validated, never replaced: `safeParse` is read for `success` and its output discarded, because a copy destroys the prototype chain of class-based plugins — the reason `PluginLoader.toPluginMetadata` is a cast. That survival is pinned by test, not asserted in prose.
+  - **`version` is excluded from this enforcement entirely**, so `1.0.0-alpha.1` and `1.0.0+20230101` still load. The schema spells `version` as `/^\d+\.\d+\.\d+$/`, which refuses the prerelease and build-metadata forms SemVer 2.0.0 defines, while the loader's own `isValidSemanticVersion` implements the full grammar and accepts them — deliberately, pinned by `plugin-loader.test.ts`. Enforcing the narrower spelling would retire that capability silently, so the loader's check remains authoritative for `version`. Reconciling the two spellings is spec work, tracked separately.
+  
+  **Blast radius, measured rather than assumed.** Every in-repo plugin object declares a `type` inside the closed set (`standard` ×62, `server` ×2, `driver` ×2, `objectql`, `app`), and the repo contains no producer of `slug` or `homepage` on a plugin object at all — so no in-repo plugin changes behaviour. Externally authored plugins are the population this reaches, and they are exactly the population that never met the compile-time `Plugin.type` union either.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing performed entirely at the runtime boot path: `PluginSchema` is READ by `kernel.use()`, not changed. No metadata key, spec symbol, Zod schema, object definition or stored representation is added, removed or given a different name, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. Stored metadata is untouched; what moves is which plugin OBJECTS a boot accepts. The channel that reaches an affected plugin author is the refusal itself, which names the offending key at `kernel.use()` and is more precise than a ledger line — and which value a formerly-refused key should carry is authoring intent no ledger entry can decide. -->
+- 51ae731: `LiteKernel.use()` now enforces the declared plugin contract — the same check, the same refusal, as `ObjectKernel.use()`. A plugin object that `PluginSchema` (`@objectstack/spec`, `kernel/plugin.zod.ts`) refuses is refused at registration on **both** published kernels instead of on one.
+  
+  **BREAKING** accept-set narrowing on a published runtime entry point, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). **A plugin object `LiteKernel` accepted before can be refused now.** Until this release `LiteKernel.use()` wrote the object straight into its registry: `PluginSchema` was run by `PluginLoader.validatePluginContract` only, and `PluginLoader` is reached from `ObjectKernel.use()` alone. So the same plugin was accepted by one kernel and refused by the other — a `type: 'ui'` plugin with no `slug` was refused by `ObjectKernel` with `PLUGIN_CONTRACT_VIOLATION` and mounted a route on `LiteKernel`. `AGENTS.md` names `LiteKernel` for tests, serverless and edge, so the lenient kernel was the one authors develop against and the strict one was production: a plugin could be green in vitest and refused at boot. Maintainer ruling of 2026-09-08 (option A, under the precedent that the two kernels converge rather than diverge): `LiteKernel` validates too.
+  
+  **Exactly what `LiteKernel.use()` newly refuses** is exactly what `ObjectKernel.use()` has refused since the `kernel.use()` enforcement release: all EIGHT declared keys, each refused with the offending key named in the message —
+  
+  - **`id`** — a non-string, or the empty string.
+  - **`type`** — any value outside the closed set `standard`, `ui`, `driver`, `server`, `app`, `theme`, `agent`, `objectql`.
+  - **`staticPath`** — a non-string.
+  - **`slug`** — a non-string, or a string that does not match `/^[a-z0-9-_]+$/`.
+  - **`default`** — a non-boolean.
+  - **`description`** — a non-string.
+  - **`author`** — a non-string.
+  - **`homepage`** — a non-string, or a string that is not a URL.
+  
+  **`null` is refused on every one of the eight**, and a `type: 'ui'` plugin missing `staticPath` or `slug` is refused with `PLUGIN_UI_REQUIRED_KEY_MISSING` inside the same envelope.
+  
+  **What a refusal looks like — one refusal, from either kernel.** The check is now one function (`assertPluginContract`, package-internal) that both kernels call, so the code and the message are produced once:
+  
+  ```
+  PLUGIN_CONTRACT_VIOLATION: plugin '@acme/console' is refused by the declared
+  plugin contract at 'slug': PLUGIN_UI_REQUIRED_KEY_MISSING: a `type: 'ui'` plugin must declare `slug` — …
+  ```
+  
+  `LiteKernel.use()` is synchronous and throws that error as-is, so the stable code is on the error's `code` property as well as at the head of the message. `ObjectKernel.use()` is unchanged: it still re-wraps a failed load as `Failed to load plugin: <name> - <that message>`, its existing wrapper for every load failure. The text after that prefix is byte-for-byte the `LiteKernel` message for the same input, pinned by test.
+  
+  **What is STILL ACCEPTED on `LiteKernel` — the narrowing stops where `ObjectKernel`'s does.** Unknown keys still pass (`PluginSchema` carries no `.strict()`, and the parse output is discarded, so the stored object is the very object passed in). A version-less plugin still loads, and so do `1.0.0-alpha.1` and `1.0.0+20230101`: `version` is excluded from the schema check on both kernels, and `LiteKernel` — which has never judged `version` — still does not. A plugin declaring no `type` still loads and still stores no `type`. A class-based plugin keeps its identity, its prototype and its prototype methods. And `PluginLoader`'s structural checks (`name`, `init`, semver) stay the loader's own: the convergence is on the schema, not on the loader.
+  
+  **Ordering, stated because it is observable.** `LiteKernel.use()` checks its state first (a kernel past bootstrap still says `Cannot register plugins after bootstrap has started`, never `PLUGIN_CONTRACT_VIOLATION`), then the contract, then registers — so a refused plugin never reaches the registry and cannot supersede an earlier registration under its name.
+  
+  **Blast radius, measured before landing rather than assumed.** Across this repository's suites, 813 `LiteKernel.use()` calls were reachable; 807 were accepted by the schema unchanged and the six refusals came from three test-local fixture objects in two files — zero product or library code. Externally authored plugins registered on `LiteKernel` are the population this reaches, and they are exactly the plugins that would already have been refused by `ObjectKernel` at production boot.
+  
+  **Migration.** There is nothing to rename. A plugin refused on `LiteKernel` now was already refused on `ObjectKernel`; fix the named key: give `type` a value from the closed set (or drop it — an absent `type` reads as `standard`), declare `staticPath` and `slug` on a `type: 'ui'` plugin, spell `slug` in `[a-z0-9-_]`, make `homepage` a URL, and never `null` a declared key. The refusal names the plugin and the first violated key.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing performed entirely at the runtime registration path: `PluginSchema` is READ by `LiteKernel.use()` now, exactly as `ObjectKernel.use()` has read it since the `kernel.use()` enforcement release — the schema itself is not changed. No metadata key, spec symbol, Zod schema, object definition or stored representation is added, removed or given a different name, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. Stored metadata is untouched; what moves is which plugin OBJECTS the second kernel accepts, and every object it newly refuses was already refused by the first. The channel that reaches an affected plugin author is the refusal itself, which names the offending key at `use()` and is more precise than a ledger line — and which value a refused key should carry is authoring intent no ledger entry can decide. -->
+- cf9bda4: The kernel's in-memory i18n fallback learns the declared `i18n.fallbackLocale`, so one declaration stops answering two ways (#15694)
+  
+  `i18n.fallbackLocale` is authorable on the stack artifact (`TranslationConfigSchema`), and `FileI18nAdapter` — the provider `I18nServicePlugin` installs — has always honoured it: both boot paths construct it with `fallbackLocale || defaultLocale || 'en'`, and its `t()` consults that locale, per key, after the requested one.
+  
+  The kernel's in-memory fallback is constructed with nothing. `AppPlugin.loadTranslations` injected the declared `defaultLocale` and `supportedLocales` (#7679) into whichever `i18n` service was registered, but never `fallbackLocale`, and the provider had no setter to receive one. On every stack running that fallback — any stack that declares `translations` without `@objectstack/service-i18n` registered (not installed, or `tierEnabled('i18n')` false) — the declaration was inert. A stack declaring `defaultLocale: 'zh-CN'` with `fallbackLocale: 'en'` answered a missing `zh-CN` key from `en` under `I18nServicePlugin` and from `zh-CN`, i.e. not at all, under the fallback: one declaration, two providers, two answers. That the fallback self-declares `degraded` licenses fewer capabilities, not a different answer to the same declared key.
+  
+  What changed:
+  
+  - **`II18nService.setFallbackLocale?(locale)`** — a new OPTIONAL member, the injection counterpart of `getFallbackLocale`. It is the same shape `setDefaultLocale` and `setSupportedLocales` already have, and for the same reason: the declaration lives on the stack artifact, which only the runtime app-plugin layer can see. A provider constructed with its fallback (`FileI18nAdapter`) omits the method and keeps the value it was built with.
+  - **`createMemoryI18n` receives it and acts on it.** `t()` now consults the declared fallback per KEY after the requested locale — the same second leg `FileI18nAdapter.t()` has. Per key, not per bundle: the pre-existing `resolveTranslations(locale) ?? mergedLocale(defaultLocale)` line swaps whole bundles and only when the requested locale has none, so a `zh-CN` bundle that simply lacked the key never reached anything else. That older leg is unchanged.
+  - **`AppPlugin.loadTranslations` threads the declaration**, through the same `typeof … === 'function'` optional-capability probe as `setDefaultLocale`, and guarded on the app having declared something — several `AppPlugin`s can share one kernel, and an app that declares no `i18n` block must not clear a fallback another app declared.
+  
+  A stack that declares no `fallbackLocale` gets exactly the behaviour it has today: the setter is never called, and `t()` walks the same chain it always did. A fallback nobody asked for would be a new chain, not a fix.
+  
+  `getFallbackLocale()` is deliberately still absent from the memory fallback. The setter is what the provider is TOLD; the accessor is what the serving layer ASKS it when building the metadata-document translators' fallback chain (#14882). Answering the second from `defaultLocale` — the only value always available there — would settle the default-locale contract question #14882 leaves deliberately open, from a degraded provider. Those reads keep the resolvers' own default, which is known and intentional.
+- 2a3decc: `PluginSchema` now REQUIRES `staticPath` and `slug` when `type` is `'ui'`, and core's `Plugin` interface inherits every `PluginSchema` key from `PluginDefinition` instead of restating two of them.
+  
+  **BREAKING** accept-set narrowing on a published schema, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). `packages/spec/src/kernel/plugin.zod.ts` described `staticPath` and `slug` as *"Required for type=\"ui\""* while declaring both `.optional()`, with nothing behind the prose; since `kernel.use()` runs the schema on the boot path (#16049), that was a promise the runtime visibly did not keep. This is the spec half of #16049, split by director ruling (decision batch #58, 2026-09-06).
+  
+  **Exactly what is newly refused.** A plugin object with `type: 'ui'` that omits `staticPath`, omits `slug`, or spells either as `undefined`. Nothing else: every other declared type (`standard`, `driver`, `server`, `app`, `theme`, `agent`, `objectql`), and a plugin declaring no `type` at all, still parses with neither key. A PRESENT value is judged exactly as before — `slug` keeps its `/^[a-z0-9-_]+$/` regex, `staticPath` stays any string, and the empty string is not refused by this change.
+  
+  **What a refusal looks like.** One zod issue per missing key, `path` naming the key, the new stable code `PLUGIN_UI_REQUIRED_KEY_MISSING` (exported from `@objectstack/spec/kernel`) at the head of the issue `message` and on the issue's `params.code`. At `kernel.use()` it rides the existing `PLUGIN_CONTRACT_VIOLATION` envelope unchanged, because the loader surfaces the first issue's `path` and `message` and reads nothing else:
+  
+  ```
+  PLUGIN_CONTRACT_VIOLATION: plugin '@acme/console' is refused by the declared
+  plugin contract at 'staticPath': PLUGIN_UI_REQUIRED_KEY_MISSING: a `type: 'ui'`
+  plugin must declare `staticPath` — the absolute path of the static assets it
+  serves. Declare it, or drop `type: 'ui'` if this plugin serves no assets.
+  ```
+  
+  **The fix for an affected plugin** is the one the message names: declare both keys (`staticPath`: the absolute path of the assets it serves; `slug`: the URL segment it is mounted under), or drop `type: 'ui'` if the plugin serves no assets. There is no fallback to lean on: the Hono server's `slug || name.split('/').pop()` derivation is no longer reachable through the kernel, because the object is refused before it is stored.
+  
+  **`@objectstack/core` — `Plugin` derives its metadata keys.** `Plugin` now `extends PluginDefinition` (`z.input<typeof PluginSchema>`), so `id`, `type`, `staticPath`, `slug`, `default`, `version`, `description`, `author` and `homepage` are ONE declaration shared with the schema the kernel enforces. Additive for every existing implementer: `type` and `version` keep the shapes they had (`type` is still `PluginType | undefined`, pinned type-equal in `packages/rest`; `version` still `string | undefined`), and the seven other keys are new optional members. A `ui` plugin can now carry `staticPath` / `slug` without widening its own type. Runtime-only members (`name`, `dependencies`, `optionalDependencies`, `requiresServices`, `providesServices`, `init`, `start`, `destroy`) stay declared on the interface.
+  
+  **Blast radius, measured.** No in-repo plugin object outside test fixtures declares `type: 'ui'` (searched `packages/`, `apps/`, `examples/` non-dist sources for a `type` key or class field holding the literal `'ui'`: three test files, nothing shipped), so no in-repo composition changes behaviour. Externally authored `ui` plugins that relied on the slug derivation, or declared no assets, are the population this reaches — and they are refused at boot, by name, with the key to add.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing on plugin OBJECTS, which are never stored metadata: `PluginSchema` gains a refinement and one exported constant; no metadata key, object definition or stored representation is added, removed or renamed, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. The channel that reaches an affected plugin author is the refusal itself, which names the missing key at `kernel.use()`; which value that key should carry is authoring intent no ledger entry can decide. -->
+- cc00df2: feat(core)!: retire `PluginSecurityScanner` — plugin security scanning is not a platform capability (#14919)
+  
+  <!-- adr-0087: registered plugin-security-scanner-retired -->
+  
+  **ADR-0087 disposition: registered**, as `plugin-security-scanner-retired` in
+  `MIGRATIONS_BY_MAJOR[18].semantic` — a **D3 semantic** entry, not a D2 conversion,
+  and so not the metadata migration the ruling excludes. The class has no spec schema
+  and never had one, so there is no authorable key to tombstone with `retiredKey()`
+  and no stored `sys_metadata` row a conversion could rewrite: a scanner was
+  constructed per call and every result lived in a per-instance Map discarded with the
+  object, so `applyConversionsToStoredItem` has no seam that would ever see one. An
+  entry is nevertheless owed rather than optional, because this changeset carries a
+  real consumer prescription — the enforced channel is tsc at the import site, and for
+  any consumer it does not reach, the ledger and the generated upgrade guide are the
+  only channel there is. Same disposition as `contracts.IDataDriver.findStream` and
+  `actor-user-roles-to-positions`.
+  
+  **BREAKING** — `PluginSecurityScanner` is removed from `@objectstack/core`,
+  together with its two companion types `ScanTarget` and `SecurityIssue`. Landing
+  as `minor` under the repo's launch-window convention for breaking changes.
+  **There is no replacement**, and none is planned.
+  
+  ⚠️ **The out-of-repo consumer population for these three exports is NOT
+  MEASURED.** This changeset can state only what was measured *inside* the
+  sources this repo can read: zero constructors in objectstack, zero in objectui
+  at the pinned sha, and zero in the deleted example itself. How many published
+  consumers of `@objectstack/core` import the class is unknown — no download,
+  dependent or source telemetry was consulted. Read the removal as breaking for
+  an unmeasured population, not as a removal proven to break nobody.
+  
+  ## Why it was removed rather than repaired
+  
+  The class was a shell that reported success. `scan()` composed five private
+  scanners: four of them (`scanCode`, `scanMalware`, `scanLicenses`,
+  `scanConfiguration`) allocated an empty issue array, logged, and returned it
+  with no code in between — none could report a finding for any input. The fifth,
+  `scanDependencies`, ran a real loop but matched only against an in-memory
+  vulnerability database whose sole writer, the public `addVulnerability`, had
+  zero callers; `updateVulnerabilityDatabase()` logged twice and fetched nothing.
+  The database was therefore empty on every code path that has ever executed, so
+  no issue was ever produced, the score stayed 100, and the result was
+  `status: 'passed'` for every plugin the scanner was ever handed — a malicious
+  one included.
+  
+  A security control that cannot fail is worse than no security control, because
+  callers rely on it. Repair — writing a real vulnerability scanner — was refused
+  by name: it is a feature with a design surface and no demand, not a defect fix.
+  
+  ## FROM → TO
+  
+  ```ts
+  // FROM — compiles today, and passes every plugin it is given
+  import { PluginSecurityScanner } from '@objectstack/core';
+  
+  const scanner = new PluginSecurityScanner(kernel.logger);
+  const result = await scanner.scan({ pluginId, version, dependencies });
+  if (result.status === 'passed') { await kernel.use(plugin); }
+  
+  // TO — delete it. The condition above was always true.
+  await kernel.use(plugin);
+  ```
+  
+  **The one-line fix:** delete the import and every call; no symbol replaces it.
+  If your code branched on `result.status`, take the `'passed'` branch — that is
+  the only branch it ever took.
+  
+  **If you were relying on it for actual security**, you were not getting any.
+  Audit dependencies with the tools built for it (`npm audit` / `pnpm audit`,
+  Dependabot, the GitHub Advisory Database, OSV) and treat an unaudited
+  third-party plugin as untrusted code. What ObjectStack does still enforce is
+  artifact **integrity and signatures** (`verifyPluginArtifactIntegrity`, the
+  plugin signature verifier — "is this what the publisher signed?", never "is
+  this safe?"), explicit plugin **permissions**, and the sandbox **resource
+  limits**; all three are unchanged.
+  
+  Removed under ADR-0049 enforce-or-remove, per the maintainer ruling of
+  2026-09-05 (director summon #14, decision batch #42). The retirement is pinned
+  as an export-list assertion on both barrels in
+  `packages/core/src/security/security-scanner-retirement.pin.test.ts`.
+
+### Patch Changes
+
+- 6f94458: fix(core): narrow the operation-private-keys pin's scanner to `.ts`, so it judges exactly the population turbo re-runs it for (#15090)
+  
+  `packages/core/src/security/operation-private-keys.pin.test.ts` filtered its
+  candidate set with `/\.tsx?$/` — `.ts` **and** `.tsx` — while this package's
+  declared radius in the cross-package declaration table is a `packages/**`
+  subtree glob ending in `.ts`. So the pin judged a population **strictly wider**
+  than the one either scoping layer of `check:cross-package-test-inputs` knows
+  about: Layer A never unions this package into the test shard when a `.tsx` file
+  changes, and Layer B never moves the `test` task's cache hash for one. A `.tsx`
+  file under `packages/` declaring its own `OPERATION_PRIVATE_KEY_PREFIX` or
+  `withoutOperationPrivateKeys` was therefore scanned by the pin and invisible to
+  CI's scoping — landing on `main` with every PR green and then reddening whichever
+  unrelated PR next touched a `.ts` file. That is the #7802 shape the declaration
+  table exists to close, one extension wide.
+  
+  Repaired by narrowing the **scanner**, not by widening the **glob** — and that
+  asymmetry is measured rather than assumed. On `b548e438d`, adding a `.tsx` glob
+  to this package's roster entry and re-deriving `check:cross-package-test-inputs`'
+  watch hints flips the dispatch-gates self-test case *"nor a .tsx test file inside
+  it"* from true to false, with the added glob itself as the covering hint. That
+  case is a live specimen for "a test class the hint route cannot reach", so the
+  red is real and re-pointing it is a decision in another lane, not a fixup.
+  
+  What the boundary costs, measured on the pin's own surface (tracked **plus**
+  untracked, ignored paths excluded) at `b548e438d`: **5408** `.ts` files scanned,
+  8 of them mentioning a guarded symbol; **8** `.tsx` files excluded, **0** of them
+  mentioning either symbol. The loss is empty today — and that reading is no longer
+  transcribed and trusted. A new case re-measures it on every run: it asserts the
+  excluded `.tsx` population is non-empty (so the boundary is an exclusion and not
+  an empty tree describing itself), that the filter really drops those files, and
+  that none of them declares either symbol. Ablation, with the restore proven by
+  blob hash rather than by exit code: re-widening the scanner reddens it while the
+  offender assertion stays green — which is precisely the failure mode, since a
+  wider scanner reads as coverage CI never runs — and planting a `.tsx`
+  redeclaration reddens it with a message that says the choice is a second-gate
+  trade, not a one-line widening.
+  
+  The correspondence between scanner and glob is now stated at **both** ends: the
+  pin's header and the declaration table's entry for this package. No published
+  surface moves — the only source file edited is a test.
+- 6e67b86: refactor(core): the authz context's time-zone probe is now the shared value-domain predicate, not a third copy of it
+  
+  `resolve-authz-context.ts` carried a module-private `isValidTimeZone` — the
+  `Intl.DateTimeFormat` probe, re-stated. It was the third copy of one
+  definition, alongside `@objectstack/spec/shared`'s `isValueDomainMember` and
+  `service-settings`' own re-statement. `coerceTimeZone` now calls
+  `isValueDomainMember('iana_time_zone', …)` and the copy is gone.
+  
+  **No behavioural change, measured rather than asserted.** The two predicates
+  were run over a shared 4,058-input corpus — the zones
+  `Intl.supportedValuesOf('timeZone')` omits (`UTC`, `Asia/Kolkata`,
+  `Europe/Kyiv`, `Asia/Ho_Chi_Minh`, `US/Eastern`, `GMT`), every member of that
+  enumeration plus its case- and space-padded variants, refusals, `Etc/` and
+  offset spellings, legacy aliases, and fuzz — with **zero disagreements**, and
+  the same zero at the `coerceTimeZone` level. The call site's own
+  pre-processing (trim, stringify a non-string, refuse blank) is unchanged.
+  
+  What this buys is drift resistance, not a fix: core's time-zone acceptance now
+  sits under the shared pins, so a future "modernisation" to
+  `Intl.supportedValuesOf('timeZone')` — which would silently narrow what the
+  authz context accepts, since that enumeration omits this platform's own
+  default `UTC` — turns a test red instead of shipping.
+- e9fcd6b: feat(spec)!: the fourteen `kernel/` duration keys carry their unit in the key name (#15678, ruling B on #14478)
+  
+  <!-- adr-0087: registered kernel-event-bus-retention-unit-in-key, kernel-package-lifecycle-durations-unit-in-key, kernel-plugin-health-report-durations-unit-in-key, kernel-plugin-security-durations-unit-in-key, kernel-startup-orchestrator-durations-unit-in-key -->
+  
+  **BREAKING** — fourteen published `kernel/` duration keys are renamed and
+  tombstoned. Shipped as `minor` under the repo's launch-window convention for
+  breaking changes; the hand-migration prescriptions are registered under protocol
+  major 18. Maintainer ruling B on #14478 (2026-09-02, decision batch #43,
+  「同意」).
+  
+  `check:duration-unit-keys` makes a duration-shaped `z.number()` carry its unit
+  in the key NAME, never only in its `.describe()` prose, and grandfathers no
+  existing offender. Stack card 1/6 (#15676) landed the rule's two structural
+  exemptions and card 2/6 (#15677) cleared `api/`; this card clears `kernel/`.
+  Measured with the gate itself: `src/kernel/**` goes from 14 offenders to **0**,
+  and the whole-tree count falls **36 → 22**.
+  
+  ## FROM → TO
+  
+  | key | replacement | unit |
+  |:--|:--|:--|
+  | `EventPersistence.retention` | `retentionDays` | days |
+  | `EventSourcingConfig.retention` | `retentionDays` | days |
+  | `UpgradePlan.estimatedDuration` | `estimatedDurationSeconds` | seconds |
+  | `PluginHealthReport.metrics.uptime` | `uptimeMs` | milliseconds |
+  | `PluginHealthReport.metrics.responseTime` | `responseTimeMs` | milliseconds |
+  | `SandboxConfig.process.timeout` | `timeoutMs` | milliseconds |
+  | `KernelSecurityPolicy.authentication.tokenExpiration` | `tokenExpirationSeconds` | seconds |
+  | `KernelSecurityPolicy.auditLog.retention` | `retentionDays` | days |
+  | `PluginSecurityManifest.vulnerabilityDisclosure.responseTime` | `responseTimeHours` | hours |
+  | `PackageDependencyResolutionResult.resolvedIn` | `resolvedInMs` | milliseconds |
+  | `MultiVersionSupport.rollout.duration` | `durationMs` | milliseconds |
+  | `StartupOptions.timeout` | `timeoutMs` | milliseconds |
+  | `PluginStartupResult.duration` | `durationMs` | milliseconds |
+  | `StartupOrchestrationResult.totalDuration` | `totalDurationMs` | milliseconds |
+  
+  **Every value is unchanged** — only key names move, and every default moves with
+  its key (`StartupOptions` still defaults to 30000, `EventSourcingConfig` to
+  365). Every old spelling is a `retiredKey()` tombstone, so it fails `tsc` at the
+  authoring site (input type `never`) and fails the parse with the rename
+  prescription rather than a bare unrecognized-key error.
+  
+  ## ⚠️ Two collisions this rename removes — check these by hand, not by search-and-replace
+  
+  **`responseTime` meant two different units on two kernel shapes.** On
+  `PluginSecurityManifest.vulnerabilityDisclosure` it is HOURS (how fast a
+  publisher promises to answer a vulnerability report); on
+  `PluginHealthReport.metrics` the identical bare name is MILLISECONDS. So
+  `responseTime: 24` was a day on one shape and a fortieth of a second on the
+  other, with nothing at the authoring site to tell them apart. They land on
+  `responseTimeHours` and `responseTimeMs` respectively — do not let one
+  find-and-replace rewrite both.
+  
+  **`uptime` is milliseconds here and SECONDS on `GET /health`.** That collision
+  was already costing prose: the protocol lifecycle page carried a standing
+  paragraph whose only job was telling the two apart. `metrics.uptime` becomes
+  `metrics.uptimeMs`; the seconds-valued `uptime` of the HTTP health body is a
+  separate, unchanged surface and must not be renamed with it.
+  
+  A third split worth reading before you migrate: `estimatedDurationSeconds: 120`
+  is two MINUTES while `durationMs: 3600000` is one HOUR. Three adjacent
+  measurements of the same package install carried two different units, and no
+  parse can catch a value moved between them — both bounds accept any
+  non-negative integer.
+  
+  ## Dispositions — five semantic entries, no D2 conversion
+  
+  Justified per key rather than defaulted, and this card's answer is uniform:
+  **none of the fourteen gets an ADR-0087 D2 conversion.** A D2 conversion runs
+  over a stack document, and `stack.zod.ts` declares no `eventBus`, `startup`,
+  `upgrade` or plugin-security root — none of these twelve defs is a stack
+  collection member or a registered metadata kind stored as a `sys_metadata` row,
+  so the conversion chain has no seam that would see one. They are host
+  construction arguments (`EventBusConfig`, `StartupOptions`, `SandboxConfig`,
+  `MultiVersionSupport`), package artifacts (`PluginSecurityManifest`) and
+  runtime-emitted measurements (`PluginHealthReport`, `PluginStartupResult`,
+  `StartupOrchestrationResult`, `UpgradePlan`,
+  `PackageDependencyResolutionResult`). Each therefore carries a **semantic**
+  entry, which is the disposition `kernel/HealthStatus:timestamp` already holds on
+  one of these very files (`epoch-instant-keys-renamed`, card 1/6) and what ruling
+  B prescribes for a key that is not authorable metadata. All fourteen are
+  registered by exact key in `RETIRED_KEYS_BY_MAJOR`.
+  
+  ## Keys deliberately left alone
+  
+  `EventSourcingConfig.snapshotRetention` is a COUNT of snapshots and
+  `MultiVersionSupport.rollout.percentage` is a proportion — neither is a
+  duration, so neither has a unit to carry and both keep their names.
+  `RuntimeConfig.resourceLimits.timeout` names its unit only in the JSDoc above
+  the key ("Execution timeout in milliseconds"), a channel
+  `check:duration-unit-keys` does not read: it reads `.describe()` and
+  `.meta({ description })`, and this key's describe ("Maximum execution time")
+  names none. The gate therefore lists it among the duration-shaped keys but
+  deliberately does not judge it — neither an offender nor an exemption — so it is
+  outside this rename; that JSDoc-channel gap is filed as #15939. A pin test
+  asserts the key still parses bare, so a later sweep cannot read the four
+  security renames as "every timeout on that file".
+  
+  ## Readers moved in the same PR, at the same magnitude
+  
+  `@objectstack/core`'s health monitor (`metrics.uptimeMs: Date.now() -
+  startTime`), the kernel and contracts test suites, and the hand-written
+  `content/docs/protocol/kernel/lifecycle.mdx`, whose `uptime` paragraph now
+  states the collision the rename removes.
+  
+  ⚠️ `packages/core/src/plugin-loader.ts` declares its OWN local
+  `PluginStartupResult` interface — a different type, carrying `startTime` rather
+  than any duration key. It is not a reader of this schema, it is untouched by
+  this rename, and the divergence between the two shapes is tracked separately.
+- c78c918: Documentation: the manifest surface no longer describes itself as an open object.
+  
+  `ManifestSchema` became a `strictObject` when the manifest surface was closed against unknown keys, but five prose sites still described the earlier posture. They shipped, so an author (or an AI writing metadata) reading the declarations was told the manifest tolerates undeclared keys — while the runtime rejects them by name and offers the declared spelling for a near miss. Prose that contradicts a tightened contract teaches exactly the wrong reflex, so each site now states the current refusal rather than merely dropping the old claim:
+  
+  - `AssembledPackageBodySchema`'s docblock no longer explains its lack of a `strictObject` spelling by calling `ManifestSchema` open. The posture is inherited: the schema is `ManifestSchema.extend(...)`, and `.extend()` carries the base's unknown-key handling, so an undeclared key on an assembled body is refused — measured, with the rename suggestion intact.
+  - The artifact-registration seam kept the half of its reasoning that still holds (the schema applies defaults, so a parsed clone would not be byte-identical) and retired the half that does not ("Zod strips undeclared keys") — the key is now refused at that parse rather than dropped from the clone.
+  - The `os compile` per-package rule pass explains why a body may be re-read as its own manifest: nothing parses that superset, and against `ManifestSchema` it would now be refused.
+  
+  No schema, behaviour or export changed; `check:api-surface` and the generated reference pages are unmoved.
+- 4771bd9: The `Server is ready` line now reports the degraded boot it is standing on, instead of printing a green `✓` over it.
+  
+  `✓ Server is ready` and the kernel's `System started with degraded capabilities. Missing core services: …` were two statements about one boot, produced by two packages — the banner in `@objectstack/cli`, the conclusion in `@objectstack/core` — with **no data path between them**. So the ready signal did not depend on the thing that broke, and therefore could not report it. Measured twice within a day, from unrelated causes: an objectui CI boot where the auth plugin failed and not one `sys_*` table existed, and this repo's own weekly registry canary on the published `npx create-objectstack@latest` on-ramp, where the tick printed directly **above** four boot warnings. In the second case the ready line carried no weight in the job's verdict at all — it was present, green, wrong, and believed by nobody.
+  
+  - **The data path.** `ObjectKernel.validateSystemRequirements()` now publishes the list it had already computed — the same array behind its own warning — on the kernel's service registry, which is the seam boot facts already cross to reach the banner (`serve` reads `auth` and `seed-summary` off it the same way). No member and no type is added to `@objectstack/core`'s public surface, and nothing re-derives which services count as `core`: that judgement stays in `ServiceRequirementDef` alone.
+  - **The line.** On a degraded boot the banner prints `⚠ Server is ready — DEGRADED: missing core services: <names>`, naming exactly what the kernel found missing. On a healthy boot the ready block is byte-for-byte unchanged, so an ordinary boot's output does not move.
+  - **Readiness is NOT made strict.** Nothing about what boots, binds, or exits changes. A machine deliberately running without auth still starts, still prints ready, and still exits 0 — the line just says what state it is ready in.
+- d4f9b2a: A session whose active organization is no longer one the user belongs to now resolves with no active organization instead of that one's data.
+  
+  Under a wall-enforcing tenancy posture (`isolated` / `group`), `resolveAuthzContext` took a browser session's stored `activeOrganizationId` as the request tenant without ever comparing it to the user's current memberships — the framework's only such comparison was gated on an API-key principal. A session whose owner had been removed from an organization therefore kept reading that organization's rows and writing into it until the session expired on its own (7 days by default), including when the removal went through the product's own offboarding path.
+  
+  That claim is now vetted: if it is not in the caller's `accessible_org_ids`, it is dropped and the context resolves with no active organization at all, which the tenant wall already fails closed on (reads resolve to nothing; a tenant-scoped write is refused by ADR-0123 D2). The principal is **not** refused — a session is a person who may hold memberships elsewhere, so they stay signed in and can switch to an organization they are actually in. The API-key arm is unchanged: a key is its organization binding and is still refused outright. The wire is unchanged; the drop is reported to the operator as a single server-side `warn`.
+- a727043: fix(rest,core): an organization-less or ex-member API key on a walled single-kernel deployment now answers 401 where it answered 200
+  
+  Under a wall-enforcing tenancy posture (`isolated`), an API key stamped with an
+  organization its owner is no longer a member of **read and wrote that
+  organization's rows** on the wiring the open core actually builds. Not a silent
+  empty set — a GET that returned the other organization's records, and a POST
+  that landed a row read back from the store carrying that organization's id and
+  the ex-member as its creator. An organization-less key on the same deployment
+  read `200` with an empty set, which is the silent failure the wall exists to
+  replace.
+  
+  The cause was a seam, not a predicate. `RestServer.computeExecCtx` derived the
+  effective tenancy posture from a per-request kernel, and on the single-kernel
+  wiring there is no per-request kernel — so the posture was `undefined` on every
+  request, and both posture-conditional API-key refusals are gated on it:
+  `organization_required` in `api-key.ts` and `organization_membership_ended` in
+  `resolve-authz-context.ts`. Neither ever ran. The Layer 0 wall itself was
+  active the whole time; it compares against the caller's active organization,
+  and an API key's tenant is `sys_api_key.active_organization_id` copied verbatim
+  — the holder's own stored claim. Enforcing the wall is what let the ex-member
+  through, because the one fact that would expose the ended membership was not an
+  input to the layer that could act on it.
+  
+  The single-kernel branch now derives the posture from a provider `rest-api-plugin`
+  wires to the lone local kernel's `tenancy` service, in the same shape as the
+  auth-service provider beside it. A host that registers no `tenancy` service is
+  unchanged and still admits: there is no wall on such a deployment, so there is
+  nothing for an organization-less key to be walled out of. A `tenancy` service
+  that was registered and **failed to build** is an outage and answers `503`, not
+  an admission — a posture that could not be read is not a posture that is absent.
+  
+  Refusals are now also said out loud on the server side, at `warn`, where each
+  one is decided: the key's row id (never the credential or its hash), the
+  principal, the organization and the reason. **The wire is unchanged** — both
+  refusals still answer the generic `401 UNAUTHENTICATED` with no reason in the
+  body, so a holder of someone else's key learns nothing a plain 401 does not
+  already tell them. The operator, who previously had a key that was neither
+  revoked nor expired and a 401 that said nothing, now has a line to find.
+  
+  Behaviour that does not move: a current member's key on the same route still
+  returns its rows and still writes; a request with no credential still answers
+  401; and an unknown, revoked or expired key is not a refusal at all, so a key
+  scanner produces no log volume.
+- c5d6803: Published `.js.map` files no longer embed the complete original source text (`sourcesContent`) — comments included. `sourcemap: true` was esbuild shorthand, and esbuild's own default for `sourcesContent` is `true`; nobody had decided to publish every package's full source (including `@internal`/test-only comments) to npm inside its source maps, it fell out of a default nobody had looked at. Measured before this change: 55 of 57 publishable packages shipped embedded source text, and maps were roughly half of `@objectstack/spec`'s published bytes.
+  
+  `sourcesContent: false` is now set at one shared place (`scripts/tsup-drop-sources-content.mjs`, wired into every `tsup.config.ts` via tsup's `esbuildOptions` hook — most packages build through the repo-root config directly and pick this up with no config change of their own). `mappings` are untouched, so stack-trace positions still resolve correctly to the original file/line/column; only the embedded source text is gone.
+  
+  `@objectstack/cli` (built with `tsc`, not `tsup`) never embedded source text to begin with — its maps' `sources` entries point at `src/**` paths that are not part of the published tarball either way. That is not a defect unique to `cli`: every `tsup`-built package's `sources` entries are `../src/**`-relative paths that are equally outside `files: ["dist", …]`, and were merely masked by the embedded content that just stopped shipping. Shipping `src/**` in `files[]` to make `sources` resolve was rejected — it would put most of the removed bytes straight back. So `cli`'s maps are left exactly as `tsc` emits them: this is now the fleet-consistent shape (accurate `mappings`, non-resolving-but-honest `sources` labels, no embedded text), not an outlier.
+  
+  A new gate, `pnpm check:sourcemap-no-sources-content`, sweeps every built, non-private package's `dist/**/*.map` and fails if any of them carries a non-empty `sourcesContent` array — so a future `tsup.config.ts` that skips the shared hook, or a toolchain upgrade that changes esbuild's default back, is caught rather than silently re-publishing source text.
+- f89812e: Five source comments in `@objectstack/cli` and `@objectstack/core` stop attributing unpack-time `manifest.integrity` re-verification to the cloud control plane and name the owner this repo has already ruled: the **future runtime loader** (ADR-0025 §3.5 steps 4–7). The enforce leg stays tracked on #11331.
+  
+  `packages/spec`'s `manifest.zod.ts` was corrected to that owner in an earlier change, and these five sites were left behind — so the repo stated both things at once. A comment that names the wrong owner costs nobody a build, but it teaches a reader (and a reading AI) to expect a verification that no component performs and that ADR-0025's own status line records as unimplemented.
+  
+  - `packages/cli/src/utils/osplugin.ts` — the `.osplugin` packaging docblock, and the `sriDigest` TSDoc.
+  - `packages/cli/src/commands/plugin/publish.ts` — the integrity-preflight comment.
+  - `packages/core/src/security/index.ts` — the `verifyIntegrity` export comment.
+  - `packages/core/src/security/plugin-artifact-integrity.ts` — the verifier's own module docblock, which had explained the module's byte-for-byte portability *by* the wrong owner. It now explains it by the leg itself: the module stays portable to whatever runs unpack-time re-verification.
+  
+  **What does NOT change.** The other half of every one of these comments — the digest map is computed by `os plugin build` and self-checked by the `os plugin publish` preflight — is true and is kept verbatim. No accept set, export, signature or runtime behaviour moves; the diff is comment prose only.
+  
+  **What moves for consumers, measured on the built output.** `@objectstack/cli` ships `dist/`, and the `sriDigest` TSDoc rides into `dist/utils/osplugin.d.ts`, so an editor's hover on `sriDigest` stops naming the control plane. `@objectstack/core`'s two sites do **not** reach its published bundle — a module docblock and a line comment above an `export {}` are both dropped from `dist/index.d.ts` — so nothing in that package's shipped bytes moves. It is declared here anyway because the pre-correction attribution is quoted in `packages/core/CHANGELOG.md`, a generated record that may not be hand-edited; a changeset naming the package is the only way the correction reaches that published record.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+  - @objectstack/spec@17.4.0
+  - @objectstack/types@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

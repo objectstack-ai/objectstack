@@ -44,10 +44,11 @@ import { defineStack } from '@objectstack/spec';
  * ⚠️ `group` names `sales_group`, a container the CORE package declares. A
  * module cannot see that id at authoring time, and a typo in it does not fail:
  * the runtime RELOCATES the items to the app's top level and says so
- * (`nav_contribution_group_missing`, at `warn`), and `os build` reports the
- * same finding at compile time. This fixture is where that is measured — keep
- * the id spelled correctly here, so a build of this example stays clean and the
- * pin that typos it has something to differ from.
+ * (`nav_contribution_group_missing`, at `warn`), and `os build` and
+ * `os validate` report the same finding at compile time. This fixture is
+ * where that is measured — keep the id spelled correctly here, so a build of
+ * this example stays clean and the pin that typos it has something to differ
+ * from.
  */
 export default defineStack({
   manifest: {

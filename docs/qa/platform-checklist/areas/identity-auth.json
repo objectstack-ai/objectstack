@@ -754,12 +754,12 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the organization capability mounted (always mounted per ADR-0081 D1; plugin-auth's default-org bootstrap guarantees an org to manage) and a session with an active organization so {current_org_id} resolves",
+          "the organization capability mounted (always mounted per cloud ADR-0081 D1; plugin-auth's default-org bootstrap guarantees an org to manage) and a session with an active organization so {current_org_id} resolves",
           "at least two members in the org so role changes and removals have a target that is not the admin"
         ]
       },
       "steps": [
-        "sign in as the org owner/admin and open Setup → People & Org → Organization (nav_organization: type object, objectName sys_organization, recordId {current_org_id}, ADR-0081); screenshot the org record page and confirm {current_org_id} resolved to the session's active org (not the list fallback)",
+        "sign in as the org owner/admin and open Setup → People & Org → Organization (nav_organization: type object, objectName sys_organization, recordId {current_org_id}, cloud ADR-0081 D3); screenshot the org record page and confirm {current_org_id} resolved to the session's active org (not the list fallback)",
         "confirm the record page exposes the Members / Invitations / Teams tabs with the better-auth row actions (GET list-members, list-invitations, list-teams feed them)",
         "change a member's role: POST /api/v1/auth/organization/update-member-role (client organizations.updateMemberRole) to one of the ADR-0108 closed 4-name vocabulary {owner, admin, delegated_admin, member}; read the membership back and confirm the new role",
         "prove the vocabulary is CLOSED, not merely conventional: attempt the same call with role 'guest' (and with any stack-declared position/permission-set name, e.g. showcase's 'contributor') — better-auth's role check refuses it (400 ROLE_NOT_FOUND) before any insert, and no membership/invitation row is left behind",
@@ -771,7 +771,7 @@
       ],
       "acceptance": [
         {
-          "clause": "{current_org_id} resolves to the session's active organization: the Organization nav opens that org's record page (Members/Invitations/Teams tabs), not the raw sys_organization list — the ADR-0081 active-org token is wired",
+          "clause": "{current_org_id} resolves to the session's active organization: the Organization nav opens that org's record page (Members/Invitations/Teams tabs), not the raw sys_organization list — the cloud ADR-0081 D3 active-org token is wired",
           "oracle": "screenshot",
           "verify": "the org record page renders for the active org id (cross-checked against GET /api/v1/auth/organization/get-active-member / get-full-organization); the three management tabs are present",
           "evidence": "the org-page screenshot + the get-active/get-full response"
@@ -817,11 +817,11 @@
         "an org management surface where the affordance is hidden but the forged endpoint succeeds for a non-admin is a FAIL — the server is the authority (ADR-0124 D1)",
         "remove-member that drops the roster row but leaves the ex-member's org-scoped access intact is a FAIL — removal must change authorization",
         "a role written outside the {owner, admin, delegated_admin, member} vocabulary is a FAIL — including a stored 'guest': the closed list is the write-side guardrail that makes an ungoverned capability grant unrepresentable (ADR-0108), so a 2xx that persists 'guest' is a regression of the closure, not a vocabulary difference. A role change that does not flip any gate is equally a FAIL",
-        "the Organization nav landing on the raw sys_organization list because {current_org_id} did not resolve (when an active org exists) is a FAIL of the ADR-0081 wiring"
+        "the Organization nav landing on the raw sys_organization list because {current_org_id} did not resolve (when an active org exists) is a FAIL of the cloud ADR-0081 D3 wiring"
       ],
       "traps": ["wrong-persona", "dispatcher-vs-hono-route", "hydration-race"],
       "source": [
-        "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_organization (nav_organization recordId {current_org_id}, ADR-0081; Teams/Invitations always mounted per ADR-0081 D1)",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_organization (nav_organization recordId {current_org_id}, cloud ADR-0081 D3; Teams/Invitations always mounted per cloud ADR-0081 D1)",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts (organization family: update-member-role, remove-member, update, create-team, add-team-member, list-members/teams/invitations, get-active-member, get-full-organization)",
         "packages/spec/src/identity/membership-role.ts#BUILTIN_MEMBERSHIP_ROLES (BUILTIN_MEMBERSHIP_ROLES / BUILTIN_MEMBERSHIP_ROLE_OPTIONS — THE role vocabulary: owner/admin/delegated_admin/member, ADR-0108; 'nothing widens these at boot any more')",
         "docs/adr/0108-membership-grade-is-not-a-capability-channel.md (why the list is closed: a grade decides what you can REACH, never a bundle of what you may do)",

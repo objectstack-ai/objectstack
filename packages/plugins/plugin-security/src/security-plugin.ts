@@ -194,6 +194,26 @@ export function hasPlatformAdminCapability(held: ReadonlySet<string>): boolean {
 }
 
 /**
+ * [#16608] The insert-side write `check`, installed on the operation context
+ * for the engine to run once the `beforeInsert` chain has produced the row that
+ * will be stored.
+ *
+ * Structurally identical to `OperationContext.postHookWriteImageCheck` in
+ * `@objectstack/objectql`, and deliberately declared here rather than imported:
+ * this package depends on the engine only as a devDependency (the middleware is
+ * registered through a duck-typed handle), so importing the engine's type would
+ * put a package that is not a runtime dependency into this package's published
+ * `.d.ts`. The two spellings are welded by a test that runs BOTH packages, not
+ * by the type system — see `insert-check-post-image.test.ts`.
+ */
+interface InsertCheckSeam {
+  /** Refuses by throwing. Receives the rows as `beforeInsert` left them. */
+  evaluate(rows: readonly Record<string, unknown>[]): void;
+  /** Set by the engine immediately before `evaluate` runs. */
+  honoured?: boolean;
+}
+
+/**
  * [ADR-0066 D3/⑤] Object `requiredPermissions` normalized into per-CRUD buckets.
  * `all` holds capabilities required for EVERY operation (the `string[]` form);
  * the per-op buckets hold capabilities from the `{read,create,update,delete}`
@@ -1493,6 +1513,13 @@ export class SecurityPlugin implements Plugin {
       // silently degrading a consumer's feature detection at runtime.
       const securityService: ISecurityService = {
         getReadFilter: (object: string, context?: any) => this.getReadFilter(object, context),
+        // The OBJECT-level half of the same read. `getReadFilter` answers
+        // "which rows" and answers `undefined` for a caller with NO grant at
+        // all, so a door holding only the filter cannot tell "unrestricted"
+        // from "not permitted" — which is how the analytics raw-SQL path served
+        // a row count for an object whose `/data` door answers 403. Exposed
+        // here so every door that bypasses the middleware asks BOTH halves.
+        canReadObject: (object: string, context?: any) => this.canReadObject(object, context),
         // [#3547] Readable-field projection for a context — the authoritative
         // column set for a read-derived export (`export ⊆ list`, #3391).
         // Same field mask as the read middleware (no drift). The REST export
@@ -1652,7 +1679,7 @@ export class SecurityPlugin implements Plugin {
           discardPermissionSetOverlay(overlayDiscardDeps, callerContext, id),
       });
       ctx.registerService('security', registeredSecurityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, canReadObject, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -1661,6 +1688,13 @@ export class SecurityPlugin implements Plugin {
 
     // Register security middleware
     ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+      // [#16608] The insert-side write `check`, once step 3.6 has installed it
+      // on the operation context for the engine to run after `beforeInsert`.
+      // Held here so the post-`next()` assertion below can read whether the
+      // seam was honoured — an installed judgement that never ran is a write
+      // this middleware did not gate, and it fails CLOSED and loudly rather
+      // than passing for an allowed one.
+      let insertCheckSeam: InsertCheckSeam | null = null;
       // [#10757] Retire every memoized permission-set resolution the moment a
       // WRITE passes through the engine. Deliberately the FIRST statement in
       // the middleware — ahead of the `isSystem` bypass immediately below —
@@ -2769,6 +2803,42 @@ export class SecurityPlugin implements Plugin {
       // row that fails the check is DENIED (fail closed, D5) — never silently
       // written. Scoped to policies that EXPLICITLY declare `check`, so an
       // object governed only by `using` is unaffected.
+      //
+      // ── [#16608] WHICH IMAGE, on an INSERT ────────────────────────────────
+      //
+      // Both verbs judge THE ROW THAT WILL EXIST. `update` reaches it here, by
+      // merging the caller's pre-image with the change set. `insert` could not:
+      // it has no pre-image, and this middleware runs BEFORE the engine's
+      // operation — so `opCtx.data` is the caller's payload as it arrived, and
+      // the `beforeInsert` hooks that derive the row's real values have not run.
+      //
+      // A denormalised scoping field is exactly what an RLS predicate compares
+      // (ADR-0055: a predicate cannot traverse a lookup) and exactly what an app
+      // stamps in `beforeInsert` so a caller cannot choose it. Judging the raw
+      // payload therefore inverted the policy on both sides, measured on 17.3.0:
+      //
+      //   • the value the app derives is NOT on the image, so the only way to
+      //     pass a `check` over it was for the caller to SEND the value the hook
+      //     exists to make un-sendable (same identity, same object, same second:
+      //     payload with the stamped field 201, payload without it 403, and the
+      //     stored row identical either way);
+      //   • the value the caller sent IS on the image and is then overwritten,
+      //     so an insert naming an in-scope organization on a parent belonging
+      //     to ANOTHER organization PASSED the check and stored the parent's
+      //     organization — a row whose stored scope the caller does not hold.
+      //
+      // Ruled 2026-09-07 (maintainer, 「同意」): the insert post-image becomes the
+      // hook-mutated payload — the row that will be stored — so insert and
+      // update judge the same thing. Mechanically that means the judgement can
+      // no longer happen HERE for an insert; it is installed on the operation
+      // context and run by the engine once the `beforeInsert` chain is done
+      // (`OperationContext.postHookWriteImageCheck`, `@objectstack/objectql`),
+      // still ahead of every producer and every statement.
+      //
+      // ⛔ The alternative — keep the order and write the contract that a
+      // checked field must arrive from the caller — is REFUSED, not deferred:
+      // it institutionalises the contradiction (the caller sending the value the
+      // hook exists to make un-sendable) and needs a permanent lint to keep it.
       if (
         (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
         opCtx.data &&
@@ -2791,28 +2861,9 @@ export class SecurityPlugin implements Plugin {
           : null;
         const checkParts = [checkFilter, delCheckFilter].filter(Boolean) as Record<string, unknown>[];
         if (checkParts.length > 0) {
-          // Build the post-image. Insert → the new row. Update by-id → the
-          // pre-image merged with the change set (so a check on an unchanged
-          // field still sees its value). A bulk update (no single id) cannot
-          // form a post-image here — it is governed by the using-based AST
-          // scoping (step 3); we log and skip rather than guess.
-          let postImage: Record<string, unknown> | null = { ...(opCtx.data as Record<string, unknown>) };
-          if (opCtx.operation === 'update') {
-            const targetId = this.extractSingleId(opCtx);
-            if (targetId == null) {
-              this.logger.warn?.(
-                `[Security] RLS check on bulk update '${opCtx.object}' is not post-image validated ` +
-                  `(governed by the using-scoped where); single-id writes are checked.`,
-              );
-              postImage = null;
-            } else if (this.ql) {
-              // Shares the memoized caller pre-image with the step-3.5 owner
-              // echo check — the identical (object, id, caller-context) row.
-              const pre = await this.getCallerPreImage(opCtx, targetId);
-              if (pre) postImage = { ...pre, ...(opCtx.data as Record<string, unknown>) };
-            }
-          }
-          if (postImage && !checkParts.every((f) => matchesFilterCondition(postImage as any, f as any))) {
+          // The ONE refusal, shared by both verbs — so an insert judged inside
+          // the engine and an update judged here answer a caller identically.
+          const denyCheck = (): never => {
             this.logger.warn?.(
               `[Security] RLS check FAILED on ${opCtx.operation} '${opCtx.object}' — write denied (fail-closed)`,
             );
@@ -2840,6 +2891,48 @@ export class SecurityPlugin implements Plugin {
               { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
               developerMessage,
             );
+          };
+          const satisfiesCheck = (image: Record<string, unknown>): boolean =>
+            checkParts.every((f) => matchesFilterCondition(image as any, f as any));
+
+          if (opCtx.operation === 'insert') {
+            // [#16608] Install the judgement; the engine runs it on the row the
+            // `beforeInsert` chain produced. The compiled filter is captured
+            // HERE — while the caller's permission sets, the delegator's, the
+            // staged membership and this request's context are all resolved —
+            // and only the IMAGE is deferred. Deferring the compilation too
+            // would move authorization inputs into the engine's timeline for no
+            // gain.
+            insertCheckSeam = {
+              evaluate: (rows) => {
+                for (const row of rows) {
+                  if (!row || typeof row !== 'object') continue;
+                  if (!satisfiesCheck(row)) denyCheck();
+                }
+              },
+            };
+            opCtx.postHookWriteImageCheck = insertCheckSeam;
+          } else {
+            // UPDATE — unchanged. Build the post-image: the caller's pre-image
+            // merged with the change set (so a check on an unchanged field
+            // still sees its value). A bulk update (no single id) cannot form a
+            // post-image here — it is governed by the using-based AST scoping
+            // (step 3); we log and skip rather than guess.
+            let postImage: Record<string, unknown> | null = { ...(opCtx.data as Record<string, unknown>) };
+            const targetId = this.extractSingleId(opCtx);
+            if (targetId == null) {
+              this.logger.warn?.(
+                `[Security] RLS check on bulk update '${opCtx.object}' is not post-image validated ` +
+                  `(governed by the using-scoped where); single-id writes are checked.`,
+              );
+              postImage = null;
+            } else if (this.ql) {
+              // Shares the memoized caller pre-image with the step-3.5 owner
+              // echo check — the identical (object, id, caller-context) row.
+              const pre = await this.getCallerPreImage(opCtx, targetId);
+              if (pre) postImage = { ...pre, ...(opCtx.data as Record<string, unknown>) };
+            }
+            if (postImage && !satisfiesCheck(postImage)) denyCheck();
           }
         }
       }
@@ -3209,6 +3302,36 @@ export class SecurityPlugin implements Plugin {
       }
 
       await next();
+
+      // [#16608] FAIL CLOSED on a seam that was never run. `honoured` is set by
+      // the engine immediately before it calls the judgement, so an unset flag
+      // means one thing only: the write went past without the insert `check`
+      // being evaluated at all — an engine that does not implement the seam, or
+      // a host that executed the operation itself. The row may already be
+      // stored, which is exactly why this is LOUD: the alternative is a gate
+      // that silently stops gating and a deployment that never finds out.
+      // ⛔ Do not soften this into a warning: a middleware that cannot say a
+      // write was checked must not report that it was.
+      if (insertCheckSeam && insertCheckSeam.honoured !== true) {
+        const developerMessage =
+          `[Security] Access denied: the insert on '${opCtx.object}' was executed without the row-level CHECK ` +
+          `being evaluated — the engine did not run OperationContext.postHookWriteImageCheck. ` +
+          `The write is NOT vouched for by this gate.`;
+        // Contract arg order (#5637): `error(message, error?: Error, meta?)` —
+        // the structured fields ride in the THIRD position. There is no `Error`
+        // to carry here: nothing threw, the seam simply never ran.
+        ctx.logger.error(developerMessage, undefined, {
+          operation: opCtx.operation,
+          object: opCtx.object,
+          positions,
+          userId: opCtx.context?.userId ?? 'unknown',
+        });
+        throw new PermissionDeniedError(
+          userFacingDenialMessage(ctx, 'record_change_not_allowed', opCtx.context?.locale),
+          { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+          developerMessage,
+        );
+      }
 
       // 4. Field-level security: mask restricted fields in returned records.
       // Covers reads AND the record echoed back by a write — otherwise a caller
@@ -4646,6 +4769,120 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
+   * Whether `context` may READ `object` at all — the OBJECT-level admission,
+   * exposed for the read doors that bypass the engine middleware.
+   *
+   * The middleware answers this before it composes any row filter; a door that
+   * compiles its own statement (the analytics native-SQL strategy is the one in
+   * the tree) never reaches the middleware and so never asked. `getReadFilter`
+   * is not a substitute: it answers "which ROWS", and its `undefined` means "no
+   * row restriction" — the same answer a caller with NO grant on the object
+   * gets. So a door holding only the filter reads an ungranted principal as an
+   * unrestricted one, and answers `200 {"rows":[{"cnt":24}]}` where
+   * `GET /data/<object>` answers `403 PERMISSION_DENIED` for the same principal
+   * on the same deployment.
+   *
+   * ## The arms, in the middleware's own order
+   *
+   * Every one of them is the SAME primitive the middleware calls, not a second
+   * reading of the same declaration — which is what makes "the two doors reach
+   * one verdict" a property of the code rather than a promise:
+   *
+   *   1. `isSystem` → admit (the middleware's total bypass);
+   *   2. no permission sets resolved → admit (the middleware guards its whole
+   *      CRUD gate with `if (permissionSets.length > 0)`; reporting a denial the
+   *      data path would not enforce is its own kind of drift);
+   *   3. `secMeta.unresolved` → DENY (#3545 — `isPrivate` would default to
+   *      `false`, which is exactly what lets a plain `'*'` wildcard reach an
+   *      object ADR-0066 D2 says it must not);
+   *   4. ADR-0066 D3/⑤ `requiredPermissions` capability AND-gate for the read
+   *      CRUD class, checked BEFORE the grant, for the caller AND (D10) the
+   *      delegator;
+   *   5. the `allowRead` CRUD grant ({@link PermissionEvaluator.checkObjectPermission}
+   *      on `find`);
+   *   6. ADR-0090 D10 — the delegator must independently hold the same grant;
+   *      a dangling delegator denies.
+   *
+   * `find` is the operation asked for, not `aggregate`, and the two are the same
+   * question: `OPERATION_PERMISSION_MAP` maps `find`, `findOne`, `count` and
+   * `aggregate` all onto `allowRead`. Asking `find` keeps the answer readable as
+   * "may this caller read this object", which is what every consuming door needs.
+   *
+   * Fails CLOSED (an access-narrowing answer): a throw anywhere inside denies,
+   * and callers must treat a throw as a denial too.
+   *
+   * ⛔ Object-level ONLY. `true` never means "unrestricted" — the row scope is
+   * still {@link getReadFilter}'s and it is still mandatory. Nothing here may be
+   * used to widen.
+   */
+  async canReadObject(object: string, context?: any): Promise<boolean> {
+    const objectName = String(object ?? '');
+    if (!objectName) return false;
+    // 1. System operations bypass (mirrors the middleware's isSystem skip).
+    if (context?.isSystem) return true;
+
+    try {
+      const permissionSets = await this.resolvePermissionSetsForContext(context);
+      // 2. No sets resolved (unauthenticated, or a deployment with no sets) →
+      //    no permission-set restriction applies, exactly as the middleware
+      //    treats it.
+      if (permissionSets.length === 0) return true;
+
+      const { isPrivate, unresolved, requiredPermissions } =
+        await this.getObjectSecurityMeta(objectName);
+      // 3. [#3545] Posture unresolvable → deny.
+      if (unresolved) return false;
+
+      // [ADR-0090 D10] Resolve the delegator ONCE — arms 4 and 6 both need it,
+      // and a dangling link denies before either runs.
+      let delegatorSets: PermissionSet[] | null = null;
+      if (context?.onBehalfOf?.userId) {
+        const del = await resolveDelegatorContext(this.ql, context);
+        if (del.kind === 'missing') return false;
+        if (del.kind === 'resolved') {
+          delegatorSets = await this.resolvePermissionSetsForContext(del.context);
+        }
+      }
+
+      // 4. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
+      //    principals — a caller missing any required capability is denied
+      //    however permissive their grants are.
+      const required = requiredCapsForOperation(requiredPermissions, 'find');
+      if (required.length > 0) {
+        const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
+        if (required.some((cap) => !held.has(cap))) return false;
+        if (delegatorSets && delegatorSets.length > 0) {
+          const delHeld = this.permissionEvaluator.getSystemPermissions(delegatorSets);
+          if (required.some((cap) => !delHeld.has(cap))) return false;
+        }
+      }
+
+      // 5. The object-level CRUD grant.
+      if (!this.permissionEvaluator.checkObjectPermission('find', objectName, permissionSets, { isPrivate })) {
+        return false;
+      }
+
+      // 6. [ADR-0090 D10] The delegator must independently grant the same read.
+      if (
+        delegatorSets &&
+        delegatorSets.length > 0 &&
+        !this.permissionEvaluator.checkObjectPermission('find', objectName, delegatorSets, { isPrivate })
+      ) {
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      this.logger.error?.(
+        `[security] canReadObject could not resolve the object-level read admission for ` +
+          `'${objectName}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return false;
+    }
+  }
+
+  /**
    * [#3544] Whether `context` may EXPORT `object` — the user-level export axis.
    *
    * Export is READ-DERIVED (`export ⊆ list`), so a bulk export reaches the
@@ -6013,6 +6250,22 @@ export class SecurityPlugin implements Plugin {
       (context?.positions ?? []) as string[],
     ).filter((p) => policyDeclaresClause(p, 'check'));
     if (withCheck.length === 0) return null;
+    // [ADR-0105 D11 / #16607] Stage the app-resolved membership sets on THIS
+    // context before the `check` clause compiles — the same staging the read
+    // side performs before Layer 1 compiles (`computeLayeredRlsFilter`). A
+    // bare insert performs no read, so without this line the `check` twin of
+    // a `using` clause that reads a resolver key
+    // (`record.f in current_user.<key>`) compiled against a context in which
+    // the key had never been staged: unresolved variable → policy dropped →
+    // `RLS_DENY_FILTER` → every such insert refused. The two write shapes
+    // that DID pass did so by accident of an earlier read on the SAME context
+    // object (the by-id pre-image at 2.7, the controlled_by_parent master
+    // read) having staged it first; staging is memoized per context, so
+    // those shapes still resolve exactly once. This OBTAINS the context the
+    // check should always have had — it relaxes nothing: no resolver, a
+    // throwing resolver or an unresolved key still drop the policy and still
+    // fail closed, on this path as on the read path.
+    await this.stageRlsMembership(context);
     return this.rlsCompiler.compileFilter(withCheck, context, 'check');
   }
 
@@ -6043,6 +6296,14 @@ export class SecurityPlugin implements Plugin {
    * unset, which makes the policies referencing them drop out — narrowing
    * access, never widening it. Reserved kernel keys can never be overwritten,
    * so an app cannot redefine the org wall's own vocabulary.
+   *
+   * Two call sites, one per compile site, and both are load-bearing: the
+   * read side ({@link computeLayeredRlsFilter}, before Layer 1 compiles
+   * `using`) and the write side ({@link computeWriteCheckFilter}, before
+   * `check` compiles). A predicate must resolve the same variables whichever
+   * clause it sits in; with the write-side call missing, a `check` reading a
+   * resolver key resolved only when the request happened to read first
+   * (#16607).
    */
   private async stageRlsMembership(context: any): Promise<void> {
     if (!this.rlsMembershipResolver || !context || typeof context !== 'object') return;

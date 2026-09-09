@@ -242,6 +242,63 @@ describe('SeedSchema', () => {
     })).toThrow();
   });
 
+  // ── Locale scope (#16510) ────────────────────────────────────────────────
+  //
+  // The shape is `strictObject`, so before this key existed an app could not
+  // add it at all: `locale` was REJECTED, and the only place to select between
+  // two language markets' datasets was application code, at config-assembly
+  // time. These pin the accept/reject behaviour that changed.
+
+  describe('locale scope', () => {
+    const withLocale = (locale: unknown) =>
+      SeedSchema.safeParse({ object: 'plan', locale, records: [] });
+
+    it('accepts a locale scope', () => {
+      // Key REACHABILITY: the shape is strict, so a key it does not declare
+      // surfaces as `unrecognized_keys`. Assert the WHOLE parse succeeds, so
+      // this cannot pass while the key is rejected for some other reason.
+      const parsed = withLocale(['zh-CN']);
+      expect(parsed.success).toBe(true);
+      expect(parsed.success && parsed.data.locale).toEqual(['zh-CN']);
+    });
+
+    it('accepts a multi-locale scope', () => {
+      const parsed = withLocale(['en', 'en-GB']);
+      expect(parsed.success).toBe(true);
+      expect(parsed.success && parsed.data.locale).toEqual(['en', 'en-GB']);
+    });
+
+    it('leaves locale ABSENT when it is not written — absence is "every locale"', () => {
+      // Deliberately NOT defaulted the way `env` is: locales are open-ended
+      // BCP-47 tags with no enumerable universe to spell out as a default, so
+      // the unrestricted spelling has to be absence.
+      const parsed = SeedSchema.parse({ object: 'plan', records: [] });
+      expect(parsed.locale).toBeUndefined();
+      expect('locale' in parsed).toBe(false);
+    });
+
+    it('rejects an empty locale array — a dataset that applies nowhere is a mistake', () => {
+      expect(withLocale([]).success).toBe(false);
+    });
+
+    it('rejects a bare string — the scope is a LIST, like env', () => {
+      expect(withLocale('zh-CN').success).toBe(false);
+    });
+
+    it('points the plural and language spellings at `locale`', () => {
+      for (const alias of ['locales', 'language', 'languages']) {
+        const parsed = SeedSchema.safeParse({
+          object: 'plan',
+          [alias]: ['zh-CN'],
+          records: [],
+        });
+        expect(parsed.success, `${alias} should be rejected`).toBe(false);
+        const message = parsed.success ? '' : JSON.stringify(parsed.error.issues);
+        expect(message, `${alias} should be pointed at \`locale\``).toContain('locale');
+      }
+    });
+  });
+
   it('should handle large datasets', () => {
     const largeDataset = SeedSchema.parse({
       object: 'bulk_data',

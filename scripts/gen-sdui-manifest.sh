@@ -568,7 +568,26 @@ esac
 # started last, so a diagnosing reader could be reading another run's output —
 # and the failure branches below point readers straight at it. mktemp, matching
 # the pidfile beside it.
-DUMP_DEV_LOG="$(mktemp "${TMPDIR:-/tmp}/sdui-dump-dev.XXXXXX.log")"
+#
+# THE X'S ARE TERMINAL, AND NO SUFFIX FOLLOWS THEM — THE BSD/macOS FLOOR.
+# `mktemp "…dev.XXXXXX.log"` is a GNU coreutils spelling: coreutils splits the
+# trailing `.log` off as an implied `--suffix` (`--suffix=SUFF … is implied if
+# TEMPLATE does not end in X`, mktemp --help, coreutils 9.4) and substitutes the
+# X's anyway. BSD mktemp(1) is a thin wrapper over mkstemp(3), which takes the
+# template as-is and only ever replaces a TRAILING run of X's; measured here on
+# glibc, `mkstemp("./x.XXXXXX.log")` fails outright with EINVAL while
+# `mkstemp("./x.XXXXXX")` succeeds. On stock macOS the reported symptom is the
+# other branch of the same refusal: nothing is substituted, the literal file
+# `sdui-dump-dev.XXXXXX.log` is created on the first run, and every later run
+# dies at this line with `mkstemp failed on …: File exists` — the script
+# manufacturing its own blocking condition, one manual `rm` per pin bump.
+#
+# So: terminal X's, and the `.log` extension is simply given up. `--suffix` is
+# itself the GNU extension and is not the portable answer; a rename after the
+# fact would buy the extension back at the price of a second path and a window
+# in which the two disagree, and nothing reads these files by extension — they
+# are echoed to the operator and classified by content, never globbed.
+DUMP_DEV_LOG="$(mktemp "${TMPDIR:-/tmp}/sdui-dump-dev.XXXXXX")"
 DUMP_PID_FILE="$(mktemp "${TMPDIR:-/tmp}/sdui-dump-pid.XXXXXX")"
 
 echo "  dev server: port ${DUMP_PORT}, log ${DUMP_DEV_LOG}"
@@ -625,7 +644,9 @@ fi
 # The dump's combined output goes to a per-run file as well as to the terminal:
 # the failure branch classifies that text, and a remedy chosen from what
 # actually happened is the point (see sdui_dump_failure_advice above).
-DUMP_OUT_LOG="$(mktemp "${TMPDIR:-/tmp}/sdui-dump-out.XXXXXX.log")"
+# Terminal X's, no suffix after them — see the DUMP_DEV_LOG block above for the
+# BSD/macOS floor this shape is keeping.
+DUMP_OUT_LOG="$(mktemp "${TMPDIR:-/tmp}/sdui-dump-out.XXXXXX")"
 
 # `${PIPESTATUS[0]}`, never `$?`: after a pipeline `$?` is TEE's status, and tee
 # does not fail, so `$?` here would read every failure of the dump as a success.

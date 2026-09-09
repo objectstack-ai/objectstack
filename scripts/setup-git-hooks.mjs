@@ -20,6 +20,26 @@
  *
  * Idempotent: it writes only values that differ, so repeated installs are silent.
  *
+ * ## It also carries the shared-config TRIPWIRE (#16624)
+ *
+ * `.git/config` is shared by every linked worktree, and a gate self-test that
+ * let a hook's `GIT_DIR` reach `git init` once wrote `core.bare = true` into it
+ * -- breaking `git status` and `git worktree list` FOR EVERY AGENT on that
+ * machine, with nothing at the point of damage saying a word and the symptom
+ * surfacing in other people's sessions.
+ *
+ * This script is where that gets noticed, and the choice is not arbitrary: in
+ * the flipped state a commit is impossible, so no hook runs and no `pre-commit`
+ * gate can be the tripwire. `pnpm install` -- which every agent runs when it
+ * creates a worktree -- reaches `prepare`, which reaches here. So this is the
+ * first thing that runs after the damage and the earliest place a human can be
+ * told.
+ *
+ * Split by role, and deliberately: `main()` WARNS (its "failing is not an
+ * option" contract above is unchanged -- a broken shared config must not also
+ * break every install on the box), while `--self-test`, whose entire job is to
+ * answer "is THIS clone wired correctly", REFUSES.
+ *
  * Usage:
  *   node scripts/setup-git-hooks.mjs              # `prepare`
  *   node scripts/setup-git-hooks.mjs --self-test  # verify THIS clone is wired
@@ -29,6 +49,7 @@ import { execFileSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { formatSharedGitConfigAlarm, sharedGitConfigVerdict } from './git-env.mjs';
 import { GIT_SETTINGS } from './regen-artifacts.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -92,6 +113,11 @@ function main() {
     changed.push(key);
   }
   if (changed.length) console.log(`git integration registered (${changed.join(', ')})`);
+
+  /* The tripwire, last so a damaged config still gets its settings registered.
+   * Warn-only here, per this script's contract. */
+  const alarm = formatSharedGitConfigAlarm(sharedGitConfigVerdict({ cwd: REPO_ROOT }));
+  if (alarm) console.warn(alarm);
 }
 
 if (process.argv.includes('--self-test')) {
@@ -99,7 +125,15 @@ if (process.argv.includes('--self-test')) {
   for (const { key, value } of wrong) console.error(`✗ ${key} is "${read(key) || '<unset>'}", expected "${value}"`);
   if (!wrong.length) console.log(`✓ this clone has all ${SETTINGS.length} git settings registered`);
   else console.error('\n  Run `node scripts/setup-git-hooks.mjs` (or `pnpm install`) to register them.');
-  process.exit(wrong.length ? 1 : 0);
+  /* ⛔ The shared-config half REFUSES rather than warning: a self-test whose
+   * question is "is this clone wired" cannot answer yes over a `core.bare`
+   * flip. Reported alongside the settings rather than instead of them -- the
+   * reader gets both problems in one run. */
+  const verdict = sharedGitConfigVerdict({ cwd: REPO_ROOT });
+  const alarm = formatSharedGitConfigAlarm(verdict);
+  if (alarm) console.error(alarm);
+  else console.log(`✓ this clone's shared git config describes a working checkout (${verdict.detail})`);
+  process.exit(wrong.length || alarm ? 1 : 0);
 }
 
 try {

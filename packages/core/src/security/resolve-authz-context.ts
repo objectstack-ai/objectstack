@@ -114,26 +114,6 @@ export interface ResolvedAuthzContext {
    * anonymous requests carry no rung.
    */
   posture?: AuthzPosture;
-  /**
-   * [#8287] Set when an inbound API key was REFUSED — a real, intact
-   * credential this deployment's tenancy posture cannot admit. The context is
-   * otherwise EMPTY (no `userId`), so every transport already fails it closed
-   * to 401 with no change; this field only lets a transport that wants to say
-   * WHY do so, instead of answering the operator with a bare "unauthenticated"
-   * for a key they can see is neither revoked nor expired.
-   *
-   * ⚠️ `reason` is NOT an `error.code`. The wire vocabulary is closed
-   * (ADR-0112: `StandardErrorCode ∪ ERROR_CODE_LEDGER`, both in `packages/spec`)
-   * and a refused credential's standard member is `UNAUTHENTICATED`. This is a
-   * diagnostic discriminator for the message, deliberately lowercase so it can
-   * never be mistaken for one.
-   *
-   * ⚠️ [#14273 A1] This field has ZERO consumers outside test assertions and is
-   * REMOVED by that card, in its own PR. The operator exit it was meant to be
-   * is now {@link warnApiKeyRefusal}'s server-side `warn` line (#15256 / 2A),
-   * which is why removing it costs nothing. ⛔ Not removed here.
-   */
-  authRefusal?: { reason: ApiKeyRefusalReason; message: string };
 }
 
 export interface ResolveAuthzInput {
@@ -182,9 +162,9 @@ function safeJsonParse<T>(s: string, fallback: T): T {
  * is neither revoked nor expired, and a 401 that says only "unauthenticated".
  *
  * `ResolvedAuthzContext.authRefusal` was that exit and never got a consumer
- * (zero readers outside two test assertions); #14273's A1 ruling REMOVES the
- * field in its own PR. ⛔ Not removed here — cross-referenced only. This log
- * line is the operator exit that field never delivered.
+ * (zero readers outside test assertions, #8287 through #14273); #14273's A1
+ * ruling removed the field. This log line is the operator exit that field
+ * never delivered, and the one place the refusal REASON is observable.
  *
  * ## What may appear here
  *
@@ -407,7 +387,6 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
       userId: admission.userId,
       organizationId: admission.organizationId,
     });
-    ctx.authRefusal = { reason: admission.reason, message: admission.message };
     return ctx;
   }
   const keyPrincipal = admission.outcome === 'admitted' ? admission.principal : undefined;
@@ -492,12 +471,6 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
         systemPermissions: [],
         org_user_ids: [],
         accessible_org_ids: [],
-        authRefusal: {
-          reason: 'organization_membership_ended',
-          message:
-            'This API key authenticates into an organization its owner is no longer a member of. '
-            + 'The key was not revoked — the membership that backed it ended.',
-        },
       };
     }
   }

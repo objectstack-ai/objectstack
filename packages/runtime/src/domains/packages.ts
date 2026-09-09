@@ -28,7 +28,7 @@ import {
 // exemptions) when the maintainer ruled the two sets must not be hand-kept
 // separately. This gate wants the read-only half specifically: its cohort was
 // ruled on its own terms (#7033 / #7023) and pinned WRITE-only callers OUT
-// (`packages/rest/src/package-envelope.conformance.test.ts`), so it names
+// (`packages-capability-gate.test.ts`, beside this file), so it names
 // `OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES` — same value it read before,
 // no re-ruling of the package cohort as a side effect of #7020.
 import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
@@ -41,7 +41,8 @@ import { isWritablePackage } from '@objectstack/metadata-protocol';
 // [#9960] The uninstall seam's DECLARED shapes, from the same producer and for
 // the same reason as the predicate above: this door reached `deletePackage`
 // through `protocol` and routinely sent two keys — `organizationId`
-// and `keepData` — that the sibling REST door's own option type could not even
+// and `keepData` — that the since-removed REST twin's own option type (#14503)
+// could not even
 // express. One statement of the contract, imported by both doors.
 import type { DeletePackageRequest, DeletePackageResponse } from '@objectstack/metadata-protocol';
 // [#13598] The DECLARED protocol contracts this domain's request literals are
@@ -269,7 +270,7 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
  * write cohort: an `organization_admin` holding `setup.access` (but not
  * `manage_metadata`) may inspect a package yet not publish or delete it, and a
  * write-only caller holding `manage_metadata` alone is refused these reads —
- * pinned in `packages/rest/src/package-envelope.conformance.test.ts`. (#7020
+ * pinned in `packages-capability-gate.test.ts`, beside this file. (#7020
  * unified the object-schema MASK exemption with the write gate; it did not
  * re-rule this cohort, which is why this site names the read-only half.)
  *
@@ -303,7 +304,7 @@ function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolCon
  * running registry listing. One API call took platform functionality out of a
  * live deployment; `DELETE` came back on restart (the packages are code-loaded),
  * `disable` did NOT — {@link setPackageDisabled} persists the disable to
- * `<OS_HOME>/package-state/<env>.json`, which the registry re-reads at boot, so
+ * `<OS_HOME>/package-state/<env>.<project>.json`, which the registry re-reads at boot, so
  * a disabled platform package stays disabled across restarts.
  *
  * The predicate is {@link isWritablePackage} from `@objectstack/metadata-protocol`
@@ -392,9 +393,8 @@ function requireWritablePackage(
  * `copied: []` that means "this gesture does not apply here" was byte-identical
  * to one meaning "the base really is empty".
  *
- * That is the #11063 ruling, one route over and pointed at a WRITE:
- * `packages/rest/src/package-routes.ts` states it verbatim — **"a read that
- * could not happen must not be reported as a read that found nothing."**
+ * That is the #11063 ruling, one route over and pointed at a WRITE — **"a read
+ * that could not happen must not be reported as a read that found nothing."**
  *
  * ## Why the refusal, rather than teaching duplicate to clone code items
  *
@@ -1271,8 +1271,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // given a shape nothing checks") — so `resolveService` hands this door an
             // `any`. That `any` is what let the call below send keys no declared shape
             // named: `organizationId` (the key that decides an uninstall's blast radius)
-            // and `keepData` are exactly the two the sibling REST door's option type
-            // could not express, and nothing compared the two doors' requests. Narrowed
+            // and `keepData` are exactly the two the since-removed REST twin's option
+            // type (#14503) could not express, and nothing compared the two doors'
+            // requests. Narrowed
             // to the producer's declared verb, so what this door sends is checked
             // against the contract the implementation states.
             //
@@ -1315,12 +1316,14 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // digging into `persisted`) recorded an uninstall that had not
             // happened.
             //
-            // The failure rule is the one the REST twin of this route already
-            // uses (`packages/rest/src/package-routes.ts`), stated the same way
-            // on purpose — DELETE /packages/:id has TWO doors (this dispatcher
-            // and the direct-mount REST registrar, which shadows it only when a
-            // `package` service is registered), and two doors answering one
-            // request differently is how this divergence arrived. Zero metadata
+            // The failure rule is the one the REST twin of this route stated
+            // (`packages/rest/src/package-routes.ts`, until #14503 removed that
+            // twin), kept in the same words on purpose — DELETE /packages/:id
+            // had TWO doors (this dispatcher and the direct-mount REST
+            // registrar), and two doors answering one request differently is
+            // how this divergence arrived. Since #14503 this domain is the
+            // single implementation of the route; the rule stays because it is
+            // right, not because a twin still needs matching. Zero metadata
             // rows is still a successful uninstall — a runtime-registered
             // package that never published metadata has nothing in
             // `sys_metadata` — so only PER-ITEM failures make it a failure.

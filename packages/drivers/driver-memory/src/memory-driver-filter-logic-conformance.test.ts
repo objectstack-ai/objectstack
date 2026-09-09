@@ -568,7 +568,11 @@ const OPERATOR_CASES: Array<[name: string, where: FilterCondition, expected: str
   // the operator table's inability to say "this operator takes the whole list".
   ['an empty $in selects nothing', { code: { $in: [] } } as FilterCondition, []],
   ['an empty $nin selects everything', { code: { $nin: [] } } as FilterCondition, ['1', '2', '3']],
-  ['an empty implicit-equality list selects nothing', { code: [] } as unknown as FilterCondition, []],
+  // [#16810] `{ code: [] }` — the empty implicit-equality ARRAY — left this
+  // table when the cell was ruled. It is not a row-set case any more: an
+  // array in an implicit-equality position is REFUSED on every face, and the
+  // property this entry carried (the faces agree about it) is asserted below
+  // as an agreement about the REFUSAL instead of about the empty row set.
   ['a non-empty $in still selects its members', { code: { $in: ['100'] } } as FilterCondition, ['1', '3']],
 ];
 
@@ -651,6 +655,42 @@ describe('[#5374] operator semantics — the analytics face against the live que
       ).toEqual(sorted(expected));
     });
   }
+
+  /**
+   * [#16810] An ARRAY comparand in an implicit-equality position — refused, and
+   * refused by BOTH faces with one envelope.
+   *
+   * This replaces the row-set case `{ code: [] }` held in `OPERATOR_CASES`
+   * above. The empty array was the harmless-looking member of the cell: its
+   * two silent answers happened to coincide at "no rows", which is why nobody
+   * noticed that a NON-empty one did not. Measured before the refusal landed,
+   * on a row storing `['a','b']` with the filter `{ tags: ['a','b'] }`: the
+   * live query path returned the row (mingo deep-equals arrays) and the
+   * reference matcher returned nothing (`==` between two objects is a
+   * reference test). One filter, one package, two answers — the #5240 shape.
+   *
+   * The assertion is the AGREEMENT, which is what the retired entry was for.
+   */
+  it('an implicit-equality ARRAY comparand is refused, and both faces refuse it alike', async () => {
+    const where = { code: [] } as unknown as FilterCondition;
+    const nonEmpty = { code: ['100'] } as unknown as FilterCondition;
+
+    for (const [label, filter] of [['empty', where], ['non-empty', nonEmpty]] as const) {
+      await expect(findIds(filter), `${label}: the live query path did not refuse it`).rejects.toMatchObject({
+        code: 'INVALID_FILTER',
+        status: 400,
+      });
+      await expect(analyticsIds(filter), `${label}: the analytics face did not refuse it`).rejects.toMatchObject({
+        code: 'INVALID_FILTER',
+        status: 400,
+      });
+    }
+
+    // The list operators are the declared spelling and are untouched — the
+    // refusal must not read as "this driver stopped accepting arrays".
+    expect(await findIds({ code: { $in: [] } } as FilterCondition)).toEqual([]);
+    expect(await findIds({ code: { $nin: [] } } as FilterCondition)).toEqual(['1', '2', '3']);
+  });
 
   /**
    * `contains` and `notContains` partition the table, stated as a predicate over

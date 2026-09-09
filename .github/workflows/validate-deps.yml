@@ -9,6 +9,9 @@ on:
       - 'pnpm-workspace.yaml'
       - 'scripts/check-changeset-fixed.mjs'
       - 'scripts/check-override-consistency.mjs'
+      # The consumer-resolution half of the same question (#16186) — an edit to
+      # the gate must be exercised on the PR that makes it.
+      - 'scripts/check-vendor-export-contract.mjs'
       # The OSV exemption ledger and its check: a PR that touches either must
       # run this workflow, or an exemption could be added without the gate
       # that governs it ever running on the PR that adds it.
@@ -82,6 +85,29 @@ jobs:
       # script: a self-test nothing invokes is a phantom check.
       - name: Verify overrides are reflected in published manifests
         run: pnpm check:override-consistency
+
+      # The half check-override-consistency structurally cannot cover (#16186).
+      # It asks whether the override TARGET is reachable from the declared
+      # range; `^1.7.2` and `^1.7.2` agreed perfectly while both floated onto
+      # `@better-auth/core@1.7.3`, a PATCH that deleted the export plugin-auth
+      # imports statically. Three published releases could not load on a fresh
+      # install and nothing here went red, because pnpm-lock.yaml held 1.7.2.
+      #
+      # `--resolve` deliberately ignores the lockfile: for every version the
+      # DECLARED range admits on the registry -- the way a downstream project
+      # resolves -- it installs that version outside this workspace and checks
+      # the export surface. It fails if ANY admitted version is missing a symbol
+      # we import. With the ranges pinned exact that is one small install per
+      # vendor; under a caret it is one per published version, which is the cost
+      # of the risk being taken.
+      #
+      # It lives HERE rather than in the lint farm because it needs the network,
+      # which this job already has, and because the daily schedule is what turns
+      # "a vendor published something today" into a red in this repo instead of
+      # in a customer's install. An unreachable registry exits 3
+      # (PREREQUISITE NOT MET), never a green.
+      - name: Verify the declared ranges cannot resolve past our import surface
+        run: pnpm check:vendor-export-contract-resolve
 
       # Fail the workflow if known vulnerabilities are found — enforces
       # security compliance before merging.

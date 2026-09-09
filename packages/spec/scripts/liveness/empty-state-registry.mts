@@ -180,6 +180,13 @@ export const EMPTY_STATE_REGISTRY: EmptyStateEntry[] = [
       'Which error a catch node handles; empty catches all of them. Catching broadly is the safe direction for an error handler — the failure mode of the opposite default is an unhandled fault, not an over-grant.',
   },
   {
+    file: 'packages/spec/src/ai/solution-blueprint.zod.ts',
+    property: 'viewName',
+    semantics: 'scope',
+    rationale:
+      "Which VIEW a proposed app-menu entry opens; absent/null means the object's default list. It is presentation breadth, not authorization — the entry's `target` already fixes WHICH OBJECT is reachable, and record- and field-level security are enforced downstream, so naming a view can only ever change how the same permitted rows are laid out. The empty state is also the pre-existing behaviour every app already has, which is what makes it the safe default here (cloud#2150 added the key precisely because there was no way to say anything ELSE). Note the failure direction is cosmetic and visible: an entry labelled 「工单看板」 that omits this opens the list — wrong-looking, never over-granting.",
+  },
+  {
     file: 'packages/spec/src/ai/knowledge-source.zod.ts',
     property: 'mimeTypes',
     semantics: 'scope',

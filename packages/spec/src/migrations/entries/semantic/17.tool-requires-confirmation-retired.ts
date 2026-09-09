@@ -6,9 +6,14 @@ export const entry: SemanticMigration = {
   id: 'tool-requires-confirmation-retired',
   surface: 'ai.tool.requiresConfirmation',
   replacement:
-    'put the operation behind an ACTION and set `ai.requiresConfirmation: true` there — that '
-    + 'is the flag the HITL approval queue actually reads, and the only path that stops '
-    + 'execution',
+    'put the operation behind an ACTION and set `ai.requiresConfirmation: true` there — the '
+    + 'flag the platform confirmation CONTRACT is written against. That contract DECLARES '
+    + 'that an AI-facing call on an action declaring the flag must carry an explicit '
+    + 'confirmation member on the request and is to be refused without it with '
+    + '`ACTION_CONFIRMATION_REQUIRED`, the refusal naming the action and the exact member to '
+    + 'set. A gate, not a queue: nothing is parked. ⚠ The refusal is DECLARED, not yet '
+    + 'performed — the runtime door lands in #15942, so until then the flag stops nothing on '
+    + 'its own and the human in the loop is still yours to arrange',
   reason:
     '`ToolSchema.requiresConfirmation` accepted `true` and no execution path ever read it: '
     + 'not the LLM tool set (a tool reaches the model as name / description / parameters '
@@ -41,8 +46,13 @@ export const entry: SemanticMigration = {
     + 'load-bearing half is what happens NEXT, and no gate can check it for you: for every '
     + 'tool that carried the flag, decide whether that operation genuinely needs a human in '
     + 'the loop. If it does, move it behind an action carrying `ai.requiresConfirmation: '
-    + 'true` and prove the pause exists — invoke it and observe the approval queue hold it, '
-    + 'rather than assuming the declaration. If it does not, delete the key knowingly. '
+    + 'true`, which is what the confirmation contract (#16293) gates on. ⛔ Do NOT try to '
+    + '"prove the gate" by invoking the operation without the confirmation member: the '
+    + 'runtime door that refuses lands in #15942, so before that ships the call is not '
+    + 'refused, it RUNS the destructive operation. Until then the declaration is a contract '
+    + 'and the human in the loop is still yours to arrange — which is the decision this '
+    + 'criterion is asking you to make, not a test to run. If the operation does not need '
+    + 'a human, delete the key knowingly. '
     + 'Deleting it without that decision leaves exactly the state the retirement exists to '
     + 'end: a destructive tool nobody is approving, now without even the false flag to show '
     + 'that somebody once meant to.',

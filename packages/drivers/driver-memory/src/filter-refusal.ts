@@ -31,6 +31,10 @@
  */
 
 import { FILTER_OPERATORS, LOGICAL_OPERATORS, RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
+// [#16810] The accepted comparand-type set's own sentence, quoted rather than
+// hand-copied — the same single-sourcing `driver-sql`'s refusals use, so the
+// two backends cannot describe the accepted set differently.
+import { ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE } from '@objectstack/spec/data';
 // [#7536] The `$like` pattern language's shared gate, so this driver refuses
 // the same malformed patterns as every other face.
 import { hasDanglingLikeEscape } from '@objectstack/spec/data';
@@ -553,6 +557,85 @@ export function retiredFilterOperatorError(
   );
 }
 
+/**
+ * [#16810] The comparison operators whose comparand is a SINGLE value.
+ *
+ * The list operators (`$in` / `$nin` / `$between`) are deliberately absent: an
+ * array is their DECLARED comparand. The text family (`$contains`,
+ * `$startsWith`, `$icontains`, `$like`, …) is absent too, and that absence is a
+ * decision this gate already recorded — "a stringified comparand for the LIKE
+ * family" is on its own "deliberately NOT refused" list, fail-closed and left
+ * alone. `driver-sql` refuses an array there as well (it cannot bind one); this
+ * driver keeps its recorded disposition rather than widening a refusal past the
+ * cell that was ruled.
+ */
+const SINGLE_VALUE_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
+  '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
+]);
+
+/**
+ * [#16810] An ARRAY where a comparison expects one comparable value —
+ * `{ tags: ['a','b'] }` and `{ tags: { $eq: ['a','b'] } }`.
+ *
+ * ## The cell, and who already answers it
+ *
+ * `@objectstack/spec`'s comparand door names this position and steps around it:
+ * an array outside `$in`/`$nin`/`$between` "is answered per driver today … the
+ * ruling does not name it, so the door leaves it to the layers that already
+ * answer it". `ACCEPTED_FILTER_COMPARAND_TYPES` — the six types the door DOES
+ * rule — has no array member, and `driver-sql` refuses one with
+ * `unbindableComparandError`. This is that same answer, in this package's
+ * envelope.
+ *
+ * ## Why refused rather than deep-equalled — the two answers, measured
+ *
+ * This package's faces did not agree, and the disagreement is the whole reason
+ * a refusal beats either silent answer. On one row `{ tags: ['a','b'] }`, with
+ * the filter `{ tags: ['a','b'] }`:
+ *
+ * | face | answer |
+ * |---|---|
+ * | the live query path (`InMemoryDriver.find` → mingo) | the row — mingo deep-equals arrays |
+ * | the reference matcher (`memory-matcher.ts`) | NO row |
+ *
+ * The matcher's arm routed an array into `value == condition`, and `==` between
+ * two objects compares REFERENCES: a deep-equal array is never that reference,
+ * so the predicate could not match any row it had not been handed literally.
+ * Fail-closed and silent — fewer rows, no error, no warning — which is the
+ * `#5240` / `#5328` / `#5347` shape exactly: one filter, one package, two
+ * answers, and `if (!rows.length)` cannot tell "genuinely none" from "the
+ * predicate never ran".
+ *
+ * Converging them UP (deep equality on both faces) was available and is not
+ * what landed: the spec's door does not rule the cell, and every sibling that
+ * has ruled it declines the semantics — `driver-sql` refuses it,
+ * `@objectstack/formula`'s record-at-a-time matcher answers `false` by an
+ * explicit "a bare array value is not a valid field spec" arm, and objectui's
+ * `ValueDataSource` was resolved the same way. A driver that calls itself a
+ * Reference Implementation inventing array-equality alone, on a cell the
+ * contract declined to rule, is how backends drift apart.
+ *
+ * ⚠️ The refusal is about the COMPARAND, never the stored value:
+ * `{ tags: 'a' }` against a row storing `['a','b']` is a scalar comparand and
+ * is untouched by this rule — the value side is not a position this door
+ * judges.
+ */
+export function arrayComparandError(field: string, value: unknown, path: string, op?: string): Error {
+  const position = op
+    ? `Operator "${op}" on field "${field}"`
+    : `The implicit-equality comparand on field "${field}"`;
+  return unsupportedFilterError(
+    `${position} requires a single comparable value, but received an array ` +
+      `(${safeShapePreview(value)}) at ${path}. Use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}; ` +
+      `for a list use $in/$nin, and for a range use $between. It is refused rather than compared ` +
+      `because this package's two faces answered it differently and neither said so — the live ` +
+      `query path deep-equalled the array and returned the row, while the reference matcher ` +
+      `compared it by REFERENCE (== between two objects is a reference test) and returned none. ` +
+      `@objectstack/spec's comparand door leaves this position to the driver, and driver-sql ` +
+      `refuses it too.`,
+  );
+}
+
 /** [#5324] `$and`/`$or` take a list of nodes; anything else is refused. */
 export function filterNodeListExpectedError(key: string, value: unknown, path: string): Error {
   return unsupportedFilterError(
@@ -669,6 +752,11 @@ function assertFieldConstraintShape(
   path: string,
   capabilities: FilterFaceCapabilities,
 ): void {
+  // [#16810] The IMPLICIT-equality position, checked before the plain-object
+  // test below because an array is not a filter node and would otherwise leave
+  // this walk unjudged — which is how it reached the matcher's `==` arm and the
+  // live path's deep equality with nobody reconciling the two.
+  if (Array.isArray(spec)) throw arrayComparandError(field, spec, path);
   if (!isFilterNode(spec)) return;
   // [#5240] The zero-operator constraint keeps its own predicate rather than an
   // inlined `keys.length === 0`, so the reasoning for what does and does not
@@ -701,6 +789,15 @@ function assertFieldConstraintShape(
     // being answered silently, differently, by each face.
     if (op === '$null' && typeof spec[op] !== 'boolean') {
       throw nonBooleanNullComparandError(field, spec[op], `${path}.$null`);
+    }
+    // [#16810] An ARRAY comparand on a single-value comparison — the operator
+    // spelling of the implicit-equality position refused at the top of this
+    // function, and the same cell `@objectstack/spec`'s comparand door leaves
+    // to the driver. The fourth comparand-shape rule this gate makes, for the
+    // reason the three above it give: a shape the operator cannot evaluate was
+    // being answered silently, and differently, by each face.
+    if (SINGLE_VALUE_COMPARISON_OPERATORS.has(op) && Array.isArray(spec[op])) {
+      throw arrayComparandError(field, spec[op], `${path}.${op}`, op);
     }
     // [#6520] `$icontains`' comparand is a NON-EMPTY string, the third
     // comparand-shape rule and the twin of `driver-sql`'s

@@ -42,13 +42,19 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * The legacy branch matched `=== '/keys' || startsWith('/keys/') ||
  * startsWith('/keys?')` — a segment match PLUS the query-string form some
  * adapters pass through in `path`. Two entries reproduce that exactly.
+ *
+ * [#16263] The second entry now says `match: 'prefix'` out loud. It always
+ * relied on the bare-`startsWith` default, and that default is `'segment'`
+ * now; a prefix ending in `'?'` has no `/` after it, so a segment match
+ * cannot express the query-string form at all. Declaring it keeps this route
+ * byte-identical to what it has always matched.
  */
 export function createKeysDomains(deps: DomainHandlerDeps): DomainRoute[] {
     const handler: DomainRoute['handler'] = (req, context) =>
         handleKeysRequest(deps, req.method, req.body, context);
     return [
         { prefix: '/keys', match: 'segment', handler },
-        { prefix: '/keys?', handler },
+        { prefix: '/keys?', match: 'prefix', handler },
     ];
 }
 

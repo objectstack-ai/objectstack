@@ -457,6 +457,7 @@ Sort field and direction pair
 | **groupBy** | `string` | optional | Field whose values become the board columns |
 | **columns** | `any[]` | optional | Swimlane definitions (`{ id, title }` per `groupBy` value, or bare value strings) — NOT a field projection |
 | **filter** | `any` | optional | Base query filter, handed to the wire `$filter` |
+| **limit** | `integer` | optional | Maximum number of records loaded onto the board (row cap); lowered to the query's top-level `$top` (renderer default 100). The component-level `dataSource.limit` wins when both are set; a bound view's `pagination.pageSize` fills it only when unset |
 | **data** | `any[]` | optional | Static inline cards — bypasses the object query |
 | **cardTitle** | `string` | optional | Field rendered as each card title |
 | **titleField** | `string` | optional | Legacy fallback for `cardTitle` (the board reads `cardTitle \|\| titleField`). Prefer `cardTitle` |

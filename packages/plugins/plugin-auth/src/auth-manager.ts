@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Auth, BetterAuthOptions } from 'better-auth';
+import type { OrganizationOptions } from 'better-auth/plugins/organization';
 import type { SCIMIdentityState, SCIMTransactionContext } from '@better-auth/scim';
 // better-auth value imports (betterAuth + plugins) are deferred via dynamic
 // import() in getOrCreateAuth() / buildPluginList() so that disabled plugins
@@ -72,6 +73,9 @@ import { resetVerifiedOnTwoFactorReenrollment } from './two-factor-reenrollment-
 import {
   applyPlatformAdminImpersonation,
 } from './admin-impersonate-endpoint.js';
+import {
+  applyDeclaredInvitationVerificationToListing,
+} from './list-user-invitations-verification.js';
 import {
   invitationRoleCapFailure,
   isPlainMemberInvitation,
@@ -1249,10 +1253,10 @@ export class AuthManager {
       // bare host) so the reset-password / verify-email / magic-link URLs
       // better-auth derives from baseURL are always clickable links.
       baseURL: this.getCanonicalOrigin(),
-      basePath: this.config.basePath || '/api/v1/auth',
+      basePath: this.configuredBasePath(),
 
       // Database adapter configuration
-      database: this.createDatabaseConfig(),
+      database: await this.createDatabaseConfig(),
 
       // Model/field mapping: camelCase (better-auth) → snake_case (ObjectStack)
       // These declarations tell better-auth the actual table/column names used
@@ -2413,7 +2417,27 @@ export class AuthManager {
       } : {}),
     };
 
-    return betterAuth(betterAuthConfig);
+    const auth = betterAuth(betterAuthConfig);
+
+    // ⛔ Do not return before better-auth's plugin `init` hooks have settled.
+    //
+    // `betterAuth()` returns synchronously and runs those hooks behind
+    // `auth.$context`, so anything a plugin does at init is a promise NOBODY
+    // holds. That was harmless while init did no I/O. It stopped being harmless
+    // when the oauth-provider began seeding the RFC 8707 `sys_oauth_resource`
+    // row from its own `init`: a failure there had no catcher and surfaced as
+    // an UNHANDLED REJECTION — which Node terminates the process for by default
+    // — and, in tests, as a boot write racing its engine's teardown and failing
+    // with "No driver available for object 'sys_oauth_resource'" long after the
+    // test that triggered it had passed.
+    //
+    // Awaiting it here makes the seed part of "the instance is ready": a boot
+    // failure now rejects THIS call, where callers can see and handle it,
+    // instead of escaping the stack. `$context` is absent when better-auth is
+    // mocked, and `await undefined` is a no-op, so this is safe on that path.
+    await (auth as { $context?: Promise<unknown> } | undefined)?.$context;
+
+    return auth;
   }
 
   /**
@@ -2792,7 +2816,12 @@ export class AuthManager {
       // [#8289] Same map, same request lifetime — see the field's doc for why
       // the before-hook cannot read it back off `ctx`.
       this.orgRolesMap = customOrgRoles;
-      return organization({
+      // [#16569] Held as a named object rather than an inline literal: the
+      // rebuilt `/organization/list-user-invitations` endpoint below needs the
+      // VERY object the vendor plugin was constructed with — it is what the
+      // vendor's own `getOrgAdapter(ctx.context, options)` reads, and the
+      // declaration it honours lives on it.
+      const organizationOptions = {
         schema: buildOrganizationPluginSchema(),
         // Enable the team sub-feature so the framework's `sys_team` /
         // `sys_team_member` tables (already declared in platform-objects)
@@ -3168,7 +3197,46 @@ export class AuthManager {
             console.error(`[AuthManager] sendInvitationEmail failed (swallowed): ${err?.message ?? err}`);
           }
         },
-      });
+      } satisfies OrganizationOptions;
+      const organizationPlugin: any = organization(organizationOptions);
+
+      // [#16569] `GET /organization/list-user-invitations` — make the vendor's
+      // listing honour the `requireEmailVerificationOnInvitation: false`
+      // declared above, the way `accept-invitation`, `reject-invitation` and
+      // `get-invitation` already do. better-auth 1.7.2's `listUserInvitations`
+      // refuses every unverified session UNCONDITIONALLY (it never reads the
+      // option), so on exactly the no-mailer deployment the declaration exists
+      // for, an invitee could accept an invitation but never list it and the
+      // SDK's `organizations.invitations.listMine()` inbox was empty-by-403.
+      // Rebuilt IN PLACE on this plugin's own endpoints record — the same
+      // shape as `applyPlatformAdminImpersonation` above, for the same reasons
+      // (one owner for the path; every hook keyed on it still fires; the
+      // request contract is the vendor's own options object, never a copy).
+      // The listing itself stays the vendor's `getOrgAdapter(...)
+      // .listUserInvitations(sessionEmail)`: no second definition of which
+      // rows a session may see. `list-user-invitations-verification.ts`
+      // carries the full reading.
+      const listingRewired = await applyDeclaredInvitationVerificationToListing(
+        organizationPlugin,
+        organizationOptions,
+      );
+      if (!listingRewired) {
+        // The vendor renamed or dropped the endpoint. Say so loudly: the
+        // route then falls back to the vendor's own handler, which refuses
+        // every unverified session — an empty inbox, not an open door.
+        // `warn`, not `error` (AGENTS.md → Degradation log levels): the
+        // system is VISIBLY smaller — the inbox answers a 403 the caller sees
+        // — and nothing claims a persistence it did not perform.
+        console.warn(
+          '[AuthManager] better-auth\'s organization plugin no longer exposes a ' +
+          '`listUserInvitations` endpoint at /organization/list-user-invitations, ' +
+          'so the declared `requireEmailVerificationOnInvitation` could NOT be ' +
+          'applied to the invitation inbox. Unverified users will be refused ' +
+          '(403 EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION) until ' +
+          'list-user-invitations-verification.ts is updated for the new vendor shape.',
+        );
+      }
+      return organizationPlugin;
       });
     }
 
@@ -3415,23 +3483,17 @@ export class AuthManager {
         loginPage: this.getConsolePageUrl('/login'),
         consentPage: this.getConsolePageUrl('/oauth/consent'),
         schema: buildOauthProviderPluginSchema(),
-        // better-auth's oauth-provider cannot see the well-known documents we
-        // mount ourselves at the issuer ROOT (RFC 8414 §3 requires them there,
-        // not under the auth basePath) — registerOidcDiscoveryRoutes serves
-        // /.well-known/oauth-authorization-server AND the path-insertion variant
-        // (`…/api/v1/auth`) the notice names. Its "Please ensure … exists"
-        // reminder is therefore a false positive on every stock example.
-        //
-        // #3420 root cause of the DOUBLE print: the notice fires in the
-        // oauth-provider plugin's `init(ctx)`, which better-auth runs once per
-        // `betterAuth()` construction — and the instance is built more than once
-        // at boot (an initial lazy build, then a rebuild once boot-time auth
-        // *settings* are applied — applyConfigPatch() nulls the cached instance
-        // so the next request rebuilds with the new policy). Gating the emitter
-        // here silences the one requirement we've already satisfied across every
-        // build path, independent of how many times auth is constructed, so an
-        // official dev boot stays warning-free.
-        silenceWarnings: { oauthAuthServerConfig: true },
+        // ⛔ No `silenceWarnings` here. It was added for the #3420 double
+        // print of oauth-provider's "Please ensure /.well-known/… exists"
+        // notice — a false positive, because registerOidcDiscoveryRoutes
+        // mounts those documents at the issuer ROOT where RFC 8414 §3 requires
+        // them. The pinned 1.7.2 emits no such notice: neither the option name
+        // nor the `oauthAuthServerConfig` key nor the notice text occurs
+        // anywhere in `@better-auth/oauth-provider` or `better-auth`, so the
+        // option silenced nothing and was the same dead-option shape as the
+        // `validAudiences` defect below. If a future bump reintroduces the
+        // notice, re-add the silencer with a fresh reading — do NOT restore it
+        // on the strength of this comment.
         // ── MCP OAuth track (#2698) ────────────────────────────────
         // Coarse tool-family scopes for the platform's own MCP endpoint,
         // advertised alongside the standard OIDC scopes. Names are
@@ -3439,10 +3501,36 @@ export class AuthManager {
         // tool layer cannot drift.
         scopes: ['openid', 'profile', 'email', 'offline_access', ...MCP_OAUTH_SCOPES],
         // MCP clients bind tokens to the resource via RFC 8707
-        // (`resource=<mcp url>`); the AS only mints audiences it knows.
-        // The auth base (better-auth's default audience) stays valid for
-        // plain OIDC SSO flows.
-        validAudiences: [this.getAuthIssuer(), this.getMcpResourceUrl()],
+        // (`resource=<mcp url>`). In @better-auth/oauth-provider 1.7.2 a
+        // requested `resource` is resolved from the `oauthResource` table
+        // (`sys_oauth_resource`) — a miss is refused at /oauth2/authorize with
+        // `invalid_target: requested resource <id> is not configured` — and
+        // `enforcePerClientResources` defaults to TRUE, so the client must
+        // additionally be linked in `oauthClientResource`
+        // (`sys_oauth_client_resource`). Both rows have to exist before the
+        // first Connect, so both are declared here:
+        //
+        //   • `resources` seeds the sys_oauth_resource row from the plugin's
+        //     own `init` (idempotent, `resourceSeedMode: "insertOnly"` by
+        //     default, so an admin's later CRUD edits are never reverted);
+        //   • `clientRegistrationDefaultResources` links every newly
+        //     registered client to it inside the DCR transaction — a client
+        //     that registers anonymously one second before the login cannot
+        //     be linked by an admin in between.
+        //
+        // ⛔ `enforcePerClientResources` is deliberately NOT passed: the
+        // per-client linkage check stays at its `true` default. The fix makes
+        // the link happen; it does not switch the check off. A client with no
+        // link row is still refused, and
+        // auth-manager.mcp-oauth-resource.test.ts asserts exactly that.
+        //
+        // ⛔ Do not reintroduce `validAudiences`: 1.7.2 reads no such option
+        // (0 occurrences in its dist), and audience validation now runs
+        // through the resource table instead. A field that is passed and read
+        // by nobody looks like configuration and enforces nothing — that is
+        // how this defect survived a version bump.
+        resources: [this.getMcpResourceUrl()],
+        clientRegistrationDefaultResources: [this.getMcpResourceUrl()],
         // RFC 7591 Dynamic Client Registration. `allowUnauthenticated…` is
         // required: MCP clients register BEFORE any user is logged in (the
         // whole point of the self-serve flow). Registration is rate-limited
@@ -3717,7 +3805,7 @@ export class AuthManager {
    * silently.  We therefore wrap the ObjectQL adapter in a factory function
    * so it is correctly recognised as a `DBAdapterInstance`.
    */
-  private createDatabaseConfig(): any {
+  private async createDatabaseConfig(): Promise<any> {
     // Use ObjectQL adapter factory if dataEngine is provided
     if (this.config.dataEngine) {
       // createObjectQLAdapterFactory returns an AdapterFactory
@@ -3735,9 +3823,41 @@ export class AuthManager {
       'Please provide a dataEngine instance (e.g., ObjectQL) in AuthManagerOptions.'
     );
 
-    // Return a minimal in-memory configuration as fallback
-    // This allows the system to work in development/testing without a real database
-    return undefined; // better-auth will use its default in-memory adapter
+    // ⛔ NOT `undefined`, and ⛔ do not "simplify" it back to that.
+    //
+    // Handing better-auth no `database` makes it build its own in-memory store
+    // in `getBaseAdapter`, and that store is keyed by the schema KEY while
+    // every read resolves by `modelName`. Measured on better-auth 1.7.2:
+    //
+    //   getAuthTables(options) -> { oauthResource: { modelName: 'sys_oauth_resource' }, … }
+    //   its memoryDB           -> { oauthResource: [] }            // keyed by KEY
+    //   the adapter then asks  -> 'sys_oauth_resource'             // resolved by modelName
+    //   => Error: Model sys_oauth_resource not found
+    //
+    // So on that path EVERY model this package renames is unreachable —
+    // `user`/`sys_user` included. It stayed invisible for as long as nothing
+    // touched a renamed model during boot; the RFC 8707 resource seed does,
+    // from the oauth-provider plugin's `init`, where the throw surfaces as an
+    // UNHANDLED REJECTION rather than a failed request.
+    //
+    // Keying the store by `modelName` is what the adapter actually reads, so
+    // this fixes the dev/test fallback instead of working around it. Production
+    // never reaches this branch — it returns the ObjectQL factory above.
+    //
+    // The import is dynamic on purpose (the rest of better-auth is loaded the
+    // same way here); `createAuthInstance` awaits this method, and better-auth
+    // then calls the returned factory SYNCHRONOUSLY, so the module has to be
+    // resolved before we hand it over, not inside it.
+    const [{ memoryAdapter }, { getAuthTables }] = await Promise.all([
+      import('better-auth/adapters/memory'),
+      import('@better-auth/core/db'),
+    ]);
+    return (options: any) => {
+      const tables = getAuthTables(options) as Record<string, { modelName?: string }>;
+      const db: Record<string, unknown[]> = {};
+      for (const [key, table] of Object.entries(tables)) db[table?.modelName ?? key] = [];
+      return memoryAdapter(db)(options);
+    };
   }
 
   /**
@@ -5446,6 +5566,152 @@ export class AuthManager {
   }
 
   /**
+   * [#16025] The `basePath` string this manager hands better-auth: the
+   * configured value VERBATIM, or the shipped default when nothing is
+   * configured. Unchanged from before this card — only the reading of it moved
+   * here, so `getBasePath()` and this cannot drift apart by accident.
+   *
+   * ## ⛔ Never normalise here
+   *
+   * better-auth stamps the OAuth access-token `iss` from `ctx.context.baseURL`,
+   * which is `baseURL` + THIS string (`@better-auth/oauth-provider` 1.7.2:
+   * `iss: jwtPluginOptions?.jwt?.issuer ?? ctx.context.baseURL`, and this
+   * manager sets no `jwt.issuer`), while `verifyMcpAccessToken` hands
+   * `jose.jwtVerify` `issuer: getAuthIssuer()` — the configured value with a
+   * leading slash ADDED and a trailing one KEPT. `jose` compares `iss` by exact
+   * string, so the two agree only while this string is the configured one.
+   * Measured on bare better-auth 1.7.2 + `@better-auth/oauth-provider` 1.7.2
+   * (memory adapter, this manager's own plugin wiring), a real
+   * `client_credentials` token, configured `basePath: '/api/v1/auth/'`:
+   *
+   *     handed '/api/v1/auth/'   ctx.baseURL …/auth/   iss …/auth/   verifier …/auth/   ->  OK
+   *     handed '/api/v1/auth'    ctx.baseURL …/auth    iss …/auth    verifier …/auth/   ->  REJECTED
+   *                                    ERR_JWT_CLAIM_VALIDATION_FAILED: unexpected "iss" claim value
+   *
+   * ⇒ normalising this string rejects every MCP access token the deployment
+   * mints, for as long as a trailing slash is configured — fail-closed, and
+   * permanent. A draft of this card did exactly that. `getBasePath()` is the
+   * NORMALISED view an HTTP adapter mounts on and is deliberately NOT this;
+   * making the two one value moves a published OAuth identifier, which is
+   * #16399's decision, not this card's.
+   */
+  private configuredBasePath(): string {
+    return this.config.basePath || '/api/v1/auth';
+  }
+
+  /**
+   * [#16399] The configured base path with a leading slash GUARANTEED and
+   * everything else left alone. This is the one place in this file that adds a
+   * leading slash; every other base-path reader is derived from it.
+   *
+   * ## ⛔ This mirrors better-auth's rule — it is not a normalisation of ours
+   *
+   * better-auth resolves the string it is handed exactly this way before
+   * composing `ctx.context.baseURL`, the value `@better-auth/oauth-provider`
+   * 1.7.2 stamps as the access-token `iss`. So `getAuthIssuer()` is
+   * `getCanonicalOrigin()` + this, and the pair cannot drift. Measured on a
+   * real `betterAuth()` built by `createAuthInstance`, reading
+   * `(await auth.$context).baseURL`:
+   *
+   *     handed 'api/v1/auth'      ctx.baseURL  http://localhost:3000/api/v1/auth
+   *     handed '/api/v1/auth'     ctx.baseURL  http://localhost:3000/api/v1/auth
+   *     handed '/api/v1/auth/'    ctx.baseURL  http://localhost:3000/api/v1/auth/
+   *     handed 'api/v1/auth/'     ctx.baseURL  http://localhost:3000/api/v1/auth/
+   *     handed '/api/v1/auth///'  ctx.baseURL  http://localhost:3000/api/v1/auth///
+   *
+   * ⇒ a trailing slash SURVIVES into the issuer, so stripping one here would
+   * make this manager's own verifier reject every token its AS mints — the
+   * fail-closed break `configuredBasePath()` above records. ⛔ Never strip
+   * anything in this method. Stripping belongs one layer down in
+   * `getBasePath()`, which is a MOUNT path, not a published identifier.
+   */
+  private rootedBasePath(): string {
+    const configured = this.configuredBasePath();
+    return configured.startsWith('/') ? configured : `/${configured}`;
+  }
+
+  /**
+   * [#16025] The path prefix better-auth's routes are reachable under, in the
+   * single NORMALISED spelling an HTTP adapter can mount: a leading slash added
+   * when absent, trailing slashes stripped.
+   *
+   * ## Why this is public
+   *
+   * An HTTP adapter that mounts this service has to know where its routes live,
+   * and it had no member that answers THAT question. `config` is private. The
+   * value was not unreachable, though, and an earlier draft of this docblock
+   * said it was: `getAuthIssuer()` is public and its URL PATH is the configured
+   * base path (`http://localhost:3000/api/v1/auth`) — `auth-plugin.ts:3176`
+   * already reads a path that way, off `getMcpResourceUrl()`. What an adapter
+   * would have been doing is parsing a path back out of an OAuth issuer
+   * identifier, which is a different contract that happens to contain the
+   * answer. A dedicated accessor is the cleaner design; being the ONLY exposure
+   * was never the reason for it.
+   *
+   * `@objectstack/hono`'s `createHonoApp` mounted the auth surface under its OWN
+   * `prefix` option instead, whose default (`/api`) does not compose with this
+   * one (`/api/v1/auth`), so on the documented embed better-auth was never
+   * reached at all — measured, on a real boot:
+   *
+   *     POST /api/auth/sign-in/email  (valid shape, wrong password)  ->  200 {}
+   *     POST /api/v1/auth/delete-user                                ->  401 {"message":"Unauthorized","code":"UNAUTHORIZED"}
+   *
+   * ## ⛔ What this method is NOT — stated because the first spelling claimed it
+   *
+   * **It is NOT the string handed to better-auth.** `createAuthInstance` passes
+   * `configuredBasePath()`, the configured value verbatim, and the two differ
+   * exactly when the configured spelling carries a trailing slash or lacks a
+   * leading one. That difference is deliberate and load-bearing — see
+   * `configuredBasePath()` for the token rejection normalising there causes.
+   * What the two DO share is the wire paths they serve: better-call strips a
+   * trailing slash when routing and better-auth adds a missing leading one, so
+   * a mount at `/api/v1/auth/*` reaches a better-auth configured with
+   * `/api/v1/auth/` — measured on the same probe, which drove its whole OAuth
+   * exchange through that mount.
+   *
+   * **It is NOT the single definition of the base path — but there IS one, one
+   * layer down [#16399].** FOUR readers of `this.config.basePath` existed in
+   * this file; #16025 left THREE, each with its own normaliser. There is now
+   * exactly ONE read of `this.config.basePath` in this file
+   * (`configuredBasePath()`) and one chain above it:
+   *
+   *     configuredBasePath()   the configured value VERBATIM — what better-auth is handed
+   *       └─ rootedBasePath()  + a leading slash when absent (better-auth's own rule)
+   *            ├─ getAuthIssuer()      = origin + this          (published `iss`)
+   *            └─ getBasePath()        = this, trailing slashes stripped   (mount path)
+   *                 └─ getMcpResourceUrl()  = origin + this minus `/auth` + `/mcp`
+   *
+   * ⇒ a fourth normaliser cannot be added without deleting a link of that
+   * chain. The two remaining values still DIFFER, and deliberately so: an
+   * issuer must mirror what better-auth stamps (trailing slash and all), while
+   * a mount path and the MCP resource URL must be canonical.
+   *
+   * ## ⛔ No value moves — what this card actually changed here
+   *
+   * Every one of the three readers answers exactly what it answered on the
+   * merge base, for every configured spelling. `betterAuthEndpointPath` already
+   * applied this normalisation; better-auth already received the raw configured
+   * string. What is new is that the normalisation has a name and is PUBLIC, so
+   * an adapter can mount on it. A configured `'/'` still normalises to `''`,
+   * unchanged from before.
+   *
+   * ## What the collapsed readers actually disagreed about
+   *
+   * As STRINGS, and not as behaviour — measured, not inferred. A configured
+   * `'api/v1/auth'` reaches better-auth without its leading slash while the
+   * ownership walk tests `'/api/v1/auth'`; but better-auth/better-call tolerate
+   * the missing slash, so `handleRequest` answers `200` and `ownsRoute` answers
+   * `true` on the SAME request. The divergence is LATENT — and ⛔ it is NOT
+   * repaired here, only given one name per side: the mount and the ownership
+   * walk read `getBasePath()`, better-auth still receives the configured
+   * spelling. Repairing it means changing what better-auth is configured with,
+   * which is the very move measured above to reject live tokens.
+   */
+  getBasePath(): string {
+    return this.rootedBasePath().replace(/\/+$/, '');
+  }
+
+  /**
    * [#15417] Does better-auth ROUTE this request — i.e. is the path one its own
    * router owns, whatever it then answers?
    *
@@ -5499,8 +5765,7 @@ export class AuthManager {
     } catch {
       return undefined;
     }
-    const configured = this.config.basePath || '/api/v1/auth';
-    const base = (configured.startsWith('/') ? configured : `/${configured}`).replace(/\/+$/, '');
+    const base = this.getBasePath();
     if (!pathname.startsWith(base)) return undefined;
     const endpoint = pathname.slice(base.length).replace(/\/+$/, '');
     return endpoint.startsWith('/') ? endpoint : undefined;
@@ -5772,20 +6037,47 @@ export class AuthManager {
    * The OAuth issuer identifier: better-auth's `baseURL` INCLUDING `basePath`
    * (e.g. `https://acme.example.com/api/v1/auth`) — this is the `iss` claim
    * the jwt plugin stamps on access tokens and what the AS metadata reports.
+   *
+   * ⛔ [#16399] This value is NOT canonicalised, and must not be: it has to
+   * equal what better-auth composes from the string `createAuthInstance` hands
+   * it, byte for byte, because `verifyMcpAccessToken` gives jose this string as
+   * `issuer` and jose compares `iss` by exact string. `rootedBasePath()` is
+   * that composition — see its docblock for the measured table, and
+   * `auth-manager-base-path.test.ts` for the pin against a real `betterAuth()`.
+   * Stripping a configured trailing slash here rejects every MCP access token
+   * the deployment mints.
    */
   getAuthIssuer(): string {
-    const basePath = this.config.basePath || '/api/v1/auth';
-    return `${this.getCanonicalOrigin()}${basePath.startsWith('/') ? basePath : `/${basePath}`}`;
+    return `${this.getCanonicalOrigin()}${this.rootedBasePath()}`;
   }
 
   /**
    * The MCP resource identifier (RFC 8707 `resource` / token `aud`):
    * `<origin><apiPrefix>/mcp`. Derived from the auth basePath so the two can
    * never disagree about the API prefix.
+   *
+   * ## [#16399] Derived from the NORMALISED base path, unlike `getAuthIssuer()`
+   *
+   * This one is a location on this host — `auth-plugin.ts` reads a path back
+   * out of it with `new URL(...).pathname` to mount the RFC 9728 §3.1
+   * path-inserted well-known route — so it takes `getBasePath()`, not the
+   * configured spelling. Before that it read `this.config.basePath` directly
+   * and added no leading slash, so a `basePath` written without one produced a
+   * value that is not a URL at all:
+   *
+   *     basePath 'api/v1/auth'  ->  http://localhost:3000api/v1/mcp
+   *
+   * `new URL()` THROWS on that (`3000api` is not a port), and
+   * `@better-auth/oauth-provider` 1.7.2 refuses it outright — measured, at
+   * plugin init: `skipping resource seed for http://localhost:3000api/v1/mcp —
+   * resource identifier … must be an absolute URI (RFC 8707 §2)`. So the
+   * `sys_oauth_resource` row is never seeded, `enforcePerClientResources`
+   * stays at its `true` default, and every MCP client is refused for want of a
+   * link row. That input class could never mint or match a token, which is why
+   * repairing it re-selects nothing.
    */
   getMcpResourceUrl(): string {
-    const basePath = this.config.basePath || '/api/v1/auth';
-    const apiPrefix = basePath.replace(/\/auth\/?$/, '');
+    const apiPrefix = this.getBasePath().replace(/\/auth$/, '');
     return `${this.getCanonicalOrigin()}${apiPrefix}/mcp`;
   }
 

@@ -131,6 +131,19 @@ export const FIELD_KEY_GUIDANCE: Readonly<
   // would be advice to delete a live key — the "no guidance entry names a key
   // the schema now declares" test enforces the absence.
   cached: { why: 'computed-field caching was pruned in 2026-06 (#3733); nothing read it.' },
+  // The one snake_case key in this table, and the spelling is LOAD-BEARING.
+  // The two channels this table feeds do not agree on the key face: a `to`
+  // becomes a `strictObject` ALIAS, matched through `aliasProbe` (case folded,
+  // `_` / `-` / space stripped), so one camelCase row covers every separator
+  // spelling. A `why` becomes strict GUIDANCE, and that channel is documented
+  // and implemented as an exact, case-SENSITIVE match on the authored spelling
+  // (`shared/suggestions.zod.ts`), as is this file's own comparator
+  // (`guidance[key]`). So a camelCase row here would never be reached by the
+  // key authors actually write, and every test in this file would still pass —
+  // none of them asks whether an entry is ever consulted.
+  // ⛔ Do not "normalise" this to `idField` to match its neighbours; the
+  // reachability test in `authoring-key-lint.test.ts` fails if you do.
+  id_field: { why: '`id_field` was never a FieldSchema key: a lookup stores the referenced record\'s id, and which field holds that value is not an authored per-field choice — the picker resolves record identity itself. Use `displayField` to change which field is SHOWN as a candidate\'s label, and a seed dataset\'s `externalId` to author references by a portable natural key. The live `idField` is the one on an `inlineColumns` entry — the GridColumn mirror in `field.zod.ts`, which is a DIFFERENT schema.' },
 });
 
 /**

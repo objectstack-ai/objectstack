@@ -33,6 +33,13 @@ import {
 // docblock for why the edge is acyclic and why it was worth adding.
 import { matchMissingColumnOfRelation } from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
+// The object-level read admission asked at this door, ahead of every strategy
+// — the layer the raw-SQL path could not inherit from the engine. See that
+// module's header for the request that reached the database without it.
+import {
+  assertObjectsReadable,
+  type ObjectReadAdmissionProvider,
+} from './read-admission.js';
 // [#15768] The measure result-type rule — which aggregates return a value of
 // the aggregated field's own type, and which are numeric whatever they read.
 // Owned in its own module so the enumerated verdict per `AggregationFunction`
@@ -182,6 +189,21 @@ function isMissingColumnOfRelation(message: string): boolean {
  * framework's own unknown-object signal. Deliberately scoped to MISSING SOURCE
  * (table/object/relation) — not column/syntax errors, which stay hard failures
  * so real query bugs still surface.
+ *
+ * ⚠️ [#16019] Reached only by a BARE error. A fault an in-repo driver raises
+ * DECLARES itself — the typed read exits since #8931 (PR #9273), the raw-SQL
+ * path (`SqlDriver.execute`, which the native-SQL strategy runs on) since
+ * #16019 — and `queryDataset`'s catch re-throws a declared envelope before
+ * this question is asked (#5717 defence B). So a missing backing table raised
+ * by `driver-sql`, or by `driver-turso` embedded, does NOT degrade on either
+ * strategy: it answers `500 DATABASE_ERROR` at the door. `driver-turso`'s
+ * REMOTE transport is the exception and pre-dates this card: its typed exits
+ * are undeclared, and `RemoteTransport.aggregate` swallows a missing table
+ * into `[]` itself, so on the ObjectQL-aggregate strategy that deployment
+ * answers `200` with no rows by the transport's own swallow. What still
+ * degrades HERE is an undeclared producer — an embedder's own
+ * `executeRawSql`, a bare `Error` from a driver outside this repo, the
+ * framework's not-registered signals.
  *
  * ⚠️ It is a heuristic over driver PHRASING, so it is the SECOND question the
  * degradation path asks, never the first: {@link hasDeclaredErrorEnvelope} runs
@@ -457,6 +479,26 @@ export interface AnalyticsServiceConfig {
     | undefined
     | Promise<FilterCondition | null | undefined>;
   /**
+   * The OBJECT-LEVEL read admission — "may this caller read this object AT
+   * ALL", asked once at the door for the base object and every joined object,
+   * BEFORE a strategy is selected.
+   *
+   * The sibling of {@link AnalyticsServiceConfig.getReadScope} and NOT a
+   * substitute for it: the scope answers WHICH ROWS and answers `undefined`
+   * for a caller with no grant at all, so a door holding only the scope cannot
+   * tell "unrestricted" from "not permitted". The plugin auto-bridges this to
+   * the `security` service's `canReadObject` (falling back to `explain`, whose
+   * `allowed` is the same bottom line), so the verdict is the one the engine
+   * middleware reaches on `GET /data/<object>` — the two doors agree by
+   * construction rather than by maintenance.
+   *
+   * MAY be async. `false` refuses the query with `PERMISSION_DENIED` / 403; a
+   * THROW also refuses (fail-closed). When the hook is absent entirely no
+   * object-level gate applies — the deployment has no security service, which
+   * is the same deployment in which `/data` has no object-level gate either.
+   */
+  admitObjectRead?: ObjectReadAdmissionProvider;
+  /**
    * ADR-0021 D-C — join allowlist per cube (the dataset's declared `include`).
    * Joins outside this set are rejected by the strategy. Compiled datasets
    * (via `queryDataset`/`registerDataset`) supply this automatically; this
@@ -700,6 +742,8 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly baseCtx: DatasetScopedStrategyContext;
   /** Context-aware read-scope provider (bound to the request's context per call). */
   private readonly readScopeProvider?: AnalyticsServiceConfig['getReadScope'];
+  /** Object-level read-admission provider (bound per call to the request context). */
+  private readonly readAdmissionProvider?: ObjectReadAdmissionProvider;
   /** Compiled datasets by name — feeds the join allowlist (D-C) and queryDataset. */
   private readonly datasetRegistry = new Map<string, CompiledDataset>();
   /** Optional object-graph resolver used when compiling datasets. */
@@ -740,6 +784,7 @@ export class AnalyticsService implements IAnalyticsService {
     }
 
     this.readScopeProvider = config.getReadScope;
+    this.readAdmissionProvider = config.admitObjectRead;
     this.relationshipResolver = config.relationshipResolver;
     this.sourceFieldMeta = config.sourceFieldMeta;
     this.labelResolver = config.labelResolver;
@@ -845,6 +890,15 @@ export class AnalyticsService implements IAnalyticsService {
     // filters. Resolve the channel per request, with the SAME instant as the
     // query's own fields.
     const getDatasetScope = this.resolvedDatasetScopeGetter(tokenCtx);
+    // The OBJECT-LEVEL gate, ahead of everything else on this path — including
+    // the early return below, which is why it is not folded into the
+    // read-scope pre-pass: a deployment that wired an admission provider and no
+    // scope provider must still be gated, and the two questions have different
+    // answers for the same caller ("no rows visible" vs "not permitted to
+    // read"). `callCtx` is the ONE thing `query()` and `generateSql()` share,
+    // so gating it covers the direct `/analytics/query` door, the `/analytics/sql`
+    // echo door and — through `DatasetExecutor` — every dataset door.
+    await this.assertReadAdmitted(this.queryObjects(query), context);
     // #3602 — `context` rides along unconditionally. It is the ENGINE-side belt
     // (forwarded to `engine.aggregate`, where the middleware chain applies its
     // own RLS), so it must not be gated on the analytics-side belt being wired:
@@ -918,6 +972,72 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   /**
+   * Every object this query will READ — the cube's base object plus every
+   * joined object.
+   *
+   * ONE derivation, two consumers: {@link resolveReadScopes} scopes exactly
+   * this set and {@link assertReadAdmitted} admits exactly this set, so the set
+   * that is row-scoped and the set that is admitted are provably the same set
+   * rather than two lists that agree today. It is a SUPERSET of what a strategy
+   * actually scans (a strategy only joins along declared relationships), which
+   * is the safe direction: no scanned object is ever left ungated.
+   *
+   * An unregistered cube yields the empty set — the query fails its own
+   * cube-existence gate downstream, and inventing an object name here would
+   * gate something the request never named.
+   */
+  private queryObjects(query: AnalyticsQuery): Set<string> {
+    if (!query.cube) return new Set<string>();
+    const cube = this.cubeRegistry.get(query.cube);
+    return cube ? this.cubeObjects(cube) : new Set<string>();
+  }
+
+  /**
+   * {@link queryObjects} for a cube already in hand — the draft-preview branch
+   * holds the COMPILED dataset rather than a query naming it, and reaching for
+   * the registry there would make the gate depend on a registration side
+   * effect. One derivation, two entry points.
+   */
+  private cubeObjects(cube: Cube): Set<string> {
+    const objects = new Set<string>();
+    if (typeof cube.sql === 'string' && cube.sql.trim()) {
+      objects.add(cube.sql.trim());
+    }
+    const joins = (cube as { joins?: Record<string, { name?: string }> }).joins;
+    if (joins) {
+      for (const [alias, j] of Object.entries(joins)) {
+        objects.add(j?.name ?? alias);
+      }
+    }
+    return objects;
+  }
+
+  /**
+   * The OBJECT-LEVEL read gate, asked at this door for every object the query
+   * will read, BEFORE a strategy is selected.
+   *
+   * Placement is the whole point. The `NativeSQLStrategy` compiles a statement
+   * and runs it through the driver's raw `execute()`, which no middleware sits
+   * in front of, so it could never inherit the admission the ObjectQL path gets
+   * from `engine.aggregate`. Asking HERE — once, ahead of the chain — makes the
+   * two strategies give the SAME verdict by construction instead of by each
+   * carrying its own copy of the check, which is the arrangement that produced
+   * the divergence in the first place.
+   *
+   * A no-op when no provider is wired: that is a deployment with no security
+   * service, where `/data` has no object-level gate either, so the doors still
+   * agree. `AnalyticsServicePlugin` reports that state at init.
+   */
+  private async assertReadAdmitted(
+    objects: Iterable<string>,
+    context: ExecutionContext | undefined,
+  ): Promise<void> {
+    const provider = this.readAdmissionProvider;
+    if (!provider) return;
+    await assertObjectsReadable(objects, provider, context, this.logger);
+  }
+
+  /**
    * Resolve the read scope (tenant + RLS `FilterCondition`) for the base object
    * AND every joined object of the query's cube, keyed by object name. This is
    * the async pre-pass that lets the synchronous strategy enforce scoping even
@@ -937,21 +1057,8 @@ export class AnalyticsService implements IAnalyticsService {
     const map = new Map<string, FilterCondition>();
     const provider = this.readScopeProvider;
     if (!provider || !query.cube) return map;
-    const cube = this.cubeRegistry.get(query.cube);
-    if (!cube) return map;
 
-    const objects = new Set<string>();
-    if (typeof cube.sql === 'string' && cube.sql.trim()) {
-      objects.add(cube.sql.trim());
-    }
-    const joins = (cube as { joins?: Record<string, { name?: string }> }).joins;
-    if (joins) {
-      for (const [alias, j] of Object.entries(joins)) {
-        objects.add(j?.name ?? alias);
-      }
-    }
-
-    for (const object of objects) {
+    for (const object of this.queryObjects(query)) {
       let filter: FilterCondition | null | undefined;
       try {
         filter = await provider(object, context);
@@ -1105,6 +1212,13 @@ export class AnalyticsService implements IAnalyticsService {
         this.logger.warn(`[Analytics] draft preview resolver failed for "${dataset.object}" — falling back to live data: ${String((e as Error)?.message ?? e)}`);
       }
       if (seedRows) {
+        // The draft-preview branch evaluates in memory and never reaches
+        // `query()`, so it is the ONE dataset path that does not inherit
+        // `callCtx`'s gate. Same gate, same helper, asked here rather than a
+        // second implementation — drafted seed rows are still this object's
+        // rows, and a caller who may not read the object may not read its
+        // pending seed either.
+        await this.assertReadAdmitted(this.cubeObjects(compiled.cube), context);
         this.logger.debug(`[Analytics] queryDataset "${dataset.name}" → preview over ${seedRows.length} drafted seed row(s)`);
         const previewService = {
           query: async (q: AnalyticsQuery) => evaluateAnalyticsQueryOverRows(q, compiled.cube, seedRows!),
@@ -1167,6 +1281,20 @@ export class AnalyticsService implements IAnalyticsService {
     // crash the widget with a 500. Datasets were the one read surface that
     // hard-failed on a missing source.
     //
+    // [#16019] That leniency now holds for a BARE error only. A fault an
+    // in-repo driver raises declares `code` + `status` — typed reads since
+    // #8931, the raw-SQL path the native-SQL strategy runs on since #16019 —
+    // and the `hasDeclaredErrorEnvelope` re-throw below (#5717 defence B)
+    // hands it to the door untouched, where it answers `500 DATABASE_ERROR`
+    // on both strategies — for `driver-sql`, and for `driver-turso` embedded;
+    // the remote transport's typed exits are undeclared and pre-date this card
+    // (`RemoteTransport.aggregate` swallows a missing table into `[]` on its
+    // own). The degrade is not re-judged here; the ruling that
+    // drivers declare (and that a declared envelope is never re-read by its
+    // wording) decides it. Producers that still reach the degrade: an
+    // embedder's own `executeRawSql`, an out-of-repo driver throwing bare, the
+    // framework's not-registered signals.
+    //
     // #5033 — that leniency is scoped to the dataset's OWN source. Once the raw-SQL
     // bridge routes by object (`plugin.ts`), a dataset that JOINS across datasources
     // fails on the base object's datasource with the JOINED table missing. Reporting
@@ -1187,7 +1315,8 @@ export class AnalyticsService implements IAnalyticsService {
       result = await new DatasetExecutor(this, orderLabels).execute(compiled, selection, context);
     } catch (err) {
       // The producer answered the classification question — the route's
-      // envelope reader serves it (4xx as itself, declared 5xx through the
+      // envelope reader serves it (4xx as itself; a declared 5xx relayed with
+      // the producer's own code by the door's ③a arm, #11718 — no longer the
       // `ANALYTICS_QUERY_FAILED` path). Nothing here may re-judge it by wording.
       if (hasDeclaredErrorEnvelope(err)) throw err;
       if (isMissingSourceError(err)) {

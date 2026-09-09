@@ -162,7 +162,8 @@ export interface ObjectQLPluginOptions {
    * Skip both `syncRegisteredSchemas()` calls inside `start()` and
    * assume DDL is managed out-of-band (e.g. an `apps/cloud/scripts/migrate.ts`
    * run before deploy that connects directly to the database and creates
-   * all `sys_*` + custom tables once).
+   * all `sys_*` + custom tables once — that script lives in the separate
+   * `objectstack-ai/cloud` repo and is NOT a path in this one).
    *
    * Use this on cold-start-sensitive runtimes (Cloudflare Containers,
    * Lambda) where the platform's inbound-request budget is shorter than
@@ -1100,10 +1101,10 @@ export class ObjectQLPlugin implements Plugin {
     ) => {
       const now = stamp();
       // A "historical" import (#3493) reinstates the ORIGINAL timeline, so a
-      // client-supplied created_at/updated_at/updated_by is CLIENT-PREFERRED
-      // under `preserveAudit` — instead of being overwritten with the import
-      // instant. Opt-in and server-set only; a normal write leaves
-      // `preserveAudit` unset and still stamps now.
+      // client-supplied created_at/created_by/updated_at/updated_by is
+      // CLIENT-PREFERRED under `preserveAudit` — instead of being overwritten
+      // with the import instant. Opt-in and server-set only; a normal write
+      // leaves `preserveAudit` unset and still stamps now.
       //
       // [#15964] `created_at` takes the SAME SHAPE as `updated_at`, on the
       // maintainer ruling of 2026-09-06 (decision batch #54, option A). It was
@@ -1123,9 +1124,28 @@ export class ObjectQLPlugin implements Plugin {
         record.created_at = preserveAudit ? (record.created_at ?? now) : now;
       }
       record.updated_at = preserveAudit ? (record.updated_at ?? now) : now;
+      // [#16311] `created_by` takes the SAME SHAPE as `updated_by`, one field
+      // over — the identical laundering, measured on the same rig and closed
+      // the same way, because two fields fixed two ways inside one function is
+      // how this second card came to exist at all. It was
+      // `record.created_by ?? session.userId`: client-preferred with no flag,
+      // so an ordinary authenticated POST stored `created_by: 'forged_user'`
+      // while `updated_by` in the SAME payload was correctly overwritten with
+      // the session user — the control proving the strip ran on that row and
+      // took the sibling audit field.
+      //
+      // Both audit-user assignments stay INSIDE `if (session?.userId)`, and
+      // that guard is load-bearing rather than incidental. `created_by` is not
+      // symmetric with `created_at`: with no session the hook must assign
+      // NOTHING, so the engine strip takes a caller's forgery and the key is
+      // absent. Assigning `session.userId` unconditionally would write
+      // `undefined` into the key, making it one the hook "wrote"; #14259's
+      // guard would then spare it and a branch that is correct today would
+      // become a NEW hole. Pinned as row1 of
+      // `plugin-audit-created-by-create-side.test.ts`.
       if (session?.userId) {
         if (isInsert && hasField(objectName, 'created_by')) {
-          record.created_by = record.created_by ?? session.userId;
+          record.created_by = preserveAudit ? (record.created_by ?? session.userId) : session.userId;
         }
         if (hasField(objectName, 'updated_by')) {
           record.updated_by = preserveAudit ? (record.updated_by ?? session.userId) : session.userId;
@@ -2490,6 +2510,76 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
+   * [#15252] The metadata plane {@link runGovernanceInventory} audits against,
+   * resolved the way a REQUEST resolves it.
+   *
+   * The audit used to take it from `ctx.getService('metadata')` alone. That
+   * accessor reads two synchronous maps — the kernel's own `services` and
+   * `PluginLoader.getServiceInstance` (which reads `serviceInstances`) — and
+   * NEITHER of them holds a scoped instance: `PluginLoader` mints those into
+   * `scopedServices`, keyed by scope id. So against a composition that
+   * registers `metadata` with `ServiceLifecycle.SCOPED` the call threw
+   * `Service 'metadata' is async - use await` BEFORE any read method ran, the
+   * wiring below swallowed the throw into "no metadata plane at all", and the
+   * audit reported that scope's declarations as absent — silently, because an
+   * empty declaration set is indistinguishable from a plane holding nothing.
+   *
+   * The router never had that problem: `HttpDispatcher.resolveService` asks
+   * `defaultKernel.getServiceAsync(name, scopeId)` FIRST, with the request's
+   * environment id, and only then falls back to the synchronous accessors. So
+   * this mirrors that order, with the one scope id a boot-time caller can
+   * legitimately name — `environmentId`, which declares that this kernel
+   * serves ONE environment. `ctx.getServiceScoped` and the dispatcher's
+   * `getServiceAsync(name, scopeId)` both land on `PluginLoader.getService`,
+   * so for a scoped registration this resolves the SAME cached instance the
+   * router resolves through. That identity is the point: an audit reading a
+   * different instance than the router dispatches from cannot say anything
+   * true about what the router will refuse.
+   *
+   * Unchanged for every shipped composition, and checked rather than assumed:
+   * `ObjectKernel.registerService` writes the kernel map AND
+   * `PluginLoader.serviceInstances`, so a statically registered plane
+   * (`packages/metadata/src/plugin.ts`) comes back from the scoped attempt as
+   * the very same object the synchronous lookup returns. The fallback covers
+   * every other shape — a host with no scoped accessor at all
+   * (`KernelBase`/`LiteKernel` throws "not supported"), a test double whose
+   * context implements `getService` only, and a kernel declaring no
+   * `environmentId`.
+   *
+   * ⚠️ The boundary that REMAINS, stated so it is not re-discovered as a bug:
+   * a kernel serving several environments at once has no single scope for a
+   * boot-time audit to name, so there is nothing to ask for and the
+   * synchronous lookup stands. Auditing per environment is a different
+   * inventory with a different lifecycle, not a scope id this method can
+   * invent.
+   */
+  private async resolveGovernanceMetadataService(
+    ctx: PluginContext,
+  ): Promise<(IMetadataService & KeyedPluralMetadataRead) | undefined> {
+    const scopeId = this.environmentId;
+    if (scopeId && typeof ctx.getServiceScoped === 'function') {
+      try {
+        const scoped = await ctx.getServiceScoped<IMetadataService & KeyedPluralMetadataRead>(
+          'metadata',
+          scopeId,
+        );
+        if (scoped != null) return scoped;
+      } catch {
+        // Not resolvable under a scope on this host — nothing registered under
+        // the name, or a host with no scoped accessor. Fall through to the
+        // synchronous lookup, which is what every non-scoped shape answers
+        // from; a plane that is genuinely absent ends up `undefined` either
+        // way and the audit degrades exactly as it did before.
+      }
+    }
+    try {
+      return ctx.getService<IMetadataService & KeyedPluralMetadataRead>('metadata');
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * [ADR-0110 D5] Audit the engine's action-handler registry against the
    * declarations it can dispatch for, and warn about the orphans on both
    * sides. Runs at `kernel:ready` (after {@link resyncAuthoredActions}, so
@@ -2514,7 +2604,9 @@ export class ObjectQLPlugin implements Plugin {
     let loadStandaloneActionsKeyed: (() => Promise<Array<{ name: string; data: any }>>) | undefined;
     let lookupMetadataAction: ((actionName: string) => unknown) | undefined;
     try {
-      const meta = ctx.getService<IMetadataService & KeyedPluralMetadataRead>('metadata');
+      // [#15252] Resolved the way a request resolves it — scoped first, with
+      // this kernel's declared environment id. See the method's docblock.
+      const meta = await this.resolveGovernanceMetadataService(ctx);
       const loadMany = meta?.loadMany;
       if (meta && typeof loadMany === 'function') {
         loadStandaloneActions = () => loadMany.call(meta, 'action');

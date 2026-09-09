@@ -484,6 +484,17 @@ Canonical cross-paradigm action/node descriptor (ADR-0018)
 | **id** | `string` | ✅ | The ID of the newly created clone. |
 | **sourceId** | `string` | ✅ | The ID of the record the clone was copied from. |
 | **record** | `Record<string, any>` | ✅ | The created clone, including server-generated fields. Engine-owned values (injected system/audit columns, autonumbers, computed formula/summary fields) are re-derived by the insert path rather than copied from the source; caller-supplied `overrides` win over copied values. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability: fields that were LEGALLY stripped before the clone was written — a non-system clone cannot seed a static `readonly` column, whether the value was COPIED from the source row or supplied through `overrides` (the strip runs inside `engine.insert`, after the `beforeInsert` hooks, `isSystem`-gated, exactly as on `createData`), so those keys are dropped and the field re-derives its default. Present ONLY when ≥1 field was dropped; the clone still succeeded without them (status/success semantics unchanged). Carried in the 201 body only — this route relays the producer verbatim and sets no `X-ObjectStack-Dropped-Fields` header. Optional — omit-when-empty keeps the shape backward-compatible for existing clients. |
+
+### Nested Shape: `CloneDataResponse.droppedFields[number]`
+
+A write-path strip event: caller-supplied fields legally dropped from the payload
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object the write targeted (resolved object name) |
+| **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, or the primary-key strip of a payload id the engine ruled is not an identifier |
 
 
 ---
@@ -558,7 +569,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **object** | `string` | ✅ | Object name |
 | **records** | `Record<string, any>[]` | ✅ | Created records |
 | **count** | `number` | ✅ | Number of records created |
-| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability: caller-supplied `readonly` fields the in-engine create-side strip (`engine.insert`, `isSystem`-gated) removed before the rows were written. AGGREGATED across the batch (one event per object/reason with the union of dropped field names) rather than per-row, because the insert-time strip is static-`readonly` only — schema-uniform, so every row drops the same set. Present ONLY when ≥1 field was dropped; the creates still succeeded without them (count/success unchanged). Optional — omit-when-empty keeps the shape backward-compatible. (The per-row `insertMany`/`batch` paths carry per-row `droppedFields` on each result instead — see BatchOperationResultSchema.) |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability: caller-supplied `readonly` fields the in-engine create-side strip (`engine.insert`, `isSystem`-gated) removed before the rows were written. AGGREGATED across the batch (one event per object/reason with the UNION of dropped field names) rather than per-row, because this response is `{ object, records, count }` and has no per-row slot to hang a drop set on — a union is the only view it can represent. So read a name here as "at least one row dropped this field", NOT "every row dropped the same set": the strip runs INSIDE `engine.insert` after the `beforeInsert` hooks and exempts keys a hook itself wrote, tracked per row: rows where a hook stamped a protected key drop a different set from rows where it did not. Present ONLY when ≥1 field was dropped; the creates still succeeded without them (count/success unchanged). Optional — omit-when-empty keeps the shape backward-compatible. (The per-row `insertMany`/`batch` paths carry per-row `droppedFields` on each result instead — see BatchOperationResultSchema.) |
 
 ### Nested Shape: `CreateManyDataResponse.droppedFields[number]`
 
@@ -1317,7 +1328,7 @@ Enable package response
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type name (e.g., "object", "plugin") |
 | **packageId** | `string` | optional | Optional package ID to filter items by |
-| **organizationId** | `string` | optional | Organization (tenant) scope for the read. Selects the org partition in the ADR-0005 overlay read order — org overlay wins over env-wide overlay wins over packaged artifact — so it decides which tenant's customization rows are merged into the list. Absent = environment-wide read: only env-level overlays apply and no org partition is consulted. |
+| **organizationId** | `string` | optional | Organization (tenant) scope for the read. When an org partition applies, this selects it in the ADR-0005 overlay read order — org overlay wins over env-wide overlay wins over packaged artifact — so it decides which tenant's customization rows are merged into the list. Supplying a value does not by itself guarantee an org partition is consulted; where none applies, and whenever it is absent, the read is environment-wide and only env-level overlays apply. |
 | **previewDrafts** | `boolean` | optional | Draft-visibility switch (ADR-0033 draft-overlay preview): when true, pending `state='draft'` rows are overlaid on the active list — draft wins on name collision, draft-only items appear, and each overlaid item is tagged `_draft: true` so UIs can badge the preview. Absent/false = published world only. Declaration ≠ authorization: this member only switches which rows are read, and ADR-0106 masking is unaffected — callers without draft-preview authorization are refused upstream (admin-gated), not by this schema. |
 
 
@@ -1564,7 +1575,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
-| **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object> }>` | optional | Dashboard translations keyed by dashboard name |
+| **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; screens?: Record<string, object> }>` | optional | Screen-flow translations keyed by flow name |

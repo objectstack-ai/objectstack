@@ -182,7 +182,49 @@ export interface ApprovalResumeSurface {
    * pause it cannot see is a pause this verb will not act on.
    */
   listSuspendedRunsDurable?(): Promise<Array<{ runId: string; flowName: string; nodeId: string; correlation?: string }>>;
+  /**
+   * [#15358] Whether the consumed suspension behind a `failed` run SURVIVES —
+   * i.e. whether the engine's `restoreConsumedSuspension` would re-arm it.
+   * Read by {@link ApprovalService.inspectStrandedRequests}, for `failed` rows
+   * only, to tell the #13909 strand (repairable) from a cascade-failed
+   * ancestor — the `failAncestors` shape the engine itself calls NOT stranded,
+   * because `failSuspendedRun` consumed the ancestor's pause and journalled
+   * nothing, so no verb re-arms it (#15222's shape). {@link getRun} answers
+   * `status: 'failed'` for both: the discriminator is deliberately NOT on
+   * `ExecutionLogEntry`, which `GET /automation/:name/runs/:runId` serves
+   * verbatim. Ruled B′ on #15358 (2026-09-07): it is published as a dedicated
+   * read-only engine member, never on the wire.
+   *
+   * ⚠️ Declares a method `AutomationEngine` ALREADY implements publicly
+   * (`inspectConsumedSuspension`); it widens no engine surface. It answers
+   * from the same two witnesses the restore verb reads — this process's hot
+   * journal and the durable row — so what it calls repairable IS what that
+   * verb restores. The three negatives are distinct on purpose (see
+   * {@link StrandedRunState}); the middle one, `'SNAPSHOT_DROPPED'`, is a
+   * strand the store could not persist, repairable only by the process that
+   * stranded it while that process lives.
+   *
+   * Optional, and its absence is FAIL-CLOSED for a report: a `failed` row the
+   * engine cannot be asked about is reported as today's undifferentiated
+   * `'failed'` — ⛔ never as `'unrepairable'` (that calls the repairable row
+   * dead: the #15555 false-negative harm, one surface over) and ⛔ never
+   * skipped (that hides the row). Absence of the discriminator is not
+   * evidence of anything. Rejects when a store cannot be read; the inspection
+   * counts such a row `undetermined` — but ⛔ unlike a thrown
+   * {@link hasSuspendedRun} it does NOT drop the row, because this oracle is
+   * asked only WHICH shape a row already known to be stranded is (#16709).
+   * A host that resolves a malformed verdict is treated the same way, and
+   * costs no OTHER row its answer.
+   */
+  inspectConsumedSuspension?(runId: string): Promise<
+    | { repairable: true }
+    | { repairable: false; reason: 'RUN_SUSPENDED' | 'SNAPSHOT_DROPPED' | 'NO_CONSUMED_SUSPENSION' }
+  >;
 }
+
+/** What {@link ApprovalResumeSurface.inspectConsumedSuspension} answers. */
+type ConsumedSuspensionVerdict =
+  Awaited<ReturnType<NonNullable<ApprovalResumeSurface['inspectConsumedSuspension']>>>;
 
 /**
  * Optional messaging surface (ADR-0012 `messaging` service). When attached,
@@ -349,7 +391,12 @@ function classifyStrandedRunState(run: { status?: string } | null | undefined): 
   // No history row at all — the #4469 shape this inspection was built for.
   if (!run) return 'missing';
   switch (run.status) {
-    // The resume consumed the pause and a downstream node threw. Reported.
+    // A terminal `failed` row. Reported — and, when the engine can be asked,
+    // refined by the third oracle ({@link refineFailedRunState}) into which of
+    // the three `failed` shapes it is. This arm alone cannot tell them apart:
+    // the row reads identically for a resume that consumed the pause and
+    // threw downstream (repairable) and for an ancestor `failAncestors`
+    // cascade-failed (not). `'failed'` here means "reported, undifferentiated".
     case 'failed':
       return 'failed';
 
@@ -377,26 +424,96 @@ function classifyStrandedRunState(run: { status?: string } | null | undefined): 
 }
 
 /**
- * WHY a terminal request's run is unrecoverable — the two shapes the inspection
- * reports, which have different causes and different remedies (#13909).
+ * [#15358] The third oracle's verdict over a `failed` row — which of the three
+ * differentiated shapes it is, read from the engine's own consumed-suspension
+ * witnesses — or `undefined` for the one answer that means the row is not
+ * stranded after all.
+ *
+ * ⛔ Absence of the discriminator is NOT an input here, on purpose: this runs
+ * only when the engine answered. A surface without the member never reaches
+ * it and the row stays `'failed'` (see {@link StrandedRunState}) — reading
+ * "the engine could not be asked" as "not a strand" would call the repairable
+ * row dead, which is #15555's false negative one surface over.
+ */
+function refineFailedRunState(verdict: ConsumedSuspensionVerdict): StrandedRunState | undefined {
+  if (verdict.repairable) return 'repairable';
+  switch (verdict.reason) {
+    // The strand happened; the store could not keep the snapshot, and the
+    // engine asked holds no hot copy. Its own class — see the type below.
+    case 'SNAPSHOT_DROPPED':
+      return 'snapshot_dropped';
+    // Neither witness holds anything: cascade-failed, or never paused.
+    case 'NO_CONSUMED_SUSPENSION':
+      return 'unrepairable';
+    // Re-armed between the two reads (an operator's restore landed while this
+    // scan was running): the run is alive and resumable, which is what the
+    // first oracle would have said a moment later. Not stranded.
+    case 'RUN_SUSPENDED':
+      return undefined;
+    // An answer this build does not know (an engine ahead of this plugin).
+    // Fail-closed exactly as an absent member: reported, undifferentiated —
+    // never condemned on a word this code cannot read.
+    default:
+      return 'failed';
+  }
+}
+
+/**
+ * WHY a terminal request's run is unrecoverable — the shapes the inspection
+ * reports, which have different causes and different remedies (#13909;
+ * split three ways by the #15358 B′ ruling, 2026-09-07).
  *
  *  - `missing` — `getRun` finds no history row at all (#4469's original shape):
  *    the run was lost before it could record anything, typically a pause that
  *    never reached a durable store and did not survive a restart.
- *  - `failed` — the run DID record a terminal `failed` row. The engine consumes
- *    a suspension *before* running the downstream nodes
- *    (`AutomationEngine.resumeInternal`: `forgetSuspendedRun(run, 'resumed')`
- *    precedes `traverseNext`), so a downstream node that merely THREW threw with
- *    the pause already gone — the catch arm recorded `failed` and there is no
- *    suspension left to resume. The decision is durable, the flow stopped
- *    mid-continuation, and no verb moves the run out of that state.
+ *
+ * The other four all describe a run that DID record a terminal `failed` row.
+ * The engine consumes a suspension *before* running the downstream nodes
+ * (`AutomationEngine.resumeInternal`: `forgetSuspendedRun(run, 'resumed')`
+ * precedes `traverseNext`), so a downstream node that merely THREW threw with
+ * the pause already gone — the catch arm recorded `failed` and there is no
+ * suspension left to resume. The decision is durable and the flow stopped
+ * mid-continuation. What differs is whether anything can put the pause back,
+ * and `status` alone cannot say — the three differentiated members come from
+ * the engine's own consumed-suspension witnesses
+ * ({@link ApprovalResumeSurface.inspectConsumedSuspension}):
+ *
+ *  - `repairable` — the engine holds the consumed suspension (in its journal
+ *    or on the durable row): the #13909 strand. `restoreConsumedSuspension`
+ *    re-arms it and {@link ApprovalService.continueRestoredRun} re-issues the
+ *    decision. The remedy is a repair.
+ *  - `snapshot_dropped` — the run DID strand, but the store could not persist
+ *    the snapshot (over its row budget) and the engine asked holds no hot
+ *    copy. Repairable only by the process that stranded it, while that process
+ *    lives; the restore verb refuses it elsewhere naming the budget. ⛔ Not
+ *    folded into either neighbour: as `repairable` it over-reports, as
+ *    `unrepairable` it is #15555's false negative. Reported as what it is.
+ *  - `unrepairable` — the engine holds NO consumed suspension: the run was
+ *    cascade-failed (`failAncestors` → `failSuspendedRun`, which consumes the
+ *    ancestor's pause and journals nothing — #15222's shape, the one the
+ *    engine's own words call not a strand), never paused at all, or did
+ *    strand and its snapshot is no longer held (the journal evicted a copy
+ *    whose write never landed; the run was restored and then finished; a
+ *    store class without `loadTerminal`, after a restart) — the engine's
+ *    `NO_CONSUMED_SUSPENSION` covers all three and does not say which. The
+ *    label is faithful to the verb: nothing re-arms it; the remedy is a new
+ *    run, not a restore.
+ *  - `failed` — the engine COULD NOT BE ASKED which of the three it is, or
+ *    was asked and could not answer. Three ways in: the attached surface has
+ *    no `inspectConsumedSuspension` (an engine build older than this plugin,
+ *    or a test double); the read THREW (a store outage); or the host resolved
+ *    a malformed verdict, violating its own declared surface (#16709). Today's
+ *    undifferentiated label, kept on purpose as the fail-closed fallback
+ *    (#15358 ruling, item 1): a failure to differentiate is not evidence, so
+ *    the row is reported and its repairability left unstated — ⛔ never
+ *    `unrepairable`, ⛔ never dropped from the report.
  *
  * ⚠️ This names the shapes for the REPORT only. It is not a run state: the
  * engine's own vocabulary is still `'completed' | 'paused' | 'failed'`
  * (`AutomationResult.status`) and nothing persists or queries "stranded".
  * Giving the condition a platform-level name is #13909's own deliverable.
  */
-export type StrandedRunState = 'missing' | 'failed';
+export type StrandedRunState = 'missing' | 'failed' | 'repairable' | 'snapshot_dropped' | 'unrepairable';
 
 /**
  * The continuation an approvals door already issued once, kept so it can be
@@ -464,14 +581,18 @@ export interface StrandedApprovalRequest {
   /**
    * The `flow_run_id` that resolves to no live suspension and no recoverable
    * run — see `runState`: no history row at all (`missing`), or a terminal
-   * `failed` row (`failed`).
+   * `failed` row (`repairable` / `snapshot_dropped` / `unrepairable`, or
+   * `failed` when the engine could not say which).
    */
   runId: string;
   /**
    * Which unrecoverable shape this is — see {@link StrandedRunState}. Carried
-   * because the two need different remedies: a `missing` run has no history to
-   * read, while a `failed` one has a step log and an error message naming the
-   * node that threw.
+   * because the shapes need different remedies: a `missing` run has no history
+   * to read; a `repairable` one is put back by `restoreConsumedSuspension` and
+   * continued by {@link ApprovalService.continueRestoredRun}; an
+   * `unrepairable` one (#15222's cascade-failed ancestor) is refused by that
+   * verb and needs a new run. An operator reading `'failed'` has to ask the
+   * engine directly.
    */
   runState: StrandedRunState;
   flowName?: string;
@@ -4263,8 +4384,25 @@ export class ApprovalService implements IApprovalService {
    * ⚠️ The widening does NOT reverse the conservatism: `completed`, `cancelled`
    * and `paused` are each still skipped, for reasons named one at a time in
    * `classifyStrandedRunState`, and an unrecognised status is skipped too.
-   * What the widening buys is that a `failed` run is now reported with
-   * `runState: 'failed'` instead of counted as healthy.
+   * What the widening buys is that a `failed` run is now reported instead of
+   * counted as healthy.
+   *
+   * **A THIRD oracle tells the `failed` rows apart (#15358).** `status ===
+   * 'failed'` over-reports in one specific direction: a cascade-failed run
+   * — an ancestor `failAncestors` failed while it was parked at its `subflow`
+   * node, whose pause `failSuspendedRun` consumed and journalled nothing — has
+   * the same terminal row as the #13909 strand, and `restoreConsumedSuspension`
+   * refuses it. The engine's discriminator (the consumed-suspension snapshot)
+   * is deliberately NOT on the object `getRun` answers, so it is asked through
+   * a dedicated read-only member, `inspectConsumedSuspension`, and only for
+   * `failed` rows: the answer splits `'failed'` into `'repairable'`,
+   * `'snapshot_dropped'` and `'unrepairable'` (see {@link StrandedRunState}).
+   * A surface without that member leaves the row `'failed'` — reported,
+   * undifferentiated — because absence of the discriminator is not evidence
+   * of anything. So does a read that THREW or answered a malformed verdict
+   * (#16709): by the time this oracle is asked the row is already known to be
+   * stranded, so a failure to differentiate it is not a reason to drop it from
+   * a report — it is counted `undetermined` as telemetry AND reported.
    *
    * ⚠️ **What this can and cannot size.** It makes the condition *visible* in a
    * deployment; it is not itself a census, and it says nothing about this
@@ -4282,7 +4420,16 @@ export class ApprovalService implements IApprovalService {
   async inspectStrandedRequests(options?: { limit?: number }): Promise<{
     scanned: number;
     stranded: StrandedApprovalRequest[];
-    /** Rows skipped because the suspension store could not be read — NOT healthy, just unknown. */
+    /**
+     * Reads that could not be MADE — telemetry, ⛔ never a verdict and ⛔ never
+     * a "healthy" number. A thrown first or second oracle SKIPS its row
+     * (whether that row is stranded at all is then unknown, and a storage
+     * outage must not be published as a lost run); a thrown or malformed THIRD
+     * read leaves its row in `stranded` as the undifferentiated `'failed'` and
+     * is counted here as well — the row is known to be stranded, only its
+     * shape could not be told (#16709). So this counter and `stranded.length`
+     * overlap on purpose, and neither one alone sizes the scan's blind spot.
+     */
     undetermined: number;
   }> {
     const empty = { scanned: 0, stranded: [] as StrandedApprovalRequest[], undetermined: 0 };
@@ -4339,12 +4486,60 @@ export class ApprovalService implements IApprovalService {
       // #13909 — the widened verdict. `undefined` means "not a shape this
       // reports": healthy, deliberate, or unresolvable. See
       // `classifyStrandedRunState` for which, and why each one.
-      const runState = classifyStrandedRunState(terminal);
+      let runState = classifyStrandedRunState(terminal);
       if (!runState) continue;
+
+      // #15358 — the third oracle, for `failed` rows only: does the engine hold
+      // the consumed suspension a restore would put back? Asked through the
+      // dedicated read-only member, never inferred from the row. Absence of
+      // the member is FAIL-CLOSED for a report — the row stays `'failed'`,
+      // reported and undifferentiated; a thrown read is `undetermined`, as for
+      // the other two oracles. See `refineFailedRunState` and
+      // `StrandedRunState` for the three answers and why none is folded.
+      if (runState === 'failed' && typeof this.automation.inspectConsumedSuspension === 'function') {
+        // ⚠️ [#16709 item 3] The REFINEMENT runs inside this `try`, with the
+        // read it refines. `refineFailedRunState` dereferences the verdict, so
+        // a host that violates the declared surface — resolving `undefined`
+        // where a verdict is declared — used to throw a `TypeError` out of
+        // `inspectStrandedRequests` itself, turning a PARTIAL answer into NO
+        // answer for every OTHER row in the scan. Enumerating the rows that
+        // cannot advance is this method's entire purpose, so a misbehaving
+        // implementation must cost at most the differentiation of its own row.
+        let refined: StrandedRunState | undefined;
+        let differentiated = true;
+        try {
+          refined = refineFailedRunState(await this.automation.inspectConsumedSuspension(runId));
+        } catch (err: any) {
+          // [#16709 item 2 — PM ruling, 2026-09-08] The row STAYS in the
+          // report, as the undifferentiated `'failed'`. This oracle is not
+          // asked WHETHER the row is stranded: the first two already answered
+          // that (no live pause, terminal `failed`). It is asked only WHICH of
+          // the three shapes it is — so a read that could not be made is the
+          // textbook "could not differentiate" case, which is exactly what
+          // `'failed'` is kept for (#15358 ruling, item 1).
+          //
+          // ⛔ Never dropped from the list. This is a REPORT of rows that
+          // cannot advance, and a row whose state we failed to determine is
+          // precisely the row an operator has to see; skipping it would make
+          // "nothing stranded" read TRUE while a row is in fact stuck, with
+          // the only trace a log line nobody is paging on. `undetermined`
+          // still counts it, as telemetry — never as a verdict.
+          differentiated = false;
+          undetermined++;
+          this.logger?.warn?.('[approvals] stranded-request scan could not read the consumed-suspension state', {
+            request: raw?.id, run: runId, error: err?.message ?? String(err),
+          });
+        }
+        if (differentiated) {
+          if (!refined) continue;   // re-armed between the two reads — alive after all
+          runState = refined;
+        }
+      }
 
       // Neither suspended nor recoverable: the run this decision was supposed to
       // advance is gone (`missing`) or terminally failed mid-continuation with
-      // its pause already consumed (`failed`).
+      // its pause already consumed (`repairable` / `snapshot_dropped` /
+      // `unrepairable` — or `failed`, when the engine could not say which).
       const config = parseJson<ApprovalNodeConfig>(
         raw.node_config_json, { approvers: [], behavior: 'first_response' } as any,
       );
@@ -4383,6 +4578,9 @@ export class ApprovalService implements IApprovalService {
         scanned: rows.length, stranded: stranded.length, undetermined,
         runMissing: stranded.filter(s => s.runState === 'missing').length,
         runFailed: stranded.filter(s => s.runState === 'failed').length,
+        runRepairable: stranded.filter(s => s.runState === 'repairable').length,
+        runSnapshotDropped: stranded.filter(s => s.runState === 'snapshot_dropped').length,
+        runUnrepairable: stranded.filter(s => s.runState === 'unrepairable').length,
         requests: stranded.map(s => `${s.requestId}@${s.nodeId ?? '?'} → run ${s.runId} (${s.runState})`),
       });
     }

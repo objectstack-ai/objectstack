@@ -1,7 +1,37 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `os create <type> [name]` — scaffold a plugin or an example application.
+ * `os create <type> [name]` — scaffold a kernel code plugin.
+ *
+ * ## `os create example` is retired (#16483)
+ *
+ * The `example` template emitted a SUBSET of what `os init` writes, plus one
+ * README. #15531 rendered and hashed both command families' real emission: the
+ * only template-level duplication left between them was this one template, and
+ * the ruling (#15531, decision batch #66, option B) is that the template goes
+ * rather than that the two families merge — they emit two different artifacts,
+ * and a kernel code `Plugin` is not a declarative app.
+ *
+ * ⚠️ That batch entry is the whole of what is verified here, and it settles the
+ * REMOVAL only. The terms this file implements on top of it — NO alias and NO
+ * deprecation window — are recorded on card #16483 and are PENDING MAINTAINER
+ * CONFIRMATION: a contract review could not locate the ruling they were
+ * attributed to, so the attribution is written as unverified with its source
+ * named rather than repeated. ⛔ Do not restate it as a settled ruling, and
+ * ⛔ do not go looking for a ruling to make it true — it is filed for the
+ * maintainer. The BEHAVIOUR is unaffected either way and is the shipped
+ * precedent (`os g agent`, `RETIRED_GENERATORS` in `generate.ts`): the command
+ * refuses rather than aliasing, which is what the message below says.
+ *
+ * ⛔ The template is not merely deleted. `os create example` still ANSWERS, and
+ * the answer names `os init` — see {@link RETIRED_TEMPLATES}. Letting it fall
+ * through to the `Unknown type:` branch would print the surviving roster and
+ * nothing else, so a reader arriving from an old doc page, a tutorial or a CI
+ * script would learn only that their spelling is not on the list, and the
+ * natural next move is to hunt for the right spelling of something that no
+ * longer exists. A removal that leaves a generic failure behind is the outcome
+ * the ruling exists to prevent, so the refusal is part of the contract and is
+ * pinned as one (`test/create-example-retired.e2e.test.ts`).
  *
  * ## What this command emits, and why it has two shapes
  *
@@ -38,13 +68,27 @@
  *                            semver range pinned to the running CLI's own
  *                            version, the `tsconfig.json` is self-contained,
  *                            a `pnpm-workspace.yaml` carries the build
- *                            approvals a fresh `pnpm install` needs, and the
- *                            project lands in the developer's own directory.
+ *                            approvals a fresh `pnpm install` needs, the
+ *                            package is named `plugin-<name>` and marked
+ *                            `private`, and the project lands in the
+ *                            developer's own directory.
  *   `in-repo`     (--in-repo) the platform-work shape: `workspace:*` deps, a
  *                            `tsconfig.json` that extends this repo's root
- *                            config, landing under `packages/plugins/` or
- *                            `examples/`. Explicit and documented, never the
- *                            default — its output installs nowhere else.
+ *                            config, a publishable `@objectstack/plugin-<name>`
+ *                            landing under `packages/plugins/`. Explicit and
+ *                            documented, never the default — its output
+ *                            installs nowhere else.
+ *
+ * ## The emitted package NAME follows the placement too (#15530)
+ *
+ * The audience decides the name, and #14824 moved the audience without moving
+ * the name: the standalone default kept stamping `@objectstack/plugin-<name>`
+ * — a scope the developer it now scaffolds for cannot publish to — onto every
+ * project, with the emitted README telling them to install it from there. The
+ * rule and the reason live on {@link pluginPackageName}; the README is the
+ * SECOND site that repeats the name and is fixed in the same place, because a
+ * rename that reaches only the manifest leaves the README pointing at a package
+ * that exists under no name at all.
  *
  * ## The version the standalone shape pins
  *
@@ -85,17 +129,13 @@ import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
-import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import {
   getCliVersion,
   NPM_PACKAGE_NAME_MAX_LENGTH,
   renderPnpmWorkspaceYaml,
   renderScaffoldTsconfig,
-  sanitizeNamespace,
   SCAFFOLD_PNPM_RANGE,
   SCAFFOLD_TSCONFIG_INCLUDE_SRC_ONLY,
-  SCAFFOLD_TSCONFIG_INCLUDE_WITH_ROOT_CONFIG,
-  SCAFFOLD_TSX_RANGE,
   SCAFFOLD_TYPES_NODE_RANGE,
   SCAFFOLD_TYPESCRIPT_RANGE,
   SCAFFOLD_VITEST_RANGE,
@@ -166,14 +206,20 @@ function defineTemplate(t: Omit<CreateTemplate, 'files'>): CreateTemplate {
 }
 
 /**
- * The scoped package name a scaffold is about to write, READ BACK off the
- * rendered manifest rather than recomposed here.
+ * The package name a scaffold is about to write, READ BACK off the rendered
+ * manifest rather than recomposed here.
  *
- * Recomposing it would be a second copy of `@objectstack/plugin-${name}` that
- * nothing keeps in step with the renderer — the same restatement that let this
- * command's emitted name drift away from what `os init` enforces. Reading the
- * rendered object measures the string that actually lands on disk, and a
- * template added later is covered without being told to declare anything.
+ * Recomposing it would be a second copy of the composition that nothing keeps
+ * in step with the renderer — the same restatement that let this command's
+ * emitted name drift away from what `os init` enforces. Reading the rendered
+ * object measures the string that actually lands on disk, and a template added
+ * later is covered without being told to declare anything.
+ *
+ * ⭐ Load-bearing since #15530, not merely tidy: the composition is no longer
+ * ONE string. The standalone placement emits an unscoped `plugin-<name>` and
+ * `--in-repo` a scoped `@objectstack/plugin-<name>`, so a recomposition here
+ * would have to know the placement rule too — and would be judging the wrong
+ * length for one of the two placements the moment the rule moved.
  *
  * `null` when the template emits no `package.json`, or emits one without a
  * string `name`: there is then no package name to judge, which is not the same
@@ -194,12 +240,17 @@ export function emittedPackageName(
  * The one rule `os create` needs and `os init` cannot.
  *
  * `init`'s argument IS the package name, so measuring the argument is the same
- * measurement. `create` composes its argument into a SCOPED name, and npm's
- * 214-character ceiling counts the scope: `@objectstack/plugin-` spends 20 of
- * them before the user's first character. A 200-character name is therefore
- * legal for `init` (measured: accepted) and illegal for `create` (measured:
- * emits a 220-character name npm refuses) — which is why the shared validator
- * is shared and this check is not.
+ * measurement. `create` COMPOSES its argument into a longer name, and npm's
+ * 214-character ceiling counts every character of the composition — the
+ * `plugin-` prefix the standalone placement writes (7), or the whole
+ * `@objectstack/plugin-` the in-repo placement writes (20), before the user's
+ * first character. A 214-character name is therefore legal for `init`
+ * (measured: accepted) and illegal for `create` in EITHER placement — which is
+ * why the shared validator is shared and this check is not.
+ *
+ * ⛔ Never re-derive the prefix length here: the caller hands in the string
+ * `emittedPackageName` read back off the rendered manifest, so this measures
+ * the bytes that would land whichever placement produced them.
  */
 export function validateEmittedPackageName(packageName: string): string | null {
   const over = packageName.length - NPM_PACKAGE_NAME_MAX_LENGTH;
@@ -211,24 +262,123 @@ export function validateEmittedPackageName(packageName: string): string | null {
   );
 }
 
-function toCamelCase(str: string): string {
-  return str.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
+/**
+ * The JavaScript identifier the emitted plugin's exported symbol is built from
+ * — DERIVED from the project name, never copied out of it.
+ *
+ * ## The defect this replaces
+ *
+ * `validateProjectName` accepts exactly what npm accepts, and that is correct:
+ * `foo.bar` is a legal npm package name and `@objectstack/plugin-foo.bar` is
+ * publishable. The same string is then interpolated into an *identifier*
+ * position (`export const <ident>Plugin`), where npm's charset is far wider
+ * than JavaScript's. The predecessor of this function folded `-x` into `X` and
+ * passed everything else straight through, so
+ *
+ *     os create plugin foo.bar   ->   export const foo.barPlugin: Plugin = {
+ *
+ * exited 0 having written a property access where a binding name belongs.
+ * `1foo` (npm-legal) reached the same position as `1fooPlugin`, and `a_b` as
+ * `a_bPlugin` — legal, but not the camel fold the `-` case promises.
+ *
+ * ## The rule
+ *
+ * The fold is GENERALISED, not narrowed: every run of characters illegal in a
+ * JS identifier is the separator `-` already was — dropped, with the character
+ * after it upper-cased — and a leading digit takes the `'a'` prefix that
+ * `init.ts`'s `sanitizeNamespace()` has always used for exactly
+ * this rule. Ordinary names are unchanged: `my-app` still yields `myApp`.
+ *
+ * ⛔ This normalises the CODE identifier and nothing else. The package name,
+ * its scope and the emitted directory name stay byte-for-byte what the user
+ * typed, and what `os create` accepts is unchanged.
+ *
+ * ⛔ No reserved-word handling, deliberately: every emission site appends
+ * `Plugin`, so the identifier that lands is never a bare keyword.
+ */
+export function sanitizeIdentifier(name: string): string {
+  const stem = name.replace(/^@[^/]+\//, ''); // drop an npm scope if present
+  let ident = stem.replace(
+    /[^A-Za-z0-9]+(.)?/g,
+    (_match: string, next?: string) => (next ? next.toUpperCase() : ''),
+  );
+  if (!ident) ident = 'plugin';
+  if (/^[0-9]/.test(ident)) ident = `a${ident}`;
+  return ident;
 }
 
 const PLUGIN_IN_REPO_DIR = 'packages/plugins';
-const EXAMPLE_IN_REPO_DIR = 'examples';
+
+/** The project directory the `plugin` template lands in, in either placement. */
+function pluginDirName(name: string): string {
+  return `plugin-${name}`;
+}
+
+/**
+ * The package name the `plugin` template writes — DERIVED from the placement,
+ * exactly as its dependency specs and its `tsconfig.json` already are.
+ *
+ * ## Why the standalone name is unscoped
+ *
+ * `@objectstack` is a scope the developer this command scaffolds FOR cannot
+ * publish to. Until #14824 that was arguably fine, because the default output
+ * landed inside this monorepo, where every sibling really does carry the scope.
+ * That ruling pointed the default at the developer's own directory and the name
+ * did not move with the audience — so the standalone emission stamped a scope
+ * its owner does not own onto every project generated from it. ⚠️ Nothing in
+ * this repository can see that: the name is never resolved from a registry
+ * inside the project, so `pnpm install`, the type-check and the scaffold smoke
+ * are all green on it. The cost is paid once, later, at `npm publish`, in
+ * someone else's terminal.
+ *
+ * The #15530 ruling is that the standalone default emits `plugin-<name>` —
+ * unscoped, and the same string as {@link pluginDirName}, which is what the
+ * scaffolder prints and what the developer already sees on disk. ⛔ Those are
+ * not two spellings of one convention: the package name is COMPOSED from the
+ * directory name here, so a template that renames its directory cannot leave a
+ * stale package name behind it.
+ *
+ * ⭐ The name is the readable half. `"private": true` — emitted beside it, for
+ * the standalone placement only — is the STRUCTURAL half, and the one that
+ * actually prevents the defect: `npm publish` refuses a private manifest
+ * loudly, whatever the name says. A later change that keeps this name and drops
+ * that flag reinstates the defect with better prose.
+ *
+ * `--in-repo` keeps `@objectstack/plugin-<name>` and stays publishable: that
+ * placement lands under `packages/plugins/`, where every sibling genuinely
+ * carries that scope and whoever runs it genuinely can publish there.
+ *
+ * ⛔ Module-private on purpose, unlike its five exported neighbours. Each of
+ * those is exported because a test in this package IMPORTS it; nothing imports
+ * this one, and nothing should — `test/create.test.ts` pins the two composed
+ * names as LITERALS precisely so the pin cannot move with the function it is
+ * pinning. An `export` here would widen this module's surface for no reader.
+ */
+function pluginPackageName(placement: ScaffoldPlacement, name: string): string {
+  return placement === 'in-repo'
+    ? `@objectstack/${pluginDirName(name)}`
+    : pluginDirName(name);
+}
 
 export const templates: Record<string, CreateTemplate> = {
   plugin: defineTemplate({
-    description: 'Create a new ObjectStack plugin',
+    description: 'Create a new kernel code plugin (TypeScript implementing the kernel Plugin contract)',
     inRepoDir: PLUGIN_IN_REPO_DIR,
-    dirName: (name: string) => `plugin-${name}`,
+    dirName: pluginDirName,
     filesFor: (placement: ScaffoldPlacement) => {
       const standalone = placement === 'standalone';
       const files: Record<string, FileRenderer> = {
         'package.json': (name: string) => ({
-          name: `@objectstack/plugin-${name}`,
+          name: pluginPackageName(placement, name),
           version: '0.1.0',
+          // ⛔ Standalone only, and ⛔ never dropped as "just a default the
+          // developer will change": this is the line that makes an accidental
+          // `npm publish` fail loudly instead of landing a package in a
+          // namespace its author does not own. The unscoped name above is the
+          // readable half; this is the enforcing one. The in-repo placement
+          // omits it because `packages/plugins/*` really is published from here
+          // — see {@link pluginPackageName}.
+          ...(standalone ? { private: true } : {}),
           description: `ObjectStack Plugin: ${name}`,
           // `tsc` emits ES modules under the compiler options below, so the
           // manifest has to declare the project as ESM or Node refuses the
@@ -266,7 +416,7 @@ export const templates: Record<string, CreateTemplate> = {
                 include: SCAFFOLD_TSCONFIG_INCLUDE_SRC_ONLY,
               })
             : {
-                extends: rootTsconfigExtends(PLUGIN_IN_REPO_DIR, `plugin-${name}`),
+                extends: rootTsconfigExtends(PLUGIN_IN_REPO_DIR, pluginDirName(name)),
                 compilerOptions: {
                   outDir: 'dist',
                   rootDir: 'src',
@@ -278,7 +428,7 @@ export const templates: Record<string, CreateTemplate> = {
 /**
  * ${name} Plugin for ObjectStack
  */
-export const ${toCamelCase(name)}Plugin: Plugin = {
+export const ${sanitizeIdentifier(name)}Plugin: Plugin = {
   name: '${name}',
   version: '0.1.0',
   
@@ -293,27 +443,71 @@ export const ${toCamelCase(name)}Plugin: Plugin = {
   },
 };
 
-export default ${toCamelCase(name)}Plugin;
+export default ${sanitizeIdentifier(name)}Plugin;
 `,
-        'README.md': (name: string) => `# @objectstack/plugin-${name}
+        'README.md': (name: string) => {
+          const packageName = pluginPackageName(placement, name);
+          // ⛔ The README is not downstream of the manifest rename — it REPEATS
+          // the name, at the title, at the install line and at the import
+          // specifier. Renaming the manifest alone would leave this file
+          // telling a developer to `pnpm add` a package that now exists under
+          // no name at all, which is the same defect one layer out. All three
+          // sites read `packageName` for that reason.
+          //
+          // The install instruction itself is placement-dependent (#15530):
+          // the standalone project is `private` and unpublished, so a registry
+          // install is not something its reader can run — the only instruction
+          // that WORKS from a freshly scaffolded directory is a local link.
+          // The in-repo project is a real workspace sibling under a scope this
+          // repo publishes, so it keeps the install it always had.
+          //
+          // ⛔ Never spell the local reference as a PATH (`pnpm add ../<dir>`,
+          // `link:../<dir>`): the scaffolder knows where this project landed
+          // and knows nothing about where the reader's app is, so any relative
+          // path is a guess about a directory layout it never created — a
+          // reference the newcomer cannot follow, and one
+          // `test/init-template-comments-self-contained.test.ts` refuses on
+          // exactly that ground. `pnpm link --global` names no location at all
+          // and both halves run where the reader already is.
+          const install = standalone
+            ? `This project is \`private\` and carries no npm scope, so there is nothing to
+install from a registry — and \`npm publish\` refuses it until you give it a name
+you own and drop that flag. Link it into your app locally in the meantime:
+
+\`\`\`bash
+# here — your app loads dist/index.js, so build it first
+pnpm install && pnpm build
+pnpm link --global
+
+# in your ObjectStack app
+pnpm link --global ${packageName}
+\`\`\``
+            : `\`\`\`bash
+pnpm add ${packageName}
+\`\`\``;
+          return `# ${packageName}
 
 ObjectStack Plugin: ${name}
 
 ## Installation
 
-\`\`\`bash
-pnpm add @objectstack/plugin-${name}
-\`\`\`
+${install}
 
 ## Usage
 
+The plugin is exported as \`${sanitizeIdentifier(name)}Plugin\` — a JavaScript
+identifier derived from the package name \`${name}\`. Characters that npm allows
+in a package name but JavaScript does not allow in an identifier (a dot, a
+hyphen, an underscore, a leading digit) are folded away, so the exported symbol
+can differ from the name.
+
 \`\`\`typescript
-import { ${toCamelCase(name)}Plugin } from '@objectstack/plugin-${name}';
+import { ${sanitizeIdentifier(name)}Plugin } from '${packageName}';
 
 // Use the plugin in your ObjectStack configuration
 export default {
   plugins: [
-    ${toCamelCase(name)}Plugin,
+    ${sanitizeIdentifier(name)}Plugin,
   ],
 };
 \`\`\`
@@ -321,7 +515,8 @@ export default {
 ## License
 
 MIT
-`,
+`;
+        },
       };
 
       // pnpm does not run dependency build scripts unless they are approved in
@@ -335,136 +530,73 @@ MIT
       return files;
     },
   }),
-
-  example: defineTemplate({
-    description: 'Create a new ObjectStack example application',
-    inRepoDir: EXAMPLE_IN_REPO_DIR,
-    dirName: (name: string) => name,
-    filesFor: (placement: ScaffoldPlacement) => {
-      const standalone = placement === 'standalone';
-      const files: Record<string, FileRenderer> = {
-        'package.json': (name: string) => ({
-          name: `@example/${name}`,
-          version: '0.1.0',
-          private: true,
-          ...(standalone ? { type: 'module' } : {}),
-          description: `ObjectStack Example: ${name}`,
-          ...(standalone ? { engines: { pnpm: SCAFFOLD_PNPM_RANGE } } : {}),
-          scripts: {
-            build: 'objectstack compile',
-            dev: 'objectstack dev',
-            test: 'vitest',
-            typecheck: 'tsc --noEmit',
-          },
-          dependencies: {
-            '@objectstack/spec': objectstackDependencySpec(placement),
-            '@objectstack/cli': objectstackDependencySpec(placement),
-            zod: SCAFFOLD_ZOD_RANGE,
-          },
-          devDependencies: {
-            '@types/node': SCAFFOLD_TYPES_NODE_RANGE,
-            tsx: SCAFFOLD_TSX_RANGE,
-            typescript: SCAFFOLD_TYPESCRIPT_RANGE,
-            vitest: SCAFFOLD_VITEST_RANGE,
-          },
-        }),
-        'objectstack.config.ts': (name: string) => {
-          const namespace = sanitizeNamespace(name);
-          return `import { defineStack } from '@objectstack/spec';
-
-// Barrel imports — add more as you create new type folders
-// import * as objects from './src/objects';
-// import * as actions from './src/actions';
-// import * as apps from './src/apps';
-
-export default defineStack({
-  manifest: {
-    id: 'com.example.${namespace}',
-    namespace: '${namespace}',
-    version: '0.1.0',
-    type: 'app',
-    name: '${name}',
-    description: '${name} example application',
-    // Protocol compatibility range: the metadata-protocol major this app is
-    // authored against. The runtime checks it before it loads anything, so a
-    // runtime outside the range refuses this app at the boundary with the
-    // exact migration command instead of crashing later. Scaffolding stamped
-    // it to match the ObjectStack version you installed — change it when you
-    // deliberately move to a new protocol major, not to silence a mismatch.
-    // Guide: https://objectstack.ai/docs/upgrading
-    engines: { protocol: '^${PROTOCOL_MAJOR}' },
-  },
-  
-  objects: [
-    // Object.values(objects),  // Uncomment after creating src/objects/index.ts
-  ],
-  
-  apps: [
-    // Object.values(apps),     // Uncomment after creating src/apps/index.ts
-  ],
-});
-`;
-        },
-        'README.md': (name: string) => `# ${name} Example
-
-ObjectStack example application: ${name}
-
-## Quick Start
-
-\`\`\`bash
-# Install dependencies
-pnpm install
-
-# Build the configuration
-pnpm build
-
-# Run in development mode
-pnpm dev
-\`\`\`
-
-## Structure
-
-- \`objectstack.config.ts\` - Main configuration file
-- \`dist/objectstack.json\` - Compiled artifact
-
-## Learn More
-
-${
-  standalone
-    ? '- [ObjectStack Documentation](https://objectstack.ai/docs)\n'
-      + '- [CLI Reference](https://objectstack.ai/docs/deployment/cli)\n'
-    : '- [ObjectStack Documentation](../../content/docs)\n- [Examples](../)\n'
-}`,
-        'tsconfig.json': (name: string) =>
-          standalone
-            ? renderScaffoldTsconfig({
-                rootDir: '.',
-                include: SCAFFOLD_TSCONFIG_INCLUDE_WITH_ROOT_CONFIG,
-              })
-            : {
-                extends: rootTsconfigExtends(EXAMPLE_IN_REPO_DIR, name),
-                compilerOptions: {
-                  outDir: 'dist',
-                  rootDir: '.',
-                },
-                include: ['*.ts', 'src/**/*'],
-              },
-      };
-
-      if (standalone) {
-        files['pnpm-workspace.yaml'] = () => renderPnpmWorkspaceYaml();
-      }
-      return files;
-    },
-  }),
 };
+
+/**
+ * Templates that were withdrawn, and what this command says when one is run.
+ *
+ * ⛔ A retired template is NOT an unknown template, and must never be allowed to
+ * fall through to the `Unknown type:` branch below. That branch prints the
+ * surviving roster and nothing else — so the reader of an old doc page, an
+ * older tutorial or a CI script that still names the retired template learns
+ * only that their spelling is off the list, and goes looking for the right
+ * spelling of something that no longer exists. The retirement replaces the
+ * command with a SIGNPOST; a generic failure is the outcome it exists to
+ * prevent.
+ *
+ * `example` (#16483, under the #15531 ruling): the template emitted a subset of
+ * what `os init` writes plus one README, measured by rendering and hashing both
+ * command families' whole emission. Every entry therefore owes both halves —
+ * why the template went, and the command to run instead, spelled so it can be
+ * copied straight out of the terminal.
+ */
+export const RETIRED_TEMPLATES: Record<string, {
+  /** Reason clause completing "`os create <type>` was retired — …". */
+  reason: string;
+  /** Body lines, printed in order; an empty string prints a blank line. */
+  detail: string[];
+}> = {
+  example: {
+    // ⛔ No `#NNNN` in the printed strings below: a runtime message reaches
+    // authors and operators who cannot resolve a tracker id. The card is
+    // named in this comment and in the block above (`pnpm check:doc-authoring`).
+    reason: 'it was a weaker `os init`.',
+    detail: [
+      'It emitted a SUBSET of what `os init` writes, plus one README. The two',
+      'command families were measured file by file and hashed: there was no',
+      'shape this template produced that `os init` does not.',
+      '',
+      'Use `os init` instead — it writes the same tsconfig.json and an',
+      'equivalent objectstack.config.ts, and adds src/objects, a .gitignore and',
+      'the dependency install this template never had:',
+      '',
+      '    os init <name>             ->  a full application project',
+      '    os init <name> -t empty    ->  config only, no src/objects',
+      '',
+      'There is no alias and no deprecation window: `os create example` will not',
+      'come back, so change the command rather than pinning an older CLI.',
+      '',
+      '`os create plugin <name>` is unaffected. It scaffolds the kernel code',
+      '`Plugin` contract, which `os init` does not emit — see the scaffolder',
+      'table on https://objectstack.ai/docs/deployment/cli',
+    ],
+  },
+};
+
+/** The roster an unknown type is shown, derived so a removal cannot outlive it. */
+function availableTypes(): string {
+  return Object.keys(templates).join(', ');
+}
 
 export default class Create extends Command {
   static override description =
-    'Create a new standalone plugin or example project from a built-in template';
+    'Create a new standalone kernel code plugin from a built-in template';
 
   static override args = {
-    type: Args.string({ description: 'Type of project to create (plugin, example)', required: true }),
+    type: Args.string({
+      description: `Type of project to create (${Object.keys(templates).join(', ')})`,
+      required: true,
+    }),
     name: Args.string({ description: 'Name of the project', required: false }),
   };
 
@@ -476,7 +608,7 @@ export default class Create extends Command {
     'in-repo': Flags.boolean({
       default: false,
       description:
-        'Scaffold INSIDE an ObjectStack monorepo checkout (packages/plugins/ or examples/) with '
+        'Scaffold INSIDE an ObjectStack monorepo checkout (packages/plugins/) with '
         + 'workspace:* dependencies. For platform work only — the emitted project installs nowhere else.',
     }),
   };
@@ -487,9 +619,24 @@ export default class Create extends Command {
     console.log(chalk.bold(`\n📦 ObjectStack Project Creator`));
     console.log(chalk.dim(`-------------------------------`));
     
+    // A withdrawn template answers for itself, AHEAD of the roster lookup and
+    // ahead of the "name is required" check below — `os create example` with no
+    // name at all must still reach the signpost rather than be told to supply
+    // an argument to a command that no longer exists. See RETIRED_TEMPLATES.
+    const retired = RETIRED_TEMPLATES[args.type];
+    if (retired) {
+      console.error(chalk.red(`\n❌ \`os create ${args.type}\` was retired — ${retired.reason}`));
+      console.error('');
+      for (const line of retired.detail) {
+        console.error(line ? chalk.dim(`  ${line}`) : '');
+      }
+      console.error('');
+      process.exit(1);
+    }
+
     if (!templates[args.type as keyof typeof templates]) {
       console.error(chalk.red(`\n❌ Unknown type: ${args.type}`));
-      console.log(chalk.dim('Available types: plugin, example'));
+      console.log(chalk.dim(`Available types: ${availableTypes()}`));
       process.exit(1);
     }
     

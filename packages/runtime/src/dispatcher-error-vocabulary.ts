@@ -186,6 +186,27 @@ export type CodeStampShape =
  */
 export type CodeDoor = 'dispatcher' | 'rest' | 'plugin-route' | 'none';
 
+/**
+ * [#16649] `'boot-refusal'` was HERE, and is retired. It named a refusal raised
+ * before any HTTP boundary exists — the CLI rethrows it and aborts — and until
+ * #16404 the ledger ratified that class as not owed a row
+ * (`MONGODB_MULTI_TENANT_UNSUPPORTED` was UNregistered by #8035 on "host boot
+ * matching is not wire vocabulary"). #16404 deleted the exemption (the ledger
+ * is the published face, door or no door), which left the verdict meaning only
+ * "a registration this tree still owes" — #16449 discharged nine of those,
+ * #16649's first half the remaining fourteen, and the second half widened
+ * `check-dispatcher-error-vocabulary`'s face refusal from `packages/spec/src/`
+ * to every published package's `src/`, which is what makes the verdict
+ * unwritable: a row carrying it inside that face is now a
+ * `published-face-unregistered` finding, and the whole scan population lives
+ * inside it. A union member no site can legally carry is a place to park work,
+ * so it comes out with the widening that closed it.
+ *
+ * ⛔ Do not reintroduce it for the next pre-HTTP producer the scan finds. Its
+ * answer under #16404 is the ledger row, and the gate's `unclassified-site`
+ * text says so. REACHABILITY is still recorded — on the ledger row, as the
+ * `door: 'none'` reading each of the twenty-three registrations carries.
+ */
 export type CodeVerdict =
     /**
      * Reaches a wire and the ledger does not know it. Since #9106 the door
@@ -209,13 +230,6 @@ export type CodeVerdict =
      * draw the same line for field-level and diagnostic codes).
      */
     | 'foreign-vocabulary'
-    /**
-     * A refusal raised before any HTTP boundary exists — the CLI rethrows it
-     * and aborts. The ledger's own note ratifies this class by name:
-     * `MONGODB_MULTI_TENANT_UNSUPPORTED` was UNregistered by #8035 for exactly
-     * this reason, and "host boot matching is not wire vocabulary".
-     */
-    | 'boot-refusal'
     /**
      * [#9223] The site builds its code by INTERPOLATION, so no source scan can
      * say which codes it produces or whether they are registered — and a named
@@ -282,6 +296,44 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // future unswept producer lands here as an `unclassified-site` finding and
     // gets a new row (then a spec-lane registration, then the row comes out
     // again). ──
+    //
+    // ── [#16449] Third full cycle, under the #16404 ruling (the ledger is the
+    // published face; every code shipped in `dist` is registered, door or no
+    // door): the nine `boot-refusal` rows measured unregistered on that card's
+    // tree — `OBJECT_OWNERSHIP_CONFLICT` (`@objectstack/objectql`), the seven
+    // `STACK_*` `defineStack` refusals and `PLUGIN_UI_REQUIRED_KEY_MISSING`
+    // (`@objectstack/spec`) — were registered and ratcheted out; the
+    // reachability each row recorded now lives on its ledger row. The
+    // `packages/spec/src/**` can no longer carry one at all —
+    // `check:dispatcher-error-vocabulary` refuses any verdict there but
+    // `foreign-vocabulary` / `runtime-pinned`. ──
+    //
+    // ── [#16649] Fourth cycle, the rest of that class: the fourteen
+    // `boot-refusal` rows that remained after #16449 — the nine
+    // `@objectstack/core` refusals (the three ADR-0130 D4 artifact-package
+    // refusals, the four `MigrationJournalRefusal` codes,
+    // `SERVICE_NOT_REGISTERED`, `PLUGIN_CONTRACT_VIOLATION`),
+    // `MIXED_ARTIFACT_COLLECTION_SHAPE` (`@objectstack/runtime`),
+    // `DUPLICATE_ARTIFACT_OBJECT_NAME` (`@objectstack/objectql`), the two
+    // drivers' `*_MULTI_TENANT_UNSUPPORTED` refusals and
+    // `WALLED_MEMBERSHIP_POLICY_UNDECLARED` (`@objectstack/organizations`) —
+    // were registered under their stamping packages and ratcheted out
+    // (`stale-row`), the reachability each row recorded now carried on its
+    // ledger row.
+    //
+    // ── [#16649, second half] The class is now closed MECHANICALLY rather than
+    // by having been emptied once. `check-dispatcher-error-vocabulary`'s face
+    // refusal, which #16449 could only afford over `packages/spec/src/`, covers
+    // every published package's `src/` — the whole of this scan's population on
+    // this tree (52 sites: 47 published-face, 5 spec-face) — so a site here is
+    // a ledger member, a `foreign-vocabulary` or a `runtime-pinned` template
+    // and nothing else, and the `boot-refusal` verdict that used to park one
+    // between is retired from `CodeVerdict` above. The single carve-out is
+    // `pending-registration` outside `packages/spec/src/`, granted 2026-09-08
+    // and owed to #8846; the gate's header dates it and every run prints how
+    // many rows still stand on it. A future pre-HTTP producer the scan finds
+    // lands here as an `unclassified-site` and its way out is the ledger row,
+    // not a row here. ──
 
     // ── runtime-pinned: an interpolated family, checked where it can be ─────
     {
@@ -499,6 +551,24 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             "into a code this repo owns by accident: it is still the vendor's string on the vendor's " +
             'wire, and a vendor rename turns the pin red rather than silently minting a local code.',
     },
+    {
+        code: 'EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION',
+        file: 'packages/plugins/plugin-auth/src/list-user-invitations-verification.ts',
+        shape: 'objlit',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            "better-auth 1.7.2's own organization-plugin vocabulary — verified in the then-installed " +
+            'vendor at `dist/plugins/organization/error-codes`, spelled there exactly as it is here — ' +
+            'and read at runtime off `plugin.$ERROR_CODES`; the local restatement is only the fallback ' +
+            'for a plugin object carrying no `$ERROR_CODES`, and ' +
+            "`list-user-invitations-verification.test.ts` pins it equal to the vendor's own entry so a " +
+            'vendor rename turns the pin red rather than silently minting a local code. Raised ' +
+            "`APIError.from('FORBIDDEN', verificationRequired)` inside the rebuilt " +
+            '`/organization/list-user-invitations` better-auth endpoint, so it leaves as the ' +
+            "vendor's own `Response` on the vendor's wire — the identical refusal the vendor handler " +
+            'raised unconditionally before the rebuild — and never as a throw this repo classifies.',
+    },
 
     {
         code: 'OS_METADATA_CONVERTED',
@@ -648,469 +718,6 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             + 'that batch\'s input, and the registration is what ratchets it out again.',
     },
 
-    // ── boot refusals: no HTTP boundary exists yet ─────────────────────────
-    // [#9460] The four `MigrationJournalRefusal` codes below arrive through the
-    // same code-carrying-helper shape as `owd_widening_forbidden` — a class
-    // constructor `(code, message)` whose `this.code = code` names the token but
-    // not the value — and land on the OTHER side of the reachability question.
-    {
-        code: 'MONGODB_MULTI_TENANT_UNSUPPORTED',
-        file: 'packages/drivers/driver-mongodb/src/mongodb-tenancy-guard.ts',
-        shape: 'classconst',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'The ledger note names this exact code as the class precedent: registered by #3724, ' +
-            'UNregistered by #8035 because the CLI rethrows it pre-HTTP and aborts. "Host boot matching ' +
-            'is not wire vocabulary." Its throw site and constant deliberately live on.',
-    },
-    // [#16130] The walled-posture membership-policy gate, which arrived in this
-    // repository with `@objectstack/organizations` when ADR-0132 moved the
-    // multi-org runtime to open core. Its row is written here rather than in the
-    // ledger for the same reason as the two rows below it.
-    {
-        code: 'WALLED_MEMBERSHIP_POLICY_UNDECLARED',
-        file: 'packages/plugins/organizations/src/membership-policy-gate.ts',
-        shape: 'classconst',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'Thrown from the plugin\'s own `kernel:bootstrapped` hook, which fires BEFORE ' +
-            '`kernel:listening` opens the socket — so no request is ever served by a deployment this ' +
-            'refuses, and no HTTP boundary exists on the path. `objectstack serve` prints the message ' +
-            'verbatim and exits 1; a multi-kernel host catches it per kernel. The `code` field exists ' +
-            'to let such a host discriminate this refusal from the two neighbouring boot refusals ' +
-            '(a licence failure and an absent package) STRUCTURALLY rather than by string match, ' +
-            'across module instances — which is a host-boot concern, not wire vocabulary. Same class ' +
-            // The precedent is #8035's ruling on the MULTI_TENANT_UNSUPPORTED pair
-            // below — in a comment, not in the string: `pnpm check:doc-authoring`
-            // keeps tracker ids out of prose a reader cannot resolve them from.
-            'and the same reasoning as the MULTI_TENANT_UNSUPPORTED pair below.',
-    },
-    {
-        code: 'MEMORY_MULTI_TENANT_UNSUPPORTED',
-        file: 'packages/drivers/driver-memory/src/memory-tenancy-guard.ts',
-        shape: 'classconst',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'The driver-memory twin of the row above — same guard shape, same MULTI_TENANT_UNSUPPORTED_CODE ' +
-            'constant name, same pre-HTTP abort. Ruled by the same #8035 reasoning.',
-    },
-    {
-        code: 'NO_SUCH_RUN',
-        file: 'packages/core/src/utils/migration-journal.ts',
-        shape: 'codehelper',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'Raised by `MigrationJournalRefusal` when no journal rows exist for the requested run id. ' +
-            'Its only consumers are `packages/cli/src/commands/migrate/resume.ts` and `recorded-by.ts`, ' +
-            'which catch it with `instanceof` and print a message — no HTTP boundary exists on that path, ' +
-            'and grep finds no other consumer in `packages/`. Same class as the two rows above and ruled ' +
-            'by the same #8035 reasoning: a runner refusal the CLI rethrows is not wire vocabulary.',
-    },
-    {
-        code: 'NOT_COMPENSABLE',
-        file: 'packages/core/src/utils/migration-journal.ts',
-        shape: 'codehelper',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'Raised by `MigrationJournalRefusal` when a chunk cannot be compensated, so the runner refuses to resume. ' +
-            'Its only consumers are `packages/cli/src/commands/migrate/resume.ts` and `recorded-by.ts`, ' +
-            'which catch it with `instanceof` and print a message — no HTTP boundary exists on that path, ' +
-            'and grep finds no other consumer in `packages/`. Same class as the two rows above and ruled ' +
-            'by the same #8035 reasoning: a runner refusal the CLI rethrows is not wire vocabulary.',
-    },
-    {
-        code: 'PLAN_CHANGED',
-        file: 'packages/core/src/utils/migration-journal.ts',
-        shape: 'codehelper',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'Raised by `MigrationJournalRefusal` when the plan hash moved under a recorded run. ' +
-            'Its only consumers are `packages/cli/src/commands/migrate/resume.ts` and `recorded-by.ts`, ' +
-            'which catch it with `instanceof` and print a message — no HTTP boundary exists on that path, ' +
-            'and grep finds no other consumer in `packages/`. Same class as the two rows above and ruled ' +
-            'by the same #8035 reasoning: a runner refusal the CLI rethrows is not wire vocabulary.',
-    },
-    {
-        code: 'PREFLIGHT_FAILED',
-        file: 'packages/core/src/utils/migration-journal.ts',
-        shape: 'codehelper',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'Raised by `MigrationJournalRefusal` when the pre-resume checks refuse to start. ' +
-            'Its only consumers are `packages/cli/src/commands/migrate/resume.ts` and `recorded-by.ts`, ' +
-            'which catch it with `instanceof` and print a message — no HTTP boundary exists on that path, ' +
-            'and grep finds no other consumer in `packages/`. Same class as the two rows above and ruled ' +
-            'by the same #8035 reasoning: a runner refusal the CLI rethrows is not wire vocabulary.',
-    },
-    // [#13905] The async service-resolution discriminator; the pre-HTTP reasoning
-    // is #8035's, the same one the migration-journal rows above cite. If a
-    // transport ever answers with this fact it becomes pending-registration and
-    // joins #8846's ledger batch. Tracker ids live in this comment, never in the
-    // `why` string below — that string is runtime prose and reaches readers who
-    // cannot resolve them.
-    {
-        code: 'SERVICE_NOT_REGISTERED',
-        file: 'packages/core/src/service-not-registered.ts',
-        shape: 'assignconst',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'The discriminator that tells "nothing ever registered this service" from "the service IS ' +
-            'registered and could not be built", stamped on the ONE rejection `PluginLoader.getService` ' +
-            'raises for the first fact. Read in-process by the seam that catches the rejection and never ' +
-            'serialized: measured on this tree, the only references to the code are its own module and the ' +
-            '`@objectstack/core` re-export — no door reads it, and both seams that catch `getServiceAsync` ' +
-            'today (`seamOrUndefined` in packages/rest, `resolveService` in packages/runtime) use a bare ' +
-            '`catch` that inspects nothing. It carries no `status` on purpose: the whole point is that the ' +
-            'CONSUMER decides whether an unwired service degrades or refuses, so binding an HTTP status here ' +
-            'would presuppose that decision at the layer that must not make it. Same class as the ' +
-            'migration-journal runner refusals above — a composition fact caught in-process is not wire ' +
-            'vocabulary. If a transport ever ANSWERS with this fact, the verdict becomes ' +
-            'pending-registration and the code belongs in the ledger batch.',
-    },
-    // [#16049] The plugin-contract refusal `kernel.use()` now raises. Same
-    // pre-HTTP class as the rows above; the ruling that created it is the
-    // 2026-09-06 ADR-0049 enforce-or-remove call on `PluginSchema`.
-    {
-        code: 'PLUGIN_CONTRACT_VIOLATION',
-        file: 'packages/core/src/plugin-loader.ts',
-        shape: 'assignconst',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'Raised by `PluginLoader.validatePluginContract` when a plugin object does not satisfy the '
-            + 'declared `PluginSchema` on any of the EIGHT keys that enforcement covers — `id`, `type`, '
-            + '`staticPath`, `slug`, `default`, `description`, `author`, `homepage` — including an explicit '
-            + '`null` on any of them, since all eight are `.optional()` and admit absence but not `null`. '
-            + '`version` is excluded from the enforcement, and unknown keys are not refused at all (the '
-            + 'schema carries no `.strict()`), so the narrowing stops at those eight. It is '
-            + 'raised while the kernel is still registering plugins, before bootstrap and therefore before '
-            + 'any HTTP boundary exists: `ObjectKernel.use()` re-wraps it into a fresh `Error` that the host '
-            + 'rethrows and the process aborts on, so no door can answer with it and no door can demote it. '
-            + 'Same class as the migration-journal runner refusals and the service-resolution discriminator '
-            + 'above, ruled by the same reasoning those rows cite: a composition fact raised pre-HTTP is not wire '
-            + 'vocabulary. The code is repeated at the head of the message because that re-wrap keeps only '
-            + '`message`. If a transport ever ANSWERS with this fact, the verdict becomes '
-            + 'pending-registration and the code belongs in the ledger batch.',
-    },
-    // [ADR-0130 D4] The artifact load path's three wrapper refusals, added with the
-    // N-package load path itself. The pre-HTTP reasoning is the one the rows above
-    // cite; what is specific to these three is the second half recorded in each `why`
-    // — the one door that can reach them catches them and answers with its own
-    // registered code, so they are not demoted at a door, they never reach one.
-    {
-        code: 'INVALID_ARTIFACT_PACKAGES',
-        file: 'packages/core/src/artifact-packages.ts',
-        shape: 'codehelper',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'The refusal for an artifact whose `packages` key is present but not an array. Raised by ' +
-            '`resolveArtifactPackageOrder`, which the `manifest` service calls on every `register()` ' +
-            '(ADR-0130 D4/D5). Measured on this tree, that service has three callers and none of them puts ' +
-            'this code on a wire: `packages/runtime/src/app-plugin.ts` registers at boot inside plugin init, ' +
-            'where a throw aborts boot before any HTTP boundary exists; the rehydrate loop in ' +
-            '`packages/cloud-connection/src/marketplace-install-local-plugin.ts` catches per entry and logs; ' +
-            'and the HTTP install route in that same file catches and answers with its OWN registered ' +
-            '`PLUGIN_REGISTER_FAILED` at 422, interpolating this refusal\'s MESSAGE into that envelope. So the ' +
-            'code reaches a reader only inside a message string, never as `error.code` — not demoted at a ' +
-            'door, absent from the wire entirely. Its `status: 422` is the ADR-0112 envelope shape this ' +
-            'repo\'s rejection tests assert on, not evidence of a door. If an install door ever answers with ' +
-            'this code itself, the verdict becomes pending-registration and it belongs in the ledger batch.'
-    },
-    {
-        code: 'INVALID_ARTIFACT_PACKAGE_ENTRY',
-        file: 'packages/core/src/artifact-packages.ts',
-        shape: 'codehelper',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'The refusal for a `packages[]` element that is not a `{ manifest: … }` wrapper, or whose ' +
-            'manifest carries no usable package id. Raised by `resolveArtifactPackageOrder`, which the ' +
-            '`manifest` service calls on every `register()` (ADR-0130 D4/D5). Measured on this tree, that ' +
-            'service has three callers and none of them puts this code on a wire: ' +
-            '`packages/runtime/src/app-plugin.ts` registers at boot inside plugin init, where a throw aborts ' +
-            'boot before any HTTP boundary exists; the rehydrate loop in ' +
-            '`packages/cloud-connection/src/marketplace-install-local-plugin.ts` catches per entry and logs; ' +
-            'and the HTTP install route in that same file catches and answers with its OWN registered ' +
-            '`PLUGIN_REGISTER_FAILED` at 422, interpolating this refusal\'s MESSAGE into that envelope. So the ' +
-            'code reaches a reader only inside a message string, never as `error.code` — not demoted at a ' +
-            'door, absent from the wire entirely. Its `status: 422` is the ADR-0112 envelope shape this ' +
-            'repo\'s rejection tests assert on, not evidence of a door. If an install door ever answers with ' +
-            'this code itself, the verdict becomes pending-registration and it belongs in the ledger batch.'
-    },
-    {
-        code: 'DUPLICATE_ARTIFACT_PACKAGE',
-        file: 'packages/core/src/artifact-packages.ts',
-        shape: 'codehelper',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'The refusal for one artifact declaring the same package id twice — raised rather than ' +
-            'deduplicated so a dropped body cannot go unnoticed. Raised by `resolveArtifactPackageOrder`, ' +
-            'which the `manifest` service calls on every `register()` (ADR-0130 D4/D5). Measured on this ' +
-            'tree, that service has three callers and none of them puts this code on a wire: ' +
-            '`packages/runtime/src/app-plugin.ts` registers at boot inside plugin init, where a throw aborts ' +
-            'boot before any HTTP boundary exists; the rehydrate loop in ' +
-            '`packages/cloud-connection/src/marketplace-install-local-plugin.ts` catches per entry and logs; ' +
-            'and the HTTP install route in that same file catches and answers with its OWN registered ' +
-            '`PLUGIN_REGISTER_FAILED` at 422, interpolating this refusal\'s MESSAGE into that envelope. So the ' +
-            'code reaches a reader only inside a message string, never as `error.code` — not demoted at a ' +
-            'door, absent from the wire entirely. Its `status: 422` is the ADR-0112 envelope shape this ' +
-            'repo\'s rejection tests assert on, not evidence of a door. If an install door ever answers with ' +
-            'this code itself, the verdict becomes pending-registration and it belongs in the ledger batch.'
-    },
-    // [ADR-0130 D4 / option B] The reader half's own refusal, raised where the
-    // three above are merely propagated. Same pre-HTTP reasoning; what is
-    // specific to it is recorded in its `why`.
-    {
-        code: 'MIXED_ARTIFACT_COLLECTION_SHAPE',
-        file: 'packages/runtime/src/artifact-collections.ts',
-        shape: 'codehelper',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'The refusal for one collection key declared in the ARRAY form by one source and in the ' +
-            'RECORD form by another inside the same artifact — `functions` is ' +
-            '`z.union([z.record(…), z.array(…)])` and `datasources` is read in either shape, so both ' +
-            'sides can pass `AssembledPackageBodySchema` and still disagree. Raised by ' +
-            '`resolveArtifactCollections`, whose every call site ships in this package and runs BEFORE ' +
-            'any HTTP boundary exists: `app-plugin.ts` resolves inside plugin init (a throw aborts boot), ' +
-            '`load-artifact-bundle.ts` and `standalone-stack.ts` resolve while the artifact is being ' +
-            'loaded into a stack that has no transport yet, and `resolve-project-database.ts` opens the ' +
-            'artifact file to pick a database before a kernel exists at all. The function is not exported ' +
-            'from `packages/runtime/src/index.ts`, so no package outside this one can reach it to put the ' +
-            'code on a wire. Its `status: 422` is the ADR-0112 envelope shape this repo\'s rejection ' +
-            'tests assert on, not evidence of a door. If an install or serve door ever answers with this ' +
-            'code itself, the verdict becomes pending-registration and it belongs in the ledger batch.'
-    },
-    {
-        code: 'DUPLICATE_ARTIFACT_OBJECT_NAME',
-        file: 'packages/objectql/src/registry.ts',
-        // [#16159] `classconst`, not `classfield`, since the literal became the
-        // exported `DUPLICATE_ARTIFACT_OBJECT_NAME_CODE` constant in the producer. The VALUE is
-        // byte-identical and the scanner resolves the constant back to it; only the
-        // spelling the scan matches on moved. The verdict below is untouched.
-        shape: 'classconst',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0130 D3 — the refusal for two packages delivered by ONE release artifact both claiming ' +
-            'the same object name, raised by `SchemaRegistry.installPackage` ahead of every mutation it ' +
-            'makes (and therefore ahead of all DDL). Its reachability is narrower than the method it lives ' +
-            'in: it can only fire when `installPackage` is handed an artifact install scope naming a SECOND ' +
-            'package, and measured on this tree exactly one caller builds one — the `manifest` service\'s ' +
-            '`register()` in `packages/objectql/src/plugin.ts`, the ADR-0130 D4/D5 load path. The two ' +
-            'HTTP-facing install sites pass no scope at all and so cannot raise it: ' +
-            '`packages/metadata-protocol/src/protocol.ts` `installPackage(manifest, request.settings)` and ' +
-            '`packages/runtime/src/domains/packages.ts` `installPackage(manifest, body.settings)`. Through ' +
-            'the load path the reading is the one the three sibling ADR-0130 codes above already record, ' +
-            're-measured here: boot-time `manifest.register()` callers (`packages/runtime/src/app-plugin.ts`, ' +
-            'the platform app plugins) register inside plugin init, where a throw aborts boot before any ' +
-            'HTTP boundary exists; the rehydrate loop in ' +
-            '`packages/cloud-connection/src/marketplace-install-local-plugin.ts` catches per entry and logs; ' +
-            'and the import route in that same file catches and answers with its OWN registered ' +
-            '`PLUGIN_REGISTER_FAILED` at 422, interpolating this refusal\'s MESSAGE into that envelope. So ' +
-            'the code reaches a reader only inside a message string, never as `error.code`. Its ' +
-            '`status: 422` is the ADR-0112 envelope shape this repo\'s rejection tests assert on, not ' +
-            'evidence of a door. If an install door ever answers with this code itself, the verdict becomes ' +
-            'pending-registration and it belongs in the ledger batch.'
-    },
-    {
-        code: 'OBJECT_OWNERSHIP_CONFLICT',
-        file: 'packages/objectql/src/registry.ts',
-        // [#16159] `classconst`, not `classfield`, since the literal became the
-        // exported `OBJECT_OWNERSHIP_CONFLICT_CODE` constant in the producer. The VALUE is
-        // byte-identical and the scanner resolves the constant back to it; only the
-        // spelling the scan matches on moved. The verdict below is untouched.
-        shape: 'classconst',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0029 D3 — the refusal for a package claiming `own` on an object name a DIFFERENT package ' +
-            'already owns, raised by `SchemaRegistry.registerObject` (the ONE spelling of this refusal — ' +
-            'the ADR-0029 D9 §6.1 late-install branch beside it re-classifies a tenant-authored ' +
-            'sitting owner and refuses nothing). Measured on this tree, every path to it either aborts boot ' +
-            'or catches below any door. `ObjectQL.registerApp` (`packages/objectql/src/engine.ts`) lets it ' +
-            'propagate to `ManifestService.register()` (`packages/objectql/src/plugin.ts`), whose callers ' +
-            'are the population the three ADR-0130 rows above record: boot-time `manifest.register()` ' +
-            'inside plugin init (`packages/runtime/src/app-plugin.ts`, the platform app plugins, the ' +
-            'service plugins), where a throw aborts boot before any HTTP boundary exists; the rehydrate ' +
-            'loop in `packages/cloud-connection/src/marketplace-install-local-plugin.ts`, which catches per ' +
-            'entry and logs; and the import route in that same file, which catches and answers with its ' +
-            'OWN registered `PLUGIN_REGISTER_FAILED` at 422, interpolating this refusal\'s MESSAGE into ' +
-            'that envelope. Every other caller catches it in-process: `ObjectQL.registerPlugin` ' +
-            '(`logger.warn`), the `ObjectQLPlugin` metadata bridge\'s reload ingest and `subscribe(\'object\')` ' +
-            'handler (`logger.warn`), and `metadata-protocol`\'s `applyObjectRegistryMutation` ' +
-            '(`console.warn`) and `loadMetaFromDb` (the per-record `errors` count). The two HTTP install ' +
-            'sites — `POST /packages` in `packages/runtime/src/domains/packages.ts` and ' +
-            '`protocol.installPackage` — call `SchemaRegistry.installPackage`, which records the package ' +
-            'and never calls `registerObject`, so neither can raise it; `MetadataFacade.register(\'object\')` ' +
-            'would propagate it, and has no production instantiation. So the code reaches a reader only ' +
-            'inside a message string, never as `error.code`. Its `status: 422` is the ADR-0112 envelope ' +
-            'shape this repo\'s rejection tests assert on, not evidence of a door. If a door ever answers ' +
-            'with this code itself, the verdict becomes pending-registration and it belongs in the ledger ' +
-            'batch.'
-    },
-    {
-        code: 'STACK_CROSS_REFERENCE_INVALID',
-        file: 'packages/spec/src/stack.zod.ts',
-        shape: 'classfield',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0130 — the AUTHORING gate\'s cross-reference refusal, raised by `defineStack` when a ' +
-            'stack\'s items name objects the stack does not define. One raise site for the whole rule ' +
-            'family: `validateCrossReferences` returns every finding as a `string[]` and `defineStack` ' +
-            'throws the collected set once, so the code names the family and the individual classes ride ' +
-            'the error\'s `issues` field (the five REFUSED ADR-0130 matrix classes — action `objectName`, ' +
-            'view `data.object`, permission-set `objects`, seed dataset `object`, import mapping ' +
-            '`targetObject` — plus the `hooks[].object` rule, and the wider duplicate-action-key, ' +
-            'global-`update`-action and mapping `javascript`-transform findings the same aggregate ' +
-            'carries). Before this envelope it threw a bare `Error`, so those classes were separable only ' +
-            'by message text. ⭐ MEASURED, not inferred from the call graph: `defineStack` is an ' +
-            'authoring/boot-time entry point, and no HTTP domain handler calls it. Every non-test ' +
-            'occurrence of `defineStack` under `packages/runtime/src` and `packages/rest/src` (25 of them) ' +
-            'is a docstring or comment; the shipped callers are the CLI (`os validate`, `os build`) and ' +
-            'the `os serve` / `os migrate` host configs and `DevPlugin`, which load a stack module at ' +
-            'boot, where a throw aborts before any HTTP boundary exists. The two HTTP install sites — ' +
-            '`POST /packages` in `packages/runtime/src/domains/packages.ts` and `protocol.installPackage` ' +
-            '— call `SchemaRegistry.installPackage`, which never calls `defineStack`. So the code reaches ' +
-            'a reader only inside a message string, never as `error.code`. Its `status: 422` is the ' +
-            'ADR-0112 envelope shape this repo\'s rejection tests assert on, not evidence of a door. If a ' +
-            'door ever answers with this code itself, the verdict becomes pending-registration and it ' +
-            'belongs in the ledger batch.'
-    },
-    // ── [#15963] the six remaining `defineStack` refusals, one code each ──
-    //
-    // Same raiser, same reachability and same verdict as the
-    // STACK_CROSS_REFERENCE_INVALID row above, which was the ONE of seven
-    // `defineStack` refusal sites carrying an envelope. One row per code
-    // rather than one shared `STACK_VALIDATION_FAILED`: this `boot-refusal`
-    // class is already at one-row-per-refusal granularity (14 rows before
-    // these six), and the cross-reference row is an instance of it, not an
-    // exception. The reachability measurement was RE-TAKEN on the tree these
-    // landed against and is recorded once, on the STACK_SCHEMA_INVALID row;
-    // the five rows after it cite that reading by its numbers.
-    {
-        code: 'STACK_SCHEMA_INVALID',
-        file: 'packages/spec/src/stack.zod.ts',
-        shape: 'classfield',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0112 — the AUTHORING gate\'s SCHEMA refusal: `ObjectStackDefinitionSchema.safeParse` failed ' +
-            'inside `defineStack`, thrown as `StackSchemaInvalidError` with the zod issues on `issues`. ' +
-            'Its own arm rather than a reuse, on a reading taken before it was written: `packages/spec` ' +
-            'has no zod-failure envelope to reuse (`formatZodError` / `safeParsePretty` return prose; no ' +
-            '`extends Error` there wraps a `ZodError`); the ledger\'s two zod-shaped refusals are both ' +
-            'spelled `*_SCHEMA_INVALID` — `METADATA_SCHEMA_INVALID` (metadata-core\'s `SchemaValidationError`, ' +
-            'the `issues`-carrying precedent; nothing in the tree assigns it a status) and ' +
-            '`FLOW_INPUT_SCHEMA_INVALID` (422 in `packages/runtime/src/flow-dispatch-status.ts`) — and the ' +
-            'zod-shaped refusal `metadata-protocol` actually stamps at 422 is `INVALID_METADATA`; ' +
-            'and the two other channels a zod failure travels on — `400 VALIDATION_ERROR` (request ' +
-            'syntax) and `VALIDATION_FAILED` + `fields[]` (record validation, which ' +
-            '`validationFailureDetails` duck-types on `name === \'ValidationError\'`) — would each file an ' +
-            'authored stack as something it is not. ⭐ MEASURED on the tree it landed against: every ' +
-            'non-test occurrence of `defineStack` under `packages/runtime/src` and `packages/rest/src` ' +
-            '(33 of them) is a docstring, a comment or this table\'s own prose — zero call sites. The ' +
-            'shipped callers are the CLI (`os validate`, `os build`) and the `os serve` / `os migrate` ' +
-            'host configs and `DevPlugin`, which load a stack module at boot, where a throw aborts before ' +
-            'any HTTP boundary exists; the two HTTP install sites call `SchemaRegistry.installPackage`, ' +
-            'which never calls `defineStack`. So the code reaches a reader only inside a message string, ' +
-            'never as `error.code`; its `status: 422` is the ADR-0112 envelope shape this repo\'s ' +
-            'rejection tests assert on, not evidence of a door. If a door ever answers with this code ' +
-            'itself, the verdict becomes pending-registration and it belongs in the ledger batch.'
-    },
-    {
-        code: 'STACK_CAPABILITY_UNKNOWN',
-        file: 'packages/spec/src/stack.zod.ts',
-        shape: 'classfield',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0112 — `defineStack`\'s capability refusal, raised through `validateKnownCapabilities` when ' +
-            '`requires` names a token no runtime provides; one `issues` entry per ' +
-            'distinct unknown token, thrown as `StackCapabilityUnknownError`. Reachability is the ' +
-            'STACK_SCHEMA_INVALID reading on the same tree: 33 non-test `defineStack` occurrences under ' +
-            '`packages/runtime/src` + `packages/rest/src`, zero call sites; callers are the CLI and the ' +
-            'boot-time host configs, where a throw aborts before any HTTP boundary exists. The code ' +
-            'reaches a reader only inside a message string; `status: 422` is envelope shape, not a door. ' +
-            'If a door ever answers with it, the verdict becomes pending-registration.'
-    },
-    {
-        code: 'STACK_NAMESPACE_PREFIX_INVALID',
-        file: 'packages/spec/src/stack.zod.ts',
-        shape: 'classfield',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0112 — `defineStack`\'s namespace-prefix refusal, raised through `validateNamespacePrefix` ' +
-            'when an object\'s name lacks the `manifest.namespace` prefix; one `issues` entry per object, ' +
-            'the writing-style hint kept in the message only, thrown as `StackNamespacePrefixInvalidError`. ' +
-            'Reachability is the STACK_SCHEMA_INVALID reading on the same tree: 33 non-test `defineStack` ' +
-            'occurrences under `packages/runtime/src` + `packages/rest/src`, zero call sites; callers are ' +
-            'the CLI and the boot-time host configs, where a throw aborts before any HTTP boundary exists. ' +
-            'The code reaches a reader only inside a message string; `status: 422` is envelope shape, not ' +
-            'a door. If a door ever answers with it, the verdict becomes pending-registration.'
-    },
-    {
-        code: 'STACK_SINGLE_APP_VIOLATION',
-        file: 'packages/spec/src/stack.zod.ts',
-        shape: 'classfield',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0112 — `defineStack`\'s single-app refusal, raised through `validateSingleApp` when an `app` ' +
-            'package declares more than one app (the banned "suite contains apps" shape, ADR-0019 D3); ' +
-            'thrown as `StackSingleAppViolationError`. Reachability is the STACK_SCHEMA_INVALID reading on ' +
-            'the same tree: 33 non-test `defineStack` occurrences under `packages/runtime/src` + ' +
-            '`packages/rest/src`, zero call sites; callers are the CLI and the boot-time host configs, ' +
-            'where a throw aborts before any HTTP boundary exists. The code reaches a reader only inside ' +
-            'a message string; `status: 422` is envelope shape, not a door. If a door ever answers with ' +
-            'it, the verdict becomes pending-registration.'
-    },
-    {
-        code: 'STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED',
-        file: 'packages/spec/src/stack.zod.ts',
-        shape: 'classfield',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0112 — `defineStack`\'s hierarchy-scope capability refusal, raised through ' +
-            '`validateHierarchyScopeCapability` when a permission grant uses a HIERARCHY scope while ' +
-            '`requires` omits `hierarchy-security` (ADR-0057 — the declared-capability class that fails ' +
-            'CLOSED); one `issues` entry per grant, thrown as `StackHierarchyScopeCapabilityRequiredError`. ' +
-            'Reachability is the STACK_SCHEMA_INVALID reading on the same tree: 33 non-test `defineStack` ' +
-            'occurrences under `packages/runtime/src` + `packages/rest/src`, zero call sites; callers are ' +
-            'the CLI and the boot-time host configs, where a throw aborts before any HTTP boundary exists. ' +
-            'The code reaches a reader only inside a message string; `status: 422` is envelope shape, not ' +
-            'a door. If a door ever answers with it, the verdict becomes pending-registration.'
-    },
-    {
-        code: 'STACK_TRIGGER_CAPABILITY_REQUIRED',
-        file: 'packages/spec/src/stack.zod.ts',
-        shape: 'classfield',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0112 — `defineStack`\'s trigger capability refusal, raised through ' +
-            '`validateTriggerCapability` when an auto-launched flow is declared while `requires` omits ' +
-            '`triggers` (the declared-capability class that fails SILENT); one `issues` entry per ' +
-            'flow, thrown as `StackTriggerCapabilityRequiredError`. Reachability is the ' +
-            'STACK_SCHEMA_INVALID reading on the same tree: 33 non-test `defineStack` occurrences under ' +
-            '`packages/runtime/src` + `packages/rest/src`, zero call sites; callers are the CLI and the ' +
-            'boot-time host configs, where a throw aborts before any HTTP boundary exists. The code ' +
-            'reaches a reader only inside a message string; `status: 422` is envelope shape, not a door. ' +
-            'If a door ever answers with it, the verdict becomes pending-registration.'
-    },
     // ── [#13233] field-level catalogs, reached by the OBJECT-LITERAL helper ──
     //
     // The 29 rows below are the whole verdict cost of widening `codehelper` to

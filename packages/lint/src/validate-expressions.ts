@@ -139,7 +139,17 @@ function buildFieldIndex(objects: AnyRec[]): Map<string, string[]> {
     if (!name) continue;
     const fields = obj.fields;
     let names: string[] = [];
-    if (Array.isArray(fields)) names = fields.map(f => (f as AnyRec).name).filter((n): n is string => typeof n === 'string');
+    // The LIST shape is read through `recordsOf` (#15742). `Array.isArray`
+    // proves the list, never its members: an empty item in a YAML `fields:`
+    // list deserialises to `null`, and the cast this replaced dereferenced it
+    // before the `.filter` two calls later could drop it. The two sibling
+    // readers below already guard (`buildFieldTypeIndex` reads `(f)?.name`,
+    // `fieldEntries` filters before mapping) and both drop such a member in
+    // SILENCE — it carries no author-written name, so there is nothing to
+    // report about it — which is what `recordsOf` does for the array shape too.
+    // The MAP shape keeps `Object.keys`: there the author's KEY is the field
+    // name, which is exactly what this "did you mean?" index needs.
+    if (Array.isArray(fields)) names = recordsOf(fields).map(f => f.name).filter((n): n is string => typeof n === 'string');
     else if (fields && typeof fields === 'object') names = Object.keys(fields as AnyRec);
     // Injected columns come second, de-duplicated by insertion order: a DECLARED
     // `owner_id` is the author's field (the registry lets it win), so the
@@ -1114,7 +1124,11 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   // ── Flows ──────────────────────────────────────────────────────────
   for (const flow of recordsOf(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
-    const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
+    // `Array.isArray` proves the LIST, never its MEMBERS — the sentence #15742
+    // removed from one reader below in this same file. A YAML `nodes:` item
+    // left empty deserialises to `null`, and `nodes.find(n => n.type === …)` on
+    // the very next line dereferenced it (#15793).
+    const nodes = recordsOf(flow.nodes);
     // The record-change target object — `record.*` refs resolve against it.
     const startNode = nodes.find(n => n.type === 'start');
     const startCfg = (startNode?.config ?? {}) as AnyRec;
@@ -1127,7 +1141,16 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     // `objectstack validate` and shipped. This is the author-time half of the
     // same traversal the engine's registration pass now does; `scope` names the
     // region so the located message still points at one edge.
-    const graphs = collectFlowGraphs(flow as { nodes?: FlowNodeParsed[] });
+    //
+    // Handed the COERCED `nodes`, never `flow` raw (#15793). `collectFlowGraphs`
+    // declares its input as `FlowNodeParsed[]` — already-parsed nodes — and is
+    // transparent about members: it forwards the caller's array and re-exposes
+    // that same object. So it neither admits nor rejects a non-record member;
+    // passing raw authored metadata is calling it OUT OF CONTRACT, and it then
+    // dereferences `node.config` in its own region walk. Coercing only the
+    // local `nodes` above does not fix the crash, it relocates it into
+    // `packages/spec` — measured. Contract-first the caller is what changes.
+    const graphs = collectFlowGraphs({ ...flow, nodes } as { nodes?: FlowNodeParsed[] });
 
     // [#14089] The flattened-scope shadowing pass needs the flow's COMPLETE
     // variable set before any condition is judged, so it is a separate walk over
@@ -1192,7 +1215,13 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
 
     for (const graph of graphs) {
       const at = graph.scope ? `flow '${flowName}' · ${graph.scope}` : `flow '${flowName}'`;
-      for (const node of graph.nodes as unknown as AnyRec[]) {
+      // `recordsOf`, not `as unknown as AnyRec[]` (#15793). A NESTED region's
+      // node list is only `Array.isArray`-checked by `collectFlowGraphs` before
+      // it becomes a graph, so this list carries the producer's word about its
+      // members and not a check. The top-level graph is clean by the coercion
+      // at the call site above; this is the same decision made once more where
+      // that guarantee stops, through the file's one home for it.
+      for (const node of recordsOf(graph.nodes)) {
         const cfg = (node.config ?? {}) as AnyRec;
         const nodeCondWhere = `${at} · node '${node.id}' (${node.type}) condition`;
         if (!checkStructuralCondition(nodeCondWhere, cfg.condition).refused) {

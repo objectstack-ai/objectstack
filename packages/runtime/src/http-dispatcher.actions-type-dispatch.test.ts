@@ -194,19 +194,47 @@ describe('REST /actions — flow dispatch (#3915)', () => {
         expect((execute.mock.calls[0]?.[1] as any).params.recordId).toBe('explicit_override');
     });
 
-    it('seeds `recordId` from the URL even when the record never loaded', async () => {
-        // New-record / unreadable-record invocations pass an empty record; the
-        // flow still needs the id the caller named.
+    it('[#16370] a ROW-SCOPED flow whose record never loaded is REFUSED — no run is created', async () => {
+        // ⚠️ This case used to assert the opposite: that the id was seeded and
+        // the flow started anyway ("new-record / unreadable-record invocations
+        // pass an empty record"). That conflated two shapes. A NEW-RECORD
+        // invocation names no `recordId` and still attempts no load — untouched
+        // below. An UNREADABLE one names a row the caller's own scope did not
+        // deliver, and starting a persisted run on it is the defect #16370 was
+        // filed for: MCP `run_action` answered `ok: true` with a `runId` for a
+        // row `get_record` calls not-found in the same session.
         const execute = vi.fn(async () => ({ success: true }));
         const { dispatcher } = makeDispatcher({
             objectDef: { name: 'crm_lead', actions: [flowAction] },
             automation: { execute },
-            // no `record` → the best-effort load returns nothing
+            // no `record` → the caller-scope load delivers nothing
         });
 
-        await dispatcher.handleActions('/crm_lead/convert_lead/lead_404', 'POST', {}, ctxFor());
+        const res = await dispatcher.handleActions('/crm_lead/convert_lead/lead_404', 'POST', {}, ctxFor());
+        const response: any = res.response;
 
-        expect((execute.mock.calls[0]?.[1] as any).params.recordId).toBe('lead_404');
+        expect(response.status).toBe(404);
+        expect(response.body.error.code).toBe('RECORD_NOT_FOUND');
+        // ⛔ The half that makes the status mean anything.
+        expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('a NEW-RECORD invocation (no recordId) still dispatches — nothing to seed, nothing to refuse', async () => {
+        // The other half of the shape the case above used to conflate: no id
+        // was named, so no load is attempted, so there is no verdict to consume
+        // and the flow starts exactly as it always did.
+        const execute = vi.fn(async () => ({ success: true }));
+        const { dispatcher } = makeDispatcher({
+            objectDef: { name: 'crm_lead', actions: [flowAction] },
+            automation: { execute },
+        });
+
+        const res = await dispatcher.handleActions('/crm_lead/convert_lead', 'POST', {}, ctxFor());
+        const response: any = res.response;
+
+        expect(response.status).toBe(200);
+        expect(execute).toHaveBeenCalledTimes(1);
+        expect((execute.mock.calls[0]?.[1] as any).params.recordId).toBeUndefined();
     });
 
     it('forwards the caller identity so a `runAs: user` flow enforces RLS as the invoker', async () => {

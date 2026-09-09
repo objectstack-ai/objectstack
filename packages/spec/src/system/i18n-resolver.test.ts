@@ -902,6 +902,7 @@ describe('resolveMetadataFormLabels', () => {
 import {
   translateApp,
   translateDashboard,
+  globalFilterKey,
   resolveViewLabel as _resolveViewLabel,
   type DashboardLike,
 } from './i18n-resolver';
@@ -1123,6 +1124,120 @@ describe('translateDashboard', () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 import { translatePage } from './i18n-resolver';
+
+describe('translateDashboard — global filters (#16772)', () => {
+  const bundle: TranslationBundle = {
+    'zh-CN': {
+      dashboards: {
+        contract_overview: {
+          widgets: { by_category: { title: '按类别' } },
+          globalFilters: {
+            // Keyed by `name` when the filter authors one…
+            dept: { label: '申请部门', options: { legal: '法务', sales: '销售' } },
+            // …and by `field` when it does not (the schema's declared default).
+            category: { label: '类别', options: { '1': '服务', 'true': '有效' } },
+            // CONTROL: this entry is keyed by the FIELD of a filter that
+            // authors a `name`, so it must never be read.
+            department: { label: 'MUST-NOT-APPLY' },
+          },
+        },
+      },
+    },
+    en: {
+      dashboards: {
+        contract_overview: {
+          globalFilters: { dept: { options: { ops: 'Operations' } } },
+        },
+      },
+    },
+  };
+
+  const dashboard = () => ({
+    name: 'contract_overview',
+    label: 'Contract Overview',
+    widgets: [{ id: 'by_category', title: 'By category' }],
+    globalFilters: [
+      {
+        name: 'dept', field: 'department', type: 'select', label: 'Requesting Department',
+        options: [
+          { value: 'legal', label: 'Legal' },
+          { value: 'sales', label: 'Sales' },
+          { value: 'ops', label: 'Ops' },
+          { value: 'hr', label: 'HR' },
+        ],
+      },
+      {
+        field: 'category', type: 'select', label: { en: 'Category', 'zh-CN': '类别（内联）' },
+        options: [{ value: 1, label: 'Services' }, { value: true, label: 'Active' }, { value: 'x', label: 'Untouched' }],
+      },
+      { field: 'owner', type: 'lookup', label: 'Owner', optionsFrom: { object: 'user', valueField: 'id', labelField: 'name' } },
+    ],
+  });
+
+  it('translates the filter label and its static option labels, keyed by `name`', () => {
+    // The chain is the deployment's DECLARED one (#14882): `en` is consulted
+    // because the caller names it, never by default.
+    const out = translateDashboard(dashboard(), bundle, { locale: 'zh-CN', fallbackChain: ['en'] });
+    expect(out.globalFilters![0].label).toBe('申请部门');
+    expect(out.globalFilters![0].options).toEqual([
+      { value: 'legal', label: '法务' },
+      { value: 'sales', label: '销售' },
+      // Resolved key by key along the declared chain — `ops` comes from `en`.
+      { value: 'ops', label: 'Operations' },
+      // No entry anywhere on the chain: authored label kept.
+      { value: 'hr', label: 'HR' },
+    ]);
+    // The widget half keeps working alongside.
+    expect(out.widgets![0].title).toBe('按类别');
+  });
+
+  it('keys a filter that authors no `name` by its `field`, and spells number/boolean option values as strings', () => {
+    const out = translateDashboard(dashboard(), bundle, { locale: 'zh-CN' });
+    const category = out.globalFilters![1];
+    // A bundle entry wins over an authored inline locale map, as everywhere
+    // else on this surface.
+    expect(category.label).toBe('类别');
+    expect(category.options).toEqual([
+      { value: 1, label: '服务' },
+      { value: true, label: '有效' },
+      { value: 'x', label: 'Untouched' },
+    ]);
+  });
+
+  it('CONTROL: a filter with a `name` is not reachable by its `field`, and an unaddressed filter keeps its identity', () => {
+    const doc = dashboard();
+    const out = translateDashboard(doc, bundle, { locale: 'zh-CN' });
+    expect(out.globalFilters![0].label).not.toBe('MUST-NOT-APPLY');
+    // `owner` has no entry: the very same object comes back, and `optionsFrom`
+    // is carried through untouched.
+    expect(out.globalFilters![2]).toBe(doc.globalFilters[2]);
+    // The input is never mutated.
+    expect(doc.globalFilters[0].label).toBe('Requesting Department');
+    expect(doc.globalFilters[0].options?.[0]?.label).toBe('Legal');
+  });
+
+  it('CONTROL: leaves `globalFilters` off the copy when nothing resolved, and invents none on a dashboard without filters', () => {
+    const filters = dashboard().globalFilters;
+    const untouched = translateDashboard(
+      { name: 'other_dashboard', globalFilters: filters },
+      bundle,
+      { locale: 'zh-CN' },
+    );
+    // Nothing resolved ⇒ the authored array itself is carried through, not a
+    // rebuilt copy of it.
+    expect(untouched.globalFilters).toBe(filters);
+
+    const noFilters = translateDashboard({ name: 'contract_overview', label: 'X' }, bundle, { locale: 'zh-CN' });
+    expect('globalFilters' in noFilters).toBe(false);
+  });
+
+  it('exports the key derivation the extractor shares — `name`, else `field`, else nothing', () => {
+    expect(globalFilterKey({ name: 'dept', field: 'department' })).toBe('dept');
+    expect(globalFilterKey({ field: 'category' })).toBe('category');
+    expect(globalFilterKey({ name: '', field: 'category' })).toBe('category');
+    expect(globalFilterKey({})).toBeUndefined();
+  });
+});
 
 describe('translatePage', () => {
   const bundle: TranslationBundle = {
@@ -1368,26 +1483,93 @@ describe('translatePage', () => {
       expect(byId(out, 'ai_briefing').properties.description).toBe('Open the assistant panel.');
     });
 
-    it('lets the id-addressed route win over the page-name route on a header that has an id', () => {
-      const doc = {
+    // Ruled 2026-09-06 (maintainer, verbatim 「同意」, decision batch #58,
+    // option 1): "The page-name route is canonical for a region-level
+    // `page:header`. `translatePage` stops reading the id route
+    // (`pages.PAGE.components.HEADERID.*`) for a `page:header` at region
+    // level; a `page:header` nested inside a container stays id-only, as its
+    // doc already says. One component, one address — `title` and `subtitle`
+    // now follow the same rule."
+    //
+    // The ruling has two halves, and one bundle cannot measure both — so two
+    // pins. `homeBundle` carries `pages.sales_home_page.label`, and the
+    // page-name overlay is applied AFTER the id route and wins for `title`
+    // whether or not the id route was read: against that bundle the header's
+    // `title` reads `销售看板` on a resolver that still reads the id route.
+    // That is a real invariant (precedence when both routes are present) and
+    // the first pin names it as exactly that — it is NOT evidence that the id
+    // route is closed. The second pin hands the resolver an id-ONLY bundle —
+    // no `pages.<name>.label`, no `pages.<name>.title` — so the page-name
+    // overlay has nothing to win with and only the id route could move the
+    // title. Measured with the gate reverted to `if (addressed)`: the first
+    // pin stays green, the second goes red.
+    //
+    // A region-level `page:header` that carries an id. `properties` is
+    // widened to the open bag it is: the overlay adds keys the literal does
+    // not spell out, and inferring it as `{title}` alone would make reading
+    // the result a type error.
+    const regionHeaderWithId = () => ({
+      name: 'sales_home_page',
+      regions: [{
+        name: 'header',
+        components: [{
+          type: 'page:header',
+          id: 'quick_create',
+          properties: { title: 'Sales Home' } as Record<string, string>,
+        }],
+      }],
+    });
+
+    // Previously this asserted the OPPOSITE (`title` resolving to `快速新建`,
+    // the id route beating the page-name one). Inverted, not deleted, because
+    // the inversion IS the behaviour change the ruling records: the id route
+    // was live for this component and preferred, and a bundle that used it
+    // now falls back to the page-name key.
+    it('prefers the page-name route over the id route for a region-level `page:header` when a bundle carries both (batch #58)', () => {
+      const out = translatePage(regionHeaderWithId(), homeBundle, { locale: 'zh-CN' });
+      // `components.quick_create.title` (`快速新建`) does not win here — the
+      // page-name route does, falling back to `pages.<name>.label` for `title`.
+      expect(out.regions[0].components[0].properties.title).toBe('销售看板');
+      expect(out.regions[0].components[0].properties.subtitle).toBe('欢迎回来');
+      // Control: the very same bundle entry still reaches the component that
+      // actually owns it, so the assertion above is about the header's route
+      // and not about a bundle that stopped resolving.
+      expect(byId(translatePage(homePage(), homeBundle, { locale: 'zh-CN' }), 'quick_create')
+        .properties.title).toBe('快速新建');
+    });
+
+    it('does not read the id route for a region-level `page:header` — an id-only bundle leaves its authored title alone (batch #58)', () => {
+      // No `pages.<name>.label` / `title` / `subtitle`: the page-name route
+      // resolves nothing for this page, so a translated title on the header
+      // could only have come from `components.quick_create.title`.
+      const idOnly: TranslationBundle = {
+        'zh-CN': { pages: { sales_home_page: { components: { quick_create: { title: '快速新建' } } } } },
+      };
+      const out = translatePage(regionHeaderWithId(), idOnly, { locale: 'zh-CN' });
+      expect(out.regions[0].components[0].properties.title).toBe('Sales Home');
+      // Control 1: the same id-only bundle DOES translate the component that
+      // owns the id, so the authored title above is the header's id route
+      // being closed and not a bundle nothing can resolve.
+      expect(byId(translatePage(homePage(), idOnly, { locale: 'zh-CN' }), 'quick_create')
+        .properties.title).toBe('快速新建');
+      // Control 2: a `page:header` NESTED in a container stays id-addressed —
+      // the ruling closes the id route at region level only, and the id route
+      // is the only one that reaches a nested header.
+      const nestedDoc = {
         name: 'sales_home_page',
         regions: [{
-          name: 'header',
-          // `properties` widened to the open bag it is: the overlay adds keys
-          // the literal does not spell out, and inferring it as `{title}` alone
-          // would make reading the result a type error.
+          name: 'main',
           components: [{
-            type: 'page:header',
-            id: 'quick_create',
-            properties: { title: 'Sales Home' } as Record<string, string>,
+            type: 'page:card',
+            id: 'wrapper',
+            properties: {
+              children: [{ type: 'page:header', id: 'quick_create', properties: { title: 'Sales Home' } as Record<string, string> }],
+            },
           }],
         }],
       };
-      const out = translatePage(doc, homeBundle, { locale: 'zh-CN' });
-      // `components.quick_create.title` is more specific than `pages.<name>.label`.
-      expect(out.regions[0].components[0].properties.title).toBe('快速新建');
-      // The page-name route still supplies what the id route did not.
-      expect(out.regions[0].components[0].properties.subtitle).toBe('欢迎回来');
+      const nested = translatePage(nestedDoc, idOnly, { locale: 'zh-CN' });
+      expect((nested.regions[0].components[0].properties.children as any[])[0].properties.title).toBe('快速新建');
     });
 
     it('does not mutate the input page', () => {
@@ -1565,17 +1747,29 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
       expect((card(out).properties.body as any[])[0].properties.label).toBe('Deals Won');
     });
 
-    it('does not descend into `items[].children` — outside the ruled `properties.children` face', () => {
+    it('descends into `items[].children` — the contract call the #12961 line left open, made by #16772', () => {
       // `page:tabs` / `page:accordion` nest their children one level deeper,
-      // under `properties.items[].children`. The ruling names
-      // `properties.children`; widening further is its own contract call, so
-      // this records where the line is rather than silently crossing it.
+      // under `properties.items[].children`. The #12961 ruling named
+      // `properties.children` and recorded this one as "its own contract
+      // call"; #16772 is that call, measured on a slotted contract page whose
+      // seven tab panels held every related list the resolver never reached.
       const out = translatePage(
         nestedUnder({ items: [{ label: 'Details', children: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Deals Won' } }] }] }),
         kpiBundle,
         { locale: 'zh-CN' },
       );
-      expect((card(out).properties.items as any[])[0].children[0].properties.label).toBe('Deals Won');
+      expect((card(out).properties.items as any[])[0].children[0].properties.label).toBe('赢单数');
+      // The panel's own keys survive the rebuild.
+      expect((card(out).properties.items as any[])[0].label).toBe('Details');
+    });
+
+    it('still does not descend into `footer` — the other back-compat spelling (#5775)', () => {
+      const out = translatePage(
+        nestedUnder({ footer: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Deals Won' } }] }),
+        kpiBundle,
+        { locale: 'zh-CN' },
+      );
+      expect((card(out).properties.footer as any[])[0].properties.label).toBe('Deals Won');
     });
 
     it('keeps the page-name header route region-level', () => {
@@ -1806,15 +2000,59 @@ describe('walkAddressedPageComponents (#13218)', () => {
     return rows;
   };
 
-  it('walks regions[].components[] only — slots is not a root', () => {
+  it('walks regions[].components[] AND slots.<slot> as roots — regions first, then slots in authored order (#16772)', () => {
+    // A slot holds one component OR an array of them (`PageSchema.slots`);
+    // both shapes are roots, at depth 0 and un-nested, exactly like a
+    // region's entry. Before #16772 this walk visited `a` alone.
     const doc: any = {
       regions: [{ name: 'main', components: [{ id: 'a', type: 'object-metric', properties: {} }] }],
-      slots: { aside: { id: 'slot_child', type: 'object-metric', properties: {} } },
+      slots: {
+        header: { id: 'slot_header', type: 'page:header', properties: {} },
+        details: [
+          { id: 'slot_d1', type: 'record:details', properties: {} },
+          { id: 'slot_d2', type: 'record:details', properties: {} },
+        ],
+      },
     };
-    expect(trace(doc).map((r) => r.id)).toEqual(['a']);
+    expect(trace(doc)).toEqual([
+      { id: 'a', nested: false, depth: 0, addressed: true },
+      { id: 'slot_header', nested: false, depth: 0, addressed: true },
+      { id: 'slot_d1', nested: false, depth: 0, addressed: true },
+      { id: 'slot_d2', nested: false, depth: 0, addressed: true },
+    ]);
   });
 
-  it('descends properties.children only — body, footer and items[].children stay unvisited', () => {
+  it('visits every root of a `kind: slotted` page that authors `regions: []` — the measured zero (#16772)', () => {
+    // The shape the card measured: `regions: []`, everything under `slots`.
+    // `walkAddressedPageComponents(page, …)` visited NOTHING on it, so
+    // `pages.<name>` carried exactly two addressable keys however many
+    // components the page authored.
+    const doc: any = {
+      kind: 'slotted',
+      regions: [],
+      slots: {
+        highlights: { id: 'path', type: 'record:path', properties: {} },
+        tabs: {
+          id: 'tabs',
+          type: 'page:tabs',
+          properties: {
+            items: [
+              { label: 'Overview', children: [{ id: 'rl_1', type: 'record:related_list', properties: {} }] },
+              { label: 'History', children: [{ id: 'rl_2', type: 'record:related_list', properties: {} }] },
+            ],
+          },
+        },
+      },
+    };
+    expect(trace(doc)).toEqual([
+      { id: 'path', nested: false, depth: 0, addressed: true },
+      { id: 'tabs', nested: false, depth: 0, addressed: true },
+      { id: 'rl_1', nested: true, depth: 1, addressed: true },
+      { id: 'rl_2', nested: true, depth: 1, addressed: true },
+    ]);
+  });
+
+  it('descends properties.children AND properties.items[].children — body and footer stay unvisited (#16772)', () => {
     const doc: any = {
       regions: [{
         name: 'main',
@@ -1830,7 +2068,65 @@ describe('walkAddressedPageComponents (#13218)', () => {
         }],
       }],
     };
-    expect(trace(doc).map((r) => r.id)).toEqual(['card', 'in_children']);
+    // `children` first, then the panels — both one level below the container;
+    // `body` / `footer` are the renderer's back-compat fallback and are still
+    // not an authorable composition spelling.
+    expect(trace(doc)).toEqual([
+      { id: 'card', nested: false, depth: 0, addressed: true },
+      { id: 'in_children', nested: true, depth: 1, addressed: true },
+      { id: 'in_items', nested: true, depth: 1, addressed: true },
+    ]);
+  });
+
+  it('matches a panel by SHAPE — an `items` entry without a `children` array is not descended and passes through', () => {
+    // `properties` is an open bag: another component's `items` may be option
+    // rows. Only an object entry carrying a `children` array is a panel.
+    const doc: any = {
+      regions: [{
+        name: 'main',
+        components: [{
+          id: 'picker',
+          type: 'element:select',
+          properties: { items: [{ value: 'a', label: 'A' }, 'bare', null] },
+        }],
+      }],
+    };
+    expect(trace(doc).map((r) => r.id)).toEqual(['picker']);
+    const { regions } = walkAddressedPageComponents(doc, (c) => c);
+    // Nothing descended ⇒ `items` is not rebuilt; the node comes back as-is.
+    expect((regions as any)[0].components[0]).toBe(doc.regions[0].components[0]);
+  });
+
+  it('arbitrates a repeated id across ROOTS: a slot entry wins outright over a nested namesake seen earlier in a region', () => {
+    const doc: any = {
+      regions: [{
+        name: 'main',
+        components: [{
+          id: 'wrap',
+          type: 'page:card',
+          properties: { children: [{ id: 'shared', type: 'object-metric', properties: {} }] },
+        }],
+      }],
+      slots: { details: { id: 'shared', type: 'record:details', properties: {} } },
+    };
+    expect(trace(doc)).toEqual([
+      { id: 'wrap', nested: false, depth: 0, addressed: true },
+      { id: 'shared', nested: true, depth: 1, addressed: false },
+      { id: 'shared', nested: false, depth: 0, addressed: true },
+    ]);
+  });
+
+  it('returns each root key exactly when the input carried it, and passes an off-spec slot value through', () => {
+    const regionsOnly = walkAddressedPageComponents({ regions: [] }, (c) => c);
+    expect(Object.keys(regionsOnly)).toEqual(['regions']);
+
+    const slotsOnly = walkAddressedPageComponents(
+      { slots: { header: { id: 'h', type: 'page:header', properties: {} }, alerts: 'not-a-component' } } as any,
+      (c) => c,
+    );
+    expect(Object.keys(slotsOnly)).toEqual(['slots']);
+    expect((slotsOnly.slots as any).alerts).toBe('not-a-component');
+    expect((slotsOnly.slots as any).header.id).toBe('h');
   });
 
   it('stops the descent at the cap: a 40-chain is visited down to depth 32 and no further', () => {
@@ -1892,7 +2188,7 @@ describe('walkAddressedPageComponents (#13218)', () => {
     expect(trace(doc).filter((r) => r.id === 'twice').map((r) => r.addressed)).toEqual([true, false]);
   });
 
-  it("replaces each node with the visitor's return and re-attaches rebuilt children — never mutating the input", () => {
+  it("replaces each node with the visitor's return and re-attaches rebuilt children and panels — never mutating the input", () => {
     const doc: any = {
       regions: [{
         name: 'main',
@@ -1908,11 +2204,16 @@ describe('walkAddressedPageComponents (#13218)', () => {
               'bare-component-id-string',
               null,
             ],
+            items: [
+              { label: 'Panel', icon: 'list', children: [{ id: 'tab_kid', type: 'object-metric', properties: { title: 'Tab kid' } }] },
+              { label: 'Empty' },
+            ],
           },
         }],
       }],
+      slots: { header: { id: 'hdr', type: 'page:header', properties: { title: 'Header' } } },
     };
-    const regions = walkAddressedPageComponents(doc, (component, { id }) => ({
+    const { regions, slots } = walkAddressedPageComponents(doc, (component, { id }) => ({
       ...component,
       properties: { ...component.properties, title: `visited:${id}` },
     })) as any;
@@ -1921,9 +2222,166 @@ describe('walkAddressedPageComponents (#13218)', () => {
     expect(rebuilt.properties.title).toBe('visited:card');
     expect(rebuilt.properties.children[0].properties.title).toBe('visited:kid');
     expect(rebuilt.properties.children.slice(1)).toEqual(['bare-component-id-string', null]);
+    // A panel keeps every key of its own (`label`, `icon`) and gets its
+    // `children` rebuilt; a panel without `children` passes through as-is.
+    expect(rebuilt.properties.items[0]).toEqual({
+      label: 'Panel', icon: 'list',
+      children: [{ id: 'tab_kid', type: 'object-metric', properties: { title: 'visited:tab_kid' } }],
+    });
+    expect(rebuilt.properties.items[1]).toBe(doc.regions[0].components[0].properties.items[1]);
+    expect(slots.header.properties.title).toBe('visited:hdr');
     // The source document is untouched — both walk consumers rely on it.
     expect(doc.regions[0].components[0].properties.title).toBe('Card');
     expect(doc.regions[0].components[0].properties.children[0].properties.title).toBe('Kid');
+    expect(doc.regions[0].components[0].properties.items[0].children[0].properties.title).toBe('Tab kid');
+    expect(doc.slots.header.properties.title).toBe('Header');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// #16772 — a `kind: 'slotted'` page goes from unaddressable to addressable
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('translatePage — slotted page roots and tab panels (#16772)', () => {
+  /**
+   * The measured shape, rebuilt as a minimal fixture rather than restated
+   * from the card: a `kind: 'slotted'` record page authoring `regions: []`,
+   * its header / path / details under `slots.*`, and a `page:tabs` under
+   * `slots.tabs` whose panels hold the related lists. Every authored copy
+   * site that the walk can address carries an id.
+   */
+  const contractPage = () => ({
+    name: 'contract_detail',
+    label: 'Contract',
+    kind: 'slotted',
+    object: 'contract',
+    regions: [] as any[],
+    slots: {
+      // THE page's header — root level, so the page-name route reaches it.
+      header: { type: 'page:header', id: 'hdr', properties: { title: 'Contract', subtitle: 'Lifecycle' } },
+      highlights: { type: 'record:path', id: 'stage_path', properties: { label: 'Stage', field: 'stage' } },
+      details: [{ type: 'record:details', id: 'main_details', properties: { label: 'Details' } }],
+      tabs: {
+        type: 'page:tabs',
+        id: 'detail_tabs',
+        properties: {
+          label: 'Sections',
+          items: [
+            { label: 'Parties', value: 'parties', children: [{ type: 'record:related_list', id: 'rl_parties', properties: { title: 'Parties' } }] },
+            { label: 'Clauses', value: 'clauses', children: [{ type: 'record:related_list', id: 'rl_clauses', properties: { title: 'Clauses' } }] },
+            {
+              label: 'Documents', value: 'documents',
+              children: [{
+                type: 'page:card', id: 'doc_card',
+                properties: {
+                  title: 'Documents',
+                  // Two levels in — a card inside a panel — still reached.
+                  children: [{ type: 'record:related_list', id: 'rl_documents', properties: { title: 'Attached documents' } }],
+                  // CONTROL: `body` is not an authorable composition slot and
+                  // is still not descended.
+                  body: [{ type: 'record:related_list', id: 'rl_body_control', properties: { title: 'Body control' } }],
+                },
+              }],
+            },
+          ],
+        },
+      },
+    },
+  });
+
+  /** Every id the fixture authors, so the bundle can offer copy for each. */
+  const bundle: TranslationBundle = {
+    'zh-CN': {
+      pages: {
+        contract_detail: {
+          label: '合同',
+          title: '合同详情',
+          subtitle: '生命周期',
+          components: {
+            hdr: { title: 'ID-ROUTE-MUST-NOT-WIN' },
+            stage_path: { label: '阶段' },
+            main_details: { label: '详细信息' },
+            detail_tabs: { label: '分区' },
+            rl_parties: { title: '当事方' },
+            rl_clauses: { title: '条款' },
+            doc_card: { title: '文档' },
+            rl_documents: { title: '附件' },
+            rl_body_control: { title: 'MUST-NOT-APPLY' },
+          },
+        },
+      },
+    },
+  };
+
+  const count = (doc: any): number => {
+    let n = 0;
+    walkAddressedPageComponents(doc, (c) => (n++, c));
+    return n;
+  };
+
+  it('addresses a slotted page — the walk count is non-zero and every authored id is visited once', () => {
+    // Measured here, on this fixture: 8 components authored (1 header, 1
+    // path, 1 details, 1 tabs, 2 related lists directly in panels, 1 card in
+    // a panel, 1 related list nested in that card); the `body` control is
+    // not a visit. The card's own number came from one app and one console
+    // build and is not restated.
+    expect(count(contractPage())).toBe(8);
+    const ids: string[] = [];
+    walkAddressedPageComponents(contractPage(), (c, { id, addressed }) => {
+      if (addressed) ids.push(id as string);
+      return c;
+    });
+    expect(ids).toEqual([
+      'hdr', 'stage_path', 'main_details', 'detail_tabs',
+      'rl_parties', 'rl_clauses', 'doc_card', 'rl_documents',
+    ]);
+  });
+
+  it('resolves each authored key — slots roots, tab panels, and a card inside a panel', () => {
+    const out = translatePage(contractPage(), bundle, { locale: 'zh-CN' });
+    const tabs = (out.slots as any).tabs;
+    expect(out.label).toBe('合同');
+    expect((out.slots as any).highlights.properties.label).toBe('阶段');
+    expect((out.slots as any).details[0].properties.label).toBe('详细信息');
+    expect(tabs.properties.label).toBe('分区');
+    expect(tabs.properties.items[0].children[0].properties.title).toBe('当事方');
+    expect(tabs.properties.items[1].children[0].properties.title).toBe('条款');
+    expect(tabs.properties.items[2].children[0].properties.title).toBe('文档');
+    expect(tabs.properties.items[2].children[0].properties.children[0].properties.title).toBe('附件');
+    // `regions: []` is carried through unchanged, and no key is invented.
+    expect(out.regions).toEqual([]);
+    expect(out.kind).toBe('slotted');
+  });
+
+  it('routes the `slots.header` page:header by PAGE NAME — the id route is not read for a root-level header', () => {
+    const out = translatePage(contractPage(), bundle, { locale: 'zh-CN' });
+    expect((out.slots as any).header.properties).toEqual({ title: '合同详情', subtitle: '生命周期' });
+  });
+
+  it('CONTROL: a component under `body` inside a panel stays untranslated, and a slotted page without a bundle entry is untouched', () => {
+    const out = translatePage(contractPage(), bundle, { locale: 'zh-CN' });
+    const docCard = (out.slots as any).tabs.properties.items[2].children[0];
+    expect(docCard.properties.body[0].properties.title).toBe('Body control');
+
+    const other = translatePage(
+      { ...contractPage(), name: 'other_page' },
+      bundle,
+      { locale: 'zh-CN' },
+    );
+    expect(other.slots).toEqual(contractPage().slots);
+  });
+
+  it('BOUNDARY: a tab panel `label` (`items[].label`) has no bundle key — its route is the inline locale map', () => {
+    // Recorded, not endorsed. `PageTabsProps.items[].label` is an
+    // `I18nLabelSchema`, so a tab strip is localisable at its authoring site;
+    // a bundle key for the panel (which carries no id and whose `value` is
+    // optional) is a naming decision this change does not make. If a key is
+    // added, this pin is the one to flip.
+    const page = contractPage();
+    (page.slots.tabs.properties.items[0] as any).label = { en: 'Parties', 'zh-CN': '当事方' };
+    const out = translatePage(page, bundle, { locale: 'zh-CN' });
+    expect((out.slots as any).tabs.properties.items[0].label).toEqual({ en: 'Parties', 'zh-CN': '当事方' });
+    expect((out.slots as any).tabs.properties.items[1].label).toBe('Clauses');
   });
 });
 

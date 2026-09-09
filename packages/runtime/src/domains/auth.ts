@@ -17,9 +17,9 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * The route this domain claims — `/auth` and its slash-separated sub-paths,
  * and NOTHING ELSE (#16026).
  *
- * ## Why `match: 'segment'` is spelled out rather than left to the default
+ * ## Why this claim stops at a segment boundary
  *
- * `DomainRoute.match` defaults to `'prefix'`, i.e. a bare
+ * `DomainRoute.match` USED TO default to `'prefix'`, i.e. a bare
  * `path.startsWith('/auth')` with no segment boundary — the legacy if-chain's
  * shape, which `DomainHandlerRegistry` preserved deliberately when the domains
  * were lifted out of it. On this prefix that rough edge claims SIBLING
@@ -50,6 +50,14 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * `'segment'` is also what the registry's other boundary-correct domains
  * already declare (`/keys`, `/mcp`, `/mcp/skill`), so this is the codebase's
  * own established spelling for the fix, not a new convention.
+ *
+ * ⭐ [#16263] It is now also the registry's DEFAULT, so this line no longer
+ * changes what `/auth` matches — the reasoning above was applied to the whole
+ * route table rather than to this one prefix. The declaration is kept, not
+ * deleted: it states at the route what the route claims, which is the fact
+ * every case in `auth-claim-segment-boundary.test.ts` is about, and it keeps
+ * this claim pinned to `'segment'` explicitly rather than to whatever the
+ * default happens to be later.
  *
  * ⚠️ What this does NOT fix, deliberately: the `200 {}` those rows carried.
  * That answer is manufactured one layer OUT, where the adapter renders a

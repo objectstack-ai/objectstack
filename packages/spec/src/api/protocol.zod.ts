@@ -233,11 +233,13 @@ export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name (e.g., "object", "plugin")'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
   organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the read. Selects the org partition in the '
-    + 'ADR-0005 overlay read order — org overlay wins over env-wide overlay wins '
-    + 'over packaged artifact — so it decides which tenant\'s customization rows '
-    + 'are merged into the list. Absent = environment-wide read: only env-level '
-    + 'overlays apply and no org partition is consulted.',
+    'Organization (tenant) scope for the read. When an org partition applies, '
+    + 'this selects it in the ADR-0005 overlay read order — org overlay wins '
+    + 'over env-wide overlay wins over packaged artifact — so it decides which '
+    + 'tenant\'s customization rows are merged into the list. Supplying a value '
+    + 'does not by itself guarantee an org partition is consulted; where none '
+    + 'applies, and whenever it is absent, the read is environment-wide and '
+    + 'only env-level overlays apply.',
   ),
   previewDrafts: z.boolean().optional().describe(
     'Draft-visibility switch (ADR-0033 draft-overlay preview): when true, '
@@ -1997,10 +1999,14 @@ export const CreateDataResponseSchema = lazySchema(() => z.object({
  * copy runs the insert path: engine-owned columns re-derived, the static
  * `readonly` strip applied inside `engine.insert` for a non-system caller —
  * the 2026-09-03 ruling, #14147; the #3043 ingress copy is deleted — and
- * internal fields omitted from the response, #7823) — but unlike `createData`
- * the producer emits no `droppedFields`
- * member, so none is declared: a key the producer never writes would be a
- * promise conformance cannot measure.
+ * internal fields omitted from the response, #7823) — and since #15703 it
+ * reports the engine's `onFieldsDropped` verdict as `droppedFields` exactly as
+ * `createData` does (maintainer ruling 2026-09-08, option 1): the producer
+ * passes the listener and the member is declared in the same change, so the
+ * key stays one conformance can measure. A clone is the one create shape that
+ * can carry a read-only column WITHOUT the caller typing it — the source row's
+ * `approval_status: 'approved'` is copied before `overrides` are applied — so
+ * this is the face where a silent strip was least discoverable.
  */
 export const CloneDataResponseSchema = lazySchema(() => z.object({
   object: z.string().describe('The object name.'),
@@ -2011,6 +2017,17 @@ export const CloneDataResponseSchema = lazySchema(() => z.object({
     + '(injected system/audit columns, autonumbers, computed formula/summary fields) are '
     + 're-derived by the insert path rather than copied from the source; caller-supplied '
     + '`overrides` win over copied values.'
+  ),
+  droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
+    'Write-observability: fields that were LEGALLY stripped before the clone was written — '
+    + 'a non-system clone cannot seed a static `readonly` column, whether the value was '
+    + 'COPIED from the source row or supplied through `overrides` (the strip runs inside '
+    + '`engine.insert`, after the `beforeInsert` hooks, `isSystem`-gated, exactly as on '
+    + '`createData`), so those keys are dropped and the field re-derives its default. '
+    + 'Present ONLY when ≥1 field was dropped; the clone still succeeded without them '
+    + '(status/success semantics unchanged). Carried in the 201 body only — this route '
+    + 'relays the producer verbatim and sets no `X-ObjectStack-Dropped-Fields` header. '
+    + 'Optional — omit-when-empty keeps the shape backward-compatible for existing clients.'
   ),
 }));
 
@@ -2337,12 +2354,20 @@ export const CreateManyDataResponseSchema = lazySchema(() => z.object({
   object: z.string().describe('Object name'),
   records: z.array(z.record(z.string(), z.unknown())).describe('Created records'),
   count: z.number().describe('Number of records created'),
+  // The per-row read below is maintainer ruling C (#14147): the static-`readonly` strip
+  // moved into `engine.insert`, after `beforeInsert`, exempting keys a hook wrote
+  // (`rowHookWrittenKeys`). The id stays in this comment, never in the `.describe()` —
+  // that string is printed AT the customer, who has no tracker to resolve it.
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
     'Write-observability: caller-supplied `readonly` fields the in-engine create-side ' +
     'strip (`engine.insert`, `isSystem`-gated) removed before the rows were written. AGGREGATED across the batch ' +
-    '(one event per object/reason with the union of dropped field names) rather than per-row, ' +
-    'because the insert-time strip is static-`readonly` only — schema-uniform, so every row ' +
-    'drops the same set. Present ONLY when ≥1 field was dropped; the creates still succeeded ' +
+    '(one event per object/reason with the UNION of dropped field names) rather than per-row, ' +
+    'because this response is `{ object, records, count }` and has no per-row slot to hang a ' +
+    'drop set on — a union is the only view it can represent. So read a name here as "at least ' +
+    'one row dropped this field", NOT "every row dropped the same set": the strip runs INSIDE ' +
+    '`engine.insert` after the `beforeInsert` hooks and exempts keys a hook itself wrote, ' +
+    'tracked per row: rows where a hook stamped a protected key drop a different set from ' +
+    'rows where it did not. Present ONLY when ≥1 field was dropped; the creates still succeeded ' +
     'without them (count/success unchanged). Optional — omit-when-empty keeps the shape ' +
     'backward-compatible. (The per-row `insertMany`/`batch` paths carry per-row `droppedFields` ' +
     'on each result instead — see BatchOperationResultSchema.)'

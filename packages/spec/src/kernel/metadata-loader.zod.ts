@@ -76,26 +76,51 @@ export const MetadataManagerConfigSchema = lazySchema(() => z.object({
 
   /**
    * Cache configuration
+   *
+   * Only `databaseLoader` is live. The three outer keys (`enabled`, `ttlSeconds`
+   * — formerly `ttl` — and `maxSize`) were REMOVED (#15624, ADR-0049
+   * enforce-or-remove): they were declared, defaulted and documented, and read
+   * by nothing — the sole runtime consumer of this block is
+   * `MetadataManager`, which hands `cache.databaseLoader` (and only that) to
+   * `new DatabaseLoader({ cache })`. An author writing `cache: { enabled: false }`
+   * got a clean parse and a cache that behaved exactly as before. Tombstoned
+   * rather than deleted because this nested object is not `.strict()` — a plain
+   * deletion would strip the keys in silence, which is the same no-op one layer
+   * down. The #14478 respelling `ttl` → `ttlSeconds` never shipped, so it is
+   * folded into the removal: both spellings now prescribe deletion.
    */
   cache: z.object({
-    enabled: z.boolean().default(true).describe('Enable caching'),
-    /**
-     * Renamed from `ttl` (#14478): the unit lived only in this description
-     * while `databaseLoader.ttl`, fourteen lines below, was in MILLISECONDS —
-     * one word, two magnitudes 1000× apart. The unit now lives in the key.
-     * Tombstoned rather than deleted because this nested object is not
-     * `.strict()` — a plain deletion would strip the old key in silence.
-     */
-    ttlSeconds: z.number().int().min(0).default(3600).describe('Cache TTL in seconds'),
-    ttl: retiredKey(
-      '`cache.ttl` was removed from `MetadataManagerConfig` in @objectstack/spec 17 — ' +
-      'its unit (seconds) lived only in the description, while the nested `cache.databaseLoader.ttl` ' +
-      'spelled the same word in milliseconds, so one key name meant two magnitudes 1000× apart. ' +
-      'Rename the key to `ttlSeconds`; the value (seconds) is unchanged.',
+    enabled: retiredKey(
+      '`cache.enabled` was removed from `MetadataManagerConfig` in @objectstack/spec 17 ' +
+      '(ADR-0049 enforce-or-remove) — nothing ever read it: the outer `cache` block was declared ' +
+      'and documented but consumed by no runtime, so `enabled: false` switched nothing off. ' +
+      'Delete the key. The cache that actually runs is the DatabaseLoader read-through LRU under ' +
+      '`cache.databaseLoader`; its `enabled` is the switch that is honoured.',
     ),
-    maxSize: z.number().int().min(0).optional().describe('Max cache size in bytes'),
+    ttlSeconds: retiredKey(
+      '`cache.ttlSeconds` was removed from `MetadataManagerConfig` in @objectstack/spec 17 ' +
+      '(ADR-0049 enforce-or-remove) — nothing ever read it: the outer `cache` block was declared ' +
+      'and documented but consumed by no runtime, so the number expired nothing. Delete the key. ' +
+      'The TTL that is honoured is `cache.databaseLoader.ttlMs` (milliseconds, default 60000) on ' +
+      'the DatabaseLoader read-through cache.',
+    ),
+    ttl: retiredKey(
+      '`cache.ttl` was removed from `MetadataManagerConfig` in @objectstack/spec 17 — nothing ' +
+      'ever read it: the outer `cache` block was declared and documented but consumed by no ' +
+      'runtime, and its unit-suffixed respelling `ttlSeconds` was retired with it before it shipped ' +
+      '(ADR-0049 enforce-or-remove). Delete the key. The TTL that is honoured is ' +
+      '`cache.databaseLoader.ttlMs` (milliseconds, default 60000) on the DatabaseLoader ' +
+      'read-through cache.',
+    ),
+    maxSize: retiredKey(
+      '`cache.maxSize` was removed from `MetadataManagerConfig` in @objectstack/spec 17 ' +
+      '(ADR-0049 enforce-or-remove) — nothing ever read it: the outer `cache` block was declared ' +
+      'and documented but consumed by no runtime, so the byte cap capped nothing. Delete the key. ' +
+      'The cap that is honoured is `cache.databaseLoader.maxSize` (an entry count, default 500) on ' +
+      'the DatabaseLoader read-through cache.',
+    ),
     /**
-     * DatabaseLoader read-through cache.
+     * DatabaseLoader read-through cache — the only live member of `cache`.
      *
      * The DatabaseLoader caches `load`/`loadMany`/`list`/`stat` results in an
      * LRU keyed by `(type, name)`. All write paths invalidate the affected
@@ -114,7 +139,7 @@ export const MetadataManagerConfigSchema = lazySchema(() => z.object({
         'Rename the key to `ttlMs`; the value (milliseconds) is unchanged.',
       ),
     }).optional().describe('DatabaseLoader read-through cache'),
-  }).optional().describe('Cache settings'),
+  }).optional().describe('Cache settings — only `databaseLoader` is read at runtime; the outer keys are retired'),
 
   /**
    * Watch for file changes

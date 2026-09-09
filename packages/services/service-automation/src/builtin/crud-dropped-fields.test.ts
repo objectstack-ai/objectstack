@@ -142,9 +142,14 @@ describe('update_record surfaces silently-stripped write fields (#3407)', () => 
 });
 
 describe('create_record is wired symmetrically (#3407)', () => {
-    // Today ObjectQL's insert path strips nothing (INSERT is readonly-exempt,
-    // FLS write denial throws) — but the node listens anyway, so a future
-    // insert-side strip surfaces instead of going silent.
+    // #3407 wired this listener against an insert path that stripped nothing
+    // (INSERT was readonly-exempt; FLS write denial throws), i.e. for a signal
+    // it could not then receive. The maintainer ruling of 2026-09-03 (#14147)
+    // put the static-`readonly` strip inside `engine.insert` under an
+    // `isSystem` gate, so the signal is live: `crud-nodes.ts` relays it and
+    // `create-record-readonly-drop.test.ts` drives it end to end. The cases
+    // below feed the channel a synthetic drop, so they pin the node's relay
+    // independently of which strips the engine runs.
     it('surfaces insert-side drop events as step warnings, keeping success', async () => {
         const engine = new AutomationEngine(makeLogger());
         const { data } = fakeDataWithDrops([

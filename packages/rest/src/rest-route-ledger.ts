@@ -109,15 +109,30 @@ export interface RestRouteLedgerEntry {
    * SDK expressibility; none of them says whether a caller must be
    * authenticated, and `public` states INTENT for a handful of browser-facing
    * routes rather than measuring a gate. Deriving the answer from source
-   * syntax instead was measured and rejected: scanning all 80
-   * `this.routeManager.register(` sites in `rest-server.ts` for `enforceAuth`
-   * reads 50 gated / 30 ungated, and 22 of those 30 are FALSE — a wrapping
-   * `guardedRouteManager` gates 19 of them with no `enforceAuth` at the call
-   * site, and one registrar shares a handler const across its 3 mounts. A 73%
-   * false-ungated rate on the largest registrar is a written-down false
-   * assurance, which is strictly worse than an honest blank. So the posture is
-   * DECLARED at the producer, where a new route is already reviewed, instead of
-   * guessed at the consumer.
+   * syntax instead was measured and rejected: scanning all 80 registration
+   * sites in `rest-server.ts` for `enforceAuth` — TWO spellings, 72 direct
+   * `this.routeManager.register(` sites plus 8 `registerPerItemRoute(` calls
+   * through the per-item family's switch-carrying helper — reads 51 gated / 29
+   * ungated, and 22 of those 29 are FALSE: a wrapping `guardedRouteManager`
+   * gates 19 of them with no `enforceAuth` at the call site, and one registrar
+   * shares a handler const across its 3 mounts. A 76% false-ungated rate,
+   * concentrated on the largest registrar, is a written-down false assurance,
+   * which is strictly worse than an honest blank. So the posture is DECLARED at
+   * the producer, where a new route is already reviewed, instead of guessed at
+   * the consumer.
+   *
+   * ⚠️ RE-MEASURED 2026-09-08, and the two halves moved differently. The
+   * 22 = 19 + 3 decomposition did NOT move when the per-item helper landed —
+   * the same 19 routes, 11 still direct and 8 now helper-routed, all through
+   * the same wrapping registrar — and the population stayed 80. Only the
+   * headline split moved, earlier and for an unrelated reason: 50/30 became
+   * 51/29 when `registerUiEndpoints`, the one route in that file resolving no
+   * identity, was guarded. Recorded so the next reader does not re-derive a
+   * figure that has now been checked. ⛔ The rejection stands either way, and
+   * the second spelling strengthens it — a syntactic scanner has to know both
+   * before it can read the file even this badly. The full reading lives in
+   * `packages/qa/dogfood/test/authz-probe-blind-spot.census.ts`, the
+   * authority on this population.
    *
    * ABSENT MEANS "UNDECLARED", and that is the state of nearly the whole
    * surface. This field is filled INCREMENTALLY, exactly like `responseSchema`
@@ -236,8 +251,17 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: '[#6603] gated on `manage_metadata` (ADR-0066 D1), same mechanism as POST /meta/_migrate-stored — a session alone is no longer enough. The write-side answer to ADR-0106 D1: a masked read PUT back verbatim used to delete the fields the caller could not see. [#12702] the gate is the shared `metaWriteCapabilityVerdict`: `manage_org_presentation` is also admitted, ONLY for an `allowOrgOverride: true` type written org-scoped to the caller\'s own active organization' },
   { route: 'DELETE /api/v1/meta/:type/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.deleteItem',
     note: 'REST-only: the dispatcher /meta branch has no DELETE handling — it falls into the read path. [#7019] gated on `manage_metadata` (ADR-0066 D1), same mechanism as the PUT twins — but NOT for the ADR-0106 reason: nothing is masked or round-tripped here, this discards a customization overlay outright, and `?dropStorage=true` takes the object table with it. [#12702] same shared verdict as the PUT door: an admitted `manage_org_presentation` reset threads the caller\'s own organization, so the only row it can discard is their own org\'s overlay' },
+  // The response schema POSTDATES this row: the row was written when the door
+  // had no declaration, and `HistoryMetaItemResponseSchema` was authored later
+  // by the card that declared the history protocol member. That is why this was
+  // the one row of the metadata family left unfilled while its `audit`,
+  // `rollback` and `diff` siblings were bound. The tracker anchors for both
+  // halves live in git history and in this comment's own PR, deliberately not
+  // in the `note` string below — that string reaches authors and operators
+  // through generated surfaces, where an issue id resolves to nothing.
   { route: 'GET /api/v1/meta/:type/:name/history', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getHistory',
-    note: 'REST-only: the dispatcher /meta branch swallows /history as a compound name and 404s' },
+    responseSchema: 'HistoryMetaItemResponseSchema',
+    note: 'REST-only: the dispatcher /meta branch swallows /history as a compound name and 404s. Payload answered BARE, so the named schema is the whole body — a describe-only transcription of `historyMetaItem`\'s declared return. Conformance: the history capture suite in spec `api/protocol.test.ts`, which parses a real two-event body (an update carrying every optional member, and the delete tombstone with `hash: null` and a `null` system actor) and pins the closed `op` vocabulary against the deliberately open `ref.type`' },
   { route: 'GET /api/v1/meta/:type/:name/audit', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getAudit',
     responseSchema: 'AuditMetaItemResponseSchema',
     note: '[#12038] REST-only route; payload answered BARE, so the named schema is the whole body. The schema predates this row (#11678, exact field-for-field match of `auditMetaItem`\'s declared return); conformance: the #11678 capture suite in spec `api/protocol.test.ts`' },
@@ -435,15 +459,14 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'POST /api/v1/data/:object/updateMany', family: 'batch', source: 'route-manager', disposition: 'sdk', client: 'data.updateMany' },
   { route: 'POST /api/v1/data/:object/deleteMany', family: 'batch', source: 'route-manager', disposition: 'sdk', client: 'data.deleteMany' },
 
-  // ── packages (direct-mount registrar; the three `:id` rows service-gated) ──
+  // ── packages (direct-mount registrar) ──────────────────────────────────────
+  // ONE row since #14503: the three read/delete twins the registrar used to
+  // mount beside `publish` are gone, and `packages/runtime`'s `/packages`
+  // domain is the single implementation of `GET /packages`,
+  // `GET /packages/:id` and `DELETE /packages/:id` — their rows live in
+  // `packages/runtime/src/route-ledger.ts`.
   { route: 'POST /api/v1/packages/publish', family: 'packages', source: 'direct-mount', disposition: 'server-only',
     note: 'marketplace registry publish ({manifest, metadata}) — publisher tooling, not app-SDK surface. Moved off the bare POST /packages in #3610: that verb+path is the dispatcher install route, and REST registering it first swallowed every packages.install call with a 400. Mounted UNCONDITIONALLY since #7563 — it has no dispatcher twin, so while it was service-gated the path was absorbed by /packages/:id and answered 405 with THAT route\'s Allow set; it now resolves the `package` service per request and answers an honest 404 on a deployment that composes none.' },
-  { route: 'GET /api/v1/packages', family: 'packages', source: 'direct-mount', disposition: 'sdk', client: 'packages.list',
-    note: 'shadows the dispatcher twin (registered first); merges registry + database packages' },
-  { route: 'GET /api/v1/packages/:id', family: 'packages', source: 'direct-mount', disposition: 'sdk', client: 'packages.get',
-    note: 'shadows the dispatcher twin (registered first)' },
-  { route: 'DELETE /api/v1/packages/:id', family: 'packages', source: 'direct-mount', disposition: 'sdk', client: 'packages.uninstall',
-    note: 'shadows the dispatcher twin (registered first); full uninstall via protocol.deletePackage (#2747)' },
 
   // ── external datasource federation (ADR-0015 §6.2, direct-mount) ──────────
   { route: 'GET /api/v1/datasources/:name/external/tables', family: 'external-datasource', source: 'direct-mount', disposition: 'sdk', client: 'datasources.external.listTables' },

@@ -100,12 +100,18 @@ function mount(options: Record<string, unknown> = {}): Map<string, RouteHandler>
     listen: async () => {},
     close: async () => {},
   } as any;
-  registerPackageRoutes(server, () => ({ list: async () => [] }) as any, '/api/v1', {
+  // [#14503] The instrument is `POST /packages/publish` — the one route the
+  // registrar mounts now; the read route this file used to drive is the
+  // dispatcher domain's alone. Same resolver, same gate, same seam.
+  registerPackageRoutes(server, () => ({ publish: async () => ({ success: true }) }) as any, '/api/v1', {
     resolveExecutionContext: CLEARS_THE_GATE,
     ...options,
   } as any);
   return routes;
 }
+
+const PUBLISH_PATH = `${PKGS}/publish`;
+const PUBLISH_BODY = { manifest: { id: 'com.acme.crm', version: '1.0.0' }, metadata: {} };
 
 async function drive(
   routes: Map<string, RouteHandler>,
@@ -129,13 +135,13 @@ async function drive(
   return captured;
 }
 
-/** `GET /packages` under one resolver wiring. `undefined` ⇒ no resolver wired. */
-const listUnder = (resolveExecutionContext: unknown, req: Record<string, any> = {}) =>
+/** `POST /packages/publish` under one resolver wiring. `undefined` ⇒ no resolver wired. */
+const publishUnder = (resolveExecutionContext: unknown, req: Record<string, any> = {}) =>
   drive(
     mount(resolveExecutionContext === undefined ? { resolveExecutionContext: undefined } : { resolveExecutionContext }),
-    'GET',
-    PKGS,
-    req,
+    'POST',
+    PUBLISH_PATH,
+    { body: PUBLISH_BODY, ...req },
   );
 
 /** The three ways this door can end up holding `undefined`. */
@@ -149,13 +155,13 @@ const RESOLVES_UNDEFINED = async () => undefined;
 
 describe('[#12537] controls — the instrument produces a one before any zero is read', () => {
   it('CONTROL (allow is observable): a fully capable context is served 200', async () => {
-    const captured = await listUnder(CLEARS_THE_GATE);
+    const captured = await publishUnder(CLEARS_THE_GATE);
     expect(captured.status).toBe(200);
     expect(captured.body?.success).toBe(true);
   });
 
   it('CONTROL (the anonymous clause is observable): a named subject is NOT 401', async () => {
-    const captured = await listUnder(async () => ({ userId: 'u_named', systemPermissions: [] }));
+    const captured = await publishUnder(async () => ({ userId: 'u_named', systemPermissions: [] }));
     expect(captured.status).not.toBe(ANONYMOUS_DENY_STATUS);
     expect(captured.status).toBe(403);
     expect(captured.body?.error?.code).toBe('FORBIDDEN');
@@ -163,7 +169,7 @@ describe('[#12537] controls — the instrument produces a one before any zero is
 
   it('CONTROL (the resolver really runs): the door calls it exactly once per request', async () => {
     const resolver = vi.fn(REJECTS);
-    await listUnder(resolver);
+    await publishUnder(resolver);
     expect(resolver.mock.calls.length).toBe(1);
   });
 
@@ -178,14 +184,14 @@ describe('[#12537] controls — the instrument produces a one before any zero is
 
 describe('[#12537] a swallowed resolution does not fall through to a system subject', () => {
   it('a rejecting resolver is REFUSED, not served', async () => {
-    const captured = await listUnder(REJECTS);
+    const captured = await publishUnder(REJECTS);
     expect(captured.status).toBe(ANONYMOUS_DENY_STATUS);
     expect(captured.body?.success).toBe(false);
     expect(captured.body?.error?.code).toBe(ANONYMOUS_DENY_CODE);
   });
 
   it('CONTROL: a real system subject IS served — so "refused" above is a decision, not an artefact', async () => {
-    const captured = await listUnder(async () => ({ isSystem: true }));
+    const captured = await publishUnder(async () => ({ isSystem: true }));
     expect(captured.status).toBe(200);
     expect(captured.body?.success).toBe(true);
   });
@@ -197,36 +203,38 @@ describe('[#12537] a swallowed resolution does not fall through to a system subj
 
 describe('[#12537] a swallowed resolution does not bypass the gate', () => {
   it('the service is never reached when the resolver rejects', async () => {
-    const list = vi.fn(async () => []);
+    const publish = vi.fn(async () => ({ success: true }));
     const routes = new Map<string, RouteHandler>();
     const server = {
-      get: (p: string, h: RouteHandler) => { routes.set(`GET:${p}`, h); },
-      post: () => {}, put: () => {}, delete: () => {}, patch: () => {},
+      get: () => {},
+      post: (p: string, h: RouteHandler) => { routes.set(`POST:${p}`, h); },
+      put: () => {}, delete: () => {}, patch: () => {},
       use: () => {}, listen: async () => {}, close: async () => {},
     } as any;
-    registerPackageRoutes(server, () => ({ list }) as any, '/api/v1', {
+    registerPackageRoutes(server, () => ({ publish }) as any, '/api/v1', {
       resolveExecutionContext: REJECTS,
     } as any);
-    const captured = await drive(routes, 'GET', PKGS);
+    const captured = await drive(routes, 'POST', PUBLISH_PATH, { body: PUBLISH_BODY });
     expect(captured.status).toBe(ANONYMOUS_DENY_STATUS);
-    // ⚠️ ZERO. Its control is the next assertion, on the SAME `list` spy shape.
-    expect(list.mock.calls.length).toBe(0);
+    // ⚠️ ZERO. Its control is the next assertion, on the SAME `publish` spy shape.
+    expect(publish.mock.calls.length).toBe(0);
   });
 
   it('CONTROL: the same spy DOES record a call when the gate is cleared', async () => {
-    const list = vi.fn(async () => []);
+    const publish = vi.fn(async () => ({ success: true }));
     const routes = new Map<string, RouteHandler>();
     const server = {
-      get: (p: string, h: RouteHandler) => { routes.set(`GET:${p}`, h); },
-      post: () => {}, put: () => {}, delete: () => {}, patch: () => {},
+      get: () => {},
+      post: (p: string, h: RouteHandler) => { routes.set(`POST:${p}`, h); },
+      put: () => {}, delete: () => {}, patch: () => {},
       use: () => {}, listen: async () => {}, close: async () => {},
     } as any;
-    registerPackageRoutes(server, () => ({ list }) as any, '/api/v1', {
+    registerPackageRoutes(server, () => ({ publish }) as any, '/api/v1', {
       resolveExecutionContext: CLEARS_THE_GATE,
     } as any);
-    const captured = await drive(routes, 'GET', PKGS);
+    const captured = await drive(routes, 'POST', PUBLISH_PATH, { body: PUBLISH_BODY });
     expect(captured.status).toBe(200);
-    expect(list.mock.calls.length).toBe(1);
+    expect(publish.mock.calls.length).toBe(1);
   });
 });
 
@@ -235,32 +243,32 @@ describe('[#12537] a swallowed resolution does not bypass the gate', () => {
 //    subject holding the EMPTY set.
 //
 //    ⚠️ DISCLOSURE, so no reader mistakes this for a wire path: the packages
-//    registrar mounts exactly four routes (POST publish, GET list, GET by id,
-//    DELETE by id) and NO `OPTIONS` route, so a real preflight never reaches
-//    these handlers. `method: 'OPTIONS'` is used here as the one INPUT that
-//    makes the shared `shouldDenyAnonymous` yield without authenticating —
-//    i.e. as an instrument for isolating the capability clause from the
-//    anonymous clause, which otherwise short-circuits ahead of it. That
-//    isolation is the only way to tell "evaluated and holds nothing" apart
-//    from "never evaluated": on a plain GET both readings answer 401.
+//    registrar mounts exactly one route (POST publish, since #14503) and NO
+//    `OPTIONS` route, so a real preflight never reaches this handler.
+//    `method: 'OPTIONS'` is used here as the one INPUT that makes the shared
+//    `shouldDenyAnonymous` yield without authenticating — i.e. as an
+//    instrument for isolating the capability clause from the anonymous
+//    clause, which otherwise short-circuits ahead of it. That isolation is the
+//    only way to tell "evaluated and holds nothing" apart from "never
+//    evaluated": on a plain POST both readings answer 401.
 // ---------------------------------------------------------------------------
 
 describe('[#12537] the capability clause reads `undefined` as "holds nothing"', () => {
   it('past the anonymous clause, a swallowed resolution is 403 FORBIDDEN', async () => {
-    const captured = await listUnder(REJECTS, { method: 'OPTIONS' });
+    const captured = await publishUnder(REJECTS, { method: 'OPTIONS' });
     expect(captured.status).toBe(403);
     expect(captured.body?.error?.code).toBe('FORBIDDEN');
-    expect(captured.body?.error?.message).toContain('studio.access');
+    expect(captured.body?.error?.message).toContain('manage_metadata');
   });
 
   it('CONTROL: past the same clause, a CAPABLE context is served 200', async () => {
-    const captured = await listUnder(CLEARS_THE_GATE, { method: 'OPTIONS' });
+    const captured = await publishUnder(CLEARS_THE_GATE, { method: 'OPTIONS' });
     expect(captured.status).toBe(200);
     expect(captured.body?.success).toBe(true);
   });
 
   it('CONTROL: past the same clause, an explicit EMPTY capability set is the same 403', async () => {
-    const captured = await listUnder(
+    const captured = await publishUnder(
       async () => ({ userId: 'u_named', systemPermissions: [] }),
       { method: 'OPTIONS' },
     );
@@ -278,9 +286,9 @@ describe('[#12537] the capability clause reads `undefined` as "holds nothing"', 
 describe('[#12537] a resolver FAULT is indistinguishable from anonymity and from no resolver', () => {
   it('rejecting resolver, resolver returning undefined, and no resolver agree byte for byte', async () => {
     const [faulted, anonymous, unwired] = await Promise.all([
-      listUnder(REJECTS),
-      listUnder(RESOLVES_UNDEFINED),
-      listUnder(undefined),
+      publishUnder(REJECTS),
+      publishUnder(RESOLVES_UNDEFINED),
+      publishUnder(undefined),
     ]);
     expect(faulted.status).toBe(ANONYMOUS_DENY_STATUS);
     expect(JSON.stringify(faulted)).toBe(JSON.stringify(anonymous));
@@ -288,18 +296,20 @@ describe('[#12537] a resolver FAULT is indistinguishable from anonymity and from
   });
 
   it('CONTROL: the same comparison SEPARATES two answers that differ', async () => {
-    const [faulted, capable] = await Promise.all([listUnder(REJECTS), listUnder(CLEARS_THE_GATE)]);
+    const [faulted, capable] = await Promise.all([publishUnder(REJECTS), publishUnder(CLEARS_THE_GATE)]);
     expect(JSON.stringify(faulted)).not.toBe(JSON.stringify(capable));
   });
 
-  it('every state-changing route reads the fault the same way', async () => {
+  it('the state-changing route reads the fault the same way with a body it would otherwise act on', async () => {
+    // [#14503] Used to compare `DELETE /:id` against publish; the delete route
+    // is the dispatcher domain's alone now, so the one state-changing route
+    // left is driven with a manifest it would publish if the gate let it.
     const routes = mount({ resolveExecutionContext: REJECTS });
-    const del = await drive(routes, 'DELETE', `${PKGS}/:id`, { params: { id: 'com.acme.crm' } });
     const pub = await drive(routes, 'POST', `${PKGS}/publish`, {
-      body: { manifest: { id: 'com.acme.crm', version: '1.0.0' } },
+      body: { manifest: { id: 'com.acme.crm', version: '1.0.0' }, metadata: {} },
     });
-    expect(del.status).toBe(ANONYMOUS_DENY_STATUS);
     expect(pub.status).toBe(ANONYMOUS_DENY_STATUS);
+    expect(pub.body?.error?.code).toBe(ANONYMOUS_DENY_CODE);
   });
 });
 
@@ -376,7 +386,7 @@ describe('[#12537] a SYNC throw is forwarded from the producer, not decided by t
   const throwsSync = (error: unknown) => () => { throw error; };
 
   it('a coded producer error keeps ITS status — the thread\'s 403 is this, not a gate decision', async () => {
-    const captured = await listUnder(
+    const captured = await publishUnder(
       throwsSync(Object.assign(new Error('nope'), { code: 'PERMISSION_DENIED', status: 403 })),
     );
     expect(captured.status).toBe(403);
@@ -384,13 +394,13 @@ describe('[#12537] a SYNC throw is forwarded from the producer, not decided by t
   });
 
   it('the SAME seam, thrown a plain Error, answers 500 — so the status tracks the error', async () => {
-    const captured = await listUnder(throwsSync(new Error('nope')));
+    const captured = await publishUnder(throwsSync(new Error('nope')));
     expect(captured.status).toBe(500);
     expect(captured.body?.error?.code).not.toBe('PERMISSION_DENIED');
   });
 
   it('and neither of those is the swallowed case: a REJECTION is still the 401 floor', async () => {
-    const captured = await listUnder(
+    const captured = await publishUnder(
       async () => { throw Object.assign(new Error('nope'), { code: 'PERMISSION_DENIED', status: 403 }); },
     );
     expect(captured.status).toBe(ANONYMOUS_DENY_STATUS);

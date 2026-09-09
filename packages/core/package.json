@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/core",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "Microkernel Core for ObjectStack",
   "type": "module",
@@ -23,7 +23,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.examples.json && pnpm check:test-typecheck",
     "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/core --project tsconfig.test.json",
     "gen:test-typecheck-debt": "tsx ../../scripts/check-test-typecheck.mts --update --package packages/core --project tsconfig.test.json",
-    "test": "vitest run",
+    "test": "vitest run --project local",
+    "test:repo": "vitest run --project repo",
     "test:watch": "vitest"
   },
   "devDependencies": {
@@ -32,7 +33,7 @@
     "@types/node": "^26.2.0",
     "esbuild": "^0.28.2",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "@objectstack/spec": "workspace:*",

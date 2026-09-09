@@ -185,7 +185,7 @@ export interface BootOptions {
    * every request of theirs resolves CARRIES an `organizationId`. Default
    * `false`.
    *
-   * Mechanically it is one flip: `AuthPlugin`'s ADR-0081 D1 default-org
+   * Mechanically it is one flip: `AuthPlugin`'s cloud ADR-0081 D1 default-org
    * bootstrap (`autoDefaultOrganization`), which the harness otherwise pins
    * OFF (see the AuthPlugin registration below). The bootstrap mints a
    * `sys_organization` and binds the platform admin to it as `owner`; the
@@ -242,7 +242,7 @@ export interface BootOptions {
    *  - with `multiTenant: 'posture-only'`, it would be a NO-OP that looks like
    *    a feature. That mode requests the `isolated` posture, and the open
    *    default-org bootstrap deliberately abstains under every WALLED posture
-   *    (`postureEnforcesWall`, ADR-0081 D1) — the open package never
+   *    (`postureEnforcesWall`, cloud ADR-0081 D1) — the open package never
    *    bootstraps an organization for a deployment whose multi-organization
    *    runtime it does not provide. The admin would resolve org-less while the
    *    fixture read as org-bound: vacuity, which is the whole defect class
@@ -309,6 +309,25 @@ export interface BootOptions {
    */
   databaseFile?: string;
   /**
+   * The default datasource's driver. Default `'sqlite-wasm'` — the pure-JS
+   * in-memory SQLite this harness has always booted, and the driver a real
+   * `objectstack dev` uses.
+   *
+   * `'memory'` boots `@objectstack/driver-memory` instead, which is the OTHER
+   * half of a two-driver equivalence measurement: the two drivers reach the
+   * analytics service through DIFFERENT strategies (`NativeSQLStrategy` compiles
+   * raw SQL on a SQL driver; the memory driver cannot run raw SQL, so the query
+   * falls through to `ObjectQLStrategy` and the engine's middleware). A gate
+   * that asserts the two doors reach ONE verdict cannot be written against one
+   * driver — asking on `sqlite-wasm` alone is exactly how the strategies were
+   * allowed to disagree about the security boundary.
+   *
+   * ⛔ It is NOT a general "run any fixture on memory" switch. The memory driver
+   * does not implement every SQL behaviour this harness's other gates depend
+   * on; use it where the DRIVER is the variable under test.
+   */
+  databaseDriver?: 'sqlite-wasm' | 'memory';
+  /**
    * Extra plugins to register between the app/service pairs and the
    * SecurityPlugin — the slot where `objectstack dev` auto-loads optional
    * service pairs the lean harness omits (e.g. `StorageServicePlugin` +
@@ -341,7 +360,7 @@ export async function bootStack(
       `verify: orgContext:true does not compose with multiTenant:${JSON.stringify(opts.multiTenant)}. ` +
         (opts.multiTenant === 'posture-only'
           ? "'posture-only' requests the `isolated` posture, and the open default-org bootstrap abstains " +
-            'under every walled posture (ADR-0081 D1) — the admin would resolve org-less while the fixture ' +
+            'under every walled posture (cloud ADR-0081 D1) — the admin would resolve org-less while the fixture ' +
             'read as org-bound. Drop one of the two options; a posture-gated seam that also needs an ' +
             'org-bound caller needs the real @objectstack/organizations package.'
           : 'the enterprise @objectstack/organizations package owns the org bootstrap under multiTenant:true ' +
@@ -398,11 +417,14 @@ export async function bootStack(
   // §Risk mitigation the ADR promised), not the legacy pre-built DriverPlugin
   // escape hatch.
   await kernel.use(new ObjectQLPlugin());
+  const databaseDriver = opts.databaseDriver ?? 'sqlite-wasm';
   await kernel.use(new DefaultDatasourcePlugin({
-    driver: 'sqlite-wasm',
+    driver: databaseDriver,
     // `opts.databaseFile` makes the database outlive the kernel, so a second
     // boot over the same path is a real cold start (see BootOptions.databaseFile).
-    config: { filename: opts.databaseFile ?? ':memory:' },
+    // The memory driver holds no file — it takes no `filename` and a stray one
+    // would be config the driver silently ignores.
+    config: databaseDriver === 'memory' ? {} : { filename: opts.databaseFile ?? ':memory:' },
   }));
 
   // HTTP server (registers the `http-server` IHttpServer service the REST +
@@ -422,7 +444,7 @@ export async function bootStack(
   // Service plugins `objectstack dev` auto-loads for an app of this shape.
   await kernel.use(new SettingsServicePlugin());
   await kernel.use(opts.analytics ?? new AnalyticsServicePlugin());
-  // `autoDefaultOrganization: false` (ADR-0081 D1): the harness proves the two
+  // `autoDefaultOrganization: false` (cloud ADR-0081 D1): the harness proves the two
   // ENDS of the isolation spectrum — pure single-tenant (no org, no scoping)
   // and, via `opts.multiTenant`, full multi-org (the enterprise plugin owns
   // the org bootstrap). AuthPlugin's single-org default-org bootstrap is a
@@ -660,7 +682,7 @@ export async function bootStack(
               'activeOrganizationId and every org-scoped assertion in this fixture would be vacuous.'
             : 'No sys_user row resolved for that address — check `opts.admin` against the app the ' +
               "harness actually seeded, since the default-org bootstrap targets the platform admin.") +
-          ' (ADR-0081 D1 `ensureDefaultOrganization` is best-effort by design; this is the harness ' +
+          ' (cloud ADR-0081 D1 `ensureDefaultOrganization` is best-effort by design; this is the harness ' +
           'refusing to hand back a stack that quietly means less than it reads.)',
       );
     }

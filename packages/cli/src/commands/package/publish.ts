@@ -29,11 +29,54 @@
 import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath, basename, dirname, isAbsolute } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
+import { PackageSchema } from '@objectstack/spec/cloud';
 import { printHeader, printKV, printSuccess, printError, printStep } from '../../utils/format.js';
 import { DEFAULT_CLOUD_URL, tryReadCloudConfig } from '../../utils/cloud-config.js';
 import { readErrorMessage } from '../../utils/response-envelope.js';
 
-const MANIFEST_ID_RE = /^[a-z0-9][a-z0-9._-]{0,254}$/i;
+/**
+ * The one rule for a manifest id is `PackageSchema.manifestId` — the schema for
+ * the very column this command publishes into (`sys_package.manifest_id`).
+ * Imported, never transcribed: a second, hand-copied rule here is what let this
+ * preflight admit six shapes the control plane refuses (`com.acme.repair_desk`,
+ * `COM.ACME.CRM`, `9foo.bar`, `com..acme`, `com.acme.` and — on the explicit
+ * `--manifest-id` path — a bare `crm`), while telling the user the contract was
+ * `a-z0-9._-`. `CreatePackageRequestSchema` in `cloud/package.zod.ts` reaches
+ * for the same declaration the same way.
+ *
+ * Read through a function rather than a module-level constant so `PackageSchema`
+ * stays lazy (`lazySchema`): the first `.shape` access materialises the whole
+ * package schema, and `os` boots for many commands that never publish.
+ */
+function manifestIdSchema() {
+  return PackageSchema.shape.manifestId;
+}
+
+/** True when `value` is a manifest id the control plane will accept. */
+export function isManifestId(value: string): boolean {
+  return manifestIdSchema().safeParse(value).success;
+}
+
+/**
+ * Describe why `value` is not a manifest id, **quoting the schema** — its own
+ * `invalid_format` issue for the rule and its `.describe()` for the shape.
+ *
+ * Deliberately not hand-written: the hand-written sentence this replaces
+ * (`Expected reverse-domain form like 'com.acme.crm' (a-z0-9._-)`) named a
+ * contract that does not exist, so a user stopped by the CLI would "fix" their
+ * id into something like `com.acme.repair_desk` — accepted here, refused by the
+ * server. Following the error message led to a second error.
+ *
+ * Returns `undefined` when `value` is valid.
+ */
+function explainManifestId(value: string): string | undefined {
+  const schema = manifestIdSchema();
+  const parsed = schema.safeParse(value);
+  if (parsed.success) return undefined;
+  const reasons = parsed.error.issues.map((issue) => issue.message).join('; ');
+  const expected = schema.description;
+  return expected ? `${reasons}. Expected: ${expected}` : reasons;
+}
 
 /**
  * Mirror of `manifest.namespace`'s pattern in `@objectstack/spec`
@@ -52,23 +95,68 @@ function slugify(input: string): string {
     .slice(0, 64) || 'app';
 }
 
+/** Where a derived manifest id came from — used to make the refusal actionable. */
+export type ManifestIdSource = 'artifact-manifest-id' | 'artifact-manifest-name' | 'artifact-filename';
+
+export interface DerivedManifestId {
+  /** The id the publish would use. NOT guaranteed valid — the caller parses it. */
+  id: string;
+  /** Which input produced it. */
+  source: ManifestIdSource;
+}
+
 /**
  * Derive a reverse-domain manifest_id when the user hasn't passed --manifest-id.
  * Order of precedence:
- *   1. artifact.manifest.id (if it looks like a reverse-domain id)
+ *   1. artifact.manifest.id (only when it is a manifest id the control plane accepts)
  *   2. local.<artifact.manifest.name slug>
  *   3. local.<artifact filename without extension>
+ *
+ * Step 1 is gated by the schema, not by a local look-alike test: `manifest.id`
+ * is a bare `z.string()` in `ManifestSchema`, so an artifact may carry any
+ * shape at all, and the previous test forwarded `com.acme.repair_desk` and
+ * friends unchanged. The old extra `explicit.includes('.')` condition is gone
+ * because the schema subsumes it — its pattern requires at least two segments,
+ * so a dotless id can never parse. That is why a bare `crm` was already blocked
+ * here while the explicit `--manifest-id` path let it through: two paths, two
+ * strictnesses, neither of them the declared one.
+ *
+ * Steps 2 and 3 are the CLI's own invention and are **not** guaranteed valid:
+ * `slugify` has no letter-first rule, so a manifest named `2024 App` derives
+ * `local.2024-app`, which the schema rejects. That is refused at the single
+ * gate in `run()` with the source named, rather than normalised: `manifestId`
+ * is immutable once published ("renaming a package requires creating a new
+ * package"), so silently minting a different permanent global identifier than
+ * the one the inputs imply is worse than saying what is wrong.
  */
-function deriveManifestId(artifact: any, artifactPath: string): string {
+export function deriveManifestId(artifact: any, artifactPath: string): DerivedManifestId {
   const explicit = artifact?.manifest?.id;
-  if (typeof explicit === 'string' && MANIFEST_ID_RE.test(explicit) && explicit.includes('.')) {
-    return explicit;
+  if (typeof explicit === 'string' && isManifestId(explicit)) {
+    return { id: explicit, source: 'artifact-manifest-id' };
   }
   const name = artifact?.manifest?.name;
   if (typeof name === 'string' && name.trim()) {
-    return `local.${slugify(name)}`;
+    return { id: `local.${slugify(name)}`, source: 'artifact-manifest-name' };
   }
-  return `local.${slugify(basename(artifactPath).replace(/\.json$/i, ''))}`;
+  return {
+    id: `local.${slugify(basename(artifactPath).replace(/\.json$/i, ''))}`,
+    source: 'artifact-filename',
+  };
+}
+
+/** The remedy line for a refused manifest id, by where the id came from. */
+function manifestIdRemedy(source: ManifestIdSource | 'explicit'): string {
+  switch (source) {
+    case 'artifact-manifest-id':
+    case 'artifact-manifest-name':
+      return 'It was derived from the compiled artifact. Pass --manifest-id, set `manifestId` in '
+        + 'objectstack.manifest.json, or fix `manifest.id` in objectstack.config.ts and rebuild.';
+    case 'artifact-filename':
+      return 'It was derived from the artifact filename. Pass --manifest-id, set `manifestId` in '
+        + 'objectstack.manifest.json, or give the app a `manifest.name` and rebuild.';
+    default:
+      return 'Pass a --manifest-id the control plane accepts.';
+  }
 }
 
 /**
@@ -322,14 +410,21 @@ export default class PackagePublish extends Command {
       const m = tplManifest?.data ?? {};
       const baseDir = tplManifest?.baseDir ?? process.cwd();
 
-      const manifestId = (
+      // One gate for both paths — the explicitly supplied id and the derived one
+      // are parsed by the same schema the control plane parses `manifest_id`
+      // with. Keeping a looser local copy "to fail early" is what this command
+      // used to do, and it did not fail early: it PASSED early, and the server
+      // answered 400.
+      const supplied =
         flags['manifest-id']
-        ?? (typeof m.manifestId === 'string' ? m.manifestId : undefined)
-        ?? deriveManifestId(artifact, artifactPath)
-      ).trim();
-      if (!MANIFEST_ID_RE.test(manifestId)) {
+        ?? (typeof m.manifestId === 'string' ? m.manifestId : undefined);
+      const derived = supplied === undefined ? deriveManifestId(artifact, artifactPath) : undefined;
+      const manifestId = (supplied ?? derived!.id).trim();
+      const manifestIdProblem = explainManifestId(manifestId);
+      if (manifestIdProblem !== undefined) {
         printError(
-          `Invalid manifest-id '${manifestId}'. Expected reverse-domain form like 'com.acme.crm' (a-z0-9._-).`,
+          `Invalid manifest-id '${manifestId}'. ${manifestIdProblem}. `
+          + manifestIdRemedy(derived?.source ?? 'explicit'),
         );
         this.exit(1);
         return;

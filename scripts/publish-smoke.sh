@@ -471,6 +471,99 @@ smoke_wait_for_own_server() {
   fail "dev server published port $bound but never answered there within $((timeout * 2))s"
 }
 
+# ── what counts as an error line, and what counts as a FAILED BOOT ──────────
+#
+# Two patterns, two windows, two different questions. Spelled here, above the
+# sourcing guard, so both are driven by the tests instead of grepped for — the
+# same reason `smoke_dev_server_argv` is a function (see its note above).
+#
+# SMOKE_ERROR_LOG_PATTERN — "did anything log at error level?", asked of the
+# WHOLE log after the probes (section 4). Unchanged in content from the inline
+# expression it replaces. Three error formats coexist: ConsoleLogger
+# `[error] …`, JsonLogger `"level":"error"`, and timestamped `<ISO> ERROR …`.
+# The trailing `Failed to register OIDC discovery routes` is a special case left
+# from #3091 and is deliberately KEPT: nothing below generalises it.
+SMOKE_ERROR_LOG_PATTERN='^\[(error|fatal)\]|"level":"(error|fatal)"|^\S+Z ERROR |Failed to register OIDC discovery routes'
+
+# SMOKE_BOOT_FAILURE_PATTERN — "did the composition this run installed actually
+# ARRIVE?", asked of the boot window BEFORE the probes.
+#
+# The gate this pattern feeds exists because a boot-load failure and an auth
+# regression are different owners that used to produce the same job output. In
+# run 34084559243 the whole defect was one WARN line at boot —
+#
+#     ⚠ AuthPlugin failed to load: The requested module '@better-auth/core/db'
+#       does not provide an export named 'createLocalAccountIssuer'
+#
+# — after which the run probed every auth and CRUD route against a server with
+# no auth and failed on a probe, naming nothing.
+#
+# ⛔ The severity is NOT the predicate. Widening the error scan to WARN is the
+# obvious repair and it is the wrong one: warn is where this repo deliberately
+# puts functional degradation (AGENTS.md → "Degradation log levels"), so a
+# healthy boot HAS warn lines and a canary that reds on them gets ignored.
+# MEASURED, rather than assumed — the warn-shaped lines a healthy boot emits:
+#
+#   pack mode, run 34276056630 (all auth+CRUD probes green, `Plugins: 34
+#   loaded`, and no boot-diagnostics block at all, i.e. zero structured warns):
+#     ⚠ Console dist not found — install `@object-ui/console` …
+#   registry mode, run 34084559243 (the broken boot; this is the one of its four
+#   boot warnings that is normal for registry mode — a published artifact
+#   legitimately predates the runtime's spec):
+#     <ISO>Z WARN [MetadataPlugin] artifact … predates this runtime's spec …
+#
+# Both are healthy, and the first even carries the same `⚠` glyph as the
+# specimen — so `⚠`, `warn`, and "a plugin word appears" are all disqualified as
+# predicates. So is a bare `failed to load` grep: it matches the benign
+# content-load degradations of plugins that DID load (`SettingsServicePlugin:
+# failed to load translations for 'fr'`, `[platform-objects] failed to load …
+# translations`, `Loader … failed to load <type>:<name>`).
+#
+# The predicate is instead: A UNIT OF THE COMPOSITION DID NOT ARRIVE. Two legs,
+# answering two different halves of that:
+#
+#   A. the load site names the unit that failed — this is what gives the run an
+#      OWNER to report. One alternative per real emit site in the CLI's boot
+#      path (`packages/cli/src/commands/serve.ts`):
+#        A1  `⚠ AuthPlugin failed to load: <cause>`        (:3917, warn)
+#        A2  `✗ Failed to load plugin: <cause>`            (:3958, error TEXT
+#                                                           but not error LEVEL,
+#                                                           so section 4 misses
+#                                                           this one too)
+#        A3  `[Capability:<cap>] failed to load <pkg>: …`  (:4338, ditto)
+#      A1 carries a tail guard — "load" must not be followed by another WORD —
+#      and that guard is the whole difference between `AuthPlugin failed to
+#      load: …` and `SettingsServicePlugin: failed to load translations …`.
+#      A2/A3 need no such guard: their subjects are already unambiguous.
+#
+#   B. the KERNEL's own verdict that it booted without a declared core service
+#      (`packages/core/src/kernel.ts` :354/:370). This leg is the answer to "the
+#      next boot defect will be worded differently": it never reads the cause at
+#      all, so it fires whatever the load site said — or said nothing. It is by
+#      construction never benign, because a core service that DID get a fallback
+#      takes the sibling warn `Service '…' not provided — using in-memory
+#      fallback`, which this pattern deliberately does not match.
+#
+# ⚠ Deliberately UNANCHORED. These lines arrive behind a `  ⚠ ` glyph, or a
+# `<ISO>Z WARN ` logger prefix, or indented inside the boot-diagnostics summary
+# block — and a pattern that assumed one of those spellings is exactly how the
+# scan below already missed a decorated `ERROR` once (the NO_COLOR note in
+# section 2). The gate scrubs ANSI before matching, for that same reason.
+SMOKE_BOOT_FAILURE_PATTERN='[[:alnum:]_]+Plugin failed to (load|start)[[:space:]]*($|[^[:alnum:][:space:]])|[Ff]ailed to load plugin|\[Capability:[^]]+\] failed to load|System started with degraded capabilities|CORE: Core service missing'
+
+# Strip ANSI SGR sequences: $1 -> $2. Both windows scrub before matching, so a
+# colorized line cannot slip past either one.
+smoke_scrub_ansi() {
+  sed -e $'s/\x1b\\[[0-9;]*m//g' "$1" > "$2"
+}
+
+# Print the boot-failure lines in $1 (ALREADY scrubbed), with line numbers.
+# Status 0 when at least one matched, so `if smoke_boot_failure_lines …; then`
+# reads as "the boot failed".
+smoke_boot_failure_lines() {
+  grep -nE "$SMOKE_BOOT_FAILURE_PATTERN" "$1"
+}
+
 # Sourcing this file defines the helpers above and runs nothing. `${BASH_SOURCE[0]}`
 # differs from `$0` exactly when the file is sourced, which is how the collision
 # test drives the real functions instead of grepping for them — a grep passes
@@ -762,6 +855,35 @@ if [ "$BOUND_PORT" != "$SMOKE_PORT" ]; then
 fi
 BASE_URL="http://localhost:$BOUND_PORT"
 
+# ── boot gate — BETWEEN 2 and 3, and that position is the point ─────────────
+# Nothing has been probed yet, so `$SERVER_LOG` right here IS the boot window.
+#
+# This is the same refusal the audience-posture assertion in section 3 makes,
+# applied to the case it missed: fail BEFORE the behaviour probes, which would
+# otherwise report the real defect as a cheerful downstream 4xx. A server that
+# came up without its auth plugin answers every auth probe honestly — 404, no
+# auth here — and that answer is indistinguishable from an auth regression,
+# which has a different owner. So the boot is judged on its own before anything
+# is asked of it.
+#
+# ⛔ This is NOT section 4 moved forward. Section 4 stays where it is and keeps
+# scanning the whole log after the probes; hoisting it would drop the
+# probe-window errors it exists to catch. What runs here is the boot-failure
+# predicate (see SMOKE_BOOT_FAILURE_PATTERN) — which is severity-blind, and so
+# closes the WARN half — plus the error-level scan against the boot window
+# only, which costs nothing (such a line already fails the run in section 4)
+# and buys the same attribution for an error-level boot failure.
+log "Checking the boot for a composition that did not load"
+BOOT_LOG="$SMOKE_ROOT/server.boot.log"
+smoke_scrub_ansi "$SERVER_LOG" "$BOOT_LOG"
+if smoke_boot_failure_lines "$BOOT_LOG"; then
+  fail "the server booted WITHOUT part of the composition (see the line(s) above, which name it). Every probe below would run against a server missing that capability and report the absence as a behaviour failure — a different owner. Fix the boot, then re-run."
+fi
+if grep -nE "$SMOKE_ERROR_LOG_PATTERN" "$BOOT_LOG"; then
+  fail "error-level log lines during BOOT, before any probe ran (see above)"
+fi
+echo "  ok — the boot log names no failed plugin, capability or core service"
+
 # ── 3. probes ───────────────────────────────────────────────────────────────
 COOKIES_USER="$SMOKE_ROOT/cookies-user.txt"
 COOKIES_ADMIN="$SMOKE_ROOT/cookies-admin.txt"
@@ -887,7 +1009,7 @@ if [ "$AUDIENCE_POSTURE" = "invite_only" ]; then
   # BY INVITATION, and a self-serve sign-up whose address holds a pending,
   # unexpired `sys_invitation` row is admitted under every posture (the
   # invitation carve-out). The route runs as the signed-in admin against the
-  # default organization their session carries — ADR-0081 bootstraps that org
+  # default organization their session carries — cloud ADR-0081 D1 bootstraps that org
   # precisely so this path exists on a single-org install.
   #
   # Chosen over `POST /auth/admin/create-user` — the other operator path named
@@ -972,16 +1094,26 @@ probe "DELETE /data/$NOTE_OBJECT/$RECORD_ID (delete)" 200 \
   -X DELETE "$BASE_URL/api/v1/data/$NOTE_OBJECT/$RECORD_ID"
 
 # ── 4. log scan ─────────────────────────────────────────────────────────────
-# The #3091 breakage announced itself at startup ("Failed to register OIDC
-# discovery routes") and would have been caught by ANY error-level line.
-# Three error formats coexist: ConsoleLogger `[error] …`, JsonLogger
-# `"level":"error"`, and timestamped `<ISO> ERROR …` (better-auth's logger and
-# the auth plugin's startup reporting). ANSI codes are stripped first —
-# belt-and-braces with NO_COLOR above, so a colorized ERROR can't slip through.
+# What is left for this section to catch, now that the boot gate above runs
+# first: everything the PROBES provoked. The whole log is re-scanned rather
+# than just the probe window, so nothing depends on slicing it correctly — the
+# boot half simply cannot reach here any more, having already failed.
+#
+# ⚠ The premise this section was written on no longer holds on its own. It read:
+# "the #3091 breakage announced itself at startup … and would have been caught
+# by ANY error-level line". True of #3091, which logged at error level — and the
+# reason it did not generalise is the boot gate's whole subject: a startup
+# breakage that logs at WARN is invisible here, and even at a matching severity
+# arrives AFTER the probes have already blamed something else. Startup is now
+# judged above; this scan is no longer the thing standing between a boot defect
+# and a misattributed probe failure.
+#
+# ANSI codes are stripped first — belt-and-braces with NO_COLOR in section 2, so
+# a colorized ERROR can't slip through (it did, once).
 log "Scanning server log for error-level output"
 SCRUBBED_LOG="$SMOKE_ROOT/server.scrubbed.log"
-sed -e $'s/\x1b\\[[0-9;]*m//g' "$SERVER_LOG" > "$SCRUBBED_LOG"
-if grep -nE '^\[(error|fatal)\]|"level":"(error|fatal)"|^\S+Z ERROR |Failed to register OIDC discovery routes' "$SCRUBBED_LOG"; then
+smoke_scrub_ansi "$SERVER_LOG" "$SCRUBBED_LOG"
+if grep -nE "$SMOKE_ERROR_LOG_PATTERN" "$SCRUBBED_LOG"; then
   fail "error-level log lines during the smoke (see above)"
 fi
 echo "  ok — no error/fatal log lines"

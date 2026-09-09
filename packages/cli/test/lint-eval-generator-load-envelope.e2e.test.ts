@@ -42,6 +42,44 @@
  * #14015 with its own review gate. `the key set is exactly the carriers` pins
  * that fence from this side, so a well-meaning widening goes red here.
  *
+ * ## [#16358] The second property this file pins: the human channel stays EMPTY
+ *
+ * `a coded failure at import surfaces BOTH carriers` below ends with
+ * `expect(run.stderr).toBe('')` under the comment *"A --json run leaks nothing
+ * to the human channel"*. That comment states a property of the `--json` face
+ * AS A WHOLE, and it was honest about the one door it drove — a module that
+ * EXISTS AND THROWS AT IMPORT, where esbuild bundles cleanly and prints
+ * nothing. The other doors into the same `catch` were uncovered, and they
+ * leaked: esbuild's own logger writes straight to stderr from inside
+ * `bundleRequire`, BEFORE anything throws, so the `catch` that builds the
+ * one-key `{error}` document never gets a chance to suppress it.
+ *
+ * Re-driven at `7f96e1417e` before the repair, `bin/run-dev.js`, `NO_COLOR=1`:
+ *
+ *     os lint --eval --json --generator /tmp/os16358/nope.mjs
+ *       exit 1 · stdout 143 B (well-formed `{error}`) · stderr  55 B
+ *       `✘ [ERROR] Could not resolve "/tmp/os16358/nope.mjs"`
+ *     os lint --eval --json --generator /tmp/os16358/warn.mjs   (LOADS FINE)
+ *       exit 0 · stdout 3158 B (the live eval report) · stderr 340 B
+ *       `▲ [WARNING] The "typeof" operator will never evaluate to "null"`
+ *
+ * ⇒ same command, same face, three answers — with a green pin asserting the
+ * one that held. The repair passes `esbuildOptions: { logLevel: 'silent' }`
+ * to that ONE `bundleRequire` call and ONLY when `--json` is set; the two
+ * cases below drive the two uncovered doors, and each carries its own
+ * negative control so a fix that silenced the REFUSAL along with the logger
+ * goes red here rather than reading green:
+ *
+ *   - unresolvable path — stderr empty AND the exit is still 1 with the
+ *     well-formed one-key `{error}` naming the unresolved path;
+ *   - warning-only — stderr empty on the `--json` face AND the SAME fixture
+ *     still shows the warning on the HUMAN face. That second leg is what
+ *     keeps the first from going vacuous: if a future esbuild stopped
+ *     emitting `impossible-typeof`, an `stderr === ''` assertion alone would
+ *     stay green while measuring nothing, and the human-face leg reddens
+ *     instead of hiding it. It also pins the scope of the silence — ⛔ the
+ *     repair must not reach the face that asked for human output.
+ *
  * ## Why no `dist/` sits on the measured path
  *
  * These run the CLI through `bin/run-dev.js`, the SOURCE entry — same CLI, run
@@ -139,6 +177,21 @@ export default function () { return {}; }
 const NOT_A_FUNCTION = `export default { nope: true };
 `;
 
+/**
+ * [#16358] Bundles and LOADS successfully, and makes esbuild emit a warning
+ * while doing it (`impossible-typeof`). Nothing throws here, so no `catch`
+ * ever sees this diagnostic and nothing carries it onto stdout — before the
+ * repair it reached stderr on both faces, including the machine one.
+ *
+ * The generated stack is deliberately trivial: this fixture measures the
+ * CHANNEL, not the rubric. `mode: 'live'` in the payload is what proves the
+ * module was actually loaded and called.
+ */
+const WARNS_BUT_LOADS = `const probe = 1;
+if (typeof probe === 'null') { throw new Error('unreachable'); }
+export default function () { return { objects: [] }; }
+`;
+
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'os-lint-eval-envelope-'));
 });
@@ -208,6 +261,58 @@ describe('os lint --eval --json — nothing is minted', () => {
     expect(run.code).toBe(1);
     expect(payload.error).toContain('Failed to load generator');
     expect(Object.keys(payload)).toEqual(['error']);
+  }, 120_000);
+});
+
+describe('os lint --eval --json — the human channel stays empty on EVERY door [#16358]', () => {
+  it('the unresolvable path leaks nothing to stderr — and still refuses on stdout', async () => {
+    // The door the sibling pin above does NOT drive. esbuild never reaches
+    // module evaluation: it throws a `BuildFailure`, and its logger had
+    // already written `✘ [ERROR] Could not resolve "…"` to stderr from inside
+    // `bundleRequire` — 55 bytes measured at 7f96e1417e for this path length
+    // (the emission is `✘ [ERROR] Could not resolve "<path>"`, so the byte
+    // count tracks the path; the card's 54 was a 20-character path).
+    const run = await runJson(join(dir, 'does-not-exist.mjs'));
+
+    // The property the card exists for, in the same shape the existing pin
+    // uses one describe up.
+    expect(run.stderr).toBe('');
+
+    // ⛔ NEGATIVE CONTROL, on the SAME run: silencing esbuild's logger must
+    // not also silence the refusal. A repair that swallowed the throw would
+    // satisfy the line above and fail every line below.
+    const payload = payloadOf(run, 'unresolvable path — stderr pin');
+    expect(run.code).toBe(1);
+    expect(Object.keys(payload)).toEqual(['error']);
+    expect(payload.error).toContain('Failed to load generator');
+    expect(payload.error).toContain('Could not resolve');
+  }, 120_000);
+
+  it('a generator that only WARNS leaks nothing either — and the human face still shows it', async () => {
+    const file = generator('warns-but-loads', WARNS_BUT_LOADS);
+
+    // The third door: nothing throws at all, so the `catch` is never entered
+    // and there is no error path to blame. 340 bytes of esbuild warning
+    // reached stderr here before the repair, on a run that exits 0.
+    const machine = await runJson(file);
+    expect(machine.stderr).toBe('');
+
+    const payload = payloadOf(machine, 'warning generator — machine face') as unknown as {
+      mode?: string;
+      error?: unknown;
+    };
+    // The module really was loaded and called — otherwise `stderr === ''`
+    // above would be measuring a run that never bundled anything.
+    expect(payload.mode).toBe('live');
+    expect(payload.error).toBeUndefined();
+
+    // ⛔ SCOPE CONTROL: the silence is the machine face's, not the command's.
+    // The same fixture on the HUMAN face must still show esbuild's warning —
+    // which also keeps the assertion above from going vacuous if a future
+    // esbuild stops emitting this diagnostic.
+    const human = await runLint(['--generator', file]);
+    expect(human.stderr).toContain('[WARNING]');
+    expect(human.stderr).toContain('typeof');
   }, 120_000);
 });
 

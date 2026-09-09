@@ -504,6 +504,16 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // declaration, and declaring one rarely-touched file is cheaper than
       // rewording prose to dodge a scanner.
       'scripts/cross-package-test-inputs.mjs',
+      // `nightly-tiers.mjs` is the mention shape a FIFTH time, and the one entry
+      // that was already HALF declared: turbo.json has carried it (and its
+      // `.d.mts`) in this task's `inputs` all along, because `vitest-tiers.ts`
+      // imports it and it decides which files the `test` task collects at all.
+      // What was missing was the row here, and nothing forced it until a test
+      // named the path in prose --- test/create-example-retired-docs-parity.test.ts,
+      // explaining which tier its sibling pin runs in. Settled the way
+      // `check-nul-bytes.mjs` above is, and it costs nothing in practice: the file
+      // is already a real input to this package's verdict.
+      'scripts/nightly-tiers.mjs',
       // `translation.zod.ts` is the second entry no test READS -- named in a
       // comment in test/i18n-section-coverage.test.ts, which describes it as the
       // DECLARATION face of the schema that test asserts against. It appears
@@ -532,6 +542,33 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // One file, not `packages/create-objectstack/**`: the test reads that
       // template and nothing else across the boundary.
       'packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml',
+      // The on-ramp's ENTRY POINT and the template it ships, the second pair of
+      // that same shape (#16485). test/scaffold-emission-policy.e2e.test.ts
+      // SPAWNS `bin/create-objectstack.js` into a throwaway directory and reads
+      // the `package.json` it emits, then compares the third-party ranges and
+      // `engines.pnpm` against the five this package renders. Three scaffolders
+      // emit a new project's manifest and only two of them can import the
+      // `SCAFFOLD_*` constants — the third reaches them by generation — so a
+      // diff to either of these files is exactly the divergence that pin exists
+      // to catch, and without the declaration `@objectstack/cli#test` hashes the
+      // same and replays a cached green over it.
+      'packages/create-objectstack/bin/create-objectstack.js',
+      'packages/create-objectstack/src/templates/blank/package.json',
+      // The CI workflow that same template ships, READ by
+      // test/scaffold-ci-script-parity.test.ts (#16350). That pin DERIVES the
+      // scripts a scaffolded project must declare from this workflow's `pnpm
+      // <script>` steps, so a step added or renamed there changes what the pin
+      // requires of `init.ts`'s three template maps — the divergence #16330
+      // created (`lint` added on the template side only) is exactly what it
+      // catches, and without the declaration `@objectstack/cli#test` would hash
+      // the same across a workflow-only diff and replay a cached green over it.
+      'packages/create-objectstack/src/templates/blank/.github/workflows/ci.yml',
+      // The generator that ties those two to this package's own constants, and
+      // the third entry of the mention shape on this package — settled the way
+      // check-nul-bytes.mjs above is. It earns the declaration on the merits
+      // too: it is what makes the bundled template equal `SCAFFOLD_*`, so a
+      // change to it changes what that pin measures.
+      'scripts/sync-scaffold-emission-policy.mjs',
       // The two files that hold the COLUMN authority the CLI's migration
       // generators mirror, READ by
       // src/commands/generate-multiple-json-column.pin.test.ts (#14829). That
@@ -1278,3 +1315,61 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     },
   },
 };
+
+/**
+ * The one input entry that keeps a declared radius from being hashed over
+ * `node_modules/` (#16555).
+ *
+ * ## The defect, and why the glob table alone cannot state it
+ *
+ * A `$TURBO_ROOT$` glob is resolved against the FILESYSTEM, not against git's
+ * tracked set, so `packages/**` descends into every installed dependency tree
+ * under `packages/`. The globs above are declared against what the escaping
+ * tests WALK, and every walk in this repo skips `node_modules` -- the
+ * declaration was simply wider than the walk, in the one direction a glob
+ * cannot narrow by itself.
+ *
+ * What that costs is not a wasted read, it is a task that can never replay from
+ * cache. vitest rewrites `node_modules/.vite/vitest/<hash>/results.json` on
+ * every run, so on a runner that ran any vitest earlier the hash has already
+ * moved before the task is hashed. Measured on the card's tree: 9,404 input
+ * keys for `@objectstack/spec#test:repo`, exactly ONE changed hash between two
+ * consecutive dry-runs, and that file was it -- while the package-local
+ * `@objectstack/spec#test` (`$TURBO_DEFAULT$`, git-scoped) read HIT across the
+ * same experiment.
+ *
+ * ## Why this spelling and not a negated `$TURBO_ROOT$` input
+ *
+ * Measured on turbo 2.10.10 against `@objectstack/spec#test:repo`, three
+ * probe files planted under three packages' dependency trees (a real tracked
+ * `.json` under `packages/` staying an input throughout, as the firing
+ * control):
+ *
+ *   baseline                                     7307 keys, 3 under node_modules
+ *   a negation carrying the root token           7307 keys, 3   -- INERT
+ *   the same, `*` instead of `**`                7307 keys, 3   -- INERT
+ *   the same, rooted at the repo instead         7307 keys, 3   -- INERT
+ *   THIS spelling (package-relative)             7304 keys, 0
+ *
+ * ⇒ turbo drops a negation that carries the root token instead of applying it,
+ * silently. The negation mechanism itself is live -- a package-relative
+ * `"!LICENSE"` on the same task removed exactly that one key (7307 -> 7306) --
+ * so the three zeros above are a reading about the ROOT TOKEN, not about
+ * negation. ⛔ Do not "tidy" this entry into the `$TURBO_ROOT$` form the globs
+ * beside it use: it reads as consistent and enforces nothing.
+ *
+ * Package-relative is also why it needs no per-package depth: `**` spans zero
+ * or more segments, so this one string covers the task's own tree and the
+ * `../<pkg>/...` keys a root-scoped glob contributes alike.
+ *
+ * `check-cross-package-test-inputs.mjs` requires it on the turbo task of every
+ * package that declares a glob able to reach a `node_modules` path, so the next
+ * root-scoped declaration cannot re-commit this silently.
+ */
+export const NODE_MODULES_EXCLUSION = '!**/node_modules/**';
+
+/**
+ * The path segment `NODE_MODULES_EXCLUSION` excludes, as the gate's rule needs
+ * it: a name to test a declared glob's reach against, not a path.
+ */
+export const NODE_MODULES_SEGMENT = 'node_modules';

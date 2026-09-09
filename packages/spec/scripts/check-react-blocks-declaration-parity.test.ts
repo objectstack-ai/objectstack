@@ -42,6 +42,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  REPO_MANIFEST_RELATIVE,
+  manifestPrescription,
+  repoManifestIsCheckedIn,
+  repoManifestPath,
+} from './manifest-prescription';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
@@ -296,9 +302,14 @@ describe('check:react-declaration-parity — the gate CAN go red (#4690)', () =>
     expect(status, output).toBe(1);
     expect(output).toMatch(/did NOT run/);
     expect(output).not.toMatch(/skipping/);
-    // The refusal has to be actionable: the manifest's producer lives in another repo.
-    expect(output).toContain('pnpm sdui:manifest');
-    expect(output).toContain('OBJECTUI_ROOT=../objectui');
+    // The refusal has to be actionable. WHICH prescription is actionable depends on
+    // the repository the script is standing in, so this only asserts the branch that
+    // is true HERE — a manifest is checked in at the root — and the prescription's
+    // own tests below cover both. Asserting the dump path unconditionally is how
+    // #16715 stayed invisible: the assertion agreed with the prose, and both were
+    // stale in the same direction.
+    expect(output).toContain('MANIFEST="$PWD/sdui.manifest.json"');
+    expect(output).toContain('pnpm --filter @objectstack/spec check:react-declaration-parity');
   });
 
   it('a MANIFEST path that does not exist fails loudly, naming the path', { timeout: SPAWN_TIMEOUT_MS }, () => {
@@ -489,5 +500,125 @@ describe('check:react-declaration-parity — the node contract, and its calibrat
     expect(output).toMatch(/<ListView> \(list-view\):.*node-level/);
     expect(output).toMatch(/spec accepts at NODE level \(not a per-block prop\): dataSource/);
     expect(status, output).toBe(0);
+  });
+});
+
+/**
+ * THE REFUSAL'S PRESCRIPTION IS PROBED, AND BOTH WORLDS ARE PINNED (#16715).
+ *
+ * The gate's refusal text used to be a constant asserting "this repository contains
+ * no copy of it" and sending the reader to build objectui and dump one in a browser.
+ * That was false from #13446 onward — `sdui.manifest.json` is checked in at the root
+ * and `lint.yml` runs this gate against it — and it is read at the exact moment
+ * someone is deciding whether the gate can run at all. Twice measured (#16489 / PR
+ * #16697, and PR #16777) a dev believed it and filed a locally-runnable gate as
+ * `EXTERNAL_INPUT_REQUIRED` / NOT MEASURED; one of those declarations reached a
+ * deliverable, on a head where setting one variable gave exit 0.
+ *
+ * ⭐ THE ONE-BRANCH SHAPE IS THE DEFECT, so testing one branch would rebuild it. The
+ * probe is a real filesystem check against a temp root here — both answers are
+ * producible — and the wiring (that the script probes at all, and prints the
+ * paste-ready command in THIS repository) is asserted through a real spawn above and
+ * below. Neither branch may assert the other's world: that is what each `not` pins.
+ */
+describe('check:react-declaration-parity — the prescription is probed, not asserted (#16715)', () => {
+  /** A root that has a manifest, and one that does not — the two worlds, on disk. */
+  function withRoots(fn: (roots: { withManifest: string; without: string }) => void): void {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'react-parity-prescription-'));
+    try {
+      const withManifest = path.join(dir, 'has-one');
+      const without = path.join(dir, 'has-none');
+      fs.mkdirSync(withManifest);
+      fs.mkdirSync(without);
+      fs.writeFileSync(path.join(withManifest, REPO_MANIFEST_RELATIVE), '{"components":{}}', 'utf8');
+      fn({ withManifest, without });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('the probe answers from the filesystem, both ways', () => {
+    withRoots(({ withManifest, without }) => {
+      expect(repoManifestIsCheckedIn(withManifest)).toBe(true);
+      expect(repoManifestIsCheckedIn(without)).toBe(false);
+      expect(repoManifestPath(withManifest)).toBe(path.join(withManifest, 'sdui.manifest.json'));
+    });
+  });
+
+  it('BRANCH: manifest checked in — hands over a paste-ready command, not a production errand', () => {
+    withRoots(({ withManifest }) => {
+      const text = manifestPrescription({ repoRoot: withManifest, checkedIn: true });
+      // The command CI runs, spelled as CI spells it, plus the `cd` that makes `$PWD`
+      // true — so the block works pasted from any working directory.
+      expect(text).toContain('MANIFEST="$PWD/sdui.manifest.json"');
+      expect(text).toContain(`cd ${withManifest}`);
+      expect(text).toContain('pnpm --filter @objectstack/spec check:react-declaration-parity');
+      expect(text).toContain('--baseline react-declaration-parity.baseline.json --strict');
+      expect(text).toContain(path.join(withManifest, 'sdui.manifest.json'));
+      // ⭐ The negative half: the false sentence, and the errand it justified, are gone.
+      expect(text).not.toContain('contains no copy of it');
+      expect(text).not.toContain('pnpm objectui:build');
+      expect(text).not.toContain('OBJECTUI_ROOT=../objectui');
+      // ⭐ And it must name the RIGHT regenerator. `pnpm sdui:manifest` is
+      // scripts/gen-sdui-manifest.sh, whose TARGET is packages/console/dist — it never
+      // writes the root artefact or scripts/sdui-manifest.record.json.
+      // `node scripts/gen-sdui-manifest-node.mjs` owns both, which is what the record's
+      // own `generator` field and check-sdui-manifest.mjs both say. Sending a reader to
+      // the wrong one is this card's defect class again: a confident false claim about
+      // the tree, in the text consulted when deciding what to run.
+      expect(text).toContain('gen-sdui-manifest-node.mjs');
+      // The wrong tool may appear ONLY inside the correction that names it wrong —
+      // nowhere else, command line or prose. The LOOKAHEAD is what enforces the whole of
+      // that sentence, and it was measured before it was written: the original defective
+      // claim ('`pnpm sdui:manifest` rewrites it when .objectui-sha moves') was itself
+      // MID-LINE, so a line-anchored form does not match it at all and would have left
+      // this comment promising more than the code delivers — the same over-claim, one
+      // layer up, in a card about exactly that. A flat `not.toContain` is not available
+      // either: it would forbid the correction itself. This assertion belongs to the
+      // present branch alone — the absent branch legitimately opens command lines with
+      // that spelling, so it must not be hoisted out of this leg.
+      expect(text).not.toMatch(/pnpm sdui:manifest(?!` does NOT rewrite)/);
+      expect(text).toContain('`pnpm sdui:manifest` does NOT rewrite this file');
+      // …and it says, in words, what the two devs got wrong.
+      expect(text).toMatch(/NOT MEASURED/);
+    });
+  });
+
+  it('BRANCH: no manifest — still hands over the whole production path', () => {
+    withRoots(({ without }) => {
+      const text = manifestPrescription({ repoRoot: without, checkedIn: false });
+      expect(text).toContain('pnpm objectui:build');
+      expect(text).toContain('pnpm sdui:manifest');
+      expect(text).toContain('OBJECTUI_ROOT=../objectui');
+      expect(text).toContain('MANIFEST=/path/to/sdui.manifest.json');
+      // It names the path it actually looked at, so "no copy" is a reading and not a
+      // claim about repositories in general — the exact over-reach that caused #16715.
+      expect(text).toContain(path.join(without, 'sdui.manifest.json'));
+      // ⭐ The negative half: it must not tell a reader a file is there when it is not.
+      expect(text).not.toContain('IS checked in');
+      expect(text).not.toContain('MANIFEST="$PWD/sdui.manifest.json"');
+    });
+  });
+
+  it('the two branches are genuinely different text, not one string with a toggle', () => {
+    withRoots(({ withManifest }) => {
+      const present = manifestPrescription({ repoRoot: withManifest, checkedIn: true });
+      const absent = manifestPrescription({ repoRoot: withManifest, checkedIn: false });
+      expect(present).not.toEqual(absent);
+    });
+  });
+
+  /**
+   * The wiring, end to end: the script must PROBE, and in this repository the probe
+   * must find the committed manifest. The unit tests above would all pass against a
+   * script that never called the function.
+   */
+  it('the real gate prints the checked-in branch in THIS repository', { timeout: SPAWN_TIMEOUT_MS }, () => {
+    const { status, output } = runExit({});
+    expect(status, output).toBe(1);
+    expect(output).toContain('IS checked in at this repository\'s root');
+    expect(output).toContain('MANIFEST="$PWD/sdui.manifest.json"');
+    expect(output).not.toContain('contains no copy of it');
+    expect(output).not.toContain('OBJECTUI_ROOT=../objectui');
   });
 });

@@ -16,9 +16,10 @@
  * The control plane (cloud) stores this blob opaquely. The per-file
  * `integrity` map is computed here at build time and self-checked by the
  * `os plugin publish` preflight; re-verification at install/load-time
- * unpack (ADR §3.5 step 5) is the cloud control plane's obligation and is
- * not implemented in this repo (#11331). This module owns the two
- * contracts the runtime and cloud must agree on byte-for-byte:
+ * unpack is not implemented in this repo and is owned by the
+ * future runtime loader (ADR-0025 §3.5 steps 4–7), not by the cloud
+ * control plane (#11331). This module owns the two contracts the
+ * runtime and cloud must agree on byte-for-byte:
  *
  *   1. The integrity digest STRING FORMAT — Subresource-Integrity style
  *      `sha256-<base64>` (matches ADR-0025 §3.2's example). See
@@ -43,8 +44,9 @@ export interface ArchiveFile {
  * Subresource-Integrity-style digest of `bytes`: `sha256-<base64>`.
  * This is the canonical per-file integrity string written into the
  * compiled manifest's `integrity` map and checked back at the
- * `os plugin publish` preflight (unpack-time re-verification is the
- * cloud control plane's obligation, #11331).
+ * `os plugin publish` preflight (unpack-time re-verification is owned
+ * by the future runtime loader — ADR-0025 §3.5 steps 4–7 — not by the
+ * cloud control plane, #11331).
  */
 export function sriDigest(bytes: Uint8Array): string {
   return 'sha256-' + createHash('sha256').update(bytes).digest('base64');

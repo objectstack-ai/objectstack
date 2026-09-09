@@ -159,6 +159,33 @@ describe('validate-ai-tool-references', () => {
     expect(validateAiToolReferences(stack)).toEqual([]);
   });
 
+  /**
+   * [#16512] The five `service-ai-studio` tools the cloud runtime registers
+   * that the registry did not list.
+   *
+   * `PLATFORM_PROVIDED_TOOL_NAMES` is the load-bearing half of
+   * `skill.tools[]` reference integrity under ADR-0109, so while these five
+   * were absent a skill naming any of them was reported as a FICTIONAL tool —
+   * the precise failure the registry exists to end. The pin lives here, not
+   * beside the constant: "refused" and "accepted" are this rule's verdicts,
+   * and the list's own file can only pin its shape.
+   */
+  it('resolves the five service-ai-studio tools the registry was missing (#16512)', () => {
+    const five = ['test_flow', 'toggle_flow', 'get_authoring_rules', 'load_tools', 'open_record'];
+    expect(validateAiToolReferences({ skills: [{ name: 's', tools: five }] })).toEqual([]);
+
+    // The control, without which this pin cannot fail: a sixth name shaped
+    // exactly like the five and registered by nobody is STILL reported. A
+    // universe widened until everything resolves would pass the assertion
+    // above and fail this one.
+    const control = validateAiToolReferences({
+      skills: [{ name: 's', tools: [...five, 'archive_flow'] }],
+    });
+    expect(control).toHaveLength(1);
+    expect(control[0].path).toBe('skills[0].tools[5]');
+    expect(control[0].message).toContain('archive_flow');
+  });
+
   it('reports stable paths and tolerates junk shapes', () => {
     const stack = {
       skills: [{ name: 's', tools: ['query_records', 'nope_tool'] }],

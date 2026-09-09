@@ -43,8 +43,9 @@
  * This is deliberately the opposite call from `bodyExtractionWarnings`, which
  * sits under its own key one line below in the payload. That is not an
  * inconsistency: `{origin,reason}` extraction records have NO counterpart in
- * `os validate --json` (validate lowers no handlers), so there is no parity to
- * hold and a sibling key is right. The undeclared-key findings do have a
+ * `os validate --json` (validate lowers too since #16544, but emits nothing, so
+ * it surfaces no extraction record), so there is no parity to hold and a
+ * sibling key is right. The undeclared-key findings do have a
  * counterpart, and it is already in `warnings`.
  *
  * The payload's top-level key set is pinned unchanged below for that reason:

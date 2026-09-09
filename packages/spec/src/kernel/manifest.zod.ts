@@ -38,19 +38,33 @@ import { NavigationContributionSchema } from '../ui/app.zod';
  *   "network": ["api.acme.com"], "fs": [] }
  * ```
  */
-export const PluginPermissionsSchema = z
-  .object({
-    services: z.array(z.string()).optional()
-      .describe('Platform services the plugin may resolve (e.g. "object", "http")'),
-    hooks: z.array(z.string()).optional()
-      .describe('Lifecycle hooks the plugin may register (e.g. "record.beforeInsert")'),
-    network: z.array(z.string()).optional()
-      .describe('Network hosts the plugin may reach (e.g. "api.acme.com")'),
-    fs: z.array(z.string()).optional()
-      .describe('Filesystem paths the plugin may access'),
-  })
-  .strict()
-  .describe('Structured plugin permission grants (ADR-0025 §3.2)');
+export const PluginPermissionsSchema = strictObject({
+  surface: 'the `permissions` block of this package manifest',
+  history:
+    'This block has refused unknown keys since it was introduced, but through zod\'s own '
+    + 'bare message: a transposed `hoooks` was echoed back and nothing else — no surface, no '
+    + 'rename — while every neighbouring block on this manifest named all three. Reaching '
+    + 'the author one level down inside the `permissions` union made that the whole message, '
+    + 'and this block decides which services, hooks, network hosts and filesystem paths the '
+    + 'plugin may touch. The declared keys are `services`, `hooks`, `network` and `fs`.',
+  aliases: {
+    // Edit distance cannot reach a two-letter abbreviation from the word it
+    // abbreviates, and `fs` is the one key here an author is most likely to
+    // spell out in full.
+    filesystem: 'fs',
+    paths: 'fs',
+    hosts: 'network',
+  },
+}, {
+  services: z.array(z.string()).optional()
+    .describe('Platform services the plugin may resolve (e.g. "object", "http")'),
+  hooks: z.array(z.string()).optional()
+    .describe('Lifecycle hooks the plugin may register (e.g. "record.beforeInsert")'),
+  network: z.array(z.string()).optional()
+    .describe('Network hosts the plugin may reach (e.g. "api.acme.com")'),
+  fs: z.array(z.string()).optional()
+    .describe('Filesystem paths the plugin may access'),
+}).describe('Structured plugin permission grants (ADR-0025 §3.2)');
 
 export type PluginPermissions = z.input<typeof PluginPermissionsSchema>;
 
@@ -139,10 +153,26 @@ export type PluginPackaging = z.input<typeof PluginPackagingSchema>;
 /**
  * Per-file content digests of the packaged artifact (ADR-0025 §3.2),
  * mapping artifact-relative path → digest string (e.g. "sha256-<base64>").
- * Computed at build time (`os plugin build`) and self-checked by the
- * publisher at the `os plugin publish` preflight. Unpack-time
- * re-verification (ADR §3.5 step 5) is the cloud control plane's
- * obligation and is not implemented in this repo (#11331).
+ *
+ * COMPUTED AND SELF-CHECKED BY THE PUBLISHER. `os plugin build` computes the
+ * map into the compiled manifest, and the `os plugin publish` preflight
+ * re-hashes the artifact bytes against it, refusing the upload on a digest
+ * mismatch, a declared entry with no file, or a packaged file the map does
+ * not declare (#13464). An absent map is a permissive pass — the field is
+ * `.optional()`.
+ *
+ * NOT RE-VERIFIED AT UNPACK. That leg is **not implemented** — nothing in
+ * this repo unpacks an installed artifact at all: there is no
+ * `os plugin install`, and the archive reader's only production caller is the
+ * publish preflight reading back its own output. Re-verification is owned by
+ * the **future runtime loader** — ADR-0025 §3.5 steps 4–7 (download + verify,
+ * materialize, register, load + activate), the install flow that ADR's own
+ * status line records as unimplemented. It is NOT the cloud control plane's
+ * obligation; the control plane stores the artifact blob opaquely.
+ *
+ * So a present `integrity` map is evidence that the publisher checked its own
+ * bytes, never that anything re-checked them after publish. The enforce leg
+ * is tracked on #11331.
  */
 export const PluginIntegritySchema = z
   .record(z.string(), z.string())
@@ -747,9 +777,11 @@ export const ManifestSchema = strictObject({
 
   /**
    * Per-file content digests of the packaged artifact (ADR-0025 §3.2).
-   * Computed at build, self-checked at the publish preflight; unpack-time
-   * verification is the cloud control plane's obligation, not yet
-   * implemented (#11331).
+   * Computed at build and self-checked at the `os plugin publish` preflight
+   * (#13464); unpack-time re-verification is NOT implemented and is owned by
+   * the future runtime loader (ADR-0025 §3.5 steps 4–7), not by the cloud
+   * control plane. Enforce leg tracked on #11331.
+   * See {@link PluginIntegritySchema}.
    */
   integrity: PluginIntegritySchema.optional()
     .describe('Per-file content digests of the plugin artifact (ADR-0025 §3.2)'),

@@ -858,8 +858,18 @@ export function diffManagedTable(args: {
       // deliberately SILENT: that is every pre-protocol-17 source after a
       // runtime upgrade, the write gate makes the column constraint
       // unreachable (harmless belt-and-suspenders), and nagging every legacy
-      // required field would bury real drift. `os migrate meta` ratifies it
-      // whenever the source is next migrated.
+      // required field would bury real drift.
+      //
+      // ⚠️ Nothing ratifies it later either, and this block used to say the
+      // opposite — "`os migrate meta` ratifies it whenever the source is next
+      // migrated". That died with the ADR-0087 `field-required-notnull-explicit`
+      // conversion, WITHDRAWN in #16693 (maintainer ruling 2026-09-08): no
+      // chain step writes `storage.notNull` for anybody, at any protocol floor.
+      // So the silence above is permanent until the author declares the
+      // constraint themselves — which is the ADR-0113 posture (`required` is
+      // the write contract; `storage.notNull` alone binds the column), not a
+      // gap. The SILENCE itself is unchanged: this PR corrects the sentence,
+      // never the behaviour.
       out.push({
         kind: 'nullability_mismatch',
         remoteName: table,
@@ -873,8 +883,8 @@ export function diffManagedTable(args: {
         message:
           `${table}.${fieldName}: the column is NOT NULL but the metadata declares no ` +
           `storage constraint. Ratify it by declaring \`storage: { notNull: true }\` ` +
-          `(pre-protocol-17 sources: \`os migrate meta\` stamps it for every ` +
-          `previously-required field), or deliberately relax the column via "os migrate".`,
+          `yourself — nothing supplies it for you, and \`required: true\` does not imply ` +
+          `it (ADR-0113) — or deliberately relax the column via "os migrate".`,
       });
     } else if (!expectNullable && col.nullable) {
       out.push({

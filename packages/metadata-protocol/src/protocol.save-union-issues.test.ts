@@ -48,17 +48,29 @@ const keyOf = (w: Record<string, unknown>) =>
 
 /** The engine surface the repository write path touches. */
 function makeProtocol() {
-    const rows = new Map<string, Row>();
+    // ⚠️ Keyed BY TABLE. `find`/`findOne` below answer nothing, so this harness
+    // cannot serve a `sys_metadata_history` row as a `sys_metadata` row the way
+    // #16223 measured — but one flat map still made `rows.size` the total of
+    // every table one save writes. `rows` is the store table these tests assert
+    // on; the journals the protocol also writes get their own.
+    const tables = new Map<string, Map<string, Row>>();
+    const tableOf = (table: string): Map<string, Row> => {
+        const existing = tables.get(table);
+        if (existing) return existing;
+        const created = new Map<string, Row>();
+        tables.set(table, created);
+        return created;
+    };
+    const rows = tableOf('sys_metadata');
     let nextId = 0;
     const engine: any = {
         async findOne(object: string, query?: EngineFindOneQueryInput) {
                           assertEngineFindOnePredicate(object, query); return null; },
         async find() { return []; },
         async insert(table: string, data: Record<string, unknown>) {
-            if (table === 'sys_metadata_audit') return { id: 'audit_skip' };
             nextId += 1;
             const row = { id: `r_${nextId}`, ...(data as any) } as Row;
-            rows.set(keyOf(data), row);
+            tableOf(table).set(keyOf(data), row);
             return { id: row.id };
         },
         async update(_t: string, data: Record<string, unknown>, opts?: Record<string, unknown>) {

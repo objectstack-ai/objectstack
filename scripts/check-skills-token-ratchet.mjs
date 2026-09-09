@@ -417,7 +417,11 @@ export const CEILINGS = new Map([
   ['skills/objectstack-data/evals/README.md', 143],
   ['skills/objectstack-data/references/data-hooks.md', 12611],
   ['skills/objectstack-data/rules/datasources.md', 911],
-  ['skills/objectstack-data/rules/field-types.md', 3584],
+  // -552 (was 3584): re-locked at the landed count (#16374) after PR #16187
+  // (the two `tree` rows) and PR #16369 (the ASCII decision tree deleted)
+  // both merged. Lowering to the landed count is the ratchet's ordinary
+  // direction — a seat's re-lock, not a maintainer ruling.
+  ['skills/objectstack-data/rules/field-types.md', 3032],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   ['skills/objectstack-data/rules/lifecycle.md', 1590],
   ['skills/objectstack-data/rules/naming.md', 773],

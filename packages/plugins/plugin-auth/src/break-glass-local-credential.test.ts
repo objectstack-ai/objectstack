@@ -5,7 +5,7 @@
  * invariant — pinned, not implemented.
  *
  * #5892 asked for two things. The ban half was missing and is built in
- * `last-admin-ban-guard.ts`; this half — "`enforced` SSO must never disable the
+ * `last-admin-guard.ts`; this half — "`enforced` SSO must never disable the
  * last local admin's password" — was **already implemented** on `origin/main`
  * and had no test of its own, which is the state that lets a security
  * behaviour be refactored away without anything going red. So this file adds
@@ -287,7 +287,7 @@ describe('[#5892] the last local password login survives ban / remove / delete',
     };
 
     // A blocked legitimate removal is the cost here; a locked-out environment
-    // is the cost in `last-admin-ban-guard.ts`. Different failure modes,
+    // is the cost in `last-admin-guard.ts`. Different failure modes,
     // different directions — see that file's header.
     await expect(
       config.hooks!.before!(hookCtx('/admin/ban-user', { userId: 'usr_owner' }, adapter)),

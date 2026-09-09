@@ -56,8 +56,35 @@ export type ExprMode = 'compile' | 'interpret';
  */
 export type ExprDialect = 'cel' | 'cron' | 'template' | 'js' | 'settings-visibility';
 export type ExprState = 'enforced' | 'experimental' | 'removed';
-/** ADR-0058 D5 fail-policy tiers. */
-export type FailPolicy = 'compile-error' | 'fail-closed' | 'fail-soft-log' | 'throw';
+/**
+ * ADR-0058 D5 fail-policy tiers, plus the one state D5 has no tier for.
+ *
+ * The four D5 tiers each describe what an EVALUATOR does when the expression is
+ * bad. `unevaluated` is the fifth member because some slots have no evaluator at
+ * all: nothing reads the value, so the honest answer to "what happens when the
+ * expression is bad" is "nothing happens", and every one of the four would be a
+ * stronger claim than the row can support.
+ *
+ * That is not a hypothetical shortfall — it is what the rows carrying it were
+ * doing before this member existed. `compile-error` claimed the Zod parse was
+ * the refusal (true as far as it goes, and weaker than it reads: the parse
+ * judges the value's SHAPE and never its grammar, so it is a refusal every row
+ * in this ledger shares), and `fail-closed` claimed a RUNTIME refusal on a slot
+ * whose own `enforcement` cell said `(no runtime consumer yet)`. On a
+ * security-flavoured row that second one reads as a security guarantee, which
+ * is the borrowing with a consequence past legibility.
+ *
+ * ⛔ `unevaluated` is NOT a synonym for `experimental`, and NOT a tier for "not
+ * measured here". `cel-inline-grid-cell` is `experimental` and stays
+ * `fail-soft-log`: its enforcement cell names an evaluator it could not reach
+ * (the objectui renderer, outside this checkout) and reports a MEASURED write
+ * path on which nothing refuses. An absence this checkout cannot establish is
+ * not an absence this ledger may assert — that is the invented cell the ledger
+ * exists to prevent, in the other direction. The companion test pins the
+ * distinction so the new word cannot be borrowed the way the old ones were:
+ * see `NAMES_RUNTIME_EVALUATOR` / `DECLARES_NO_EVALUATOR` there.
+ */
+export type FailPolicy = 'compile-error' | 'fail-closed' | 'fail-soft-log' | 'throw' | 'unevaluated';
 
 export interface ExprSurface extends ConformanceRow {
   dialect: ExprDialect;
@@ -346,7 +373,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     // The key and its documented hand-off arrived with #14825.
     id: 'cron-knowledge-refresh',
     summary: 'knowledge-source periodic reindex cron (KnowledgeRefreshPolicy.cron) — surfaced, deliberately not scheduled',
-    dialect: 'cron', mode: 'interpret', state: 'experimental', failPolicy: 'compile-error',
+    dialect: 'cron', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
     enforcement:
       'PARSE ONLY — `CronExpressionInputSchema` refuses a blank/non-string, non-envelope value and normalizes to `{dialect:"cron",source}`; nothing evaluates the result. service-knowledge/knowledge-service.ts reads `refresh.onRecordChange` and NEVER `refresh.cron` (measured: the only `refresh` reads in that package are the two `onRecordChange` sites)',
     covers: ['ai/knowledge-source.zod.ts:KnowledgeRefreshPolicySchema.cron'],
@@ -357,7 +384,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     // and #15028 (the envelope arm now pins the dialect — the note's last sentence).
     id: 'cron-declared-unwired',
     summary: 'cron slots on subsystems that were declared but never built — export schedules, flow schedule state, connector sync, cache warmup, DR backup/test',
-    dialect: 'cron', mode: 'interpret', state: 'experimental', failPolicy: 'compile-error',
+    dialect: 'cron', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
     enforcement:
       'PARSE ONLY — `CronExpressionInputSchema` refuses a blank/non-string, non-envelope value and normalizes to the envelope; NO EVALUATOR FOUND for any of these five keys. Reader hunt, per key, walking out from each declaration (2026-09-04, `61821e54cf5`): `api/export.zod.ts:cronExpression` — the whole `ExportJobApiContracts` family has zero consumers and rest-server serves no `/api/v1/data/export` route, so `POST /api/v1/data/export/schedules` is a declared contract nothing implements; `IExportService` has no provider binding, which its own source already records. `automation/execution.zod.ts:cronExpression` — `ScheduleStateSchema` has no consumer outside packages/spec; the schedule TRIGGER that does work reads a flow start node `config.schedule` through trigger-schedule/schedule-trigger.ts `normalizeSchedule`, a different shape this key never reaches. `integration/connector.zod.ts:schedule` — `syncConfig` has no reader outside packages/spec. `system/cache.zod.ts:schedule` (CacheWarmup) and `system/disaster-recovery.zod.ts:schedule` (BackupConfig + the DR `testing` block) — neither schema has any consumer outside packages/spec',
     covers: [
@@ -367,7 +394,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       'system/cache.zod.ts:CacheWarmupSchema.schedule',
       'system/disaster-recovery.zod.ts:BackupConfigSchema.schedule', 'system/disaster-recovery.zod.ts:DisasterRecoveryPlanSchema.schedule',
     ],
-    note: 'EXPERIMENTAL — five declared cron slots with no runtime evaluator (ADR-0049 enforce-or-remove candidates; each wants its own look, and the card that surfaced them says so rather than proposing a sweep). ⚠️ TWO of these surfaces are declared TWICE: `api/export.zod.ts` `cronExpression` on `ScheduledExportSchema` and on `ScheduleExportRequestSchema`, and `system/disaster-recovery.zod.ts` `schedule` on `BackupConfigSchema` and on `DisasterRecoveryPlanSchema` (the DR `testing` block). Both pairs are genuinely the same surface twice, so one row is honest here — and now that each declaring position carries its OWN key, that judgement is written out as two `covers` entries instead of being assumed by a collapse. ⚠️ The `failPolicy` on this row is `compile-error` because the PARSE is the only thing that ever refuses one of these values; it is not a claim that cron SYNTAX is checked. It is not: `@objectstack/formula` cronEngine validates 5/6-field patterns and `@` aliases, and has ZERO consumers outside packages/formula — nothing routes these slots through it. The parse now DOES pin these slots to the cron dialect (the sibling finding on the dialect union is closed): the envelope arm of `CronExpressionInputSchema` accepts a `cron` envelope only and its bare-string arm refuses a blank string, each with one issue at the slot naming the fix — and it still judges no cron syntax, by position: no grammar is restated in spec; `croner` judges the pattern where a schedule is wired (`cron-job-schedule`).',
+    note: 'EXPERIMENTAL — five declared cron slots with no runtime evaluator (ADR-0049 enforce-or-remove candidates; each wants its own look, and the card that surfaced them says so rather than proposing a sweep). ⚠️ TWO of these surfaces are declared TWICE: `api/export.zod.ts` `cronExpression` on `ScheduledExportSchema` and on `ScheduleExportRequestSchema`, and `system/disaster-recovery.zod.ts` `schedule` on `BackupConfigSchema` and on `DisasterRecoveryPlanSchema` (the DR `testing` block). Both pairs are genuinely the same surface twice, so one row is honest here — and now that each declaring position carries its OWN key, that judgement is written out as two `covers` entries instead of being assumed by a collapse. ⚠️ The `failPolicy` on this row is `unevaluated`. It read `compile-error` until the vocabulary gained a member for "nothing evaluates this slot", and that value was the closest available rather than a true one: the PARSE is the only thing that ever refuses one of these values, which is a property every row in this ledger shares and says nothing about this one. It was never a claim that cron SYNTAX is checked. It is not: `@objectstack/formula` cronEngine validates 5/6-field patterns and `@` aliases, and has ZERO consumers outside packages/formula — nothing routes these slots through it. The parse now DOES pin these slots to the cron dialect (the sibling finding on the dialect union is closed): the envelope arm of `CronExpressionInputSchema` accepts a `cron` envelope only and its bare-string arm refuses a blank string, each with one issue at the slot naming the fix — and it still judges no cron syntax, by position: no grammar is restated in spec; `croner` judges the pattern where a schedule is wired (`cron-job-schedule`).',
   },
 
   // ── TEMPLATE dialect (#15027) ─────────────────────────────────────────────
@@ -375,19 +402,21 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     // The apparent owner was #14797 (closed completed), delivered by PR #14819.
     id: 'template-prompt',
     summary: 'AI prompt-template system/user prompts (PromptTemplate.system, .user) — `{{var}}` interpolation',
-    dialect: 'template', mode: 'interpret', state: 'experimental', failPolicy: 'compile-error',
+    dialect: 'template', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
     enforcement:
       'PARSE ONLY — `TemplateExpressionInputSchema` refuses a blank/non-string, non-envelope value and normalizes to `{dialect:"template",source}`; NO EVALUATOR FOUND. `PromptTemplateSchema` has no consumer outside packages/spec (measured 2026-09-04), so nothing interpolates the `{{var}}` holes and nothing checks that the declared `variables` match them',
     covers: [
       'ai/model-registry.zod.ts:PromptTemplateSchema.system',
       'ai/model-registry.zod.ts:PromptTemplateSchema.user',
     ],
-    note: 'EXPERIMENTAL — declared prompt templates with no runtime evaluator (ADR-0049). Ownership was checked before classifying rather than assumed: the card that appeared to own these keys is closed as completed, and its delivered diff (`d355c361157`) touched exactly one file, `skills/objectstack-ai/SKILL.md` — it corrected a prose clause that called these keys CEL, and never owned a ledger row. No open card owns them.',
+    // Ruling: #15954 (decision batch #56, option B for the template family). The tracker ids live
+    // here, not in the string: `note` is runtime prose (check:doc-authoring, cross-package prose-id leg).
+    note: 'EXPERIMENTAL — declared prompt templates with no runtime evaluator (ADR-0049), and MARKED as such at the declaration under the marking ruling (option B: this pair is marked, NOT retired). Both positions this row covers — `PromptTemplateSchema.system` and `PromptTemplateSchema.user` — now carry the `[EXPERIMENTAL — not enforced]` prefix in their own `.describe()`, stating that no runtime renders or executes the template today, so an author reading the generated reference page gets the same verdict this row records instead of having to find this ledger. The marking is PROSE ONLY: `.user` remains REQUIRED (no `.optional()`) and `.system` keeps the `.optional()` it already had — optionalising or retiring a required key is parse-breaking and is its own card. Ownership was checked before classifying rather than assumed: the card that appeared to own these keys is closed as completed, and its delivered diff (`d355c361157`) touched exactly one file, `skills/objectstack-ai/SKILL.md` — it corrected a prose clause that called these keys CEL, and never owned a ledger row. No open card owns them.',
   },
   {
     id: 'template-title-format',
     summary: 'object record-title template (Object.titleFormat, deprecated → nameField per ADR-0079)',
-    dialect: 'template', mode: 'interpret', state: 'experimental', failPolicy: 'compile-error',
+    dialect: 'template', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
     enforcement:
       'PARSE ONLY in this repo — `TemplateExpressionInputSchema` refuses a blank/non-string, non-envelope value. The KEY has a build-time reader that is NOT an evaluator: lint/validate-record-title.ts `validateRecordTitle` (wired into authoring-rules.ts, run by `os build` / `os lint` / the MCP authoring surface) reports every declaration as `title-format-retired`, an advisory WARNING steering the author to `nameField` — it reads that the key is present and never looks at the template text. The server-side title resolver deliberately does NOT read it: spec/src/data/display-name.ts `objectTitleCompleteness` / `resolveRecordDisplayName` resolve `nameField` then the `displayNameField` alias then a derivation, and ADR-0079 states the reason (render-only; the server can neither return nor query it)',
     covers: ['data/object.zod.ts:ObjectSchemaBase.titleFormat'],
@@ -396,12 +425,12 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
   {
     id: 'cel-advanced-policy',
     summary: 'advanced security / versioning policy conditions',
-    dialect: 'cel', mode: 'interpret', state: 'experimental', failPolicy: 'fail-closed',
+    dialect: 'cel', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
     enforcement: '(no runtime consumer yet)',
     covers: [
       'kernel/plugin-security-advanced.zod.ts:PluginPermissionSchema.condition',
       'kernel/plugin-versioning.zod.ts:MultiVersionSupportSchema.condition',
     ],
-    note: 'EXPERIMENTAL — declared policy conditions with no runtime evaluator yet (ADR-0056 D8 / ADR-0049 tracking).',
+    note: 'EXPERIMENTAL — declared policy conditions with no runtime evaluator yet (ADR-0056 D8 / ADR-0049 tracking). This row is why `unevaluated` was minted: it carried `fail-closed` — a RUNTIME refusal — while its own `enforcement` cell said `(no runtime consumer yet)`, so on a security-flavoured row the ledger read as a security guarantee over a slot nothing evaluates. `fail-closed` here was the one borrowing with a consequence past legibility, and spreading it to the other four unwired rows was refused for that reason.',
   },
 ];

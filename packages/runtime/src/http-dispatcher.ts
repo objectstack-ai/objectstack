@@ -226,6 +226,27 @@ export interface HttpDispatcherOptions {
 }
 
 /**
+ * Whether `path` IS `prefix` or lies UNDER it — a prefix test that stops at a
+ * segment boundary (#16263).
+ *
+ * The boundary is `'/'`, `'?'` or end-of-string. `charCodeAt` past the end
+ * yields `NaN`, and `NaN` fails both comparisons, so the end-of-string case is
+ * the `prefix.length === path.length` equality that `startsWith` already
+ * established — no separate length check.
+ *
+ * ⛔ Not a general path utility and deliberately not exported: it exists for
+ * the CONTROL-PLANE SKIP LIST, where the query form has to keep matching. A
+ * domain's route claim is a different question with a different answer —
+ * `DomainHandlerRegistry`'s `match: 'segment'`, which does not accept `'?'`
+ * because a `?`-suffixed prefix is spelled as its own route there.
+ */
+function isPathWithinPrefix(path: string, prefix: string): boolean {
+    if (!path.startsWith(prefix)) return false;
+    const next = path.charCodeAt(prefix.length);
+    return Number.isNaN(next) || next === 47 /* '/' */ || next === 63 /* '?' */;
+}
+
+/**
  * `services.search`'s in-process remedy string (#7939), kept out of the
  * shared `inProcessServiceMessage('search')` path on purpose: that helper's
  * wording ("Kernel-internal service — consumed in-process via the service
@@ -280,6 +301,26 @@ interface DriverReadiness {
 type PrimaryDatasourceReading =
     | { readonly kind: 'resolved'; readonly datasource: string }
     | { readonly kind: 'unresolved'; readonly reason: string };
+
+/**
+ * [#16402] What {@link HttpDispatcher.classifyService} answers — the classified
+ * service lookup's three non-fault outcomes.
+ *
+ * ⛔ Module-local and deliberately NOT exported, for the same reason
+ * `PrimaryDatasourceReading` above is not: it is an internal reading, and
+ * `DomainHandlerDeps.resolveServiceOrLoud` — which IS part of an exported type —
+ * keeps answering the service or `undefined`, unchanged. Nothing published
+ * gains a member.
+ *
+ * A caller that named no scope and asked for a `SCOPED` registration is NOT
+ * here: that stays the unbranded rejection `packages/core` raises, so
+ * `Scope ID required for scoped service '<name>'` keeps reaching the one caller
+ * it is true about.
+ */
+type ClassifiedServiceLookup =
+    | { readonly outcome: 'resolved'; readonly value: any }
+    | { readonly outcome: 'never-registered' }
+    | { readonly outcome: 'no-instance-in-scope'; readonly scopeId: string };
 
 /**
  * The HTTP dispatch engine — translates an inbound (method, path, body, ctx)
@@ -652,8 +693,19 @@ export class HttpDispatcher {
         // that had nothing to do with the data layer. The dependency check
         // belongs on `/ready`, whose failure mode (leave the LB rotation) is
         // the one that actually helps.
+        //
+        // [#15910] `liveness: true` extends that promise from this handler's
+        // BODY to the whole REQUEST (maintainer ruling 2026-09-06, decision
+        // batch #57, option C — verbatim 「同意」). The handler checked nothing,
+        // but `dispatch()`'s identity step ran before it and read the tenancy
+        // posture, so after #15909 a `tenancy` service that was registered and
+        // failed to build answered an uncredentialed `GET /health` with 503 —
+        // the restart loop this comment already argues against, arriving
+        // through the preamble instead of through the body. The flag is read by
+        // `DomainHandlerRegistry.resolveLiveness`; see the carve-out at the head
+        // of `dispatch()` for why the set is derived and never listed.
         this.domainRegistry.register({
-            prefix: '/health', match: 'exact', methods: ['GET'],
+            prefix: '/health', match: 'exact', methods: ['GET'], liveness: true,
             handler: async () => ({
                 handled: true,
                 response: this.success({
@@ -1281,8 +1333,34 @@ export class HttpDispatcher {
         if (!this.enforceMembership) return null;
 
         // Control-plane paths — never gated by project membership.
+        //
+        // [#16263] The membership skip list stops at a SEGMENT BOUNDARY. It
+        // was `skipPaths.some(p => path.startsWith(p))`, the same bare
+        // `startsWith` the domain registry defaulted to — and it is the same
+        // mistake about the same prefix: `/authentication/foo` is not under
+        // `/auth`, yet it satisfied `startsWith('/auth')` and was waved past
+        // this check.
+        //
+        // ⚠️ Why this site is repaired ahead of the domain claims even though
+        // it is the harder one to make fire: a domain claim that is too wide
+        // sends traffic SOMEWHERE WRONG, while a skip list that is too wide
+        // sends traffic PAST A CHECK. Nothing claims `/authentication/*`
+        // today, so such a request 404s further down before the missing
+        // membership check can matter — LATENT, not harmless. It goes live the
+        // day any domain claims a path of that shape, and on that day the
+        // symptom is a non-member reading a scoped route, not a 404.
+        //
+        // The boundary is `'/'`, `'?'` or end-of-string, matching the
+        // `acceptOAuthAccessToken` spelling in `resolveRequestScope`
+        // (`/^…\/mcp(?:[/?]|$)/`). `'?'` is load-bearing rather than
+        // decorative: `cleanPath` here has only had a trailing slash stripped,
+        // so an adapter that passes the query through in `path` presents
+        // `/auth?redirect=…` — skipped before this change, and it must stay
+        // skipped. A repair that only accepted `'/'` would newly gate the
+        // control plane on membership, which is a WIDER change than the one
+        // this card asks for and in the dangerous direction.
         const skipPaths = ['/auth', '/cloud', '/health', '/ready', '/discovery'];
-        if (skipPaths.some(p => path.startsWith(p))) return null;
+        if (skipPaths.some(p => isPathWithinPrefix(path, p))) return null;
 
         // Public share-link resolve/messages — the token IS the authorisation,
         // so never gate them on project membership (a signed-in non-member
@@ -2242,24 +2320,129 @@ export class HttpDispatcher {
      * probe, which is the same classification rather than a second collapse.
      */
     private async resolveServiceOrLoud(kernel: any, name: string, scopeId?: string): Promise<any> {
-        const classified = async (read: () => Promise<any>): Promise<{ found: boolean; value?: any }> => {
+        const classified = await this.classifyService(kernel, name, scopeId);
+        return classified.outcome === 'resolved' ? classified.value : undefined;
+    }
+
+    /**
+     * [#16402] The classified lookup itself — the three answers the chain above
+     * can reach without a fault, told apart instead of collapsed.
+     *
+     * ## The defect this replaces
+     *
+     * The chain used to re-resolve on the request's own kernel WITHOUT the
+     * scope id it had just been handed:
+     *
+     * ```ts
+     * const own = await classified(() => kernel.getServiceAsync(name)); // ⛔ no scopeId
+     * ```
+     *
+     * A `ServiceLifecycle.SCOPED` registration resolved without a scope id
+     * rejects `Scope ID required for scoped service '<name>'` from
+     * `PluginLoader.getService`, unbranded — so a scoped factory that answered
+     * `undefined` for THIS scope came back out of here as that rejection, and
+     * every door above it (`./domains/keys.ts`, `./domains/activation-gate.ts`
+     * and its automation-toggle caller, and the identity step in
+     * {@link resolveRequestScope}) rendered it `503 SERVICE_UNAVAILABLE`.
+     *
+     * ⭐ `packages/core` was telling the TRUTH there — the retry really did give
+     * no scope. The retry was the lie, and it is repaired here: the scope the
+     * caller handed in travels with EVERY leg, which is what the leg before it
+     * and the `resolveService` tail already did. ⛔ The core message is
+     * deliberately untouched: it is the correct diagnostic for a caller that
+     * genuinely omitted the scope, and that caller must keep receiving it.
+     *
+     * ## Three states, three answers
+     *
+     *  - `resolved` — an instance.
+     *  - `never-registered` — every registry in the chain answered the BRANDED
+     *    "nothing was ever registered under this name" (#13905), or the probe
+     *    tail found nothing. The supported no-service composition.
+     *  - `no-instance-in-scope` — a registry DID know the name and the read
+     *    made in this scope produced no instance. ⚠️ It claims exactly that and
+     *    no more: this lookup never reads a registration's lifecycle, so it
+     *    does not assert the registration is `SCOPED` — asserting that would be
+     *    a second copy of a classification the registry already owns, and a
+     *    second thing to drift.
+     *
+     * A caller that named NO scope is not one of these three: it leaves as the
+     * unbranded rejection it always did, so the `Scope ID required …` diagnostic
+     * survives for the caller it is actually about.
+     *
+     * ## Why `no-instance-in-scope` maps to a quiet `undefined` above
+     *
+     * The two misses are DIFFERENT FACTS with the SAME licence. #13906
+     * decision 1 option A governs the posture that could not be READ —
+     * 「A posture that could not be READ is not a posture that is ABSENT.」 — and
+     * a factory that returns `undefined` for a scope has ANSWERED, not failed:
+     * the read happened and it reported no service here. ADR-0093 D4/D5 makes a
+     * deployment with no tenancy service the same shape as `single`, and that
+     * reading is per-scope for a per-scope registration. Answering it as an
+     * outage would keep the manufactured 503 this card is about and merely fix
+     * its wording, locking a legitimately service-less environment out of
+     * `/keys`, the activation switch and its own identity step.
+     *
+     * `undefined` is also what absence already means everywhere in this file:
+     * `resolveService`'s whole chain tests `svc != null`, and
+     * `PluginLoader.getScopedService` hands a factory's `undefined` straight
+     * back. Reading that value as a fault would be this lookup overruling the
+     * registry.
+     *
+     * ⛔ The distinction stays HERE rather than on
+     * {@link DomainHandlerDeps.resolveServiceOrLoud}: that member is part of an
+     * EXPORTED type, and no door needs to act on the difference — both misses
+     * license the same answer. A caller that needs the fact asks this method.
+     */
+    private async classifyService(
+        kernel: any,
+        name: string,
+        scopeId?: string,
+    ): Promise<ClassifiedServiceLookup> {
+        /**
+         * One registry read, split three ways. A value is the answer; the
+         * BRANDED rejection is "nothing registered"; a registry that knew the
+         * name and produced nothing is the scope-relative miss. Every other
+         * rejection is a fault and stays loud.
+         */
+        const read = async (get: () => Promise<any>): Promise<ClassifiedServiceLookup> => {
+            let svc: any;
             try {
-                const svc = await read();
-                return svc != null ? { found: true, value: svc } : { found: false };
+                svc = await get();
             } catch (err) {
-                if (isServiceNotRegisteredError(err)) return { found: false };
+                if (isServiceNotRegisteredError(err)) return { outcome: 'never-registered' };
                 throw err;
             }
+            if (svc != null) return { outcome: 'resolved', value: svc };
+            return scopeId === undefined
+                ? { outcome: 'never-registered' }
+                : { outcome: 'no-instance-in-scope', scopeId };
         };
+
+        // The more specific miss wins: one registry not knowing the name does
+        // not unsay another registry's "known here, no instance in this scope".
+        let miss: ClassifiedServiceLookup = { outcome: 'never-registered' };
+        const remember = (answer: ClassifiedServiceLookup): void => {
+            if (answer.outcome === 'no-instance-in-scope') miss = answer;
+        };
+
         if (scopeId && typeof this.defaultKernel.getServiceAsync === 'function') {
-            const scoped = await classified(() => this.defaultKernel.getServiceAsync(name, scopeId));
-            if (scoped.found) return scoped.value;
+            const scoped = await read(() => this.defaultKernel.getServiceAsync(name, scopeId));
+            if (scoped.outcome === 'resolved') return scoped;
+            remember(scoped);
         }
         if (typeof kernel?.getServiceAsync === 'function') {
-            const own = await classified(() => kernel.getServiceAsync(name));
-            return own.found ? own.value : undefined;
+            // ⭐ [#16402] `scopeId` — the whole repair. Dropped here, this leg
+            // manufactured `Scope ID required …` for a scope that was supplied.
+            const own = await read(() => kernel.getServiceAsync(name, scopeId));
+            if (own.outcome === 'resolved') return own;
+            remember(own);
+            return miss;
         }
-        return this.resolveService(kernel, name, scopeId);
+        // A `KernelBase`-shaped host (e.g. `LiteKernel`) supports no service
+        // factories, so it has no scoped registrations and "not registered" is
+        // the only miss it can produce — the quiet probe, unchanged.
+        const probed = await this.resolveService(kernel, name, scopeId);
+        return probed != null ? { outcome: 'resolved', value: probed } : miss;
     }
 
     /**
@@ -2303,6 +2486,44 @@ export class HttpDispatcher {
     async dispatch(method: string, path: string, body: any, query: any, context: HttpProtocolContext, prefix?: string): Promise<HttpDispatcherResult> {
         let cleanPath = path.replace(/\/$/, ''); // Remove trailing slash if present, but strict on clean paths
 
+        // ── Liveness carve-out — the ONE route family that runs no preamble ──
+        // [#15910, maintainer ruling 2026-09-06 (decision batch #57), option C,
+        // verbatim 「同意」] "Carve liveness out of the identity step. `/health`
+        // (liveness) answers 200 whenever the process can serve HTTP, regardless
+        // of configuration faults; `/ready` (readiness) keeps returning 503 for
+        // the identity/configuration fault so traffic is withheld until the
+        // fault is fixed. A configuration fault must never restart a pod that
+        // cannot be fixed by restarting."
+        //
+        // WHAT THIS IS NOT. It is deliberately NOT the fast path the anchored
+        // invariant below forbids: nothing here resolves a handler for a route
+        // that did not DECLARE itself a liveness probe, so no migrated domain is
+        // un-gated and no handler receives an unresolved context it wanted
+        // resolved. `/health`'s body reads process-local state only — it is the
+        // one handler in this table for which "already-scoped, already-gated" was
+        // never part of the contract.
+        //
+        // WHY THE SET IS DERIVED. `resolveLiveness` is `resolve` plus one field
+        // read, so "which routes are liveness" is answered by the live route
+        // table through the same matcher that picks the handler. ⛔ Never replace
+        // it with an array of liveness paths: a second list of routes drifts from
+        // the first one silently, and this repo has paid for that shape more than
+        // once. A future liveness route becomes liveness by declaring it at its
+        // own registration — the only edit that cannot be forgotten, because it
+        // is the same object that makes the route exist.
+        //
+        // WHY BEFORE THE SCOPED-URL STRIP. `cleanPath` is still environment-
+        // scoped here, so `/environments/:id/health` does NOT match and keeps
+        // today's behaviour end to end (it resolves its environment, runs both
+        // gates, and answers from the same handler — pinned in
+        // `http-dispatcher.scoped-url-strip.test.ts`). No orchestrator wires a
+        // scoped probe: the liveness surface is the unscoped `${prefix}/health`
+        // the dispatcher plugin mounts, and that is exactly the set carved out.
+        const livenessRoute = this.domainRegistry.resolveLiveness(cleanPath, method);
+        if (livenessRoute) {
+            return await livenessRoute.handler({ path: cleanPath, method, body, query }, context);
+        }
+
         // ── Gates run BEFORE any domain body (ADR-0076 D11 step ③) ──
         // Scope resolution plus the two gates below are the dispatcher's half of
         // the D11 contract: a body extracted to `./domains/` receives an
@@ -2312,7 +2533,9 @@ export class HttpDispatcher {
         // ordering is not overhead to optimize away: moving the domain-registry
         // resolve (further down) above these lines would un-gate every migrated
         // domain at once and hand handlers a context whose per-request kernel was
-        // never resolved (#5155). Anchored in scripts/adr-anchors/.
+        // never resolved (#5155). Anchored in scripts/adr-anchors/. The one
+        // exception is the DECLARED liveness carve-out above, which resolves no
+        // route that did not ask to run without a preamble (#15910).
         await this.resolveRequestScope(context, cleanPath);
 
         // ── ADR-0069 Authentication-policy gate ──

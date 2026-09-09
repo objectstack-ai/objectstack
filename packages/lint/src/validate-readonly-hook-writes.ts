@@ -58,10 +58,17 @@
 //     reads L2 bodies, which run in QuickJS, and the VM-side `ctx.api.object()`
 //     installs exactly `insert`/`update`/`delete`/`updateMany`/`deleteMany`/
 //     `upsert` (`installCtx`, runtime/src/sandbox/quickjs-runner.ts) — so a
-//     body's `.create()` is `TypeError: not a function` at run time: a LOUD
+//     body's `.create()` was `TypeError: not a function` at run time: a LOUD
 //     failure on the first run, not the silent no-op this rule exists to
 //     report. Gating it as a silent drop would state something false, the
 //     mirror of the `sudo()` hint defect below.
+//
+//     ⚠️ [#16249] Since that card the shape does not arrive here at all: the
+//     extractor ledger no longer advertises `.create({…})` and `objectstack
+//     build` refuses `.create(` at lowering, so a handler spelling it is
+//     bundled and never becomes a `body.source`. The exclusion STAYS — it is
+//     now the record of a withdrawn verb rather than a live declination — and
+//     its reason is updated to say so.
 //
 //   - Only a NON-ELEVATED `ctx.api`. `ScopedContext.sudo()` returns a context
 //     with `isSystem: true`, which the strip skips entirely. A `.sudo()` chain
@@ -236,21 +243,46 @@ const STRIP_SUBJECT_METHODS: ReadonlySet<string> = new Set(READONLY_HOOK_STRIP_S
 const CONDITIONAL_SUBJECT_METHODS: ReadonlySet<string> = new Set(['update', 'updateById']);
 
 /**
- * `ctx.api.object()` write methods the shared extractor recognises
- * (`API_WRITE_METHODS` in `validate-hook-body-writes.ts`) that this rule
- * deliberately does NOT judge, each with its reason — the same discipline
- * {@link READONLY_HOOK_WRITE_EXCLUSIONS} applies to pattern shapes. ⛔ A reason
- * here may never be "INSERT is exempt": that sentence is false about the
- * engine since the 2026-09-03 ruling.
+ * `ctx.api.object()` write verbs this rule deliberately does NOT judge, each
+ * with its reason — the same discipline {@link READONLY_HOOK_WRITE_EXCLUSIONS}
+ * applies to pattern shapes. ⛔ A reason here may never be "INSERT is exempt":
+ * that sentence is false about the engine since the 2026-09-03 ruling.
+ *
+ * ⚠️ [#16249] The one entry is now a verb the shared extractor no longer
+ * recognises at all, so this list is NOT a subset of `API_WRITE_METHODS`
+ * (`validate-hook-body-writes.ts`) any more — it is the record of a verb
+ * withdrawn from it. That is the point: the entry survives its own cause, and
+ * deleting it would leave the next author free to re-add `create` to the ledger
+ * with nothing on this rule's side saying why it was taken out.
  */
 export const READONLY_HOOK_METHOD_EXCLUSIONS: readonly { method: string; reason: string }[] = [
   {
     method: 'create',
+    // ⚠️ [#16249] The REASON changed, the exclusion did not. Until #16249 the
+    // reason was "a body's .create() throws, and reporting a silent drop about
+    // a call that throws would be false" — correct then, because the shape
+    // reached this rule: the extractor ledger advertised `.create({…})` as
+    // legal `api-crud-literal` syntax and mapped it in `API_WRITE_METHODS`, so
+    // this rule had to decline a subject it could actually see.
+    //
+    // #16249 closed that at the source: `create` is withdrawn from the ledger,
+    // and `objectstack build` refuses `.create(` at lowering
+    // (`FORBIDDEN_PATTERNS`, packages/cli/src/utils/extract-hook-body.ts), so a
+    // handler spelling it is bundled and never becomes a `body.source`. This
+    // rule opens on `body.language === 'js'` and parses `body.source`, so the
+    // shape cannot arrive here at all. "It throws, so do not report it" has
+    // become "it can no longer get here" — a stronger fact, and a different
+    // one. ⛔ Do not restore the old sentence: it would describe a route the
+    // build has closed.
     reason:
-      'this rule reads L2 bodies, which run in QuickJS, and the VM-side ctx.api.object() installs no ' +
-      '`create` leaf (installCtx in runtime/src/sandbox/quickjs-runner.ts: insert / update / delete / ' +
-      'updateMany / deleteMany / upsert) - so a body calling .create() is `TypeError: not a function` on ' +
-      'its first run, a LOUD failure, not the silent no-op this rule reports. The host ObjectRepository ' +
+      'the shape can no longer reach this rule: `objectstack build` refuses `.create(` at ' +
+      'lowering, so a handler spelling it is bundled and never becomes a body.source this rule can parse, ' +
+      'and the shared extractor no longer recognises the verb either. What that refusal encodes: this rule ' +
+      'reads L2 bodies, which run in QuickJS, and the VM-side ctx.api.object() installs no `create` leaf ' +
+      '(installCtx in runtime/src/sandbox/quickjs-runner.ts: insert / update / delete / updateMany / ' +
+      'deleteMany / upsert), while the spec contract IScopedObjectRepository declares insert and names ' +
+      'create as measured-and-excluded - so a body calling .create() was `TypeError: not a function` on ' +
+      'its first run, a LOUD failure, never the silent no-op this rule reports. The host ObjectRepository ' +
       'does alias create() to insert(), but no body reaches the host repository. A fact about the ' +
       'SANDBOX, not about INSERT: the same payload spelled .insert() IS judged',
   },
@@ -276,6 +308,43 @@ function isRec(v: unknown): v is AnyRec {
  * Validate L2 hook-body `ctx.api` writes against target-object readonly
  * declarations. Pure `(stack) => Finding[]` (ADR-0019); safe on pre- or
  * post-parse stacks.
+ *
+ * ## Which intakes reach a hook authored as an inline `handler` (#16095)
+ *
+ * This rule opens on `body.language === 'js'`. A hook written as
+ * `handler: async (ctx) => { … }` carries no `body`, so whether it is judged
+ * is a property of the DOOR — what each caller hands this function — not of
+ * the rule. Measured (`packages/cli/test/lint-hook-rules-reach-handler-hooks*`):
+ *
+ * Every leg below was measured with the body-authored control beside it, so a
+ * silent leg is a reading about that door and never about this rule. The doors
+ * are the call sites of `runAuthoringRules`, enumerated — not the three `os *`
+ * commands, which are fewer than the doors:
+ *
+ *   `os build` union        `compile.ts` lowers every inline handler to a
+ *                           metadata body BEFORE its parse (`lowerCallables`)
+ *                           and judges the parsed result — REACHED, always was.
+ *   `os build` per-package  same lowered `result.data`, re-entered one package
+ *                           manifest at a time — REACHED, always was.
+ *   `os lint`               hands the registry's `parsed` tier that same
+ *                           lowered view — REACHED since #16095.
+ *   scaffold validate       `runScaffoldAuthoringRules` (`os init` / `dev` over
+ *                           a rendered template) lowers before it parses too —
+ *                           REACHED, always was, and pinned since #16095.
+ *   `os validate`           lowers before it parses since #16544 — the same
+ *                           `lowerCallables` call, between its pre-parse
+ *                           unknown-key lints and its parse — REACHED since
+ *                           #16544. Measured NOT reached under #16095, when it
+ *                           parsed the normalized stack without lowering while
+ *                           the body-authored control fired; closing it was
+ *                           its own accept/reject decision, taken on #16544.
+ *   direct call             judges exactly the stack it is given — NOT reached
+ *                           unless the caller lowers first; measured both ways.
+ *
+ * A handler the extractor refuses (forbidden token, free identifier,
+ * unparseable) is left with no `body` on every door, so this rule stays silent
+ * on it; the refusal itself is reported by `os lint`'s `hook-body/*` rules and
+ * by `os build`'s warn-and-bundle line, never guessed at here.
  */
 export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFinding[] {
   const findings: ReadonlyHookWriteFinding[] = [];

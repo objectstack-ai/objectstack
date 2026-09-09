@@ -414,15 +414,17 @@ const draft = await metadataService.get('object', 'opportunity');
 
 ### REST Endpoints
 
-The REST layer mounts package routes under `/api/v1/packages` and per-item metadata
-routes under `/api/v1/meta`. Publishing a single metadata item's pending draft is done
-via the `/meta/:type/:name/publish` route.
+The package family under `/api/v1/packages` is served by the runtime dispatcher's
+`/packages` domain — one implementation for the reads and the uninstall — with the
+REST layer contributing only the marketplace publish route beside it; per-item
+metadata routes live under `/api/v1/meta`. Publishing a single metadata item's
+pending draft is done via the `/meta/:type/:name/publish` route.
 
 | Method | Path | Description |
 |:---|:---|:---|
-| `POST` | `/api/v1/packages` | Publish a package (body: `{ manifest, metadata }`) |
-| `GET` | `/api/v1/packages` | List all packages (registry + database) |
-| `GET` | `/api/v1/packages/:id` | Get a specific package |
-| `DELETE` | `/api/v1/packages/:id` | Delete a package |
+| `POST` | `/api/v1/packages/publish` | Publish a package to the marketplace registry (body: `{ manifest, metadata }`) — the REST registrar's one route |
+| `GET` | `/api/v1/packages` | List the installed packages (the in-memory registry; published-but-not-installed artifacts are not listed) |
+| `GET` | `/api/v1/packages/:id` | Get an installed package — the bare row under `data`; a missing id answers `404 RESOURCE_NOT_FOUND`, message `Package 'ID' not found` |
+| `DELETE` | `/api/v1/packages/:id` | Uninstall a package for the caller's organization (`?keepData=true` keeps the object tables) |
 | `POST` | `/api/v1/meta/:type/:name/publish` | Promote a metadata item's pending draft to live |
 | `POST` | `/api/v1/meta/:type/:name/rollback` | Restore a historical version as the live overlay |

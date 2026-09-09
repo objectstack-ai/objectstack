@@ -1,6 +1,6 @@
 # ADR-0053: `date` is a timezone-naive calendar day; `datetime` is an instant rendered in a reference timezone
 
-**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 resolved 2026-07-30: `temporalFilterValue` + `temporalFilterColumnSql` are optional `IDataDriver` contract members with identity semantics, and analytics types its driver seam from the contract. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942). **Extended (2026-07-30, addendum D-C1..D-C3):** `Field.time` takes the same construction — canonical `HH:MM:SS[.fff]` wall-clock text, one function on write/filter/read, `TIME(3)` on MySQL, UTC `NOW()` defaults on every dialect (#3994).
+**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 resolved 2026-07-30: `temporalFilterValue` + `temporalFilterColumnSql` are optional `IDataDriver` contract members with identity semantics, and analytics types its driver seam from the contract. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942). **Extended (2026-07-30, addendum D-C1..D-C3):** `Field.time` takes the same construction — canonical `HH:MM:SS[.fff]` wall-clock text, one function on write/filter/read, `TIME(3)` on MySQL, UTC `NOW()` defaults on every dialect (#3994). **Extended (2026-09-07, addendum D-F1..D-F3):** the READ side takes the same canon — every `@objectstack/driver-sql` record read door ~~but `findWithWindowFunctions` (#16609)~~ presents `Field.datetime` values and the builtin `created_at` / `updated_at` audit stamps as the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text on every dialect, folded at the driver's read boundary with the client parsers untouched; those doors never hand out a JS `Date` for those columns, save an Invalid `Date`, which has no canonical text and passes through unchanged (#13973, maintainer ruling B1 narrow, 2026-09-02). **Corrected 2026-09-08 (#16609 / PR #16716):** that exception is gone — `findWithWindowFunctions` now routes each row through the same `formatOutput` pass, so those two column classes present as the same canonical text there, with the window ALIAS columns carved out (a computed alias wins the key and its value stays raw). D-F1 rules those two classes and no more: the other presentations that pass applies at that door are #16609's contract, not this ADR's.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0032](./0032-unified-expression-layer.md) (unified expression layer — CEL dialect, `today()`/`daysFromNow()`), [ADR-0014](./0014-record-form-field-type.md) (field types)
 **Consumers**: `@objectstack/spec` (`Field.date`/`Field.datetime`), `@objectstack/driver-sql` (`coerceFilterValue`, `formatInput`/`formatOutput`, `dateFields`/`datetimeFields`), `@objectstack/formula` (`stdlib` time functions, `cel-engine` hydration), `@objectstack/objectql` (`applyFormulaPlan`), schedule/cron executors, report/analytics date bucketing, `sys-user-preference.timezone`.
@@ -1020,3 +1020,174 @@ again — the #5499 freeze that used to be the other half of this condition was
 dissolved on 2026-08-11. The conversion itself is pinned by
 `mongodb-time-storage.test.ts`, which is unaffected: it is pure, needs no
 server, and still runs everywhere.
+
+---
+
+## Addendum (2026-09-07) — the read door presents ONE instant shape on every dialect (D-F1..D-F3, #13973)
+
+> **Status:** landed. Extends D-B1's canon from the storage and comparand sides
+> to the READ side, and ADR-0074's audit-column read repair from SQLite to every
+> dialect. Provenance: maintainer ruling on #13973 — 「同意」 to the director
+> seat's analysis recommending B1 (narrow), 2026-09-02, recorded on the card as
+> comment 5507803003. The options that ruling declined are listed at the end.
+
+### What the read side actually was
+
+D-B1 gave `Field.datetime` one storage form per dialect and one comparand rule,
+and said nothing about what the driver HANDS BACK. That was decided by the
+client library. `formatOutput` folded every SQLite storage shape to
+`YYYY-MM-DDTHH:MM:SS.sssZ` — inside `if (this.isSqlite)`. On Postgres and MySQL
+a `timestamptz` / `DATETIME(3)` left the read door as node-pg's / mysql2's JS
+`Date`; on SQLite (and the memory driver) as canonical text. The builtin audit
+columns had the same gate around ADR-0074's repair, and the `aggregate()` /
+`distinct()` presentation (`readPresentationKind`) had no arm for them on ANY
+dialect. One column, two runtime types, through the same `any`-shaped record —
+invisible to the type system, and to every test that never ran on a live
+dialect.
+
+The #13973 census measured what that cost. 44 packages call a read door; 43 of
+them had only ever seen the text side (the one CI job with a live Postgres and
+MySQL runs `driver-sql` alone). Eight consumers were wrong on the production
+default driver — #13382 in production (the OCC seam compared `String(v)` on
+both sides and refused every guarded save), #13993–#13999 by reading (an
+idempotency window that never expires; a migration that persisted
+`Date.toString()`; a timeline sorted by weekday name; a `z.string()` field
+holding a `Date`) — every one in the direction "expected the text, received a
+`Date`", none the reverse. The driver comment stating the `Date` side as
+deliberate ("`Field.datetime` depends on it") was checked on the tree and did
+not hold: nothing on the read path consumed the `Date`.
+
+### D-F1 — Every read door presents the canonical instant text, on every dialect
+
+For the builtin audit columns (`created_at`, `updated_at`) and every declared
+`Field.datetime` column, every record read door of `@objectstack/driver-sql`
+listed here presents the value as `YYYY-MM-DDTHH:MM:SS.sssZ` text — on SQLite,
+Postgres and MySQL alike, exactly as SQLite always did:
+
+- `find()`, `findOne()`, and the rows `create()`, `update()`, `upsert()`,
+  `bulkCreate()` and `bulkUpdate()` return (all through `formatOutput`, whose two
+  gates are now unconditional and whose audit-column arm folds a `Date`);
+- `aggregate()` for `min` / `max` over such a column and for a raw temporal
+  group key, and `distinct()` over such a column (`presentReadValue`, whose
+  `datetime` arm is now unconditional, and `readPresentationKind`, which now
+  routes the two audit columns to the same `presentAuditTimestampOutput`
+  `formatOutput` applies — one presenter per column class, shared by every
+  door, so a value `find()` passes through as a number — ADR-0074 §3's epoch
+  INTEGER, or an author-declared non-temporal `created_at` — is that same
+  number here, never ISO text at this door alone).
+
+None of these doors hands out a JS `Date` for these columns, save the one
+shape D-F3 names: an Invalid `Date`, which has no canonical text and passes
+through unchanged. ~~`findWithWindowFunctions` is not one of these doors (see
+Consequences; #16609).~~ — **corrected 2026-09-08 (#16609 / PR #16716): it is
+one of them now, for these two column classes.** It routes each row through the
+same `formatOutput` pass `find()` runs, minus the window ALIAS columns: a
+computed alias wins the key and its value stays raw (`select *` plus an
+`... as ok` window projection yields two `ok` columns and the row object keeps
+the LAST), so no declared field's presentation rule is ever applied to a
+computed value. That pass moves more than this addendum rules — the
+`external.columnMap` row-KEY rename, `Field.object`/JSON, numeric strings,
+`Field.boolean`, `Field.date` and `Field.time` — and D-F1 governs, at that door
+exactly as at the doors listed above, ONLY the two instant classes named here;
+the rest of that pass is #16609's contract, pinned by
+`sql-driver-window-function-output.test.ts` (door-to-door agreement with
+`find()` on SQLite; the Postgres and MySQL cells under `Temporal Conformance
+(live PG + MySQL)`). Declared = enforced:
+`sql-driver-13973-canonical-iso-read-door.test.ts` asserts it per cell of the
+D-A3 driver axis for every door listed — `bulkCreate()` over the rows a
+dialect's bulk insert returns (MySQL, with no `RETURNING`, returns none, and
+that cell reads the batch back through `find()` instead) — the SQLite cell
+everywhere, the Postgres and MySQL cells under `Temporal Conformance (live PG
++ MySQL)`, with the three-way zone skew guard so a `Z` that only survived
+because every clock agreed cannot pass — and
+`sql-driver-13567-audit-stamp-materialisation.test.ts` re-pins the audit
+column at the OCC seam's door. The same file's §D pins, on SQLite, that
+`aggregate()` / `distinct()` present the audit columns through the presenter
+`find()` uses, on the two shapes where a different one would show (an
+author-declared non-temporal `created_at`; a raw-written epoch INTEGER) —
+SQLite because its type affinity is what lets a number sit in that column at
+all; the `timestamptz` / `DATETIME(3)` the DDL types it as elsewhere cannot.
+
+Why text rather than "everything a `Date`" (the maintainer asked exactly this:
+「为什么不能都用日期类型」): every platform with a metadata layer decides the
+in-process type from the declared field type at its own read boundary, and
+ObjectStack had already declared that type — D-B1's text — everywhere but this
+one door. A `Date` is not a value type (`===` compares identity, a `Map` key is
+by reference, it is mutable); `Invalid Date` is a `Date` whose `toISOString()`
+throws; its local-zone methods answer differently on every host; JSON cannot
+carry it; and it holds less precision than `timestamptz`. The canonical text
+makes `String(v)`, `===`, a template, a sort and a `Map` key correct by
+construction, which is what an author — human or AI — reaches for first. A
+`Date` belongs at exactly two places: the client parser (D-F2) and the moment
+arithmetic happens (`new Date(text).getTime()`, which every class (a) site in
+the census already spells and which accepts both shapes).
+
+### D-F2 — Folded at the driver's read boundary, not at the client parser
+
+The pg and mysql2 type parsers are not touched. A `Date` stays the client-level
+materialisation — a raw knex read of the same row still hands one back, and a
+host's own `pg` clients keep the stock behaviour — and the driver canonicalises
+in `formatOutput` / `presentReadValue`. This is the narrow form of B1: the
+`date` parser installed by `withPostgresCalendarDayAsText` stays the one place
+a clock is chosen, the instant types keep their stock parser, and nothing
+outside the driver's own read doors moves. §C of
+`sql-driver-13973-canonical-iso-read-door.test.ts` measures this on every live
+cell: the raw read is a `Date`, the read door is text, and the two name the
+same instant.
+
+### D-F3 — The one shape the fold cannot canonicalise passes through
+
+An Invalid `Date` — a `Date` whose time value is `NaN`, which #14078 measured
+both live dialects to produce from rows already on disk (a MySQL zero
+`DATETIME`; any Postgres year in 275760..294276) — has no canonical text. The
+fold is total in the sense #14078 ruled for the shared consumer spelling: it
+never throws, and it hands the client's Invalid `Date` through unchanged. It is
+neither nulled (a stored value silently erased) nor spelled as the text
+`Invalid Date` (a wire change: `JSON.stringify` already serialises the shape as
+`null`); it leaves as the one `Date` the consumer-side guards #14078 landed
+already absorb. `sql-driver-14078-invalid-date-materialisation.test.ts` pins
+both halves: the control instant leaves as text, the Invalid `Date` leaves as
+itself.
+
+### Consequences
+
+- **Consumer-visible, Postgres and MySQL only** (changeset `minor` for
+  `@objectstack/driver-sql`): in-process consumers receive a `string` where
+  they received a `Date`. The wire is unchanged — `JSON.stringify` already
+  serialised the `Date` as the same ISO text. A consumer that called a `Date`
+  method directly on such a field fails loudly with a `TypeError`; the census
+  for this addendum (its expressions are recorded on #13973's landing PR)
+  found none in non-test sources. A consumer that compared, sorted, keyed or
+  formatted the value as text is now correct on every dialect.
+- The per-site canonicalisations landed for #13993–#13999 and the five total
+  `Date` arms #14078 landed become no-ops on driver rows. They stay correct and
+  are not removed here; retiring them is separate, deliberate work.
+- ADR-0074's read repair is no longer SQLite-only in effect: its string arm is
+  unchanged and now runs on every dialect (a no-op on canonical text), and a
+  `Date` arm sits beside it.
+- D-A3's matrix gains the read-shape cell. `Temporal Conformance (live PG +
+  MySQL)` is the job that proves it; its package set is not widened.
+- ~~Not covered: `findWithWindowFunctions`, which applies no read presentation of
+  any kind today (booleans, dates and JSON included) — a pre-existing gap of its
+  own, recorded rather than folded in.~~ — **corrected 2026-09-08 (#16609 / PR
+  #16716): that gap was a card of its own and it landed.** The door now runs
+  each row through the same `formatOutput` pass `find()` runs, so it presents
+  the two instant classes D-F1 rules exactly as the doors listed above do — and
+  also the classes D-F1 does NOT rule (the `external.columnMap` row-KEY rename,
+  `Field.object`/JSON, numeric strings, `Field.boolean`, `Field.date`,
+  `Field.time`), which are #16609's contract rather than this ADR's. Carved out
+  at that door: the window ALIAS columns — a computed alias wins the key and its
+  value stays raw.
+
+### Options not taken
+
+- **B1-full** — text at the pg parser. Same effect, one more decision reversed
+  (the parser is scoped per pool and would then differ from a host's own `pg`
+  clients), marginally better precision. Not taken: the driver's read boundary
+  is the layer that owns the declared type.
+- **B2** — a union return type the consumer must narrow. Moot once the read
+  type is `string`; it only made sense if both shapes were kept.
+- **B3** — accept the divergence and add a shared `Date` fixture. It accepts a
+  divergence this ADR had already declared away and leaves 43 packages
+  untested against the shape. Its fixture folds into the conformance cells
+  above.

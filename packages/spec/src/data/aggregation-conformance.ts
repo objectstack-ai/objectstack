@@ -195,9 +195,32 @@ export interface AggregationRow {
    * A non-null numeric column for the arithmetic aggregates. Deliberately
    * all-distinct so `count_distinct(score)` equals the row count: the pair of
    * `count_distinct` cases then straddles the interesting axis — one column
-   * where dedup and nulls both bite, one where neither does.
+   * where dedup and nulls both bite, one where neither does. Its NULLABLE
+   * twin is {@link AggregationRow.amount} (#15546).
    */
   score: number;
+  /**
+   * [#15546] The NULLABLE numeric aggregand — the column `score` deliberately
+   * is not. `east` is NULL in EVERY row and `west` in two of its four, so the
+   * grouped `sum(amount)` case reaches the cell no other column can: a group
+   * that is NOT empty whose addend set IS.
+   *
+   * SQL `SUM` skips NULLs and answers NULL once it has skipped everything;
+   * the engine's in-memory tier, `driver-memory` and `driver-mongodb`'s
+   * lowering answer `0` for the same rows; `emptyGroupValueFor`
+   * (`aggregation-policy.ts`) rules that summing nothing is `0`. Which face
+   * answered a grouped list view's `sum` summary was decided by a driver
+   * capability bit the caller never sees, so the same view rendered a blank
+   * total on one deployment and `0` on another. Ruled 2026-09-07 (maintainer,
+   * option A on #15546): a non-empty group whose aggregand is NULL in every
+   * row sums to `0`, on every face — which is what the `east` cell pins.
+   *
+   * Harnesses MUST declare it nullable and seed the nulls AS nulls, exactly
+   * as for {@link AggregationRow.stage}: a `NOT NULL` column, or a `0` written
+   * in place of a null, turns the `east` cell green for the wrong reason. Its
+   * `count(amount)` control answers `0` only while the nulls are real.
+   */
+  amount: number | null;
   /**
    * [#11152] The non-null BOOLEAN aggregand — 3 true / 3 false, so `sum` and
    * `avg` cannot agree with a face that dropped the booleans (`0` / `null`,
@@ -224,15 +247,17 @@ export interface AggregationRow {
 /**
  * The fixture, as stored. `west` carries the duplicate (`won` twice) and a
  * null; `east` carries one value and a null, so BOTH groups exercise null
- * exclusion while only one exercises dedup.
+ * exclusion while only one exercises dedup. [#15546] On `amount`, `east` is
+ * NULL in every row and `west` in two of four, so one group has an EMPTY
+ * addend set and the other a partial one.
  */
 export const AGGREGATION_ROWS: readonly AggregationRow[] = [
-  { id: '1', region: 'west', stage: 'won',  score: 10, flag: true },
-  { id: '2', region: 'west', stage: 'won',  score: 20, flag: false },
-  { id: '3', region: 'west', stage: 'lost', score: 30, flag: false },
-  { id: '4', region: 'west', stage: null,   score: 40, flag: false },
-  { id: '5', region: 'east', stage: 'won',  score: 50, flag: true },
-  { id: '6', region: 'east', stage: null,   score: 60, flag: true },
+  { id: '1', region: 'west', stage: 'won',  score: 10, flag: true,  amount: 10 },
+  { id: '2', region: 'west', stage: 'won',  score: 20, flag: false, amount: null },
+  { id: '3', region: 'west', stage: 'lost', score: 30, flag: false, amount: 30 },
+  { id: '4', region: 'west', stage: null,   score: 40, flag: false, amount: null },
+  { id: '5', region: 'east', stage: 'won',  score: 50, flag: true,  amount: null },
+  { id: '6', region: 'east', stage: null,   score: 60, flag: true,  amount: null },
 ] as const;
 
 /**
@@ -479,6 +504,63 @@ export const AGGREGATION_CASES: readonly AggregationCase[] = [
       { group: 'east', value: 110 },
       { group: 'west', value: 100 },
     ],
+  },
+
+  // ── [#15546] the NULLABLE aggregand: summing nothing is 0, on every face ──
+  //
+  // `amount` is NULL in every `east` row. SQL `SUM` skips NULLs and answers
+  // NULL once it has skipped everything — measured `null` on better-sqlite3,
+  // live PostgreSQL 16.13 and live MySQL 8.0.46 before the driver-sql fold —
+  // while the engine's in-memory tier answers `0` (its reduce starts at the
+  // identity and `toNumber(null)` is 0), and so do `driver-memory` and
+  // `driver-mongodb`'s lowering. The two platform faces are picked per query
+  // by a driver capability bit the caller cannot see, so the same grouped list
+  // view rendered a blank total on one deployment and `0` on another.
+  // Maintainer ruling 2026-09-07 (#15546, option A): a non-empty group whose
+  // aggregand is NULL in every row sums to `0` — the addend set is empty
+  // either way, and `emptyGroupValueFor` already says summing nothing is `0`.
+  // The other half of that policy (`avg`/`min`/`max` have no identity and stay
+  // null) is outside this table's `value: number` vocabulary and is pinned per
+  // face.
+  {
+    name: 'sum(amount) grouped by region — east is NULL in every row and sums to 0',
+    function: 'sum',
+    field: 'amount',
+    groupBy: 'region',
+    expected: [
+      { group: 'east', value: 0 },
+      { group: 'west', value: 40 },
+    ],
+    note:
+      '#15546: `east` has two rows and nothing to add. A face that hands SQL\'s '
+      + 'NULL through answers null here (a blank tile, indistinguishable from '
+      + '"not computed"), and `west` at 40 keeps a face that folded EVERY sum '
+      + 'to 0 from passing.',
+  },
+  {
+    name: 'count(amount) grouped by region — the nulls are real',
+    function: 'count',
+    field: 'amount',
+    groupBy: 'region',
+    expected: [
+      { group: 'east', value: 0 },
+      { group: 'west', value: 2 },
+    ],
+    note:
+      '#15546: the reachability control for the case above. COUNT(col) is '
+      + 'defined over non-null values on every backend, so `east` at 0 proves '
+      + 'the seed stored NULLs — a harness that wrote 0 in place of a null '
+      + 'answers 2 here and turns the sum cell green for the wrong reason.',
+  },
+  {
+    name: 'sum(amount) over the whole table skips the nulls',
+    function: 'sum',
+    field: 'amount',
+    expected: [{ group: null, value: 40 }],
+    note:
+      '#15546: the partial-null control. Four nulls among six rows contribute '
+      + 'nothing and the two values add to 40 on every face — the case that was '
+      + 'always green, which is why the all-null cell went unmeasured.',
   },
 
   // ── [#6401] the group column's NAME, not its value ────────────────────────

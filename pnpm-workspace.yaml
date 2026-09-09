@@ -25,7 +25,12 @@ onlyBuiltDependencies:
 # ⛔ SELECTOR SHAPE — the one rule every OSV pin below now follows (#6095).
 # An OSV pin states a FLOOR ("nothing below the patched line"), so its selector
 # must cover the whole major it guards and its target must be a range that
-# floats up inside that major. Concretely:
+# floats up inside that major — UNLESS the package's export surface is one we
+# compile against, in which case the target is an EXACT version and lifting it
+# is a reviewed edit (the better-auth family, #16186: 1.7.3 deleted a public
+# export in a PATCH). The selector rule below is unchanged either way, and it
+# is what keeps an exact target a one-line lift.
+# Concretely:
 #     'pkg@>=<affected floor> <next major above the target>': '^<patched>'
 # Never write the selector's exclusive upper bound AT the target's own version
 # line (`pkg@<X.Y.Z` -> `^X.Y.Z`). That shape self-invalidates the day X.Y.Z
@@ -43,9 +48,10 @@ onlyBuiltDependencies:
 # the three zero-consumer pins awaiting a #5835-style ruling
 # (@tootallnate/once, react-router, @sveltejs/kit). (`@better-auth/scim` was
 # the other carve-out while it held the rc; #3653 moved it onto stable with
-# the bound at the major boundary, and #13715 returned its TARGET to the
-# family's `^` — see its note below. Both are about the resolved version, not
-# the selector shape this rule governs.)
+# the bound at the major boundary, #13715 returned its TARGET to the family's
+# `^`, and #16186 moved the whole family back to an EXACT target — see its
+# note below. All three are about the resolved version, not the selector shape
+# this rule governs.)
 #   - esbuild: GHSA-gv7w-rqvm-qjhr (high). tsup/tsx/vite pulled 0.27.7 / 0.28.0
 #     (< 0.28.1); force the patched line everywhere.
 #   - form-data: GHSA-hmw2-7cc7-3qxx (high) — CRLF injection via unescaped
@@ -135,10 +141,15 @@ onlyBuiltDependencies:
 #     undici above).
 #     IMPORTANT: these overrides do NOT ship with published packages — a
 #     downstream `npx create-objectstack` install resolves plugin-auth's own
-#     declared ranges. plugin-auth therefore declares the same `^1.7.1` in its
-#     dependencies (a `^1.6.23` range there resolved to the broken 1.6.23 mix
-#     and 500'd every fresh 15.1.0 project). Keep both in sync — CI enforces
-#     this via scripts/check-override-consistency.mjs.
+#     declared ranges. plugin-auth therefore declares the same exact `1.7.2`
+#     in its dependencies (a `^1.6.23` range there resolved to the broken
+#     1.6.23 mix and 500'd every fresh 15.1.0 project; a `^1.7.2` range there
+#     resolved to 1.7.3 and made every fresh 17.1.0–17.3.0 project unloadable,
+#     #16186). Keep both in sync — CI enforces this via
+#     scripts/check-override-consistency.mjs, and
+#     scripts/check-vendor-export-contract.mjs enforces that the DECLARED
+#     range admits exactly one version and that version exports every symbol
+#     plugin-auth imports.
 #   - uuid: GHSA-w5hq-g745-h8pq (high) — pulled 8.3.2 transitively; the fix
 #     first lands in 11.1.1. Pin to the ^11.1.1 LTS line (uuid `legacy-11`
 #     dist-tag) rather than the latest major to keep the jump conservative.
@@ -165,10 +176,30 @@ overrides:
   'undici@>=7.23.0 <8.0.0': '^7.29.0'
   # better-auth family — kept on one line (see @better-auth/oauth-provider note).
   # Off the 1.7.0-rc.2 prerelease and onto the stable line (#3002). Bounds sit
-  # at the MAJOR boundary, so a future advisory lift moves only the target.
-  'better-auth@<2.0.0': '^1.7.2'
-  '@better-auth/core@<2.0.0': '^1.7.2'
-  # scim carries the family's `^` again — see the @better-auth/scim note
+  # at the MAJOR boundary, so a future advisory lift moves only the TARGET.
+  #
+  # ⛔ EXACT TARGETS, not `^`, since #16186. This family removes public exports
+  # in PATCH releases: 1.7.3 deleted `createLocalAccountIssuer` /
+  # `createOAuthAccountIssuer` and the whole `account.issuer` column from
+  # `@better-auth/core/db` (better-auth/better-auth#10909 rolled the
+  # issuer-scoped account identity back), and `@objectstack/plugin-auth`
+  # statically imports both names. A caret cannot express "the export surface
+  # we compile against", so `^` here means the tested version and the shipped
+  # version are free to differ — which is exactly what happened: this
+  # lockfile held 1.7.2 and every CI job was green while every consumer of
+  # published 17.1.0–17.3.0 resolved 1.7.3 and could not load the plugin at
+  # all. The selectors keep their `<2.0.0` major boundary, so lifting the
+  # family later is still a target-only edit.
+  #
+  # These targets are held EQUAL to the ranges `@objectstack/plugin-auth`
+  # declares (`scripts/check-override-consistency.mjs` cross-checks that the
+  # declared range admits the target; `pnpm check:vendor-export-contract`
+  # requires the declared range to be exact and to export what we import).
+  # Move all eleven together, in one commit, or better-auth init throws and
+  # every auth endpoint 500s.
+  'better-auth@<2.0.0': '1.7.2'
+  '@better-auth/core@<2.0.0': '1.7.2'
+  # scim carries the family's target — see the @better-auth/scim note
   # above. It was held at 1.7.1 EXACT, one deliberate step behind `^1.7.1`,
   # because `^1.7.1` then resolved scim to 1.7.2 while the installed family
   # was still 1.7.1: scim 1.7.2 peers `better-auth`/`@better-auth/core` at
@@ -183,29 +214,30 @@ overrides:
   # for all eleven; the install resolves all eleven to 1.7.2 (one copy each),
   # so scim's `^1.7.2` peers are SATISFIED by the installed 1.7.2 pair rather
   # than silenced — the condition the exact hold existed for no longer holds.
-  # `^` rather than a fresh exact pin for two reasons. Structural: the two
-  # sibling standalone plugins, oauth-provider and sso, peer the family in
-  # exactly the same shape (`better-auth`/`@better-auth/core` at `^1.7.2`) and
-  # carry `^`; an exact scim would be the one asymmetric member with no reason
-  # left to state. Security: this pin is also the GHSA-j8v8-g9cx-5qf4 floor,
-  # and a floor that cannot take the next patch is the wrong shape for a
-  # package with that history. Measured, so it is not a preference: `^1.7.2`
-  # and exact `1.7.2` produce byte-identical resolutions today — two
-  # `pnpm install --lockfile-only` runs differ only in the echoed override
-  # string and the echoed importer specifier, in no resolved version and no
-  # peer-resolution suffix — so the shape is chosen on durability, not on a
-  # resolution difference that does not exist.
+  # It carried `^1.7.2` from #13715 until #16186, on two arguments the 1.7.3
+  # release answered. Structural — "the siblings peer `^1.7.2` and carry `^`,
+  # so an exact scim would be the one asymmetric member" — is moot now that
+  # ALL eleven are exact; the family is symmetric again, one line lower.
+  # Security — "this pin is also the GHSA-j8v8-g9cx-5qf4 floor, and a floor
+  # that cannot take the next patch is the wrong shape" — was the reasoning
+  # 1.7.3 refuted: taking the next patch UNREVIEWED is what a floor must not
+  # do when the vendor deletes public exports in one. 1.7.2 is above the
+  # patched line for GHSA-j8v8-g9cx-5qf4 and GHSA-p2fr-6hmx-4528, so the floor
+  # still holds; what changed is that lifting it is now a reviewed edit, which
+  # is the only way an export-surface change gets read before it ships. That
+  # review has somewhere to land: `pnpm check:vendor-export-contract` fails on
+  # a lift whose new version drops a symbol `plugin-auth` imports.
   # What stays true: the whole family still moves as ONE line, and a bump that
-  # moves scim alone is still the mistake the ruling named.
-  '@better-auth/scim@<2.0.0': '^1.7.2'
-  '@better-auth/oauth-provider@<2.0.0': '^1.7.2'
-  '@better-auth/sso@<2.0.0': '^1.7.2'
-  '@better-auth/drizzle-adapter@<2.0.0': '^1.7.2'
-  '@better-auth/kysely-adapter@<2.0.0': '^1.7.2'
-  '@better-auth/memory-adapter@<2.0.0': '^1.7.2'
-  '@better-auth/mongo-adapter@<2.0.0': '^1.7.2'
-  '@better-auth/prisma-adapter@<2.0.0': '^1.7.2'
-  '@better-auth/telemetry@<2.0.0': '^1.7.2'
+  # moves scim alone is still the mistake the #3653 ruling named.
+  '@better-auth/scim@<2.0.0': '1.7.2'
+  '@better-auth/oauth-provider@<2.0.0': '1.7.2'
+  '@better-auth/sso@<2.0.0': '1.7.2'
+  '@better-auth/drizzle-adapter@<2.0.0': '1.7.2'
+  '@better-auth/kysely-adapter@<2.0.0': '1.7.2'
+  '@better-auth/memory-adapter@<2.0.0': '1.7.2'
+  '@better-auth/mongo-adapter@<2.0.0': '1.7.2'
+  '@better-auth/prisma-adapter@<2.0.0': '1.7.2'
+  '@better-auth/telemetry@<2.0.0': '1.7.2'
   'uuid@<12.0.0': '^11.1.1'
   'postcss@<9.0.0': '^8.5.10'
   'cookie@<0.8.0': '^0.7.0'
@@ -221,6 +253,12 @@ overrides:
   # (next optionalDep ^0.34.5 excludes the fix); react-router GHSA-qwww-vcr4-c8h2 has no
   # 7.x fix — fumadocs-core peer allows 8.x and docs uses the next adapter, so jump to 8;
   # @sveltejs/kit GHSA-866w-xmhq-wj7x/GHSA-wqjv-9729-c5q2 (better-auth optional peer);
+  # 2026-09-09 (#16999): sharp GHSA-rgj7-g3m4-5g8c (8.9 high) — the target lifts
+  # from ^0.35.0 to ^0.35.4; the selector is untouched, because <0.36.0 already
+  # sits at the 0.x compatibility boundary this block's header names. Still
+  # transitive-only via next's optional dependency, and 0.35.4 is a patch inside
+  # the 0.35 line the pin already held, so nothing declares a range that has to
+  # move in lockstep.
   # @hono/node-server GHSA-frvp-7c67-39w9 has no 1.x fix — @modelcontextprotocol/sdk
   # declares ^1.19.9 and only imports getRequestListener, which 2.x still exports.
   # ⚠️ @hono/node-server is the exception to this block's "transitive-only" heading:
@@ -229,7 +267,7 @@ overrides:
   # specifier — the resolved version is unchanged at 2.0.12, because the ^2.0.10 target
   # floats to the newest 2.x (measured, #6095).
   'brace-expansion@>=5.0.0 <6.0.0': '^5.0.9'
-  'sharp@>=0.34.0 <0.36.0': '^0.35.0'
+  'sharp@>=0.34.0 <0.36.0': '^0.35.4'
   'react-router@<8.3.0': '^8.3.0'
   '@sveltejs/kit@<2.69.1': '^2.69.1'
   '@hono/node-server@<3.0.0': '^2.0.10'
@@ -255,8 +293,24 @@ overrides:
   #     peer states what host hono we work against, and a host that pins an old
   #     hono owns that copy; narrowing it fixes nothing here and only breaks
   #     compatibility. check-override-consistency.mjs covers both forms.
+  #     2026-09-09 (#16999): three MORE hono advisories, GHSA-crvj-82cr-hjcx
+  #     (5.9), GHSA-g6gw-c38x-mqfc (5.3) and GHSA-gqvv-2mrq-wpjv (6.5), fixed in
+  #     4.13.5 — target lifted from ^4.12.34, selector stays at the 5.0.0
+  #     boundary, so this is the target-only lift that shape exists to allow.
+  #     The lift is ALSO what collapses the duplicate: the scanner flagged hono
+  #     at TWO resolved versions, 4.12.34 (pulled by @modelcontextprotocol/sdk)
+  #     and 4.13.2 (our three declarations, floated up by the old ^4.12.34
+  #     target). 4.12.34 satisfied ^4.12.34, so lockfile inertia left the
+  #     transitive copy sitting on the floor while ours moved; ^4.13.5 excludes
+  #     it, both edges must re-resolve, and the tree deduplicates onto one hono.
+  #     A bump that moved only our declarations would have left the 4.12.34 copy
+  #     flagged and the gate red. @hono/node-server peers hono ^4.12.34, which
+  #     4.13.x satisfies, so neither node-server version has to move.
+  #     The declared ranges go to ^4.13.5 in lockstep for the downstream-install
+  #     reason above; the @objectstack/hono PEER range stays ^4.12.8, unchanged,
+  #     for the reason above it.
   'fast-uri@<4.0.0': '^3.1.6'
-  'hono@<5.0.0': '^4.12.34'
+  'hono@<5.0.0': '^4.13.5'
   # OSV 2026-08-07 (#6407) — transitive-only, and the same "it has a fix, so
   # take the fix" disposition as the batch above:
   #   dompurify GHSA-55q2-fjhq-7xh7 (5.1 medium) — an IN_PLACE hook removal

@@ -36,12 +36,15 @@ const BASELINE_PATH = path.join(SPEC_DIR, 'docs-import-surface.baseline.json');
  *   Widget    — `export const WidgetSchema` + `export type Widget`  (healthy)
  *   Gadget    — `export const GadgetSchema`, NO type alias          (#4570)
  *   Flavor    — `export const Flavor = z.enum(…)` + `export type Flavor`
- *               (merged declaration; api-surface reports `type` only)
+ *               (merged declaration; since #15919 api-surface records BOTH
+ *               `Flavor (const)` and `Flavor (type)`, one row per declared
+ *               kind — before it, the value half was never enumerated)
  *   Ghost     — documented by a page, exported by nothing
  */
 const API_SURFACE = {
   '.': ['defineStack (function)'],
   './demo': [
+    'Flavor (const)',
     'Flavor (type)',
     'GadgetSchema (const)',
     'Widget (type)',
@@ -70,8 +73,10 @@ describe('resolveValueName', () => {
   });
 
   it('falls back to the bare name for a merged const+type declaration', () => {
-    // api-surface reports `Flavor (type)` — kindOf tests TypeAlias before
-    // Variable — so value-ness cannot be read off the kind. Presence can.
+    // There is no `FlavorSchema`, so the bare-name candidate is what resolves.
+    // This resolver asks only whether the name is exported — presence, never
+    // the kind — which is why it was already correct while api-surface still
+    // recorded `Flavor (type)` alone (before #15919).
     expect(resolveValueName('Flavor', demo)).toBe('Flavor');
   });
 
@@ -88,6 +93,37 @@ describe('resolveTypeName', () => {
   it('rejects a const-only export — `import type { Gadget }` does not resolve', () => {
     expect(resolveTypeName('GadgetSchema', demo)).toBeNull();
     expect(resolveTypeName('Gadget', demo)).toBeNull();
+  });
+
+  // #15919: `build-api-surface.ts` now emits one row per DECLARED kind, so a
+  // merged const+type name arrives as TWO rows instead of one. This asserts the
+  // property that made two rows the right encoding: `loadEntrySurfaces` already
+  // models a name as a SET of kinds, so the extra `(const)` row joins the set
+  // and BOTH resolvers answer exactly what they answered before. The
+  // alternative encoding — a single combined `Flavor (const, type)` row —
+  // cannot do that, and the two cases below are why.
+  it('is unmoved by the extra `(const)` row of a dual-declared name', () => {
+    const oneRow = loadEntrySurfaces({ './demo': ['Flavor (type)'] }).get('demo')!;
+    const twoRows = loadEntrySurfaces({ './demo': ['Flavor (const)', 'Flavor (type)'] }).get('demo')!;
+
+    expect(twoRows.get('Flavor')).toEqual(new Set(['const', 'type']));
+    expect(resolveTypeName('Flavor', twoRows)).toBe(resolveTypeName('Flavor', oneRow));
+    expect(resolveTypeName('Flavor', twoRows)).toBe('Flavor');
+    expect(resolveValueName('Flavor', twoRows)).toBe(resolveValueName('Flavor', oneRow));
+  });
+
+  it('would have thrown on a combined kind, and lied after widening the parser', () => {
+    // Leg 1 — the parser refuses it outright, which is the loud half.
+    expect(() => loadEntrySurfaces({ './demo': ['Flavor (const, type)'] })).toThrow(
+      /cannot parse entry/,
+    );
+    // Leg 2 — the silent half, and the reason a combined kind stays rejected:
+    // widen the parser to admit it and the string `const, type` is in no
+    // TYPE_KINDS set, so `import type { Flavor }` vanishes from the page with
+    // no error anywhere. Simulated here by a kind spelled as one token, which
+    // is what any widened parser would hand the resolver.
+    const combined = loadEntrySurfaces({ './demo': ['Flavor (const_type)'] }).get('demo')!;
+    expect(resolveTypeName('Flavor', combined)).toBeNull();
   });
 });
 

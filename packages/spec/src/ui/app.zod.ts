@@ -411,12 +411,17 @@ export const ObjectNavItemSchema = lazySchema(() => strictObject(navItemSurface(
    * parameterized slices (dashboard drill-throughs, "assigned to me"
    * links); a slice worth curating and reusing belongs in a named view
    * via `viewName`. Values support the same template variables as
-   * `recordId`. Precedence: `recordId` → `filters` → `viewName`.
+   * `recordId`.
    *
    * Mutually exclusive with `recordId` / `viewName` — enforced by
-   * {@link NavigationItemSchema} (see `objectNavTargetExclusivity`) so the
-   * ambiguous combination is unrepresentable rather than silently resolved
-   * by precedence.
+   * {@link objectNavTargetExclusivity}, chained on the `type: 'object'`
+   * branch of {@link NavigationItemSchema} — so the ambiguous combination is
+   * unrepresentable. There is deliberately NO precedence order stated here:
+   * without the guard a consumer would have to resolve the combination by
+   * picking one field and silently ignoring the rest, and a mirror that
+   * copies an ordering from this docblock instead of chaining the guard ends
+   * up accepting what this schema refuses (#16714). The guard's own docblock
+   * names the one legacy combination it tolerates (`recordId` + `viewName`).
    */
   filters: z.record(z.string(), z.string()).optional().describe(
     'URL filter conditions — targets the /:objectName/data bare surface via filter[<field>]=<value> params instead of a saved view. Values support template vars {current_user_id}, {current_org_id}. Mutually exclusive with recordId/viewName.',
@@ -461,11 +466,22 @@ export const ObjectNavItemSchema = lazySchema(() => strictObject(navItemSurface(
  * the message. The legacy `recordId` + `viewName` combination stays
  * tolerated: it predates this guard and is documented as "viewName is
  * ignored when recordId is set".
+ *
+ * EXPORTED (#16714), one function per refinement, the same posture as the
+ * `check*` exports of #16489: a hand-written mirror of the object nav item
+ * chains this very function in its own `superRefine` instead of restating
+ * the rule from prose — a restatement is what drifts. Its one mount in this
+ * module is the `type: 'object'` branch of {@link NavigationItemSchema}; the
+ * exported {@link ObjectNavItemSchema} does NOT chain it, and exporting the
+ * function moves no accept set — which schema mounts the check is a separate
+ * question from whether a mirror can. The mount, the export and the two
+ * asymmetries below (`recordId` + `viewName` tolerated; `runAction` refused
+ * with `recordId` only) are pinned by `app-nav-target-exclusivity-export.test.ts`.
  */
-const objectNavTargetExclusivity = (
+export function objectNavTargetExclusivity(
   item: { filters?: unknown; recordId?: unknown; viewName?: unknown; runAction?: unknown },
   ctx: z.RefinementCtx,
-): void => {
+): void {
   if (item.filters && (item.recordId || item.viewName)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -491,7 +507,7 @@ const objectNavTargetExclusivity = (
         + '`runAction` to keep the record deep-link.',
     });
   }
-};
+}
 
 /**
  * 2. Dashboard Navigation Item
@@ -737,9 +753,15 @@ export const NavigationItemSchema: z.ZodType<NavigationItem, NavigationItemInput
  * The runtime merges all contributions into the owning app's `navigation`
  * tree by **target group id + priority** (lower priority applied first,
  * mirroring object extender ordering). When `group` is omitted the items are
- * appended at the app's top level. Contributed items keep the normal nav
- * gating fields (`requiresObject` / `requiredPermissions` / `visible`), so an
- * uninstalled capability simply contributes nothing and its slot stays empty.
+ * appended at the app's top level. Naming a group the target app does not
+ * declare is not refused either: the items are appended at the app top level
+ * anyway and a `nav_contribution_group_missing` diagnostic is emitted — by the
+ * runtime at `warn`, and by `os build` and `os validate` at compile time. That
+ * second case is the one an author cannot detect from their own source,
+ * because the target app belongs to another package. Contributed items keep
+ * the normal nav gating fields (`requiresObject` / `requiredPermissions` /
+ * `visible`), so an uninstalled capability simply contributes nothing and its
+ * slot stays empty.
  *
  * @example
  * {

@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/metadata",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "Metadata loading, saving, and persistence for ObjectStack",
   "type": "module",
@@ -96,7 +96,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^26.2.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "author": "ObjectStack",
   "repository": {

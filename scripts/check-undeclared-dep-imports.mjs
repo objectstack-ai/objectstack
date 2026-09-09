@@ -320,22 +320,6 @@ const LEDGER = [
       + 'the same seam for exactly that reason — so declaring it would reverse a stance the tree '
       + 'states, not repair an omission.',
   },
-  {
-    pkg: '@objectstack/rest',
-    dep: '@objectstack/metadata-protocol',
-    file: 'packages/rest/src/package-routes.ts',
-    kind: 'type-only',
-    why:
-      '#9960 chose the PRODUCER\'s exported types over a local restatement for the '
-      + '`protocol.deletePackage` seam, and refused a spec shape for it (zero external consumers). '
-      + 'Nothing reaches the emitted JavaScript and rollup-plugin-dts inlines the two aliases, so an '
-      + 'installing consumer is never told to install a package it does not receive. Measured on '
-      + 'this branch: `packages/rest/dist/index.d.ts` and `index.d.cts` carry ZERO module '
-      + 'references to `@objectstack/metadata-protocol` (its one textual occurrence is inside a '
-      + 'TSDoc comment), and every `from` specifier in those published types names a package rest '
-      + 'DECLARES — @objectstack/core, @objectstack/spec/* and zod. The row\'s mechanical evidence '
-      + 'is the type-only form, checked every run; a value import ends it.',
-  },
 ];
 
 const LEDGER_KINDS = new Set(['optional-runtime-probe', 'type-only']);

@@ -74,9 +74,11 @@ export default defineStack({
 | App navigation | `apps.<app>.navigation.<id>.label` |
 | Dashboard label / description | `dashboards.<name>.label` / `description` |
 | Dashboard widget title / description / sub-caption | `dashboards.<name>.widgets.<widgetId>.title` / `description` / `subCaption` |
+| Dashboard global-filter label and static option labels | `dashboards.<name>.globalFilters.<filterName>.label` / `.options.<value>` — the key is the filter's `name`, or its `field` when it authors no `name`; an option is keyed by its `value` spelled as a string |
 | Analytics dataset label / description | `datasets.<name>.label` / `description` |
 | Dataset dimension and measure labels | `datasets.<name>.dimensions.<dimension>.label` / `datasets.<name>.measures.<measure>.label` |
-| Page labels and `page:header` copy | `pages.<name>.label` / `description` / `title` / `subtitle` |
+| Page labels and `page:header` copy | `pages.<name>.label` / `description` / `title` / `subtitle` — on a `kind: 'slotted'` page the header under `slots.header` is the page's header |
+| Page component copy, by component id | `pages.<name>.components.<id>.title` / `description` / `label` / `placeholder` / `emptyText` — reached under `regions[].components[]` and `slots.<slot>`, through `properties.children` and a `page:tabs` / `page:accordion` panel's `items[].children` |
 | Screen-flow wizards (flow label, screen headings, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.fields.<field>.label` / `.placeholder` — see the boundary note below |
 | Global actions, settings, messages | `globalActions`, `settings`, `messages` |
 | A label written as an inline locale map (`label: { en: 'Members', 'zh-CN': '成员' }`) | Nowhere — it is written on the metadata and resolved at render time; see **Current boundaries** below |

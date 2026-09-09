@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/platform-objects",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "Core platform object schemas for ObjectStack — identity, security, audit, tenant, and metadata objects",
   "main": "dist/index.js",
@@ -80,7 +80,7 @@
     "@types/node": "^26.2.0",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "objectstack",

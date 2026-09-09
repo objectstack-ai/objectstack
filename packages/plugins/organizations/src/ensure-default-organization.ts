@@ -3,7 +3,7 @@
 /**
  * ensureDefaultOrganization — multi-org flavour of the default-org bootstrap.
  *
- * The helper itself moved to `@objectstack/plugin-auth` (ADR-0081 D1: the
+ * The helper itself moved to `@objectstack/plugin-auth` (cloud ADR-0081 D1: the
  * open member-management basics own it — single-org mode runs it too, from
  * AuthPlugin). This wrapper keeps the multi-org semantics this plugin always
  * had by injecting the per-org seed-ownership handoff step

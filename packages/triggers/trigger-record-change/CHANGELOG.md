@@ -1,5 +1,218 @@
 # @objectstack/plugin-trigger-record-change
 
+## 17.4.0
+
+### Patch Changes
+
+- 4f85e4d: fix(trigger-record-change)!: the record handed to a record-change flow no longer aliases the write's payload (#14744)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing metadata-shaped moves: no spec key, no Zod schema, no `packages/spec` declaration, no export, no config field and no stored row changes spelling or shape, and a stored flow definition is byte-identical before and after — `objectstack migrate meta` has nothing to reach. What moves is the reference identity of the object one runtime seam hands a flow. The consumer note below names the supported node for writing a record; it prescribes no rewrite of any authored artifact, and the code it could affect is a stack author's own registered function body, which the metadata upgrader cannot see. -->
+  
+  **BREAKING** for a flow whose `script` node mutates a NESTED value of the
+  triggering record IN PLACE: that mutation no longer affects the write the flow
+  was triggered by. Shipped as `patch` — this change moves no public surface (no
+  exported symbol, no accepted key or value), and under the maintainer's
+  2026-09-04 rule (decision batch #35, on #15294) a `fix(` that changes no public
+  surface stays `patch`, with breaking-ness carried by this banner and the
+  ADR-0087 disposition rather than by the level. Maintainer ruling 2026-09-04 on
+  #14744 (decision batch #38, verbatim 「同意」), adopting option A.
+  
+  **Why.** `buildContext` builds the flow's `record` as a shallow overlay of the
+  pre-image, the mutation payload and the after-row. The top-level object was
+  new, so a flow ASSIGNING a top-level key reached nothing — but every nested
+  value in it was the engine's own object, shared by reference. One of those is
+  `ctx.input.data`, and on a `multi: true` update ADR-0058 Addendum II D3 hands
+  every per-row context that same payload object, which is the SET clause of the
+  single `updateMany`. A registered function doing `record.tags.push(...)`
+  therefore wrote the SET clause without assigning any key: every dispatch's
+  contribution landed on EVERY matched row, including values derived from another
+  row's pre-image, and #14099's key-set refusal could not see it because no key
+  was assigned. Measured end to end on the memory driver and on
+  `@objectstack/driver-sql` (#15356).
+  
+  **What changes.** Both flow-facing roots — `record` (and the `params` alias of
+  it) and `previous` — are decoupled from the engine's state before the flow
+  runs. Arrays, plain objects, `Date`, `RegExp`, `Map` and `Set` are copied;
+  primitives, functions and other class instances are shared, which is the
+  documented and pinned boundary. A flow still mutates its roots freely and still
+  observes its own writes for the rest of the run; those writes simply reach
+  nothing outside it. `previous` is decoupled in the same stroke because it is the
+  engine's single pre-image object and the same hook context reaches every other
+  flow bound to the same write.
+  
+  **What does NOT change.** The engine's write shape. ADR-0058 Addendum II D3
+  stands untouched: one payload still serves N rows and every per-row context is
+  still handed that one object. #14099's key-set refusal is untouched and is not
+  widened — a hook that assigns the same key with per-row values still passes it,
+  and divergent key sets are still refused whole. Flow metadata with no registered
+  function reached nothing before this change and reaches nothing after it:
+  assignment nodes write the run's variable map, and `update_record` issues its own
+  by-id write. Lookup expansion (`config.expand`) still grafts onto the record the
+  flow holds.
+  
+  **Consumer note.** A flow that relied on an in-place nested mutation to persist
+  — which on a by-id write did persist, and on a `multi: true` write corrupted
+  every other matched row — writes the record with the `update_record` node
+  instead. That node is the supported per-row write and is unaffected by this
+  change.
+- b224324: `@objectstack/trigger-record-change` and `@objectstack/trigger-schedule` now declare a `repository.directory` that resolves to the directory they actually live in.
+  
+  Both manifests declared a path under `packages/plugins/` that no longer exists in the repository:
+  
+  | package | declared | actual |
+  |---|---|---|
+  | `@objectstack/trigger-record-change` | `packages/plugins/plugin-trigger-record-change` | `packages/triggers/trigger-record-change` |
+  | `@objectstack/trigger-schedule` | `packages/plugins/plugin-trigger-schedule` | `packages/triggers/trigger-schedule` |
+  
+  `repository.directory` is what npm uses to build the **Repository** deep link on a package page, and what tooling uses to locate a monorepo package's source from its tarball. Pointing it at a path that does not exist sends a reader to a 404 instead of to the source — on packages published today at `17.3.0`. The value ships inside the tarball, so this correction only reaches npm by being published; that is why it carries a changeset rather than `skip-changeset`.
+  
+  The residue came from a three-commit sequence on 2026-06-12, and only one of those commits was a pure rename. `f15d6f6f6` **copied** the two packages to `packages/plugins/trigger-*` (26 files, +2222/-19, with all four directories briefly coexisting) and edited exactly one line of each copied manifest — its `name` — leaving `directory` pointing at the path it was copied from; `290c62514` deleted the originals five minutes later; and `ea4941ad8` then promoted `packages/plugins/trigger-*` to a first-class `packages/triggers/` directory as a pure 16-file rename with zero content changes, which made the declared value wrong in a second segment. Six weeks after that, `9a43e042f` (#3380) rewrote `repository.url` and `bugs` in both of these manifests, with the stale `directory` line sitting as unchanged context one line below the edited `url`. So the field was not merely never in anyone's way: one commit edited its immediate neighbour inside the same object, and a later reviewed hunk had the wrong line on screen. Nothing caught it because nothing reads it.
+  
+  Scope of this change, stated as a measured set rather than a general claim: over all **81** tracked `package.json` files in the repository, **57** declare `repository.directory`; before this change **55** resolved to the manifest's own directory and **2** did not — the two above. After it, **57 of 57** resolve. No other manifest field is edited, and no package's code, exports or behaviour is touched. The remaining **24** manifests declare no `repository.directory` at all; that population is deliberately left alone here and is reported separately, because whether declaring the field is mandatory is a policy question rather than a correction.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [51ae731]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [4771bd9]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f89812e]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+  - @objectstack/spec@17.4.0
+  - @objectstack/core@17.4.0
+
 ## 17.3.0
 
 ### Patch Changes

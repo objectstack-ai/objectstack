@@ -24,10 +24,10 @@
  *
  * ## Why this door, and why it is a DISAGREEMENT rather than an omission
  *
- * `/api/v1/packages` has two transports, and the module note in
- * `package-routes.ts` records that this direct-mount registrar registers FIRST
- * — so for the three routes both declare it is the one production serves. The
- * twin, the runtime dispatcher domain (`packages/runtime/src/domains/packages.ts`),
+ * `/api/v1/packages` had two transports (since #14503 this registrar serves
+ * only `POST /packages/publish`, for which it is the one door; the read and
+ * delete twins it carried are the dispatcher domain's alone). The twin, the
+ * runtime dispatcher domain (`packages/runtime/src/domains/packages.ts`),
  * answers every catch through `errorFromThrown`
  * (`packages/runtime/src/http-dispatcher.ts`), which has emitted exactly this
  * channel since #9106:
@@ -52,8 +52,8 @@
  *    into `PackageRoutesOptions`, and `resolveExecutionContext` is handed in by
  *    the composition step. The door forwards whatever they throw, so the
  *    demote fires on any spelling outside `@objectstack/spec`'s ledger.
- *    Section 1 drives all four seams through the real registrar — but
- *    ⚠️ only THREE of the four are production producers; the
+ *    Section 1 drives both seams through the real registrar — but
+ *    ⚠️ only ONE of the two is a production producer; the
  *    `resolveExecutionContext` seam is a TEST-ONLY injection point. See
  *    **Seam census** below, which is the one place that reason is stated.
  *
@@ -61,19 +61,22 @@
  *    `pnpm check:dispatcher-error-vocabulary` (`dispatcher-error-vocabulary.ts`)
  *    fails on an unswept platform producer precisely so a platform semantic
  *    code cannot silently demote off the wire. Measured on this checkout: every
- *    status-declaring coded throw reachable at the three PRODUCTION seams
+ *    status-declaring coded throw reachable at the PRODUCTION seam
  *    (**Seam census** below) spells a REGISTERED code. That is the point of the gate, not an argument that the
  *    channel is dead — it leaves `declaredCode`'s live population as the limb
  *    no ledger can enumerate: a metadata app's own thrown `.code` across the
  *    QuickJS boundary (#7867) and a downstream repo's codes, which the ledger's
  *    federation ruling (2026-08-03/09) keeps out of this ledger BY DESIGN.
  *
- * ## ⭐ Seam census: THREE production seams, plus ONE test-only injection
+ * ## ⭐ Seam census: ONE production seam, plus ONE test-only injection
  *
- * `SITES` below drives FOUR seams. Three are producers a deployment can
- * actually reach; the fourth is an injection point that exists only in a test.
- * Stated ONCE here and cited from the sites that depend on it, rather than
- * restated at each.
+ * `SITES` below drives TWO seams. One is a producer a deployment can actually
+ * reach — `packageService.publish`; the other is an injection point that
+ * exists only in a test. Stated ONCE here and cited from the sites that depend
+ * on it, rather than restated at each. (Until #14503 the table had four rows:
+ * `packageService.get` and `packageService.delete` reached this same catch
+ * through the read and delete routes, which the ruling removed — the
+ * dispatcher's `/packages` domain is their single implementation.)
  *
  * Measured on `origin/main` @ `aa5994e17` by reading the composition rather
  * than inferring it:
@@ -154,13 +157,14 @@
  * `package-routes.ts` site still carries none. So "deliberate" is established
  * by the code for the first site and still is not for the second.
  *
- * Section 5 is the second fact stated as a test: a REAL `ObjectQL`, a REAL
- * `ObjectStackProtocolImplementation` and a failing driver, driven through the
- * route a client calls, answer a REGISTERED `SERVICE_UNAVAILABLE` and therefore
- * carry NO `declaredCode`. It is this suite's proof that the instrument can say
- * no on a real path — a suite that only ever asserted presence would be green
- * for an implementation that stamped `declaredCode` on every refusal, which is
- * the exact invariant `ApiErrorSchema.declaredCode` forbids.
+ * Section 5 used to state the second fact as a test: a REAL `ObjectQL`, a
+ * REAL `ObjectStackProtocolImplementation` and a failing driver, driven through
+ * `DELETE /packages/:id`, answered a REGISTERED `SERVICE_UNAVAILABLE` and
+ * therefore carried NO `declaredCode`. That route left this registrar with
+ * #14503, and the real-producer walk went with it: the producer-side fact is
+ * measured at the producer (`packages/metadata-protocol/src/protocol.driver-text-disclosure.test.ts`),
+ * and the surviving dispatcher door has its own pins. The instrument's "no"
+ * on a REGISTERED code is still asserted here, in section 2, on fixtures.
  *
  * ## Reverse verification, and the half the prediction got wrong
  *
@@ -200,8 +204,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ApiErrorSchema, BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import type { RouteHandler } from '@objectstack/spec/contracts';
-import { ObjectQL } from '@objectstack/objectql';
-import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import {
   resolveThrownHttpError,
   demotedDeclaredCode,
@@ -287,12 +289,12 @@ const MANIFEST = { id: 'com.acme.crm', version: '1.0.0' };
 
 /**
  * One catch site, plus the seam that drives a throw INTO it and a witness that
- * the throw really travelled that way. Same four seams as
+ * the throw really travelled that way. Same two seams as
  * `package-routes-coded-error-mapping.test.ts`, for the same reason: a case
  * that silently never reached the seam would otherwise "pass" on a body it got
  * for a completely different reason.
  *
- * ⚠️ Four seams, THREE of them production. The
+ * ⚠️ Two seams, ONE of them production. The
  * `resolveExecutionContext` entry is the test-only one — see **Seam census**
  * in the module docblock, the single place that reason is stated.
  */
@@ -324,48 +326,23 @@ const SITES: Site[] = [
     // ⚠️ The `vi.fn` below is deliberately NOT `async`: an `async` one
     // would REJECT, and `package-routes.ts:81` would swallow that into the
     // 401 anonymous-deny floor instead of reaching `sendThrownError`.
-    name: 'GET /packages — the capability gate resolver throws',
+    name: 'POST /packages/publish — the capability gate resolver throws',
     run: async (error: unknown) => {
       const resolveExecutionContext = vi.fn(() => { throw error; });
       const captured = await drive(
-        mount({ list: async () => [] }, { resolveExecutionContext }),
-        'GET',
-        PKGS,
+        mount({ publish: async () => ({ success: true }) }, { resolveExecutionContext }),
+        'POST',
+        `${PKGS}/publish`,
+        { body: { manifest: MANIFEST, metadata: { author: 'acme' } } },
       );
       return { captured, reached: () => resolveExecutionContext.mock.calls.length === 1 };
-    },
-  },
-  {
-    name: 'GET /packages/:id — packageService.get throws',
-    run: async (error: unknown) => {
-      const get = vi.fn(async () => { throw error; });
-      const captured = await drive(
-        mount({ get }),
-        'GET',
-        `${PKGS}/:id`,
-        { params: { id: 'com.acme.crm' } },
-      );
-      return { captured, reached: () => get.mock.calls.length === 1 };
-    },
-  },
-  {
-    name: 'DELETE /packages/:id — packageService.delete throws',
-    run: async (error: unknown) => {
-      const del = vi.fn(async () => { throw error; });
-      const captured = await drive(
-        mount({ delete: del }),
-        'DELETE',
-        `${PKGS}/:id`,
-        { params: { id: 'com.acme.crm' } },
-      );
-      return { captured, reached: () => del.mock.calls.length === 1 };
     },
   },
 ];
 
 // ---------------------------------------------------------------------------
 // 1. The demote reaches the wire, at every seam this suite drives
-//    (three production producers + one test-only injection — Seam census)
+//    (one production producer + one test-only injection — Seam census)
 // ---------------------------------------------------------------------------
 
 describe('[#12405] an UNREGISTERED producer spelling rides `declaredCode`', () => {
@@ -522,7 +499,7 @@ describe('[#12405] `details` and `declaredCode` travel together', () => {
    * producer shape.
    */
   it('a demoted refusal carrying structured context keeps BOTH', async () => {
-    const del = vi.fn(async () => {
+    const publish = vi.fn(async () => {
       throw thrown('two records still reference this package', {
         status: 409,
         code: 'CLOSE_PERIOD_LOCKED',
@@ -530,13 +507,13 @@ describe('[#12405] `details` and `declaredCode` travel together', () => {
       });
     });
     const captured = await drive(
-      mount({ delete: del }),
-      'DELETE',
-      `${PKGS}/:id`,
-      { params: { id: 'com.acme.crm' } },
+      mount({ publish }),
+      'POST',
+      `${PKGS}/publish`,
+      { body: { manifest: MANIFEST, metadata: { author: 'acme' } } },
     );
 
-    expect(del.mock.calls.length, 'the throwing seam was never called').toBe(1);
+    expect(publish.mock.calls.length, 'the throwing seam was never called').toBe(1);
     const error = expectDeclaredEnvelope(captured);
     expect(captured.status).toBe(409);
     expect(error.code).toBe('RESOURCE_CONFLICT');
@@ -547,21 +524,21 @@ describe('[#12405] `details` and `declaredCode` travel together', () => {
   });
 
   it('a refusal with context but a REGISTERED code keeps `details` and gains nothing', async () => {
-    const del = vi.fn(async () => {
-      throw thrown('uninstalling drops 3 tables', {
+    const publish = vi.fn(async () => {
+      throw thrown('publishing would drop 3 tables', {
         status: 409,
         code: 'DESTRUCTIVE_CHANGE',
         issues: [{ path: 'tables', message: 'crm_account would be dropped' }],
       });
     });
     const captured = await drive(
-      mount({ delete: del }),
-      'DELETE',
-      `${PKGS}/:id`,
-      { params: { id: 'com.acme.crm' } },
+      mount({ publish }),
+      'POST',
+      `${PKGS}/publish`,
+      { body: { manifest: MANIFEST, metadata: { author: 'acme' } } },
     );
 
-    expect(del.mock.calls.length, 'the throwing seam was never called').toBe(1);
+    expect(publish.mock.calls.length, 'the throwing seam was never called').toBe(1);
     const error = expectDeclaredEnvelope(captured);
     expect(error.details).toEqual({
       issues: [{ path: 'tables', message: 'crm_account would be dropped' }],
@@ -594,20 +571,19 @@ describe('[#12405] the demote is not withheld by the 5xx message sanitiser', () 
    * merely consistent, because of a fact about the producers, and that fact is
    * recorded here because it can rot and is written down nowhere else:
    *
-   *   **No producer reaching the three PRODUCTION seams can put a driver
-   *   errno in `declaredCode` today, because `PackageService` discriminates on
-   *   the STATUS channel and never on `.code`.** (Three, not four — **Seam
-   *   census** in the module docblock.)
+   *   **No producer reaching the PRODUCTION seam can put a driver errno in
+   *   `declaredCode` today, because `PackageService` discriminates on the
+   *   STATUS channel and never on `.code`.** (One, not two — **Seam census**
+   *   in the module docblock.)
    *
    * `packages/services/service-package/src/index.ts` is explicit about why:
    * `publish` and `delete` re-throw only what `declaresHttpAnswer(error)`
    * accepts — a declared `status`/`statusCode` — and its own comment states the
    * reason in as many words, that "every SQL driver populates a string `code`
    * on its errors, so reading it would re-throw genuine driver faults as if
-   * they were refusals". `get` and `list` re-throw only the branded
-   * seam-unreadable refusal (`SERVICE_UNAVAILABLE` / 503). `protocol.deletePackage`
-   * escapes only with `TENANT_SCOPE_REQUIRED` or `metadataStoreUnavailableError`.
-   * So a bare `SQLITE_ERROR` / `42P01` is swallowed and re-answered long before
+   * they were refusals". (Its `get` / `list` / `delete` siblings and
+   * `protocol.deletePackage` used to reach this door too, through the routes
+   * #14503 removed.) So a bare `SQLITE_ERROR` / `42P01` is swallowed and re-answered long before
    * this door sees it, and the dialect-disclosure shape — a backend's own
    * error class landing in `declaredCode` beside a withheld message — is
    * unreachable rather than tolerated.
@@ -619,11 +595,10 @@ describe('[#12405] the demote is not withheld by the 5xx message sanitiser', () 
    * here measures that shape, because nothing produces it.
    *
    * ⛔ **The falsifier, stated so the next reader inherits a measurement
-   * instead of an argument:** a producer that reaches any of the three
-   * PRODUCTION seams carrying a driver errno as its `.code` — a
-   * `PackageService` implementation that re-throws on `.code` rather than on
-   * status, or a `protocol` slice that lets a raw driver error out of
-   * `deletePackage`. On that day the disclosure becomes live, this block's
+   * instead of an argument:** a producer that reaches the PRODUCTION seam
+   * carrying a driver errno as its `.code` — a `PackageService`
+   * implementation whose `publish` re-throws on `.code` rather than on
+   * status. On that day the disclosure becomes live, this block's
    * premise is false, and the fork has to be RE-OPENED rather than re-derived
    * from the consistency half above.
    *
@@ -722,62 +697,4 @@ describe('[#12405] the wire `declaredCode` IS the shared rule, not a second copy
     expect(answers.filter((a) => a !== undefined).length).toBeGreaterThan(2);
     expect(answers.filter((a) => a === undefined).length).toBeGreaterThan(2);
   });
-});
-
-describe('[#12405] a REAL producer walked through this door answers with NO demote', () => {
-  /**
-   * The instrument's "no", on a real path rather than a fixture — and the
-   * reachability measurement's second half stated as a test.
-   *
-   * A real `ObjectQL`, a real `ObjectStackProtocolImplementation` and a driver
-   * that fails every `sys_metadata` access, driven through
-   * `DELETE /api/v1/packages/:id` (no `?version=`, which is the branch that
-   * routes to `protocol.deletePackage`). The producer answers its own declared
-   * `503 SERVICE_UNAVAILABLE` — a REGISTERED code — so nothing is demoted and
-   * this door must add nothing.
-   *
-   * That is the framework-producer population in one case: platform producers
-   * reaching here are kept inside the ledger by
-   * `pnpm check:dispatcher-error-vocabulary`, which is why `declaredCode`'s
-   * live population is the limb no ledger enumerates (a metadata app's own
-   * `.code`, #7867; a downstream repo's codes, kept out of this ledger by the
-   * federation ruling). A suite that only ever asserted presence would be green
-   * for a door that stamped `declaredCode` on this body too.
-   */
-  function failingDriver(dbError: string) {
-    const boom = () => { throw new Error(dbError); };
-    const driver: any = {
-      name: 'memory-broken', version: '0.0.0', supports: {},
-      async connect() {}, async disconnect() {}, async checkHealth() { return true; },
-      async execute() { return null; },
-      async find() { boom(); }, async findOne() { boom(); },
-      async create() { boom(); }, async update() { boom(); }, async delete() { boom(); },
-      async upsert() { boom(); }, async count() { boom(); },
-      async bulkCreate() { boom(); }, async bulkUpdate() { boom(); }, async bulkDelete() { boom(); },
-      async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; },
-      async commit() {}, async rollback() {},
-    };
-    return driver;
-  }
-
-  it('an unreadable metadata store answers 503 SERVICE_UNAVAILABLE with no `declaredCode`', async () => {
-    const engine = new ObjectQL();
-    engine.registerDriver(failingDriver('SQLITE_ERROR: no such table: sys_metadata'), true);
-    await engine.init();
-    const protocol = new ObjectStackProtocolImplementation(engine as any);
-
-    const captured = await drive(
-      mount({ delete: async () => ({ success: true }) }, { protocol }),
-      'DELETE',
-      `${PKGS}/:id`,
-      { params: { id: 'com.acme.crm' } },
-    );
-
-    const error = expectDeclaredEnvelope(captured);
-    // The POSITIVE shape first, so the absence below cannot pass vacuously on
-    // a request that failed for some entirely different reason.
-    expect(captured.status).toBe(503);
-    expect(error.code).toBe('SERVICE_UNAVAILABLE');
-    expect('declaredCode' in error).toBe(false);
-  }, 60_000);
 });

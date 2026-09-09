@@ -4,13 +4,45 @@ on:
   push:
     branches:
       - main
+  # ⭐ NO `branches:` filter here, deliberately (#16482) — see ci.yml's `on:`
+  # block for the full rationale and the measured runner cost; both files carry
+  # required contexts and are widened together, because six contexts split
+  # across two files are only as reachable as the less reachable file.
+  #
+  # ⚠️ The MEASURED 2026-08-25 (#12211) block immediately below does NOT bind
+  # on this widening, and it is not touched by it. Read what it measured: it is
+  # a `merge_group` COVERAGE result — "is there a queue-build gap to close" —
+  # answered NO, plus a ⛔ against adding `merge_group` to the ADVISORY
+  # workflows. It says nothing about the `pull_request:` trigger's `branches:`
+  # filter, and its residual is explicitly named as two repository SETTINGS
+  # (a commit reaching main with no queue build; `strict_required_status_checks
+  # _policy: false`), "neither reachable from this file". Removing a base-branch
+  # filter from `pull_request:` changes no merge_group behaviour whatsoever:
+  # `merge_group:` is a separate trigger key, still present below, and
+  # `check:required-contexts` assertion 6 fails the build if it ever is not.
   pull_request:
-    branches:
-      - main
   # Merge queue (see ci.yml for the full note): required checks must report on
   # queue builds or the queue stalls. This workflow has no PR-only steps, so
   # the trigger alone is enough.
   merge_group:
+  # ── THE HOURLY FULL RUN (#16467), the half this file owns ────────────────
+  # The card's ruling is that the hourly run covers BOTH required-context
+  # files, not just ci.yml, and the reason is measured rather than symmetric:
+  # the push-on-`main` run of THIS workflow is the only post-merge full-battery
+  # run of the families `scripts/ci/select-gate-families.sh` scopes away on
+  # merge groups (the PM dispatch-gates self-test, both ratchets, the
+  # verify-lock self-test, the comment-mask corpus). A scoped family that goes
+  # red on `main` after a queue build skipped it had, until this trigger, no
+  # run that would notice and no filer that would say so.
+  #
+  # The selector already treats every event that is neither `merge_group` nor
+  # `pull_request` as "run every family", so this trigger alone restores the
+  # full battery here — no step in this file changes.
+  #
+  # ⛔ A NEW TRIGGER KEY, not a widening of `push:`; see ci.yml's `on:` block.
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 # ── MEASURED 2026-08-25 (#12211) — a NEGATIVE result, recorded so it is not
 # re-measured. After the stale-ledger outage the queue's check set was measured
@@ -54,8 +86,14 @@ on:
 # Same policy as ci.yml: superseded runs on the same PR/branch waste runners
 # and delay feedback; cancel them. Push runs to main group by commit ref, so an
 # in-flight main run is cancelled only by a newer main push.
+#
+# ⭐ `github.event_name` is in the key for the reason ci.yml's concurrency block
+# states in full (#16467): on a `schedule` event the remaining two segments are
+# byte-identical to a push to `main`, so without it the next merge cancels the
+# hourly full run. `scripts/ci/scheduled-full-run.mjs --check-concurrency`
+# evaluates THIS expression too and reds if the two groups ever collapse again.
 concurrency:
-  group: lint-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: lint-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -174,6 +212,45 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # ── Gate-family selection (#16496) ───────────────────────────────────
+      # After #16453 this job is the merge queue's critical path (median 1468 s
+      # over the ten merge-group runs measured for #16496; the PM dispatch-gates
+      # self-test alone 597 s), and none of its expensive steps read a
+      # merge group's file surface: a docs-only group paid the full battery.
+      # So on `merge_group` and `pull_request` the FIVE scoped families below
+      # -- each step carrying `if: steps.gate-families.outputs.<id> != 'skip'`
+      # -- run only when the changed paths touch the files that family reads.
+      # `push` on main and the scheduled full run keep the whole battery: the
+      # script runs everything for any event it does not scope.
+      #
+      # ⭐ The invariant is FAIL-OPEN, and it holds at both layers. The script
+      # runs every family when the base cannot be resolved, the diff fails or
+      # is empty, a path is one it does not classify (a new top-level
+      # directory, an unlisted root file), or any change is a deletion, rename
+      # or type change; a family is skipped ONLY when every changed path is
+      # positively classified into a class that family provably never reads.
+      # The `!= 'skip'` spelling means an ABSENT output -- the selector never
+      # ran, or wrote nothing -- also runs the step. Both halves are pinned by
+      # `scripts/ci/select-gate-families.selftest.sh` (`check:select-gate-
+      # families`, further down this job), which also reads THIS file and
+      # refuses any other `if:` spelling and any family the script does not
+      # decide. The per-family read-sets, and how each was measured, are in
+      # the script's header.
+      #
+      # The selection itself lives in scripts/ci/select-gate-families.sh:
+      # environment in, `$RUNNER_TEMP/gate-families.txt` + `$GITHUB_OUTPUT`
+      # out, and a ran/skipped table in the job summary (the seat reads it).
+      # This step only exports the event's fields, so the same script -- every
+      # branch of it -- runs locally and under its self-test.
+      - name: Select the gate families this run pays for
+        id: gate-families
+        env:
+          OS_GATE_EVENT_NAME: ${{ github.event_name }}
+          OS_GATE_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          OS_GATE_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          bash scripts/ci/select-gate-families.sh
+
       # #7484 docs anchors: `lychee.toml` sets `include_fragments = "none"`, so
       # the `Check Documentation Links` job resolves a link's FILE and never its
       # `#anchor` — measured with the pinned lychee 0.24.2 under the CI argv, a
@@ -251,7 +328,12 @@ jobs:
       # file is ignored COMPLETELY, so new erasures added to one ride the old
       # entry in silence. This re-measures those files with the grandfathering
       # lifted and holds them to a per-file count, so the list can only shrink.
+      #
+      # Scoped (#16496): reads `packages/**/*.{ts,tsx,mts,cts}`, its baseline,
+      # `eslint.config.mjs` and the top-level `scripts/*.mjs` it imports; a
+      # group touching none of those skips it (selection step above).
       - name: Slot-lookup ratchet
+        if: steps.gate-families.outputs.slot_lookup != 'skip'
         run: pnpm check:slot-lookup
 
       # Engine query-options erasure ratchet (#4918). The slot-lookup rule above
@@ -269,7 +351,11 @@ jobs:
       # slot-lookup for the non-test residual, plus one aggregate decrease-only
       # number for test code (a test whose subject IS off-contract engine input
       # must be able to build it). Runs its own --self-test first.
+      #
+      # Scoped (#16496): the same population and inputs as the slot-lookup
+      # ratchet above, with `scripts/query-options-erasure-baseline.json`.
       - name: Engine query-options erasure ratchet
+        if: steps.gate-families.outputs.query_options_erasure != 'skip'
         run: pnpm check:query-options-erasure
 
       # @objectstack/verify stand-in erasure guard (#6399). The third and
@@ -620,7 +706,13 @@ jobs:
       # Cost, measured on a contended 4-vCPU container: 4,741 files, 72 MB of
       # source, 45–48 s, of which the parser is 45 s. The step prints CI's own
       # number on every run.
+      #
+      # Scoped (#16496): the walk reads every `.ts .tsx .mts .cts .js .mjs
+      # .cjs .jsx` file in the tree, so a group that changes no file of those
+      # extensions (and no root configuration) skips it -- selection step at
+      # the top of this job.
       - name: Comment mask agrees with a real parser over the whole corpus
+        if: steps.gate-families.outputs.comment_mask_corpus != 'skip'
         run: node scripts/check-comment-mask-corpus.mjs
 
       # Stack-collection enumerations vs the schema (#6242). `stack.zod.ts`
@@ -745,9 +837,28 @@ jobs:
       # green and surfaced later as a prompt naming the wrong gate families —
       # output that reads as correct, produced by the one tool whose purpose is
       # to stop gate lists being memory-shaped. Same family as the
-      # `Changeset-family gate self-tests` step above, and like that one this
-      # step is deliberately UNCONDITIONAL: no `if:`, no label read, no paths
-      # filter. An exemption is what a self-test must not have, or the gap moves.
+      # `Changeset-family gate self-tests` step above. Until #16496 this step
+      # was deliberately UNCONDITIONAL -- no `if:`, no label read, no paths
+      # filter -- on the argument that an exemption is what a self-test must
+      # not have, or the gap moves. That argument was about an exemption a
+      # PATH FILTER or a LABEL would grant: a paths: trigger or a label read
+      # skips the step on a card that never touched the paths someone once
+      # listed, with no reader of what the test actually reads. What runs
+      # here now is different in kind and was the maintainer's call (#16496,
+      # 「同意你的建议，你负责执行派发所有可行的优化」): the selection step at
+      # the top of this job classifies every changed path against this
+      # self-test's MEASURED read-set (every workflow, every gate source under
+      # `scripts/**` and `packages/*/scripts/**`, every `package.json`,
+      # `.claude/**`, `skills/**`, `AGENTS.md`, `CLAUDE.md`, `tsconfig.json`,
+      # every `.gitignore` -- nested ones included -- the CONTENT of every
+      # JS/TS file in the tree (the compound-anchor census of
+      # `function ...SelfTest...(` declarations and the exposed-scratch-dir
+      # sweep of every mkdtempSync/mkdirSync caller both assert over it), and
+      # the tracked NAME set it sweeps -- so any added, deleted or renamed
+      # file runs it too), and skips this step only when every path is one
+      # the test provably never reads: a modified doc, changeset or non-source
+      # workspace file. Every doubt runs it, the self-test of the selector
+      # pins that, and `push` on main keeps it unconditional.
       #
       # The gate runs the SELF-TEST only. The live derivation
       # (`node scripts/pm/dispatch-gates.mjs <path>`) answers a question about a
@@ -775,13 +886,17 @@ jobs:
       # counts stand here either, for the same reason — they rot the same way,
       # and it is the SHAPE of the work, not its size, that the argument needs.
       #
-      # ⛔ Cost was never what makes this step unconditional. The FIRST
-      # paragraph above is, and it stands without this half: an exemption is
-      # what a self-test must not have, or the gap moves. Losing the estimate is
-      # therefore NOT an argument for an `if:`, a label read or a paths filter —
-      # weakening this gate is a maintainer call, and no reading of this note
-      # authorises one.
+      # ⛔ Cost was never what decided this step's conditionality, and the
+      # measured medians that motivated #16496 (597 s here, over ten
+      # merge-group runs) live in that card and its PR, not in this note.
+      # Losing the estimate is NOT an argument for a label read or a paths
+      # filter, and the read-set-scoped `if:` below is not one of those: it
+      # was a maintainer call (the first paragraph names it), and widening the
+      # skip -- any change to the classes the selector treats as inert for
+      # this family -- is again a maintainer call, taken in
+      # scripts/ci/select-gate-families.sh under its self-test.
       - name: PM dispatch-gates self-test
+        if: steps.gate-families.outputs.pm_dispatch_gates != 'skip'
         run: pnpm check:pm-dispatch-gates
 
       # Every ROOT_DIR_WATCH_HINTS declaration stays READABLE BY A TEXT SCANNER
@@ -974,6 +1089,19 @@ jobs:
       # and H31 cannot come to disagree about which PR delivers which card.
       - name: Clause-② carrier checker self-test
         run: pnpm check:pm-clause2-carriers
+
+      # Widening-tell gate self-test (#16448) — the mechanical half of the
+      # directional clause-② ruling (#16349), and the same split as every step
+      # around it: the LIVE predicate is `--pair`'s C5 row, a verdict about ONE
+      # pair's diff, so failing an unrelated PR's CI over it would punish the
+      # wrong actor. Only the offline self-test runs here.
+      #
+      # This gate has no whole-tree production run at all — its input is a DIFF
+      # supplied by its caller, never a file in the tree — so the `--self-test`
+      # invocation is the only instrument its matching rules have, which is
+      # exactly the family `check:self-test-wired` requires this step for.
+      - name: Widening-tell gate self-test
+        run: pnpm check:pm-widening-tells
 
       # Governed-merges audit self-test (#9495) — same family, same split as
       # the half-state sweeper above: the live sweep enumerates the governed
@@ -1305,9 +1433,21 @@ jobs:
       #
       # It runs entirely on a private lock under a temp dir; it never touches
       # /tmp/os-heavy-verify.lock, so a runner and an agent container behave the
-      # same. Unconditional and un-`if:`-ed, like the self-tests above — an
-      # exemption is what a self-test must not have. No network, ~40 s.
+      # same. No network; median 100 s over the ten merge-group runs measured
+      # for #16496.
+      #
+      # Scoped (#16496): the suite reads the script itself (`$SELF`) and a
+      # private temp dir, and its case (h) runs the real entry point from the
+      # repo root, which routes through filter_preflight ->
+      # scripts/pnpm-filter-targets.mjs --preflight and so reads the top-level
+      # scripts/*.mjs helpers that imports, pnpm-workspace.yaml and every
+      # workspace package.json. A group touching none of those skips it. That
+      # is not the exemption the self-tests above refuse (a label or a paths
+      # filter with no reader behind it): the selection step at the top of
+      # this job runs this step on every doubt, and `push` on main keeps it
+      # unconditional.
       - name: Verify-lock entry-point self-test
+        if: steps.gate-families.outputs.verify_lock != 'skip'
         run: bash scripts/pm/os-verify-lock.sh --self-test
 
       # ci-failure self-test (#9898). Fifth member of the PM self-test family
@@ -2033,6 +2173,25 @@ jobs:
       - name: Template version-time rewriter self-test
         run: pnpm check:template-version-sync
 
+      # #16485 — the BUILD-time generator beside the version-time one above, and
+      # the only one of the two whose --check leg runs on a real corpus here.
+      # `create-objectstack` cannot import @objectstack/cli (the dependency edge
+      # runs the other way, and the npx package must not pull the CLI's closure),
+      # so its bundled template RESTATED the scaffold emission policy and the
+      # restatement decayed: `typescript` reached `^6.0.0` there while `os init`
+      # and `os create` emitted `^5.3.0` from the shared constants, so two
+      # projects created the same day got different TypeScript majors depending
+      # on which documented entry point the reader followed. The values are now
+      # generated into the template from `packages/cli/src/commands/init.ts`, and
+      # this is the leg that reddens on drift — a hand edit into agreement would
+      # have satisfied the acceptance box and diverged again on the next move.
+      # Both legs run: --self-test covers the red paths a green corpus cannot
+      # reach (a renamed policy constant, a template omitting a stamped key, an
+      # unparseable template, an empty templates directory), --check covers the
+      # live tree.
+      - name: Scaffold emission policy generated into the on-ramp
+        run: pnpm check:scaffold-emission-policy
+
       # #15332 — the THIRD version-time rewriter, and the third self-test beside
       # the two above. scripts/sync-release-index-currency.mjs joins the root
       # `version` chain and stamps the release index's "current series: X.Y.Z,
@@ -2615,6 +2774,24 @@ jobs:
       - name: Auth mount-vs-ledger guard
         run: pnpm check:auth-mount-ledger
 
+      # Vendor export contract (#16186). `@better-auth/core@1.7.3` deleted
+      # `createLocalAccountIssuer` in a PATCH; plugin-auth imports it statically
+      # through a caret range, so published 17.1.0-17.3.0 could not load at all
+      # on a fresh install -- while every job here stayed green, because
+      # pnpm-lock.yaml held 1.7.2. The lockfile protected the producer from the
+      # defect it was shipping. This gate asserts that a governed vendor's
+      # DECLARED range is exact, that the installed version IS that version, and
+      # that importing it really yields every symbol our shipped source takes
+      # from it -- so "what CI imported" and "what a consumer resolves" are the
+      # same string. Cheap and offline: it imports what `pnpm install` already
+      # put on disk. The network half (`--resolve`, which enumerates every
+      # registry version the range admits) runs in validate-deps.yml, which
+      # already installs from the registry. No `paths:` filter: a manifest edit,
+      # a lockfile refresh and a new vendor import can each move it. Runs its
+      # own --self-test first.
+      - name: Vendor export contract
+        run: pnpm check:vendor-export-contract
+
       # Optional-`error` sink contract (#9754, wired by #10608). A sink TYPE that
       # declares `error` as OPTIONAL must also declare `warn` as NON-optional, so
       # every value of that type has somewhere to put a durability report —
@@ -2851,6 +3028,19 @@ jobs:
       # pr-automation.yml). ~0.8s + ~5.0s.
       - name: Changeset-family gate self-tests
         run: pnpm check:changeset-gate-self-tests
+
+      # Lockstep package-count guard (#17039). `.changeset/config.json`'s
+      # `fixed` array is the one true count of packages one stray `major`
+      # promotes; check-changeset-fixed.mjs (release/RC workflows) already
+      # gates that array against the real workspace. Nothing gated the THREE
+      # prose restatements of the array's length — two sentences in
+      # content/docs/protocol/backward-compatibility.mdx and one header
+      # comment in scripts/publish-smoke-pack.mjs — so all three drifted
+      # silently (69 written, 70 true) the day a package joined the group.
+      # Full-repo state, not diff-shaped, so — unlike the self-tests above —
+      # this runs its real check every time, unconditionally.
+      - name: Lockstep package-count guard
+        run: pnpm check:lockstep-package-count
 
       # Release-notes drift guard: the platform is one version-locked train, so
       # every released @objectstack/spec major must have a curated, navigable
@@ -3249,6 +3439,50 @@ jobs:
       - name: Test Core package selection self-test
         run: pnpm check:select-shard-packages
 
+      # The hourly full run's own contract (#16467). Two halves, one script:
+      #
+      #   --self-test        the card's IDENTITY, DE-DUP and BODY, driven
+      #                      offline. The filer is a `workflow_run` workflow, so
+      #                      it can only ever run from the default branch and
+      #                      NOTHING on a pull request can exercise it — the
+      #                      same position merge-queue-triage.yml is in. A
+      #                      de-dup rule tested only by the live workflow gets
+      #                      its first real test on the night it files its
+      #                      second duplicate, and this one fires hourly.
+      #   --check-concurrency
+      #                      evaluates ci.yml's and THIS file's
+      #                      `concurrency.group` expressions against a
+      #                      push-shaped and a schedule-shaped context and reds
+      #                      when the two collapse onto one group. They did
+      #                      until #16467: on a `schedule` event the other two
+      #                      segments are byte-identical to a push to `main`, so
+      #                      `cancel-in-progress` let the next merge kill the
+      #                      hourly run. It also refuses the two degenerate ways
+      #                      to make them differ — a run-unique key, and a
+      #                      constant one — since both switch cancellation off
+      #                      or on for every event in the file.
+      #
+      # Offline, no network, ~0.1 s.
+      - name: Hourly full run self-test and concurrency gate
+        run: |
+          node scripts/ci/scheduled-full-run.mjs --self-test
+          node scripts/ci/scheduled-full-run.mjs --check-concurrency
+
+      # Gate-family selection self-test (#16496). The "Select the gate families
+      # this run pays for" step at the top of this job is a thin call into
+      # scripts/ci/select-gate-families.sh, and its `merge_group` branch cannot
+      # run before a PR is already in the queue, so it is proved here: every
+      # event, the card's four cases (a scripts/pm change, a docs-only group, a
+      # workflow change, an unknown path), and every fail-open branch (empty
+      # diff, unresolvable base, deletion / rename, unspellable path), pinning
+      # which families ran and skipped, for which reason, and which
+      # `::warning::` lines fired. It also reads THIS file and pins the YAML
+      # half: the selector step's id and env, the `!= 'skip'` spelling on every
+      # scoped step, and that the scoped set equals the decided set. Offline;
+      # ~3 s.
+      - name: Gate-family selection self-test
+        run: pnpm check:select-gate-families
+
       # Aggregator roster gate (#10490). Three required contexts are aggregate
       # jobs standing in for a set of real jobs — `Test Core` and `Dogfood
       # Regression Gate` in ci.yml, `TypeScript Type Check` in this file — and
@@ -3623,13 +3857,16 @@ jobs:
       # whole population rather than a rule about moves: one of the three commits
       # involved moved nothing at all — it edited `repository.url` in the same
       # JSON object with the stale `directory` line as visible hunk context, and
-      # it shipped. Humans looked and missed it twice. ⛔ It judges only manifests
-      # that DECLARE the field; whether declaring is mandatory for a publishable
-      # package is an open policy question and a maintainer's to answer, so
-      # silence is counted and never a finding. Runs its own --self-test first:
-      # this population is `git ls-files` plus a field predicate, so a changed
-      # glob or a renamed field empties it silently and the production run would
-      # print exactly what a clean tree prints. Static read of tracked manifests;
+      # it shipped. Humans looked and missed it twice. Declaration is MANDATORY
+      # for a publishable (non-private) manifest — ruled, and the 14 that
+      # declared nothing were backfilled in the same change; a private manifest
+      # publishes nothing, so its silence is exempt while a wrong value in it is
+      # still judged. Runs its own --self-test first: this population is
+      # `git ls-files` plus TWO field predicates, so a changed glob, a renamed
+      # `repository.directory` or a `name`/`private` that stops reading as
+      # publishable each empty it silently and the production run would print
+      # exactly what a clean tree prints — hence pinned floors on all four counts
+      # and a control pair on each predicate. Static read of tracked manifests;
       # no build, no network, sub-second.
       - name: Manifest repository.directory guard
         run: pnpm check:manifest-repository-directory
@@ -4228,6 +4465,29 @@ jobs:
       # Reads source files only; no build, sub-second.
       - name: Check every driver runs the shared conformance cases
         run: pnpm check:driver-conformance
+
+      # Object-definition parameter keys (#16711). `SqlDriver` takes object
+      # definitions as inline object-literal parameter types and reads keys off
+      # them that the literal does not list, through `(obj as any).<key>`. Three
+      # single-key cards fixed one key each (#4311 `tenancy`, #16570 `indexes`,
+      # #16711 `lifecycle`) before anyone called it a class. The escape is
+      # silent: TypeScript's excess-property check fires on a FRESH object
+      # literal and not on one bound to a variable first, so an author who hits
+      # the refusal drops the key — an unsynced UNIQUE, an unarmed ADR-0057
+      # rotation policy — and nothing says so.
+      #
+      # ⛔ NOT scoped to sql-driver.ts, which is the whole ruling: `TursoDriver`
+      # OVERRIDES `initObjects` in a separately published package, so #4311's
+      # fix was invisible from outside `@objectstack/driver-sql` for five weeks
+      # and #16570's would have escaped identically. The gate compares every
+      # subclass override's declared keys against the base's, across packages,
+      # and refuses the two edits that would make that vacuous (an index
+      # signature, an opaque replacement type). AST-based, because the signature
+      # this class hides behind wraps across lines and a single-line grep for it
+      # returns a silence that reads exactly like a negative.
+      # Reads source files only; no build, ~2s.
+      - name: Check object-definition parameters declare the keys they are read for
+        run: pnpm check:object-def-param-keys
 
       # Stall-guard self-test (#4250). scripts/run-with-stall-guard.mjs is what
       # turns a frozen Test Core into a labeled red; six jobs across five

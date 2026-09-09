@@ -272,6 +272,16 @@ describe('[#15587] sign-up for an address that already exists is refused, not fa
     await seedPopulation(engine);
     const manager = makeManager(engine, EMAIL_DOMAIN_POSTURE);
     const before = await readAll(engine, 'sys_user');
+    // ⛔ Build the auth instance BEFORE arming the recorder. `handleRequest`
+    // builds it lazily on the first call, and that build is boot work, not
+    // sign-up work — it seeds the MCP `sys_oauth_resource` row (RFC 8707).
+    // Recording from before the build would attribute a boot-time write to
+    // this sign-up; the assertion below is meant to be total, so the window
+    // has to start where the sign-up does.
+    // `getAuthInstance()` now settles better-auth's plugin `init` hooks before
+    // it resolves, so this drains the boot writes (the RFC 8707
+    // `sys_oauth_resource` seed among them) outside the window.
+    await manager.getAuthInstance();
     const inserts = instrumentInserts(engine);
 
     const res = await signUp(manager, EXISTING);

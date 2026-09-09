@@ -1,5 +1,102 @@
 # create-objectstack
 
+## 17.4.0
+
+### Minor Changes
+
+- 4998efa: Scaffolded projects now ship a CI workflow, and a `lint` script for it to run.
+  The blank template carries `.github/workflows/ci.yml` — one job, on `push` and
+  `pull_request`: checkout, pnpm, Node 22, `pnpm install --frozen-lockfile`, then
+  `pnpm validate`, `pnpm lint` and `pnpm typecheck`.
+  
+  `lint` is new to the template (`objectstack lint`). It is not a second spelling
+  of `validate`: the two share the authoring-rule engine but only `lint` runs the
+  hook-body lowering check, which catches handlers that have silently stopped
+  lowering to metadata-only bodies — a change of deployment shape produced by a
+  refactor that looks like tidying.
+  
+  The scaffolder already created `.github/` at runtime for a single file
+  (`copilot-instructions.md`) while the template's gates shipped as npm scripts
+  nothing ever ran, so a fresh project started with no CI at all — and ObjectStack
+  metadata mistakes fail silently at runtime, which makes `objectstack validate`
+  the only place they surface early. That gate is now unskippable for a human and
+  for an AI agent authoring metadata in the project, instead of advisory.
+  
+  Existing projects are unaffected; copy the file from a fresh scaffold to adopt
+  it.
+- 813d6c5: `npx create-objectstack` now declares the same TypeScript range as `os init` and
+  `os create`, and the value is generated rather than restated.
+  
+  Three scaffolders write a new project's `package.json`, and the range that
+  decides whether that project type-checks at all had split: `os init` and
+  `os create` emitted `typescript: ^5.3.0` from a shared emission policy, while
+  this package's bundled template carried `^6.0.0`. Two projects created the same
+  day got different TypeScript **majors** depending on which documented entry
+  point the reader followed.
+  
+  - **What changed for a scaffolded project.** Its declared `typescript`
+    devDependency floor moves from `^6.0.0` to `^5.3.0`. Both resolve to the same
+    installed compiler on a fresh install; what moves is the floor the project
+    **declares**, and a floor is a support promise. `^5.3.0` is the promise the
+    docs already make — "ObjectStack works with TypeScript 5.3+" on the getting
+    started page, "TypeScript 5.3.0 or later" in the deployment troubleshooting
+    page — and it is measured rather than assumed: TypeScript 5.3.3 type-checks
+    every shape these scaffolders emit with results identical to 6.0.3. The repo's
+    own `typescript@^6.0.3` devDependency is deliberately not this value; the same
+    doc sentence states both halves ("…but the project itself is built and tested
+    against TypeScript 6.x"). `engines.pnpm` was already in agreement and is now
+    held there by the same mechanism.
+  - **Why the value is generated.** This package cannot import from
+    `@objectstack/cli`: the dependency edge runs the other way, and the `npx`
+    package must not pull the CLI's package closure. So the values are stamped
+    into the bundled template at build time by
+    `scripts/sync-scaffold-emission-policy.mjs`, read out of the same
+    `SCAFFOLD_*` constants the other two scaffolders import, and
+    `pnpm check:scaffold-emission-policy` reddens the moment the inlined values
+    disagree with that source. Editing the two into agreement by hand would have
+    left them free to diverge again on the next move, silently, for the same
+    structural reason — which is how they diverged the first time.
+- fd75728: Scaffolded projects now install the AI skills bundle for **one** agent runtime
+  instead of every runtime the skills CLI knows, so the bundle is committed once.
+  
+  **Route B of the two the card offered was taken**, and the choice was measured
+  rather than argued. Against `skills@1.5.23` and the 11-skill catalog, the old
+  `--all` (shorthand for `--skill '*' --agent '*' -y`) wrote the same bundle to
+  three destinations — `.agents/` (46 real files, 604,102 B), `agent/` (46 real
+  files, 602,682 B, identical bodies with re-serialised frontmatter) and
+  `.claude/` (11 symlinks into `.agents/`). The template's `.gitignore` excluded
+  none of it, so a new project's first `git add -A` staged 22 `SKILL.md` paths
+  plus 11 symlinks. That reached the initial commit of a real app before anyone
+  noticed.
+  
+  The scaffolder now runs
+  `npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y`,
+  which writes 46 real files to `.claude/skills/` and nothing else: 11 staged
+  `SKILL.md` paths, no symlinks, and a clone of that commit has readable skill
+  files on every platform.
+  
+  Route A (keep `--all`, exclude the duplicates in the template `_gitignore`) was
+  built and cloned, not reasoned about, and both of its shapes were rejected.
+  Ignoring `.agents/` and `agent/` while committing `.claude/` gives a fresh
+  cloner 11 dangling symlinks and zero readable `SKILL.md`. Ignoring only
+  `agent/` works on POSIX but commits 11 symlinks that a `core.symlinks=false`
+  clone — git-for-Windows' default — materialises as ordinary files whose whole
+  content is the link target. `--all --copy`, the other way to make `.claude/`
+  real, fans out to 56 destination directories totalling 33.8 MB. A denylist is
+  also the wrong shape regardless of which paths it names: this package does not
+  choose the destination set, the skills CLI does, and it moves with that
+  package's releases.
+  
+  The cost is the multi-runtime default, and it is paid in the open: the closing
+  summary now always prints an **AI Skills** block naming where the bundle landed
+  and the one-line command for any other runtime, one agent at a time. The
+  bundle is identical whichever agent is named.
+  
+  Existing projects are unaffected. To shrink one that already carries the
+  triplicate, delete `.agents/` and `agent/` and re-run the single-agent command
+  above; `skills-lock.json` records source and hash, not paths, so it does not
+  change.
+
 ## 17.3.0
 
 ### Minor Changes

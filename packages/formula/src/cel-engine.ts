@@ -181,6 +181,48 @@ let recordScopeEnv: Environment | undefined;
  * on arithmetic/comparison overloads — and it must NOT be applied to flow /
  * automation conditions, where the record's fields ARE flattened to top-level
  * and bare references are correct.
+ *
+ * ## The false-NEGATIVE side of that narrowing (#16412)
+ *
+ * The paragraph above states which error this helper cannot make. It does not
+ * state that it makes neither, and it does not: cel-js's checker hands back
+ * exactly ONE error, so when the FIRST one is of another class every undeclared
+ * reference behind it in the same source goes unjudged and the answer is
+ * `null` -- the same value that means "every reference is rooted". A `null`
+ * here is "nothing was reported", never "the source is clean", and a caller
+ * that needs the stronger reading does not get it from this helper.
+ *
+ * The masking is POSITIONAL, not name-keyed: the masked name is not the one
+ * that triggered the first error, so excluding the trigger's own name does not
+ * reach it. Measured on this env:
+ *
+ *     data == 'x' && status == 'q'   -> null       first error `no such
+ *                                                  overload: map<dyn, dyn> ==
+ *                                                  string`; `status` unjudged
+ *     status == 'q' && data == 'x'   -> "status"   first error `Unknown
+ *                                                  variable: status`
+ *
+ * ⚠️ {@link celEngine.compile} is not a gate against this, so a caller that
+ * only reaches here on a clean compile is not protected by that gate. `compile`
+ * type-checks in the PERMISSIVE env ({@link CEL_ENV_OPTIONS},
+ * `unlistedVariablesAreDyn: true`), and the two error classes that reach the
+ * first slot from ordinary authored input fault only HERE:
+ *
+ *  - a {@link SCOPE_ROOTS} member -- or an object field sharing one of those
+ *    names (`data`, `config`, `result`, `item`, `event`, `input`, `user`, …) --
+ *    as the operand of an operator with no `map` overload, because this env
+ *    declares those roots `map` while the permissive one leaves them `dyn`;
+ *  - a CEL TYPE name (`type`, `string`, `int`, …) in the same position, already
+ *    pinned as a blind spot by `@objectstack/lint`'s `visibility-bare-identifier`
+ *    suite -- pinned there per NAME, while the masking it causes is source-wide.
+ *
+ * ⛔ Do not close this by widening the regex onto the overload message: that
+ * false positive is precisely what the narrowing buys off (`type(record.x) ==
+ * string` is legitimate CEL). Reporting past the first error needs a re-check
+ * loop over a neutralised source, or a checker entry that returns more than one
+ * error -- cel-js 8.0.0 has none, its `TypeCheckResult` carries a single
+ * `error` -- and either one changes what every consuming rule reports. That is
+ * a design decision, not a patch.
  */
 export function firstUndeclaredReference(
   source: string,

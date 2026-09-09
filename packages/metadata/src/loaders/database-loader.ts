@@ -37,14 +37,23 @@ import { migrateProjectIdToEnvironmentId } from '../migrations/migrate-project-i
  * `MetadataStats.mtime` is declared as.
  *
  * [#13997] `sys_metadata`'s `created_at` / `updated_at` are BUILTIN audit
- * columns, so no declared-field coercion reaches them and
- * `SqlDriver#formatOutput` repairs them only inside its `if (this.isSqlite)`
- * arm. On Postgres and MySQL they arrive out of the record read door as a JS
- * `Date` — pinned in
- * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`.
+ * columns, so no declared-field coercion reaches them; `SqlDriver#formatOutput`
+ * repairs them through its own `AUDIT_TIMESTAMP_COLUMNS` pass, which used to
+ * sit inside `if (this.isSqlite)` and so handed Postgres and MySQL rows out of
+ * the record read door as a JS `Date`. #13973 ([ADR-0053 D-F1]) lifted that
+ * pass out of the gate — it now runs on EVERY dialect, and the pin that once
+ * recorded the asymmetry records the canonical-text contract instead
+ * (`packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`
+ * §B, inverted on purpose).
+ *
  * `MetadataStatsSchema.mtime` is `z.string().datetime()`
  * (`packages/spec/src/system/metadata-persistence.zod.ts`), so a `Date` here
- * is a silent violation of a declared contract.
+ * is a silent violation of a declared contract. This adapter stays because the
+ * `Date` domain did not close: `driver-sql` still hands an INVALID `Date`
+ * through unchanged ([ADR-0053 D-F3] — the one shape with no canonical text),
+ * and non-SQL drivers materialise their own `Date`s. Under [ADR-0053 D-F1]'s
+ * B1 ruling a producer-side arm like this became a NO-OP for the valid-`Date`
+ * case, ⛔ never a conflict with it.
  *
  * ⚠️ The call below looks redundant against `MetadataRecord`'s static type and
  * is not: `rowToRecord` reaches its `createdAt` / `updatedAt` through an
@@ -103,18 +112,29 @@ function canonicalIsoInstant(value: unknown): string | undefined {
  *
  * [#14037] `rowToRecord` and the two history adapters below each assert a
  * `string` over a driver row (`row.created_at as string | undefined`, and so
- * on). On Postgres and MySQL that assertion is false: `SqlDriver#formatOutput`
- * repairs the BUILTIN audit columns (`repairNaiveUtcAuditTimestamp`) and folds
- * declared `Field.datetime` columns (`normalizeSqliteDatetimeOutput`) only
- * inside its `if (this.isSqlite)` arm, and `withPostgresCalendarDayAsText`
- * leaves `timestamptz` / `timestamp` deliberately untouched. Both column
- * classes therefore arrive as a JS `Date` on the live dialects — pinned in
- * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`.
+ * on). On Postgres and MySQL that assertion USED to be false for both column
+ * classes: `SqlDriver#formatOutput` repaired the BUILTIN audit columns
+ * (`repairNaiveUtcAuditTimestamp`) and folded declared `Field.datetime` columns
+ * (`normalizeSqliteDatetimeOutput`) only inside its `if (this.isSqlite)` arm,
+ * so both arrived as a JS `Date` on the live dialects. #13973 ([ADR-0053 D-F1])
+ * lifted both passes out of that gate; they run on EVERY dialect now, and the
+ * pin that recorded the asymmetry records the canonical-text contract instead
+ * (`packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`
+ * §B, inverted on purpose).
+ *
+ * ⚠️ `withPostgresCalendarDayAsText` is UNCHANGED by that ruling and still
+ * leaves `timestamptz` / `timestamp` deliberately untouched ([ADR-0053 D-F2]):
+ * the client library still materialises those columns as a `Date`. What moved
+ * is where it is folded — at the driver's own read boundary, not at the parser
+ * — so what reaches this adapter is the canonical text.
+ *
  * `MetadataRecord.createdAt` / `.updatedAt` and
  * `MetadataHistoryRecord.recordedAt` are declared `z.string().datetime()`
  * (`packages/spec/src/system/metadata-persistence.zod.ts`) — a refinement a
  * `Date` fails outright. The cast is an assertion about a driver row, never a
- * measurement of one, which is why tsc reports nothing.
+ * measurement of one, which is why tsc reports nothing — and the `Date` domain
+ * did not close: `driver-sql` hands an INVALID `Date` through unchanged
+ * ([ADR-0053 D-F3]) and non-SQL drivers materialise their own.
  *
  * ⚠️ Deliberately NOT {@link canonicalIsoInstant} above. That difference used
  * to be exactly one input shape — the Invalid `Date` on which that spelling
@@ -410,7 +430,16 @@ export class DatabaseLoader implements MetadataLoader {
       // nothing to compare against: a `data.id` spread over the id parameter
       // would retarget the write to a row no caller resolved. The separate
       // `id` parameter is the row address — do not let a payload outrank it.
-      return this.engine.update(table, { ...data, id });
+      // [#16231] `IDataEngine.update` now declares its dispatch union
+      // (`record | affected-count | null`). This call passes NO `where`, so
+      // the payload id is the only address the dispatch ladder sees and it
+      // resolves `by-id` — the limb that answers a record or `null`. The
+      // `number` limb is the predicate path (`driver.updateMany`'s affected
+      // count, #4639), which this call cannot reach; it is narrowed away here
+      // rather than cast, so a future dispatch change surfaces at THIS line
+      // instead of as a wrong-shaped row at the caller.
+      const updated = await this.engine.update(table, { ...data, id });
+      return typeof updated === 'number' ? null : updated;
     }
     return this.driver!.update(table, id, data);
   }

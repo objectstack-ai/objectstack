@@ -193,9 +193,25 @@ const ROOT_DIR_WATCH_HINTS = ['scripts/**/*.mjs', 'scripts/**/*.mts', 'scripts/*
  * Measured after this change over the live corpus: 186 named paths, ZERO of
  * which lack a file on disk (before: exactly one, the phantom above). The
  * `live corpus` battery holds both halves of that reading.
+ *
+ * ## The RIGHT boundary, and the phantom it mints without one (#16464)
+ *
+ * The extension alternation needs the same treatment the left edge got, for the
+ * same reason and with the same failure shape. `js` is a PREFIX of `json`, so
+ * without a right boundary a workflow line naming `scripts/test-shard-
+ * timings.json` -- a data file, not a script -- matched as far as
+ * `scripts/test-shard-timings.js` and minted exactly the phantom key the left
+ * boundary was added to abolish: a path with no file behind it, silent in both
+ * directions.
+ *
+ * It stayed invisible only because no workflow had yet named a `.json` under
+ * `scripts/`; the first one to do it (the shard-timings refresh) reddened the
+ * `live corpus` battery. `(?![\w-])` is the spelling already used on
+ * `--self-test` two groups along, so both boundaries on this pattern now read
+ * the same way: a match must end where the token ends.
  */
 const INVOCATION_RE =
-  /(?<![\w.\-/])(?:\.\/)*((?:[A-Za-z0-9_][A-Za-z0-9_.\-]*\/)*scripts\/[A-Za-z0-9_.\-/]+\.(?:mjs|mts|js|sh))(\s+--self-test(?![\w-]))?/g;
+  /(?<![\w.\-/])(?:\.\/)*((?:[A-Za-z0-9_][A-Za-z0-9_.\-]*\/)*scripts\/[A-Za-z0-9_.\-/]+\.(?:mjs|mts|js|sh))(?![\w-])(\s+--self-test(?![\w-]))?/g;
 
 /**
  * ⛔ SHRINK-ONLY. Scripts CI runs whose self-test IS run by CI, but not through
@@ -682,7 +698,7 @@ function main() {
 // a ledger that empties without the structural case noticing, still reds.
 const SELF_TEST_BATTERIES = Object.freeze({
   'comment mask': 7,
-  'right boundary': 4,
+  'right boundary': 8,
   'left boundary': 6,
   'alias resolution': 4,
   'population verdict': 4,
@@ -775,6 +791,30 @@ function selfTest() {
     ok(
       !got.selfTested.has('scripts/check-foo.mjs'),
       '`scripts/check-foo.mjs` was credited on the strength of its longer sibling (prefix match, not exact equality)',
+    );
+  }
+  // The EXTENSION's own right boundary (#16464). `js` is a prefix of `json`, so
+  // without one a workflow naming a DATA file under scripts/ mints a phantom key
+  // with no file behind it — the same defect the left boundary abolished,
+  // arriving from the other end. The control comes first, so a pattern that
+  // simply stopped matching anything cannot pass this pair.
+  {
+    const got = collectInvocations(wf('    - run: node scripts/g.js --self-test\n'), {});
+    ok(got.selfTested.has('scripts/g.js'), 'a real `.js` script stopped being seen — the boundary case below would test nothing');
+  }
+  {
+    const got = collectInvocations(wf('    - run: node scripts/m.mjs --out scripts/data.json\n'), {});
+    ok(
+      got.named.has('scripts/m.mjs'),
+      'the real script on the line was not seen — the boundary case would test nothing',
+    );
+    ok(
+      !got.named.has('scripts/data.js'),
+      '`scripts/data.json` was truncated to `scripts/data.js` and keyed as a script — a phantom path with no file behind it (no right boundary on the extension)',
+    );
+    ok(
+      !got.named.has('scripts/data.json'),
+      '`scripts/data.json` was keyed as a script; a data file is not in this population at all',
     );
   }
 

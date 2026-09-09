@@ -94,7 +94,10 @@ describe('REST /actions — identity is `name`, the handler key is derived (ADR-
         // `content/docs/ui/actions.mdx` teaches exactly this URL. Before D2 it
         // 404ed: the route used `complete_task` as the registry key, but the
         // handler lives under `completeTask`.
-        const { dispatcher, calls } = makeDispatcher();
+        // [#16370] `record` is seeded because the body names a `recordId`: the
+        // door refuses a row-scoped invocation whose subject load did not
+        // deliver, and this case is about ADDRESSING, not about the load.
+        const { dispatcher, calls } = makeDispatcher({ record: { id: 'task_1' } });
 
         const res = await dispatcher.handleActions(
             '/todo_task/complete_task', 'POST', { recordId: 'task_1' }, ctxFor(),
@@ -123,8 +126,11 @@ describe('REST /actions — identity is `name`, the handler key is derived (ADR-
 
     it('runs the gated action for a caller who holds the capability', async () => {
         const gated = { ...targetBoundAction, requiredPermissions: ['task.manage'] };
+        // [#16370] Same reason as above — the capability gate is this case's
+        // subject, and it must be reached with a deliverable subject row.
         const { dispatcher } = makeDispatcher({
             objectDef: { name: 'todo_task', actions: [gated] },
+            record: { id: 'task_1' },
         });
 
         const res = await dispatcher.handleActions(

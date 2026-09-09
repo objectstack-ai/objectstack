@@ -73,17 +73,58 @@
 // one that loses one is red until re-recorded, one that reaches zero is red
 // until its entry is deleted, a signature that ARRIVES or VANISHES is red even
 // at an unchanged file total, and a file NOT listed there may have no errors at
-// all. 24 of the 29 files carry no entry, so any error any of them gains is red
-// on arrival. This layer holds ZERO `@ts-expect-error` directives (grepped with
-// a positive control — the same grep hits `packages/spec/src`), so no pin here
-// was silently dead.
+// all. At 6a1e38244, 24 of the 29 files carried no entry, so any error any of
+// them gains is red on arrival. This layer holds ZERO `@ts-expect-error`
+// directives (grepped with a positive control — the same grep hits
+// `packages/spec/src`), so no pin here was silently dead.
+//
+// ⭐ REPAIRED (#16297) — the repair the paragraph above described as real and
+// deliberately deferred. `@types/node` is now a devDependency of this package
+// and this file names `"types": ["node"]`. It goes HERE and not in
+// `tsconfig.json` for the reason this header opens with: that file is the BUILD
+// config and stays exactly as it is. Measured, not assumed: `packages/formula/
+// dist` is byte-identical across the change (6 files, sha256 per file, built
+// before and after on the same tree), so nothing published moves and the test
+// program alone gains the typings its two fixture-loading tests already assumed.
+// Ledger effect, with NO test file edited: 15 -> 7 errors, 5 -> 3 files,
+// 12 -> 4 signatures. 26 of the 29 files now carry no entry.
+//
+// ⚠️ A COUNT CORRECTION that repair earned in its turn. #16297 is titled
+// "15 of its test-typecheck ledger errors have one cause". Measured here, the
+// node-typings cause is **8 of the 15** — precisely the TS2591 x6 + TS2339 x2
+// named in the paragraph above, confined to `src/rls-predicate.test.ts` and
+// `src/skill-catalog-sync.test.ts`. That paragraph always said 8; the card
+// generalised it to the file total. The 7 that SURVIVE are three unrelated
+// classes in three OTHER files — TS2739 x1 (`src/cel-to-filter.test.ts`),
+// TS2345 x3 (`src/matches-filter-temporal-conformance.test.ts`), TS2352 x3
+// (`src/normalize.test.ts`) — and none of them is this cause.
+//
+// ⚠️ `types` REPLACES rather than merges, exactly like the `paths` note above,
+// so naming `["node"]` also ENDS whatever automatic `@types/*` inclusion this
+// program had. Measured before naming it: the only package in the reachable
+// `node_modules/@types` is `node` itself, and the ledger reading above is the
+// proof that the replacement subtracted nothing.
+//
+// ⚠️ OF THE TWO LINES, THIS ONE IS THE LOAD-BEARING ONE, and the pair was
+// measured in both directions on a fully built closure rather than reasoned
+// about. `tsc -p tsconfig.test.json --types node` with NO package-local
+// devDependency at all already reports 7 — the entry alone does the whole job,
+// resolving `@types/node` from the root hoist. The complementary leg is the one
+// worth knowing: the devDependency WITHOUT this entry reports 15, unchanged,
+// so ⛔ adding `@types/node` to `package.json` on its own would have been a
+// no-op that looked like a repair. The devDependency earns its line by making
+// the dependency declared instead of borrowed, and it is the pairing
+// `packages/spec` (#5286), `packages/verify`, `packages/cli` and
+// `packages/drivers/driver-mongodb` all use.
+
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
     "module": "esnext",
     "moduleResolution": "bundler",
-    "lib": ["ES2022"]
+    "lib": ["ES2022"],
+    "types": ["node"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

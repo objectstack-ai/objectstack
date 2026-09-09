@@ -214,6 +214,8 @@ export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_metadata_audit.fields.lock_state.options.nooverlay": "49a44e4a03ff124c",
   "objects.sys_metadata_history.fields.id.label": "00b0385c9c152888",
   "objects.sys_metadata_history.fields.recorded_by.help": "e293bd6cf3c47060",
+  "objects.sys_migration.fields.columns_moved_at.help": "eaa31d8860c680ec",
+  "objects.sys_migration.fields.columns_moved_at.label": "9f0cfcef656a7ec8",
   "objects.sys_migration.fields.deviation_detail.help": "681fe28dc0c34386",
   "objects.sys_migration.fields.deviation_detail.label": "5bf0f0f59a89e2fb",
   "objects.sys_migration.fields.deviation_observed_at.help": "d6720808eb570acd",

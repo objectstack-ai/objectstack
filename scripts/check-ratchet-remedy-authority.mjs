@@ -1068,6 +1068,27 @@ const CONTROL = {
     expect: 'excluded',
     why: 'Describes a ratchet widening as a hazard to avoid, in a data field, rather than offering it. Reached only without the descriptive-modal guard.',
   },
+  // A gate that joins the convention as a NEW one rather than by retrofit
+  // (#15347) — the fourth to do so, after the seventh, eighth and ninth rows
+  // above. Same reading as those three: there IS a legitimate act here and it
+  // has an owner. The gate asserts SET
+  // EQUALITY between a lean entry's measured module closure and ADMITTED_PACKAGES,
+  // so it hands out two remedies with two different owners. Repairing the import
+  // that pulled the newcomer in is the landing author's, freely, and the message
+  // offers it first. Widening the admitted set is the other path and it is not a
+  // fact being recorded: every name in that set is weight each embedder of the
+  // published lean entry pays, so admitting one moves the ADR-0076 D2 boundary
+  // itself. `refused` would be untrue — a genuinely new dependency is a real act
+  // someone must be able to take — so the honest shape is to name the owner.
+  //
+  // ⚠️ Recorded from the sweep's own verdict (reported `marked`, anchor
+  // `shrink`), not from the author's intent. The two agreeing is the point of the
+  // corpus.
+  'check-lean-entry-closure.mjs': {
+    expect: 'marked',
+    why: 'PR for #15347. Its admitted-package set is shrink-only and the message says so in the same breath; repairing the import is offered first and belongs to the landing author, while admitting a package moves the ADR-0076 D2 boundary and is named with its owner rather than denied.',
+  },
+
   [SELF_FILE]: {
     expect: 'excluded',
     why: 'This gate. Its control is a declaration registry, so its own remedy is not an expanding one. If this flips, this file started talking like an offer.',

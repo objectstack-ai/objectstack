@@ -1,5 +1,508 @@
 # @objectstack/metadata-protocol
 
+## 17.4.0
+
+### Minor Changes
+
+- 2ed6be6: Advisory validation rules no longer flood the startup log, and no longer count a row twice on a clean first boot.
+  
+  A `severity: 'warning'` (or `'info'`) validation rule is advisory: it never blocks a write, and its message is written for a person filling in a form. Evaluated across a seed load it produced one `WARN` line per row, so a clean-database first boot opened with a wall of form hints re-cast as boot diagnostics — and an app could reach "zero warnings" only by bending its data or deleting the rule.
+  
+  Two changes, and neither moves what a rule evaluates to:
+  
+  - **Aggregated reporting on the seed/boot path.** `SeedLoaderService.load()` now runs inside an advisory aggregation scope, and reports one summary line per rule — the rule, the object, the row count, the rule's own message and example rows — instead of one line per row. Off that path (an ordinary interactive write) nothing changes: the same per-write line is emitted verbatim. The new scope is `runWithAdvisoryAggregation` / `recordAdvisoryHit` in `@objectstack/core`.
+  - **Advisory rules are counted by row, not by write.** An `update` whose payload touches only platform-injected system columns — the shape `claimSeedOwnership` writes when it hands seeded rows to the first admin, `{ owner_id }` — changes no business field, so it no longer re-evaluates the object's advisory rules. Previously a seeded row rang once on insert and again when the claim scan rewrote `owner_id`, so anyone counting startup warnings over-estimated by the number of claimed objects.
+  
+  `error`-severity rules are untouched by both changes: an invariant is still enforced on every write, whoever issued it and however little it moved. Membership of the "system column" set is resolved per object by `resolveInjectedSystemColumns`, so an object that declares `ownership: 'org'` (no `owner_id`) or `systemFields: false` is judged on its own columns rather than a fixed list.
+- 65846bc: fix(metadata-protocol)!: a batch ROW reports a unique-constraint refusal as `UNIQUE_VIOLATION` — the same wire spelling as the whole-request failure on the same route (#14723)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves: no spec key, export, config field or stored metadata changes spelling or shape, `packages/spec` is untouched and `objectstack migrate meta` has nothing to rewrite. What moves is the `code` value one REST response row carries for one condition — the wire report of a driver's unique-constraint refusal on the per-row surface of `POST /api/v1/data/:object/batch` — which now spells the standard-catalog member the whole-request doors and the published protocol docs already use. The consumer note below is guidance for a client branching on that row code; it prescribes no rewrite of any authored artifact. -->
+  
+  **BREAKING** on the per-row report of `POST /api/v1/data/:object/batch` (and
+  the multi-object `POST /api/v1/batch`, which rides the same protocol): a row
+  refused by the engine's `DuplicateRecordError` envelope now reports
+  `errors[].code: 'UNIQUE_VIOLATION'` where it reported `'DUPLICATE_RECORD'`.
+  Shipped as `minor` under the repo's launch-window convention for breaking
+  changes. Maintainer ruling 2026-09-03 on #14723 (verbatim 「同意，然后执行契约
+  复审」), adopting option A: one wire spelling for a unique-constraint refusal on
+  every route.
+  
+  **Why.** `toRowApiError` put a thrown REGISTERED code on the row verbatim, and
+  `DUPLICATE_RECORD` is registered, so a `DuplicateRecordError` row said
+  `DUPLICATE_RECORD` while the whole-request failure on the very same route (the
+  bulk door's classification in `@objectstack/rest`) answered `UNIQUE_VIOLATION`
+  — the standard-catalog member `content/docs/protocol/kernel/http-protocol.mdx`
+  documents for the 409 constraint-violation body. Since the bulk doors were
+  restored to `UNIQUE_VIOLATION`, the two spellings of one condition sat side by
+  side in one route's responses, which ADR-0112's one-name-per-concept and the
+  error-code ledger's own header both forbid. The duplication is removed, not
+  declared: no ledger waiver is added.
+  
+  **What changes.** The row derivation recognises the engine's envelope by the
+  same two-part gate the whole-request arm uses — the registered code AND the
+  class name `DuplicateRecordError`, never message text — and reports
+  `UNIQUE_VIOLATION`. Everything else on the row is unchanged: `httpStatus: 409`,
+  the platform sentence (no driver text, no bound value — the driver's error
+  stays on `cause` and never reaches the row), and the sibling `NOT_ATTEMPTED` /
+  `ROLLED_BACK` rows.
+  
+  **What does NOT change.** The engine's thrown identity: `DuplicateRecordError.code`
+  is still `DUPLICATE_RECORD` for an in-process caller of `engine.insert` /
+  `engine.update` (a hook, a flow node), and the objectql pins on `insert` /
+  `insertMany` hold. The single-record `/data` door, which has answered
+  `UNIQUE_VIOLATION` throughout, does not move. A producer that merely THROWS the
+  registered `DUPLICATE_RECORD` from its own body without being the engine's
+  class keeps its own code on the row, exactly as it does at the door.
+  
+  **Consumer note.** A batch client that branched on a row's `code` reading
+  `DUPLICATE_RECORD` reads `UNIQUE_VIOLATION` there now — the same value it
+  already handles for the whole-request 409 on that route and on the
+  single-record door. Measured in-repo and in the sibling repos (hotcrm, objectui,
+  non-test sources): zero consumers branch on either spelling of a row code.
+- e08892d: `cloneData` reports `droppedFields` like every other create face: `CloneDataResponseSchema` (`@objectstack/spec/api`) gains an optional `droppedFields` member of the same shape as `CreateDataResponseSchema`'s, and the `POST /data/:object/:id/clone` 201 body carries it whenever the engine stripped a static `readonly` column from the clone.
+  
+  A clone IS a create, and it is the one create shape that can carry a read-only column without the caller typing it: the source row is copied whole (`approval_status: 'approved'` included), `overrides` are applied on top, and the copy is inserted. Since the create-side strip moved into `engine.insert` that column has been stripped and logged at `warn` — but the 201 body said nothing, so a caller that cloned an approved record and read `record.approval_status: 'draft'` back had no field in the response telling it why, while `createData`, `createManyData`, `insertManyData` and every `batchData` row that created already answered on the wire. Maintainer ruling 2026-09-08 (option 1 on #15703): report it, the same way.
+  
+  - **`@objectstack/spec`** — `CloneDataResponseSchema.droppedFields`: `DroppedFieldsEvent[]`, optional, omit-when-empty — present ONLY when ≥1 field was dropped, and the clone still succeeded without them (status unchanged). The schema is declared AS PRODUCED, so the member and the producer land in one change. Additive: a client that reads only `object` / `id` / `sourceId` / `record` sees no difference.
+  - **`@objectstack/metadata-protocol`** — `cloneData` passes the engine the same `onFieldsDropped` listener `createData` wires and spreads the collected events onto its return as `droppedFields`. The strip itself is unchanged and still the engine's (`isSystem`-gated, `defaultValue` re-derived); what is new is that a copied-in or overridden readonly key is now named in the body instead of only in the server log.
+  - **`@objectstack/client`** — `CloneDataResult` (the declared mirror of `CloneDataResponseSchema`, the return type of `client.data.clone`) gains the same optional `droppedFields?: DroppedFieldsEvent[]`, so a TypeScript caller reads the member without a cast; its docblock no longer states that the clone producer emits no write-observability event.
+  
+  Body only, deliberately: the clone route relays the producer verbatim and sets no `X-ObjectStack-Dropped-Fields` header (the single-record `POST /data/:object` and `PATCH /data/:object/:id` mounts do); the schema's `.describe()` says so rather than promising a header the route does not send.
+- d2b6fa0: Stop persisting the caller's `_packageId` / `_packageVersion` / `_provenance`, and restate tenant authorship at hydration for every metadata type.
+  
+  Two seams let a tenant lock themselves out of their own metadata. `saveMetaItem` persisted those three keys verbatim — `metadata-read-decorations.ts` deliberately does not strip `_provenance` from a served document, so the ordinary Studio `GET /meta/app/x` → edit → `PUT /meta/app/x` round trip wrote `_provenance: 'package'` into the tenant's own `sys_metadata` row. For every non-`object` type, boot and read-side hydration then registered that stored body as-is, so `SchemaRegistry.getArtifactItem`'s bare-key fallback accepted the overlay as a code artifact, `isArtifactBacked` turned true, and every later write was refused `NOT_OVERRIDABLE` — permanently, because the next boot re-derived the same verdict from the same row. The refusal said the item is "provided by a code package" when no code package published it at all.
+  
+  Both halves are closed, because they cover different populations:
+  
+  - `saveMetaItem` now drops exactly those three keys from the body it persists, so future writes stop poisoning the corpus. The `_lock*` family is deliberately untouched — a lock is author-declarable and dropping one is the fail-open direction.
+  - `hydrateOverlayIntoRegistry` — the one choke point boot, read-side and write-through hydration already share — now states `_provenance: 'org'` on a copy before merging the artifact envelope, so rows already written become harmless without being rewritten. That also covers the column path: `getMetaItems` re-stamps `_packageId` onto the body from the row's `package_id` column, which the write-door strip cannot reach.
+  
+  The three keys are read-side derived — `mergeArtifactProtection` recomputes them from the artifact on every read — so nothing an author wrote is lost and no accepted key or value changes. Where a real artifact exists its envelope still wins over both the stored copy and the restatement: ADR-0010 §3.3 precedence is unchanged, and an item genuinely shipped by a code package is still refused `NOT_OVERRIDABLE`.
+  
+  One residual is deliberately left open: hydration corrects the AUTHORIZATION verdict, not the SERVED document. `getMetaItem` / `getMetaItems` return the overlay row's own body, and `mergeArtifactProtection` only fires where an artifact exists — so a row already poisoned at rest becomes editable again while `GET /meta/app/x` keeps serving `_provenance: 'package'` (and the UI keeps badging it as package-provided) until that row is re-saved through the write door or backfilled. The `objectstack-ai/cloud#2069` backfill stays load-bearing for that population; this change does not retire it.
+- 6491463: `/discovery` stops advertising a realtime service that has no mounted surface, and "what counts as a subscribable channel" becomes one explicit definition.
+  
+  **A client that keyed on `services.realtime.enabled: true` to subscribe was subscribing to nothing; it now sees `false`.** On a stock boot the document reported that entry as `enabled: true` *and*, in the same entry, "In-process event bus only — no HTTP/WS realtime surface is mounted", with no `routes.realtime`. Both statements were true, because `enabled` meant "the slot is filled" — which for an in-process pub/sub bus says nothing about whether anything is listening on the wire. A client reading it as "a channel exists" lost its subscription silently: no error, no failed request, no signal at all. The open framework does not mount a realtime transport (maintainer ruling, 2026-09-04), so discovery now says so.
+  
+  **The definition, written down once and computed once.** A subscribable channel exists only where discovery reports `handlerReady: true` together with a connectable `route`; `enabled` never means "there is a channel". That sentence is `isSubscribableChannel()` in `@objectstack/spec/api`, and both discovery producers — `HttpDispatcher.getDiscoveryInfo()` and `ObjectStackProtocolImplementation.getDiscovery()` — set `services.realtime.enabled` and `capabilities.websockets` to the value of that call, so the field a consumer reads and the predicate a consumer is told to use are one computation and cannot disagree. `capabilities.websockets` was previously a literal `false` in each producer; two constants that happen to agree are not agreement, they are two places to forget.
+  
+  **Nothing else changes meaning.** The predicate is applied per slot, to the slots whose advertised capability *is* a channel (`CHANNEL_SURFACE_SLOTS` — `realtime` alone). `cache`, `queue` and `job` deliver their whole contract in-process, so they stay honestly `enabled: true` with no route; `status`, `message` and every other slot's `enabled` are untouched, and `realtime` keeps `status: 'degraded'` plus its message so a consumer can still tell "registered but no wire" from "not installed".
+  
+  What to read instead, per case:
+  
+  - deciding whether to open a subscription → `handlerReady === true && typeof route === 'string'`, i.e. `isSubscribableChannel(discovery.services.realtime)`, or the equivalent `capabilities.websockets.enabled`; poll or degrade otherwise;
+  - asking whether the slot is occupied at all → `status` (`'unavailable'` = nothing registered; `'degraded'` = registered, reduced) — this is what `enabled` answered for `realtime` before.
+  
+  Testing note, recorded because it is a real limit rather than an implementation detail: the two producer pins drive a declared in-process-bus stand-in, not the shipped `InMemoryRealtimeAdapter` — `@objectstack/runtime` taking a source-level dependency on `@objectstack/service-realtime` for a test is refused by this repo's type-resolution ratchets. The claim about the shipped occupant is pinned against the real class in `@objectstack/service-realtime`'s own suite instead; a mutation giving that adapter a channel route reddens that pin and leaves the producer pins green, which is the division of labour stated at both sites.
+  
+  New in `@objectstack/spec`: `isSubscribableChannel()`, `readChannelRoute()`, `CHANNEL_SURFACE_SLOTS` (`@objectstack/spec/api`) and the optional `IRealtimeService.getChannelRoute()` — the producer half, by which an occupant that really serves a transport names the path a host mounted it at. Additive; no existing member changed shape. `@objectstack/service-realtime` deliberately does not implement it.
+- b4b37e5: The object publish door now refuses an object whose `searchableFields` entry, or whose built-in list view's `columns` (and every other field-naming position on that list view), names a field the object does not have.
+  
+  `#15254` closed this one key over: it crossed the reference-integrity suite onto the object write door for the object's own field-name **lists** (`highlightFields`, `publicSharing.redactFields`). The two members that read the *other* field surfaces an object carries — its ADR-0061 search set and its built-in `listViews` — still declared `runtimeTypes: ['flow', 'view']`, so on the only door a Studio, REST `/meta` or MCP author has they never judged the snapshot that arrived. An object could publish clean with `searchableFields: ['gone_field']` or a list-view column resolving to nothing, and both fail the same silent way downstream: the engine filters a stale search entry out without a word (`resolveSearchFields`), so `$search` scans a narrower set than declared — or, once every entry is stale, the auto-default set the author never chose — and a dangling column renders one field short.
+  
+  - **`validateSearchableFields` and `validateListViewFieldRefs` gain `object`** in their suite-member `runtimeTypes`. No new rule and no new finding class: the rule ids (`searchable-field-unknown`, `searchable-field-unsearchable`, `list-view-field-unknown`, `list-view-field-dotted`) and their severities are unchanged — they now reach the door where the author actually is.
+  - **The crossing carries the #9313 precondition.** Both members resolve only against `stack.objects`, the one collection every per-write snapshot carries, so neither opens a missing-collection false-positive channel; their `views[]` rungs simply find no `stack.views` on an object snapshot.
+  - **Measured before crossing**, at the door's own snapshot shape and differential, over every shipped object definition in the monorepo: 116 objects (platform-objects 48, showcase 24, plugins 19, services 12, crm 6, metadata-core 5, todo 1, qa 1), 105 built-in list views on 40 objects, 666 list-view field-naming positions and 5 `searchableFields` entries judged — **0 findings for both members, precision 1.0**, against synthetic probes that are refused.
+  - **`validateSortableFields`, the third sibling, is deliberately not crossed** — it measured equally clean, but that crossing is its own adjudication.
+  
+  ## Migration
+  
+  **A publish that used to succeed can now be refused (HTTP 422, `INVALID_METADATA`).** The receipt names the rule id and the offending path, name-keyed on the wire — for example `objects.proj_task.searchableFields[1]` or `objects.proj_task.listViews.all.columns[1]` — plus the string that was written and the fields the object actually has.
+  
+  To fix a refusal, do one of:
+  
+  - rewrite the entry to the field's current API name (after a Studio label edit the derived name is the one to use — `field_10` becomes `health_score`); or
+  - drop the entry from the declaration; or, for `searchable-field-unsearchable`, target a text-like stored column instead of a virtual or non-scannable one.
+  
+  `os validate` / `os build` / `os lint` already reported these findings at the same severity, so a code-authored stack can be repaired before it reaches a publish. Objects that name a platform-injected system column are unaffected — both members resolve those per object and stay silent where the platform really provisions them.
+- c1d8f98: Seed datasets gain a `locale` filter axis, composed with `env` by the loader.
+  
+  An app shipping demo data for two language markets — the same records, different display strings — had no declarative way to say which dataset applies. `SeedSchema` is a `strictObject`, so the app could not add the key itself; the selection had to happen in application code while the config was assembled. That is the wrong layer twice over: the choice is cached in the build output (switching markets means deleting `dist`), and because every profile is an `upsert` and the loader only writes, the other market's rows stay resident in the database.
+  
+  - **`Seed.locale?: string[]`** — BCP-47 tags scoping the dataset to one or more language markets. **Omitted means every locale.** Unlike `env`, whose three environments are a closed set that can be spelled out as a default, locales are open-ended tags with no enumerable universe — so absence, not a default array, is what carries "unrestricted". An empty array is rejected: a dataset that applies nowhere is an authoring mistake, the same reasoning that already governs a composite `externalId`. `locales`, `language` and `languages` are aliased onto it, matching the existing `environment` / `environments` → `env` pair.
+  - **`SeedLoaderConfig.locale?: string`** — the tag the load filters on.
+  - **The loader composes both axes by conjunction.** A dataset is loaded when it passes `env` **and** `locale`; neither axis can rescue a dataset the other excluded. `filterByLocale` mirrors `filterByEnv` down to the reporting posture — skipping is the declared, intended outcome, so it logs at `info`, but it always names what it dropped. Tags compare case-insensitively (BCP-47 casing is a convention, not part of a tag's identity) and otherwise exactly: `['zh']` does not match `zh-CN`, and widening that would be the lenient consumer-side fallback the contract-first rule forbids.
+  
+  The platform still translates nothing and merges nothing. The app authors both record sets; this adds only the axis that selects between them.
+  
+  **What is not wired yet, stated plainly.** The locale axis is evaluated against `config.locale`, and no first-party call site supplies one — the runtime wiring that would resolve it from the stack's configured locale is a separate change in `packages/runtime`. An embedding host that passes `config.locale` itself gets the full behaviour today; on the default boot path the axis is inert. That is the shape `Seed.env` was in before framework#4704, so it is not left silent: a load carrying locale-scoped datasets and no `config.locale` warns naming each dataset it let through and the config key that would make the scope take effect. The liveness ledger records `seed.locale` as `experimental` for exactly this reason, with the consumer side cited and the producer gap spelled out, rather than claiming `live` on a correct-but-insufficient consumer pointer.
+- 615fac3: A publish now refuses an object whose `highlightFields` names a field that does not exist on it — the same gate that refuses a code-authored stack.
+  
+  `list-view-field-unknown` inspects `view.columns`, and Studio's app builder mints no `view` items at all, so the reference-integrity family had nothing to inspect on the only artifacts the click path authors. What it authors is the **object**, and an object-level field-name list was covered by nothing that could refuse: measured on `origin/main`, `runtimeAuthoringRulesFor('object')` dispatched seven rules with no reference-integrity rule among them, while the object-level existence check that did exist (`semantic-role-field-unknown`) is `warning`, advisory-tier and CLI-only. So `os validate` exited 0 on a dangling reference and the runtime publish door — the only door a Studio, REST `/meta` or MCP author has — said nothing at all.
+  
+  The reproduction is the natural click order, not a contrived one: click-create a field (Studio mints it as `field_10`), add it to `highlightFields`, then give it a label — the API name auto-derives to `health_score` and `highlightFields` keeps `field_10`. Anyone who names a field after placing it produces this.
+  
+  - **New rule `object-field-ref-unknown` (`error`)**, in `@objectstack/lint`, over the object-level field-name **lists** that no rule owned: `highlightFields` (ADR-0085) and `publicSharing.redactFields`. It resolves through the same `object-graph` seam as the rest of the family, so the three shared skips hold — an object outside the stack, an object with no readable field map (ADR-0015 `external`), and a registry-injected system column resolved **per object** (`highlightFields: ['owner_id']` is a live pointer on an owned object and a real miss under `ownership: 'none'`).
+  - **It runs on the runtime publish door.** The reference-integrity suite entry's `runtimeTypes` gains `object`, and the suite's per-member declaration keeps the crossing narrow: this is the only member that judges an object snapshot; every other member keeps `['flow', 'view']` or the frozen `['flow']` default.
+  - **`validateSemanticRoles` keeps the provenance question** at the same position (`semantic-role-field-unprovisioned`, still `warning`) and no longer restates existence — one finding per path, at one tier.
+  - **`probes.checked` gained an `objects` counter.** Its absence was the tell: a receipt reading `{seeds: 0, views: 0, widgets: 0}` was accurate while the objects the package published were probed by nothing.
+  
+  ## Migration
+  
+  **A publish that used to succeed can now be refused (HTTP 422, `INVALID_METADATA`).** The receipt names the rule id `object-field-ref-unknown` and the offending path, name-keyed on the wire — for example `objects.proj_task.highlightFields[1]` — plus the string that was written and the fields the object actually has.
+  
+  To fix a dangling reference, do one of:
+  
+  - rewrite the entry to the field's current API name (after a Studio label edit the derived name is the one to use — `field_10` becomes `health_score`); or
+  - drop the entry from the list.
+  
+  `os validate` / `os build` / `os lint` report the same finding at `error`, so a stack can be repaired before it reaches a publish. If an object legitimately points at a platform-injected system column, no change is needed — the rule resolves those per object and stays silent where the platform really provisions them.
+- b398ad2: **BREAKING (behaviour):** a static `readonly` field is now stripped from a **non-system caller's INSERT payload inside `engine.insert`**, exactly as it already was on `engine.update`. A non-system create that used to write a read-only column now has that column dropped, reported through `onFieldsDropped` / `droppedFields`, logged at `warn`, and refused outright under `strictReadonlyWrites`. Seeding a read-only column at create time is a **system** act — use `context.isSystem`, a flow's `runAs: 'system'`, a system hook or a seed.
+  
+  Until now the create-side strip lived only at the DataProtocol ingress (`stripReadonlyForInsert` in `@objectstack/metadata-protocol`), so `readonly` meant one thing on insert and another on update: every external REST/GraphQL/MCP create was stripped, while a caller reaching `engine.insert` directly — the automation engine's `create_record` among them — wrote the column with no refusal, no `WARN` and no dropped-field event.
+  
+  - `stripReadonlyForInsert` and its five call sites in `@objectstack/metadata-protocol` are **deleted**, not kept as a second implementation; every create face — `createData`, `cloneData`, `createManyData`, `insertManyData`, and `batchData`'s `create` rows and both arms of `upsert` that create — now hands the caller's payload to the engine whole, and every face whose response carries `droppedFields` (`createData`, `createManyData`, `insertManyData`, every `batchData` row that created) reports the engine's own verdict there, so `droppedFields` says the same thing at each of those seams. `cloneData` forwards whole but reports nothing on the wire: its response contract (`CloneDataResponseSchema`, declared as produced) has no `droppedFields` member, so a clone that carried or overrode a read-only column is stripped and logged at `warn` but not reported in the 201 body — adding that key is a spec change, not part of this one.
+  - `create_record` (`@objectstack/service-automation`) starts receiving readonly drops on the `onFieldsDropped` channel it has been wired for since #3407 — a flow without `runAs: 'system'` that seeds a read-only column now reports a node warning and `output.droppedFields` instead of a clean success. That package's own code changes only in prose; the traffic is new, the surface is not.
+  - Unchanged, deliberately: `isSystem` is still the exemption; `preserveAudit` is still an UPDATE-path exemption and a create that asks for it is told so out loud; runtime-owned types (`autonumber`) keep their own pass and their own wider whitelist; platform objects (`managedBy`, the `sys_` namespace) are still left to their own field-write guards; `readonlyWhen` still has no create-side strip. A stripped key's `defaultValue` is re-derived, so a forged `approval_status` becomes `draft` rather than NULL.
+  - `@objectstack/service-settings` is `patch`: prose only — the `upsertRow` docblock, which ships in the package's `.d.ts`, no longer states the superseded INSERT exemption; it names the platform-object carve-out that actually keeps a `sys_setting` insert outside the strip.
+  - `@objectstack/lint` and `@objectstack/spec` are `patch`: both change prose only. All three lint rules — `validate-readonly-action-writes`, `validate-readonly-flow-writes`, `validate-readonly-hook-writes` — drop the superseded "INSERT is exempt" premise from their docblocks and from the justification of their green control cases; the two non-elevated rules now name their `insert`/`create` silence as a scan gap rather than an exemption (the action rule additionally records its now-reasoned refusal as a module-local constant that its `index` does not re-export, so no public surface widens). The spec change is prose only: one docblock sentence that named the deleted function, the `strictReadonlyWrites` contract docblock (which now states what strict refuses on insert), and the `readonly` liveness-ledger verdict, whose evidence pointer named the deleted ingress strip.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The BREAKING here is a WRITE-PATH BEHAVIOUR change, not a retirement of an authorable or published surface, so there is nothing for the ledger to carry to `objectstack migrate meta`, `spec-changes.json` or the upgrade guide: no spec property, metadata key, accepted value or exported symbol disappears, and this body prescribes no FROM/TO migration. The remedy for an affected caller is to declare the write trusted (`context.isSystem` / `runAs: 'system'`), which is application code, not a metadata migration. The obvious retirement candidate is a non-question in the same direction: `stripReadonlyForInsert` was a bare module-private `function` in `packages/metadata-protocol/src/protocol.ts`, absent from that package's `index.ts` (the only path its `exports` map offers), so no consumer could name it. -->
+
+### Patch Changes
+
+- 3e7ef9c: Serve an Invalid `Date` from a driver instead of raising `RangeError` at two metadata read seams.
+  
+  `canonicalIsoInstant` (`sys-metadata-repository.ts`) and the `occurredAt` arm inside `auditMetaItem` (`protocol.ts`) both reached `value.toISOString()` for any `Date`. That call raises `RangeError: Invalid time value` for the one `Date` whose time value is `NaN`, so a single bad row answered **500** on a read path — where the spelling these repairs replaced, `String(value)`, had served a visibly-wrong field the caller could see and report.
+  
+  The shape is measured, not hypothetical: mysql2 3.23.1 returns a module constant literally named `INVALID_DATE` for a zero `DATETIME`, and postgres-date 1.0.7 builds `new Date(NaN)` for every year in 275760..294276 — a range Postgres itself stores. Legacy imports, hand migrations and a MySQL database shared with another application are all ordinary ways such a row arrives.
+  
+  Both arms now guard on `Number.isNaN(value.getTime())`, and the terminal value is chosen per call site rather than uniformly:
+  
+  - `canonicalIsoInstant` answers `undefined`, so each caller's existing `?? <default>` chain — the branch an absent column already takes — keeps its meaning. Its consumers are machines, and one forwards into a `z.string().datetime()` field that visible text would fail.
+  - `auditMetaItem`'s `occurredAt` falls into the `String(...)` arm already beside it, which renders exactly `"Invalid Date"`. `AuditMetaItemResponseSchema.events[].occurredAt` is a required plain `z.string()` read by an operator in Studio's audit tab, so the text satisfies the contract and one bad row no longer blanks the page.
+  
+  Neither answer is a blank: a silent empty value is the shape that hides the producer's bug.
+- e1d4f9e: `getMetaItemLayered` no longer reports a phantom org-scoped row as a tenant customization.
+  
+  `getMetaItemLayered` is the three-layer diagnostic behind Studio's "Code default vs Overlay vs Effective" view, and the third `/meta` read verb in the series `getMetaItems` (plural) and `getMetaItem` (singular) were repaired in. Unlike those two it applied no registry read gate of its own: whatever organization a caller passed was spent on whatever type it passed. On a type the registry declares `allowOrgOverride: false` — everything outside the ADR-0005 tier-A five (`view`, `dashboard`, `report`, `translation`, `email_template`) — a deployment with history can hold pre-#6190 phantom org-scoped rows, which boot hydration deliberately walks past. Read back through this verb they surfaced as `overlay` with `overlayScope: 'org'`: an operator was shown a customization that does not exist, in the one surface built to be authoritative about customizations.
+  
+  It was not only displayed. Two doors return that layer **as the response** when it is non-null — the runtime metadata dispatcher and REST `GET /meta/:type/:name/published` — so on those paths the phantom was served as the item.
+  
+  The read now resolves its organization through `organizationIdForMetaRead`, the same registry-derived predicate the REST `/meta` doors have applied since #9454 and the twin of the write side's `organizationIdForMetaWrite`. A type with a per-org read channel still resolves the caller's organization and still reports `overlayScope: 'org'`; every other type reads env-wide, which is the partition that actually runs.
+  
+  **The gate is bound after the canonical type fold, and that ordering is load-bearing.** In the two sibling verbs the binding already sat below `canonicalizeMetaRequestType`, so the fix there was a substitution. Here it sat above it, and dropping the same expression in place would have gated on the raw `/meta/:type` segment: `declaresOrgOverride` tolerates the manifest plurals but not the URL-only spellings (`translations` and `email_templates` have no manifest key), so a raw segment splits one item across two partitions, addressed by spelling. The repair is therefore a reorder, and it is pinned by a test that fails if the binding moves back above the fold.
+  
+  Callers that name no organization — four of the five `plugin-security` invocations, and every import/analytics/auth reader — are unaffected, and a door that already computed the same predicate receives the scope it did before.
+- c383352: `SysMetadataRepository.listDrafts` emits the ISO-8601 string its own signature declares for `updatedAt`
+  
+  `listDrafts` declares `updatedAt: string | null` on an inline TypeScript return type and reached the field through `row.updated_at ?? row.created_at ?? null`. `??` fires only on nullish, so the JS `Date` that Postgres and MySQL materialise for the builtin audit columns walked straight past it into a field the declaration calls a string. Driven through the published door, the pre-fix build answered `typeof "object"` and the visible text `Wed Mar 04 2026 05:06:07 GMT+0000 (Coordinated Universal Time)` where the same build's `dist/index.d.ts` promised `string | null`; it now answers `2026-03-04T05:06:07.089Z`.
+  
+  `updated_at` / `created_at` are builtin audit columns: `SqlDriver#formatOutput` repairs them (and folds declared `datetime` columns) only inside its `if (this.isSqlite)` arm, and `withPostgresCalendarDayAsText` leaves `timestamptz` / `timestamp` deliberately untouched because those are instants. Nothing reported the mismatch — the declaration is an inline return type rather than a Zod schema, so a schema search finds nothing, and `rows` is cast `as any[]` one line above the map, so tsc saw a `string` assignment that never happened.
+  
+  Canonicalised at the producer through the same adapter boundary `rowToItem` already uses, with the terminal chosen per call site: `null` here, because the chain being replaced already ended in `?? null` and that is what "absent" already means to this projection's consumers. An Invalid `Date` — reachable on both live dialects — takes that same branch instead of raising. Already-canonical SQLite text passes through byte-identically, and `updatedBy` is unchanged: `updated_by` / `created_by` are `Field.lookup('sys_user')` string columns, which the dialect asymmetry never reaches.
+  
+  No published declaration moves: `dist/index.d.ts` and `dist/index.d.cts` are byte-identical across the fix, which already declared `updatedAt: string | null` before it. A JavaScript consumer that read the raw value and called a `Date` method on it, or stringified it, sees the corrected shape.
+- ba426b0: A junk entry in `stack.objects` no longer crashes the reference-integrity rules, and a probe rule that throws is reported instead of read as "nothing wrong".
+  
+  `indexObjectGraph` is the first statement of every rule that resolves a field path, and it read each `stack.objects` member without checking it was a record — so a `null` entry (an empty YAML list item, a partial editor write) threw `TypeError: Cannot read properties of null (reading 'name')` before any rule's own per-object guard could run. Because these rules also run inside the runtime publish gate, that was an exception on a write path rather than a missed finding. The seam now drops non-record entries — silently, matching every sibling collection reader in the package — and the valid objects beside them are judged exactly as before.
+  
+  On the publish receipt, `runBuildProbes`' object plane wrapped its rule call in a catch that produced an empty finding list, so a crashed rule was indistinguishable from a clean object while `checked.objects` had already counted it. A rule that throws now surfaces as a `runtime`-layer `object_field_ref_rule_failed` error carrying the thrown message, so an unverified object never reads as a verified one. Probes still never fail the publish they verify.
+- 618f70d: A dashboard bound to a dataset you just saved now publishes, without restarting the runtime.
+  
+  The author-time gate that runs on every `active` metadata publish resolves a widget's `dataset` (and a `type: 'page'` view's `pageName`, and the sibling collections the cross-collection security rules compare against) against a resolution universe the host gathers per write. That gather read the SchemaRegistry alone. The registry is filled at boot by code packages, and for every metadata type except `object` a runtime write does not reach it — so a dataset saved through `PUT /api/v1/meta/dataset` was invisible to the gate until the process restarted, while `GET /api/v1/meta/dataset` returned it in the same instant with `_diagnostics.valid: true`.
+  
+  Measured on the reported shape, in one process with no restart between the steps: the row is in `sys_metadata`, the read API lists six datasets, the registry lists the five code-package ones, and a three-widget board bound to the new dataset was refused `422` with three `widget-dataset-unknown` issues whose hint enumerated every dataset except the one just authored. The same request answered `200` after a restart, nothing else changed.
+  
+  The gather now folds the stored half onto the registry half for every collection it carries. What that does and does not do:
+  
+  - **Additive.** A stored row contributes a name the registry does not already carry and never displaces a registry entry — an object's registry copy is its resolved schema (base plus `extend` contributors) and a raw `sys_metadata` row is the base layer alone, so replacing it would trade this phantom for a subtler one. Where an org overlay redefines a code-package item, the gate still judges that item's content from the registry's version.
+  - **Active rows only.** A draft does not resolve. The refuse-at-publish ruling exists so an author can write the widget first and the dataset second; a draft dataset that satisfied a published board would invert it.
+  - **Scoped to the write's own partition** — environment-wide rows plus, when the write has one, its own organization. No other organization's overlays are visible to the gate, on any kernel.
+  - **A failed store read is reported, not swallowed.** Context gathering still never fails a write, but a read that fails for any reason other than an unprovisioned `sys_metadata` now says so once, naming the consequence — a gather that silently shrinks is how a phantom refusal is manufactured in the first place.
+  
+  The rules themselves are unchanged: a reference that resolves in neither home is still refused, with the same code, status and key path.
+- 4b0508e: docs(runtime,metadata-protocol): correct the `writable` verdict's illustration — the scope-less booted row is a marketplace / offline import, never a multi-package artifact's module (#14803)
+  
+  Comment and prose only. No predicate, no assertion and no served shape changes;
+  every pin behind the `writable` verdict stays green as written.
+  
+  The `writable` verdict shipped in 17.3.0 with a **false attribution** in its own
+  explanation, and this corrects it at every site that repeated it. The claim was
+  that the scope-less booted row `isWritablePackage` answers `false` for is *the
+  `type: module` sub-package a multi-package artifact carries*. It is not, and it
+  never was:
+  
+  - `defineStack` parses every `packages[]` entry through `ManifestSchema`
+    (`spec/src/stack.zod.ts`, `ArtifactPackageEntrySchema`), whose `scope` is
+    `.default('project')` (`spec/src/kernel/manifest.zod.ts`), so **no** package of
+    a compiled artifact is ever scope-less — `dist/objectstack.json` and both
+    served rows carry `scope: "project"`.
+  - A genuinely scope-less row arises only where a manifest reaches the registry
+    **without** that parse, because `installPackage` stores a key-by-key copy that
+    applies no defaults: a marketplace install / offline file import
+    (`manifestService.register(rawBody)` to `ql.registerApp`) for the **booted,
+    read-only** half, and `POST /api/v1/packages` (`body.manifest || body` to
+    `installPackage`) for the **database base, writable** half.
+  
+  Measured: `ManifestSchema.parse` of the `app-multi-package` orders body turns an
+  unauthored `scope` into `scope: "project"`, while `SchemaRegistry.installPackage`
+  of the same unparsed body yields a record with no `scope` key at all.
+  
+  What stays, because it is true and load-bearing: a scope-less **booted** package
+  is read-only while a scope-less **database base** is writable, and only
+  `engine.manifests` tells them apart — which is why the server owns the verdict.
+- 460d4b8: Seed loader: a composite `externalId` no longer puts a raw NUL byte in a
+  diagnostic line.
+  
+  `SeedLoaderService` joins a composite natural key's parts with U+0000 on
+  purpose — that byte cannot occur in a natural-key value, so `('a','b')` and
+  `('a\0b','')` never collide. The map key is unchanged. What changes is that
+  the key string is no longer interpolated into human-readable messages: the
+  `Failed to write <object> record #N (<fields>=<value>)` parenthetical and pass
+  2's `on record '<value>'` lines now render a composite value as a JSON array of
+  its parts (`(employer+user=["emp-1","usr-2"])`).
+  
+  A single-field `externalId` renders byte-identically, so non-composite
+  diagnostics do not move, and the structured `errors[].attemptedValue` still
+  carries the real key.
+  
+  Why it mattered: one raw NUL makes `grep` classify the whole server log as
+  binary, so every later `grep -n` / `grep -c` over it silently returns nothing
+  until the reader adds `-a` — the reader's main instrument disabled by one byte,
+  at the moment someone is diagnosing a failed boot.
+- c5d6803: Published `.js.map` files no longer embed the complete original source text (`sourcesContent`) — comments included. `sourcemap: true` was esbuild shorthand, and esbuild's own default for `sourcesContent` is `true`; nobody had decided to publish every package's full source (including `@internal`/test-only comments) to npm inside its source maps, it fell out of a default nobody had looked at. Measured before this change: 55 of 57 publishable packages shipped embedded source text, and maps were roughly half of `@objectstack/spec`'s published bytes.
+  
+  `sourcesContent: false` is now set at one shared place (`scripts/tsup-drop-sources-content.mjs`, wired into every `tsup.config.ts` via tsup's `esbuildOptions` hook — most packages build through the repo-root config directly and pick this up with no config change of their own). `mappings` are untouched, so stack-trace positions still resolve correctly to the original file/line/column; only the embedded source text is gone.
+  
+  `@objectstack/cli` (built with `tsc`, not `tsup`) never embedded source text to begin with — its maps' `sources` entries point at `src/**` paths that are not part of the published tarball either way. That is not a defect unique to `cli`: every `tsup`-built package's `sources` entries are `../src/**`-relative paths that are equally outside `files: ["dist", …]`, and were merely masked by the embedded content that just stopped shipping. Shipping `src/**` in `files[]` to make `sources` resolve was rejected — it would put most of the removed bytes straight back. So `cli`'s maps are left exactly as `tsc` emits them: this is now the fleet-consistent shape (accurate `mappings`, non-resolving-but-honest `sources` labels, no embedded text), not an outlier.
+  
+  A new gate, `pnpm check:sourcemap-no-sources-content`, sweeps every built, non-private package's `dist/**/*.map` and fails if any of them carries a non-empty `sourcesContent` array — so a future `tsup.config.ts` that skips the shared hook, or a toolchain upgrade that changes esbuild's default back, is caught rather than silently re-publishing source text.
+- ce478db: Correct the out-of-package comments that still described `SqlDriver#formatOutput`'s
+  two timestamp passes as gated on `if (this.isSqlite)`.
+  
+  Since ADR-0053 D-F1 (#13973) both passes — the `AUDIT_TIMESTAMP_COLUMNS` pass and the
+  `normalizeSqliteDatetimeOutput` pass over `datetimeFields` — run on every dialect, so a
+  declared `Field.datetime` and the builtin audit columns are presented as canonical
+  ISO-8601-`Z` text on Postgres and MySQL as well as SQLite. The `rest-server.ts` comment
+  went further than staleness: it warned future authors that "a declared `Field.datetime`
+  is therefore NOT protected on Postgres/MySQL", inviting exactly the tolerant consumer-side
+  coercion ADR-0053 forbids.
+  
+  Comments only — no runtime behaviour, no exported symbol and no public type changes; the
+  published `.d.ts` of both packages is byte-identical. These two packages are named because
+  their bundled `dist/index.js` / `dist/index.cjs` carry the amended comment text verbatim,
+  so the published output does change. `@objectstack/metadata` carries the same correction
+  in `database-loader.ts` but is deliberately NOT named: its edits are all JSDoc blocks,
+  which its bundle strips, so its published output is unchanged.
+  
+  Two carve-outs are preserved rather than flattened: `withPostgresCalendarDayAsText` is
+  untouched by that ruling (D-F2 — the client library still materialises `timestamptz` /
+  `DATETIME(3)` as a `Date`; the driver now folds it at its own read boundary), and the
+  Invalid `Date` residue still stands (D-F3 — the one `Date` shape with no canonical text
+  leaves the read door unchanged).
+- 7d711c9: `findReferencesToMeta`'s unanswerable-target refusal now opens with prose instead of a machine-shaped `[unanswerable_target]` tag that nothing read.
+  
+  ```
+  before  501 {"error":{"code":"NOT_IMPLEMENTED","message":"[unanswerable_target] References to a 'field' item cannot be computed. … Ask the owning object instead: GET /api/v1/meta/object/account/references."}}
+  after   501 {"error":{"code":"NOT_IMPLEMENTED","message":"References to a 'field' item cannot be computed. … Ask the owning object instead: GET /api/v1/meta/object/account/references."}}
+  ```
+  
+  Nothing else moves: same `501`, same `NOT_IMPLEMENTED`, same envelope position, and the prescriptive sentence ADR-0110 D3 requires is untouched. Callers branch on `code`, which is unchanged; only the human-facing sentence is shorter.
+  
+  Why the tag was wrong here specifically. This producer writes a bracketed tag on many refusals, and every other one is the lowercase restatement of that throw's own declared `code` — `[item_locked]` with `ITEM_LOCKED`, `[no_draft]` with `NO_DRAFT`, `[invalid_request]` with `INVALID_REQUEST`. Measured across the two producer files, 30 of the 31 tagged throw sites that declare a code restate it that way. This refusal declares `NOT_IMPLEMENTED`, so its tag was the sole exception: it named a token the envelope carries on no axis, and a repo-wide search finds no parser, no switch, no assertion and no doc that reads it. Per the ruling behind the `/data` door's `FORBIDDEN:` prefix removal, `error` is human language and `code` is the machine token.
+  
+  It became worth fixing when the `/meta/:type/:name/references` door started relaying the producer's prose verbatim: before that the whole sentence was replaced by `Internal server error` and the tag reached nobody, and after it the tag was the first thing an operator read on the screen where they decide whether to delete something. The `@objectstack/rest` entry in this release quotes the pre-removal sentence in its example; this entry is the later word on that wire text.
+  
+  The absence is now pinned in `protocol.reference-target-unanswerable.test.ts` — nothing pinned the tag, so without a pin nothing would have pinned its removal either.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [954cb0b]
+- Updated dependencies [a56baa2]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [347b777]
+- Updated dependencies [36a16d0]
+- Updated dependencies [c01b3a6]
+- Updated dependencies [a51eb86]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [693fbcb]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [098cbb7]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [86c75f4]
+- Updated dependencies [2c753fe]
+- Updated dependencies [b371960]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [d61bad0]
+- Updated dependencies [53cf263]
+- Updated dependencies [d91dff4]
+- Updated dependencies [21aabbc]
+- Updated dependencies [dff0bdd]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [0c5d035]
+- Updated dependencies [281bf0d]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [3e7ef9c]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [7a01847]
+- Updated dependencies [a87163c]
+- Updated dependencies [f36eef5]
+- Updated dependencies [36a6082]
+- Updated dependencies [7ad2ca0]
+- Updated dependencies [0cde37d]
+- Updated dependencies [7dafaae]
+- Updated dependencies [52b59d6]
+- Updated dependencies [9f890d3]
+- Updated dependencies [720bf47]
+- Updated dependencies [434ca2d]
+- Updated dependencies [f502898]
+- Updated dependencies [51ae731]
+- Updated dependencies [af7edfe]
+- Updated dependencies [25a3d91]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [c1d274d]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [784cb92]
+- Updated dependencies [09c1d91]
+- Updated dependencies [7629f4d]
+- Updated dependencies [3bd9b34]
+- Updated dependencies [51df9fd]
+- Updated dependencies [ce21963]
+- Updated dependencies [a7da4de]
+- Updated dependencies [8647c87]
+- Updated dependencies [6f23f0e]
+- Updated dependencies [b4b37e5]
+- Updated dependencies [ba426b0]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [eda26ce]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [4771bd9]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [0db2947]
+- Updated dependencies [ed6579b]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [efc5447]
+- Updated dependencies [89758ac]
+- Updated dependencies [d83d079]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [615fac3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [4df2a98]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f89812e]
+- Updated dependencies [6b7d709]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [60ff091]
+- Updated dependencies [8fd246d]
+- Updated dependencies [cd55558]
+  - @objectstack/spec@17.4.0
+  - @objectstack/core@17.4.0
+  - @objectstack/lint@17.4.0
+  - @objectstack/metadata@17.4.0
+  - @objectstack/formula@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/metadata-core@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

@@ -462,8 +462,11 @@ declareDialectCell(PG_CELL, 'date wire form (#11389)', (cell) => {
         // SQL NULL survives as null; the year-boundary element is where a
         // pre-fix skew changed the year.
         expect(row.ds).toEqual([DAY, null, NEW_YEAR]);
-        // Untouched on purpose: an instant is exactly what a Date is for, and
-        // `Field.datetime` depends on it.
+        // Untouched on purpose (ADR-0053 D-F2): the CLIENT parser keeps
+        // materialising an instant as a `Date`, and the driver folds it to the
+        // canonical text at its own read doors, not here. This is a raw
+        // `execute`, past every read-side presentation, so the client's shape
+        // is what comes back — the #13973 ruling forbids changing that parser.
         expect(row.ts instanceof Date).toBe(true);
         expect((row.ts as Date).toISOString()).toBe(`${DAY}T00:00:00.000Z`);
       });

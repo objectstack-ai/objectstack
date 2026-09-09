@@ -29,7 +29,7 @@
 | Structural validation            | Basic name/type/label validation                |
 | **DatabaseLoader read-through cache** | Generic `LRUCache` (lazy TTL, promote-on-get, write invalidation) wrapping `load`/`loadMany`/`list`/`stat`. Configured via `cache.databaseLoader`. |
 | **Bootstrap modes**              | `MetadataPluginConfig.bootstrap` = `eager` \| `lazy` \| `artifact-only` — supports edge / serverless / read-only deployments. |
-| **Persistence write gates**      | `MetadataManagerConfig.persistence.{ writable, overlayWritable }` — runtime freeze for sealed kernels. |
+| **Persistence write gates**      | `MetadataManagerConfig.persistence.writable` — runtime freeze for sealed kernels (`overlayWritable` was retired in #13135 with the paper metadata-customization protocol; authoring it is a compile-time and parse-time error). |
 | **Single-source schema discipline** | Canonical `MetadataManagerConfigSchema` / `MetadataFallbackStrategySchema` live in `kernel/metadata-loader.zod.ts` and are re-exported from `system/metadata-persistence.zod.ts`. |
 | **Remote artifact boot**   | `MetadataPlugin` boots from a compiled artifact via `artifactSource: { mode: 'local-file', path }`, where `path` may be an `http(s)` URL — e.g. the control plane's public `/pub/v1/environments/:id/artifact[?commit=…]` route. Wired across `eager` / `lazy` / `artifact-only` bootstrap modes. Configurable timeout via `fetchTimeoutMs` or `OS_ARTIFACT_FETCH_TIMEOUT_MS` (default 60 s). A dedicated `artifact-api` mode (Bearer-authenticated control-plane pull) was removed in #4246 — zero consumers in any repo; the cloud runtime uses its own `ArtifactApiClient`. |
 

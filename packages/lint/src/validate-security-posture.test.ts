@@ -14,6 +14,7 @@ import { FieldSchema, ObjectSchema } from '@objectstack/spec/data';
 import { ObjectPermissionSchema, PermissionSetSchema } from '@objectstack/spec/security';
 import {
   SECURITY_FLS_UNQUALIFIED_KEY,
+  SECURITY_FLS_UNKNOWN_FIELD,
   validateSecurityPosture,
   validateSecurityRoleWord,
   SECURITY_OWD_UNSET,
@@ -181,6 +182,243 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
         ],
       }),
     ).toEqual([]);
+  });
+
+  // ── Rule: security-fls-unknown-field (#16108) ───────────────────────
+  //
+  // The card's pair, both directions, on one object and one set: an FLS key
+  // that is object-qualified and names a REAL field passes; the same key
+  // naming a field the object does not declare reds. Before this rule the two
+  // were indistinguishable — both exit 0 — which is the fail-OPEN the rule
+  // closes: a mask that can never match leaves the field readable to every
+  // holder of the set, and nothing said so at author time or at runtime.
+  const ACCOUNT = {
+    name: 'crm_account',
+    label: 'Account',
+    sharingModel: 'public_read',
+    fields: { description: { type: 'text', label: 'Description' } },
+  } as const;
+
+  const flsStack = (key: string, perm: Record<string, boolean> = { readable: false, editable: false }) => ({
+    objects: [ACCOUNT],
+    permissions: [
+      { name: 'sales_rep', label: 'Sales Rep', objects: { crm_account: { allowRead: true } }, fields: { [key]: perm } },
+    ],
+  });
+
+  it('errors on a qualified key naming a field the object does not declare — the mask never enforces', () => {
+    const findings = validateSecurityPosture(flsStack('crm_account.description_nope')).filter(
+      (f) => f.rule === SECURITY_FLS_UNKNOWN_FIELD,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('permissions[0].fields["crm_account.description_nope"]');
+    // The message must name BOTH halves: what the author did wrong, and what
+    // it costs. "unknown field" alone would read as a typo notice on a key
+    // that is in fact an unenforced security control.
+    expect(findings[0].message).toContain("crm_account.description_nope");
+    expect(findings[0].message).toContain("declares no field 'description_nope'");
+    expect(findings[0].message).toMatch(/NEVER ENFORCES/);
+    expect(findings[0].message).toMatch(/stays as readable and as editable/);
+    // And the hint must be actionable: the fields that DO exist.
+    expect(findings[0].hint).toContain('description');
+  });
+
+  it('accepts a qualified key naming a real field — the other direction of the same pair', () => {
+    expect(rulesOf(flsStack('crm_account.description'))).toEqual([]);
+  });
+
+  // The control stays in its own lane: two rules, two ids, two messages. A
+  // widening of `security-fls-unqualified-key` would have collapsed them.
+  it('the unqualified spelling still reds under security-fls-unqualified-key ONLY', () => {
+    const rules = rulesOf(flsStack('description'));
+    expect(rules).toEqual([SECURITY_FLS_UNQUALIFIED_KEY]);
+    expect(rules).not.toContain(SECURITY_FLS_UNKNOWN_FIELD);
+  });
+
+  // ── Negative controls: an implementation that always fires passes every
+  //    positive above, so these are what make the positives readings.
+  it('an all-qualified, all-real permission set emits NOTHING new', () => {
+    expect(
+      rulesOf({
+        objects: [
+          {
+            ...ACCOUNT,
+            fields: {
+              description: { type: 'text', label: 'Description' },
+              revenue: { type: 'number', label: 'Revenue' },
+            },
+          },
+        ],
+        permissions: [
+          {
+            name: 'sales_rep',
+            label: 'Sales Rep',
+            objects: { crm_account: { allowRead: true } },
+            fields: {
+              'crm_account.description': { readable: true, editable: true },
+              'crm_account.revenue': { readable: false, editable: false },
+            },
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('an object with NO fields at all does not throw, and is not judged', () => {
+    // Skip 2: an object declaring no readable field map (ADR-0015 `external`,
+    // an introspected datasource) resolves its columns at runtime, so the
+    // linter cannot answer and must not guess. Both spellings of "no fields".
+    for (const fields of [undefined, {}]) {
+      const stack = {
+        objects: [{ name: 'crm_account', label: 'Account', sharingModel: 'public_read', ...(fields ? { fields } : {}) }],
+        permissions: [
+          { name: 'ps', label: 'PS', objects: {}, fields: { 'crm_account.whatever': { readable: false } } },
+        ],
+      };
+      expect(() => validateSecurityPosture(stack)).not.toThrow();
+      expect(rulesOf(stack)).toEqual([]);
+    }
+  });
+
+  it('skip 1: an object this stack does not define is never judged', () => {
+    // The set may legitimately mask a field of an object another installed
+    // package ships — the same silence `security-book-audience-unknown-set`
+    // keeps for a set it cannot see.
+    expect(
+      rulesOf({
+        objects: [ACCOUNT],
+        permissions: [
+          { name: 'ps', label: 'PS', objects: {}, fields: { 'not_in_this_stack.anything': { readable: false } } },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('skip 3: a registry-injected system column resolves, and is not a finding', () => {
+    // `created_at` appears in no authored `fields` and is real at runtime.
+    // Flagging it would be the false finding ADR-0072 D1 refuses — measured
+    // against a nonsense sibling in the same run, so the zero is a reading.
+    expect(rulesOf(flsStack('crm_account.created_at', { readable: true }))).toEqual([]);
+    expect(rulesOf(flsStack('crm_account.created_at_nope', { readable: true }))).toEqual([
+      SECURITY_FLS_UNKNOWN_FIELD,
+    ]);
+  });
+
+  it('mirrors the evaluator on a multi-dot key: FLS addresses columns, never joins', () => {
+    // `getFieldPermissions` strips only the object prefix and looks the WHOLE
+    // remainder up as a column, so `crm_account.owner.name` asks for a column
+    // literally named `owner.name` and matches nothing. Resolving it as a
+    // relationship hop here would have been a fail-open divergence from the
+    // gate this rule mirrors.
+    const findings = validateSecurityPosture({
+      objects: [
+        {
+          ...ACCOUNT,
+          fields: {
+            description: { type: 'text', label: 'Description' },
+            owner: { type: 'lookup', label: 'Owner', reference: 'sys_user' },
+          },
+        },
+        { name: 'sys_user', label: 'User', isSystem: true, fields: { name: { type: 'text', label: 'Name' } } },
+      ],
+      permissions: [
+        { name: 'ps', label: 'PS', objects: {}, fields: { 'crm_account.owner.name': { readable: false } } },
+      ],
+    }).filter((f) => f.rule === SECURITY_FLS_UNKNOWN_FIELD);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain("declares no field 'owner.name'");
+  });
+
+  it('reports the EMPTY remainder — a truncated key masks nothing either', () => {
+    // ⚠️ This was skipped by an earlier revision with a comment claiming the
+    // schema owned the shape. It does not: `PermissionSetSchema.fields` is
+    // `z.record(z.string(), FieldPermissionSchema)` with a bare string key —
+    // pinned below against the LIVE schema, so the premise cannot rot silently
+    // — and this rule is the only reader of those keys in the package. The key
+    // passes `startsWith('crm_account.')` at runtime and resolves to the empty
+    // column name, so it is the identical fail open.
+    const findings = validateSecurityPosture(flsStack('crm_account.')).filter(
+      (f) => f.rule === SECURITY_FLS_UNKNOWN_FIELD,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('permissions[0].fields["crm_account."]');
+    expect(findings[0].message).toMatch(/names NO field/);
+    // The consequence half is the same sentence the dangling case carries — an
+    // author must be told what it costs, not merely that the key is malformed.
+    expect(findings[0].message).toMatch(/NEVER ENFORCES/);
+    expect(findings[0].message).toMatch(/stays as readable and as editable/);
+    // ⛔ And it must not read as the dangling-field message: there is no field
+    // name to quote, so the wrong branch would render `declares no field ''`.
+    expect(findings[0].message).not.toContain("declares no field");
+  });
+
+  it('the empty-remainder premise: the schema really does NOT constrain the key', () => {
+    // The control that keeps the test above honest. If a future revision adds a
+    // key regex or a refine to `PermissionSetSchema.fields`, this pin goes red
+    // and the rule's justification is re-opened deliberately, instead of the
+    // rule quietly becoming a second opinion on the schema (Prime Directive
+    // #12). Read off the LIVE schema, with a control that the read is not
+    // vacuous.
+    const fieldsSchema = PermissionSetSchema.shape.fields;
+    expect(fieldsSchema, 'PermissionSetSchema must declare `fields` at all').toBeDefined();
+    // A bare-string key accepts the truncated spelling: the schema parses it.
+    const parsed = PermissionSetSchema.safeParse({
+      name: 'ps',
+      label: 'PS',
+      objects: {},
+      fields: { 'crm_account.': { readable: false, editable: false } },
+    });
+    expect(parsed.success, 'the schema ACCEPTS a truncated FLS key — so this rule is its only reader').toBe(true);
+    // Control: the same shape with a key the schema also accepts, proving the
+    // `true` above is not a blanket accept-anything reading of `safeParse`.
+    expect(
+      PermissionSetSchema.safeParse({ name: 'ps', label: 'PS', objects: {}, notADeclaredKey: 1 }).success,
+      'control — the schema is not accepting everything',
+    ).toBe(false);
+  });
+
+  it('skip 1 still holds for a truncated key naming an unknown object', () => {
+    // The deliberate non-widening: `'no_such_object.'` is unmatchable too, but
+    // judging it would mean judging a key whose OBJECT half this stack cannot
+    // resolve — the same disposition `'.description'` (empty object name) is
+    // left to. Named here so the silence is a decision on record, not an
+    // oversight, and measured against a firing control in the same run.
+    expect(
+      rulesOf({
+        objects: [ACCOUNT],
+        permissions: [{ name: 'ps', label: 'PS', objects: {}, fields: { 'no_such_object.': { readable: false } } }],
+      }),
+    ).toEqual([]);
+    expect(
+      rulesOf({
+        objects: [ACCOUNT],
+        permissions: [{ name: 'ps', label: 'PS', objects: {}, fields: { 'crm_account.': { readable: false } } }],
+      }),
+    ).toEqual([SECURITY_FLS_UNKNOWN_FIELD]);
+  });
+
+  it('reports every dangling key, and only the dangling ones', () => {
+    const findings = validateSecurityPosture({
+      objects: [ACCOUNT],
+      permissions: [
+        {
+          name: 'ps',
+          label: 'PS',
+          objects: {},
+          fields: {
+            'crm_account.description': { readable: true },
+            'crm_account.gone_one': { readable: false },
+            'crm_account.gone_two': { readable: false },
+          },
+        },
+      ],
+    }).filter((f) => f.rule === SECURITY_FLS_UNKNOWN_FIELD);
+    expect(findings.map((f) => f.path)).toEqual([
+      'permissions[0].fields["crm_account.gone_one"]',
+      'permissions[0].fields["crm_account.gone_two"]',
+    ]);
   });
 
   // ── Rule: security-anchor-high-privilege (ADR-0090 D5/D9) ───────────
@@ -940,6 +1178,12 @@ const NOT_SCHEMA_RECEIVERS: Record<string, string> = {
   cbpTier: "this file's own `cbpMasterCandidates` return type ({ tier, candidates }), not an authored surface.",
   winner: 'a `CbpRelation` — the winning-tier candidate this file already derived, not an authored surface.',
   cand: 'a `CbpRelation` — the same derived shape, one per candidate named in the ambiguity message.',
+  // [#16108] `surface` is a `GraphObject` from `object-graph.ts` — this
+  // package's own resolved shape ({ names, fields, injected }), built by that
+  // module from `ObjectSchema.fields`. The FieldSchema reads behind it are
+  // scanned where they happen (in `object-graph.ts`, guarded by its own tests),
+  // not here; this rule never touches an authored field record directly.
+  surface: "a `GraphObject` — `object-graph.ts`'s resolved per-object surface, not an authored one.",
 };
 
 const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: string; keys: () => string[] }> = [
@@ -1055,6 +1299,9 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
     const PLUMBING = new Set([
       'findings', 'objects', 'permissionSets', 'privateObjects', 'grantedObjects', 'stackSetNames',
       'records', 'reason', 'until', 'setName', 'flsKey', 'opts', 'path', 'i', 'e', 'fields', 'crm_opportunity',
+      'flsGraph', // #16108: the shared object index — `.has` / `.get`, JS Map methods.
+      'flsField', // #16108: the key's remainder, a string — `.length`, a JS property.
+      'declared', // #16108: one object's sorted field-name list — `.length` / `.slice` / `.join`.
       'entries', // #7503: the rule's own field list — `.find`, a JS method.
       'matched', // #14747: one tier's candidate list — `.length` / `.map`, JS methods.
     ]);
@@ -1166,6 +1413,7 @@ const RULE_IDS: Record<string, string> = {
   SECURITY_PRIVATE_NO_READSCOPE,
   SECURITY_MASTER_DETAIL_UNGRANTED,
   SECURITY_FLS_UNQUALIFIED_KEY,
+  SECURITY_FLS_UNKNOWN_FIELD,
   SECURITY_GRANT_EXPIRED_AT_AUTHORING,
   SECURITY_DELEGATION_MISSING_REASON,
   SECURITY_CBP_NO_RELATION,
@@ -1190,6 +1438,13 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
     stack: { objects: [objectFixture({ name: 'o', sharingModel: 'private', externalSharingModel: 'public_read_write' })] },
   },
   { label: 'fls-unqualified-key', stack: { permissions: [{ name: 'ps', label: 'PS', objects: {}, fields: { budget: { readable: true } } }] } },
+  {
+    label: 'fls-unknown-field',
+    stack: {
+      objects: [objectFixture({ name: 'crm_account', sharingModel: 'public_read' })],
+      permissions: [{ name: 'ps', label: 'PS', objects: {}, fields: { 'crm_account.gone': { readable: false } } }],
+    },
+  },
   { label: 'wildcard-vama', stack: { permissions: [{ name: 'ps', label: 'PS', objects: { '*': { viewAllRecords: true } } }] } },
   {
     label: 'anchor-high-privilege',
@@ -1260,7 +1515,7 @@ describe('validateSecurityPosture — every branch is reachable without an undec
   });
 
   it('maps every `findings.push` site in the source', () => {
-    expect(pushedRuleIds()).toHaveLength(17);
+    expect(pushedRuleIds()).toHaveLength(18);
   });
 
   it('reaches every `findings.push` site from that corpus', () => {

@@ -750,6 +750,37 @@ try {
 }
 ```
 
+**The resume door says one thing more.** `client.automation.resume()` rejects
+with the same `400` `FLOW_FAILED` when a run consumed its pause and then failed
+— and there the `details` also carry the engine's verdict, because one of those
+failures is *stranded*: terminal like any failure, but the pause a durable
+decision was waiting on is gone with it and only an explicit operator verb can
+re-arm the run. The shape is `ResumeFailureDetailsSchema` from
+`@objectstack/spec/api`; branch on it, never on the message text:
+
+```typescript
+import { ResumeFailureDetailsSchema } from '@objectstack/spec/api';
+
+try {
+  await client.automation.resume('order_approval', runId, { inputs });
+} catch (err) {
+  if (!isApiError(err) || err.code !== 'FLOW_FAILED') throw err;
+  const verdict = ResumeFailureDetailsSchema.safeParse(err.details);
+  if (verdict.success && verdict.data.repairable) {
+    // verdict.data.status === 'stranded' — verdict.data.runId names the run
+    // an operator can re-arm; offer that instead of closing as terminal.
+  }
+}
+```
+
+`repairable` is always present on the resume door's `400` — `false` on a plain
+terminal failure, deliberately, so an absent member reads as an older server
+rather than as "not repairable". `status` is the engine's own stamp
+(`'stranded'` or `'failed'`), forwarded when the engine set one and never
+invented by the door. The code stays `FLOW_FAILED`: there is no `FLOW_STRANDED`
+sibling, and the trigger door's `400` carries `errorMessage` / `summary` only —
+it never resumes, so "repairable" has no referent there.
+
 ---
 
 ## Configuration

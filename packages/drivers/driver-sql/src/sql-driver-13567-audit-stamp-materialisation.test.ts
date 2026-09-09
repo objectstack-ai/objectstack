@@ -31,40 +31,54 @@
  * one — the layering runs the other way — so the seam's own regression suite
  * necessarily drives a hand-made `Date`. That is correct and catches a revert
  * of the repair. What it cannot assert is the half that made the bug real:
- * **this driver, on these dialects, hands a `Date` out of its record read
- * door.** That half is asserted here, where a live Postgres and a live MySQL
- * actually exist (`Temporal Conformance (live PG + MySQL)`).
+ * what **this driver, on these dialects, hands out of its record read door.**
+ * That half is asserted here, where a live Postgres and a live MySQL actually
+ * exist (`Temporal Conformance (live PG + MySQL)`).
  *
- * ## Not over-pinning: the driver states this decision deliberately
+ * ## What this file pinned, and what it pins now (#13973)
  *
- * `withPostgresCalendarDayAsText` installs a text parser for `date` and
- * `date[]` and says, in as many words, why the instant types are left alone:
- * *"`timestamptz` / `timestamp` are deliberately untouched: those are instants,
- * a `Date` is the right materialisation for them, and `Field.datetime` depends
- * on it."* This file pins that stated decision at the door a consumer reads it
- * through, and the SQLite side of the same asymmetry alongside it.
+ * As first landed, §B pinned the asymmetry as a coverage FACT: the two live
+ * cells handed `updated_at` out as a `Date`, SQLite as canonical text, and the
+ * driver's `withPostgresCalendarDayAsText` comment stated the `Date` side as
+ * deliberate. The #13973 census then measured the cost of that fact — 43 of
+ * the 44 packages that call a read door had only ever seen the text side, and
+ * eight consumers were wrong under the `Date` side (#13382 in production,
+ * #13993–#13999 by reading) — and the maintainer ruled B1 (narrow), 2026-09-02:
+ * the read door presents the canonical ISO-Z text on EVERY dialect (ADR-0053
+ * D-F1), folded at the driver's own read boundary with the client parsers
+ * untouched (D-F2). §B now pins that contract; the SQLite cell's assertions
+ * simply apply to all three. The composed fact this file was written about is
+ * therefore inverted on purpose: `String(v)` of the driver's value IS the
+ * client's echoed token, on every dialect, by construction and no longer by
+ * accident. `sql-driver-13973-canonical-iso-read-door.test.ts` is the full
+ * conformance cell (both column classes, every read door); this file keeps
+ * the OCC-seam framing and the one column that seam reads.
  *
  * ## Which half rests on which evidence
  *
  * §A is pure JavaScript — `Date.prototype.toString` renders whole seconds in
  * the PROCESS's zone while `toISOString` renders milliseconds in UTC. It needs
  * no server, so it runs on every runner including Test Core, and it is the half
- * that can be measured anywhere.
+ * that can be measured anywhere. It is kept as the record of WHY a `Date`
+ * leaving the door was a defect: the two spellings §A1 puts side by side are
+ * the two sides of the comparison #13382 made.
  *
  * §B is the DIALECT fact and only a live server can answer it: what
- * `SqlDriver#findOne` puts in `updated_at`. The SQLite cell runs everywhere and
- * pins the ISO-text side — the accident that kept every OCC pin green; the two
- * live cells pin the `Date` side and are the reason this file lives in
- * `driver-sql` rather than next to the seam.
+ * `SqlDriver#findOne` puts in `updated_at`. The SQLite cell runs everywhere;
+ * the two live cells are the reason this file lives in `driver-sql` rather
+ * than next to the seam, and §B3 is what keeps them a measurement rather than
+ * a restatement of the client library's behaviour — a raw knex read of the same
+ * row still materialises the dialect's `Date`, so the fold is provably the
+ * driver's.
  *
  * ## Why the audit column and not a declared `Field.datetime`
  *
  * `created_at` / `updated_at` are BUILTIN columns, so they are not in
- * `datetimeFields` and no declared-field coercion reaches them. `formatOutput`
- * repairs them only inside its `if (this.isSqlite)` arm
- * (`repairNaiveUtcAuditTimestamp` over `AUDIT_TIMESTAMP_COLUMNS`), which is
- * precisely why the two live dialects hand the raw client value through — and
- * why `updated_at`, not some other datetime, is the value the OCC seam reads.
+ * `datetimeFields` and no declared-field coercion reaches them. Their read
+ * presentation is `presentAuditTimestampOutput` over `AUDIT_TIMESTAMP_COLUMNS`
+ * in `formatOutput` — SQLite-gated before #13973, which is precisely why the
+ * two live dialects handed the raw client value through — and `updated_at`,
+ * not some other datetime, is the value the OCC seam reads.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -79,17 +93,18 @@ const TABLE = 'os13567_stamp';
 /**
  * How many create + read-back rounds each cell measures.
  *
- * Sized for §B4's non-vacuity guard rather than for coverage: `String(Date)`
- * drops milliseconds, which is only OBSERVABLE on a stamp that carried some.
- * Postgres' `CURRENT_TIMESTAMP` is microsecond-precision and MySQL's `now(3)`
- * is millisecond-precision, so a stamp landing on an exact `.000` is ~1 in
- * 1000 — rare, but not impossible, and a run in which every stamp did would
- * report a green that no truncation could have perturbed. Six independent
- * rounds put that at ~1e-18, the same sizing `#11224` uses one file over.
+ * Sized for §B4's non-vacuity guard rather than for coverage: the fold keeps
+ * the milliseconds `String(Date)` would have dropped, which is only OBSERVABLE
+ * on a stamp that carried some. Postgres' `CURRENT_TIMESTAMP` is
+ * microsecond-precision and MySQL's `now(3)` is millisecond-precision, so a
+ * stamp landing on an exact `.000` is ~1 in 1000 — rare, but not impossible,
+ * and a run in which every stamp did would report a green that no truncation
+ * could have perturbed. Six independent rounds put that at ~1e-18, the same
+ * sizing `#11224` uses one file over.
  */
 const ROUNDS = 6;
 
-/** Canonical audit-timestamp text — the shape SQLite stores and returns. */
+/** Canonical audit-timestamp text — the shape every read door presents (ADR-0053 D-F1). */
 const ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 /**
@@ -259,98 +274,104 @@ function measure(cell: DialectCell): void {
       }
     });
 
-    if (cell.id === 'sqlite') {
-      it('§B1 hands `updated_at` back as canonical ISO-8601-Z TEXT', () => {
-        for (const row of rows) {
-          expect(typeof row.updated_at, `updated_at type for ${row.id}`).toBe('string');
-          expect(row.updated_at).toMatch(ISO_Z);
-        }
-      });
+    it('§B1 hands `updated_at` back as canonical ISO-8601-Z TEXT — on every dialect (ADR-0053 D-F1)', () => {
+      // The ruled shape (#13973 B1). Before it, this cell asserted the exact
+      // opposite for the two live dialects: `timestamptz` (Postgres, via
+      // node-pg's stock OID 1184 parser) and `DATETIME(3)` (MySQL, via mysql2's
+      // `parseDateTime` under the `timezone: 'Z'` pin) both materialise as a
+      // `Date`, and `formatOutput`'s audit-column presentation was SQLite-gated,
+      // so nothing downstream converted it. The fold is now unconditional and
+      // carries a `Date` arm, so the client's `Date` never leaves the door.
+      for (const row of rows) {
+        expect(
+          row.updated_at instanceof Date,
+          `${cell.label} returned updated_at as a JS Date ` +
+            `(${JSON.stringify(String(row.updated_at))}) — the read door is ruled to present the ` +
+            `canonical text on every dialect (ADR-0053 D-F1)`,
+        ).toBe(false);
+        expect(typeof row.updated_at, `updated_at type for ${row.id}`).toBe('string');
+        expect(row.updated_at).toMatch(ISO_Z);
+      }
+    });
 
-      it('§B2 `String()` of it IS the token a client echoes — the accident that hid the defect', () => {
-        // This is the control, and the reason this file exists: on the dialect
-        // every OCC pin was written against, the naive `String(v)` comparison
-        // matches BY ACCIDENT, because the stored value already is the
-        // canonical spelling the client was served.
-        const value = rows[0].updated_at as string;
+    it('§B2 `String()` of it IS the token a client echoes — by construction now, not by accident', () => {
+      // This used to be the SQLite-only control, and the reason this file
+      // exists: on the dialect every OCC pin was written against, the naive
+      // `String(v)` comparison matched BY ACCIDENT, because the stored value
+      // already was the canonical spelling the client was served. Under D-F1 it
+      // holds on every dialect, which is what makes the seam's text compare
+      // correct rather than lucky.
+      for (const row of rows) {
+        const value = row.updated_at as string;
         expect(String(value)).toBe(value);
         expect(new Date(value).toISOString()).toBe(value);
-      });
-    } else {
-      it('§B1 hands `updated_at` back as a JS `Date`', () => {
-        // The composed fact. `timestamptz` (Postgres, via node-pg's stock OID
-        // 1184 parser — `withPostgresCalendarDayAsText` overrides only `date`
-        // and `date[]`) and `DATETIME(3)` (MySQL, via mysql2's `parseDateTime`
-        // under the `timezone: 'Z'` pin `withUtcSession` installs) both
-        // materialise as a `Date`, and `formatOutput`'s audit-column repair is
-        // SQLite-gated, so nothing downstream converts it.
-        for (const row of rows) {
-          expect(
-            row.updated_at instanceof Date,
-            `${cell.label} returned updated_at as ${typeof row.updated_at} ` +
-              `(${JSON.stringify(String(row.updated_at))}) — the OCC seam's Date handling is ` +
-              `pinned against a shape this dialect no longer produces`,
-          ).toBe(true);
-        }
-        // A real instant, not an Invalid Date dressed up as one.
-        for (const row of rows) expect(Number.isFinite((row.updated_at as Date).getTime())).toBe(true);
-      });
+      }
+    });
 
-      it('§B3 `String()` of it is NOT the token the client echoes, and follows the process zone', async () => {
-        const value = rows[0].updated_at as Date;
-        // What the GET served and what the client hands back as its next
-        // `If-Match`: a `Date` leaves this process as its ISO-8601 form.
-        const echoed = value.toISOString();
-        expect(echoed).toMatch(ISO_Z);
+    it('§B3 the presented text names the instant the CLIENT materialised — the fold changed the type and nothing else', async () => {
+      // Past every read-side presentation: what the client library hands the
+      // driver for the same row. On a live cell that is still a `Date` — the
+      // client parsers are untouched (D-F2) — so the fold is provably the
+      // driver's, and this cell is a measurement of the driver rather than of
+      // node-pg / mysql2. On SQLite the stored TEXT already is the presented
+      // text, the side of the old asymmetry every consumer was tested against.
+      const raw: any = await (driver as any).knex(TABLE).where('id', rows[0].id).first();
+      expect(raw, 'raw read returned nothing').toBeTruthy();
+      const presented = rows[0].updated_at as string;
+      if (cell.live) {
+        expect(
+          raw.updated_at instanceof Date,
+          `${cell.label} raw updated_at is ${typeof raw.updated_at} — the client parser was changed, ` +
+            `which the #13973 ruling forbids`,
+        ).toBe(true);
+        const value = raw.updated_at as Date;
+        expect(Number.isFinite(value.getTime())).toBe(true);
+        expect(value.toISOString()).toBe(presented);
 
+        // And the two spellings #13382 compared are still two spellings: the
+        // client's `Date`, rendered through `String()`, follows the process
+        // zone and is NOT the token — which is exactly why it must never
+        // leave the door.
         const shanghai = await underProcessZone('Asia/Shanghai', () => String(value));
         const newYork = await underProcessZone('America/New_York', () => String(value));
-
         for (const [tz, spelled] of [['Asia/Shanghai', shanghai], ['America/New_York', newYork]] as const) {
           expect(spelled, `${tz}: shape`).toMatch(WHOLE_SECONDS_AND_ZONE);
-          expect(
-            spelled === echoed,
-            `${tz}: a strict String() compare of the driver's value against the client's echoed ` +
-              `token is the comparison #13382 made — ${JSON.stringify(spelled)} vs ` +
-              `${JSON.stringify(echoed)}`,
-          ).toBe(false);
+          expect(spelled === presented, `${tz}: ${JSON.stringify(spelled)} vs ${JSON.stringify(presented)}`).toBe(false);
         }
-
-        // One `Date`, two process zones, two spellings: the process zone is
-        // baked into the rendering. Asserted by DIFFERENCE rather than against
-        // a literal offset, so no tzdata value is pinned here.
-        expect(
-          shanghai,
-          `the same instant spelled identically under two different process zones — ` +
-            `${JSON.stringify(shanghai)}`,
-        ).not.toBe(newYork);
+        expect(shanghai).not.toBe(newYork);
         expect(offsetInSpelling(shanghai)).not.toBe(offsetInSpelling(newYork));
-      });
+      } else {
+        expect(typeof raw.updated_at).toBe('string');
+        expect(raw.updated_at).toBe(presented);
+      }
+    });
 
-      it('§B4 `String()` drops the milliseconds the echoed token carries', async () => {
-        const withMillis = rows.filter((row) => (row.updated_at as Date).getMilliseconds() !== 0);
-        expect(
-          withMillis.length,
-          `none of the ${ROUNDS} stamps in this run carried sub-second digits, so nothing here ` +
-            `could have observed the millisecond loss — the cell measured nothing`,
-        ).toBeGreaterThan(0);
+    it('§B4 the presented text keeps the milliseconds `String(Date)` would have dropped', () => {
+      const withMillis = rows.filter((row) => !/\.000Z$/.test(row.updated_at as string));
+      expect(
+        withMillis.length,
+        `none of the ${ROUNDS} stamps in this run carried sub-second digits, so nothing here ` +
+          `could have observed a millisecond loss — the cell measured nothing`,
+      ).toBeGreaterThan(0);
 
-        for (const row of withMillis) {
-          const value = row.updated_at as Date;
-          const echoed = value.toISOString();
-          // The echoed token names the instant exactly …
-          expect(echoed, `${row.id}: echoed token`).toMatch(/\.\d{3}Z$/);
-          expect(Date.parse(echoed), `${row.id}: echoed token instant`).toBe(value.getTime());
-          // … while its `String()` names one `getMilliseconds()` earlier. Read
-          // in the ambient zone the suite is running under, which is the zone
-          // the seam's `String(v)` would have used.
-          expect(Date.parse(String(value)), `${row.id}: spelled instant`).toBe(
-            value.getTime() - value.getMilliseconds(),
-          );
-          expect(Date.parse(String(value))).not.toBe(Date.parse(echoed));
-        }
-      });
-    }
+      for (const row of withMillis) {
+        const presented = row.updated_at as string;
+        // The presented token names the instant exactly, sub-second digits
+        // included …
+        expect(presented, `${row.id}: presented token`).toMatch(/\.\d{3}Z$/);
+        const instant = Date.parse(presented);
+        expect(Number.isFinite(instant)).toBe(true);
+        // … while the spelling the OCC seam used to compare against names one
+        // `getMilliseconds()` earlier. Read in the ambient zone the suite is
+        // running under, which is the zone the seam's `String(v)` would have
+        // used had a `Date` reached it.
+        const spelledAsDateWouldHaveBeen = String(new Date(instant));
+        expect(Date.parse(spelledAsDateWouldHaveBeen), `${row.id}: spelled instant`).toBe(
+          instant - new Date(instant).getMilliseconds(),
+        );
+        expect(Date.parse(spelledAsDateWouldHaveBeen)).not.toBe(instant);
+      }
+    });
   });
 }
 

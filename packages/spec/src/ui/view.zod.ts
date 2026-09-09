@@ -1689,8 +1689,17 @@ const VIEW_PAGE_MOUNT_HAS_COLUMNS =
  * on the flattened runtime overlay arm ({@link ViewMetadataSchema} member 3,
  * the door a Studio tenant or an MCP/AI author writes through) and on
  * {@link ObjectListViewSchema} (`objects[].listViews.*`) without a second copy.
+ *
+ * Exported (#16489, the spec half of objectui#7715) so a downstream mirror
+ * that derives its schema from `ListViewSchema.shape` — which carries the
+ * FIELDS by reference and drops every object-level check — can re-attach
+ * exactly this rule with `.superRefine(checkListViewPageMount)` instead of
+ * re-implementing it. One function per refinement, no bundle: a mirror attaches
+ * the checks whose fields it carries. Every spec door attaches this same
+ * binding, so the export IS the check the schema runs — pinned in
+ * `object-refinement-check-exports.test.ts`.
  */
-function checkListViewPageMount(
+export function checkListViewPageMount(
   view: { type?: string; pageName?: string; columns?: unknown },
   ctx: z.RefinementCtx,
 ): void {
@@ -1742,8 +1751,17 @@ const VIEW_CALENDAR_ALLOWED_NEEDS_START_DATE =
  * `.omit()`/key-overwriting `.extend()`, so derived shapes re-attach): the
  * authoring terminal, `objects[].listViews.*`, and the flattened runtime
  * overlay arm — the door a Studio tenant or an MCP/AI author writes through.
+ *
+ * Exported (#16489, the spec half of objectui#7715) for the same reason as
+ * {@link checkListViewPageMount}: a mirror built from `ListViewSchema.shape`
+ * drops this check and re-attaches it with
+ * `.superRefine(checkListViewCalendarVisualization)` — the measured 17.3.0
+ * gap was exactly this rule, accepted by objectui's authoring door and refused
+ * by the spec's publish door. Every spec door attaches this same binding, so
+ * the export IS the check the schema runs — pinned in
+ * `object-refinement-check-exports.test.ts`.
  */
-function checkListViewCalendarVisualization(
+export function checkListViewCalendarVisualization(
   view: { appearance?: { allowedVisualizations?: unknown } | null; calendar?: unknown },
   ctx: z.RefinementCtx,
 ): void {

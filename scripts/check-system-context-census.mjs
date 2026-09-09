@@ -7,7 +7,7 @@
  *
  *   node scripts/check-system-context-census.mjs
  *   node scripts/check-system-context-census.mjs --self-test
- *   node scripts/check-system-context-census.mjs --fix   # re-anchor rotted lines
+ *   node scripts/check-system-context-census.mjs --fix   # regenerates declared COUNTS; anchors still need a human -- see below
  *
  * That page declares itself "the authority" for every platform behaviour keyed off
  * `ExecutionContext.isSystem`, and says it is "built by census over the whole repo,
@@ -33,29 +33,69 @@
  * carry an anchor. The other direction (PAGE -> CENSUS) is worth having and cheap,
  * but it is the second gate, not the first.
  *
- * The two deletions are the reason a symbol-name anchor is not sufficient either.
- * Both were the `isSystem` propagation inside a `callerContext()` helper; both
- * helpers still exist under the same name. **A symbol anchor would still resolve
- * and would still be green** while the protection the row described was gone.
  * Deletions are caught here by the counts, which are census-derived: lose a site
- * and the page's declared 109 stops being true.
+ * and the page's declared total stops being true.
+ *
+ * ## ⭐ Why the anchors are `path#symbol` and no longer `path:line` (#15921)
+ *
+ * A line number is not an anchor form anywhere in this repo any more. The
+ * `docs/adr/**` migration measured 243 of 337 live line anchors broken -- 72.1%,
+ * a one-way lower bound -- and ruled the whole class out; this page joins that
+ * ruling as a CORPUS REGISTRATION against the same resolver, never a second
+ * implementation of it. `CORPUS` below is a `defineCorpus` call and nothing else;
+ * the grammar, the extractor and the resolution rule live in
+ * `scripts/symbol-anchors.mjs`, whose header is authoritative.
+ *
+ * ⛔ The resolver is deliberately NOT widened to understand spans. That was the
+ * other option on the ruling (a span-aware resolver plus per-read disambiguation
+ * in the colliding files) and it is its own card, to be taken if the gap below is
+ * ever measured to have let a deletion through.
+ *
+ * ## ⚠️ What that costs, measured rather than asserted
+ *
+ * A symbol anchor cannot say WHICH read inside a symbol it means. Measured on the
+ * tree this migration ran against: 106 read sites live in 89 distinct symbols
+ * across 45 files, and 9 of those files hold more than one read inside a single
+ * symbol (`packages/objectql/src/engine.ts` and `packages/rest/src/rest-server.ts`
+ * are the widest, at 10
+ * reads in 9 symbols and 6 reads in 2). So:
+ *
+ *   ⭐ Delete a whole symbol and this gate REDS -- twice over: the anchor stops
+ *      resolving, and the census's symbol set for that file stops matching the
+ *      page's.
+ *   ⚠️ Delete ONE of several reads inside a symbol that keeps at least one, and
+ *      the symbol set does not move, so this gate may NOT red.
+ *
+ * That second line is the precision the line numbers had and these anchors do
+ * not. It is the reason the page carries the same warning where a reader meets
+ * the anchors: a gap stated on the instrument and not on the artifact is a gap
+ * only the instrument's author knows about. ⛔ It is NOT closed by adding a
+ * count of reads per file -- a count of reads cannot be satisfied by a page whose
+ * anchors are symbols, which is precisely why the population rule is per file and
+ * per symbol.
  *
  * ## The four checks
  *
- *   A  RESOLUTION   every anchor resolves to exactly one tracked file, at a line
- *                   that file has. Ambiguity is an error, never a guess: the
- *                   previous edition had 41 of 111 anchors whose bare basename
- *                   matched two files and could only be placed by reading the
- *                   row's prose.
- *   B  POPULATION   every elevation read site the census finds is anchored at its
- *                   exact `file:line`. Zero omissions. ⭐ This is the mandatory one.
+ *   A  RESOLUTION   delegated WHOLE to `sweepCorpus` over the `CORPUS`
+ *                   registration below: every anchor names a tracked file, every
+ *                   `#symbol` has a declaration site in it, and a surviving line
+ *                   number is a hard finding. ⛔ This gate re-implements none of
+ *                   that -- a sweep that could not run is a refusal here, never a
+ *                   skip.
+ *   B  POPULATION   per FILE, at SYMBOL granularity: every file the census finds
+ *                   a read in carries at least one anchor here, and the set of
+ *                   symbols this page cites into that file EQUALS the set the
+ *                   census plus `NON_READ_ANCHORS` require -- so the two counts
+ *                   are equal by construction and a difference names the symbol
+ *                   rather than only the number. ⭐ This is the mandatory one.
  *   C  COUNTS       every CENSUS-DERIVED number the page states equals the census.
  *                   A pattern that matches NOTHING is an error, so a reworded page
  *                   cannot silently stop being checked. The page's whole-corpus
  *                   TEXT counts are deliberately NOT compared -- see the next
  *                   section -- but they are still required to be present and dated.
- *   D  CLASSIFICATION  an anchor that is not a read site must be a declared
- *                   `NON_READ_ANCHORS` row, and that row must still locate the line.
+ *   D  CLASSIFICATION  a symbol anchor the census does not call an elevation read
+ *                   must be a declared `NON_READ_ANCHORS` row, and that row's
+ *                   symbol must still be declared by its file.
  *
  * ## ⭐ What is enforced, and why the text decomposition is NOT
  *
@@ -83,42 +123,50 @@
  * the page does not certify -- and whose churn, measured, was blocking the page
  * from ever landing.
  *
- * ## Why `NON_READ_ANCHORS` carries needles instead of line numbers
+ * ## Why `NON_READ_ANCHORS` is keyed by SYMBOL
  *
- * 28 of the page's anchors are deliberately not read sites: the four unrelated
- * `isSystem` declarations, the `sys_`-prefix name helpers, a guard block a row
- * cites as the thing being skipped, and the prose targets in the "what it does NOT
- * do" table. They need an allow-list -- and an allow-list of LINE NUMBERS would rot
+ * Some of the page's anchors are deliberately not read sites: the four unrelated
+ * `isSystem` declarations, the `sys_`-prefix name helpers, a guard a row cites as
+ * the thing being skipped, and the prose targets in the "what it does NOT do"
+ * table. They need an allow-list -- and an allow-list of LINE NUMBERS would rot
  * exactly like the anchors this gate exists to stop rotting, silently, because a
- * stale row still excuses an anchor.
+ * stale row still excuses an anchor. So did the `needle` this ledger used before
+ * #15921: a literal of source text, which every reformatting moved.
  *
- * So each row carries a `needle`: a literal that must appear on exactly one line of
- * the file. The gate LOCATES the line and requires the page's anchor to name it.
- * That makes every anchor on the page enforced and mechanically repairable, and it
- * makes the ledger self-retiring -- a needle that matches zero lines, or more than
- * one, is an error naming the row.
+ * Each row now names `{ file, symbol }`, the same pair the page writes, and the
+ * gate asks the SHARED resolver whether that file still declares that symbol. A
+ * row whose symbol is gone is an error naming the row, so the ledger stays
+ * self-retiring; and there is nothing left in it that a whitespace change can
+ * break.
  *
- * ## `--fix` repairs rot and REFUSES to repair population
+ * `symbol: null` is the FILE-LEVEL row and it is honest, not a shrug: the citation
+ * lands in a module docblock with no declaration around it, and a file-level
+ * anchor is what the grammar provides for exactly that. One row is like this today
+ * (`plugin-auth/src/last-admin-guard.ts`).
  *
- * Per file, when the page's DISTINCT anchor count equals the number of lines the
- * file offers to be anchored -- its census read sites AND its `NON_READ_ANCHORS`
- * citations, as one union -- the two are mapped in line order and the numbers
- * rewritten: that is a pure shift, the shape an unrelated edit produces. When the
- * counts differ, the population changed -- a site arrived or vanished -- and no
- * mechanical mapping is honest. `--fix` leaves those alone and the gate stays red
- * until a human writes the row.
+ * ⭐ `collapsesOntoRead` is the declaration this migration made necessary. Under
+ * symbol granularity a citation can share its symbol with a census read site -- the
+ * `owner_id` guard block and the short-circuit that skips it are both inside
+ * `packages/plugins/plugin-security/src/security-plugin.ts#start` -- so the row
+ * stops EXCUSING anything while its `why`
+ * and its `rowSeams` are still worth keeping. The field says so, and the gate
+ * refuses when the declaration and the census disagree in EITHER direction: an
+ * undeclared overlap reads as a row that excuses an anchor when it does not, and a
+ * declared overlap that has ended is a row nobody re-examined.
  *
- * ⭐ The union is load-bearing, not tidiness: subtracting the ledger by LINE
- * compares a pre-shift page with a post-shift ledger and reports a POPULATION
- * change over a population that never moved (#13490). `fixAnchors` carries the two
- * measured occurrences and why the union is the safer shape.
+ * ## ⛔ `--fix` no longer rewrites anything, and that is the point
  *
- * ⇒ So the repair for a line-shift red is `--fix` and never a hand-edited line
- * number, and the repairing PR should state that `--fix` REFUSED ZERO files. That
- * sentence is what separates a pure re-anchor from a population change that
- * happened to be shifted at the same time: the refusal is the gate's only signal
- * that a site arrived or vanished, and a `--fix` run reporting refusals leaves
- * rows a human still has to write.
+ * It used to re-anchor a pure line shift, which was the common repair: a file grew
+ * an import, every anchor into it moved by one, and a mechanical remap was both
+ * safe and necessary. Symbol anchors do not shift, so that repair has no subject.
+ * ⛔ The flag is NOT silently accepted -- a `--fix` that writes nothing and exits 0
+ * reads exactly like a repair that worked. It prints what it did not do and why,
+ * and then returns this gate's ordinary verdict, so `gen:system-context-census`
+ * stays wired and stays honest.
+ *
+ * ⇒ Every red here is now a HUMAN edit: a symbol was renamed (update the anchor),
+ * a read arrived or vanished (write or delete the row), or a citation moved out of
+ * the symbol that held it.
  *
  * ## Refusals, never quiet passes (#4690)
  *
@@ -159,15 +207,23 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
-import { CORPUS_ROOTS, runCensus, siteKeys } from './isystem-census.mjs';
-import { extractLineAnchors, extractPathCitations, resolveAnchorFile } from './doc-line-anchors.mjs';
+import { CORPUS_ROOTS, runCensus, symbolPopulation } from './isystem-census.mjs';
+import {
+  ANCHOR_GRAMMAR,
+  defineCorpus,
+  extractAnchors,
+  formatFindings,
+  symbolResolutionClass,
+  sweepCorpus,
+} from './symbol-anchors.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -187,20 +243,20 @@ import { extractLineAnchors, extractPathCitations, resolveAnchorFile } from './d
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   'the GREEN control: a page that is correct': 2,
-  '⭐ the RED that matters: a site the page never mentions': 1,
+  '⭐ the RED that matters: a site the page never mentions': 2,
   'the deletion shape: the row stands, the site is gone': 3,
-  'resolution': 3,
-  'ledger': 3,
+  '⭐ RESOLUTION is delegated, and a sweep that did not run is a REFUSAL': 3,
+  'ledger': 5,
   'counts': 6,
   '⭐ CRITERION: enforced means CENSUS-DERIVED, pinned over the REAL lists': 2,
   'the same criterion, behaviourally, on one page': 3,
   '⛔ and the half that must NOT have moved: the contract still reds': 2,
   'absence is loud': 1,
-  '--fix': 2,
-  '⭐ #13490: the incident shape -- reads AND ledger citations BOTH shift': 2,
-  '⛔ the dangerous direction: the citation crosses onto a read anchor\'s line ─': 1,
-  '⭐ and the safety property, on the shape that now ACCEPTS': 2,
-  'the refusal has to SHOW its work (both counts, both classes, the diff)': 2,
+  '⛔ --fix regenerates declared COUNTS only, never anchors, and says so': 8,
+  '⭐ THE RULED RED-FIRST PAIR: a symbol rename REDS, a pure line move does NOT': 5,
+  '⭐ the precision this trades away, pinned so nobody rediscovers it as a bug': 2,
+  'the refusal has to SHOW its work (both counts, the symbol, the file)': 2,
+  '⭐ CORPUS REGISTRATION: one resolver, not a second implementation': 3,
   'WIRING: this gate, and its self-test, really run in CI': 2,
   'POPULATION DECLARATION: what the dispatch derivation is told this gate reads': 6,
   '⭐ ROW REFERENCES: held by seam, and the insertion that was silent (#15869)': 23,
@@ -217,6 +273,46 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 export const PAGE = 'content/docs/permissions/system-context.mdx';
+const PAGE_DIR = 'content/docs/permissions';
+const PAGE_FILE = /^system-context\.mdx$/;
+
+/**
+ * ── The corpus registration (#15921) ────────────────────────────────────────
+ *
+ * ⚠️ THE MECHANISM IS NOT HERE. This is a `defineCorpus` call and nothing else,
+ * exactly like `scripts/check-adr-symbol-anchors.mjs#CORPUS`: the grammar, the
+ * extractor and the resolution rule are `scripts/symbol-anchors.mjs`'s, shared
+ * with `docs/adr/**` and with the `scripts/**` gate-header corpus. The ruling
+ * that put line anchors out of this repo said 「共享同一个 resolver,⛔ 不造第
+ * 二套」, and a corpus is how a body of documents joins it.
+ *
+ * `docPattern` names ONE file rather than the directory: the other 22 pages under
+ * `content/docs/permissions` are hand-written prose that nobody has migrated, and
+ * sweeping them here would red this gate for citations it was never given the
+ * ledger to explain. Widening the pattern is its own decision with its own
+ * cleanup, not a side effect of this one.
+ *
+ * `checkBarePaths` is ON, which `docs/adr/**` cannot afford (1,056 findings there)
+ * and this page can: it carries 45 anchored files and a handful of prose
+ * citations, every one of them spelled in full from the repository root, so a
+ * bare path that resolves to nothing is a real finding and not a corpus-wide
+ * cleanup.
+ *
+ * ⚠️ For anyone registering the NEXT corpus: `sweepCorpus` resolves through
+ * `git ls-files` and passes no environment of its own, so a sweep of a SYNTHETIC
+ * root inherits whatever `GIT_DIR` / `GIT_INDEX_FILE` the caller was launched
+ * with. In-repo callers are unaffected (the inherited values name this
+ * repository, which is the right answer); a test that builds a throwaway tree is
+ * not. This gate's self-test detaches from those variables before its first case
+ * — see `buildRedFirstCorpus`, which carries the measured incident.
+ */
+export const CORPUS = defineCorpus({
+  id: 'system-context',
+  label: 'content/docs/permissions/system-context.mdx (the isSystem census page)',
+  docRoots: [PAGE_DIR],
+  docPattern: PAGE_FILE,
+  checkBarePaths: true,
+});
 
 /**
  * ── The population this gate READS, declared where the dispatch tool looks ───
@@ -278,156 +374,146 @@ const ROOT_DIR_WATCH_HINTS = ['packages/**', 'examples/**'];
 
 /**
  * ⛔ SHRINK-ONLY. Anchors the page writes that are deliberately NOT elevation read
- * sites. `needle` must appear on exactly ONE line of `file`; that line is where the
- * page's anchor has to point.
+ * sites, keyed the way the page writes them: `{ file, symbol }`.
+ *
+ * `symbol` must have a declaration site in `file` by the SHARED resolver's rule
+ * (`scripts/symbol-anchors.mjs#symbolResolutionClass`), and the page must anchor
+ * exactly that pair. `symbol: null` is a FILE-LEVEL row -- the citation lands
+ * somewhere no declaration encloses, and the page anchors the bare path.
+ *
+ * `collapsesOntoRead: true` declares that this row's symbol is ALSO a symbol the
+ * census finds an elevation read in, so the row no longer excuses an anchor and is
+ * kept for its `why` and its `rowSeams`. The gate holds the declaration to the
+ * census in both directions.
  */
 export const NON_READ_ANCHORS = [
   // ── The four declarations that share the identifier ──────────────────────────
   {
     file: 'packages/spec/src/kernel/execution-context.zod.ts',
-    needle: 'isSystem: z.boolean().default(false),',
+    symbol: 'isSystem',
     why: 'the elevation flag itself -- a declaration, not a read',
   },
   {
     file: 'packages/spec/src/data/object.zod.ts',
-    needle: "isSystem: z.boolean().optional().default(false).describe('Is system object",
+    symbol: 'isSystem',
     why: 'Object.isSystem -- an unrelated metadata field the page names to defuse the collision',
   },
   {
     file: 'packages/spec/src/system/email-template.zod.ts',
-    needle: 'isSystem: z.boolean().default(false),',
+    symbol: 'isSystem',
     why: 'EmailTemplate.isSystem -- unrelated metadata field',
   },
   {
     file: 'packages/spec/src/cloud/environment.zod.ts',
-    needle: "isSystem: z.boolean().default(false).describe('Whether this is a system environment",
+    symbol: 'isSystem',
     why: 'Environment.isSystem -- unrelated metadata field',
   },
   // ── The `sys_` name-prefix family, cited to keep it apart from the flag ──────
   {
     file: 'packages/runtime/src/action-execution.ts',
-    needle: 'export function isSystemObjectName(name: string): boolean {',
+    symbol: 'isSystemObjectName',
     why: 'keys on the `sys_` NAME PREFIX, not on any flag',
   },
   {
     file: 'packages/mcp/src/mcp-http-tools.ts',
-    needle: 'function isSystemObject(name: string): boolean {',
+    symbol: 'isSystemObject',
     why: 'the same name-prefix helper, MCP side',
   },
   // ── Constructs a table row deliberately cites alongside its read ─────────────
   {
     file: 'packages/plugins/plugin-security/src/security-plugin.ts',
-    needle: '3.5. [#3004]',
-    why: 'row 2 -- the `owner_id` guard block that the row-1 short-circuit skips',
+    symbol: 'start',
+    collapsesOntoRead: true,
+    why: 'row 2 -- the `owner_id` guard block that the row-1 short-circuit skips; both are inside `start`',
     rowSeams: ['`owner_id` is not auto-stamped on INSERT', 'The whole security middleware short-circuits'],
   },
   {
     file: 'packages/objectql/src/engine.ts',
-    needle: 'if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit) return base;',
-    why: 'row 23 -- the early return the tenant-audit read feeds',
+    symbol: 'buildDriverOptions',
+    collapsesOntoRead: true,
+    why: 'row 24 -- the early return the tenant-audit read feeds, and where `bypassTenantAudit` is threaded to the driver',
     rowSeams: ['Tenant-audit warning silenced'],
   },
   {
     file: 'packages/objectql/src/engine.ts',
-    needle: 'if (isSystem && opts.bypassTenantAudit === undefined && !isTenantAuditInScope) {',
-    why: 'row 23 -- where `bypassTenantAudit` is threaded to the driver',
-    rowSeams: ['Tenant-audit warning silenced'],
-  },
-  {
-    file: 'packages/objectql/src/engine.ts',
-    needle: 'if (options?.strictReadonlyWrites === true) {',
-    why: 'row 21 -- the strict-drop refusal that never fires under elevation',
+    symbol: 'insert',
+    collapsesOntoRead: true,
+    why: 'row 22 -- the strict-drop refusal that never fires under elevation, and the strip-before-validation block the validation row cites',
     rowSeams: ['Strict-drop refusal never fires'],
   },
   {
     file: 'packages/objectql/src/readonly-strict-errors.ts',
-    needle: 'const READONLY_CLASS_REASONS',
-    why: 'row 21 -- the reason set the silent refusal would have used',
+    symbol: 'READONLY_CLASS_REASONS',
+    why: 'row 22 -- the reason set the silent refusal would have used',
     rowSeams: ['Strict-drop refusal never fires'],
   },
   {
     file: 'packages/plugins/plugin-security/src/system-write-guard.ts',
-    needle: 'if (!isUserContextWrite(context)) return;',
-    why: 'row 24 -- the bypass expressed through a helper rather than a direct read',
+    symbol: 'assertEngineOwnedWriteAllowed',
+    why: 'row 25 -- the bypass expressed through a helper rather than a direct read',
     rowSeams: ['append-only write guard bypassed'],
   },
   {
     file: 'packages/plugins/plugin-sharing/src/sharing-service.ts',
-    needle: "if (row.source != null && row.source !== 'manual') {",
-    why: 'row 34 -- the CONFLICT guard `revoke()` deletes in front of',
+    symbol: 'revoke',
+    collapsesOntoRead: true,
+    why: 'row 35 -- the CONFLICT guard `revoke()` deletes in front of, in the same function',
     rowSeams: ['`revoke()` deletes directly'],
   },
   {
     file: 'packages/services/service-automation/src/builtin/crud-nodes.ts',
-    needle: 'stampSystemInsertOwner(fields, dataCtx, data, objectName);',
-    why: 'row 60 -- the call site of the compensating owner stamp',
+    symbol: 'registerCrudNodes',
+    why: 'row 61 -- the call site of the compensating owner stamp',
     rowSeams: ['Automation flow data nodes re-add the `owner_id` stamp'],
   },
   {
     file: 'packages/objectql/src/registry.ts',
-    needle: 'export function applySystemFields(',
+    symbol: 'applySystemFields',
     why: 'rough edge 5 -- named as if it read the flag; it reads it zero times',
   },
   // ── Prose targets: "what `isSystem` does NOT do", and the rough edges ────────
   {
     file: 'packages/metadata-protocol/src/seed-loader.ts',
-    needle: 'so it must carry `skipTriggers` too.',
-    why: 'the rationale comment the triggers row cites',
+    symbol: 'writeDeferredReference',
+    why: 'the rationale comment the triggers row cites -- `isSystem` does NOT suppress trigger dispatch',
   },
   {
     file: 'packages/metadata-protocol/src/seed-loader.ts',
-    needle: 'does NOT suppress trigger dispatch, only `skipTriggers` does',
-    why: 'end of that rationale comment',
-  },
-  {
-    file: 'packages/metadata-protocol/src/seed-loader.ts',
-    needle: 'SEED_OPTIONS = { context: { isSystem: true, skipTriggers: true',
+    symbol: 'SEED_OPTIONS',
     why: 'the seed options that carry BOTH flags -- a producer, not a read',
   },
   {
     file: 'packages/spec/src/automation/flow.zod.ts',
-    needle: 'Declare `system` to make the elevation explicit.',
+    symbol: 'runAs',
     why: 'the flow-side declaration of the same distinction',
   },
   {
-    file: 'packages/objectql/src/engine.ts',
-    needle: '// Runs BEFORE validation on purpose: a value the caller was never',
-    why: 'start of the strip-before-validation block the validation row cites',
-  },
-  {
     file: 'packages/spec/src/data/field.zod.ts',
-    needle: "readonly: z.boolean().default(false).describe(",
+    symbol: 'readonly',
     why: '`preserveAudit` is the separate opt-in -- this is the `readonly` declaration',
   },
   {
     file: 'packages/services/service-automation/src/runtime-identity.ts',
-    needle: 'const userId = (dataCtx as RunIdentityContext).userId;',
-    why: 'audit stamping reads `userId`, not the flag',
-  },
-  {
-    file: 'packages/services/service-automation/src/runtime-identity.ts',
-    needle: 'if (!userId) return;',
-    why: 'the user-less system write that stamps nothing',
+    symbol: 'stampSystemInsertOwner',
+    collapsesOntoRead: true,
+    why: 'audit stamping reads `userId`, not the flag, and the user-less system write stamps nothing',
   },
   {
     file: 'packages/plugins/plugin-auth/src/last-admin-guard.ts',
-    needle: 'applies to EVERY context, `isSystem` included',
-    why: 'the guard that is NOT bypassed -- cited to refute "it bypasses every guard"',
+    symbol: null,
+    why: 'the guard that is NOT bypassed -- cited to refute "it bypasses every guard". The claim lives in the module docblock, which no declaration encloses, so this is the one FILE-LEVEL row',
   },
   {
     file: 'packages/rest/src/rest-server.ts',
-    needle: '"authenticated". `isSystem` flags are never set on inbound HTTP',
-    why: 'inbound HTTP cannot set the flag',
-  },
-  {
-    file: 'packages/rest/src/rest-server.ts',
-    needle: '`isSystem` is never set on inbound HTTP, so it cannot bypass.',
-    why: 'the second inbound seam',
+    symbol: 'enforceAuth',
+    collapsesOntoRead: true,
+    why: 'inbound HTTP cannot set the flag -- stated in the docblock and again inside the seam',
   },
   {
     file: 'packages/runtime/src/domains/actions.ts',
-    needle: '`isSystem` is never settable from the wire; internal',
-    why: 'an action body cannot set the flag',
+    symbol: 'handleActionsRequest',
+    collapsesOntoRead: true,
+    why: 'nor can an action body',
   },
 ];
 
@@ -794,7 +880,7 @@ export function checkRowReferences({ pageText, ledger = NON_READ_ANCHORS, pageRe
     const seams = row.rowSeams ?? [];
     if (mentions.length !== seams.length) {
       problems.push(
-        `[why-row-unkeyed] NON_READ_ANCHORS row for ${row.file} (needle \`${row.needle}\`) writes ` +
+        `[why-row-unkeyed] NON_READ_ANCHORS row for ${row.file} (\`#${row.symbol ?? '<file-level>'}\`) writes ` +
           `${mentions.length} row reference(s) in its \`why\` (${row.why}) but declares ${seams.length} ` +
           '`rowSeams`. Every `row N` in a `why` needs the seam it is about, in the order it is ' +
           'written -- an unkeyed number is held by nothing and reads as current forever.'
@@ -848,6 +934,30 @@ export function checkRowReferences({ pageText, ledger = NON_READ_ANCHORS, pageRe
  * reworded out from under the check, which is how a counts gate goes quietly
  * vacuous.
  */
+/**
+ * How many distinct symbols the census's read sites live in — the population the
+ * page can actually ANCHOR, which is smaller than the site count wherever several
+ * reads share a symbol.
+ */
+function distinctSymbolCount(census) {
+  let total = 0;
+  for (const entry of symbolPopulation(census).values()) total += entry.symbols.size;
+  return total;
+}
+
+/**
+ * How many files hold more than one read inside a single symbol — the size of the
+ * precision this page trades away, kept enforced so the sentence that prices it
+ * cannot quietly stop being true in either direction.
+ */
+function collapsingFileCount(census) {
+  let files = 0;
+  for (const entry of symbolPopulation(census).values()) {
+    if (entry.symbols.size + (entry.fileLevel ? 1 : 0) !== entry.sites) files += 1;
+  }
+  return files;
+}
+
 export const DECLARED_COUNTS = [
   {
     id: 'headline-sites',
@@ -928,6 +1038,30 @@ export const DECLARED_COUNTS = [
     why: 'the decomposition table: file count',
   },
   {
+    id: 'table-symbols',
+    pattern: /\| — the distinct symbols those reads live in — what this page anchors \|\s*(\d+) \|/,
+    value: (c) => distinctSymbolCount(c),
+    why: 'the decomposition table: what this page can actually anchor, after the collapse',
+  },
+  {
+    id: 'table-collapsing-files',
+    pattern: /\| — of those files, the ones holding more than one read in one symbol \|\s*(\d+) \|/,
+    value: (c) => collapsingFileCount(c),
+    why: 'the decomposition table: the size of the declared precision loss',
+  },
+  {
+    id: 'precision-collapsing-files',
+    pattern: /\*\*(\d+)\*\* of the \*\*\d+\*\*\s*\n?\s*anchored files hold more than one read/,
+    value: (c) => collapsingFileCount(c),
+    why: 'the prose that prices the precision loss where a reader meets the anchors',
+  },
+  {
+    id: 'precision-anchored-files',
+    pattern: /\*\*\d+\*\* of the \*\*(\d+)\*\*\s*\n?\s*anchored files hold more than one read/,
+    value: (c) => c.files.length,
+    why: 'the denominator of that same sentence',
+  },
+  {
     id: 'ruling-sites',
     pattern: /`isSystem` is a published contract with (\d+) read sites/,
     value: (c) => c.sites.length,
@@ -940,6 +1074,73 @@ export const DECLARED_COUNTS = [
     why: "the ruling's package count",
   },
 ];
+
+/**
+ * The WRITE half of `DECLARED_COUNTS` (#16919 direction 1).
+ *
+ * `evaluate()`'s COUNTS check (below) already computes, for every declared
+ * sentence, exactly the value it should hold — `declared.value(census, page)`
+ * — and only ever uses it to compare. Two branches independently hand-typing
+ * the same freshly-computed number into the same sentence text-merge clean and
+ * silently wrong on the SUM: main and a sibling PR each bumped the same seven
+ * sentences 106 → 107 for two different new reads, and the merged tree held
+ * 108. The fix in that shape is never "type the right number" — it is "stop
+ * typing it": this function performs the identical `pattern`/`value` lookup
+ * COUNTS already runs, and writes the result back instead of only comparing.
+ *
+ * Pure — a text in, a text out, plus what changed and what could not be
+ * derived. The caller decides whether to persist `text` or to refuse on a
+ * non-empty `errors`; nothing here touches the filesystem, so `--self-test`
+ * can drive it on a fixture exactly as it drives `evaluate()`.
+ *
+ * ⛔ Deliberately narrow, same rule as `check:generated --fix` elsewhere in
+ * this repo (see AGENTS.md, "Touched `packages/spec`?"): only a MISMATCHED
+ * count is rewritten, so a page where every count already agrees with the
+ * census comes back byte-identical — idempotent by construction, not merely
+ * in practice (`--self-test`'s IDEMPOTENCE case proves it on the real page).
+ * `UNENFORCED_TEXT_COUNTS` is deliberately NOT in scope: those six rows count
+ * whole-corpus TEXT, not the elevation contract, and are unenforced by design
+ * (see that export) — regenerating them would silently start enforcing a
+ * population this gate has already measured and rejected as noise.
+ *
+ * @param {{ pageText: string, census: object, declaredCounts?: typeof DECLARED_COUNTS }} args
+ * @returns {{ text: string, rewrites: {id: string, from: string, to: string}[], errors: string[] }}
+ */
+export function regenerateDeclaredCounts({ pageText, census, declaredCounts = DECLARED_COUNTS }) {
+  let text = pageText;
+  const rewrites = [];
+  const errors = [];
+  for (const declared of declaredCounts) {
+    // `d` adds match INDICES (Node >=16) so only the captured digits are
+    // spliced out -- never the surrounding sentence, which stays hand-written
+    // prose and must survive byte-for-byte on every run that changes nothing.
+    const flags = declared.pattern.flags.includes('d') ? declared.pattern.flags : `${declared.pattern.flags}d`;
+    const re = new RegExp(declared.pattern.source, flags);
+    const match = re.exec(text);
+    if (!match) {
+      errors.push(
+        `[count-pattern-unmatched] the page no longer carries the \`${declared.id}\` sentence ` +
+          `(${declared.why}) -- nothing was rewritten for it. Update the pattern together with the wording.`
+      );
+      continue;
+    }
+    const actual = declared.value(census, text);
+    if (!Number.isInteger(actual) || actual < 0) {
+      errors.push(
+        `[count-underivable] \`${declared.id}\` could not be derived (${declared.why}) -- the page ` +
+          'structure it reads is gone; nothing was rewritten for it.'
+      );
+      continue;
+    }
+    const stated = match[1];
+    const replacement = String(actual);
+    if (stated === replacement) continue;
+    const [start, end] = match.indices[1];
+    text = text.slice(0, start) + replacement + text.slice(end);
+    rewrites.push({ id: declared.id, from: stated, to: replacement });
+  }
+  return { text, rewrites, errors };
+}
 
 /**
  * ⛔ The six numbers this gate deliberately does NOT hold to the census, listed
@@ -1064,25 +1265,23 @@ export function carryOnwardRowCount(pageText) {
   return rows.length;
 }
 
-/** Tracked files, for anchor resolution. */
-export function trackedFiles(root = ROOT) {
-  const files = execFileSync('git', ['-C', root, 'ls-files'], {
-    encoding: 'utf8',
-    maxBuffer: 1 << 28,
-  })
-    .split('\n')
-    .filter(Boolean);
-  if (files.length === 0) throw new Error('check-system-context-census: `git ls-files` listed nothing');
-  return files;
-}
-
 /**
- * Locate every `NON_READ_ANCHORS` row by its needle.
+ * Resolve every `NON_READ_ANCHORS` row against its file, through the SHARED
+ * resolution rule.
  *
- * @returns {{ located: Map<string, object>, problems: string[] }} keyed `file:line`
+ * A row is stale when its file cannot be read, or when the file no longer
+ * declares its symbol -- the same predicate `sweepCorpus` applies to the page's
+ * own anchors, so the ledger and the page can never mean different things by
+ * "the symbol is there". A `symbol: null` row only requires its file to exist.
+ *
+ * @param {{ file: string, symbol: string|null, why: string, collapsesOntoRead?: boolean }[]} rows
+ * @param {(relPath: string) => string} readFile
+ * @param {Map<string, { symbols: Set<string> }>} population  the census, by file
+ * @returns {{ declared: Map<string, object[]>, problems: string[] }} keyed `file#symbol`, or `file`
  */
-export function locateNonReadAnchors(rows, readFile) {
-  const located = new Map();
+export function resolveNonReadAnchors(rows, readFile, population = new Map()) {
+  /** @type {Map<string, object[]>} */
+  const declared = new Map();
   const problems = [];
   for (const row of rows) {
     let body;
@@ -1095,27 +1294,43 @@ export function locateNonReadAnchors(rows, readFile) {
       );
       continue;
     }
-    const hits = [];
-    body.split('\n').forEach((line, i) => {
-      if (line.includes(row.needle)) hits.push(i + 1);
-    });
-    if (hits.length === 0) {
-      problems.push(
-        `[ledger-stale] NON_READ_ANCHORS row for ${row.file} no longer finds its needle ` +
-          `\`${row.needle}\` -- the construct it excuses is gone or reworded (${row.why}).`
-      );
-      continue;
+    if (row.symbol !== null && row.symbol !== undefined) {
+      if (!symbolResolutionClass(body, row.file, row.symbol)) {
+        problems.push(
+          `[ledger-stale] NON_READ_ANCHORS row for ${row.file} names \`#${row.symbol}\`, which that ` +
+            `file no longer declares -- the construct it excuses was renamed or removed (${row.why}).`
+        );
+        continue;
+      }
+      /* ⭐ The overlap is DECLARED, never inferred. A row whose symbol is also a
+       * census read symbol excuses nothing (POPULATION already requires that
+       * anchor); saying so in the row is what stops the next reader from taking
+       * it for a live exclusion, and holding the declaration to the census in
+       * BOTH directions is what stops the declaration itself from rotting. */
+      const collapses = population.get(row.file)?.symbols.has(row.symbol) === true;
+      if (collapses && row.collapsesOntoRead !== true) {
+        problems.push(
+          `[ledger-undeclared-collapse] NON_READ_ANCHORS row for ${row.file}#${row.symbol} shares its ` +
+            'symbol with a census elevation read, so it no longer excuses an anchor. Declare ' +
+            '`collapsesOntoRead: true` on the row, or re-key it to the symbol it is really about.'
+        );
+        continue;
+      }
+      if (!collapses && row.collapsesOntoRead === true) {
+        problems.push(
+          `[ledger-stale-collapse] NON_READ_ANCHORS row for ${row.file}#${row.symbol} declares ` +
+            '`collapsesOntoRead`, but the census finds no elevation read in that symbol any more -- ' +
+            'the read moved or was deleted, and this row is excusing an anchor again without anyone ' +
+            'having re-read it.'
+        );
+        continue;
+      }
     }
-    if (hits.length > 1) {
-      problems.push(
-        `[ledger-ambiguous] NON_READ_ANCHORS needle \`${row.needle}\` matches ${hits.length} ` +
-          `lines of ${row.file} (${hits.join(', ')}) -- lengthen it until it is unique.`
-      );
-      continue;
-    }
-    located.set(`${row.file}:${hits[0]}`, row);
+    const key = row.symbol === null || row.symbol === undefined ? row.file : `${row.file}#${row.symbol}`;
+    if (!declared.has(key)) declared.set(key, []);
+    declared.get(key).push(row);
   }
-  return { located, problems };
+  return { declared, problems };
 }
 
 /**
@@ -1126,8 +1341,8 @@ export function locateNonReadAnchors(rows, readFile) {
 export function evaluate({
   pageText,
   census,
-  tracked,
   readFile,
+  sweep,
   ledger = NON_READ_ANCHORS,
   declaredCounts = DECLARED_COUNTS,
   unenforcedCounts = UNENFORCED_TEXT_COUNTS,
@@ -1136,10 +1351,10 @@ export function evaluate({
 }) {
   const problems = [];
 
-  const anchors = extractLineAnchors(pageText);
+  const { anchors } = extractAnchors(pageText);
   if (anchors.length === 0) {
     problems.push(
-      '[no-anchors] the page yielded ZERO `file:line` anchors -- the reader stopped ' +
+      '[no-anchors] the page yielded ZERO anchors -- the reader stopped ' +
         'recognising the page rather than the page being clean.'
     );
     return { problems, stats: { anchors: 0 } };
@@ -1155,86 +1370,125 @@ export function evaluate({
     );
   }
 
-  // ── A. RESOLUTION ───────────────────────────────────────────────────────────
-  /** @type {Map<string, object[]>} `file:line` -> anchors pointing there */
-  const anchored = new Map();
-  const fileLengths = new Map();
-  for (const anchor of anchors) {
-    const resolved = resolveAnchorFile(anchor.spelling, tracked);
-    if ('error' in resolved) {
-      problems.push(
-        resolved.error === 'ambiguous'
-          ? `[ambiguous-anchor] ${PAGE}:${anchor.docLine} spells \`${anchor.spelling}\`, which ` +
-            `matches ${resolved.matches.length} tracked files (${resolved.matches.join(', ')}) -- ` +
-            'lengthen the spelling until it is unique.'
-          : `[unresolved-anchor] ${PAGE}:${anchor.docLine} spells \`${anchor.spelling}\`, which ` +
-            'matches no tracked file -- the file moved or was deleted.'
-      );
-      continue;
-    }
-    const path = resolved.path;
-    if (!fileLengths.has(path)) {
-      try {
-        fileLengths.set(path, readFile(path).split('\n').length);
-      } catch {
-        fileLengths.set(path, -1);
-      }
-    }
-    const length = fileLengths.get(path);
-    if (length === -1) {
-      problems.push(`[unreadable-anchor-target] ${path} cannot be read (anchored at ${PAGE}:${anchor.docLine}).`);
-      continue;
-    }
-    if (anchor.line < 1 || anchor.line > length) {
-      problems.push(
-        `[out-of-range-anchor] ${PAGE}:${anchor.docLine} anchors ${path}:${anchor.line}, ` +
-          `but that file has ${length} lines.`
-      );
-      continue;
-    }
-    const key = `${path}:${anchor.line}`;
-    if (!anchored.has(key)) anchored.set(key, []);
-    anchored.get(key).push(anchor);
-  }
-
-  for (const citation of extractPathCitations(pageText)) {
-    const resolved = resolveAnchorFile(citation.spelling, tracked);
-    if ('error' in resolved) {
-      problems.push(
-        `[unresolved-citation] ${PAGE}:${citation.docLine} cites \`${citation.spelling}\`, ` +
-          `which ${resolved.error === 'ambiguous' ? 'matches several tracked files' : 'matches no tracked file'}.`
-      );
-    }
-  }
-
-  // ── B. POPULATION — ⭐ the mandatory direction ───────────────────────────────
-  const sites = siteKeys(census);
-  const missing = [...sites].filter((key) => !anchored.has(key)).sort();
-  for (const key of missing) {
-    const site = census.sites.find((s) => `${s.file}:${s.line}` === key);
+  // ── A. RESOLUTION — delegated whole to the shared resolver ──────────────────
+  //
+  // ⭐ Not re-implemented here, and not optional either. `sweepCorpus` over
+  // `CORPUS` is what decides that a path is tracked, that a `#symbol` has a
+  // declaration site, and that a surviving line number is a finding. A sweep this
+  // gate could not run is a REFUSAL: "could not check" reported as "checked and
+  // clean" is the silently-degrading verifier this repo refuses on principle.
+  if (!sweep || !Array.isArray(sweep.findings)) {
     problems.push(
-      `[site-without-a-row] ${key} reads \`${site.receiver}.isSystem\` and NO row on the page ` +
-        `anchors it — \`${site.text.slice(0, 90)}\`. ` +
-        'Either the page is missing this elevation behaviour, or an existing row rotted off it.'
+      '[no-sweep] the shared symbol-anchor resolver was not run over this page, so NOTHING here ' +
+        'resolved an anchor. Run `sweepCorpus(CORPUS, root)` and pass its result -- a missing sweep ' +
+        'is a failure, never a skip.'
     );
+    return { problems, stats: { anchors: anchors.length } };
+  }
+  for (const finding of sweep.findings) {
+    if (finding.soft) continue;
+    problems.push(`[${finding.kind}] ${finding.doc}:${finding.line}  ${finding.raw} -- ${finding.detail}`);
+  }
+
+  // ── the page's own citations, as SETS ───────────────────────────────────────
+  /** @type {Map<string, Set<string>>} path -> the symbols the page cites into it */
+  const pageSymbols = new Map();
+  /** @type {Set<string>} paths the page cites with NO symbol -- file-level anchors */
+  const pageFileLevel = new Set();
+  for (const anchor of anchors) {
+    if (anchor.repo) continue; // cross-repo: reported by the sweep, resolved nowhere here
+    if (!anchor.symbol) {
+      pageFileLevel.add(anchor.path);
+      continue;
+    }
+    if (!pageSymbols.has(anchor.path)) pageSymbols.set(anchor.path, new Set());
+    pageSymbols.get(anchor.path).add(anchor.symbol);
+  }
+
+  const population = symbolPopulation(census);
+  const { declared, problems: ledgerProblems } = resolveNonReadAnchors(ledger, readFile, population);
+  problems.push(...ledgerProblems);
+
+  /** The symbols the page is REQUIRED to cite, per file: census ∪ ledger. */
+  /** @type {Map<string, Set<string>>} */
+  const required = new Map();
+  const requireSymbol = (file, symbol) => {
+    if (!required.has(file)) required.set(file, new Set());
+    required.get(file).add(symbol);
+  };
+  for (const [file, entry] of population) for (const symbol of entry.symbols) requireSymbol(file, symbol);
+  for (const key of declared.keys()) {
+    const at = key.indexOf('#');
+    if (at !== -1) requireSymbol(key.slice(0, at), key.slice(at + 1));
+  }
+
+  // ── B. POPULATION — ⭐ the mandatory direction, per FILE ─────────────────────
+  //
+  // Two halves, and the second is what makes the first more than "the file is
+  // mentioned somewhere": every file with a read must be anchored, and the SET of
+  // symbols cited into it must equal the set required. Reporting the set
+  // difference rather than only the counts is deliberate -- the counts are equal
+  // exactly when the sets are, and a count alone cannot tell an author WHICH
+  // symbol to write.
+  const missing = [];
+  for (const [file, entry] of [...population].sort()) {
+    const cited = pageSymbols.get(file) ?? new Set();
+    const need = required.get(file) ?? new Set();
+    if (cited.size === 0 && !pageFileLevel.has(file)) {
+      missing.push(file);
+      problems.push(
+        `[file-without-a-row] ${file} holds ${entry.sites} elevation read site(s) in ` +
+          `${entry.symbols.size} symbol(s) (${[...entry.symbols].join(', ') || 'none nameable'}) and NO ` +
+          'anchor on the page points into it at all. Either the page is missing this file entirely, ' +
+          'or every row that cited it rotted off.'
+      );
+      continue;
+    }
+    for (const symbol of [...entry.symbols].sort()) {
+      if (cited.has(symbol)) continue;
+      const sites = census.sites.filter((site) => site.file === file && site.symbol === symbol);
+      missing.push(`${file}#${symbol}`);
+      problems.push(
+        `[site-without-a-row] ${file}#${symbol} holds ${sites.length} elevation read(s) ` +
+          `(\`${(sites[0]?.text ?? '').slice(0, 90)}\`) and no row on the page anchors it. ` +
+          `This file cites ${cited.size} symbol(s), the census and the ledger require ${need.size}. ` +
+          'Either the page is missing this elevation behaviour, or a row rotted off it.'
+      );
+    }
+    /* A read with no nameable enclosing declaration is anchored at FILE level --
+     * the grammar's own fallback, and the only honest anchor for it. Today the
+     * census produces none of these; the branch is here so that the first one to
+     * arrive is a named refusal rather than a shape nothing considered. */
+    if (entry.fileLevel && !pageFileLevel.has(file)) {
+      missing.push(file);
+      problems.push(
+        `[site-without-a-file-anchor] ${file} holds an elevation read inside no nameable declaration, ` +
+          'so it needs a FILE-LEVEL anchor here (the bare path, no `#symbol`) and the page carries none.'
+      );
+    }
   }
 
   // ── D. CLASSIFICATION ───────────────────────────────────────────────────────
-  const { located, problems: ledgerProblems } = locateNonReadAnchors(ledger, readFile);
-  problems.push(...ledgerProblems);
-  const unexplained = [...anchored.keys()].filter((key) => !sites.has(key) && !located.has(key)).sort();
-  for (const key of unexplained) {
-    problems.push(
-      `[anchor-is-not-a-read-site] the page anchors ${key}, which the census does not call an ` +
-        'elevation read and NON_READ_ANCHORS does not declare. Either the line rotted, or the ' +
-        'citation is deliberate and needs a ledger row with a needle.'
-    );
+  const unexplained = [];
+  for (const [file, cited] of [...pageSymbols].sort()) {
+    const need = required.get(file) ?? new Set();
+    for (const symbol of [...cited].sort()) {
+      if (need.has(symbol)) continue;
+      unexplained.push(`${file}#${symbol}`);
+      problems.push(
+        `[anchor-is-not-a-read-site] the page anchors ${file}#${symbol}, which the census does not ` +
+          'call an elevation read and NON_READ_ANCHORS does not declare. Either the symbol was ' +
+          'renamed under the row, or the citation is deliberate and needs a ledger row.'
+      );
+    }
   }
-  const unusedLedger = [...located.entries()].filter(([key]) => !anchored.has(key));
-  for (const [key, row] of unusedLedger) {
+  for (const [key, rows] of declared) {
+    const at = key.indexOf('#');
+    const used = at === -1 ? pageFileLevel.has(key) : pageSymbols.get(key.slice(0, at))?.has(key.slice(at + 1));
+    if (used) continue;
     problems.push(
-      `[ledger-row-unused] NON_READ_ANCHORS excuses ${key} (${row.why}) but no anchor on the page ` +
-        'points there -- the row outlived the citation, or the anchor rotted off it.'
+      `[ledger-row-unused] NON_READ_ANCHORS excuses ${key} (${rows.map((r) => r.why).join('; ')}) but no ` +
+        `anchor on the page points there -- the row outlived the citation, or the anchor was re-keyed.`
     );
   }
 
@@ -1294,200 +1548,66 @@ export function evaluate({
   const rowRefs = checkRowReferences({ pageText, ledger, pageRefs: pageRowReferences });
   problems.push(...rowRefs.problems);
 
+  let citedSymbols = 0;
+  for (const cited of pageSymbols.values()) citedSymbols += cited.size;
+  let requiredSymbols = 0;
+  for (const need of required.values()) requiredSymbols += need.size;
+  let censusSymbols = 0;
+  let collapsingFiles = 0;
+  for (const entry of population.values()) {
+    censusSymbols += entry.symbols.size;
+    if (entry.symbols.size + (entry.fileLevel ? 1 : 0) !== entry.sites) collapsingFiles += 1;
+  }
+
   return {
     problems,
     stats: {
       anchors: anchors.length,
-      anchorTargets: anchored.size,
-      sites: sites.size,
+      citedSymbols,
+      requiredSymbols,
+      censusSymbols,
+      collapsingFiles,
+      fileLevelAnchors: pageFileLevel.size,
+      sites: census.sites.length,
       packages: census.packages.length,
       files: census.files.length,
-      nonReadAnchors: located.size,
+      nonReadAnchors: declared.size,
       missing: missing.length,
+      unexplained: unexplained.length,
       rowRefsHeld: rowRefs.held.page + rowRefs.held.why,
       rowRefsUnheld: rowRefs.held.unheld,
     },
   };
 }
 
-/** A line list for a refusal message, capped so one bad file cannot flood the log. */
-function fmtLines(lines, cap = 14) {
-  if (lines.length === 0) return '(none)';
-  const shown = lines.slice(0, cap).join(', ');
-  return lines.length > cap ? `${shown}, … (+${lines.length - cap} more)` : shown;
-}
-
-/**
- * The refusal, with everything it compared -- BOTH counts, BOTH target classes,
- * and the set difference.
- *
- * ⭐ Why the sets and not just the counts. Twice now this refusal has been read as
- * "your diff added or removed an elevation read site" when nothing of the sort had
- * happened, and the output gave the author no way to tell which case they were in
- * short of running `isystem-census.mjs --json` in two trees by hand. The last line
- * settles it mechanically: if NOTHING is already anchored the page is uniformly
- * displaced and some citation is unaccounted for; if everything but one target is
- * already anchored, that one target is the site that arrived.
- */
-function describeRefusal({ path, pageLines, censusLines, ledgerLines, targets, located }) {
-  const anchoredSet = new Set(pageLines);
-  const targetSet = new Set(targets);
-  const alreadyAnchored = targets.filter((line) => anchoredSet.has(line));
-  const unanchored = targets.filter((line) => !anchoredSet.has(line));
-  const stray = pageLines.filter((line) => !targetSet.has(line));
-  const why = ledgerLines
-    .map((line) => `${line} (${located.get(`${path}:${line}`)?.why ?? 'declared non-read'})`)
-    .join('; ');
-  return (
-    `${path}: the page anchors ${pageLines.length} distinct line(s) into this file, but the tree ` +
-    `holds ${targets.length} anchorable line(s) -- ${censusLines.length} census read site(s) plus ` +
-    `${ledgerLines.length} NON_READ_ANCHORS citation(s). The POPULATION changed, this is not a ` +
-    'shift. A row has to be written or deleted by hand.\n' +
-    `       page anchors ......... ${fmtLines(pageLines)}\n` +
-    `       census read sites .... ${fmtLines(censusLines)}\n` +
-    `       ledger-excused ....... ${why || '(none)'}\n` +
-    `       already anchored ..... ${alreadyAnchored.length} of ${targets.length} target(s)\n` +
-    `       target, NO anchor .... ${fmtLines(unanchored)}\n` +
-    `       anchor, NO target .... ${fmtLines(stray)}`
-  );
-}
-
-/**
- * Rewrite rotted read-site anchors and ledger anchors in place.
- *
- * Only pure shifts. Per file the page's DISTINCT anchor lines are compared with the
- * union of the two classes of line this page is allowed to anchor -- the census's
- * read sites and the `NON_READ_ANCHORS` citations -- and rewritten by order when
- * the two counts agree. A population change is left for a human.
- *
- * ## ⛔ Why the ledger cannot be subtracted by LINE (#13490)
- *
- * The obvious partition -- "a page anchor is a read anchor unless it sits on a
- * ledger line" -- compares two DIFFERENT coordinate systems. The page's anchors are
- * pre-shift, by construction: rot is the only reason `--fix` is running. The ledger
- * lines are post-shift, because a row locates itself by NEEDLE in the current tree.
- * So a file whose ledger-excused citation also moved has that citation counted as a
- * read anchor, and the gate reports a POPULATION change over a population that
- * never moved. Measured twice, in two lanes, on two different files:
- *
- *   security-plugin.ts  7 read sites + 1 ledger citation, all displaced +20/+19 by
- *                       an unrelated bootstrap edit; zero `isSystem` lines added or
- *                       removed. Refusal: "page anchors 8 distinct read line(s),
- *                       census finds 7". (PR #13514, cost a patch round.)
- *   rest-server.ts      6 read sites + 2 ledger citations, displaced +3/+11 by a
- *                       merge. Refusal: "page anchors 7 ... census finds 6", with
- *                       the contradicting `[ledger-row-unused]` line in the SAME
- *                       run's output.
- *
- * ⚠️ And it is wrong in the other direction too, which is the dangerous one: a
- * stale READ anchor that happens to land on a line the ledger now occupies was
- * SUBTRACTED, so the counts could agree by cancellation and the rewrite would map
- * the surviving anchors onto each other's rows -- a page that is wrong and GREEN,
- * because both classes stay covered. That crossing is real: on the second
- * occurrence `rest-server.ts:1267` was simultaneously the second inbound seam's new
- * home and a read row's stale anchor.
- *
- * ⭐ Comparing the UNION removes both directions at once, and buys a postcondition
- * the per-class comparison cannot state: the rewrite is a BIJECTION from the page's
- * distinct anchor lines onto the file's anchorable lines, so every census site is
- * anchored, every ledger row is used and no anchor is unexplained -- for every file
- * `--fix` touches, `evaluate` is clean by construction. That is why the union is
- * the safer of the two shapes, and it is the one taken: it also refuses when a
- * ledger citation was added or dropped without the page following, which comparing
- * reads alone would have rewritten straight past.
- *
- * ⛔ What it still cannot see, stated rather than papered over: alignment is by
- * ORDER, so a pure displacement is reconstructed exactly, but a REORDERING that
- * moves a cited construct past another one inside the same file is indistinguishable
- * from a shift on line numbers alone. No line-only tool can tell those apart -- and
- * `evaluate` cannot either, since both classes stay covered. Rows are matched to
- * lines by a human there, as they always were.
- *
- * @returns {{ text: string, rewrites: string[], refused: string[] }}
- */
-export function fixAnchors({ pageText, census, tracked, readFile, ledger = NON_READ_ANCHORS }) {
-  const anchors = extractLineAnchors(pageText);
-  const { located } = locateNonReadAnchors(ledger, readFile);
-  /** ledger target lines, per file */
-  const ledgerByFile = new Map();
-  for (const key of located.keys()) {
-    const at = key.lastIndexOf(':');
-    const file = key.slice(0, at);
-    if (!ledgerByFile.has(file)) ledgerByFile.set(file, []);
-    ledgerByFile.get(file).push(Number(key.slice(at + 1)));
-  }
-
-  /** @type {Map<object, string>} anchor -> resolved path */
-  const paths = new Map();
-  for (const anchor of anchors) {
-    const resolved = resolveAnchorFile(anchor.spelling, tracked);
-    if ('path' in resolved) paths.set(anchor, resolved.path);
-  }
-
-  /** @type {Map<object, number>} anchor -> new line */
-  const newLine = new Map();
-  const refused = [];
-  const byFile = new Map();
-  for (const anchor of anchors) {
-    const path = paths.get(anchor);
-    if (!path) continue;
-    if (!byFile.has(path)) byFile.set(path, []);
-    byFile.get(path).push(anchor);
-  }
-  for (const [path, fileAnchors] of byFile) {
-    const ledgerLines = [...new Set(ledgerByFile.get(path) ?? [])].sort((a, b) => a - b);
-    const censusLines = [...new Set(census.sites.filter((s) => s.file === path).map((s) => s.line))].sort(
-      (a, b) => a - b
-    );
-    // ⭐ The comparison is against the UNION of both target classes, in one pass.
-    // A row cites the same line more than once (`:274` appears in the table AND in
-    // the rough edges), so the comparable unit is a DISTINCT line, not an anchor.
-    const targets = [...new Set([...censusLines, ...ledgerLines])].sort((a, b) => a - b);
-    const pageLines = [...new Set(fileAnchors.map((a) => a.line))].sort((a, b) => a - b);
-    if (pageLines.length !== targets.length) {
-      refused.push(describeRefusal({ path, pageLines, censusLines, ledgerLines, targets, located }));
-      continue;
-    }
-    const shift = new Map(pageLines.map((line, i) => [line, targets[i]]));
-    for (const anchor of fileAnchors) {
-      const to = shift.get(anchor.line);
-      if (to !== undefined && to !== anchor.line) newLine.set(anchor, to);
-    }
-  }
-
-  // Apply, latest anchor first, so earlier offsets stay valid.
-  const rewrites = [];
-  let text = pageText;
-  const ordered = [...newLine.keys()].sort((a, b) => b.docLine - a.docLine || b.raw.length - a.raw.length);
-  for (const anchor of ordered) {
-    const to = newLine.get(anchor);
-    const from = anchor.raw;
-    const replacement =
-      anchor.kind === 'full' ? `${anchor.spelling}:${to}` : anchor.kind === 'continuation' ? `:${to}` : `${to}`;
-    const needle = `\`${from}\``;
-    const at = text.indexOf(needle, offsetOfDocLine(text, anchor.docLine));
-    if (at === -1) {
-      refused.push(`could not re-find \`${from}\` at ${PAGE}:${anchor.docLine}`);
-      continue;
-    }
-    text = `${text.slice(0, at)}\`${replacement}\`${text.slice(at + needle.length)}`;
-    rewrites.push(`${PAGE}:${anchor.docLine}  \`${from}\` -> \`${replacement}\``);
-  }
-  return { text, rewrites, refused };
-}
-
-function offsetOfDocLine(text, docLine) {
-  let offset = 0;
-  for (let n = 1; n < docLine; n += 1) {
-    const at = text.indexOf('\n', offset);
-    if (at === -1) return offset;
-    offset = at + 1;
-  }
-  return offset;
-}
-
 function readFileAt(root) {
   return (relPath) => readFileSync(join(root, relPath), 'utf8');
+}
+
+/**
+ * ⛔ ANCHORS have nothing to repair, and `--fix` says so instead of exiting 0 in
+ * silence about that half.
+ *
+ * Before #15921 this rewrote line numbers after a pure shift, which was the
+ * common repair and a real one. Symbol anchors encode no position, so the shift
+ * that repair existed for cannot happen: an edit above a site moves nothing this
+ * page writes. A remaining anchor red is a human edit -- a rename, an arrived
+ * read, a vanished one -- and none of them is mechanically derivable from the
+ * tree. COUNTS are the other half, and `run()` handles those separately below
+ * (#16919) -- this function is deliberately scoped to what stays a human edit.
+ *
+ * ⭐ The flag stays RECOGNISED on purpose. `gen:system-context-census` and
+ * `scripts/regen-artifacts.mjs` both name it, and a flag that silently became a
+ * no-op would leave both reading as a working regeneration path. This prints what
+ * it did not do, then returns the ordinary verdict.
+ */
+function reportNoAnchorFix() {
+  process.stdout.write(
+    'check-system-context-census --fix: anchors have nothing to rewrite — this page carries no line\n' +
+      '  numbers. Anchors are `path#symbol` (scripts/symbol-anchors.mjs), so an unrelated edit above a\n' +
+      '  site cannot rot one and there is no mechanical repair to apply there. A remaining anchor red is\n' +
+      '  a human edit: a renamed symbol, a read that arrived, or a read that vanished (add its row).\n'
+  );
 }
 
 function run({ fix = false } = {}) {
@@ -1499,34 +1619,74 @@ function run({ fix = false } = {}) {
     process.stderr.write(`::error::[unreadable-page] ${PAGE} could not be read -- ${error.message}\n`);
     return 1;
   }
-  const census = runCensus({ root: ROOT });
-  const tracked = trackedFiles(ROOT);
 
-  if (fix) {
-    const { text, rewrites, refused } = fixAnchors({ pageText, census, tracked, readFile });
-    if (rewrites.length > 0) writeFileSync(join(ROOT, PAGE), text);
-    for (const line of rewrites) process.stdout.write(`  re-anchored ${line}\n`);
-    for (const line of refused) process.stdout.write(`  ⛔ NOT fixable: ${line}\n`);
-    process.stdout.write(`check-system-context-census --fix: ${rewrites.length} anchor(s) rewritten\n`);
-    pageText = text;
+  const census = runCensus({ root: ROOT });
+  /* RESOLUTION is the shared resolver's, run once, over this gate's corpus
+   * registration. `evaluate` reports what it found and re-decides none of it. */
+  const sweep = sweepCorpus(CORPUS, ROOT);
+  if (sweep.counts.docs === 0) {
+    process.stderr.write(
+      `::error::[corpus-empty] the \`${CORPUS.id}\` corpus swept ZERO documents -- ${PAGE} moved out ` +
+        'from under this gate, which would otherwise report a clean sweep over nothing.\n'
+    );
+    return 1;
   }
 
-  const { problems, stats } = evaluate({ pageText, census, tracked, readFile });
+  if (fix) {
+    // ── COUNTS: the one half of `--fix` that IS mechanical (#16919 direction 1) ──
+    //
+    // Reuses the exact `DECLARED_COUNTS` computation the COUNTS check below
+    // runs, as a write instead of a comparison -- see `regenerateDeclaredCounts`.
+    // A count that cannot be derived or located refuses loudly (`errors`) rather
+    // than writing a partial page: a generator that writes six of seven numbers
+    // and silently skips the seventh is worse than one that writes none.
+    const { text, rewrites, errors } = regenerateDeclaredCounts({ pageText, census });
+    if (errors.length > 0) {
+      for (const error of errors) process.stderr.write(`::error::${error}\n`);
+      process.stderr.write(
+        `\ncheck-system-context-census --fix: ${errors.length} declared count(s) could not be ` +
+          'regenerated -- the page wording changed out from under the pattern that reads it. Fix the ' +
+          'wording and the pattern together (by hand), then re-run --fix.\n'
+      );
+      return 1;
+    }
+    if (rewrites.length > 0) {
+      writeFileSync(join(ROOT, PAGE), text, 'utf8');
+      pageText = text;
+      process.stdout.write(
+        `check-system-context-census --fix: regenerated ${rewrites.length} declared count(s) from the ` +
+          `census: ${rewrites.map((r) => `${r.id} ${r.from}->${r.to}`).join(', ')}.\n`
+      );
+    } else {
+      process.stdout.write(
+        'check-system-context-census --fix: every declared count already matches the census -- nothing ' +
+          'to rewrite there.\n'
+      );
+    }
+    reportNoAnchorFix();
+  }
+
+  const { problems, stats } = evaluate({ pageText, census, readFile, sweep });
   for (const problem of problems) process.stderr.write(`::error::${problem}\n`);
   if (problems.length > 0) {
     process.stderr.write(
       `\ncheck-system-context-census: ${problems.length} problem(s) over ${stats.anchors} anchors ` +
         `and ${stats.sites} census sites.\n` +
-        `Re-run the census with \`node scripts/isystem-census.mjs --json\`; pure line rot is ` +
-        `repaired by \`node scripts/check-system-context-census.mjs --fix\`.\n`
+        'Re-run the census with `node scripts/isystem-census.mjs --json`. A `[declared-count]` mismatch ' +
+        'is mechanical -- `pnpm gen:system-context-census` (`--fix`) rewrites it from the census. ' +
+        '⛔ Everything else here is a human edit.\n' +
+        `\nThe anchor grammar:\n  ${ANCHOR_GRAMMAR}\n`
     );
     return 1;
   }
   process.stdout.write(
     `check-system-context-census: OK — ${stats.sites} elevation read sites in ${stats.packages} ` +
-      `packages across ${stats.files} files, all anchored; ${stats.anchors} anchors resolve, ` +
-      `${stats.nonReadAnchors} declared non-read; ${stats.rowRefsHeld} row reference(s) resolve to ` +
-      `their keyed row, ${stats.rowRefsUnheld} declared unheld.\n`
+      `packages across ${stats.files} files, living in ${stats.censusSymbols} symbol(s); the page ` +
+      `cites ${stats.citedSymbols} symbol(s) against ${stats.requiredSymbols} required, over ` +
+      `${stats.anchors} anchors and ${stats.fileLevelAnchors} file-level citation(s); ` +
+      `${stats.nonReadAnchors} declared non-read; ${stats.collapsingFiles} file(s) hold more than one ` +
+      `read in one symbol (the declared precision loss); ${stats.rowRefsHeld} row reference(s) resolve ` +
+      `to their keyed row, ${stats.rowRefsUnheld} declared unheld.\n`
   );
   return 0;
 }
@@ -1541,10 +1701,13 @@ const FIXTURE_SOURCE = [
   '}', // 5
   '// the sys_ prefix helper lives here', // 6
   'export function isSystemObjectName(name: string) { return name.startsWith("sys_"); }', // 7
+  'export function unrelated() { return 1; }', // 8
 ].join('\n');
 
 const FIXTURE_CENSUS = {
-  sites: [{ file: 'pkg/a.ts', line: 2, receiver: 'ctx', package: 'pkg', text: 'if (ctx.isSystem) return ALLOW;' }],
+  sites: [
+    { file: 'pkg/a.ts', line: 2, receiver: 'ctx', package: 'pkg', symbol: 'handler', text: 'if (ctx.isSystem) return ALLOW;' },
+  ],
   nonElevationReads: [{ file: 'pkg/a.ts', line: 3, receiver: 'obj', field: 'Object.isSystem' }],
   roleCounts: { read: 2, declaration: 0, key: 0, other: 0 },
   packages: ['pkg'],
@@ -1555,70 +1718,23 @@ const FIXTURE_CENSUS = {
 };
 
 const FIXTURE_LEDGER = [
-  { file: 'pkg/a.ts', needle: 'export function isSystemObjectName', why: 'name-prefix helper, not a read' },
-];
-
-/**
- * ⭐ The CROSSING fixture (#13490). `pkg/a.ts` puts its read ABOVE its ledger
- * citation, which is the easy order: a stale read anchor can never land on the
- * ledger's line. Here the citation sits BELOW the read site, so a displacement
- * walks the citation onto ground a read anchor used to hold -- and the ledger was
- * subtracted by LINE, so that read anchor was subtracted with it. The counts then
- * agreed by cancellation and the rewrite mapped the two surviving anchors onto
- * each other's rows: a page that is WRONG and GREEN, because both classes stay
- * covered and nothing downstream compares a row to its meaning. That crossing is
- * not hypothetical -- `rest-server.ts:1267` was simultaneously the second inbound
- * seam's new home and a read row's stale anchor on the second occurrence.
- */
-const CROSSING_SOURCE = [
-  'export function guard(ctx: ExecutionContext) {', // 1
-  '  const kind = classify(ctx);', // 2
-  '  if (isSystemObjectName(ctx.objectName)) return SKIP;', // 3  <- ledger needle
-  '  audit(kind);', // 4
-  '  if (ctx.isSystem) return ALLOW;', // 5  <- the elevation read
-  '  return DENY;', // 6
-  '}', // 7
-].join('\n');
-
-const CROSSING_CENSUS = {
-  ...FIXTURE_CENSUS,
-  sites: [{ file: 'pkg/b.ts', line: 5, receiver: 'ctx', package: 'pkg', text: 'if (ctx.isSystem) return ALLOW;' }],
-  files: ['pkg/b.ts'],
-};
-
-const CROSSING_LEDGER = [
-  {
-    file: 'pkg/b.ts',
-    needle: 'isSystemObjectName(ctx.objectName)',
-    why: 'the sys_ name-prefix helper call, not a read',
-  },
+  { file: 'pkg/a.ts', symbol: 'isSystemObjectName', why: 'name-prefix helper, not a read' },
 ];
 
 function fixtureRead(relPath) {
   if (relPath === 'pkg/a.ts') return FIXTURE_SOURCE;
-  if (relPath === 'pkg/b.ts') return CROSSING_SOURCE;
   throw new Error(`no fixture for ${relPath}`);
 }
 
-const FIXTURE_TRACKED = ['pkg/a.ts', 'other/a.ts', 'pkg/b.ts'];
-
 /**
- * One anchor per line, so the two slots can be told apart AFTER a rewrite: the
- * question these cases ask is not "are both lines covered" -- the buggy fixer
- * covered both -- but "did each ROW keep its own line".
+ * A sweep result that found nothing. RESOLUTION is delegated to `sweepCorpus`,
+ * which walks a real tree; the fixtures below drive POPULATION, CLASSIFICATION and
+ * COUNTS, and hand `evaluate` the shape a clean sweep returns.
+ *
+ * ⭐ It is passed EXPLICITLY, never defaulted: `evaluate` refuses a missing sweep,
+ * and a default would let that refusal be forgotten by every caller at once.
  */
-function crossingPage({ read = 'pkg/b.ts:5', helper = 'pkg/b.ts:3' } = {}) {
-  return [
-    '---',
-    'title: crossing fixture',
-    '---',
-    '',
-    'the elevation read at `' + read + '`.',
-    '',
-    'the name helper at `' + helper + '`.',
-    '',
-  ].join('\n');
-}
+const CLEAN_SWEEP = { findings: [], counts: { docs: 1, anchors: 2 } };
 
 /** A one-row stand-in for `DECLARED_COUNTS`, so the fixtures need one sentence. */
 const FIXTURE_COUNTS = [
@@ -1630,7 +1746,7 @@ const FIXTURE_COUNTS = [
   },
 ];
 
-function fixturePage({ anchor = 'pkg/a.ts:2', helper = 'pkg/a.ts:7' } = {}) {
+function fixturePage({ anchor = 'pkg/a.ts#handler', helper = 'pkg/a.ts#isSystemObjectName' } = {}) {
   return [
     '---',
     'title: fixture',
@@ -1639,10 +1755,72 @@ function fixturePage({ anchor = 'pkg/a.ts:2', helper = 'pkg/a.ts:7' } = {}) {
     'read at `' + anchor + '` and the name helper at `' + helper + '`.',
     '',
     '```bash',
-    'grep -rn "isSystem" packages   # `pkg/a.ts:999` inside a fence is not an anchor',
+    'grep -rn "isSystem" packages   # not an anchor: fenced material is quoted, not cited',
     '```',
     '',
   ].join('\n');
+}
+
+/**
+ * ── The RED-FIRST corpus, as a real git tree ────────────────────────────────
+ *
+ * ⭐ The ruled headline pair — a symbol rename REDS, a pure line move does NOT —
+ * cannot be shown on an in-memory fixture: `sweepCorpus` resolves against
+ * `git ls-files` and reads the target from disk, so a fixture that skipped either
+ * would be pinning something other than the gate. This builds a two-file tree,
+ * `git init`s it and stages it, which is the whole of what the resolver needs.
+ *
+ * ⛔ Nothing here ever touches the real repository. Every case reads back what it
+ * wrote and the temp dir is removed in a `finally`.
+ *
+ * ## ⛔ Why every `git` call below runs with a STRIPPED environment (measured)
+ *
+ * This self-test shells out to `git` -- here, and one frame down inside
+ * `sweepCorpus`, which asks `git ls-files` what a corpus's tracked files are.
+ * From a plain shell that is harmless. From INSIDE A GIT HOOK it is not: git
+ * exports `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE`, every child `git`
+ * inherits them, and then the throwaway corpus's `git init` creates nothing
+ * while its `git add -A` writes THE REPOSITORY'S INDEX.
+ *
+ * ⭐ That is not hypothetical and it is not a rare path: `check-regen-pending`
+ * runs this gate from `pre-commit`, which is precisely where an os-regen merge
+ * lap lands. Measured once, on this file's own branch, during exactly that lap:
+ * 8,190 paths staged as deleted and the fixture's own `pkg/a.ts` staged into the
+ * real index, from a self-test whose every case still printed `ok`.
+ *
+ * ⛔ The failure is SILENT in the direction that matters -- the self-test passes,
+ * and the damage is to a tree nobody was looking at. So the environment is
+ * stripped for the duration of the self-test AND passed stripped to each child
+ * here, rather than relying on either one alone.
+ *
+ * ⭐ The strip itself now lives in `scripts/git-env.mjs`, so the rule this gate
+ * discovered has ONE spelling for the whole repo rather than a copy per gate
+ * that learns it (#16624). The local copy that used to sit here is gone; what
+ * stays here is the pin below, because the pin is about THIS gate's children.
+ *
+ * @param {{ symbol?: string, pad?: number }} shape
+ * @returns {{ dir: string, sourceLine: number }}
+ */
+function buildRedFirstCorpus({ symbol = 'handler', pad = 0 } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'system-context-corpus-'));
+  mkdirSync(join(dir, 'content', 'docs', 'permissions'), { recursive: true });
+  mkdirSync(join(dir, 'pkg'), { recursive: true });
+  const head = Array.from({ length: pad }, (_, i) => `// padding line ${i + 1}`);
+  const body = [
+    `export function ${symbol}(ctx: ExecutionContext) {`,
+    '  if (ctx.isSystem) return ALLOW;',
+    '  return DENY;',
+    '}',
+  ];
+  writeFileSync(join(dir, 'pkg', 'a.ts'), [...head, ...body].join('\n'));
+  writeFileSync(
+    join(dir, 'content', 'docs', 'permissions', 'system-context.mdx'),
+    ['---', 'title: red-first fixture', '---', '', 'the elevation read lives at `pkg/a.ts#handler`.', ''].join('\n')
+  );
+  const env = gitFreeEnv();
+  execFileSync('git', ['init', '-q'], { cwd: dir, env });
+  execFileSync('git', ['add', '-A'], { cwd: dir, env });
+  return { dir, sourceLine: pad + 2 };
 }
 
 /**
@@ -1665,16 +1843,16 @@ const ROW_FIXTURE_PAGE = [
   '',
   '| # | Behaviour | Anchor |',
   '|:--|:---|:---|',
-  '| 1 | **The short-circuit** runs first | `pkg/a.ts:2` |',
-  '| 2 | **`owner_id` is not stamped** on INSERT | `pkg/a.ts:3` |',
-  '| 3 | `revoke()` deletes directly, before the guard | `pkg/a.ts:4` |',
+  '| 1 | **The short-circuit** runs first | `pkg/a.ts#handler` |',
+  '| 2 | **`owner_id` is not stamped** on INSERT | `pkg/a.ts#stamp` |',
+  '| 3 | `revoke()` deletes directly, before the guard | `pkg/a.ts#revoke` |',
   '',
   '### 6. Reads that only carry the flag onward',
   '',
   '| # | Site | What it does |',
   '|:--|:---|:---|',
-  '| 4 | `pkg/b.ts:5` | Propagates the flag onward |',
-  '| 5 | `pkg/b.ts:6` | Rebuilds the context |',
+  '| 4 | `pkg/b.ts#carry` | Propagates the flag onward |',
+  '| 5 | `pkg/b.ts#rebuild` | Rebuilds the context |',
   '',
   '1. **`revoke()` skips its own conflict guard.** Row 3 is correct for the rule.',
   "2. The shared verdict is the one function all of row 2's doors consult.",
@@ -1705,17 +1883,17 @@ const ROW_FIXTURE_REFS = [
 const ROW_FIXTURE_LEDGER = [
   {
     file: 'pkg/a.ts',
-    needle: 'a',
+    symbol: 'handler',
     why: 'row 3 -- the guard `revoke()` deletes in front of',
     rowSeams: ['`revoke()` deletes directly'],
   },
   {
     file: 'pkg/a.ts',
-    needle: 'b',
+    symbol: 'isSystemObjectName',
     why: 'row 2 -- the stamp guard the row-1 short-circuit skips',
     rowSeams: ['**`owner_id` is not stamped**', '**The short-circuit** runs first'],
   },
-  { file: 'pkg/a.ts', needle: 'c', why: 'rough edge 5 -- names no row at all', rowSeams: [] },
+  { file: 'pkg/a.ts', symbol: 'unrelated', why: 'rough edge 5 -- names no row at all', rowSeams: [] },
 ];
 
 /**
@@ -1775,6 +1953,17 @@ function fixtureUnenforcedTable({ linesTotal = 6, dropTestsRow = false, dated = 
 let selfTestReachedVerdict = false;
 
 function selfTest() {
+  /* ⛔ Detach from any inherited git environment BEFORE the first case. See
+   * `buildRedFirstCorpus`'s header for the measured incident: under `pre-commit`
+   * this function's children would otherwise write the REPOSITORY's index. This
+   * covers `sweepCorpus`'s own `git ls-files` too, which lives in the shared
+   * resolver and is not this gate's to change. Restored before the return, so an
+   * in-process caller gets its environment back. */
+  const savedGitEnv = Object.fromEntries(
+    Object.keys(process.env).filter((key) => key.startsWith('GIT_')).map((key) => [key, process.env[key]])
+  );
+  for (const key of Object.keys(savedGitEnv)) delete process.env[key];
+
   // The battery ledger this self-test's floor is evaluated against (#13489).
   // `battery()` opens a battery; every assertion below is attributed to the one
   // most recently opened, so a section that stops running stops registering and
@@ -1795,12 +1984,12 @@ function selfTest() {
     if (!ok) failures += 1;
     process.stdout.write(`${ok ? '  ok  ' : '  FAIL'} ${name}${detail ? ` -- ${detail}` : ''}\n`);
   };
-  const run = (page, census = FIXTURE_CENSUS, declaredCounts = [], unenforcedCounts = []) =>
+  const run = (page, census = FIXTURE_CENSUS, declaredCounts = [], unenforcedCounts = [], extra = {}) =>
     evaluate({
       pageText: page,
       census,
-      tracked: FIXTURE_TRACKED,
       readFile: fixtureRead,
+      sweep: CLEAN_SWEEP,
       ledger: FIXTURE_LEDGER,
       declaredCounts,
       unenforcedCounts,
@@ -1809,24 +1998,43 @@ function selfTest() {
       // carry no table at all. The battery below drives that check on its own
       // fixtures and on the real page.
       pageRowReferences: [],
+      ...extra,
     });
 
   // ── the GREEN control: a page that is correct ───────────────────────────────
   battery('the GREEN control: a page that is correct');
   const green = run(fixturePage());
   t('green control: a correct page reports nothing', green.problems.length === 0, green.problems.join(' | '));
-  t('green control: the fenced `pkg/a.ts:999` is not read as an anchor', green.stats.anchors === 2);
+  t(
+    'green control: the page cites exactly the symbols the census and the ledger require',
+    green.stats.citedSymbols === 2 && green.stats.requiredSymbols === 2 && green.stats.censusSymbols === 1,
+    JSON.stringify(green.stats)
+  );
 
   // ── ⭐ the RED that matters: a site the page never mentions ──────────────────
   battery('⭐ the RED that matters: a site the page never mentions');
   const arrived = {
     ...FIXTURE_CENSUS,
-    sites: [...FIXTURE_CENSUS.sites, { file: 'pkg/a.ts', line: 4, receiver: 'ctx', package: 'pkg', text: 'return DENY;' }],
+    sites: [
+      ...FIXTURE_CENSUS.sites,
+      { file: 'pkg/a.ts', line: 8, receiver: 'ctx', package: 'pkg', symbol: 'unrelated', text: 'export function unrelated() { return 1; }' },
+    ],
   };
   const missing = run(fixturePage(), arrived);
   t(
-    'POPULATION: a read site with no row is a finding',
-    missing.problems.some((p) => p.startsWith('[site-without-a-row] pkg/a.ts:4'))
+    'POPULATION: a read in a symbol no row anchors is a finding, naming the symbol',
+    missing.problems.some((p) => p.startsWith('[site-without-a-row] pkg/a.ts#unrelated')),
+    missing.problems.join(' | ')
+  );
+  const wholeFileMissing = run(fixturePage({ anchor: 'pkg/a.ts#unrelated', helper: 'pkg/a.ts#isSystemObjectName' }), {
+    ...FIXTURE_CENSUS,
+    sites: [{ file: 'pkg/b.ts', line: 1, receiver: 'ctx', package: 'pkg', symbol: 'guard', text: 'x' }],
+    files: ['pkg/b.ts'],
+  });
+  t(
+    'POPULATION: a whole FILE with reads and no anchor at all is its own finding',
+    wholeFileMissing.problems.some((p) => p.startsWith('[file-without-a-row] pkg/b.ts')),
+    wholeFileMissing.problems.join(' | ')
   );
 
   // ── the deletion shape: the row stands, the site is gone ────────────────────
@@ -1837,67 +2045,104 @@ function selfTest() {
 
   const shrunk = {
     ...FIXTURE_CENSUS,
-    sites: [{ file: 'pkg/a.ts', line: 4, receiver: 'ctx', package: 'pkg', text: 'return DENY;' }],
+    sites: [{ file: 'pkg/a.ts', line: 8, receiver: 'ctx', package: 'pkg', symbol: 'unrelated', text: 'export function unrelated() { return 1; }' }],
   };
   const stale = run(fixturePage(), shrunk);
   t(
-    'DELETION: a row anchoring a line that is no longer a read site is a finding',
-    stale.problems.some((p) => p.startsWith('[anchor-is-not-a-read-site]') && p.includes('pkg/a.ts:2'))
+    'DELETION: a row anchoring a symbol that is no longer a read site is a finding',
+    stale.problems.some((p) => p.startsWith('[anchor-is-not-a-read-site]') && p.includes('pkg/a.ts#handler')),
+    stale.problems.join(' | ')
+  );
+  t(
+    'DELETION: and the arrived symbol is named on the other side in the same run',
+    stale.problems.some((p) => p.startsWith('[site-without-a-row] pkg/a.ts#unrelated')),
+    stale.problems.join(' | ')
   );
 
-  // ── rot ────────────────────────────────────────────────────────────────────
-  const rotted = run(fixturePage({ anchor: 'pkg/a.ts:4' }));
-  t('ROT: a shifted anchor is caught from both sides', rotted.problems.length === 2, rotted.problems.join(' | '));
-
-  // ── resolution ─────────────────────────────────────────────────────────────
-  battery('resolution');
-  const ambiguous = run(fixturePage({ anchor: 'a.ts:2' }));
-  t('RESOLUTION: a bare basename matching two files is refused', ambiguous.problems.some((p) => p.startsWith('[ambiguous-anchor]')));
-  const gonefile = run(fixturePage({ anchor: 'pkg/nope.ts:2' }));
-  t('RESOLUTION: an anchor to a file that does not exist is refused', gonefile.problems.some((p) => p.startsWith('[unresolved-anchor]')));
-  const overrun = run(fixturePage({ anchor: 'pkg/a.ts:999' }));
-  t('RESOLUTION: a line past end of file is refused', overrun.problems.some((p) => p.startsWith('[out-of-range-anchor]')));
+  // ── ⭐ RESOLUTION is DELEGATED, and a sweep that did not run is a REFUSAL ────
+  //
+  // ⛔ This gate must not re-decide what "the symbol is in that file" means --
+  // two copies of that rule drift silently, each green on its own corpus. So the
+  // only thing asserted here is the delegation itself: the sweep's findings are
+  // surfaced verbatim, and its ABSENCE is a refusal rather than a quiet pass.
+  battery('⭐ RESOLUTION is delegated, and a sweep that did not run is a REFUSAL');
+  const noSweep = run(fixturePage(), FIXTURE_CENSUS, [], [], { sweep: undefined });
+  t(
+    'RESOLUTION: a missing sweep REFUSES -- "could not check" never reports as "checked and clean"',
+    noSweep.problems.some((p) => p.startsWith('[no-sweep]')),
+    noSweep.problems.join(' | ')
+  );
+  const brokenSweep = run(fixturePage(), FIXTURE_CENSUS, [], [], { sweep: { counts: {} } });
+  t(
+    'RESOLUTION: a sweep object with no findings ARRAY is refused too, not read as zero findings',
+    brokenSweep.problems.some((p) => p.startsWith('[no-sweep]')),
+    brokenSweep.problems.join(' | ')
+  );
+  const sweptRed = run(fixturePage(), FIXTURE_CENSUS, [], [], {
+    sweep: {
+      findings: [
+        { kind: 'unresolved-symbol', doc: PAGE, line: 5, raw: '`pkg/a.ts#handler`', detail: '`handler` has no declaration site' },
+        { kind: 'cross-repo-skipped', doc: PAGE, line: 5, raw: '`objectui:x.ts`', detail: 'no checkout', soft: true },
+      ],
+    },
+  });
+  t(
+    "RESOLUTION: the sweep's hard findings are surfaced verbatim and its soft ones are not",
+    sweptRed.problems.some((p) => p.startsWith('[unresolved-symbol]')) &&
+      !sweptRed.problems.some((p) => p.includes('cross-repo-skipped')),
+    sweptRed.problems.join(' | ')
+  );
 
   // ── ledger ─────────────────────────────────────────────────────────────────
   battery('ledger');
-  const ledgerStale = evaluate({
-    pageRowReferences: [],
-    pageText: fixturePage(),
-    census: FIXTURE_CENSUS,
-    tracked: FIXTURE_TRACKED,
-    readFile: fixtureRead,
-    ledger: [{ file: 'pkg/a.ts', needle: 'no such text anywhere', why: 'x' }],
-    unenforcedCounts: [],
-    declaredCounts: [],
-  });
-  t('LEDGER: a needle that matches nothing is a finding', ledgerStale.problems.some((p) => p.startsWith('[ledger-stale]')));
-  const ledgerAmbig = evaluate({
-    pageRowReferences: [],
-    pageText: fixturePage(),
-    census: FIXTURE_CENSUS,
-    tracked: FIXTURE_TRACKED,
-    readFile: fixtureRead,
-    ledger: [{ file: 'pkg/a.ts', needle: 'return', why: 'x' }],
-    unenforcedCounts: [],
-    declaredCounts: [],
-  });
-  t('LEDGER: a needle matching two lines is a finding', ledgerAmbig.problems.some((p) => p.startsWith('[ledger-ambiguous]')));
-  const ledgerUnused = evaluate({
-    pageRowReferences: [],
-    pageText: fixturePage({ helper: 'pkg/a.ts:2' }),
-    census: FIXTURE_CENSUS,
-    tracked: FIXTURE_TRACKED,
-    readFile: fixtureRead,
-    ledger: FIXTURE_LEDGER,
-    unenforcedCounts: [],
-    declaredCounts: [],
-  });
-  t('LEDGER: a row no anchor uses is a finding', ledgerUnused.problems.some((p) => p.startsWith('[ledger-row-unused]')));
+  const ledgerRun = (ledger, page = fixturePage()) =>
+    evaluate({
+      pageRowReferences: [],
+      pageText: page,
+      census: FIXTURE_CENSUS,
+      readFile: fixtureRead,
+      sweep: CLEAN_SWEEP,
+      ledger,
+      unenforcedCounts: [],
+      declaredCounts: [],
+    });
+  t(
+    'LEDGER: a symbol the file no longer declares is a finding',
+    ledgerRun([{ file: 'pkg/a.ts', symbol: 'noSuchSymbol', why: 'x' }]).problems.some((p) =>
+      p.startsWith('[ledger-stale]')
+    )
+  );
+  t(
+    'LEDGER: a file that cannot be read is a finding, not a skipped row',
+    ledgerRun([{ file: 'pkg/gone.ts', symbol: 'x', why: 'x' }]).problems.some((p) =>
+      p.startsWith('[ledger-unreadable]')
+    )
+  );
+  t(
+    'LEDGER: a row no anchor uses is a finding',
+    ledgerRun(FIXTURE_LEDGER, fixturePage({ helper: 'pkg/a.ts#handler' })).problems.some((p) =>
+      p.startsWith('[ledger-row-unused]')
+    )
+  );
+  t(
+    '⭐ LEDGER: an UNDECLARED overlap with a census read symbol is a finding — a row that excuses ' +
+      'nothing must say so',
+    ledgerRun([{ file: 'pkg/a.ts', symbol: 'handler', why: 'x' }]).problems.some((p) =>
+      p.startsWith('[ledger-undeclared-collapse]')
+    )
+  );
+  t(
+    '⭐ LEDGER: and a DECLARED overlap that has ended is a finding too — the declaration cannot rot ' +
+      'in the safe direction either',
+    ledgerRun([{ file: 'pkg/a.ts', symbol: 'isSystemObjectName', collapsesOntoRead: true, why: 'x' }]).problems.some(
+      (p) => p.startsWith('[ledger-stale-collapse]')
+    )
+  );
 
   // ── counts ─────────────────────────────────────────────────────────────────
   battery('counts');
-  const countPage =
-    fixturePage() + '\nit is a single boolean read at **1\ndistinct sites across 1 packages**.\n';
+  const countSentence = '\nit is a single boolean read at **1\ndistinct sites across 1 packages**.\n';
+  const countPage = fixturePage() + countSentence;
   const countsOk = run(countPage, FIXTURE_CENSUS, FIXTURE_COUNTS);
   t(
     'COUNTS: a matching declared count is silent',
@@ -1922,8 +2167,8 @@ function selfTest() {
     '',
     '| # | Site |',
     '|:--|:---|',
-    '| 62 | `pkg/a.ts:2` |',
-    '| 63 | `pkg/a.ts:2` |',
+    '| 62 | `pkg/a.ts#handler` |',
+    '| 63 | `pkg/a.ts#handler` |',
     '',
     '---',
     '',
@@ -1935,12 +2180,12 @@ function selfTest() {
     pageRowReferences: [],
     pageText: fixturePage(),
     census: FIXTURE_CENSUS,
-    tracked: FIXTURE_TRACKED,
     readFile: fixtureRead,
+    sweep: CLEAN_SWEEP,
     ledger: FIXTURE_LEDGER,
     unenforcedCounts: [],
     declaredCounts: [
-      { id: 'x', pattern: /helper at `pkg\/a\.ts:(\d+)`/, value: () => carryOnwardRowCount('gone'), why: 'fixture' },
+      { id: 'x', pattern: /helper at `pkg\/a\.ts#(\w+)`/, value: () => carryOnwardRowCount('gone'), why: 'fixture' },
     ],
   });
   t(
@@ -1957,8 +2202,7 @@ function selfTest() {
   //
   // ⭐ These two cases run over `DECLARED_COUNTS` and `UNENFORCED_TEXT_COUNTS`
   // THEMSELVES, not over a fixture stand-in. That is the point: move a text count
-  // back into the enforced list and the first case names it by id. A criterion
-  // change with nothing watching it is how the next reader undoes it.
+  // back into the enforced list and the first case names it by id.
   battery('⭐ CRITERION: enforced means CENSUS-DERIVED, pinned over the REAL lists');
   const textDrifted = {
     ...FIXTURE_CENSUS,
@@ -1985,7 +2229,6 @@ function selfTest() {
 
   // ── the same criterion, behaviourally, on one page ──────────────────────────
   battery('the same criterion, behaviourally, on one page');
-  const countSentence = '\nit is a single boolean read at **1\ndistinct sites across 1 packages**.\n';
   const okPage = fixturePage() + countSentence;
   const staleText = run(
     okPage + fixtureUnenforcedTable({ linesTotal: 999 }),
@@ -1998,7 +2241,7 @@ function selfTest() {
     staleText.problems.length === 0,
     staleText.problems.join(' | ')
   );
-  const rowGone = run(
+  const rowGoneCase = run(
     okPage + fixtureUnenforcedTable({ dropTestsRow: true }),
     textDrifted,
     FIXTURE_COUNTS,
@@ -2006,8 +2249,8 @@ function selfTest() {
   );
   t(
     'CRITERION: an unenforced row reworded off the page IS a finding',
-    rowGone.problems.some((p) => p.startsWith('[unenforced-count-missing]') && p.includes('`table-lines-tests`')),
-    rowGone.problems.join(' | ')
+    rowGoneCase.problems.some((p) => p.startsWith('[unenforced-count-missing]') && p.includes('`table-lines-tests`')),
+    rowGoneCase.problems.join(' | ')
   );
   const undated = run(
     okPage + fixtureUnenforcedTable({ dated: false }),
@@ -2024,13 +2267,13 @@ function selfTest() {
   // ── ⛔ and the half that must NOT have moved: the contract still reds ────────
   battery('⛔ and the half that must NOT have moved: the contract still reds');
   const rottedToo = run(
-    fixturePage({ anchor: 'pkg/a.ts:4' }) + countSentence + fixtureUnenforcedTable({ linesTotal: 999 }),
+    fixturePage({ anchor: 'pkg/a.ts#unrelated' }) + countSentence + fixtureUnenforcedTable({ linesTotal: 999 }),
     FIXTURE_CENSUS,
     FIXTURE_COUNTS,
     UNENFORCED_TEXT_COUNTS
   );
   t(
-    'CRITERION: a rotted ANCHOR still reds on the very page whose text counts are stale',
+    'CRITERION: a re-keyed ANCHOR still reds on the very page whose text counts are stale',
     rottedToo.problems.some((p) => p.startsWith('[site-without-a-row]')) &&
       rottedToo.problems.some((p) => p.startsWith('[anchor-is-not-a-read-site]')),
     rottedToo.problems.join(' | ')
@@ -2043,7 +2286,7 @@ function selfTest() {
   );
   t(
     'CRITERION: a POPULATION change still reds on that same page',
-    grewToo.problems.some((p) => p.startsWith('[site-without-a-row] pkg/a.ts:4')) &&
+    grewToo.problems.some((p) => p.startsWith('[site-without-a-row] pkg/a.ts#unrelated')) &&
       grewToo.problems.some((p) => p.includes('`headline-sites` says 1, the census says 2')),
     grewToo.problems.join(' | ')
   );
@@ -2053,169 +2296,258 @@ function selfTest() {
   const noAnchors = run('---\ntitle: x\n---\n\nnothing here.\n');
   t('ABSENCE: a page with no anchors refuses', noAnchors.problems.some((p) => p.startsWith('[no-anchors]')));
 
-  // ── --fix ──────────────────────────────────────────────────────────────────
-  battery('--fix');
-  const fixed = fixAnchors({
-    pageText: fixturePage({ anchor: 'pkg/a.ts:4' }),
-    census: FIXTURE_CENSUS,
-    tracked: FIXTURE_TRACKED,
-    readFile: fixtureRead,
-    ledger: FIXTURE_LEDGER,
-  });
-  t('FIX: a pure shift is rewritten', fixed.text.includes('`pkg/a.ts:2`'), fixed.rewrites.join(' | '));
-  const refusedFix = fixAnchors({
-    pageText: fixturePage(),
-    census: arrived,
-    tracked: FIXTURE_TRACKED,
-    readFile: fixtureRead,
-    ledger: FIXTURE_LEDGER,
-  });
-  t(
-    'FIX: a population change is REFUSED, never guessed',
-    refusedFix.rewrites.length === 0 && refusedFix.refused.length === 1,
-    JSON.stringify(refusedFix.refused)
-  );
-
-  // ── ⭐ #13490: the incident shape -- reads AND ledger citations BOTH shift ────
+  // ── ⛔ --fix regenerates declared COUNTS only, never anchors, and says so ───
   //
-  // The pre-existing case above shifts the read only, which is why it never caught
-  // this: a page anchor is pre-shift by construction, a ledger line is located by
-  // needle in the CURRENT tree, and subtracting one from the other counts the
-  // displaced citation as a read anchor. Measured on two files in two lanes --
-  // `security-plugin.ts` (7 reads + 1 citation, all +20/+19, zero `isSystem` lines
-  // added or removed) refused with "page anchors 8 distinct read line(s), census
-  // finds 7", and `rest-server.ts` (6 + 2) with "7 ... finds 6".
-  battery('⭐ #13490: the incident shape -- reads AND ledger citations BOTH shift');
-  const bothShifted = fixAnchors({
-    pageText: fixturePage({ anchor: 'pkg/a.ts:1', helper: 'pkg/a.ts:6' }),
-    census: FIXTURE_CENSUS,
-    tracked: FIXTURE_TRACKED,
-    readFile: fixtureRead,
-    ledger: FIXTURE_LEDGER,
-  });
+  // ⭐ Two failures this pins, in opposite directions. `gen:system-context-census`
+  // and `scripts/regen-artifacts.mjs` both invoke `--fix`; a flag that silently
+  // went back to being a no-op (the pre-#16919 shape) leaves both reading as a
+  // working regeneration path while every count red still needs a human. And a
+  // `--fix` that goes the OTHER way -- resurrecting the retired line-shift
+  // repair, or writing the page on a count it could not actually derive -- is
+  // exactly the "mechanical repair" this gate explicitly does not offer for
+  // anchors. Both directions are pinned on the SAME source read.
+  battery('⛔ --fix regenerates declared COUNTS only, never anchors, and says so');
+  let ownSourceForFix = null;
+  try {
+    ownSourceForFix = readFileSync(join(ROOT, 'scripts/check-system-context-census.mjs'), 'utf8');
+  } catch (err) {
+    t('--fix: this gate can read its own source', false, err.code ?? err.message);
+  }
+  if (ownSourceForFix !== null) {
+    t(
+      '--fix: no anchor line-shift repair survives -- symbol anchors still encode no position to fix',
+      !/\bfixAnchors\b/.test(ownSourceForFix),
+      'the retired line-shift repair is back in this file'
+    );
+    t(
+      '--fix: the count-regenerating function is exported, not inlined where nothing else can reach it',
+      /export function regenerateDeclaredCounts\(/.test(ownSourceForFix)
+    );
+    t(
+      '--fix: the write is gated on there being something to write -- a no-op run must not touch the page',
+      /if \(rewrites\.length > 0\) \{/.test(ownSourceForFix) &&
+        /writeFileSync\(\s*join\(ROOT, PAGE\)/.test(ownSourceForFix)
+    );
+    t(
+      '--fix: the flag is still RECOGNISED and explains BOTH halves, so the wiring cannot go quiet',
+      /argv\.includes\('--fix'\)/.test(ownSourceForFix) &&
+        /anchors have nothing to rewrite/.test(ownSourceForFix) &&
+        /regenerated \$\{rewrites\.length\} declared count/.test(ownSourceForFix)
+    );
+  }
+
+  // ⭐ Behavioural, not textual: drive `regenerateDeclaredCounts` itself on the
+  // same fixtures the 'counts' battery already uses to pin the CHECK, so the
+  // WRITE can never define "correct" any differently than the comparison does.
+  const mismatched = fixturePage() + '\nit is a single boolean read at **7\ndistinct sites across 1 packages**.\n';
+  const regenerated = regenerateDeclaredCounts({ pageText: mismatched, census: FIXTURE_CENSUS, declaredCounts: FIXTURE_COUNTS });
   t(
-    'FIX #13490: a shift that moves the LEDGER citation too is a shift, not a population change',
-    bothShifted.refused.length === 0 &&
-      bothShifted.text.includes('`pkg/a.ts:2`') &&
-      bothShifted.text.includes('`pkg/a.ts:7`'),
-    `refused=${JSON.stringify(bothShifted.refused)} rewrites=${JSON.stringify(bothShifted.rewrites)}`
+    '--fix REGENERATES: a mismatched declared count is rewritten to the census value, and reported',
+    regenerated.errors.length === 0 &&
+      regenerated.rewrites.length === 1 &&
+      regenerated.rewrites[0].id === 'headline-sites' &&
+      regenerated.rewrites[0].from === '7' &&
+      regenerated.rewrites[0].to === '1',
+    JSON.stringify(regenerated.rewrites)
+  );
+  t(
+    '--fix REGENERATES: the rewritten text carries the new digit and NOT the old one, surrounding prose untouched',
+    regenerated.text.includes('read at **1\ndistinct sites') && !regenerated.text.includes('**7\ndistinct sites'),
+    regenerated.text
+  );
+  t(
+    '⭐ IDEMPOTENCE: a page that already agrees with the census comes back BYTE-IDENTICAL, zero rewrites',
+    (() => {
+      const already = fixturePage() + '\nit is a single boolean read at **1\ndistinct sites across 1 packages**.\n';
+      const first = regenerateDeclaredCounts({ pageText: already, census: FIXTURE_CENSUS, declaredCounts: FIXTURE_COUNTS });
+      const second = regenerateDeclaredCounts({ pageText: first.text, census: FIXTURE_CENSUS, declaredCounts: FIXTURE_COUNTS });
+      return (
+        first.rewrites.length === 0 &&
+        first.text === already &&
+        second.rewrites.length === 0 &&
+        second.text === first.text
+      );
+    })()
+  );
+  t(
+    '--fix REFUSES rather than writes a partial page: an unmatched or underivable count surfaces as an error',
+    (() => {
+      const unmatched = regenerateDeclaredCounts({
+        pageText: fixturePage(),
+        census: FIXTURE_CENSUS,
+        declaredCounts: FIXTURE_COUNTS,
+      });
+      const underivable = regenerateDeclaredCounts({
+        pageText: fixturePage() + '\nhelper at `pkg/a.ts#isSystemObjectName`\n',
+        census: FIXTURE_CENSUS,
+        declaredCounts: [
+          { id: 'x', pattern: /helper at `pkg\/a\.ts#(\w+)`/, value: () => carryOnwardRowCount('gone'), why: 'fixture' },
+        ],
+      });
+      return (
+        unmatched.errors.some((e) => e.startsWith('[count-pattern-unmatched]')) &&
+        unmatched.text === fixturePage() &&
+        underivable.errors.some((e) => e.startsWith('[count-underivable]'))
+      );
+    })()
   );
 
-  // ⭐ The postcondition the union buys: the rewrite is a BIJECTION from the page's
-  // distinct anchor lines onto the file's anchorable lines, so a file `--fix`
-  // touched cannot come back with a missing site, an unexplained anchor or an
-  // unused ledger row. Pinned behaviourally rather than argued in a comment.
-  const afterFix = evaluate({
-    pageRowReferences: [],
-    pageText: bothShifted.text,
-    census: FIXTURE_CENSUS,
-    tracked: FIXTURE_TRACKED,
-    readFile: fixtureRead,
-    ledger: FIXTURE_LEDGER,
-    declaredCounts: [],
-    unenforcedCounts: [],
-  });
-  t(
-    'FIX #13490: what --fix rewrote evaluates clean -- every site anchored, every ledger row used',
-    afterFix.problems.length === 0,
-    afterFix.problems.join(' | ')
-  );
-
-  // ── ⛔ the dangerous direction: the citation crosses onto a read anchor's line ─
+  // ── ⭐ THE RULED RED-FIRST PAIR, on a real tree ─────────────────────────────
   //
-  // Subtracting the ledger by LINE removed the stale READ anchor here (it sits on
-  // `:3`, the citation's new home), the counts agreed by cancellation, and the one
-  // surviving anchor was mapped onto the read site -- leaving the page GREEN with
-  // the two rows pointing at each other's lines. Both spellings survive either
-  // way, so this case asserts which ROW holds which line.
-  battery('⛔ the dangerous direction: the citation crosses onto a read anchor\'s line ─');
-  const crossed = fixAnchors({
-    pageText: crossingPage({ read: 'pkg/b.ts:3', helper: 'pkg/b.ts:2' }),
-    census: CROSSING_CENSUS,
-    tracked: FIXTURE_TRACKED,
-    readFile: fixtureRead,
-    ledger: CROSSING_LEDGER,
-  });
+  // The two headline behaviours the migration was ruled on, proved rather than
+  // asserted: a SYMBOL RENAME reds, a PURE LINE MOVE does not. Both run the real
+  // `sweepCorpus` over a real `git` tree, because that is the only place the
+  // resolver's inputs -- `git ls-files` and the target's own bytes -- exist.
+  battery('⭐ THE RULED RED-FIRST PAIR: a symbol rename REDS, a pure line move does NOT');
+  const corpora = [];
+  try {
+    const control = buildRedFirstCorpus();
+    corpora.push(control.dir);
+    const controlSweep = sweepCorpus(CORPUS, control.dir);
+    t(
+      'RED-FIRST control: the unmutated tree sweeps clean and really found the anchor',
+      controlSweep.findings.filter((f) => !f.soft).length === 0 && controlSweep.counts.symbol === 1,
+      JSON.stringify(controlSweep.counts) + ' ' + formatFindings(controlSweep.findings)
+    );
+
+    const renamed = buildRedFirstCorpus({ symbol: 'handleRequest' });
+    corpora.push(renamed.dir);
+    t(
+      'RED-FIRST: the rename really reached disk -- the old name is gone from the target',
+      !readFileSync(join(renamed.dir, 'pkg', 'a.ts'), 'utf8').includes('function handler(') &&
+        readFileSync(join(renamed.dir, 'pkg', 'a.ts'), 'utf8').includes('function handleRequest(')
+    );
+    const renamedSweep = sweepCorpus(CORPUS, renamed.dir);
+    t(
+      '⭐ RED-FIRST: a RENAMED symbol turns the sweep RED, naming the anchor that no longer resolves',
+      renamedSweep.findings.some((f) => f.kind === 'unresolved-symbol' && f.raw.includes('#handler')),
+      formatFindings(renamedSweep.findings)
+    );
+
+    const moved = buildRedFirstCorpus({ pad: 40 });
+    corpora.push(moved.dir);
+    const movedSweep = sweepCorpus(CORPUS, moved.dir);
+    t(
+      '⭐ RED-FIRST: a PURE LINE MOVE (the read is 40 lines lower) is NOT red -- the property the ' +
+        'line numbers did not have',
+      moved.sourceLine === 42 &&
+        control.sourceLine === 2 &&
+        movedSweep.findings.filter((f) => !f.soft).length === 0,
+      `read moved ${control.sourceLine} -> ${moved.sourceLine}; ` + formatFindings(movedSweep.findings)
+    );
+    /* ⛔ THE REGRESSION PIN for the measured incident above, and it pins the WRITE
+     * side, which is the side that did the damage: a hook's exported `GIT_DIR`
+     * must not reach `git init` / `git add -A`, or the throwaway corpus is never
+     * created and the REPOSITORY's index is written instead.
+     *
+     * A bogus `GIT_DIR` is injected, the corpus is built under it, and the temp
+     * tree is then read back with a stripped environment: two files staged, in
+     * ITS OWN repository. If the builder had leaked, `git init` would have
+     * created nothing there and `git ls-files` would answer with someone else's
+     * tree — or with nothing at all.
+     *
+     * ⚠️ Deliberately NOT sweeping under the injected variable. `sweepCorpus`
+     * asks `git ls-files` through the shared resolver, which passes no
+     * environment of its own, so a sweep is protected by the process-level strip
+     * at the top of this function rather than by anything here — and that strip
+     * is what the second half of this case asserts. Hardening the shared
+     * resolver is not this gate's to do. */
+    const priorGitDir = process.env.GIT_DIR;
+    process.env.GIT_DIR = join(tmpdir(), 'a-git-dir-that-does-not-exist');
+    let staged = null;
+    try {
+      const guarded = buildRedFirstCorpus();
+      corpora.push(guarded.dir);
+      staged = execFileSync('git', ['ls-files'], { cwd: guarded.dir, encoding: 'utf8', env: gitFreeEnv() })
+        .split('\n')
+        .filter(Boolean)
+        .sort();
+    } catch (err) {
+      staged = err;
+    } finally {
+      if (priorGitDir === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = priorGitDir;
+    }
+    t(
+      '⛔ ENV LEAK: an inherited GIT_DIR (what `pre-commit` exports) never reaches the corpus builder, ' +
+        'and the self-test itself runs detached — measured incident: 8,190 paths staged as deleted in ' +
+        'the REAL index by a self-test whose every case still printed ok',
+      Array.isArray(staged) &&
+        staged.join(' ') === 'content/docs/permissions/system-context.mdx pkg/a.ts' &&
+        Object.keys(process.env).filter((key) => key.startsWith('GIT_')).length === 0,
+      staged instanceof Error ? String(staged.message).slice(0, 200) : JSON.stringify(staged)
+    );
+  } finally {
+    for (const dir of corpora) rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ── ⭐ the precision this trades away, pinned so nobody rediscovers it as a bug ─
+  //
+  // ⛔ Written as a PASSING case on purpose. The gap is real and declared -- on the
+  // page and in this file's header -- and a self-test that quietly omitted it
+  // would leave the next reader to find it as a defect and "fix" it by weakening
+  // something else. Two reads inside ONE symbol, one of them deleted: the symbol
+  // set does not move, and this gate does not red.
+  battery('⭐ the precision this trades away, pinned so nobody rediscovers it as a bug');
+  const twoInOne = {
+    ...FIXTURE_CENSUS,
+    sites: [
+      ...FIXTURE_CENSUS.sites,
+      { file: 'pkg/a.ts', line: 4, receiver: 'ctx', package: 'pkg', symbol: 'handler', text: 'return DENY;' },
+    ],
+  };
+  const bothPresent = run(fixturePage(), twoInOne);
+  const oneDeleted = run(fixturePage(), FIXTURE_CENSUS);
   t(
-    'FIX #13490: a citation crossing a read anchor keeps each ROW on its own line, not merely covered',
-    crossed.refused.length === 0 &&
-      crossed.text.includes('the elevation read at `pkg/b.ts:5`') &&
-      crossed.text.includes('the name helper at `pkg/b.ts:3`'),
-    `refused=${JSON.stringify(crossed.refused)} rewrites=${JSON.stringify(crossed.rewrites)}`
+    '⛔ THE DECLARED GAP: deleting one of two reads inside one symbol does NOT red -- stated here ' +
+      'rather than discovered later',
+    bothPresent.problems.length === 0 && oneDeleted.problems.length === 0,
+    `${bothPresent.problems.join(' | ')} // ${oneDeleted.problems.join(' | ')}`
+  );
+  t(
+    '⭐ and the half that DOES hold: deleting the whole symbol reds, so the gap is bounded',
+    run(fixturePage(), { ...FIXTURE_CENSUS, sites: [{ file: 'pkg/a.ts', line: 8, receiver: 'ctx', package: 'pkg', symbol: 'unrelated', text: 'x' }] })
+      .problems.some((p) => p.startsWith('[anchor-is-not-a-read-site]') && p.includes('#handler'))
   );
 
-  // ── ⭐ and the safety property, on the shape that now ACCEPTS ────────────────
-  //
-  // ⛔ The fix must not buy acceptance with the refusal. A read site ARRIVES while
-  // the ledger citation shifts: the old counting arm and the new one both refuse
-  // here, and that must stay true, or #13490 was closed by deleting the guard.
-  battery('⭐ and the safety property, on the shape that now ACCEPTS');
-  const grewWhileShifting = fixAnchors({
-    pageText: fixturePage({ anchor: 'pkg/a.ts:2', helper: 'pkg/a.ts:6' }),
-    census: arrived,
-    tracked: FIXTURE_TRACKED,
-    readFile: fixtureRead,
-    ledger: FIXTURE_LEDGER,
-  });
+  // ── the refusal has to SHOW its work (both counts, the symbol, the file) ─────
+  battery('the refusal has to SHOW its work (both counts, the symbol, the file)');
+  const refusal = missing.problems.find((p) => p.startsWith('[site-without-a-row]')) ?? '';
   t(
-    'FIX #13490: a site that ARRIVES while the citation shifts is still REFUSED',
-    grewWhileShifting.rewrites.length === 0 && grewWhileShifting.refused.length === 1,
-    JSON.stringify(grewWhileShifting.refused)
+    'REFUSAL: the population refusal names the file, the symbol and how many reads live in it',
+    refusal.includes('pkg/a.ts#unrelated') && refusal.includes('1 elevation read(s)'),
+    refusal
+  );
+  t(
+    'REFUSAL: and BOTH counts it compared, so the reader is not sent to run the census by hand',
+    refusal.includes('cites 2 symbol(s), the census and the ledger require 3'),
+    refusal
   );
 
-  const vanished = fixAnchors({
-    pageText: crossingPage(),
-    census: { ...CROSSING_CENSUS, sites: [...CROSSING_CENSUS.sites, { file: 'pkg/b.ts', line: 6, receiver: 'ctx', package: 'pkg', text: 'return DENY;' }] },
-    tracked: FIXTURE_TRACKED,
-    readFile: fixtureRead,
-    ledger: CROSSING_LEDGER,
-  });
+  // ── ⭐ CORPUS REGISTRATION: one resolver, not a second implementation ────────
+  battery('⭐ CORPUS REGISTRATION: one resolver, not a second implementation');
   t(
-    'FIX #13490: an unanchored site in the crossing file is REFUSED too',
-    vanished.rewrites.length === 0 && vanished.refused.length === 1,
-    JSON.stringify(vanished.refused)
+    'CORPUS: the registration names THIS page and only this page',
+    CORPUS.docRoots.length === 1 &&
+      PAGE.startsWith(`${CORPUS.docRoots[0]}/`) &&
+      CORPUS.docPattern.test(PAGE.slice(CORPUS.docRoots[0].length + 1)) &&
+      !CORPUS.docPattern.test('access-matrix.mdx'),
+    JSON.stringify({ docRoots: CORPUS.docRoots, docPattern: String(CORPUS.docPattern) })
   );
+  t(
+    'CORPUS: bare paths ARE judged here -- this page spells every path in full',
+    CORPUS.checkBarePaths === true
+  );
+  if (ownSourceForFix !== null) {
+    t(
+      '⛔ CORPUS: the resolution rule is imported, never restated -- no local symbol matcher, no ' +
+        'second grammar',
+      /import \{[\s\S]*?\} from '\.\/symbol-anchors\.mjs';/.test(ownSourceForFix) &&
+        !/function\s+symbolResolutionClass\b/.test(ownSourceForFix) &&
+        (ownSourceForFix.match(/defineCorpus\(/g) ?? []).length === 1
+    );
+  }
 
-  // ── the refusal has to SHOW its work (both counts, both classes, the diff) ────
-  //
-  // Twice this refusal was read as "your diff added or removed an elevation read
-  // site" when nothing had, and the output gave no way to tell which case you were
-  // in short of running the census in two trees by hand. `already anchored 8 of 9`
-  // + one named target settles it; `0 of 9` says uniform displacement.
-  battery('the refusal has to SHOW its work (both counts, both classes, the diff)');
-  const refusalText = grewWhileShifting.refused[0] ?? '';
-  t(
-    'FIX #13490: the refusal states BOTH counts it compared and the ledger it set aside',
-    refusalText.includes('the page anchors 2 distinct line(s)') &&
-      refusalText.includes('holds 3 anchorable line(s)') &&
-      refusalText.includes('2 census read site(s)') &&
-      refusalText.includes('1 NON_READ_ANCHORS citation(s)') &&
-      refusalText.includes('name-prefix helper, not a read'),
-    refusalText
-  );
-  t(
-    'FIX #13490: the refusal names the set difference, not just a count',
-    refusalText.includes('already anchored') &&
-      refusalText.includes('target, NO anchor') &&
-      refusalText.includes('anchor, NO target'),
-    refusalText
-  );
-
-  // ── WIRING: this gate, and its self-test, really run in CI ──────────────────
-  //
-  // ⭐ The half a clean tree cannot show, and the reason this block exists. Every
-  // other case above judges the RULES; this one judges whether anything runs them.
-  // `check-self-test-wired` is conditional in the wrong direction for that -- it
-  // requires "if CI runs the script, CI runs its --self-test too", so deleting BOTH
-  // lines from `lint.yml` leaves it green and silently retires the only instrument
-  // that catches a stale anchor. Measured: the census is what reddens when a cited
-  // file moves underneath a page nobody edited, so its scheduling is load-bearing,
-  // not incidental.
-  //
-  // Asserted against the workflow TEXT, following the precedent `check-doc-frontmatter`,
-  // `check-aggregator-roster` and `check-ci-filter-parity` set -- and, like the second
-  // docs root that gate added, this needed NO workflow edit: `lint.yml` already invokes
-  // both legs, and it is the repo's busiest file.
   // ── ⭐ ROW REFERENCES: held by SEAM, and the insertion that used to be silent ─
   //
   // The shape this battery exists for (#15869): a row INSERTED into the behaviour
@@ -2275,7 +2607,7 @@ function selfTest() {
   );
 
   // ── the incident shape, on the fixture: ONE insertion, several falsehoods ───
-  const inserted = insertRowAbove(ROW_FIXTURE_PAGE, 3, ' **An inserted row** | `pkg/a.ts:9` |');
+  const inserted = insertRowAbove(ROW_FIXTURE_PAGE, 3, ' **An inserted row** | `pkg/a.ts#inserted` |');
   const afterInsert = rowRefs(inserted.text);
   t(
     '⭐ THE INCIDENT SHAPE: inserting one row above row 3 falsifies every reference below it, ' +
@@ -2297,8 +2629,8 @@ function selfTest() {
     'a key that resolves to TWO rows refuses and names both candidates',
     (() => {
       const twice = ROW_FIXTURE_PAGE.replace(
-        '| 2 | **`owner_id` is not stamped** on INSERT | `pkg/a.ts:3` |',
-        '| 2 | **`owner_id` is not stamped** and `revoke()` deletes directly | `pkg/a.ts:3` |'
+        '| 2 | **`owner_id` is not stamped** on INSERT | `pkg/a.ts#stamp` |',
+        '| 2 | **`owner_id` is not stamped** and `revoke()` deletes directly | `pkg/a.ts#stamp` |'
       );
       const result = rowRefs(twice);
       return result.problems.some((p) => p.startsWith('[row-ref-key-ambiguous]') && p.includes('rows 2, 3'));
@@ -2363,7 +2695,7 @@ function selfTest() {
   t(
     'a `why:` that names a row and declares NO seam is refused -- an unkeyed number reads as current forever',
     (() => {
-      const unkeyed = [{ file: 'pkg/a.ts', needle: 'n', why: 'row 3 -- unkeyed' }];
+      const unkeyed = [{ file: 'pkg/a.ts', symbol: 'handler', why: 'row 3 -- unkeyed' }];
       return codes(rowRefs(ROW_FIXTURE_PAGE, ROW_FIXTURE_REFS, unkeyed)).includes('[why-row-unkeyed]');
     })()
   );
@@ -2383,8 +2715,8 @@ function selfTest() {
       realResult.problems.join(' | ')
     );
     t(
-      'and the real run really resolved them (10 page references + 9 `why:` mentions, 2 declared unheld)',
-      realResult.held.page === 10 && realResult.held.why === 9 && realResult.held.unheld === 2,
+      'and the real run really resolved them (10 page references + 8 `why:` mentions, 2 declared unheld)',
+      realResult.held.page === 10 && realResult.held.why === 8 && realResult.held.unheld === 2,
       JSON.stringify(realResult.held)
     );
 
@@ -2396,7 +2728,8 @@ function selfTest() {
       const mutated = insertRowAbove(
         realPage,
         34,
-        ' **An inserted row, for the ablation** | plugin-sharing | Get: nothing | `sharing-service.ts:1` |'
+        ' **An inserted row, for the ablation** | plugin-sharing | Get: nothing | ' +
+          '`packages/plugins/plugin-sharing/src/sharing-service.ts#grant` |'
       );
       const copy = join(dir, 'system-context.mdx');
       writeFileSync(copy, mutated.text);
@@ -2414,14 +2747,15 @@ function selfTest() {
       t(
         '⭐ ABLATION: one row inserted above row 34 turns the gate RED, naming the falsified page ' +
           'references -- this is the exact edit #15687 made under a green gate',
-        falsifiedRefs.some((p) => p.includes('`Row 34`') && p.includes('is row 35')) &&
-          falsifiedRefs.some((p) => p.includes('`rows 1–62`')),
+        falsifiedRefs.some((p) => p.includes('`Row 35`') && p.includes('is row 36')) &&
+          falsifiedRefs.some((p) => p.includes('`rows 1–63`')),
         ablated.problems.join(' | ')
       );
       t(
-        '⭐ ABLATION: and the `why:` strings for rows 34 and 60 -- the other two references #15687 falsified',
-        falsifiedWhy.some((p) => p.includes('`row 34`') && p.includes('is row 35')) &&
-          falsifiedWhy.some((p) => p.includes('`row 60`') && p.includes('is row 61')),
+        '⭐ ABLATION: and the `why:` strings for the two `why:` references #15687 falsified ' +
+          '(the seams #15687 knew as rows 34 and 60; the page has since grown a row above them)',
+        falsifiedWhy.some((p) => p.includes('`row 35`') && p.includes('is row 36')) &&
+          falsifiedWhy.some((p) => p.includes('`row 61`') && p.includes('is row 62')),
         falsifiedWhy.join(' | ')
       );
       t(
@@ -2508,6 +2842,7 @@ function selfTest() {
     );
   }
 
+  Object.assign(process.env, savedGitEnv);
   process.stdout.write(
     failures === 0
       ? '\ncheck-system-context-census --self-test: all cases passed\n'

@@ -253,8 +253,14 @@ function isRecordTriggered(flow: AnyRec, startConfig: AnyRec): boolean {
 
 /** Resolve the object a record-change flow binds to, from its start node. */
 function boundObjectOf(flow: AnyRec): string | undefined {
-  const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
-  const start = nodes.find((n) => n?.type === 'start');
+  // `recordsOf`, not `Array.isArray` + cast (#16751). This site and the two
+  // below never threw — but only because each `.find` predicate happens to be
+  // spelled `n?.type`, one character away from the reader that did throw in
+  // `lint-flow-patterns.ts`. Nothing maintained that difference, and the `?.`
+  // reads as redundant beside an `Array.isArray`, so the coercion is made where
+  // it has a home and the optional chain goes with it.
+  const nodes = recordsOf(flow.nodes);
+  const start = nodes.find((n) => n.type === 'start');
   if (!start) return undefined;
   const config = (start.config ?? {}) as AnyRec;
   const typed = (start.start ?? {}) as AnyRec;
@@ -271,8 +277,8 @@ function boundObjectOf(flow: AnyRec): string | undefined {
  * or `string[]`; anything else yields the empty set.
  */
 function declaredExpandOf(flow: AnyRec): Set<string> {
-  const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
-  const start = nodes.find((n) => n?.type === 'start');
+  const nodes = recordsOf(flow.nodes);
+  const start = nodes.find((n) => n.type === 'start');
   const raw = ((start?.config ?? {}) as AnyRec).expand;
   if (typeof raw === 'string') return new Set(raw ? [raw] : []);
   if (Array.isArray(raw)) return new Set(raw.filter((r): r is string => typeof r === 'string' && r.length > 0));
@@ -295,8 +301,8 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
 
   flows.forEach((flow, flowIndex) => {
     const flowName = typeof flow.name === 'string' ? flow.name : `#${flowIndex}`;
-    const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
-    const start = (nodes.find((n) => n?.type === 'start')?.config ?? {}) as AnyRec;
+    const nodes = recordsOf(flow.nodes);
+    const start = (nodes.find((n) => n.type === 'start')?.config ?? {}) as AnyRec;
     if (!isRecordTriggered(flow, start)) return;
 
     const objectName = boundObjectOf(flow);

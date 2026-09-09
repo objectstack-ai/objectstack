@@ -11,6 +11,10 @@
 // to land on stderr before it. `NODE_ENV` and `settings.debug` are what
 // `development: true` sets — they are set here so this shim keeps behaving
 // exactly as it did.
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { flush, handle, run, settings } from '@oclif/core';
 
 import { keepStderrNonBlocking } from '../src/utils/stderr-nonblocking.ts';
@@ -59,11 +63,15 @@ const STDERR_DRAIN_POLL_MS = 50;
  * asynchronously and `process.exit` tears the process down with the buffer only
  * partly drained; `src/utils/format.ts` carries the whole argument for stdout
  * (`emitJson`). One thing makes it worse here: `settings.debug` is on, so
- * oclif's `displayWarnings()` has already queued ~138 KB of `ModuleLoadError`
- * blocks AHEAD of these lines. Measured on the #12964 repro with a reader that
- * was not draining: the pipe delivered exactly one 64 KiB buffer and everything
- * after it was lost — this diagnostic AND oclif's own `command … not found`,
- * which `handle()` writes a moment later and which the same tear-down takes.
+ * ~143 KB of `ModuleLoadError` blocks is already queued AHEAD of these lines —
+ * three quarters of it from oclif's `displayWarnings()` and the rest from node's
+ * OWN default `warning` handler, which stays attached and prints every warning
+ * as well (#16691, drained run: 147 729 bytes over 179 writes, 111 751 of them
+ * from `config.js`, 35 133 from `internal/process/warning.js`). Measured on the
+ * #12964 repro with a reader that was not draining: the pipe delivered exactly
+ * one 64 KiB buffer and everything after it was lost — this diagnostic AND
+ * oclif's own `command … not found`, which `handle()` writes a moment later and
+ * which the same tear-down takes.
  * That is why the merge queue saw it and a developer's terminal never does: a
  * TTY is written synchronously, a captured pipe is not.
  *
@@ -152,6 +160,28 @@ async function announceInvocationFailure(error) {
 const moduleLoadFailures = [];
 
 /**
+ * Where THIS process's loader sends a specifier — the probe
+ * `unbuiltWorkspaceLines` uses to tell a stale build output apart from a build
+ * output that was never consulted (#16547).
+ *
+ * It has to be the shim's own `import.meta.resolve` rather than one the
+ * diagnostic builds for itself: this is the resolver that produced the failure
+ * being reported, tsconfig `paths` and all, so it is the only one that can
+ * answer for it. A resolver constructed anywhere else answers about a different
+ * loader and could contradict the run it is describing.
+ *
+ * `undefined` on any failure, which the diagnostic reads as "no evidence of a
+ * redirect" and which leaves the build remedy exactly as it was.
+ */
+function resolveThroughThisLoader(specifier) {
+  try {
+    return import.meta.resolve(specifier);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * The other reading of "command … not found": the command is there and its
  * MODULE would not load, because a workspace package this repo builds has no
  * usable `dist/`. See `scripts/cli-unbuilt-workspace-lead.mjs` for the whole
@@ -169,7 +199,7 @@ async function announceUnbuiltWorkspace(error) {
     ]);
     // One write, so the drain that matters happens once, immediately before
     // `handle()` gets its turn at the same pipe.
-    const lines = unbuiltWorkspaceLines(error, moduleLoadFailures, INVOCATION_PREFIX) ?? [];
+    const lines = unbuiltWorkspaceLines(error, moduleLoadFailures, INVOCATION_PREFIX, resolveThroughThisLoader) ?? [];
     if (lines.length) await writeStderr(`${lines.join('\n')}\n`);
   } catch {
     // Stay quiet rather than replacing oclif's report with an error about the
@@ -196,20 +226,170 @@ settings.debug = true;
 keepStderrNonBlocking();
 
 /**
+ * This package's OWN tsconfig — the one its `src/` is written against, and the
+ * one the guard below pins tsx to.
+ */
+const CLI_TSCONFIG = fileURLToPath(new URL('../tsconfig.json', import.meta.url));
+
+/** This package's manifest, read for the dependency list the probe sweeps. */
+const CLI_PACKAGE_JSON = fileURLToPath(new URL('../package.json', import.meta.url));
+
+/**
+ * The first of this package's OWN workspace dependencies that tsx is resolving
+ * to TypeScript SOURCE instead of to build output — or '' when none is, which
+ * is every run from a cwd that carries no redirecting tsconfig.
+ *
+ * ## What it detects, measured rather than reasoned (#16547)
+ *
+ * tsx reads the CWD's tsconfig, not the entry file's, and applies its
+ * `compilerOptions.paths` to EVERY specifier it resolves — including this
+ * CLI's own. Ten in-tree directories carry such a rule, written for tsc so a
+ * `typecheck` grades against a producer's source rather than its last build
+ * (`check:type-source-resolution` requires them), and #11094 named the runtime
+ * half "a latent runtime redirect for any tsx-honouring tool". Run this shim
+ * from one of them and the CLI's imports are re-routed:
+ *
+ *     cd examples/app-multi-package
+ *     ../../node_modules/.bin/tsx ../../packages/cli/bin/run-dev.js lint objectstack.config.ts
+ *     → exit 2, "command lint:objectstack.config.ts not found"
+ *
+ * ⚠️ NOT because the source is missing an export — the correction #16547's
+ * repro earned over the reading it was filed with. `@objectstack/spec/data`'s
+ * source subpath exports the very name the failure blames (470 names, measured
+ * through `await import()`, `DATABASE_DRIVER_SELECTION_IDS` among them). What
+ * breaks is the STATIC LINK, and the reason is module FORMAT: `packages/spec`
+ * and `packages/types` declare no `"type": "module"`, so tsx loads their `.ts`
+ * sources as CommonJS, and a static ESM named import can then bind only the
+ * names `cjs-module-lexer` detects — which does not follow the two-hop
+ * `export *` chain (`data/index.ts` → `./driver/index` →
+ * `./config-registry.zod`) that publishes this one. Measured with a two-leg
+ * fixture whose only difference was the `"type"` field: CJS leg SyntaxError,
+ * ESM leg links. `packages/cli` IS `"type": "module"`, so every one of its
+ * command modules is on the failing side of that seam.
+ *
+ * ## Why the probe is a RESOLUTION and not a tsconfig read
+ *
+ * The question "would this cwd redirect us" is decided by tsx's own resolver,
+ * so it is asked of the resolver. Reading the cwd's tsconfig would mean
+ * reimplementing get-tsconfig's lookup, its JSONC parse and its `extends`
+ * walk — three chances to disagree with the thing whose behaviour is the whole
+ * subject, for an answer this call gets exactly right.
+ *
+ * The criterion is that a resolution lands on a TypeScript SOURCE file. No
+ * workspace package's `exports` map points at one — every one targets `dist/`
+ * — so a `.ts` answer cannot be produced by node resolution alone. Measured on
+ * this manifest: 0 of 49 workspace dependencies answer `.ts` from the repo
+ * root, exactly 1 does from `examples/app-multi-package` (`@objectstack/spec`)
+ * and exactly 1 from `packages/plugins/plugin-security` (`@objectstack/types`)
+ * — the two directories #16547 reproduced from, each naming its own package.
+ *
+ * Cost, measured on the box this landed on: ~72 ms for the full 49-specifier
+ * sweep (~1.35 ms per `import.meta.resolve`), against a ~11.3 s end-to-end
+ * `lint` run through this shim — 0.6%, and it is paid once per process. The
+ * alternative that needs no probe at all, re-execing unconditionally, costs a
+ * whole second tsx bootstrap (~550 ms measured) on every run instead.
+ *
+ * ⚠️ The error direction is the safe one and is worth stating: a dependency
+ * that legitimately published a `.ts` entry point would cost one unnecessary
+ * re-exec, never a wrong answer — pinning this CLI to its own tsconfig is
+ * always correct for this CLI's own code.
+ */
+function firstSourceRedirectedDependency() {
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(CLI_PACKAGE_JSON, 'utf8'));
+  } catch {
+    // No manifest, no probe. Degrade to the behaviour this shim had before the
+    // pin existed rather than fail on the way to running the CLI.
+    return '';
+  }
+  // The scope comes from this package's OWN name rather than a constant, so
+  // "a package this repo builds" cannot drift away from what this repo calls
+  // itself: `@objectstack/cli` → `@objectstack/`.
+  const scope = String(manifest?.name ?? '').split('/')[0];
+  if (!scope.startsWith('@')) return '';
+  for (const dep of Object.keys(manifest?.dependencies ?? {})) {
+    if (!dep.startsWith(`${scope}/`)) continue;
+    let pathname;
+    try {
+      // The URL is parsed INSIDE the guard on purpose. This runs before the CLI
+      // does anything, so a throw here would replace the whole run with an error
+      // about the probe — the same rule the two reporters below are written to.
+      pathname = new URL(import.meta.resolve(dep)).pathname;
+    } catch {
+      // Not installed, no such subpath, or an answer that is not a URL. Not this
+      // probe's business, and never this probe's report.
+      continue;
+    }
+    if (/\.[cm]?tsx?$/.test(pathname)) return dep;
+  }
+  return '';
+}
+
+// ⛔ The pin can only be applied by RE-EXEC, and that is a measured constraint
+// rather than a preference. tsx parses its tsconfig in the loader's
+// `initialize` / `globalPreload`, both of which have already run by the time
+// this file gets control: setting `process.env.TSX_TSCONFIG_PATH` here and
+// re-resolving answers the SOURCE path exactly as before (measured). So the
+// choice is a second process or no pin at all.
+//
+// The env var doubles as the loop guard, and as the caller's override: a run
+// that already carries one is either the child this block spawned or someone
+// who pinned deliberately, and neither wants a second opinion.
+if (!process.env.TSX_TSCONFIG_PATH) {
+  const redirected = firstSourceRedirectedDependency();
+  if (redirected) {
+    // ⚠️ `process.stderr.write` followed by an exit is the #6531 defect this
+    // file exists to avoid, and this is deliberately NOT that shape: what
+    // follows the write is `spawnSync`, which blocks this process for the
+    // whole lifetime of the child (seconds), so the write has the entire run
+    // to drain instead of racing a tear-down. `keepStderrNonBlocking()` above
+    // has already run, so the write cannot park the thread either.
+    process.stderr.write(
+      `objectstack: the current directory's tsconfig redirects '${redirected}' to TypeScript source, and tsx honours the CWD's tsconfig — re-running with tsx pinned to ${CLI_TSCONFIG}\n`,
+    );
+    const child = spawnSync(process.execPath, [...process.execArgv, ...process.argv.slice(1)], {
+      // Inherited, so the child holds the very fds this process was handed and
+      // every byte-level property the suites below pin is the CHILD's, not a
+      // forwarding copy. libuv clears `O_NONBLOCK` on fd 2's shared
+      // description in the pre-exec — the hazard `keepStderrNonBlocking()`
+      // exists for — and the child re-asserts it on its own write path, which
+      // is why that guard had to live on the write rather than run once.
+      stdio: 'inherit',
+      env: { ...process.env, TSX_TSCONFIG_PATH: CLI_TSCONFIG },
+    });
+    if (!child.error) {
+      // A signalled child is reported as a signal, never as an exit code: #14715
+      // pinned that this CLI answers 2 for a failed run, and laundering a
+      // SIGKILL into some number would make a killed child indistinguishable
+      // from one that decided.
+      if (child.signal) process.kill(process.pid, child.signal);
+      process.exit(child.status ?? 1);
+    }
+    // Spawn itself failed. Degrade to the behaviour this shim had before the
+    // pin existed — which is the failure #16547 describes, and still better
+    // than replacing the CLI's report with one about the re-exec.
+  }
+}
+
+/**
  * Make a FAILED stderr write non-fatal, so a caller whose read end is gone
  * still gets this CLI's own exit status instead of a crash. #14858.
  *
  * `process.stderr` is an `EventEmitter`, and an `error` event with nothing
  * listening IS an uncaught exception. With the parent's read end DESTROYED
- * (`stdio: ['ignore', 'ignore', 'pipe']`, then `child.stderr.destroy()`)
- * oclif's `displayWarnings()` makes the first write, the pipe is already gone,
- * node raises `write EPIPE` on `process.stderr`, and this process died of an
- * uncaught exception — 12 of 12 runs, 938-1174 ms in, well before `run()`
- * settles and before `writeStderr()` above is ever called. Traced with a
- * `--import` observer that installs NO listener on this stream and wraps no
- * write (`uncaughtExceptionMonitor`, which observes without preventing the
- * default crash — an `uncaughtException` handler would have changed the very
- * thing being read):
+ * (`stdio: ['ignore', 'ignore', 'pipe']`, then `child.stderr.destroy()`) the
+ * first write comes from node's OWN default `warning` handler
+ * (`internal/process/warning.js`: `onWarning` → `writeOut` → `console.error`),
+ * and oclif's `displayWarnings()` makes writes 2 and 3 of the same warning
+ * (#16691 re-traced the order; #15558 named `displayWarnings()` for the first
+ * one). The pipe is already gone, node raises `write EPIPE` on
+ * `process.stderr`, and this process died of an uncaught exception — 12 of 12
+ * runs, 938-1174 ms in, well before `run()` settles and before `writeStderr()`
+ * above is ever called. Traced with a `--import` observer that installs NO
+ * listener on this stream and wraps no write (`uncaughtExceptionMonitor`, which
+ * observes without preventing the default crash — an `uncaughtException` handler
+ * would have changed the very thing being read):
  *
  *     uncaughtException  code=EPIPE  msg=write EPIPE
  *           at afterWriteDispatched (node:internal/stream_base_commons:159:15)
@@ -221,6 +401,26 @@ keepStderrNonBlocking();
  * the never-read reader. So the closed reader was the one shape that could not
  * tell "the command failed" from "the CLI crashed", on the only channel it had
  * left.
+ *
+ * ⚠️ EVERY write on that path is a `console.error`, which is worth stating
+ * because it reads as if it should be survivable — `bin/run.js` records that
+ * Console's `ignoreErrors` keeps a warning block from crashing a process, and
+ * THERE it does. What saves a process is not the temporary listener
+ * `kWriteToConsole` parks across the write (its `finally` removes that one
+ * before the completion arrives) but Console's write CALLBACK, which re-attaches
+ * a `noop` when the completion reports an error — and only
+ * `if (stream.listenerCount('error') === 0)`. Under `tsx` that count is never 0:
+ * tsx registers an off-thread module-customization hook, so node pipes the hooks
+ * worker's stderr into `process.stderr` and `Stream.prototype.pipe` prepends its
+ * own `onerror` there (`node:internal/streams/legacy`). Console's keep-alive is
+ * therefore never installed; `onerror` takes the first EPIPE, tears the pipe's
+ * own listeners down including itself, finds no other `error` listener left and
+ * RE-EMITS on `process.stderr` — that second emit is the uncaught one.
+ * Ablated on plain node, one short line and nothing else changed: `console.error`
+ * alone 0/3, `module.register()` of a no-op hook plus the SAME `console.error`
+ * 3/3, a raw `process.stderr.write` 3/3 (#16691). ⇒ Payload size decides nothing
+ * here, and this listener is what covers the `console.error` sites too, not only
+ * `writeStderr()` above.
  *
  * ⛔ Deliberately NOT narrowed to `error.code === 'EPIPE'`, even though EPIPE is
  * the only code this path was measured to raise (4 events per run, no other

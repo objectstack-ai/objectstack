@@ -296,9 +296,13 @@ function mountDoor(rest: InstanceType<typeof RestServer>): Map<string, RouteHand
         delete: (p: string, h: RouteHandler) => { routes.set(`DELETE:${p}`, h); },
         patch: () => {}, use: () => {}, listen: async () => {}, close: async () => {},
     } as never;
+    // [#14503] The door is `POST /packages/publish` — the one route the
+    // registrar mounts now (the read route this file used to drive is the
+    // dispatcher domain's alone). Same resolver, same gate, same three wire
+    // answers: the fixture's permission set grants `manage_metadata`.
     registerPackageRoutes(
         server,
-        () => ({ list: async () => [], publish: async () => ({}), delete: async () => ({}) }) as never,
+        () => ({ publish: async () => ({ success: true }) }) as never,
         '/api/v1',
         { resolveExecutionContext: (req: unknown) => rest.resolvePackageRouteExecutionContext(req) } as never,
     );
@@ -306,8 +310,8 @@ function mountDoor(rest: InstanceType<typeof RestServer>): Map<string, RouteHand
 }
 
 async function driveDoor(routes: Map<string, RouteHandler>): Promise<{ status: number; body: any }> {
-    const handler = routes.get('GET:/api/v1/packages');
-    if (!handler) throw new Error('no handler for GET /api/v1/packages');
+    const handler = routes.get('POST:/api/v1/packages/publish');
+    if (!handler) throw new Error('no handler for POST /api/v1/packages/publish');
     const capturedRes: { status: number; body: any } = { status: 0, body: undefined };
     const res: any = {
         json(data: unknown) { capturedRes.body = data; },
@@ -315,7 +319,10 @@ async function driveDoor(routes: Map<string, RouteHandler>): Promise<{ status: n
         status(code: number) { capturedRes.status = code; return res; },
         header() { return res; },
     };
-    await handler({ params: {}, query: {}, body: undefined, headers: {}, method: 'GET', path: '/api/v1/packages' } as never, res);
+    await handler({
+        params: {}, query: {}, headers: {}, method: 'POST', path: '/api/v1/packages/publish',
+        body: { manifest: { id: 'com.acme.crm', version: '1.0.0' }, metadata: {} },
+    } as never, res);
     return capturedRes;
 }
 

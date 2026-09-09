@@ -24,7 +24,35 @@ const REPO_ROOT = join(HERE, '../../../..');
 const SPEC_SRC = join(REPO_ROOT, 'packages/spec/src');
 
 const MODES = new Set(['compile', 'interpret']);
-const FAIL_POLICIES = new Set(['compile-error', 'fail-closed', 'fail-soft-log', 'throw']);
+const FAIL_POLICIES = new Set(['compile-error', 'fail-closed', 'fail-soft-log', 'throw', 'unevaluated']);
+
+/**
+ * Runtime evaluator/compiler SITES, as this ledger's own enforcement cells
+ * name them. Used only as the negative half of the `unevaluated` pin below: a
+ * row claiming nothing evaluates its slot must not, in the same breath, name
+ * the thing that does.
+ *
+ * The vocabulary is drawn from the enforcement cells already in the ledger
+ * rather than invented, and it is deliberately a DETECTOR, not an inventory —
+ * a row may name an evaluator this list has never heard of (the objectui
+ * renderers are named in prose, with no callable token to match), so a MISS
+ * proves nothing on its own. That is why the pin's other half is a positive
+ * requirement rather than this one alone.
+ */
+const NAMES_RUNTIME_EVALUATOR =
+  /celEngine|cronEngine|ExpressionEngine\.evaluate|compileCelToFilter|celToFilter|matchesFilterCondition|evaluateVisibility|evaluateValidationRules|evalFieldPredicate|evalRowPredicate|useRowPredicate|resolveCascadingOptions|toBoundaryJobSchedule|croner/;
+
+/**
+ * The closed set of spellings that STATE the absence `unevaluated` claims.
+ *
+ * ⚠️ This does not make the claim true — no regex reads prose for honesty. What
+ * it does is refuse the shape the four older members were borrowed in: a row
+ * whose enforcement cell simply describes a site and leaves the reader to infer
+ * what happens to a bad expression. An `unevaluated` row has to say, in the
+ * cell itself, that this ledger looked and found no evaluator — which is the
+ * sentence a reviewer can check and a future author can be held to.
+ */
+const DECLARES_NO_EVALUATOR = /NO EVALUATOR FOUND|PARSE ONLY|no runtime consumer/;
 // `settings-visibility` is not one of the spec's `ExpressionDialect` members on
 // purpose (#7327): it is a closed non-CEL grammar with its own evaluator, and
 // the ledger's job is to say what a surface IS, not what its schema used to
@@ -213,5 +241,59 @@ describe('ADR-0058 D7 — expression surface conformance ledger', () => {
         + `${ds.map((d) => `${d.file}:${d.line}`).join(', ')}. `
         + 'Give the colliding declarations distinguishable keys, then classify each on its own row.');
     expect(collisions, collisions.join('\n')).toEqual([]);
+  });
+
+  // The pin that makes `unevaluated` worth minting. The card this member comes
+  // from is about a vocabulary with no word for "nothing evaluates this slot",
+  // which forced five rows to borrow a member claiming something stronger —
+  // `compile-error` on four, and `fail-closed` on a security-flavoured row
+  // whose own enforcement cell read `(no runtime consumer yet)`. A new word
+  // that could be borrowed just as loosely would reproduce that defect one
+  // member wider, so the word arrives with the assertions below.
+  //
+  // "Non-empty runtime enforcement" cannot be checked as `enforcement !== ''`:
+  // `ExprSurface` makes the cell REQUIRED, so every row has a non-empty one,
+  // the five honest `unevaluated` rows included. The checkable question is what
+  // the cell SAYS — it must state the absence, and it must not name the runtime
+  // site whose existence the row is denying.
+  it('`unevaluated` states an absence, and cannot be borrowed the way the old members were', () => {
+    // Positive control for the detector itself. An emptied or mistyped
+    // NAMES_RUNTIME_EVALUATOR makes the negative assertion below vacuously
+    // green — the "reports green because it never looked" failure the pin above
+    // guards against with its own control. The COMPILE rows are exactly the
+    // rows another pin in this file already requires to name the canonical
+    // compiler, so they are rows this detector MUST fire on.
+    const compileRows = EXPRESSION_SURFACE.filter((x) => x.mode === 'compile');
+    expect(
+      compileRows.length,
+      'no COMPILE rows in the ledger — the runtime-evaluator detector has nothing to be controlled against, so the assertions below prove nothing',
+    ).toBeGreaterThan(0);
+    for (const s of compileRows) {
+      expect(
+        NAMES_RUNTIME_EVALUATOR.test(s.enforcement),
+        `${s.id}: the runtime-evaluator detector does not fire on a row that is required to name the canonical compiler — the DETECTOR is broken, not the row`,
+      ).toBe(true);
+    }
+
+    for (const s of EXPRESSION_SURFACE.filter((x) => x.failPolicy === 'unevaluated')) {
+      // `enforced` means the platform enforces the surface; `unevaluated` means
+      // nothing reads it. Restricting this pin to `experimental` rows would
+      // leave `state: 'enforced'` as the escape hatch, so the contradiction is
+      // refused directly instead.
+      expect(
+        s.state,
+        `${s.id}: state 'enforced' and failPolicy 'unevaluated' contradict each other — nothing evaluates the slot, so nothing enforces it`,
+      ).not.toBe('enforced');
+
+      expect(
+        DECLARES_NO_EVALUATOR.test(s.enforcement),
+        `${s.id}: failPolicy 'unevaluated' but the enforcement cell never states the absence it claims. Say it in the cell — 'NO EVALUATOR FOUND', 'PARSE ONLY', or 'no runtime consumer' — so the claim is reviewable rather than inferred from silence`,
+      ).toBe(true);
+
+      expect(
+        NAMES_RUNTIME_EVALUATOR.test(s.enforcement),
+        `${s.id}: failPolicy 'unevaluated' says nothing evaluates this slot, but the enforcement cell names a runtime evaluator/compiler site. One of the two is wrong: if something evaluates it, classify it under the ADR-0058 D5 tier that describes what happens to a bad expression there`,
+      ).toBe(false);
+    }
   });
 });

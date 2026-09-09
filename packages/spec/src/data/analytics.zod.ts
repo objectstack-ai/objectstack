@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { FilterConditionSchema } from './filter.zod';
+import { DATE_RANGE_PRESETS } from './date-range-presets';
 
 /**
  * Analytics/Semantic Layer Protocol
@@ -246,6 +247,116 @@ export const CubeSchema = lazySchema(() => strictObject(
 ));
 
 /**
+ * The bare-string arm of `timeDimensions[].dateRange` — the dashboard
+ * date-range PRESET vocabulary, closed (#16041).
+ *
+ * Derived from {@link DATE_RANGE_PRESETS} rather than restated: that module's
+ * header records the vocabulary once existed in three drifting copies, and a
+ * fourth here would be the defect it was consolidated to end. `today` is the
+ * vocabulary's first member, so the ruling's "presets plus `today`" IS this
+ * enum. `analytics-date-range-closed-vocabulary.test.ts` pins the options
+ * equal to the module's list.
+ *
+ * Why closed (maintainer ruling on #16041, decision batch #57, option A —
+ * contract first): the arm was a bare `z.string()` whose only documented
+ * example, `"Last 7 days"`, was a value no driver could parse. An unrecognised
+ * spelling reached `driver-memory` as written and fell through to a
+ * `[range, range]` "window" that matched EVERY `Date`-typed row (a `Date`
+ * compares above a `String` under BSON cross-type ordering, so both garbage
+ * bounds were satisfied) — a dashboard asking for one week silently got all
+ * of history, while the SQL side read a bare string as a single ISO day.
+ * Same input, opposite wrong answers, neither an error. The protocol is the
+ * baseline, so the vocabulary is declared ONCE here and the drivers align to
+ * it (#16322) instead of each guessing.
+ */
+export const AnalyticsDateRangePresetSchema = z.enum(DATE_RANGE_PRESETS);
+/** The same names as {@link DateRangePreset} — declared through the schema so the alias cannot drift from it. */
+export type AnalyticsDateRangePreset = z.input<typeof AnalyticsDateRangePresetSchema>;
+
+/**
+ * The one refusal wording for a `timeDimensions[].dateRange` value outside
+ * the closed contract — shared by the schema door (this file) and, through
+ * the `ANALYTICS_DATE_RANGE_UNRECOGNIZED` envelope, by the runtime door and
+ * the drivers (#16322), so one condition keeps one wording (the #5240
+ * convention). A bare string is judged against {@link DATE_RANGE_PRESETS};
+ * anything that is neither a preset name nor an array is described by type.
+ */
+export function analyticsDateRangeRefusalMessage(input: unknown): string {
+  const window = 'an explicit window is the two-element array [start, end] of ISO dates or '
+    + '{date-macro} tokens — e.g. ["2026-01-01", "2026-01-31"] or ["{7_days_ago}", "{today}"]';
+  if (typeof input === 'string') {
+    return (
+      `${JSON.stringify(input)} is not a dateRange the platform can resolve. A bare string must `
+      + `be one of the declared date-range PRESET names (${DATE_RANGE_PRESETS.join(', ')}) — the `
+      + `same closed vocabulary the dashboard date filter uses, case-sensitive, snake_case; `
+      + `${window}. Refused at the schema (ANALYTICS_DATE_RANGE_UNRECOGNIZED / 400): an `
+      + 'unrecognised spelling used to reach the driver as written and silently widen the window '
+      + 'to every row instead of the one you named.'
+    );
+  }
+  const received = input === null ? 'null' : Array.isArray(input) ? 'an array with a non-string bound' : typeof input;
+  return (
+    `dateRange must be a date-range preset name (${DATE_RANGE_PRESETS.join(', ')}) or `
+    + `${window}; received ${received}. Refused at the schema (ANALYTICS_DATE_RANGE_UNRECOGNIZED / 400).`
+  );
+}
+
+/**
+ * `timeDimensions[].dateRange` — a preset name from the closed vocabulary, or
+ * an explicit `[start, end]` window.
+ *
+ * @example
+ * <!-- os:check -->
+ * ```ts
+ * import type { AnalyticsQuery } from '@objectstack/spec/data';
+ *
+ * const timeDimensions: AnalyticsQuery['timeDimensions'] = [
+ *   { dimension: 'created_at', granularity: 'day', dateRange: 'last_7_days' },
+ *   { dimension: 'created_at', granularity: 'month', dateRange: ['2023-01-01', '2023-01-31'] },
+ *   { dimension: 'created_at', dateRange: ['{30_days_ago}', '{today}'] },
+ * ];
+ * ```
+ *
+ * A value that is neither raises ONE issue at the field's own path with the
+ * prescriptive wording of {@link analyticsDateRangeRefusalMessage}; the
+ * runtime door recognises it through {@link isAnalyticsDateRangeRefusalIssue}
+ * and answers the ADR-0112 envelope `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED`
+ * (registered in `api/error-code-ledger.zod.ts`).
+ */
+export const AnalyticsDateRangeSchema = z.union(
+  [AnalyticsDateRangePresetSchema, z.array(z.string())],
+  {
+    // Zod 4 reports a union with no matching arm as ONE `invalid_union` issue
+    // at the union's own path, so the prescription lands on
+    // `timeDimensions.N.dateRange` instead of on the two arms' generic texts.
+    error: (issue) => (issue.code === 'invalid_union' ? analyticsDateRangeRefusalMessage(issue.input) : undefined),
+  },
+);
+export type AnalyticsDateRange = z.input<typeof AnalyticsDateRangeSchema>;
+
+/**
+ * Is this Zod issue the closed-vocabulary refusal of a
+ * `timeDimensions[].dateRange` value? Structural — the union's own
+ * `invalid_union` issue at the path this schema declares — so the door that
+ * lifts it into `ANALYTICS_DATE_RANGE_UNRECOGNIZED` reads the contract rather
+ * than sniffing message prose, and moves with the schema if the field ever
+ * moves. Accepts any object with a Zod-issue-shaped `code` and `path` so a
+ * door does not need Zod's own types to ask.
+ */
+export function isAnalyticsDateRangeRefusalIssue(
+  issue: { code: string; path: ReadonlyArray<PropertyKey> },
+): boolean {
+  const p = issue.path;
+  return (
+    issue.code === 'invalid_union'
+    && p.length >= 3
+    && p[p.length - 1] === 'dateRange'
+    && typeof p[p.length - 2] === 'number'
+    && p[p.length - 3] === 'timeDimensions'
+  );
+}
+
+/**
  * Analytics Query Schema
  * The request format for the Analytics API.
  *
@@ -322,12 +433,26 @@ export const AnalyticsQuerySchema = lazySchema(() => strictObject(
     {
       dimension: z.string(),
       granularity: TimeUpdateInterval.optional(),
-      dateRange: z.union([
-        z.string(), // "Last 7 days"
-        z.array(z.string()) // ["2023-01-01", "2023-01-31"]
-      ]).optional(),
+      // The string arm is the closed preset vocabulary (`'last_7_days'`, never
+      // the display spelling `"Last 7 days"` this comment used to show — a
+      // value no driver could parse, #16041); the array arm is an explicit
+      // `["2023-01-01", "2023-01-31"]` window. See {@link AnalyticsDateRangeSchema}.
+      dateRange: AnalyticsDateRangeSchema.optional().describe(
+        // The vocabulary is spelled by the module, never restated here — the
+        // generated reference page is one of the three copies #4614 retired.
+        'Time window for this dimension: a date-range PRESET name from the closed vocabulary in '
+        + `\`data/date-range-presets.ts\` (${DATE_RANGE_PRESETS.join(', ')} — e.g. \`'last_7_days'\`), `
+        + 'or an explicit `[start, end]` array of ISO dates / {date-macro} tokens (e.g. '
+        + '`["2023-01-01", "2023-01-31"]`). Any other string is refused at the schema with '
+        + '`400 ANALYTICS_DATE_RANGE_UNRECOGNIZED`.'
+      ),
     },
-  )).optional(),
+  )).optional().describe(
+    'Time-bucketed dimensions. Each entry names a dimension, an optional bucket `granularity`, '
+    + 'and an optional `dateRange` — a preset name from the closed date-range vocabulary '
+    + '(e.g. `\'last_7_days\'`) or an explicit `[start, end]` window; an unrecognised '
+    + 'string answers `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` instead of silently widening.'
+  ),
 
   order: z.record(z.string(), z.enum(['asc', 'desc'])).optional(),
 

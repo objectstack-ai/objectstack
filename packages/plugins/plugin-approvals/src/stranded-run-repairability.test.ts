@@ -1,14 +1,18 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #15358 — THE REPRODUCTION: `inspectStrandedRequests` labels a repairable
- * strand and an UNREPAIRABLE cascade-failed ancestor identically.
+ * #15358 — THE REPRODUCTION, and its resolution: `inspectStrandedRequests`
+ * labelled a repairable strand and an UNREPAIRABLE cascade-failed ancestor
+ * identically; under ruling B′ (2026-09-07) it tells them apart through the
+ * engine's dedicated read-only member, `inspectConsumedSuspension`.
  *
  * The card was filed from a reading of the sources. This file is the drive,
- * against a real `AutomationEngine` and a real `ApprovalService`, and it
- * reproduces: one fixture produces both rows, the inspection returns both as
- * `runState: 'failed'`, and the repair verb an operator would reach for next
- * answers `restored: true` for one and refuses the other.
+ * against a real `AutomationEngine` and a real `ApprovalService`: one fixture
+ * produces both rows, the repair verb an operator would reach for answers
+ * `restored: true` for one and refuses the other — and the inspection now
+ * reports them as `'repairable'` and `'unrepairable'` (PIN 1), from the SAME
+ * engine reading the verb uses (PIN 2), while `getRun` still carries no
+ * discriminator (PIN 3 — the wire surface is untouched, by ruling).
  *
  * ## The two rows, from one fixture
  *
@@ -29,30 +33,29 @@
  *    cancelled, cascade-failed)". UNREPAIRABLE — and this row's decision did
  *    advance its flow, which is the half the shared label denies.
  *
- * ## What must turn these assertions RED
+ * ## What PIN 1 pins now, and the assertion it replaced
  *
- * ⛔ The `runState` assertions below record what the inspection reports
- * TODAY. The maintainer ruling on this card (2026-09-04, decision batch #36,
- * option B) splits `StrandedRunState` into a repairable and an unrepairable
- * member and reports both, labelled apart — so whatever lands for B MUST turn
- * the "both come back identical" assertion red on purpose. It is written as a
- * single `toEqual` over both rows for exactly that reason: a split that
- * relabels only one of them still fails it.
+ * PIN 1 was written as a single `toEqual` over both rows recording what the
+ * inspection reported before B′ — `['failed', 'failed']` — so that a split
+ * relabelling only one of them would still fail it. B′ landed; the same
+ * single `toEqual` now records the split, so a regression that folds either
+ * row back into the other's label (or into bare `'failed'`) fails it.
  *
- * ## The measurement that sent the card back to the decision box
+ * ## The measurement B′ was ruled on — kept as PIN 3
  *
- * `PIN 3` is the load-bearing one. B's first clause is "`getRun` widens to
- * carry the discriminator the engine already records". The engine records it
- * on the DURABLE `RunRecord`, and `AutomationEngine.getRun` answers an
- * `ExecutionLogEntry`, which carries neither field — deliberately: `recordLog`
- * says the snapshot is "a parameter rather than a field of
- * `ExecutionLogEntry`" because that interface "is served verbatim by
- * `GET /automation/:name/runs/:runId`". So widening the plugin-side
- * declaration alone cannot separate these two rows: on a real engine the
- * discriminator is absent for BOTH, and a classifier reading absence as "not a
- * strand" would answer UNREPAIRABLE for the repairable row — the #15555
- * false-negative harm, one surface over. Where the discriminator gets
- * published is a producer-side contract decision, and it is open.
+ * The first ruling (2026-09-04, batch #36, option B) said "`getRun` widens to
+ * carry the discriminator the engine already records". PIN 3 measured that it
+ * cannot: the engine records the discriminator on the DURABLE `RunRecord`,
+ * and `AutomationEngine.getRun` answers an `ExecutionLogEntry`, which carries
+ * neither field — deliberately, because that interface "is served verbatim by
+ * `GET /automation/:name/runs/:runId`". On a real engine the discriminator is
+ * absent for BOTH rows, so a classifier reading absence as "not a strand"
+ * would answer UNREPAIRABLE for the repairable row — the #15555
+ * false-negative harm, one surface over. B′ (batch #76) therefore publishes it
+ * as a dedicated read-only engine member and leaves the wire untouched; PIN 3
+ * now pins that the wire IS untouched, and PIN 5 pins the fail-closed half: a
+ * surface that lacks the member reports both rows `'failed'` — never
+ * `'unrepairable'`, never dropped.
  *
  * ## The control that makes the readings trustworthy
  *
@@ -71,7 +74,7 @@ import { AutomationEngine, InMemorySuspendedRunStore, installBuiltinNodes } from
 // it stands in for is how #4434 shipped a dead REST route with its suite green.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { strandedDecisionDetails } from '@objectstack/types';
-import { ApprovalService } from './approval-service.js';
+import { ApprovalService, type ApprovalResumeSurface } from './approval-service.js';
 import { registerApprovalNode } from './approval-node.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as any;
@@ -284,7 +287,7 @@ describe('#15358 — a cascade-failed ancestor is reported as the repairable str
     return { parentReq, parentRunId, childReq, childRunId, childError: err };
   }
 
-  it('PIN 1 — the two rows come back with the SAME `runState`, and one of them cannot be repaired', async () => {
+  it('PIN 1 — the two rows come back labelled APART: the strand `repairable`, the ancestor `unrepairable`', async () => {
     const automation = boot();
     const { parentReq, parentRunId, childReq, childRunId } = await driveBothShapes(automation);
 
@@ -297,11 +300,13 @@ describe('#15358 — a cascade-failed ancestor is reported as the repairable str
     const labelled = out.stranded
       .map(s => [s.requestId === parentReq.id ? 'cascade-failed ancestor' : 'genuine strand', s.runState])
       .sort((a, b) => a[0].localeCompare(b[0]));
-    // ⛔ THE DEFECT, as one assertion: the label does not distinguish them.
-    // Option B splits `StrandedRunState`, so this MUST go red when B lands.
+    // The resolution, as one assertion over both rows: before B′ this read
+    // `['failed', 'failed']` (the defect — one label for two remedies). A fold
+    // of either row back into the other's label, or into bare `'failed'` on
+    // an engine that CAN be asked, fails it.
     expect(labelled).toEqual([
-      ['cascade-failed ancestor', 'failed'],
-      ['genuine strand', 'failed'],
+      ['cascade-failed ancestor', 'unrepairable'],
+      ['genuine strand', 'repairable'],
     ]);
 
     // …and both are reported with their decision durable, which is the true
@@ -382,5 +387,40 @@ describe('#15358 — a cascade-failed ancestor is reported as the repairable str
     expect(strandedDecisionDetails(result as unknown)).toBeUndefined();
     // …while the strand behind it is every bit as repairable as door A's.
     expect((await automation.restoreConsumedSuspension(recalledRunId)).restored).toBe(true);
+  });
+
+  it('PIN 5 — FAIL-CLOSED: a surface WITHOUT the member reports both rows `failed`, never `unrepairable`', async () => {
+    // The same real engine, the same two rows — seen through a surface that
+    // carries the two older oracles and not the third (an engine build older
+    // than this plugin, or a host double). Absence of the discriminator is not
+    // evidence: the repairable row must not be called dead (#15555's false
+    // negative, one surface over) and neither row may vanish from the report.
+    const automation = boot();
+    const { parentReq, parentRunId, childRunId } = await driveBothShapes(automation);
+    const blind: ApprovalResumeSurface = {
+      hasSuspendedRun: (runId) => automation.hasSuspendedRun(runId),
+      getRun: (runId) => automation.getRun(runId),
+    };
+    expect(typeof (blind as { inspectConsumedSuspension?: unknown }).inspectConsumedSuspension).toBe('undefined');
+    service.attachAutomation(blind);
+
+    const out = await service.inspectStrandedRequests();
+    expect(out.scanned).toBe(2);
+    expect(out.undetermined).toBe(0);
+    const labelled = out.stranded
+      .map(s => [s.requestId === parentReq.id ? 'cascade-failed ancestor' : 'genuine strand', s.runState])
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    expect(labelled).toEqual([
+      ['cascade-failed ancestor', 'failed'],
+      ['genuine strand', 'failed'],
+    ]);
+    expect(new Set(out.stranded.map(s => s.runId))).toEqual(new Set([parentRunId, childRunId]));
+
+    // Positive control, same engine, same rows: re-attach the full surface and
+    // the split comes back — so the `'failed'` above was the member's absence,
+    // not the rows.
+    service.attachAutomation(automation);
+    const again = await service.inspectStrandedRequests();
+    expect(new Set(again.stranded.map(s => s.runState))).toEqual(new Set(['repairable', 'unrepairable']));
   });
 });

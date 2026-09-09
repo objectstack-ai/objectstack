@@ -4410,7 +4410,11 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     const ql: any = {
       executeAction: vi.fn(),
       registry: { getObject: () => flowObject },
-      find: vi.fn(async () => []),
+      // [#16370] Answer the by-id subject pre-load — the bridge refuses a
+      // row-scoped invocation whose caller-scope load did not deliver the row,
+      // and these cases are about the flow DISPATCH, not about the load.
+      find: vi.fn(async (_object: string, options?: any) =>
+        (options?.where?.id ? [{ id: options.where.id }] : [])),
       insert: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),

@@ -534,7 +534,7 @@ function isObjectQLValidationError(
  * the guards live in this package but throw a plain engine-shaped error so that
  * BOTH transports can map it — `mapDataError` gives the REST data routes a 403,
  * this gives the auth pipeline one. The concrete case is the break-glass
- * last-administrator ban guard (ADR-0024 D5.2, `last-admin-ban-guard.ts`):
+ * last-administrator ban guard (ADR-0024 D5.2, `last-admin-guard.ts`):
  * without this arm, an over-broad SCIM deprovision would be refused correctly
  * and then reported to the IdP as an opaque 500, which is the one thing a guard
  * whose whole product is an explanation must not do.
@@ -981,7 +981,12 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         // first config edit, leaving a column that only LOOKS protected.
         liftClientSecretForWrite(objectName, patch);
         const result = await dataEngine.update(objectName, { ...patch, id: record.id });
-        if (!result) return null;
+        // [#16231] The payload carries the resolved `id` and no `where`, so
+        // the engine dispatches `by-id` and answers the record or `null`. The
+        // `number` limb of the declared union is the predicate path's affected
+        // count, unreachable from here — refused rather than coerced, so this
+        // adapter never hands `normaliseLegacyDates` a count shaped as a row.
+        if (!result || typeof result === 'number') return null;
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },
@@ -1085,7 +1090,12 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         if (set) Object.assign(patch, bridged ? remapKeys(set, camelToSnake) : set);
 
         const result = await dataEngine.update(objectName, { ...patch, id: record.id });
-        if (!result) return null;
+        // [#16231] The payload carries the resolved `id` and no `where`, so
+        // the engine dispatches `by-id` and answers the record or `null`. The
+        // `number` limb of the declared union is the predicate path's affected
+        // count, unreachable from here — refused rather than coerced, so this
+        // adapter never hands `normaliseLegacyDates` a count shaped as a row.
+        if (!result || typeof result === 'number') return null;
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },

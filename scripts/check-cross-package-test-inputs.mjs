@@ -22,9 +22,9 @@
 //
 //   Layer B -- turbo's task cache. `test` declares `inputs: ["$TURBO_DEFAULT$",
 //     ...]`, which is PACKAGE-LOCAL. `@objectstack/spec#test` therefore hashes
-//     the same before and after any change outside `packages/spec`, so even the
-//     merge-queue and push builds -- which deliberately partition the FULL
-//     package list, not the affected subset -- replay a cached green.
+//     the same before and after any change outside `packages/spec`, so even a
+//     build that partitions the FULL package list -- `push` on `main` today,
+//     the merge queue too until #16453 -- replays a cached green.
 //     Measured: `turbo run test --filter=@objectstack/spec` after the
 //     platform-objects edit printed `>>> FULL TURBO`, 42ms, replaying the
 //     previous run's log, while `--force` on the same tree failed the scan.
@@ -220,14 +220,14 @@
 //   node scripts/check-cross-package-test-inputs.mjs --list-escapes
 //   node scripts/check-cross-package-test-inputs.mjs --self-test
 
-import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve, relative, dirname, sep, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import process from 'node:process';
 
-import { CROSS_PACKAGE_TEST_INPUTS } from './cross-package-test-inputs.mjs';
+import { CROSS_PACKAGE_TEST_INPUTS, NODE_MODULES_EXCLUSION, NODE_MODULES_SEGMENT } from './cross-package-test-inputs.mjs';
 import { matchesAny, selfTest as globMatchSelfTest } from './glob-match.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
@@ -263,11 +263,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the INTERPOLATING TEMPLATE argument, `NEW_URL_LITERAL` sibling (#12085) ─': 7,
   'the RESOLVER half (#10452)': 43,
   'the entry guard, driven for real': 2,
+  'the SPLIT test:repo task (#16466)': 16,
+  'the node_modules REACH rule (#16555)': 18,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 9;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1455,23 +1457,17 @@ function verify() {
     console.error(`FAIL: cannot read turbo.json: ${e.message}`);
     process.exit(1);
   }
+  // A split package (#16466, the header above `readSplit`) hashes the radius on
+  // `<pkg>#test:repo` and keeps `<pkg>#test` package-local; its `repo` project's
+  // include list is held equal to the scan here, in both directions.
+  let splitCount = 0;
   for (const [name, { globs }] of Object.entries(CROSS_PACKAGE_TEST_INPUTS)) {
-    const task = turbo.tasks?.[`${name}#test`];
-    if (!task) {
-      problems.push(
-        `turbo.json has no "${name}#test" task. Without it the package's test cache is\n` +
-          `    keyed on package-local files only, so a change to its declared globs replays\n` +
-          `    a stale green instead of re-running. Add it with inputs:\n` +
-          `      ${JSON.stringify(expectedInputs(globs))}`,
-      );
-      continue;
-    }
-    const missing = globs.filter((g) => !(task.inputs ?? []).includes(`$TURBO_ROOT$/${g}`));
-    if (missing.length) {
-      problems.push(
-        `turbo.json "${name}#test" inputs are missing the declared glob(s):\n` +
-          missing.map((g) => `      $TURBO_ROOT$/${g}`).join('\n'),
-      );
+    const info = escaping.get(name);
+    const { split, listed } = info ? readSplit(join(REPO_ROOT, info.dir)) : { split: false, listed: null };
+    if (split) splitCount++;
+    problems.push(...turboInputProblems(name, globs, turbo.tasks, split));
+    if (split && info) {
+      problems.push(...repoProjectProblems(name, info.tests.map((t) => relative(info.dir, t)), listed));
     }
   }
 
@@ -1502,12 +1498,242 @@ function verify() {
   }
   console.log(
     `OK: ${escaping.size} package(s) read outside themselves, all declared, ` +
-      `and turbo.json hashes every declared glob.`,
+      `and turbo.json hashes every declared glob` +
+      (splitCount ? ` (${splitCount} of them on a split "${REPO_TASK}" task).` : '.'),
   );
 }
 
+// ── The SPLIT (#16466): `<pkg>#test` and `<pkg>#test:repo` ───────────────────
+//
+// A heavy package that also carries repo-scanning tests paid its declared
+// radius on every change anywhere inside it: `packages/**/*.ts` on
+// `@objectstack/spec#test` re-ran 13,000 cases for a leaf `.ts` edit, and
+// `content/**` re-ran spec and rest (~640s of CI-median suite wall) for a
+// docs-only merge group. Moving the scanning files out was measured and
+// refused -- 20 of the 33 import private internals of their home package --
+// so such a package splits its TASK, never its files: two vitest projects in
+// one config,
+//
+//   `local`  every other test file    -> `<pkg>#test`        package-local inputs
+//   `repo`   the escaping tests       -> `<pkg>#test:repo`   the declared radius
+//
+// The split is declared by the manifest's `test:repo` script. The `repo`
+// project's include list is REPO_TESTS_FILE beside the config, and this gate
+// holds that list EQUAL to its own scan in both directions: an escaping test
+// missing from the list runs under `test`, whose hash never moves with its
+// reads -- #7802 again, one task over -- and a listed file that no longer
+// escapes is refused too, so the list cannot rot into "everything". Layer B
+// follows the split: the declared globs must hash on `<pkg>#test:repo`, and
+// `<pkg>#test` must carry NO `$TURBO_ROOT$` input at all, or the split gains
+// nothing while reading as done. A package without a `test:repo` script keeps
+// the radius on `<pkg>#test` exactly as before.
+export const REPO_TESTS_FILE = 'vitest.repo-tests.json';
+export const REPO_TASK = 'test:repo';
+
+/** `{ split, listed }` for a package directory: `listed` is the JSON array, or null when unreadable. */
+export function readSplit(pkgDir) {
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'));
+  } catch {
+    return { split: false, listed: null };
+  }
+  if (typeof manifest?.scripts?.[REPO_TASK] !== 'string') return { split: false, listed: null };
+  let listed = null;
+  try {
+    const parsed = JSON.parse(readFileSync(join(pkgDir, REPO_TESTS_FILE), 'utf8'));
+    if (Array.isArray(parsed) && parsed.every((p) => typeof p === 'string')) listed = parsed;
+  } catch {
+    listed = null;
+  }
+  return { split: true, listed };
+}
+
+/**
+ * ── Layer B's second question: what else does the declared glob MATCH? (#16555)
+ *
+ * Layer B above asks whether turbo hashes the declared globs. It never asked
+ * what those globs hash BESIDES the declaration, and that is a whole defect
+ * class it cannot see: a `$TURBO_ROOT$` glob resolves against the FILESYSTEM,
+ * so `packages/**` descends into every installed dependency tree under
+ * `packages/` while the walks these globs are declared against all skip
+ * `node_modules`. The declaration is wider than the walk in the one direction
+ * a glob cannot narrow by itself, and the task stops being cacheable at all --
+ * vitest rewrites its own `results.json` under `node_modules/.vite` on every
+ * run, so on a runner that ran any vitest earlier the hash has already moved
+ * before the task is hashed.
+ *
+ * That is why the rule is not "fix the glob". A glob CANNOT express the
+ * exclusion (measured, and recorded where `NODE_MODULES_EXCLUSION` is
+ * declared: turbo drops a negation carrying the root token instead of applying
+ * it). What the next declaration needs is the EXCLUSION on the task, and this
+ * rule is what makes its absence red instead of silent.
+ *
+ * The reach question is answered by the MATCHER, never by sniffing the glob's
+ * text for a wildcard: a witness path is assembled with the excluded segment in
+ * each wildcard position and handed to `matchesAny`, so a glob is judged by the
+ * same semantics Layers A and B judge it by. A declaration of literal file
+ * paths -- most rows in the table -- yields no witness and reaches nothing, so
+ * it owes no exclusion and stays green.
+ *
+ * @param {string} glob repo-relative, as declared
+ * @returns {boolean} whether some path with a `node_modules` segment matches it
+ */
+export function globReachesNodeModules(glob) {
+  const segments = glob.split('/');
+  // A wildcard segment stands in for one concrete segment: `**` spans zero or
+  // more, so one is a legal instance of it, and `*` stays inside its own.
+  const concrete = (seg) => (seg === '**' ? 'd' : seg.replace(/\*/g, 'x'));
+  for (let i = 0; i < segments.length; i++) {
+    if (!segments[i].includes('*')) continue;
+    const head = segments.slice(0, i).map(concrete);
+    const tail = segments.slice(i + 1).map(concrete);
+    // A trailing wildcard covers a SUBTREE, so the witness puts a file under
+    // the excluded directory rather than ending at its bare name.
+    const witness = [...head, NODE_MODULES_SEGMENT, ...(tail.length ? tail : ['x'])].join('/');
+    if (matchesAny(witness, [glob])) return true;
+  }
+  return false;
+}
+
+/**
+ * The `node_modules` half of Layer B for one package: the globs that reach
+ * there, and the exclusion the owning task therefore owes.
+ *
+ * Two grains, because they fail differently. A glob that NAMES the excluded
+ * segment is refused outright -- the exclusion would cancel it, leaving a
+ * declaration that reads as a radius and hashes nothing. A glob that merely
+ * REACHES there is legitimate (every walking test's radius does) and owes the
+ * exclusion on its task instead.
+ */
+export function nodeModulesProblems(name, globs, task, owner) {
+  const problems = [];
+  const naming = globs.filter((g) => g.split('/').includes(NODE_MODULES_SEGMENT));
+  if (naming.length) {
+    problems.push(
+      `${name} declares glob(s) that NAME the ${NODE_MODULES_SEGMENT} directory:\n` +
+        naming.map((g) => `      ${g}`).join('\n') +
+        `\n    An installed dependency is not a repo source input, and "${NODE_MODULES_EXCLUSION}" on the\n` +
+        `    task cancels the glob anyway -- declared, hashing nothing, reading as a radius.\n` +
+        `    Declare the source path the test really reads.`,
+    );
+  }
+  const reaching = globs.filter(globReachesNodeModules);
+  if (reaching.length && !(task?.inputs ?? []).includes(NODE_MODULES_EXCLUSION)) {
+    problems.push(
+      `turbo.json "${owner}" hashes glob(s) that reach into ${NODE_MODULES_SEGMENT}/ and carries no\n` +
+        `    exclusion for it:\n` +
+        reaching.map((g) => `      $TURBO_ROOT$/${g}`).join('\n') +
+        `\n    A $TURBO_ROOT$ glob is resolved against the FILESYSTEM, not git's tracked set, so\n` +
+        `    it descends into every installed dependency tree it spans -- including vitest's own\n` +
+        `    results cache, which is rewritten by every run, so the task can never replay from\n` +
+        `    cache on a runner that ran any vitest before it.\n` +
+        `    Add ${JSON.stringify(NODE_MODULES_EXCLUSION)} to this task's inputs. ⛔ Not a negated\n` +
+        `    $TURBO_ROOT$ input -- turbo drops that form instead of applying it (measured; see\n` +
+        `    NODE_MODULES_EXCLUSION in scripts/cross-package-test-inputs.mjs).`,
+    );
+  }
+  return problems;
+}
+
+/**
+ * Layer B for one package: the task that must hash the declared globs, and --
+ * for a split package -- the task that must not. `tasks` is turbo.json's map.
+ */
+export function turboInputProblems(name, globs, tasks, split) {
+  const problems = [];
+  const owner = split ? `${name}#${REPO_TASK}` : `${name}#test`;
+  const task = tasks?.[owner];
+  problems.push(...nodeModulesProblems(name, globs, task, owner));
+  if (!task) {
+    problems.push(
+      `turbo.json has no "${owner}" task. Without it the package's test cache is\n` +
+        `    keyed on package-local files only, so a change to its declared globs replays\n` +
+        `    a stale green instead of re-running. Add it with inputs:\n` +
+        `      ${JSON.stringify(expectedInputs(globs))}`,
+    );
+  } else {
+    const missing = globs.filter((g) => !(task.inputs ?? []).includes(`$TURBO_ROOT$/${g}`));
+    if (missing.length) {
+      problems.push(
+        `turbo.json "${owner}" inputs are missing the declared glob(s):\n` +
+          missing.map((g) => `      $TURBO_ROOT$/${g}`).join('\n'),
+      );
+    }
+  }
+  if (split) {
+    const wide = (tasks?.[`${name}#test`]?.inputs ?? []).filter((i) => i.startsWith('$TURBO_ROOT$/'));
+    if (wide.length) {
+      problems.push(
+        `turbo.json "${name}#test" still hashes repo-wide input(s) although the package splits its\n` +
+          `    escaping tests into "${owner}":\n` +
+          wide.map((i) => `      ${i}`).join('\n') +
+          `\n    Move them to "${owner}" -- left here, every change inside the radius re-runs the\n` +
+          `    whole suite and the split gains nothing while reading as done.`,
+      );
+    }
+  }
+  return problems;
+}
+
+/**
+ * The `repo` project's include list against this gate's scan, both package-relative.
+ * `listed` null means the file could not be read as a JSON array of strings.
+ */
+export function repoProjectProblems(name, escapingTests, listed) {
+  if (listed === null) {
+    return [
+      `${name} declares a "${REPO_TASK}" script but has no readable ${REPO_TESTS_FILE} beside its\n` +
+        `    vitest config (a JSON array of package-relative test paths). Write it with the\n` +
+        `    escaping tests:\n` +
+        `      ${JSON.stringify([...escapingTests].sort())}`,
+    ];
+  }
+  const problems = [];
+  const listedSet = new Set(listed);
+  const escSet = new Set(escapingTests);
+  const missing = escapingTests.filter((t) => !listedSet.has(t));
+  if (missing.length) {
+    problems.push(
+      `${name} has escaping test(s) that are NOT in ${REPO_TESTS_FILE}, so they run under\n` +
+        `    "${name}#test", whose hash never moves with what they read:\n` +
+        missing.map((t) => `      ${t}`).join('\n') +
+        `\n    Add them to the list (it is the \`repo\` project's include).`,
+    );
+  }
+  const extra = listed.filter((t) => !escSet.has(t));
+  if (extra.length) {
+    problems.push(
+      `${name}'s ${REPO_TESTS_FILE} lists file(s) that do not read outside the package:\n` +
+        extra.map((t) => `      ${t}`).join('\n') +
+        `\n    Remove them -- they belong to "${name}#test", and a list wider than the scan is\n` +
+        `    one that rots into "everything".`,
+    );
+  }
+  const duplicated = listed.filter((t, i) => listed.indexOf(t) !== i);
+  if (duplicated.length) {
+    problems.push(
+      `${name}'s ${REPO_TESTS_FILE} has duplicated entr${duplicated.length === 1 ? 'y' : 'ies'}:\n` +
+        [...new Set(duplicated)].map((t) => `      ${t}`).join('\n'),
+    );
+  }
+  return problems;
+}
+
 function expectedInputs(globs) {
-  return ['$TURBO_DEFAULT$', '!dist/**', '!coverage/**', '!.turbo/**', ...globs.map((g) => `$TURBO_ROOT$/${g}`)];
+  // The `node_modules` exclusion is prescribed only when a glob really reaches
+  // there, so the prescription this gate prints is one that its own rule would
+  // accept -- and a literal-path declaration is not handed an entry it does not
+  // owe.
+  const excluded = globs.some(globReachesNodeModules) ? [NODE_MODULES_EXCLUSION] : [];
+  return [
+    '$TURBO_DEFAULT$',
+    '!dist/**',
+    '!coverage/**',
+    '!.turbo/**',
+    ...excluded,
+    ...globs.map((g) => `$TURBO_ROOT$/${g}`),
+  ];
 }
 
 /**
@@ -2428,6 +2654,144 @@ function selfTest() {
   // A spawned child is the only honest witness: the guard's answer depends on
   // what node puts in `process.argv[1]`, which cannot be modelled in-process.
   // Without this case the guard can be deleted as quietly as it was missing.
+  battery('the SPLIT test:repo task (#16466)');
+  {
+    const T = (inputs) => ({ inputs });
+    // A LITERAL path, not a subtree glob: this battery is about which TASK
+    // hashes the radius, and the #16555 rule beside it reds a reaching glob on
+    // a task with no `node_modules` exclusion. A wide fixture here would fail
+    // these cases for that unrelated reason and blur which rule they pin, so
+    // the two batteries stay orthogonal -- reach is exercised in its own.
+    const G = [['content', 'docs', 'index.mdx'].join('/')];
+    const local = T(['$TURBO_DEFAULT$', '!dist/**']);
+    const wideOnTest = T(['$TURBO_DEFAULT$', `$TURBO_ROOT$/${G[0]}`]);
+    const repoTask = T(['$TURBO_DEFAULT$', `$TURBO_ROOT$/${G[0]}`]);
+    // Layer B, both shapes
+    ok('unsplit: the radius on <pkg>#test is green', turboInputProblems('p', G, { 'p#test': wideOnTest }, false).length === 0);
+    ok('unsplit: a glob missing from <pkg>#test reds', turboInputProblems('p', G, { 'p#test': local }, false).some((m) => m.includes('missing the declared glob')));
+    ok('split: the radius on <pkg>#test:repo and none on <pkg>#test is green', turboInputProblems('p', G, { 'p#test': local, 'p#test:repo': repoTask }, true).length === 0);
+    ok('split: a <pkg>#test:repo task without its wide input reds', turboInputProblems('p', G, { 'p#test': local, 'p#test:repo': local }, true).some((m) => m.includes('"p#test:repo" inputs are missing')));
+    ok('split: no <pkg>#test:repo task at all reds naming it', turboInputProblems('p', G, { 'p#test': local }, true).some((m) => m.includes('has no "p#test:repo" task')));
+    ok('split: a wide input LEFT on <pkg>#test reds even when test:repo is complete', turboInputProblems('p', G, { 'p#test': wideOnTest, 'p#test:repo': repoTask }, true).some((m) => m.includes('still hashes repo-wide input')));
+    ok('split: the pre-split shape (radius on <pkg>#test alone) reds twice', turboInputProblems('p', G, { 'p#test': wideOnTest }, true).length === 2);
+    // the include list against the scan, both directions
+    ok('split: an escaping file left out of the list (running under `test`) reds naming it', repoProjectProblems('p', ['src/a.test.ts', 'src/b.test.ts'], ['src/a.test.ts']).some((m) => m.includes('NOT in') && m.includes('src/b.test.ts')));
+    ok('split: a listed file that does not escape reds naming it', repoProjectProblems('p', ['src/a.test.ts'], ['src/a.test.ts', 'src/c.test.ts']).some((m) => m.includes('do not read outside') && m.includes('src/c.test.ts')));
+    ok('split: a list equal to the scan is green', repoProjectProblems('p', ['src/a.test.ts'], ['src/a.test.ts']).length === 0);
+    ok('split: order does not matter', repoProjectProblems('p', ['src/b.test.ts', 'src/a.test.ts'], ['src/a.test.ts', 'src/b.test.ts']).length === 0);
+    ok('split: an unreadable list reds once, prescribing the scan', repoProjectProblems('p', ['src/a.test.ts'], null).length === 1 && repoProjectProblems('p', ['src/a.test.ts'], null)[0].includes('src/a.test.ts'));
+    ok('split: a duplicated entry reds', repoProjectProblems('p', ['src/a.test.ts'], ['src/a.test.ts', 'src/a.test.ts']).some((m) => m.includes('duplicated')));
+    // readSplit, driven on disk
+    const dir = mkdtempSync(join(tmpdir(), 'crosspkg-split-'));
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'p', scripts: { test: 'vitest run --project local' } }));
+      ok('readSplit: no test:repo script is not a split', readSplit(dir).split === false);
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'p', scripts: { test: 'vitest run --project local', 'test:repo': 'vitest run --project repo' } }));
+      ok('readSplit: a test:repo script with no list file is split with listed=null', readSplit(dir).split === true && readSplit(dir).listed === null);
+      writeFileSync(join(dir, REPO_TESTS_FILE), JSON.stringify(['src/a.test.ts']));
+      ok('readSplit: the list is read back as written', JSON.stringify(readSplit(dir).listed) === JSON.stringify(['src/a.test.ts']));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  // ── the node_modules REACH rule (#16555) ─────────────────────────────────
+  //
+  // Layer B asks whether turbo hashes the declared globs. This battery is the
+  // other question -- what ELSE the glob matches -- and it is pinned in both
+  // directions on purpose. A rule that reds every root-scoped glob would pass
+  // every "it catches something" case above and break the repo, so the cases
+  // that must stay GREEN (a literal-path declaration, a task that carries the
+  // exclusion) are as load-bearing here as the ones that must go red.
+  battery('the node_modules REACH rule (#16555)');
+  {
+    const NM = NODE_MODULES_SEGMENT;
+    const P = (...segments) => segments.join('/');
+    const WIDE = P('packages', '**', '*.json');
+    const SUBTREE = P('packages', 'lint', 'src', '**');
+    const LITERAL = P('scripts', 'js-comment-mask.mjs');
+    const ONE_SEGMENT = P('packages', '*.json');
+    const NAMED = P('packages', '**', NM, '**');
+
+    // reach, answered by the matcher
+    ok('a `**` glob under packages/ reaches node_modules', globReachesNodeModules(WIDE));
+    ok('a per-directory subtree glob reaches it too', globReachesNodeModules(SUBTREE));
+    ok('a declaration of one literal file path reaches nothing', !globReachesNodeModules(LITERAL));
+    ok('a single-segment `*` cannot span into a node_modules subtree', !globReachesNodeModules(ONE_SEGMENT));
+    ok('a glob that names the directory outright reaches it', globReachesNodeModules(NAMED));
+
+    // the rule, on a task map
+    const withExclusion = { inputs: ['$TURBO_DEFAULT$', NODE_MODULES_EXCLUSION, `$TURBO_ROOT$/${WIDE}`] };
+    const without = { inputs: ['$TURBO_DEFAULT$', `$TURBO_ROOT$/${WIDE}`] };
+    ok(
+      'a reaching glob on a task with no exclusion reds, naming the entry to add',
+      nodeModulesProblems('p', [WIDE], without, 'p#test').some((m) => m.includes(NODE_MODULES_EXCLUSION)),
+    );
+    ok(
+      'the same task carrying the exclusion is green',
+      nodeModulesProblems('p', [WIDE], withExclusion, 'p#test').length === 0,
+    );
+    ok(
+      'NEGATIVE CONTROL: a literal-path declaration owes no exclusion and stays green',
+      nodeModulesProblems('p', [LITERAL], without, 'p#test').length === 0,
+    );
+    ok(
+      'a glob that NAMES node_modules is refused outright, exclusion or not',
+      nodeModulesProblems('p', [NAMED], withExclusion, 'p#test').some((m) => m.includes('NAME')),
+    );
+    ok(
+      'a missing task (no inputs at all) reds for the reaching glob rather than throwing',
+      nodeModulesProblems('p', [WIDE], undefined, 'p#test').length === 1,
+    );
+
+    // and through Layer B's own entry point, which is what runs in CI
+    const T = (inputs) => ({ inputs });
+    const complete = T(['$TURBO_DEFAULT$', NODE_MODULES_EXCLUSION, `$TURBO_ROOT$/${WIDE}`]);
+    const missingExclusion = T(['$TURBO_DEFAULT$', `$TURBO_ROOT$/${WIDE}`]);
+    ok(
+      'Layer B reds a complete radius that is hashed over node_modules',
+      turboInputProblems('p', [WIDE], { 'p#test': missingExclusion }, false).some((m) => m.includes('reach into')),
+    );
+    ok(
+      'Layer B is green once the exclusion is there',
+      turboInputProblems('p', [WIDE], { 'p#test': complete }, false).length === 0,
+    );
+    ok(
+      'NEGATIVE CONTROL: Layer B stays green for a literal-path declaration with no exclusion',
+      turboInputProblems('p', [LITERAL], { 'p#test': T(['$TURBO_DEFAULT$', `$TURBO_ROOT$/${LITERAL}`]) }, false).length === 0,
+    );
+
+    // the prescription this gate prints must be one its own rule accepts
+    ok('the prescribed inputs carry the exclusion for a reaching glob', expectedInputs([WIDE]).includes(NODE_MODULES_EXCLUSION));
+    ok('and do NOT carry it for a literal-path declaration', !expectedInputs([LITERAL]).includes(NODE_MODULES_EXCLUSION));
+
+    // the exclusion's own spelling: the measured trap is the root token
+    ok(
+      'the exclusion is package-relative -- a negation carrying the root token is inert in turbo',
+      NODE_MODULES_EXCLUSION.startsWith('!') && !NODE_MODULES_EXCLUSION.includes('$TURBO_ROOT$'),
+    );
+
+    // the live tree, not a fixture: every declaring package's owning task is
+    // judged by the same rule CI runs, so this battery cannot pass on a repo
+    // whose turbo.json has drifted back.
+    const liveTasks = JSON.parse(readFileSync(join(REPO_ROOT, 'turbo.json'), 'utf8')).tasks;
+    const liveReaching = Object.entries(CROSS_PACKAGE_TEST_INPUTS).filter(([, { globs }]) => globs.some(globReachesNodeModules));
+    ok('the live table still has packages whose globs reach node_modules', liveReaching.length > 0);
+    ok(
+      'the live table still has packages whose globs do NOT -- the negative control is populated',
+      liveReaching.length < Object.keys(CROSS_PACKAGE_TEST_INPUTS).length,
+    );
+    ok(
+      'every live task whose globs reach node_modules carries the exclusion',
+      liveReaching.every(([name]) => {
+        const info = findEscapingPackages().get(name);
+        const { split } = info ? readSplit(join(REPO_ROOT, info.dir)) : { split: false };
+        const owner = split ? `${name}#${REPO_TASK}` : `${name}#test`;
+        return (liveTasks?.[owner]?.inputs ?? []).includes(NODE_MODULES_EXCLUSION);
+      }),
+    );
+  }
+
   battery('the entry guard, driven for real');
   const importProbe = spawnSync(
     process.execPath,

@@ -27,10 +27,13 @@
  *      a slot exclusively can still self-register via
  *      {@link HttpDispatcher.registerDomainHandler}.
  *
- * Matching semantics are deliberately faithful to the legacy if-chain,
- * INCLUDING its rough edges (`match: 'prefix'` on `/i18n` also matches
- * `/i18nxx`, exactly as `startsWith` did) — fixing those edges is explicitly
- * not this seam's job; behavior preservation is.
+ * Matching semantics were deliberately faithful to the legacy if-chain,
+ * INCLUDING its rough edges, for as long as the migration needed behaviour
+ * preservation to be the only promise this seam made. That period is over and
+ * the edges are fixed (#16263): a domain claim now stops at a SEGMENT
+ * BOUNDARY by default, so `/i18n` no longer claims `/i18nxx`. The legacy
+ * `startsWith` shape is still reachable, but only where a route ASKS for it in
+ * writing (`match: 'prefix'`) — see {@link DomainRoute.match}.
  */
 
 import type { HttpProtocolContext, HttpDispatcherResult } from './http-dispatcher.js';
@@ -60,14 +63,68 @@ export interface DomainRoute {
     /** Path prefix the domain claims, e.g. `'/i18n'`. */
     prefix: string;
     /**
-     * `'prefix'` — legacy `startsWith(prefix)` semantics (default).
+     * How much of the path space this route claims.
+     *
+     * `'segment'` — **the default**: the path equals the prefix, or is
+     * followed by `'/'`. Claims `/i18n` and everything under `/i18n/`, and
+     * does NOT claim `/i18nxx`.
      * `'exact'` — the path must equal the prefix exactly.
-     * `'segment'` — exact, or followed by `'/'` (the legacy
-     * `=== p || startsWith(p + '/')` branch shape; does NOT claim `/i18nxx`).
+     * `'prefix'` — bare `startsWith(prefix)`, NO segment boundary: the legacy
+     * if-chain's shape, which also claims `/i18nxx`.
+     *
+     * ## Why `'segment'` is the default and `'prefix'` must be asked for
+     *
+     * The reasoning is #16026's, applied to the whole table rather than to one
+     * prefix. A bare `startsWith` claim reaches SIBLING NAMESPACES: `/authx`,
+     * `/authentication/foo`, `/datax`, `/metaxyz`, `/uifoo` are not paths of
+     * the domain that was claiming them by any reading, and each is a
+     * plausible namespace someone mounts later — a route registered there is
+     * SHADOWED by a domain that never wanted it. `'segment'` claims the prefix
+     * exactly and everything under `prefix + '/'`, which is the whole of what
+     * a domain owns, so narrowing to it removes only claims a domain does not
+     * own and keeps every sub-path fallthrough intact (#4088's
+     * `/auth/me/permissions` is the case that pins that half).
+     *
+     * `'segment'` was already the codebase's own spelling for a
+     * boundary-correct claim — `/auth`, `/keys`, `/mcp`, `/mcp/skill`,
+     * `/security` and `/share-links` each declared it — so this makes the
+     * table's majority spelling its default rather than introducing a
+     * convention.
+     *
+     * ⚠️ `'prefix'` is NOT deprecated, and one shape genuinely needs it: a
+     * prefix ending in `'?'` (`'/keys?'`, `'/mcp?'`), which reproduces the
+     * legacy branch's query-string form for adapters that pass the query
+     * through in `path`. There is no `/` after that `'?'`, so a segment match
+     * cannot express it. Those routes declare `match: 'prefix'` in writing.
+     *
+     * ⛔ Do not reach for `'prefix'` to widen a domain's claim over its
+     * lexical neighbours. The default changed because that claim was never
+     * anything but a migration artefact.
      */
     match?: 'prefix' | 'exact' | 'segment';
     /** Restrict to these UPPERCASE HTTP methods. Omit = all methods. */
     methods?: string[];
+    /**
+     * This route is a LIVENESS probe: `dispatch()` runs its handler WITHOUT the
+     * per-request identity step or the gates that follow it.
+     *
+     * Declared here, on the route itself, and nowhere else — that is the whole
+     * point of the field. "Which routes are liveness" is a question with exactly
+     * one honest source, the table `dispatch()` already routes on, so
+     * {@link DomainHandlerRegistry.resolveLiveness} answers it through the SAME
+     * matcher that picks the handler. A separate array of liveness paths would
+     * be a second list of routes, and this repo has measured what those cost:
+     * they drift from the thing they describe and the drift is silent.
+     *
+     * ⛔ Do not set this on a route whose body reads configuration, credentials
+     * or any service. A liveness handler may report process-local facts only
+     * (the process is executing code, the server is listening) — anything else
+     * puts a configuration fault back on the route whose consumer answers by
+     * restarting the pod, and a restart cannot fix a service that cannot build.
+     * Readiness is where a dependency check belongs; its failure mode (leave the
+     * load-balancer rotation) is the one that helps.
+     */
+    liveness?: boolean;
     handler: DomainHandler;
 }
 
@@ -135,6 +192,15 @@ export interface DomainHandlerDeps {
      *  - branded "never registered" (`isServiceNotRegisteredError`, #13905) →
      *    `undefined`, quiet. The supported composition, whose behaviour is
      *    exactly what it was;
+     *  - [#16402] a registry that KNOWS the name and produces no instance for
+     *    the scope you passed → `undefined`, quiet as well. A factory that
+     *    answers `undefined` for a scope has ANSWERED, so this is an absent
+     *    fact and not an unread one — ADR-0093 D4/D5 reads a scope with no
+     *    service the same way it reads a deployment with none. ⚠️ It is a
+     *    DIFFERENT fact from the one above with the same licence, and the
+     *    lookup tells the two apart internally (`HttpDispatcher.classifyService`)
+     *    — it is collapsed HERE because no door needs to act on the difference,
+     *    ⛔ not because they are the same state;
      *  - every other rejection (a factory that threw, a scoped registration
      *    resolved without a scope id, a circular service dependency) →
      *    re-raised, for the gate to answer as an OUTAGE rather than as an
@@ -163,6 +229,15 @@ export interface DomainHandlerDeps {
      * fallback into a manufactured outage for every caller of that door. A
      * rejection out of this method should describe the SERVICE, never the call
      * site's own omission.
+     *
+     * ⭐ [#16402] That last sentence used to be false INSIDE the lookup itself:
+     * having taken your scope, it re-resolved on the request's own kernel
+     * WITHOUT it, so a scoped factory answering `undefined` for your scope came
+     * back as `Scope ID required for scoped service '<name>'` — a rejection
+     * describing an omission that never happened, at a call site that passed
+     * everything it was asked for. The scope now travels with every leg. ⛔ The
+     * `packages/core` wording is untouched, and a caller that really passes no
+     * scope still receives it, which is the one caller it is true about.
      *
      * Untyped by slot on purpose, exactly like `resolveService`'s second
      * overload: its callers address `tenancy`, which has no written
@@ -302,14 +377,33 @@ export class DomainHandlerRegistry {
         return undefined;
     }
 
+    /**
+     * The route claiming `path` (+`method`) when — and only when — it declared
+     * itself a liveness probe ({@link DomainRoute.liveness}); otherwise
+     * `undefined`.
+     *
+     * DERIVED, not listed: it is {@link resolve} plus one field read, so the
+     * liveness set is a projection of the live route table and cannot name a
+     * route that is not registered, miss one that is, or disagree with the
+     * matcher about which route a path reaches. First-match-wins is inherited
+     * too — a non-liveness route registered earlier shadows here exactly as it
+     * shadows in `resolve`, because that is the route the request would get.
+     */
+    resolveLiveness(path: string, method: string): DomainRoute | undefined {
+        const route = this.resolve(path, method);
+        return route?.liveness ? route : undefined;
+    }
+
     private static matches(route: DomainRoute, path: string): boolean {
         switch (route.match) {
             case 'exact':
                 return path === route.prefix;
-            case 'segment':
-                return path === route.prefix || path.startsWith(route.prefix + '/');
-            default:
+            case 'prefix':
+                // Bare `startsWith`, no segment boundary — the legacy
+                // if-chain's shape, now reachable only by asking for it.
                 return path.startsWith(route.prefix);
+            default:
+                return path === route.prefix || path.startsWith(route.prefix + '/');
         }
     }
 

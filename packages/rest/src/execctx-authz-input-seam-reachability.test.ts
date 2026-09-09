@@ -88,7 +88,7 @@
  *    outside vitest (it needs git history) and is recorded on the card.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -168,10 +168,35 @@ describe('[#13906] §0 — the two seams are LIVE on today\'s tree, by symbol', 
     //     expect(body).toMatch(/catch\s*\{\s*\n\s*tenancyPosture = undefined;/);
     // i.e. EVERY rejection became `undefined`. It now must not match, because
     // only the branded not-registered rejection may take that path.
-    expect(body).toMatch(/tenancyPosture = effectiveTenancyPosture\(await kernel\.getServiceAsync\('tenancy'\)/);
     expect(body).not.toMatch(/catch\s*\{\s*\n\s*tenancyPosture = undefined;/);
-    // The discriminator is the REGISTRY's brand, never message text (#13905).
-    expect(body).toMatch(/if \(!isServiceNotRegisteredError\(err\)\) \{\s*\n\s*throw new AuthzStoreUnavailableError\('tenancy', err\);/);
+    // SUPERSEDED PINS, quoted for the same reason. [#16013] folded the
+    // classification onto ONE shared function (`classifyAdmissionTenancyPosture`,
+    // @objectstack/core), so the two hand-written copies these matched are gone
+    // from this file:
+    //     expect(body).toMatch(/tenancyPosture = effectiveTenancyPosture\(await kernel\.getServiceAsync\('tenancy'\)/);
+    //     expect(body).toMatch(/if \(!isServiceNotRegisteredError\(err\)\) \{\s*\n\s*throw new AuthzStoreUnavailableError\('tenancy', err\);/);
+    //     expect(body).toMatch(/tenancyPosture = effectiveTenancyPosture\(\s*\n?\s*await this\.tenancyServiceProvider\(environmentId\)/);
+    // ⭐ RE-AIMED, not deleted. What this pin is ABOUT is unchanged: BOTH
+    // wirings classify, and neither absorbs. The classification's own two
+    // directions (branded ⇒ quiet, unbranded ⇒ loud) are now pinned where the
+    // decision lives — `packages/core/src/security/admission-tenancy-posture.test.ts`
+    // — and the behavioural §2/§3 drives below still measure this file's wire
+    // answer end to end. What stays THIS file's to hold is that each branch
+    // REACHES the shared classification, and that neither grew a `catch` of its
+    // own again. The discriminator is still the REGISTRY's brand, never message
+    // text (#13905); it is asserted at its new home.
+    expect(body).toMatch(/tenancyPosture = await classifyAdmissionTenancyPosture\(\s*\n?\s*\(\) => kernel\.getServiceAsync\('tenancy'\)/);
+    expect(body).toMatch(/tenancyPosture = await classifyAdmissionTenancyPosture\(\s*\n?\s*\(\) => this\.tenancyServiceProvider!\(environmentId\)/);
+    // ⛔ NARROWNESS CONTROL for the fold: the seam region itself holds NO
+    // `catch`. A local `catch` reappearing here is exactly the silent-`catch`
+    // degradation #13906 decision 1 option A forbids, and it would be invisible
+    // to the two delegation pins above.
+    const tenancySeam = body.slice(
+      body.indexOf('let tenancyPosture;'),
+      body.indexOf('const authz = await resolveAuthzContext('),
+    );
+    expect(tenancySeam.length).toBeGreaterThan(0);
+    expect(tenancySeam).not.toMatch(/catch/);
     // ⛔ And the WIRING fact is asked of `kernel`'s presence AND of the async
     // accessor's — never inferred from the returned value (the #13476
     // discipline this repair inherits). The accessor half matters on its own:
@@ -184,7 +209,6 @@ describe('[#13906] §0 — the two seams are LIVE on today\'s tree, by symbol', 
     // block, so on the single-kernel wiring `tenancyPosture` stayed the
     // declaration's `undefined` and no refusal could fire.
     expect(body).toMatch(/\} else if \(this\.tenancyServiceProvider\) \{/);
-    expect(body).toMatch(/tenancyPosture = effectiveTenancyPosture\(\s*\n?\s*await this\.tenancyServiceProvider\(environmentId\)/);
   });
 
   it('[#15256 / 1A] the withdrawn B-prime BOOT refusal is no longer cited as this seam\'s remedy', () => {
@@ -300,21 +324,28 @@ function mount(rest: RestServer): Map<string, RouteHandler> {
     delete: (p: string, h: RouteHandler) => { routes.set(`DELETE:${p}`, h); },
     patch: () => {}, use: () => {}, listen: async () => {}, close: async () => {},
   } as any;
+  // [#14503] The instrument is `POST /packages/publish` — the one route the
+  // registrar mounts now (the read routes it used to drive here are the
+  // dispatcher domain's alone). Same resolver, same gate, same seam; the write
+  // cohort (`manage_metadata`) is what the fixture's permission set grants.
   registerPackageRoutes(
     server,
-    () => ({ list: async () => [], publish: async () => ({}), delete: async () => ({}) }) as any,
+    () => ({ publish: async () => ({ success: true }) }) as any,
     '/api/v1',
     { resolveExecutionContext: (req: any) => rest.resolvePackageRouteExecutionContext(req) } as any,
   );
   return routes;
 }
 
+const PUBLISH_PATH = `${PKGS}/publish`;
+const PUBLISH_BODY = { manifest: { id: 'com.acme.crm', version: '1.0.0' }, metadata: {} };
+
 async function drive(
   routes: Map<string, RouteHandler>,
   headers: Record<string, string>,
 ): Promise<Captured> {
-  const handler = routes.get(`GET:${PKGS}`);
-  if (!handler) throw new Error(`no handler for GET ${PKGS}`);
+  const handler = routes.get(`POST:${PUBLISH_PATH}`);
+  if (!handler) throw new Error(`no handler for POST ${PUBLISH_PATH}`);
   const captured: Captured = { status: 0, body: undefined };
   const res: any = {
     json(data: any) { captured.body = data; },
@@ -322,7 +353,7 @@ async function drive(
     status(code: number) { captured.status = code; return res; },
     header() { return res; },
   };
-  await handler({ params: {}, query: {}, body: undefined, headers, method: 'GET', path: PKGS } as any, res);
+  await handler({ params: {}, query: {}, body: PUBLISH_BODY, headers, method: 'POST', path: PUBLISH_PATH } as any, res);
   return captured;
 }
 
@@ -515,15 +546,28 @@ describe('[#13906] §2 — the Layer 0 ex-member refusal, and what a failed post
     // Same fixtures, same real resolver, posture present: the refusal fires
     // and carries its reason. This is what distinguishes "the refusal was
     // skipped" (§ next) from "the refusal never applied to this fixture".
-    const headers = new Headers({ 'x-api-key': RAW_EXMEMBER_KEY });
-    const authz = await resolveAuthzContext({
-      ql: qlWith({ memberships: MEMBER_ROWS }),
-      headers,
-      getSession: async () => undefined,
-      tenancyPosture: 'isolated',
-    } as any);
-    expect(authz.authRefusal?.reason).toBe('organization_membership_ended');
-    expect(authz.userId).toBeUndefined();
+    // [#14273 A1] `ResolvedAuthzContext` carries no refusal field any more
+    // (zero readers; removed). The ONE surface that names the refusal is the
+    // server-side `warnApiKeyRefusal` line (#15256 / 2A), so the mechanism
+    // control reads that — and the wire above still answers the anonymous floor.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const headers = new Headers({ 'x-api-key': RAW_EXMEMBER_KEY });
+      const authz = await resolveAuthzContext({
+        ql: qlWith({ memberships: MEMBER_ROWS }),
+        headers,
+        getSession: async () => undefined,
+        tenancyPosture: 'isolated',
+      } as any);
+      expect(authz.userId).toBeUndefined();
+      const refused = warnSpy.mock.calls
+        .map((c: unknown[]) => c.map(String).join(' '))
+        .filter((l: string) => l.includes('API key refused'));
+      expect(refused).toHaveLength(1);
+      expect(refused[0]).toContain('API key refused (organization_membership_ended)');
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('REPAIRED [decision 1 A]: tenancy REGISTERED AND FAILING (factory throws) → 503 outage, no longer a served 200', async () => {
@@ -544,19 +588,28 @@ describe('[#13906] §2 — the Layer 0 ex-member refusal, and what a failed post
   });
 
   it('⚠️ MEASURED PERMISSIVE (mechanism): with the posture absent the resolver ADMITS the ex-member as a full principal', async () => {
-    const headers = new Headers({ 'x-api-key': RAW_EXMEMBER_KEY });
-    const authz = await resolveAuthzContext({
-      ql: qlWith({ memberships: MEMBER_ROWS }),
-      headers,
-      getSession: async () => undefined,
-      tenancyPosture: undefined,
-    } as any);
-    expect(authz.authRefusal).toBeUndefined();
-    expect(authz.userId).toBe('u_exmember');
-    // The membership fact is IN HAND and says "not a member of org_A" — the
-    // refusal was gated off by the missing posture, not by missing data.
-    expect(authz.accessible_org_ids).not.toContain('org_A');
-    expect(authz.tenantId).toBe('org_A');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const headers = new Headers({ 'x-api-key': RAW_EXMEMBER_KEY });
+      const authz = await resolveAuthzContext({
+        ql: qlWith({ memberships: MEMBER_ROWS }),
+        headers,
+        getSession: async () => undefined,
+        tenancyPosture: undefined,
+      } as any);
+      // [#14273 A1] No refusal fired — the warn line is the refusal's only
+      // surface and it is silent: an ADMISSION, not a quiet refusal.
+      expect(warnSpy.mock.calls
+        .map((c: unknown[]) => c.map(String).join(' '))
+        .filter((l: string) => l.includes('API key refused'))).toHaveLength(0);
+      expect(authz.userId).toBe('u_exmember');
+      // The membership fact is IN HAND and says "not a member of org_A" — the
+      // refusal was gated off by the missing posture, not by missing data.
+      expect(authz.accessible_org_ids).not.toContain('org_A');
+      expect(authz.tenantId).toBe('org_A');
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('THE COLLAPSE IS ENDED: "registered and failed" and "never registered" no longer answer alike', async () => {
@@ -734,8 +787,8 @@ describe('[#15256] §3b — every computeExecCtx branch derives the posture', ()
     headers: Record<string, string>,
     params: Record<string, string>,
   ): Promise<Captured> {
-    const handler = routes.get(`GET:${PKGS}`);
-    if (!handler) throw new Error(`no handler for GET ${PKGS}`);
+    const handler = routes.get(`POST:${PUBLISH_PATH}`);
+    if (!handler) throw new Error(`no handler for POST ${PUBLISH_PATH}`);
     const captured: Captured = { status: 0, body: undefined };
     const res: any = {
       json(data: any) { captured.body = data; },
@@ -743,7 +796,7 @@ describe('[#15256] §3b — every computeExecCtx branch derives the posture', ()
       status(code: number) { captured.status = code; return res; },
       header() { return res; },
     };
-    await handler({ params, query: {}, body: undefined, headers, method: 'GET', path: PKGS } as any, res);
+    await handler({ params, query: {}, body: PUBLISH_BODY, headers, method: 'POST', path: PUBLISH_PATH } as any, res);
     return captured;
   }
 

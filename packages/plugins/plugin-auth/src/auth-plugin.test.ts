@@ -1256,7 +1256,7 @@ describe('AuthPlugin', () => {
     });
   });
 
-  // ADR-0081 D1 — single-org default-organization bootstrap.
+  // cloud ADR-0081 D1 — single-org default-organization bootstrap.
   describe('Single-org default-org bootstrap', () => {
     const OLD_ENV = process.env.OS_MULTI_ORG_ENABLED;
     let hookCapture: ReturnType<typeof createHookCapture>;

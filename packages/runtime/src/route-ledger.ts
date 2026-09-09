@@ -157,15 +157,30 @@ export interface RouteLedgerEntry {
    * SDK expressibility; none of them says whether a caller must be
    * authenticated, and `public` states INTENT for a handful of browser-facing
    * routes rather than measuring a gate. Deriving the answer from source
-   * syntax instead was measured and rejected: scanning all 80
-   * `this.routeManager.register(` sites in `rest-server.ts` for `enforceAuth`
-   * reads 50 gated / 30 ungated, and 22 of those 30 are FALSE — a wrapping
-   * `guardedRouteManager` gates 19 of them with no `enforceAuth` at the call
-   * site, and one registrar shares a handler const across its 3 mounts. A 73%
-   * false-ungated rate on the largest registrar is a written-down false
-   * assurance, which is strictly worse than an honest blank. So the posture is
-   * DECLARED at the producer, where a new route is already reviewed, instead of
-   * guessed at the consumer.
+   * syntax instead was measured and rejected: scanning all 80 registration
+   * sites in `rest-server.ts` for `enforceAuth` — TWO spellings, 72 direct
+   * `this.routeManager.register(` sites plus 8 `registerPerItemRoute(` calls
+   * through the per-item family's switch-carrying helper — reads 51 gated / 29
+   * ungated, and 22 of those 29 are FALSE: a wrapping `guardedRouteManager`
+   * gates 19 of them with no `enforceAuth` at the call site, and one registrar
+   * shares a handler const across its 3 mounts. A 76% false-ungated rate,
+   * concentrated on the largest registrar, is a written-down false assurance,
+   * which is strictly worse than an honest blank. So the posture is DECLARED at
+   * the producer, where a new route is already reviewed, instead of guessed at
+   * the consumer.
+   *
+   * ⚠️ RE-MEASURED 2026-09-08, and the two halves moved differently. The
+   * 22 = 19 + 3 decomposition did NOT move when the per-item helper landed —
+   * the same 19 routes, 11 still direct and 8 now helper-routed, all through
+   * the same wrapping registrar — and the population stayed 80. Only the
+   * headline split moved, earlier and for an unrelated reason: 50/30 became
+   * 51/29 when `registerUiEndpoints`, the one route in that file resolving no
+   * identity, was guarded. Recorded so the next reader does not re-derive a
+   * figure that has now been checked. ⛔ The rejection stands either way, and
+   * the second spelling strengthens it — a syntactic scanner has to know both
+   * before it can read the file even this badly. The full reading lives in
+   * `packages/qa/dogfood/test/authz-probe-blind-spot.census.ts`, the
+   * authority on this population.
    *
    * ABSENT MEANS "UNDECLARED", and that is the state of nearly the whole
    * surface. This field is filled INCREMENTALLY, exactly like `responseSchema`
@@ -384,6 +399,23 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'POST /automation/:name/runs/:runId/resume', domain: '/automation', disposition: 'sdk', client: 'automation.resume',
     note: "generic, so the SUSPENDED NODE gates it (#3801): a pause whose descriptor declares resumeAuthority:'service' — today `approval` / `approval_revise` — answers 403 here and continues only through its owning service (ApprovalService.decide), which authorizes and records the decision first. A node type that declares NO resumeAuthority answers 403 too, fail-closed since #5561: this door is an opt-in a descriptor states with 'any'. Screen/wait pauses are unaffected because they declare it; this route is the screen-flow runner's door" },
   { route: 'GET /automation/:name/runs/:runId/screen', domain: '/automation', disposition: 'sdk', client: 'automation.getScreen' },
+  // [#13953] Cancel a suspended run (ADR-0044) — the maintainer ruling of 2026-09-05
+  // (option A) on the two operator run-lifecycle verbs. The engine has carried both for
+  // as long as either has existed with no way for an operator to reach them: no REST
+  // route, no CLI command, and until the contract half landed (PR #16563, card #16495)
+  // not on `IAutomationService` either. #15981 is the correction this gate is built on
+  // at birth: the platform-operator test is the ADR-0095 rung, never the `positions[]`
+  // name. #13909 is the parent card the repair verb belongs to; #10243 / #12156 are the
+  // toggle and clone arms whose `trigger` exclusion this predicate copies; #5519 is the
+  // anonymous floor that answers first.
+  { route: 'POST /automation/:name/runs/:runId/cancel', domain: '/automation', disposition: 'server-only',
+    note: "Cancel a suspended run (ADR-0044) — the maintainer ruling of 2026-09-05 (option A) gave the engine's two operator run-lifecycle verbs a door, because until the contract half landed neither was reachable by an operator at all: no REST route, no CLI command, and not on `IAutomationService`. Body is the closed `{ reason? }` envelope, relayed VERBATIM to the engine, which lands it on the terminal `cancelled` log's `error`. ⚑ ONE authority tier and it is the strictest one this domain has: the ADR-0095 D2/D3 posture RUNG (`posture === 'PLATFORM_ADMIN'` — NEVER `positions.includes('platform_admin')`, which `sys_user_position` lets a tenant mint), required UNCONDITIONALLY. ⛔ Not posture-conditional like the ADR-0126 §5 activation gate: that one falls open under `single` because `manage_metadata` still gates it there, and this door has no capability tier in front of it, so the same conditionality would open an operator verb to any authenticated caller on every single-organization deployment — looser than `resume`, whose `resumeAuthority` gate is fail-closed on every deployment. Fail-closed by construction: an absent executionContext, an absent posture or any other rung all reach the refusal, 403 `PERMISSION_DENIED` (ADR-0112); only `isSystem` bypasses, which is how plugin-approvals' in-process revise-window recall keeps working. The anonymous floor answers an unidentified caller 401 first. WHICH routes is one predicate, `isRunLifecycleWrite` in `domains/automation.ts`, read by the gate AND by both route arms so they cannot drift; it excludes `parts[0] === 'trigger'` so a flow literally NAMED `runs` keeps its legacy execution door. ⚠️ `:name` is READ, never VERIFIED — the existing, deliberate convention `resume` / `screen` / `getRun` already use on this domain: both arms dispatch the verb with `parts[2]` (the run id) alone and never check that the run recorded under it belongs to flow `parts[0]`, so any flow name reaches any run id by design, not by omission; the flow-scoped URL shape is not a scoping guarantee this door enforces. Answers 200 both ways — `cancelled: false` is idempotent success per the contract — but ⛔ never a BARE success: `false` is also what an UNREADABLE durable store answers, so the response carries a `notice` naming both readings (never a door that returns success while hiding the condition). The `true` notice states that `true` is NOT exclusive — the engine has no cancel-side compare-and-set, so overlapping cancels each answer `true` and each record the terminal log; this door keys no once-only side effect off it and says so on the wire. A service not declaring `cancelRun` (an OPTIONAL member) answers 501 `NOT_IMPLEMENTED`, ⛔ never a 200 and ⛔ never `{ handled: false }`. NOT JS-SDK surface on this leg, and that is stated rather than left as an open gap: the ruling charters a REST door for a platform operator holding only HTTP and explicitly declines a CLI command for want of pull, so this card declares no client method and implies none. ⚑ DECIDED, not merely deferred: https://github.com/objectstack-ai/objectstack/issues/16896#issuecomment-5595099733 rules that `client.automation.cancelRun` stays unadded because no operator has asked and an SDK method is a published surface that cannot be withdrawn cheaply — an inert method is worse than an absent one (ADR-0078) — reopening only when an operator or app repo asks for programmatic cancel, at which point this row reclassifies to `sdk`. Pinned in `domains/automation-run-lifecycle-door.test.ts`" },
+  // [#13953] The repair verb's door — the exit from the `'stranded'` state #13937
+  // shape 4 named and #13909 exists to measure. Its result is the inline structural
+  // type PR #16563 landed in spec (card #16495 route (i)), whose `refusal?: string` is
+  // the covariant widening the non-exhaustive status switch is a consequence of.
+  { route: 'POST /automation/:name/runs/:runId/restore-suspension', domain: '/automation', disposition: 'server-only',
+    note: "Put back the suspension a failed resume consumed — the repair verb for `AutomationResult.status: 'stranded'`, re-arming a run the platform recorded as terminally failed. Same gate, same predicate and same fail-closed absent-member 501 as the cancel row above; see it for the authority and why the rung is unconditional. Same `:name` convention too — this arm dispatches with `parts[2]` alone and never checks the run against flow `parts[0]`; not a defect, the same deliberate `resume` / `screen` / `getRun` shape the cancel row's note explains. The card's own reason this needed a permission model rather than a line of routing: a repair verb re-arms a terminally-failed run, so 'who may do this' is a real question and NOT the same answer as 'who may resume'. Body is the closed `{ reason? }` envelope; ⭐ `requestedBy` is filled from the AUTHENTICATED CALLER and is refused BY NAME in the body, so no operator can write another's name into the trace that records who re-armed the run. Refusals are answered as refusals — `RUN_NOT_FOUND` 404, `STORE_UNAVAILABLE` 503, and the run-state conflicts (`RESUME_IN_PROGRESS`, `RESTORE_IN_PROGRESS`, `RUN_SUSPENDED`, `RUN_COMPLETED`, `RUN_CANCELLED`, `NO_CONSUMED_SUSPENSION`) 409 — matching the statuses this same door already answers those conditions with on `resume`, ⛔ never a 200 carrying `restored: false`. ⚠️ The contract types the refusal as `refusal?: string`, a covariant widening of the engine's closed eight-member union, so that mapping is a NON-EXHAUSTIVE string switch by construction: an unrecognised code — or a `restored: false` carrying none — answers 500, ⛔ deliberately not one of the 409s, which would claim a diagnosis this door did not make. ⛔ The vocabulary is neither narrowed nor extended at this call site; closing it is a `packages/spec` card. The engine's code rides `details.refusal`, ⛔ never `details.code`, which would promote an unregistered member into the ADR-0112-closed `error.code`. NOT JS-SDK surface on this leg, for the cancel row's reason. ⚑ DECIDED there too: https://github.com/objectstack-ai/objectstack/issues/16896#issuecomment-5595099733 rules `client.automation.restoreSuspension` stays unadded until an operator or app repo asks for programmatic restore — only then does this row reclassify to `sdk`. Pinned in `domains/automation-run-lifecycle-door.test.ts`" },
   { route: 'GET /automation/:name/runs/:runId', domain: '/automation', disposition: 'sdk', client: 'automation.getRun' },
   { route: 'GET /automation/:name/runs', domain: '/automation', disposition: 'sdk', client: 'automation.listRuns' },
   { route: 'GET /automation/:name', domain: '/automation', disposition: 'sdk', client: 'automation.get' },

@@ -97,7 +97,11 @@ const BOOT_SLOTS = [
   'kernel-manager',
   'env-registry',
   'kernel-resolver',
-  'package',
+  // [#14503] `package` is NOT here any more: the package registrar mounts
+  // `POST /packages/publish` unconditionally and resolves the `package` slot
+  // per request, inside the handler (#7563) — the boot-time lookup that used
+  // to decide whether to mount its three (since-removed) read/delete routes
+  // is gone with them. Same shape as `external-datasource` below.
 ] as const;
 
 function mockServer() {

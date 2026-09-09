@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/objectql",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "Isomorphic ObjectQL Engine for ObjectStack",
   "main": "dist/index.js",
@@ -19,7 +19,8 @@
   },
   "scripts": {
     "build": "tsup && node ../../scripts/check-dts-emitted.mjs",
-    "test": "vitest run",
+    "test": "vitest run --project local",
+    "test:repo": "vitest run --project repo",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json && pnpm check:test-typecheck",
     "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/objectql --project tsconfig.test.json",
     "gen:test-typecheck-debt": "tsx ../../scripts/check-test-typecheck.mts --update --package packages/objectql --project tsconfig.test.json"
@@ -39,7 +40,7 @@
   "devDependencies": {
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "objectstack",

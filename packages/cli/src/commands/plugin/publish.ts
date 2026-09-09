@@ -113,8 +113,9 @@ export default class PluginPublish extends Command {
     // bytes against the manifest's own declared per-file digests before
     // upload. Absent map = permissive by contract (the field is
     // `.optional()`; artifacts built before integrity computation stay
-    // publishable). Unpack-time re-verification remains the cloud control
-    // plane's obligation (#11331) — this preflight does not discharge it.
+    // publishable). Unpack-time re-verification is owned by the
+    // future runtime loader (ADR-0025 §3.5 steps 4–7), not by the cloud
+    // control plane (#11331) — this preflight does not discharge it.
     const declaredIntegrity = manifest.integrity;
     if (
       declaredIntegrity !== undefined && declaredIntegrity !== null

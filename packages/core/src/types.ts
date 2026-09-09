@@ -2,7 +2,7 @@
 
 import { ObjectKernel } from './kernel.js';
 import type { Logger, LifecycleEventName } from '@objectstack/spec/contracts';
-import type { CORE_PLUGIN_TYPES } from '@objectstack/spec/kernel';
+import type { CORE_PLUGIN_TYPES, PluginDefinition } from '@objectstack/spec/kernel';
 
 /**
  * PluginContext - Runtime context available to plugins
@@ -106,40 +106,57 @@ export type PluginType = 'standard' | (typeof CORE_PLUGIN_TYPES)[number];
 
 /**
  * Plugin Interface
- * 
+ *
  * All ObjectStack plugins must implement this interface.
+ *
+ * ## Two halves, one contract (#16334)
+ *
+ * **The metadata half is inherited, not restated.** Every key `PluginSchema`
+ * declares (`@objectstack/spec`, `kernel/plugin.zod.ts`) — `id`, `type`,
+ * `staticPath`, `slug`, `default`, `version`, `description`, `author`,
+ * `homepage` — arrives here through `PluginDefinition`
+ * (`z.input<typeof PluginSchema>`), so the keys the compiler accepts on a
+ * plugin object and the keys `kernel.use()` validates
+ * (`PluginLoader.validatePluginContract`, #16049) are ONE declaration. Before
+ * this the interface spelled `type` and `version` itself and declared neither
+ * `staticPath` nor `slug`, so an in-repo `ui` plugin could not carry the two
+ * keys the schema requires of it without widening its own type — two shapes
+ * for one contract, free to drift.
+ *
+ * **The runtime half is declared here and only here**: `name`, the ADR-0116
+ * ordering declarations, and the `init` / `start` / `destroy` lifecycle. The
+ * spec's schema describes what a plugin OBJECT may say about itself, never
+ * what it does.
+ *
+ * ### `type`
+ *
+ * The inherited `type` is a {@link PluginType} — the closed set the spec
+ * declares (`'standard'` plus `CORE_PLUGIN_TYPES`); `packages/rest`'s
+ * `plugin-type-closed-set.pin.test.ts` pins that the inherited key and the
+ * exported alias are the same union. Absent means `'standard'` at the schema
+ * (`.default('standard')`), and the loader never writes that default back
+ * onto the object. A value outside the set no longer type-checks, and since
+ * #16049 `kernel.use()` REFUSES it at boot — `assertPluginContract`
+ * (`plugin-contract.ts`, run by BOTH `ObjectKernel.use()` and `LiteKernel.use()`
+ * since #16721) runs `PluginSchema` over every plugin object and raises
+ * `PLUGIN_CONTRACT_VIOLATION` naming the plugin and the first violated key.
+ * `type: 'ui'` additionally owes `staticPath` and `slug` (#16334,
+ * `PLUGIN_UI_REQUIRED_KEY_MISSING`), refused on the same path.
+ *
+ * ⚠️ This comment used to say a bad `type` was refused "at parse". It was
+ * measured false (#16049, from #15638): `PluginSchema` had no runtime caller,
+ * kernel plugin objects were never parsed, and a `type` outside the set was
+ * accepted and stored verbatim. The refusal described here is the one that
+ * now exists, on the boot path, and the compiler's arm is the second half
+ * rather than the only one — `kernel.use(plugin as any)` is a shipped
+ * in-repo pattern, and externally authored plugins never meet this compiler
+ * at all.
  */
-export interface Plugin {
+export interface Plugin extends PluginDefinition {
     /**
      * Unique plugin name (e.g., 'com.objectstack.engine.objectql')
      */
     name: string;
-
-    /**
-     * Plugin version
-     */
-    version?: string;
-
-    /**
-     * Plugin type categorisation for runtime behaviour — a {@link PluginType},
-     * the closed set the spec declares. The enumeration lives on that type
-     * (derived from `CORE_PLUGIN_TYPES`), not in this comment: a value outside
-     * it no longer type-checks, and since #16049 `kernel.use()` REFUSES it at
-     * boot — `PluginLoader.validatePluginContract` runs `PluginSchema` over
-     * every plugin object and raises `PLUGIN_CONTRACT_VIOLATION` naming the
-     * plugin and the first violated key.
-     *
-     * ⚠️ This sentence used to say the value was refused "at parse". It was
-     * measured false (#16049, from #15638): `PluginSchema` had no runtime
-     * caller, kernel plugin objects were never parsed, and a `type` outside the
-     * set was accepted and stored verbatim. The refusal this comment describes
-     * is the one that now exists, on the boot path, and the compiler's arm is
-     * the second half rather than the only one — `kernel.use(plugin as any)` is
-     * a shipped in-repo pattern, and externally authored plugins never meet
-     * this compiler at all.
-     * @default 'standard'
-     */
-    type?: PluginType;
 
     /**
      * List of other plugin names that this plugin depends on.

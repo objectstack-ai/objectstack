@@ -20,8 +20,12 @@ import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readA
 // The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
 // "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` actually admits.
-import { AggregationFunction } from '@objectstack/spec/data';
+import { AggregationFunction, emptyGroupValueFor } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
+// [#16318] The per-field-type physical representation of the NUMERIC family.
+// `os generate migration` reads the SAME table, in both of its formats — that
+// shared table IS the repair, so ⛔ never restate one of its numbers here.
+import { numericColumnFor } from '@objectstack/spec/data';
 // [#5659] The Filter Protocol's boolean identity reduction — `$and: []` is TRUE,
 // `$or: []` is FALSE, `{}` is a TRUE disjunct, `$not: {}` is FALSE. One
 // implementation for all four consumers, proven against the same
@@ -245,6 +249,13 @@ const JSON_COLUMN_TYPES = new Set<string>([
  * column-type switch (these map to INTEGER/REAL columns) and the read-side
  * coercion registry (`numericFields`).
  *
+ * ⚠️ [#16318] The read coercion no longer reads this whole set on every
+ * dialect. The three ALIASES below are how an external, introspected column
+ * reaches the driver, and on PostgreSQL a `bigint` arrives as a STRING; the
+ * server-dialect arm therefore reads {@link SqlDriver.numericValueFields}, the
+ * authorable `NUMERIC_VALUE_TYPES` half, and SQLite keeps this full set for the
+ * legacy TEXT-affinity repair described below. The DDL switch is unchanged.
+ *
  * The read coercion exists so the fix is robust on SQLite even when the column
  * predates it: a `rating`/`slider`/`progress` column created before #2025 has
  * TEXT affinity and returns '4' not 4, and SQLite never alters a column's type
@@ -264,8 +275,9 @@ const NUMERIC_SCALAR_TYPES = new Set<string>([
 /**
  * The builtin audit-timestamp columns every managed object carries. They are
  * stamped to a single canonical instant format on SQLite (see
- * `stampInsertTimestamps`/`update`) and read-repaired by
- * `repairNaiveUtcAuditTimestamp`.
+ * `stampInsertTimestamps`/`update`) and presented on read — on EVERY dialect —
+ * as that same canonical instant text by {@link presentAuditTimestampOutput}
+ * ([ADR-0053 D-F1], #13973).
  */
 const AUDIT_TIMESTAMP_COLUMNS = ['created_at', 'updated_at'] as const;
 
@@ -300,6 +312,52 @@ function repairNaiveUtcAuditTimestamp(value: unknown): unknown {
   if (!m) return value;
   const d = new Date(`${m[1]}T${m[2]}Z`);
   return Number.isNaN(d.getTime()) ? value : d.toISOString();
+}
+
+/**
+ * Fold a client library's `Date` — what node-pg materialises a `timestamptz`
+ * as and what mysql2 materialises a `DATETIME(3)` as — into the canonical
+ * instant text, `YYYY-MM-DDTHH:MM:SS.sssZ`.
+ *
+ * Total in the sense #14078 ruled for the shared consumer spelling: the ONE
+ * `Date` shape `toISOString()` refuses — an Invalid `Date`, whose time value
+ * is `NaN` — is handed back UNCHANGED rather than thrown on. Both live
+ * dialects are measured to produce it from rows that are already on disk (a
+ * MySQL zero `DATETIME`; a Postgres year past 275760, inside the server's
+ * range and outside JS's — `sql-driver-14078-invalid-date-materialisation.test.ts`),
+ * and it has no canonical text to fold to. It is neither nulled (that erases a
+ * stored value silently) nor spelled as the text `Invalid Date` (that would
+ * change the wire, where `JSON.stringify` already serialises it as `null`); it
+ * leaves as the client's `Date`, which is exactly the shape the ruled-B
+ * consumer arms (`canonicalIsoInstant` and kin) already absorb.
+ * [ADR-0053 D-F3].
+ */
+function isoFromValidDate(value: Date): unknown {
+  return Number.isNaN(value.getTime()) ? value : value.toISOString();
+}
+
+/**
+ * What a record read door hands out for a builtin audit timestamp, on every
+ * dialect ([ADR-0053 D-F1], #13973): the canonical instant text.
+ *
+ * Two arms, one per shape the dialects actually produce. A `Date` — the
+ * client-level materialisation on Postgres (`timestamptz`) and MySQL
+ * (`DATETIME(3)`), which the driver deliberately does NOT alter at the client
+ * parser ([ADR-0053 D-F2]; see {@link SqlDriver.withPostgresCalendarDayAsText})
+ * — is folded by {@link isoFromValidDate}. A string — SQLite's TEXT, canonical
+ * post-ADR-0074 or a legacy zone-naive `CURRENT_TIMESTAMP` — takes ADR-0074's
+ * {@link repairNaiveUtcAuditTimestamp}, which is idempotent on the canonical
+ * form. Every other shape passes through untouched, exactly as before.
+ *
+ * Before #13973 the string arm ran inside `if (this.isSqlite)` and the `Date`
+ * arm did not exist, so the two live dialects handed the client's `Date`
+ * through the read door — the divergence the #13973 census measured eight
+ * consumers to be wrong under (#13382 in production, #13993–#13999 by reading),
+ * every one in the direction "expected the text, received a `Date`".
+ */
+function presentAuditTimestampOutput(value: unknown): unknown {
+  if (value instanceof Date) return isoFromValidDate(value);
+  return repairNaiveUtcAuditTimestamp(value);
 }
 
 /**
@@ -339,8 +397,15 @@ const isNowDefaultValue = isNowDefaultToken;
  * ADR-0074's `repairNaiveUtcAuditTimestamp` for the string shapes (the single
  * source of the zone-naive→UTC rules) and adds the INTEGER epoch-ms / `Date`
  * folding, mirroring the read-repair the `Field.date`/numeric-scalar paths do.
- * SQLite-only: Postgres/MySQL store a real zone-aware TIMESTAMP and never carry
- * this ambiguity.
+ *
+ * Runs on EVERY dialect since #13973 ([ADR-0053 D-F1]): the name records the
+ * storage forms it was written to fold (SQLite's INTEGER epoch and naive TEXT),
+ * not where it runs. Postgres and MySQL store a real `timestamptz` /
+ * `DATETIME(3)` and never carry the mixed-storage ambiguity, but their client
+ * libraries hand the column back as a JS `Date`, and that `Date` used to leave
+ * the read door as-is — the SQLite-gated fold was the whole of the dialect
+ * divergence the #13973 census measured. The `Date` arm below is the one those
+ * two dialects take, and the client parser stays untouched ([ADR-0053 D-F2]).
  */
 function normalizeSqliteDatetimeOutput(value: unknown): unknown {
   if (value == null) return value;
@@ -350,11 +415,10 @@ function normalizeSqliteDatetimeOutput(value: unknown): unknown {
     const d = new Date(value);
     return Number.isNaN(d.getTime()) ? value : d.toISOString();
   }
-  // A JS `Date` is never returned by better-sqlite3 here, but normalize one
-  // defensively so any caller-shaped row also reads back canonical.
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? value : value.toISOString();
-  }
+  // The client-level materialisation on Postgres and MySQL (never what
+  // better-sqlite3 returns): fold it to the canonical text, an Invalid `Date`
+  // passing through — see `isoFromValidDate` for why that is the total arm.
+  if (value instanceof Date) return isoFromValidDate(value);
   if (typeof value !== 'string') return value;
   const s = value.trim();
   if (s === '') return value;
@@ -892,6 +956,69 @@ function backendStatementFaultError(object: string, cause: unknown, targetedTabl
   });
   // [#13438] Code-readable, serialisation-invisible — see the section above.
   declareTargetedTable(err, targetedTable);
+  return err;
+}
+
+/**
+ * [#16019] The raw-execution twin of {@link backendStatementFaultError}: the
+ * envelope {@link SqlDriver.execute} raises when the backend refuses a
+ * statement it was handed verbatim. `no such function: translate` on a SQLite
+ * datasource whose analytics compiler emitted a function the dialect lacks
+ * (#16028) is the measured case; every other dialect refusal on this path is
+ * the same class.
+ *
+ * # Why this exists beside the read-exit terminal
+ *
+ * Every typed read exit (`find`, `count`, `aggregate`) already terminates in
+ * {@link SqlDriver.backendStatementFault}, so a dialect refusal there leaves
+ * the driver DECLARED — `code: DATABASE_ERROR`, `status: 500` — and the HTTP
+ * doors withhold its prose by that declaration (`declaresServerFault`). The
+ * raw path had no terminal at all: `execute()` awaited `knex.raw()` bare, so
+ * the dialect's own error object left the driver with no `status`, a `code`
+ * from the backend's vocabulary (`SQLITE_ERROR`) and knex's `<statement> -
+ * <diagnostic>` message. Undeclared, it fell to `looksLikeInternalErrorLeak`
+ * at the doors — a phrasing heuristic that recognises `no such column:` and
+ * not `no such function:` — so whether a caller saw the engine's text was a
+ * property of which limb the message happened to match, and one transport
+ * over, of whether the message carried a statement prefix at all.
+ *
+ * Maintainer ruling 2026-09-06 (decision batch #57, option 3): the substring
+ * list is not grown; the driver declares its own fault and the doors classify
+ * on the declaration. This is that declaration for the raw path — the idiom
+ * this file already spells at its other terminals, not a second mechanism.
+ *
+ * # What the envelope carries, and what it does not
+ *
+ * The message is COMPOSED, for the reason `backendStatementFaultError` gives:
+ * there is no cut of a dialect's text that keeps its words and reliably drops
+ * a caller's inlined value. No statement, no diagnostic and no function name
+ * reaches the message. The dialect error travels whole under `cause`,
+ * NON-ENUMERABLE — readable by cause-following predicates
+ * (`isMissingTableError` still classifies a missing table on this path
+ * through it), invisible to `JSON.stringify` and `{ ...err }` — and the driver
+ * writes it to the server log before composing. ⛔ No `DRIVER_TARGETED_TABLE`
+ * is declared here: a raw statement may reference any number of tables, and
+ * naming one would make a missing JOINED table read as the caller's own — the
+ * misclassification #13438 exists to prevent.
+ *
+ * @param cause - the dialect error, kept whole for the log and for
+ *                cause-following predicates.
+ */
+function rawStatementFaultError(cause: unknown): Error {
+  const err = new Error(
+    'The database refused to run a raw statement. The driver could not attribute the failure ' +
+      'to any part of the request, so no verdict about the statement is claimed here. The ' +
+      "backend's own diagnostic and the statement were written to the server log for an " +
+      'operator to read.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.DATABASE_ERROR;
+  err.status = 500;
+  Object.defineProperty(err, 'cause', {
+    value: cause,
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  });
   return err;
 }
 
@@ -4084,8 +4211,15 @@ export type SqlWindowFunctionQuery = Omit<DriverQuery, 'windowFunctions'> & {
  * presents. One entry per rule `formatOutput` applies to a scalar column; the
  * read paths that bypass `formatOutput` (`aggregate`, `distinct`) name the rule
  * per column instead. See {@link SqlDriver.readPresentationKind}.
+ *
+ * `audit_timestamp` is the builtin `created_at` / `updated_at` rule —
+ * {@link presentAuditTimestampOutput}, the presenter `formatOutput` applies to
+ * those two columns — kept apart from `datetime` because the two presenters
+ * differ on a number: the datetime fold turns an epoch INTEGER into ISO text,
+ * the audit presenter passes it through (ADR-0074 §3), and a `find()` row
+ * takes the latter ([ADR-0053 D-F1], #13973).
  */
-export type ReadPresentationKind = 'datetime' | 'date' | 'time' | 'boolean' | 'number';
+export type ReadPresentationKind = 'datetime' | 'date' | 'time' | 'boolean' | 'number' | 'audit_timestamp';
 
 /**
  * Journal modes the driver knows how to ask a file-backed SQLite database for.
@@ -4253,6 +4387,30 @@ export class SqlDriver implements IDataDriver {
   protected jsonFields: Record<string, string[]> = {};
   protected booleanFields: Record<string, string[]> = {};
   protected numericFields: Record<string, string[]> = {};
+  /**
+   * [#16318] The subset of {@link numericFields} whose field type is an
+   * AUTHORABLE numeric one (`NUMERIC_VALUE_TYPES`), with the driver-internal
+   * SQL aliases `integer` / `int` / `float` deliberately left out.
+   *
+   * Why a second registry rather than a narrower first one: `numericFields` is
+   * read by three other seams — the presentation-kind door, the cross-field
+   * comparability door, and the shard aliasing — and every one of them is about
+   * "this column holds a number", which the aliases do. Only the READ COERCION
+   * needed narrowing, and it needed it on exactly one axis.
+   *
+   * ⚠️ The axis is EXISTING columns. Moving the coercion off the SQLite-only
+   * arm (see `formatOutput`) is what the exact-decimal column forced, and the
+   * aliases are how an EXTERNAL, introspected table's columns reach this
+   * driver — a PostgreSQL `bigint`, which node-postgres hands back as a STRING
+   * precisely because it does not fit a JS double. Coercing those through
+   * `Number()` would silently round above 2^53 on a table this change never
+   * created, which is outside the "new tables only" bound the ruling drew
+   * (「不考虑现有数据」). So on the server dialects the coercion applies to the
+   * seven authorable numeric types and to nothing else; SQLite keeps the wider
+   * set, because that is where the legacy TEXT-affinity repair this pass was
+   * originally written for actually lives.
+   */
+  protected numericValueFields: Record<string, string[]> = {};
   protected dateFields: Record<string, Set<string>> = {};
   protected datetimeFields: Record<string, Set<string>> = {};
   /**
@@ -5246,9 +5404,20 @@ export class SqlDriver implements IDataDriver {
    * optional peer dependency and is never imported here — `setTypeParser` /
    * `getTypeParser` are read off the `pg.Client` knex hands the hook.
    *
-   * `timestamptz` / `timestamp` are deliberately untouched: those are
-   * instants, a `Date` is the right materialisation for them, and
-   * `Field.datetime` depends on it.
+   * `timestamptz` / `timestamp` are deliberately untouched here: those are
+   * instants, and a `Date` is the right materialisation for them at the
+   * CLIENT layer, where the wire text is parsed. It is not, however, what the
+   * driver hands out of its read doors: [ADR-0053 D-F1/D-F2] (#13973) fold that
+   * `Date` to the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text in `formatOutput`
+   * / `presentReadValue`, so every dialect presents the instant the way
+   * SQLite always has. This comment used to add that "`Field.datetime`
+   * depends on" the `Date` materialisation; #13973 checked that on the tree
+   * and it did not hold — nothing on the read path consumed the `Date` (the
+   * SQLite-gated `formatOutput` never touched a datetime column on Postgres),
+   * and every in-repo reader of the value already accepted the text form.
+   * Canonicalising at the driver's own read boundary rather than at this
+   * parser is the ruled shape: one clock stays in play here for `date`, the
+   * instant types keep their stock parser, and no host `pg` client is touched.
    *
    * A host's existing `pool.afterCreate` is chained rather than replaced,
    * exactly as in {@link withUtcSession}.
@@ -8213,6 +8382,39 @@ export class SqlDriver implements IDataDriver {
   // ===================================
 
   /**
+   * [#16019] The terminal of the raw path — compose
+   * {@link rawStatementFaultError} for a backend refusal nothing declared,
+   * writing the statement and the dialect's own message to the SERVER LOG on
+   * the way.
+   *
+   * The same "is it already ours" gate {@link SqlDriver.backendStatementFault}
+   * applies, asked over the DECLARED status and ⛔ never over an error class: a
+   * transport that already answers with an ADR-0112 envelope must not be
+   * buried under a generic one.
+   *
+   * Returns the error rather than throwing it — the shape every sibling
+   * terminal in this file uses — so each call site spells its own `throw`.
+   * `protected` so a subclass that routes `execute()` around this class's knex
+   * (`TursoDriver` in remote mode) declares through the SAME composition.
+   */
+  protected rawStatementFault(command: string, error: unknown): Error {
+    const declared = (error as { status?: unknown } | null | undefined)?.status;
+    if (typeof declared === 'number') return error as Error;
+
+    const detail = (error as { message?: unknown } | null | undefined)?.message;
+    const code = (error as { code?: unknown } | null | undefined)?.code;
+    this.logger.warn(
+      '[sql-driver] DATABASE_ERROR — the backend refused a raw statement' +
+        (typeof code === 'string' && code.length > 0 ? ` (${code})` : '') +
+        '. The statement and the dialect message below are kept server-side: the message ' +
+        'carries the compiled statement, and on the dialects that inline them the bound ' +
+        `literals too. statement: ${command}; dialect: ` +
+        `${typeof detail === 'string' ? detail : String(error)}`,
+    );
+    return rawStatementFaultError(error);
+  }
+
+  /**
    * Run a raw SQL string or knex builder through the underlying knex
    * connection.
    *
@@ -8238,7 +8440,13 @@ export class SqlDriver implements IDataDriver {
         ? this.knex.raw(command, params || []).transacting(options.transaction as Knex.Transaction)
         : this.knex.raw(command, params || []);
 
-    const result = await builder;
+    let result: unknown;
+    try {
+      result = await builder;
+    } catch (error) {
+      // [#16019] The raw path's terminal — see {@link SqlDriver.rawStatementFault}.
+      throw this.rawStatementFault(command, error);
+    }
     // Only after the statement actually succeeded — an index we failed to
     // create is not one we own (#4884).
     if (INDEX_DDL_PREFIX.test(command)) this.noteRuntimeIndexDdl(command);
@@ -8396,6 +8604,12 @@ export class SqlDriver implements IDataDriver {
     // See {@link presentReadColumns}.
     const presentedOutput = new Map<string, ReadPresentationKind>();
 
+    // [#15546] Result columns whose NULL answer folds to the identity the
+    // platform declares for that aggregate over NOTHING (`emptyGroupValueFor`,
+    // spec `data/aggregation-policy.ts`), keyed like `presentedOutput` by the
+    // column name the caller will read. See {@link foldEmptyAggregateAnswers}.
+    const foldedOutput = new Map<string, number>();
+
     if (query.groupBy) {
       // groupBy items may be plain strings ('region') or structured objects
       // ({ field: 'closed_at', dateGranularity: 'quarter' }). For structured
@@ -8525,6 +8739,12 @@ export class SqlDriver implements IDataDriver {
           } else {
             builder.select(this.knex.raw(`${rawFunc} as ${this.aliasIdentifierSql(agg.alias)}`, [fieldExpr]));
           }
+          // [#15546] What this aggregate answers over NOTHING, read from the
+          // policy rather than restated: `sum` (and the two counts, which never
+          // arrive as NULL) fold to `0`; `avg`/`min`/`max` have no identity and
+          // their NULL passes through. See {@link foldEmptyAggregateAnswers}.
+          const identity = emptyGroupValueFor(funcName);
+          if (identity !== undefined) foldedOutput.set(agg.alias, identity);
           // `min`/`max` are the only supported functions that hand back a value
           // OF the column rather than a count/total derived from it, so they are
           // the only ones whose result still needs the column's presentation.
@@ -8616,7 +8836,60 @@ export class SqlDriver implements IDataDriver {
       // {@link SqlDriver.aggregateBackendFault}.
       throw this.aggregateBackendFault(object, query, error);
     }
-    return this.presentReadColumns(rows, presentedOutput);
+    return this.presentReadColumns(this.foldEmptyAggregateAnswers(rows, foldedOutput), presentedOutput);
+  }
+
+  /**
+   * [#15546] Fold the NULL a SQL aggregate answers over an all-NULL aggregand
+   * to the identity the platform declares for that aggregate over NOTHING.
+   *
+   * SQL `SUM` skips NULLs, and once it has skipped every row of a group it
+   * answers NULL — on every dialect this driver targets. Measured 2026-09-07
+   * on better-sqlite3, live PostgreSQL 16.13 and live MySQL 8.0.46: `sum` over
+   * a group of three rows whose column is NULL in each of them is `null` on
+   * all three, for `number` and `currency` columns alike. The engine's
+   * in-memory aggregate tier (`objectql`'s `in-memory-aggregation.ts`) answers
+   * `0` for the same rows, as do `driver-memory` and `driver-mongodb`'s
+   * lowering, and `emptyGroupValueFor` (spec `data/aggregation-policy.ts`)
+   * rules that summing nothing is `0` — a measured fact, not missing data.
+   * Which face answered was decided by a driver capability bit the caller
+   * never sees (`engine.ts`'s `typeof drv.aggregate === 'function'` fork), so
+   * one grouped list view rendered a blank total on one deployment and `0` on
+   * another. Maintainer ruling 2026-09-07 on #15546 (option A): three rows
+   * whose aggregand is absent and zero rows are the SAME case for `sum` — the
+   * addend set is empty either way — and this face is the one that moves.
+   *
+   * The identity is READ from the policy rather than restated here, so the
+   * other half of the same rule holds by construction: an aggregate whose
+   * `emptyGroupValueFor` is `undefined` (`avg`/`min`/`max`) has no answer over
+   * nothing, is never registered, and its NULL reaches the caller untouched.
+   * `count`/`count_distinct` register too but never arrive as NULL — `COUNT`
+   * answers `0` on its own — so the entry is inert for them, deliberately
+   * rather than special-cased away.
+   *
+   * Presentation, not compilation. The statement is unchanged — no `COALESCE`
+   * — so the emitted-SQL pins and the per-dialect result-type parsing above
+   * are untouched, and the answer is the JS number `0` on every dialect, the
+   * same value the in-memory tier produces. Only `null` folds: an `undefined`
+   * would mean the column was never projected, a different defect that must
+   * stay visible. Rows are mutated in place, as {@link presentReadColumns}
+   * does. The unaliased branch of {@link SqlDriver.aggregate} is not tracked,
+   * for the reason `presentedOutput` gives: `alias` is required by
+   * `AggregationNodeSchema`, and that branch lands under a dialect-dependent
+   * column name.
+   *
+   * Pinned on every enrolled face by the `sum(amount)` cases of
+   * `AGGREGATION_CASES` (spec `data/aggregation-conformance.ts`).
+   */
+  protected foldEmptyAggregateAnswers(rows: any, identities: Map<string, number>): any {
+    if (identities.size === 0 || !Array.isArray(rows)) return rows;
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      for (const [column, identity] of identities) {
+        if (row[column] === null) row[column] = identity;
+      }
+    }
+    return rows;
   }
 
   /**
@@ -8901,7 +9174,63 @@ export class SqlDriver implements IDataDriver {
     if (query.limit !== undefined) builder.limit(query.limit);
     if (query.offset !== undefined) builder.offset(query.offset);
 
-    return await builder;
+    const rows = await builder;
+    if (!Array.isArray(rows)) return rows;
+
+    // [#16609] The last read door that returned STORAGE forms. It handed back
+    // `await builder` with no presentation at all, while `find()`/`findOne()`
+    // run every row through `formatOutput` and `aggregate()`/`distinct()` got
+    // `presentReadValue` under #3797/#3849 — so one driver answered one
+    // declared column two ways depending on which door you knocked on.
+    // Measured on `main` at `2e6a2ea4c9`, one row through the two doors:
+    //   find()   -> { ok: true, meta: { k: 1 } }
+    //   window   -> { ok: 1,    meta: '{"k":1}' }
+    // i.e. a declared `Field.boolean` answered `1` and a declared `Field.object`
+    // answered the stored JSON TEXT. `formatOutput` rather than
+    // `presentReadValue` is what runs here, and that choice is load-bearing:
+    // {@link ReadPresentationKind} has no `json` member, so the per-value
+    // helper the other two doors use cannot present `meta` at all. These are
+    // ROWS, which is exactly what `formatOutput` takes.
+    //
+    // ── The alias columns are carved out, and that is the whole design ──────
+    //
+    // A window alias is a COMPUTED value, not a declared field, so no declared
+    // field's presentation rule may touch it. The case that forces the rule to
+    // be explicit is an alias that COLLIDES with a declared field name, and SQL
+    // has already decided that one: `select *` plus `<window> as ok` projects
+    // two columns named `ok` and the row object keeps the LAST, so the computed
+    // value wins the key and the declared column's value is not in the row at
+    // all. Measured on `main` at `2e6a2ea4c9` with `alias: 'ok'` over a
+    // declared `Field.boolean ok`: rows came back `ok: 1` and `ok: 2` — the
+    // ROW_NUMBERs, not the booleans (`true`/`false`), which is how you can tell
+    // them apart. So the alias wins the key BEFORE this change and still wins
+    // it after; what this carve-out prevents is presenting that computed number
+    // as the declared type, which would have turned ROW_NUMBER 1 and 2 into
+    // `true` and `true` and destroyed the very value the caller asked for.
+    // Pinned by `sql-driver-window-function-output.test.ts`.
+    //
+    // Snapshot-and-restore rather than a "which keys would `formatOutput`
+    // touch?" pre-computation: that question can only be answered by re-reading
+    // the declared-field registries `formatOutput` reads, which would be a
+    // second, worse copy of it — and one that goes silently stale the next time
+    // `formatOutput` learns a new rule. Restoring a value the pass never
+    // touched is a no-op, so the cheap-looking version buys nothing.
+    const aliases = Array.isArray(query.windowFunctions)
+      ? query.windowFunctions.map((wf) => String(wf.alias))
+      : [];
+
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      const computed: [string, any][] = [];
+      for (const alias of aliases) {
+        if (Object.prototype.hasOwnProperty.call(row, alias)) computed.push([alias, row[alias]]);
+      }
+      // Mutates in place and returns the same row, as `findRows()` relies on.
+      this.formatOutput(object, row);
+      for (const [alias, value] of computed) row[alias] = value;
+    }
+
+    return rows;
   }
 
   // ===================================
@@ -9080,7 +9409,7 @@ export class SqlDriver implements IDataDriver {
    * drops shards past the `shards × unit` window.
    */
   async rotateShards(
-    objectDef: { name: string; fields?: Record<string, any>; lifecycle?: any },
+    objectDef: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any },
     nowMs: number = Date.now(),
   ): Promise<{ object: string; current: string; shards: string[]; dropped: string[] }> {
     this.assertSchemaMutable('rotateShards');
@@ -9097,7 +9426,7 @@ export class SqlDriver implements IDataDriver {
 
   protected async ensureRotation(
     tableName: string,
-    obj: { name: string; fields?: Record<string, any> },
+    obj: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
     policy: { shards: number; unit: 'day' | 'week' | 'month' },
     nowMs: number = Date.now(),
   ): Promise<{ object: string; current: string; shards: string[]; dropped: string[] }> {
@@ -9250,8 +9579,21 @@ export class SqlDriver implements IDataDriver {
   }
 
   /** Create/column-sync one physical shard table (mirrors the managed-table
-   * branch of {@link initObjects}, scoped to a shard). */
-  protected async ensureShardTable(shardName: string, obj: { fields?: Record<string, any>; tenancy?: any }): Promise<void> {
+   * branch of {@link initObjects}, scoped to a shard).
+   *
+   * #16711: `indexes` and `tenancy` are DECLARED here, on {@link ensureRotation}
+   * and on {@link rotateShards}, because this leaf reads both off the object the
+   * public entry point was handed — a shard carries the base table's declared
+   * indexes (#11374) and must scope a `unique: 'organization'` index the same
+   * way on every shard (ADR-0120 D1). Declaring them only here would leave the
+   * two links above still narrowing the same value, so a caller spelling
+   * `indexes` in a fresh literal to `rotateShards` would still be refused by a
+   * type while the driver read the key regardless.
+   */
+  protected async ensureShardTable(
+    shardName: string,
+    obj: { fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
+  ): Promise<void> {
     const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
     // [#12015] Both branches below drop a declared field named after a builtin
     // column — the create branch skips it explicitly, the column-sync branch
@@ -9265,7 +9607,7 @@ export class SqlDriver implements IDataDriver {
       table: shardName,
       fields: obj.fields ?? {},
       tenantField: this.resolveTenantField(shardName),
-      declaredIndexes: (obj as any).indexes,
+      declaredIndexes: obj.indexes,
     });
     if (!exists) {
       await this.knex.schema.createTable(shardName, (table) => {
@@ -9292,7 +9634,7 @@ export class SqlDriver implements IDataDriver {
     // Declared indexes per shard. Auto-derived names already embed the shard
     // name; explicit names get a shard prefix so they can't collide across
     // shards in the same database.
-    const declared = (obj as any).indexes;
+    const declared = obj.indexes;
     if (Array.isArray(declared) && declared.length > 0) {
       const colInfo = await this.knex(shardName).columnInfo();
       const perShard = declared.map((idx: any) => ({
@@ -9324,6 +9666,7 @@ export class SqlDriver implements IDataDriver {
     this.jsonFields[shard] = this.jsonFields[base] ?? [];
     this.booleanFields[shard] = this.booleanFields[base] ?? [];
     this.numericFields[shard] = this.numericFields[base] ?? [];
+    this.numericValueFields[shard] = this.numericValueFields[base] ?? [];
     this.autoNumberFields[shard] = this.autoNumberFields[base] ?? [];
     if (this.dateFields[base]) this.dateFields[shard] = this.dateFields[base];
     if (this.datetimeFields[base]) this.datetimeFields[shard] = this.datetimeFields[base];
@@ -9450,6 +9793,7 @@ export class SqlDriver implements IDataDriver {
     const jsonCols: string[] = [];
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
+    const numericValueCols: string[] = [];
     const dateCols: string[] = [];
     const datetimeCols: string[] = [];
     const timeCols: string[] = [];
@@ -9462,6 +9806,8 @@ export class SqlDriver implements IDataDriver {
         if (this.isJsonField(type, field)) jsonCols.push(name);
         if (type === 'boolean' || type === 'toggle') booleanCols.push(name);
         if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) numericCols.push(name);
+        // [#16318] The authorable half only — see {@link numericValueFields}.
+        if (NUMERIC_VALUE_TYPES.has(type) && !field.multiple) numericValueCols.push(name);
         if (type === 'date') dateCols.push(name);
         if (type === 'datetime') datetimeCols.push(name);
         if (type === 'time') timeCols.push(name);
@@ -9474,6 +9820,7 @@ export class SqlDriver implements IDataDriver {
     this.jsonFields[key] = jsonCols;
     this.booleanFields[key] = booleanCols;
     this.numericFields[key] = numericCols;
+    this.numericValueFields[key] = numericValueCols;
     this.autoNumberFields[key] = autoNumberCols;
     this.tenantFieldByTable[key] = tenantField;
     if (dateCols.length) this.dateFields[key] = new Set(dateCols);
@@ -9497,7 +9844,7 @@ export class SqlDriver implements IDataDriver {
    *          which `initObjects` goes on to use for its DDL.
    */
   protected registerManagedObjectMetadata(
-    obj: { name: string; fields?: Record<string, any>; tenancy?: any },
+    obj: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
   ): { tableName: string; tenantField: string | null } {
     const tableName = StorageNameMapping.resolveTableName(obj);
     // #2186: remember the authoritative metadata field set for this table so
@@ -9506,8 +9853,8 @@ export class SqlDriver implements IDataDriver {
     // Always overwrite — a metadata change that REMOVES `indexes` must clear
     // the previous entry, or drift detection keeps expecting an index nobody
     // declares any more (and never reports it as orphaned).
-    if (Array.isArray((obj as any).indexes)) {
-      this.managedObjectIndexes.set(tableName, (obj as any).indexes);
+    if (Array.isArray(obj.indexes)) {
+      this.managedObjectIndexes.set(tableName, obj.indexes);
     } else {
       this.managedObjectIndexes.delete(tableName);
     }
@@ -9520,6 +9867,7 @@ export class SqlDriver implements IDataDriver {
     const jsonCols: string[] = [];
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
+    const numericValueCols: string[] = [];
     const autoNumberCols: Array<{ name: string; format: string; tokens: AutonumberToken[]; tenantField: string | null }> = [];
     // Tenant-isolation column: explicit tenancy opt-out → declared field →
     // implicit `organization_id`. See {@link computeAndRecordTenantField}
@@ -9543,6 +9891,10 @@ export class SqlDriver implements IDataDriver {
         if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) {
           numericCols.push(name);
         }
+        // [#16318] The authorable half only — see {@link numericValueFields}.
+        if (NUMERIC_VALUE_TYPES.has(type) && !field.multiple) {
+          numericValueCols.push(name);
+        }
         if (type === 'date') {
           (this.dateFields[tableName] ??= new Set()).add(name);
         }
@@ -9565,6 +9917,7 @@ export class SqlDriver implements IDataDriver {
     this.jsonFields[tableName] = jsonCols;
     this.booleanFields[tableName] = booleanCols;
     this.numericFields[tableName] = numericCols;
+    this.numericValueFields[tableName] = numericValueCols;
     this.autoNumberFields[tableName] = autoNumberCols;
     this.tenantFieldByTable[tableName] = tenantField;
     // [#11067] The declared shape's answer to "does this table carry
@@ -9627,7 +9980,7 @@ export class SqlDriver implements IDataDriver {
    * Idempotent: pure metadata assignment, safe to re-drive on every reload.
    */
   registerObjectMetadata(
-    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>,
+    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] }>,
   ): void {
     for (const obj of objects) this.registerManagedObjectMetadata(obj);
   }
@@ -9638,7 +9991,33 @@ export class SqlDriver implements IDataDriver {
   // undeclared here until #4311 (`registerExternalObject` and
   // `computeAndRecordTenantField` both had it), so a caller spelling the key
   // correctly was rejected by the type while the driver read it regardless.
-  async initObjects(objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>): Promise<void> {
+  //
+  // `indexes` is the same story, one key over, and it went undeclared here for
+  // longer: `registerManagedObjectMetadata` fills `managedObjectIndexes` from
+  // it, and that map is what `syncDeclaredIndexes` renders every declared
+  // UNIQUE from — so the whole index-sync path was driven by a key this
+  // signature said did not exist, reached through an `as any`. The sibling
+  // `detectManagedDrift` on this class had always declared it, so the two
+  // halves disagreed about the shape of the same input. Nothing tripped over
+  // it because TypeScript's excess-property check fires on a FRESH object
+  // literal and not on one bound to a variable first, and every caller here
+  // happened to bind first — a green that held for a reason unrelated to
+  // correctness. `src/sql-driver-16570-init-objects-indexes-param.test.ts`
+  // pins the fresh-literal form so it cannot silently go back.
+  //
+  // `lifecycle` was the third instance, and the one that made #16711 file the
+  // CLASS rather than a fourth single-key card: the loop below reads
+  // `obj.lifecycle?.storage` to decide whether a table is time-sharded, while
+  // the sibling `rotateShards` on this same class had always declared the key.
+  // Dropping it does not fail — it leaves the ADR-0057 rotation policy unarmed,
+  // silently, exactly as dropping `indexes` leaves a declared UNIQUE unsynced.
+  // `scripts/check-object-def-param-keys.mjs` now holds the whole class,
+  // including the half no in-file gate could see: a SUBCLASS in another
+  // published package overriding one of these methods with a narrower literal
+  // (`TursoDriver.initObjects` shadowed #4311's `tenancy` fix for five weeks).
+  async initObjects(
+    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>,
+  ): Promise<void> {
     // In-memory registration FIRST, and deliberately ahead of the DDL gate
     // below: being refused permission to alter a schema is not a reason to stay
     // ignorant of the objects we were just told about. On a datasource we are a
@@ -9695,7 +10074,7 @@ export class SqlDriver implements IDataDriver {
       // ADR-0057 P2: rotation-declared telemetry is physically time-sharded —
       // the Rotator owns its DDL (shard tables + a read view under the base
       // name); the plain create/alter path below would collide with the view.
-      const rotationPolicy = (obj as any).lifecycle?.storage;
+      const rotationPolicy = obj.lifecycle?.storage;
       if (rotationPolicy?.strategy === 'rotation' && this.supportsRotation) {
         this.tablesWithTimestamps.add(tableName);
         await this.ensureRotation(tableName, obj, rotationPolicy);
@@ -9736,7 +10115,7 @@ export class SqlDriver implements IDataDriver {
         table: tableName,
         fields: obj.fields ?? {},
         tenantField,
-        declaredIndexes: (obj as any).indexes,
+        declaredIndexes: obj.indexes,
       });
 
       if (!exists) {
@@ -9811,7 +10190,7 @@ export class SqlDriver implements IDataDriver {
       // referenced column physically exists — which is also why field-level
       // `unique` can no longer be emitted inline by `createColumn`: a composite
       // needs the tenant column to already be there.
-      const declaredIndexes = (obj as any).indexes;
+      const declaredIndexes = obj.indexes;
       const uniqueFields = Object.values<any>(obj.fields ?? {}).some((f) =>
         isUniqueScopeDeclared(f?.unique),
       );
@@ -10911,7 +11290,7 @@ export class SqlDriver implements IDataDriver {
       for (const o of objects) {
         tables.set(StorageNameMapping.resolveTableName(o), {
           fields: o.fields ?? {},
-          indexes: (o as any).indexes,
+          indexes: o.indexes,
         });
       }
     } else {
@@ -11938,13 +12317,7 @@ export class SqlDriver implements IDataDriver {
                     ...nullSafe,
                   ]);
                   if (duplicates.length > 0) {
-                    const shown = duplicates
-                      .slice(0, 5)
-                      .map((g) => `(${g.key}) × ${g.rows} rows`)
-                      .join('; ');
-                    report = ` Conflicting group(s): ${shown}${
-                      duplicates.length > 5 ? `; …and ${duplicates.length - 5} more` : ''
-                    }.`;
+                    report = ` Conflicting group(s): ${formatDuplicateGroups(duplicates)}.`;
                   }
                 } catch {
                   // The probe is a diagnostic; the refusal below stands without it.
@@ -12767,13 +13140,38 @@ export class SqlDriver implements IDataDriver {
    * row, asked one field at a time so the paths that return raw builder output
    * can ask it too. `null` means the stored form already IS the presented form.
    *
+   * The temporal kinds run on every dialect. For `datetime` that is [ADR-0053
+   * D-F1] (#13973): the fold was SQLite-only before, so `aggregate()` and
+   * `distinct()` handed Postgres' and MySQL's `Date` through here exactly as
+   * `find()` did. The builtin audit columns take their OWN rule,
+   * `audit_timestamp` — the same `presentAuditTimestampOutput` `formatOutput`
+   * applies to them — unless the author declared the column temporal (the
+   * engine's `applySystemFields` declares both as `Field.datetime`), in which
+   * case the temporal rule wins here exactly as `formatOutput`'s datetime fold
+   * runs after its audit fold there. They are not in `datetimeFields` by
+   * themselves (builtin, not declared), and before #13973 this function had
+   * NO arm for them on ANY dialect, so `max(updated_at)` and
+   * `distinct('created_at')` diverged from `find()` even on SQLite, where they
+   * missed ADR-0074's legacy-row repair. The arm is the audit presenter and
+   * not the `datetime` one because the two differ on a NUMBER: ADR-0074 §3
+   * passes an epoch INTEGER through on a `find()` row, and a `created_at` the
+   * author declared non-temporal (`applySystemFields` lets the declaration
+   * win; `AUDIT_FIELD_GOVERNANCE` forces only `readonly` / `system`, never
+   * `type`) leaves `find()` as the number it is — routed to the datetime fold,
+   * both became ISO text at this door and nowhere else (the #16619 contract
+   * review's finding; `sql-driver-13973-canonical-iso-read-door.test.ts` §D
+   * pins the agreement).
+   *
    * The boolean rule runs on SQLite AND MySQL — the two dialects that store a
    * declared boolean as a number (INTEGER 0/1, `tinyint(1)`) — because
    * `formatOutput` gates its row reads that way (#11782; SQLite-only before,
    * which is how a declared boolean answered `1`/`0` on MySQL). Postgres
    * stores a real `boolean` node-pg parses, so there the stored form already
-   * IS the presented form. The numeric repair stays SQLite-only: it exists
-   * for legacy TEXT-affinity columns, which no other dialect has.
+   * IS the presented form. The numeric repair ran SQLite-only on the premise
+   * that string-valued numerics exist only for legacy TEXT-affinity columns;
+   * #16318 falsified that premise by moving the numeric family to an exact
+   * decimal, which node-postgres and mysql2 both hand back as a string, so it
+   * runs on every dialect now.
    */
   protected readPresentationKind(
     table: string | null | undefined,
@@ -12782,25 +13180,52 @@ export class SqlDriver implements IDataDriver {
     if (!table) return null;
     const temporal = this.temporalFieldKind(table, field);
     if (temporal) return temporal;
+    if ((AUDIT_TIMESTAMP_COLUMNS as readonly string[]).includes(field)) return 'audit_timestamp';
     if ((this.isSqlite || this.isMysql) && this.booleanFields[table]?.includes(field)) {
       return 'boolean';
     }
-    if (!this.isSqlite) return null;
+    // [#16318] Every dialect, for the reason `formatOutput`'s own numeric pass
+    // records: an exact-decimal column is handed back as a STRING by
+    // node-postgres and by mysql2, so `aggregate()` / `distinct()` would present
+    // a declared numeric field as a string on exactly the dialects `find()` now
+    // presents it as a number. One class, one answer, on every door.
     if (this.numericFields[table]?.includes(field)) return 'number';
     return null;
   }
 
   /**
-   * Present one value exactly the way `formatOutput` presents it on a `find()`
-   * row, for the read paths that return raw builder output instead
-   * (`aggregate`, `distinct` — #3797 for instants, #3849 for scalars).
+   * Present one value through the presenter `formatOutput` applies to that
+   * column class on a `find()` row, for the read paths that return raw builder
+   * output instead (`aggregate`, `distinct` — #3797 for instants, #3849 for
+   * scalars): one presenter per kind, and it is the function `formatOutput`
+   * itself calls, never a re-derivation of it.
    *
-   * The dialect gating mirrors `formatOutput`: the `Field.datetime` repair and
-   * the numeric coercion are SQLite-only, the boolean coercion runs on SQLite
-   * and MySQL (#11782 — the two dialects whose stored boolean is a number),
-   * and the `Field.date` → `YYYY-MM-DD` collapse runs everywhere.
+   * The dialect gating mirrors `formatOutput`: the three temporal folds and
+   * the audit-stamp fold run everywhere (`datetime` and `audit_timestamp`
+   * since #13973, [ADR-0053 D-F1] — the former SQLite-only and the latter
+   * absent before, which handed the two live dialects' `Date` through), the
+   * numeric coercion is SQLite-only, and the boolean coercion runs on SQLite
+   * and MySQL (#11782 — the two dialects whose stored boolean is a number).
    * {@link readPresentationKind} does the dialect gating for the scalar kinds,
    * so by the time one arrives here the dialect is settled.
+   *
+   * Where this is NOT `formatOutput` to the letter: a row walk COMPOSES. A
+   * `created_at` an author declared `number` takes the SQLite numeric repair
+   * and then the audit presenter there, while here it takes the audit
+   * presenter alone (`readPresentationKind` answers one kind per column). The
+   * two differ on any TEXT that `Number()` accepts but SQLite's NUMERIC
+   * affinity leaves as TEXT — hex, binary and octal literals (`'0x10'`,
+   * `'0b101'`, `'0o17'`) and `'Infinity'` — which `find()` reads as the number
+   * (`16`, `5`, `15`, `Infinity`) and this door as the string; that is
+   * reachable through `create()` / `update()` on the driver's own DDL with an
+   * author-declared non-temporal audit column, not only through a hand-made
+   * TEXT-affinity column (measured in the #16619 contract review). A decimal
+   * or exponent spelling (`'1700000000000'`, `'1e3'`, `'.5'`) is folded to
+   * INTEGER/REAL by the affinity before it is read back, and a number passes
+   * both presenters untouched, so those agree. The B1 ruling did not decide
+   * that residual shape — it lies outside its column classes — and nothing
+   * here closes it. `sql-driver-13973-canonical-iso-read-door.test.ts` §D
+   * pins the agreement on the shapes the ruling covers.
    */
   protected presentReadValue(kind: ReadPresentationKind, value: any): any {
     if (value == null) return value;
@@ -12813,7 +13238,23 @@ export class SqlDriver implements IDataDriver {
         // exactly what `find()` presents (#3994, the F6 gap of the #3849 fix).
         return this.toTimeOnly(value);
       case 'datetime':
-        return this.isSqlite ? normalizeSqliteDatetimeOutput(value) : value;
+        // Every dialect ([ADR-0053 D-F1]): the same fold `formatOutput` applies
+        // to a `find()` row, so `min`/`max`/`distinct` over a declared
+        // `Field.datetime` (the audit columns too, when the engine declares
+        // them so) present the canonical text and never the client's `Date`.
+        return normalizeSqliteDatetimeOutput(value);
+      case 'audit_timestamp':
+        // Every dialect ([ADR-0053 D-F1]): the ONE presenter `formatOutput`
+        // applies to `created_at` / `updated_at` — a `Date` folds to the
+        // canonical text, a zone-naive legacy string is repaired (ADR-0074),
+        // and a number passes through as it does on a `find()` row (ADR-0074
+        // §3) — so `max(created_at)` and `distinct('updated_at')` answer the
+        // value `find()` answers, type for type. `normalizeSqliteDatetimeOutput`
+        // would fold the number too, and did between #13973's first cut and
+        // its contract review: an author-declared `created_at: number` read
+        // `1700000000000` off `find()` and `"2023-11-14T22:13:20.000Z"` off
+        // `distinct()` — the divergence the conformance file's §D pins closed.
+        return presentAuditTimestampOutput(value);
       case 'boolean':
         return Boolean(value);
       case 'number': {
@@ -15546,8 +15987,12 @@ export class SqlDriver implements IDataDriver {
       // Virtual — `createColumn` returns without emitting anything.
       case 'formula':
         return null;
-      // The non-string primitives: INTEGER / REAL / BOOLEAN / DATE / DATETIME /
-      // TIME columns. None of them is sized from metadata and none is a varchar.
+      // The non-string primitives: INTEGER / REAL / DECIMAL / BOOLEAN / DATE /
+      // DATETIME / TIME columns. None of them is a varchar, so none is sized
+      // from `maxLength` — which is the only question this mirror answers.
+      // ⚠️ Since #16318 the numeric members ARE sized, by `numericColumnFor`,
+      // but from the field's TYPE and not from any declaration; `null` here
+      // stays the correct answer to the question actually asked.
       case 'integer':
       case 'int':
       case 'float':
@@ -16025,21 +16470,67 @@ export class SqlDriver implements IDataDriver {
       case 'int':
         col = table.integer(name);
         break;
+      // `float` is a DRIVER-SIDE ALIAS, not a `FieldType`: there is no
+      // `Field.float` builder and `NUMERIC_VALUE_TYPES` does not carry it, so
+      // #16318's table has no opinion about it and it keeps the column it has
+      // always had.
       case 'float':
-      case 'number':
-      case 'currency':
-      case 'percent':
+        col = table.float(name);
+        break;
+      // [#16318] The seven members of `NUMERIC_VALUE_TYPES` take the physical
+      // representation `packages/spec` states for them ({@link
+      // numericColumnFor}) — the same table both `os generate migration`
+      // formats read, so one declaration can no longer produce three different
+      // columns (measured on live PostgreSQL 16.13: this arm's `real`, the sql
+      // format's `numeric(18,2)`/`numeric(5,2)`, and the typescript format's
+      // `numeric(8,2)`). The spec module carries the measurements, the ruling
+      // and the residual bound; ⛔ do not restate its numbers here.
+      //
+      // What this arm still owes its reader is the SQLite half, because that is
+      // why three of these types were put in a float arm in the first place:
+      //
       // `rating`/`slider`/`progress` are authored as numeric scalars (a star
       // count, a slider position, a percent-of-completion). Without an explicit
       // case they fell to `default → table.string`, giving the column TEXT
       // affinity so SQLite coerced the written number to a string ('4' not 4) —
       // a silent type-fidelity leak the value-loss tests didn't catch. REAL
       // affinity round-trips them as JS numbers (#field-zoo).
+      //
+      // That leak stays defeated, and MEASURED rather than argued: knex
+      // compiles `table.decimal(name, p, s)` and `table.float(name)` to the
+      // IDENTICAL `float` column on SQLite
+      // (`ColumnCompiler_SQLite3.prototype.decimal` is the literal `'float'`),
+      // so the six exact-decimal members emit byte-identical SQLite DDL to what
+      // this arm emitted before and keep REAL affinity. `rating` moves to
+      // INTEGER affinity, where SQLite stores `4` as an integer and still
+      // accepts `4.5` as a REAL — it refuses no fractional value — so nothing
+      // this dialect accepts today stops being accepted.
+      //
+      // ⚠️ The read path is what makes the move safe on the server dialects:
+      // node-postgres parses `numeric` to a STRING and `real` to a number, and
+      // it is `NUMERIC_SCALAR_TYPES`' existing `numericFields` coercion —
+      // already registered for all seven of these types — that turns it back
+      // into a JS number on the way out.
+      case 'number':
+      case 'currency':
+      case 'percent':
       case 'rating':
       case 'slider':
       case 'progress':
-        col = table.float(name);
+      case 'summary': {
+        const numeric = numericColumnFor(type);
+        // ⛔ Not `?? table.float(name)`: an undefined answer for a type named
+        // in these very case labels would mean the labels and
+        // `NUMERIC_VALUE_TYPES` have parted, and a silent fallback is exactly
+        // the drift #16318 exists to close. The spec-side pin
+        // (`numeric-column-representation.test.ts`) holds the two equal, and
+        // `NUMERIC_VALUE_TYPES` is the single membership authority both read.
+        col =
+          numeric === undefined || numeric.kind === 'integer'
+            ? table.integer(name)
+            : table.decimal(name, numeric.precision, numeric.scale);
         break;
+      }
       // `toggle` is a boolean rendered as a switch. Same leak as above (TEXT
       // affinity stored '1'); a boolean column gives NUMERIC affinity and the
       // `booleanFields` read-coercion below converts the stored 1/0 back to a
@@ -16134,9 +16625,6 @@ export class SqlDriver implements IDataDriver {
         // types.mdx` has told authors since 2026-07-30.
         col = table.string(name);
         break;
-      case 'summary':
-        col = table.float(name);
-        break;
       case 'auto_number':
       case 'autonumber':
         // ⛔ Also out of #11431's scope, for a different reason than `lookup`
@@ -16199,9 +16687,21 @@ export class SqlDriver implements IDataDriver {
       // constraint, not from `required` — `required` is the write-time
       // contract enforced by the record validator at the engine seam, and
       // binding the DDL to it made every post-deploy tightening a
-      // destructive migration. Sources authored before protocol 17 carry
-      // `storage.notNull` explicitly via the `field-required-notnull-explicit`
-      // conversion, so their columns come out exactly as they always did.
+      // destructive migration.
+      //
+      // ⚠️ NOTHING supplies `storage.notNull` on an author's behalf. The
+      // sentence that used to close this block said the opposite — that
+      // pre-17 sources "carry `storage.notNull` explicitly via the
+      // `field-required-notnull-explicit` conversion, so their columns come
+      // out exactly as they always did" — and it was measured false from both
+      // ends (#16693): a real `^17.0.0` app logged that conversion and got
+      // NULLABLE columns anyway, and the conversion itself has since been
+      // WITHDRAWN (maintainer ruling 2026-09-08), because stamping the
+      // constraint wherever `required: true` appears is the implication
+      // ADR-0113 abolished. So a column reaches `notNullable()` here because
+      // its author wrote `storage: { notNull: true }`, and for no other
+      // reason; a `required: true` field with no `storage` block gets a
+      // nullable column, at every protocol floor, on every dialect.
       if ((field as { storage?: { notNull?: boolean } }).storage?.notNull) col.notNullable();
       this.applyDeclaredColumnDefault(col, field, type);
     }
@@ -16618,49 +17118,104 @@ export class SqlDriver implements IDataDriver {
         }
       }
 
-      // Numeric scalars stored on a legacy TEXT-affinity column come back as
-      // strings ('4'); coerce numeric-looking strings back to numbers so the
-      // declared type wins regardless of when the column was created. Only
-      // touch strings — a fresh REAL/INTEGER column already yields a number,
-      // and a genuinely non-numeric value (junk legacy data) is left intact
-      // rather than turned into NaN. See NUMERIC_SCALAR_TYPES.
-      const numericFields = this.numericFields[object];
-      if (numericFields && numericFields.length > 0) {
-        for (const field of numericFields) {
-          const v = data[field];
-          if (typeof v === 'string' && v.trim() !== '') {
-            const n = Number(v);
-            if (!Number.isNaN(n)) data[field] = n;
-          }
+    }
+
+    // Numeric scalars handed back as STRINGS are coerced to numbers, on EVERY
+    // dialect, so the declared type wins regardless of which dialect stored the
+    // value or when the column was created. Only strings are touched — a
+    // REAL/INTEGER column already yields a number — and a genuinely non-numeric
+    // value (junk legacy data) is left intact rather than turned into NaN.
+    // See NUMERIC_SCALAR_TYPES.
+    //
+    // ⚠️ [#16318] This pass was SQLite-only until the numeric family moved to an
+    // exact-decimal column, on the stated premise that string-valued numerics
+    // "exist for legacy TEXT-affinity columns, which no other dialect has".
+    // That premise is now false and it is THIS change that falsified it, so it
+    // is corrected here rather than left as a fossil: measured on live
+    // PostgreSQL 16.13, node-postgres parses `real` to a JS `number` and
+    // `numeric` to a STRING (`1234567.89` arrives as
+    // `'1234567.890000000000000000000000000000'`), and mysql2 does the same for
+    // `DECIMAL`. Without this line every `number` / `currency` / `percent` /
+    // `slider` / `progress` / `summary` field would start reading back as a
+    // string on the two server dialects — a wire-contract break, since
+    // `valueSchemaFor` gives the whole class `z.number().finite()`.
+    //
+    // Two SQLite readings stay exactly as they were: the legacy TEXT-affinity
+    // repair this pass was written for, and a fresh column, which knex declares
+    // `float` for both the old float arm and the new decimal one.
+    //
+    // ⚠️ [#16318] The registry is chosen PER DIALECT, and the narrowing is the
+    // "new tables only" bound, not a taste. `numericFields` carries the
+    // driver-internal aliases `integer` / `int` / `float`, which is how an
+    // EXTERNAL, introspected table's columns reach this driver. A PostgreSQL
+    // `bigint` is handed back by node-postgres as a STRING precisely because it
+    // does not fit a JS double, so running it through `Number()` would silently
+    // round it above 2^53 — on a table this change never created. SQLite is the
+    // one dialect where the wider set is right, because there the pass exists
+    // for legacy TEXT-affinity columns of exactly those alias types.
+    //
+    // ⚠️ The repair is bounded by the wire contract it restores, and that bound
+    // is binary64: `valueSchemaFor` gives this whole class `z.number().finite()`
+    // (ADR-0104 D1), so a `find()` result is a JS double however exact the
+    // COLUMN is. Measured: a value the driver itself wrote from a JS number
+    // round-trips exactly ('1234567.890000000000000000000000000000' → 1234567.89),
+    // because the shortest representation is what was stored; a value that was
+    // never a double does not ('1234567890123456.123' → 1234567890123456,
+    // 2^53+1 → 2^53). ⇒ the exactness this change buys is exact-column-through-
+    // a-double: SQL-side writers, `summary` roll-ups computed in SQL and any
+    // magnitude at or above 2^53 are bounded by the read seam, not by the
+    // column. Widening that is a wire-contract change and is NOT in #16318.
+    const numericFields = this.isSqlite
+      ? this.numericFields[object]
+      : this.numericValueFields[object];
+    if (numericFields && numericFields.length > 0) {
+      for (const field of numericFields) {
+        const v = data[field];
+        if (typeof v === 'string' && v.trim() !== '') {
+          const n = Number(v);
+          if (!Number.isNaN(n)) data[field] = n;
         }
       }
+    }
 
-      // Builtin audit timestamps: repair any legacy/raw row stored as a
-      // zone-naive, space-separated string (CURRENT_TIMESTAMP or the pre-fix
-      // UPDATE stamp) to canonical ISO-8601 with `Z`, so reads are unambiguous
-      // and uniform regardless of when/how the row was written. Idempotent on
-      // already-canonical values; mirrors the legacy-row read-repair the
-      // `Field.date`/numeric paths already do. See `repairNaiveUtcAuditTimestamp`.
-      for (const col of AUDIT_TIMESTAMP_COLUMNS) {
-        if (data[col] !== undefined) data[col] = repairNaiveUtcAuditTimestamp(data[col]);
-      }
+    // [ADR-0053 D-F1] (#13973) — the two instant classes present as ONE shape
+    // on EVERY dialect: the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text. Both
+    // loops below sat inside the `if (this.isSqlite)` arm above until #13973,
+    // and that gate WAS the divergence the card's census measured: on
+    // Postgres and MySQL the client library's `Date` left this door as-is,
+    // while SQLite handed out text — one value, two runtime types, through the
+    // same `any`-shaped record, invisible to the type system. Eight consumers
+    // were wrong under it (#13382 in production, #13993–#13999 by reading),
+    // all in the direction "expected the text, received a `Date`", none the
+    // reverse. The client parsers are NOT touched ([ADR-0053 D-F2]); the
+    // driver canonicalises at its own read boundary, here and in
+    // `presentReadValue` for the `aggregate()`/`distinct()` doors.
 
-      // Present every `Field.datetime` value as one canonical instant —
-      // ISO-8601 with an explicit `Z` — regardless of its on-disk storage form.
-      // A SQLite `datetime` column mixes forms: an explicit value bound as a JS
-      // `Date` is stored as INTEGER epoch ms, while a `defaultValue: 'NOW()'`
-      // slot is TEXT (canonical ISO-`Z` post-fix, or a legacy timezone-naive
-      // `CURRENT_TIMESTAMP` string). Without this, reads leak the raw integer or
-      // a zone-naive string that `Date.parse` mis-reads as LOCAL time. Folds all
-      // shapes to UTC ISO-`Z` and transparently repairs legacy rows with no data
-      // migration — mirroring the `Field.date`/numeric read-repairs above and
-      // the audit-column repair just above. See `normalizeSqliteDatetimeOutput`.
-      const datetimeFields = this.datetimeFields[object];
-      if (datetimeFields && datetimeFields.size > 0) {
-        for (const field of datetimeFields) {
-          if (data[field] !== undefined) {
-            data[field] = normalizeSqliteDatetimeOutput(data[field]);
-          }
+    // Builtin audit timestamps. On SQLite: repair any legacy/raw row stored as
+    // a zone-naive, space-separated string (CURRENT_TIMESTAMP or the pre-fix
+    // UPDATE stamp) to canonical ISO-8601 with `Z`, idempotent on
+    // already-canonical values (ADR-0074). On Postgres/MySQL: fold the
+    // client's `Date`. See `presentAuditTimestampOutput`.
+    for (const col of AUDIT_TIMESTAMP_COLUMNS) {
+      if (data[col] !== undefined) data[col] = presentAuditTimestampOutput(data[col]);
+    }
+
+    // Present every `Field.datetime` value as one canonical instant —
+    // ISO-8601 with an explicit `Z` — regardless of its on-disk storage form.
+    // A SQLite `datetime` column mixes forms: an explicit value bound as a JS
+    // `Date` is stored as INTEGER epoch ms, while a `defaultValue: 'NOW()'`
+    // slot is TEXT (canonical ISO-`Z` post-fix, or a legacy timezone-naive
+    // `CURRENT_TIMESTAMP` string). Without this, reads leak the raw integer or
+    // a zone-naive string that `Date.parse` mis-reads as LOCAL time. Folds all
+    // shapes to UTC ISO-`Z` and transparently repairs legacy rows with no data
+    // migration — mirroring the `Field.date`/numeric read-repairs above and
+    // the audit-column repair just above. A Postgres/MySQL `Date` takes the
+    // same fold. See `normalizeSqliteDatetimeOutput`.
+    const datetimeFields = this.datetimeFields[object];
+    if (datetimeFields && datetimeFields.size > 0) {
+      for (const field of datetimeFields) {
+        if (data[field] !== undefined) {
+          data[field] = normalizeSqliteDatetimeOutput(data[field]);
         }
       }
     }

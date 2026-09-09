@@ -2,7 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { ScheduleTrigger } from './schedule-trigger.js';
-import type { FlowTrigger, JobServiceSurface } from './schedule-trigger.js';
+import type { FlowTrigger, JobServiceSurface, ScheduleDispatchLedger } from './schedule-trigger.js';
 
 /**
  * The slice of the automation engine this plugin needs: register a trigger on
@@ -67,6 +67,17 @@ export class ScheduleTriggerPlugin implements Plugin {
             const trigger = new ScheduleTrigger(
                 () => this.resolveService<JobServiceSurface>(ctx, 'job'),
                 ctx.logger,
+                // #14501 — once-per-(flow, tick-window) delivery goes through
+                // the SAME automation service this plugin already resolves,
+                // and the same `sys_flow_dispatch` ledger the time-relative
+                // trigger claims against (#10220). The trigger computes the
+                // key and never learns the ledger's table name. An automation
+                // service predating claim() resolves to null and the trigger
+                // degrades — honestly, warned once — to no dedup at all.
+                () => {
+                    const svc = this.resolveService<Partial<ScheduleDispatchLedger>>(ctx, 'automation');
+                    return svc && typeof svc.claim === 'function' ? (svc as ScheduleDispatchLedger) : null;
+                },
             );
             automation.registerTrigger(trigger);
             ctx.logger.info('ScheduleTriggerPlugin: schedule trigger registered');

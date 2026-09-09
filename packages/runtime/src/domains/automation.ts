@@ -3,7 +3,8 @@
 /**
  * `/automation` domain — extracted dispatcher body (ADR-0076 D11 step ③,
  * PR-6). Bridges to the `automation` service (flow CRUD, trigger/execute,
- * runs history, pause/resume — ADR-0018/0019/0022 surfaces). Route-order
+ * runs history, pause/resume, and the two operator run-lifecycle verbs
+ * (cancel / restore-suspension, #13953) — ADR-0018/0019/0022 surfaces). Route-order
  * subtlety preserved verbatim: `/actions`, `/connectors` and `/_status`
  * MUST precede the `/:name → getFlow` catch-all, or a flow literally named
  * "actions"/"connectors" would shadow them.
@@ -17,13 +18,14 @@ import {
 // the posture rule and the #10243 measurement behind it.
 import { refuseUngrantedActivationWrite, FLOW_ACTIVATION_SUBJECT } from './activation-gate.js';
 import { CoreServiceName } from '@objectstack/spec/system';
-import type { IAutomationService, ISecurityService } from '@objectstack/spec/contracts';
+import type { AutomationResult, IAutomationService, ISecurityService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
 import {
     validationFailure, validationFailureDetails, fieldsFromZodIssues, VALIDATION_FAILED_STATUS,
 } from '../validation-failure.js';
 import { ExecutionStatus } from '@objectstack/spec/automation';
 import { ListRunsRequestSchema } from '@objectstack/spec/api';
+import type { ResumeFailureDetails } from '@objectstack/spec/api';
 import { parseEnumParam, parseIntegerParam, parseStringParam } from '../query-param.js';
 import { capabilityUnavailable } from './unavailable.js';
 // [#9446] The ONE #9378 status table, now shared with the `/actions` door.
@@ -557,6 +559,425 @@ function refuseUngrantedFlowWrite(
     };
 }
 
+/** [#13953] The path segment naming the cancel door (ADR-0044's operator verb). */
+const RUN_CANCEL_SEGMENT = 'cancel';
+/** [#13953] The path segment naming the repair door (#13909's operator verb). */
+const RUN_RESTORE_SEGMENT = 'restore-suspension';
+
+/**
+ * [#13953] The two OPERATOR RUN-LIFECYCLE doors — `POST /:name/runs/:runId/cancel`
+ * and `POST /:name/runs/:runId/restore-suspension`.
+ *
+ * Declared as ONE predicate for the reason {@link isRunStateRead} and
+ * {@link isFlowAuthoringWrite} are one predicate each: this domain gets one
+ * policy per data class, and a policy spelled at two call sites is two
+ * policies that happen to agree today. It is read TWICE — once by the gate
+ * below to decide the route is gated at all, once by each route arm to decide
+ * the arm fires — so the gate and the routes it guards cannot drift apart. A
+ * gate narrower than its route is a bypass; a gate wider than its route is an
+ * over-block.
+ *
+ * ⛔ `parts[0] === 'trigger'` is excluded, exactly as the toggle (#10243) and
+ * clone (#12156) arms exclude it, and the ROUTE ARMS carry the same exclusion
+ * so the two spellings stay byte-identical. `POST /automation/trigger/:name`
+ * is the LEGACY EXECUTION door, answered ABOVE the flow-scoped block, so for a
+ * flow literally named `runs` the path `/automation/trigger/runs/x/cancel`
+ * RUNS that flow. Gating it would over-block an execution door — the one thing
+ * the #10243 ruling did not do — and dispatching a cancel from it would be the
+ * mirror bypass.
+ *
+ * No upper bound on depth, for the reason the toggle arm documents: the arms
+ * below test `parts[3]` with no length check, so a predicate spelled
+ * `parts.length === 4` would leave `/…/cancel/anything` reaching the route
+ * with no gate in front of it.
+ */
+function isRunLifecycleWrite(parts: string[], method: string): boolean {
+    if (method !== 'POST') return false;
+    if (parts[0] === 'trigger') return false;
+    if (parts[1] !== 'runs' || !parts[2]) return false;
+    return parts[3] === RUN_CANCEL_SEGMENT || parts[3] === RUN_RESTORE_SEGMENT;
+}
+
+/** [#13953] Refusal vocabulary for the run-lifecycle operator gate (ADR-0112: code AND status). */
+const RUN_LIFECYCLE_DENY_STATUS = 403;
+const RUN_LIFECYCLE_DENY_CODE = 'PERMISSION_DENIED';
+
+/**
+ * [#13953] The refusal sentence. It names the standing that would admit ANY
+ * caller and nothing about this one (#7450), and — like every refusal in the
+ * ADR-0126 §7 family — it names the sanctioned path a refused caller does
+ * have, because the commonest reason to arrive here is an end user trying to
+ * get their OWN paused run moving again, for which `resume` is the door.
+ */
+const RUN_LIFECYCLE_DENY_MESSAGE =
+    'Cancelling an automation run, or restoring a consumed suspension, is a platform-operator verb: it ends or '
+    + 're-arms a run for the whole environment, and a run belongs to the environment rather than to a user. It '
+    + 'requires platform-operator standing (the unscoped `admin_full_access` grant, ADR-0068 D2). Resuming a run '
+    + 'you are the declared authority for is a different question and stays open to you at '
+    + '`POST /automation/:name/runs/:runId/resume`.';
+
+/**
+ * [#13953] THE RUN-LIFECYCLE GATE: the platform operator, and only the
+ * platform operator.
+ *
+ * ## Why this is a THIRD policy on this domain rather than an arm of an
+ * existing one
+ *
+ * The card's own words are the reason: *"a repair verb re-arms a run the
+ * platform recorded as terminally failed, so 'who may do this' is a real
+ * question and not the same answer as 'who may resume'"*. Neither existing
+ * predicate answers it:
+ *
+ *  - {@link isRunStateRead} / {@link refuseUngrantedRunRead} govern READS of
+ *    `sys_automation_run`-class data. These verbs WRITE run lifecycle; the
+ *    grant that lets support tooling look at a run is not the authority to end
+ *    one or to re-arm one.
+ *  - {@link isFlowAuthoringWrite} governs the flow DEFINITION (`manage_metadata`,
+ *    the metadata plane). A run is not a definition, and the #10145 comment
+ *    says in as many words why the execution surfaces are deliberately outside
+ *    that set — sweeping a run surface into a metadata gate locks every
+ *    ordinary user out of the flows built for them.
+ *
+ * ## The authority, and why it is spelled as the RUNG
+ *
+ * Maintainer ruling, 2026-09-05 (the #13953 fork, option A): both verbs are
+ * *"platform-operator verbs gated on the existing `platform_admin` position
+ * (no new permission type, no per-run ownership — a run belongs to the
+ * environment, not a user)"*.
+ *
+ * ⛔ [#15981] What that is READ as is the ADR-0095 D2/D3 posture RUNG
+ * (`posture === 'PLATFORM_ADMIN'`), NEVER
+ * `positions.includes('platform_admin')` — the same correction
+ * `./activation-gate.ts` carries, made here at birth rather than after a
+ * measurement. `positions[]` also carries ADR-0057 D4 `sys_user_position`
+ * names, and that table is `apiEnabled` with unconstrained `position` values,
+ * so a tenant can mint a row spelling the built-in and
+ * `resolveUserAuthzGrants` §4 pushes it onto the array. The rung is derived
+ * from the unscoped `admin_full_access` evidence and nothing else, so it is
+ * what the ruling MEANT, and it is byte-for-byte what
+ * `hasPlatformAdminStanding` returns.
+ *
+ * ## ⛔ Why it is NOT posture-conditional the way the activation gate is
+ *
+ * `refuseUngrantedActivationWrite` requires the operator only under
+ * `group`/`isolated`, and falls open under `single` — correctly, because a
+ * capability tier (`manage_metadata`) still gates it there, so `single` is not
+ * an ungated deployment. This door has no such tier in front of it, so the
+ * same conditionality would leave the two verbs open to any authenticated
+ * caller on every single-organization deployment. That is LOOSER than
+ * `resume`, which is fail-closed on the suspended node's declared
+ * `resumeAuthority` (#3801 / #5561) on every deployment, and the card's floor
+ * is that this door is at least as strict as `resume`'s. So the rung is
+ * required unconditionally.
+ *
+ * ## The two non-denials, each of which is a decision
+ *
+ * 1. **System context passes** (`isSystem`, never settable from the wire) — as
+ *    at every neighbouring gate in this file and in `./activation-gate.ts`. The
+ *    in-process owner the contract names, `plugin-approvals`' revise-window
+ *    recall (ADR-0044), cancels on behalf of a decision it already authorized
+ *    and recorded; it does not speak HTTP and never enters this handler.
+ * 2. **Nothing else passes.** An absent `executionContext`, an absent
+ *    `posture`, or any other rung all fall through to the refusal. A
+ *    deployment with no authorization system resolves no rung, so it has no
+ *    platform operator to name — and answering an operator verb there would be
+ *    inventing one. That direction is deliberate and it is the fail-closed
+ *    one; the #5519 anonymous floor answers an unidentified caller 401 before
+ *    this gate is reached at all.
+ *
+ * Returns a refusal to short-circuit on, `undefined` to proceed — the shape
+ * every gate in this family uses, so no route can consume a denial as a value.
+ *
+ * ⚠️ Callers MUST run this BEFORE the automation service is resolved and
+ * before any body validation, for the reasons {@link refuseUngrantedFlowWrite}
+ * documents: an unentitled caller must not learn from a 501-vs-403 whether
+ * this deployment mounts automation, nothing may be cancelled or re-armed
+ * before the refusal, and the body contract must not be enumerable by probing
+ * validation errors from outside the operator cohort.
+ *
+ * Synchronous: the rung rides the caller's own execution context, so nothing
+ * is resolved and no outage class exists here to absorb.
+ */
+function refuseUngrantedRunLifecycleWrite(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): HttpDispatcherResult | undefined {
+    const ec: any = context?.executionContext;
+    if (ec?.isSystem) return undefined;
+    if (ec?.posture === 'PLATFORM_ADMIN') return undefined;
+
+    return {
+        handled: true,
+        response: deps.error(RUN_LIFECYCLE_DENY_MESSAGE, RUN_LIFECYCLE_DENY_STATUS, {
+            code: RUN_LIFECYCLE_DENY_CODE,
+        }),
+    };
+}
+
+/**
+ * [#13953] The CLOSED body envelope both lifecycle doors accept — exactly one
+ * optional key, `reason`.
+ *
+ * Shaped on the resume door's own envelope discipline (#8796 / #9416), for the
+ * same reason and with the same three refusals: the body itself must be a JSON
+ * object (a string / number / boolean / array body used to normalise to `{}`
+ * there and reach the engine as an empty signal, answered 200), an unknown
+ * top-level key is refused rather than dropped, and an accepted key carrying
+ * the wrong TYPE is refused rather than coerced.
+ *
+ * ⛔ `requestedBy` is deliberately NOT an accepted key, and refusing it is the
+ * point rather than an omission. The contract slot exists — `restoreConsumedSuspension`
+ * takes `options.requestedBy` and the implementation's trace records it — but a
+ * door that let the WIRE fill it would let an operator write somebody else's
+ * name into the record of who re-armed a terminally-failed run, which is the
+ * one field that record exists for. The door fills it from the caller's own
+ * authenticated identity instead (see the route arm), so a caller who spells it
+ * in the body gets a loud refusal rather than the silent impression that they
+ * set it.
+ *
+ * Returns `undefined` when the body is acceptable; a `HttpDispatcherResult` to
+ * short-circuit on otherwise — the guard-clause shape every refusal in this
+ * file uses.
+ */
+function refuseInvalidRunLifecycleBody(
+    deps: DomainHandlerDeps,
+    rawBody: unknown,
+    door: string,
+): HttpDispatcherResult | undefined {
+    /**
+     * How the offending value is NAMED back to the caller. A second copy of
+     * the resume arm's one-liner rather than a hoist of it, DELIBERATELY: that
+     * arm's own note records the decision that it stays local to the arm it
+     * serves — *"it exists to make one refusal message readable, not to become
+     * a shared formatter for a vocabulary nobody has ruled on"* — and hoisting
+     * it here would overturn that decision as a side effect of adding a route.
+     */
+    const jsonTypeOf = (v: unknown): string =>
+        v === null ? 'null' : Array.isArray(v) ? 'an array' : `a ${typeof v}`;
+
+    if (rawBody === undefined || rawBody === null) return undefined;
+    if (typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+        return {
+            handled: true,
+            response: deps.errorFromThrown(
+                validationFailure(
+                    `Invalid ${door} body — expected an object with an optional \`reason\`, received `
+                    + `${jsonTypeOf(rawBody)}`,
+                    [{ field: '(body)', code: 'invalid_type', message: 'expected an object' }],
+                ),
+                VALIDATION_FAILED_STATUS,
+            ),
+        };
+    }
+
+    const unknownKeys = Object.keys(rawBody as Record<string, unknown>).filter((k) => k !== 'reason');
+    if (unknownKeys.length) {
+        return {
+            handled: true,
+            response: deps.errorFromThrown(
+                validationFailure(
+                    `Unknown key${unknownKeys.length > 1 ? 's' : ''} `
+                    + `${unknownKeys.map((k) => `\`${k}\``).join(', ')} — the ${door} body accepts \`reason\``
+                    + (unknownKeys.includes('requestedBy')
+                        ? '; `requestedBy` is filled from the authenticated caller and is not settable from the wire'
+                        : ''),
+                    unknownKeys.map((k) => ({
+                        field: k,
+                        code: 'unrecognized_keys' as const,
+                        message: `not a ${door} body key — the ${door} body accepts \`reason\``,
+                    })),
+                ),
+                VALIDATION_FAILED_STATUS,
+            ),
+        };
+    }
+
+    const reason = (rawBody as { reason?: unknown }).reason;
+    if (reason !== undefined && typeof reason !== 'string') {
+        return {
+            handled: true,
+            response: deps.errorFromThrown(
+                validationFailure(
+                    `Invalid ${door} body — \`reason\` must be a string, received ${jsonTypeOf(reason)}`,
+                    [{ field: 'reason', code: 'invalid_type', message: 'expected a string' }],
+                ),
+                VALIDATION_FAILED_STATUS,
+            ),
+        };
+    }
+
+    return undefined;
+}
+
+/**
+ * [#13953] The refusal-code → HTTP-status table for
+ * `restoreConsumedSuspension`, and the fail-closed answer for everything that
+ * is not in it.
+ *
+ * ⚠️ THIS SWITCH IS NON-EXHAUSTIVE BY CONSTRUCTION, and that is a property of
+ * the contract rather than a gap here. `IAutomationService` types the refusal
+ * as `refusal?: string` — a deliberate COVARIANT WIDENING of the engine's own
+ * closed eight-member `SuspensionRestoreRefusal` union (#16495 route (i)): the
+ * contract declines to keep an enumeration in step with an implementation's
+ * vocabulary, and the wider engine type satisfies the narrower contract one
+ * under `implements`. So this door is reading a `string` and any implementation
+ * may answer a code that did not exist when this table was written.
+ *
+ * ⛔ The vocabulary is NOT narrowed or extended here. Closing it is a
+ * `packages/spec` card; a call site that widened it would be exactly the
+ * "second consumer that needs the vocabulary itself" the contract's own
+ * docblock rules out.
+ *
+ * The eight rows are the engine's, mapped onto the statuses this same door
+ * already uses for the same conditions on `resume` — so one deployment cannot
+ * answer `RUN_NOT_FOUND` two ways depending on which verb asked:
+ *
+ *   `RUN_NOT_FOUND`          → 404, no record of the run at all (resume: 404)
+ *   `STORE_UNAVAILABLE`      → 503, the store is unreadable so existence is
+ *                              UNKNOWN and the same call is expected to work
+ *                              once it recovers (resume: 503)
+ *   `RESUME_IN_PROGRESS`     → 409, a resume holds this run right now
+ *                              (resume: 409)
+ *   `RESTORE_IN_PROGRESS`    → 409, a restore holds it — the same class
+ *   `RUN_SUSPENDED`          → 409, a live suspension already exists, so the
+ *                              run is resumable and there is nothing to repair
+ *   `RUN_COMPLETED`          → 409, the run finished
+ *   `RUN_CANCELLED`          → 409, somebody ended it on purpose (ADR-0044)
+ *   `NO_CONSUMED_SUSPENSION` → 409, the run exists and holds no consumed
+ *                              suspension to put back
+ *
+ * The five 409s are one class stated five ways: the run's OWN STATE refuses
+ * the repair, the request was well-formed, and retrying it unchanged will
+ * answer the same. They are not collapsed at the source — the engine's
+ * `reason` sentence, which this door relays verbatim, is what tells "this run
+ * is fine" from "this run is beyond this verb", and the code itself rides
+ * `details.refusal`.
+ */
+const RESTORE_REFUSAL_STATUS: Readonly<Record<string, number>> = Object.freeze({
+    RUN_NOT_FOUND: 404,
+    STORE_UNAVAILABLE: 503,
+    RESUME_IN_PROGRESS: 409,
+    RESTORE_IN_PROGRESS: 409,
+    RUN_SUSPENDED: 409,
+    RUN_COMPLETED: 409,
+    RUN_CANCELLED: 409,
+    NO_CONSUMED_SUSPENSION: 409,
+});
+
+/**
+ * [#13953] The fail-closed status for a refusal this door cannot classify —
+ * an unrecognised code, or a `restored: false` carrying no code at all.
+ *
+ * ⛔ NOT one of the 409s, and the choice is the whole point of the arm. A 409
+ * would CLAIM a diagnosis this door did not make ("the run's state refuses
+ * this, retrying will not help"), and a caller — or an agent — reading that
+ * would stop, believing the platform had answered them. 500 says the true
+ * thing: the implementation refused, and this door does not know what it
+ * refused with, so nothing about the run's state has been established here.
+ * The refusal itself is never absorbed into a 200 either way, which is
+ * #13909's posture — ⛔ never a door that returns success while hiding the
+ * condition.
+ */
+const RESTORE_REFUSAL_UNKNOWN_STATUS = 500;
+
+/**
+ * [#13953] The ABSENT-MEMBER refusals — the half of the fail-closed promise
+ * the contract cannot keep on its own.
+ *
+ * Both verbs are OPTIONAL members of `IAutomationService` (the house
+ * convention: 13 of its 15 members are), and that is deliberate — cancelling
+ * or repairing a suspension is a capability of the flow-engine implementation,
+ * exactly like `resume`, and a script-runner slot never suspends and has
+ * nothing to cancel. The contract states the consequence and hands this door
+ * the job: *"A service that does not declare this member has NO operator door
+ * for it: a door MUST probe for presence and refuse fail-closed when it is
+ * absent — never answer success for a verb it could not dispatch."*
+ *
+ * ⇒ 501, in the shape `resume` already uses one arm up (`'Resume not
+ * supported'`), and ⛔ never `{ handled: false }`. The difference matters and
+ * is `./unavailable.ts`'s whole subject: a fall-through becomes the
+ * dispatcher's `404 ROUTE_NOT_FOUND` with the hint "check the API discovery
+ * endpoint", both halves of which are false here — a handler DID match, and
+ * discovery does not list the route — so an operator reads a routing bug that
+ * does not exist. `error.code` derives from the 501 as `NOT_IMPLEMENTED`
+ * (ADR-0112), which is the accurate one: the route is mounted, the
+ * implementation behind it is not.
+ *
+ * ⛔ And never a 200. That is the pin the whole fail-closed promise rests on:
+ * a door that answered `{ cancelled: false }` or `{ restored: false }` for a
+ * verb it never dispatched would be #13909's exact failure — success hiding
+ * the condition — and it would be indistinguishable, on the wire, from a real
+ * engine answering about a run it could not find.
+ */
+const RUN_CANCEL_UNSUPPORTED_MESSAGE =
+    'Cancelling a run is not supported by the automation service this deployment mounts — it does not implement '
+    + '`cancelRun`, an optional member of `IAutomationService`. No run was cancelled.';
+const RUN_RESTORE_UNSUPPORTED_MESSAGE =
+    'Restoring a consumed suspension is not supported by the automation service this deployment mounts — it does '
+    + 'not implement `restoreConsumedSuspension`, an optional member of `IAutomationService`. No suspension was '
+    + 'restored.';
+
+/**
+ * [#13953] The message for a refusal this door could not classify — no
+ * `reason` came back, so there is nothing of the implementation's to relay.
+ * Says what was established (nothing) rather than guessing at the run's state.
+ */
+const RUN_RESTORE_UNCLASSIFIED_MESSAGE =
+    'The automation service refused to restore this run\'s consumed suspension and reported no reason this door '
+    + 'recognises. Nothing has been established about the run\'s state, and no suspension was restored.';
+
+/**
+ * [#13953] What the cancel door says on `true`.
+ *
+ * ⚠️ It exists to keep the non-exclusivity of `true` from being invisible on
+ * the wire. The engine has no cancel-side compare-and-set, so two overlapping
+ * cancels of one run can each answer `true` and each write the terminal log.
+ * This door keys nothing off it — but the door is not the last consumer, and a
+ * caller who reads a bare `cancelled: true` as "I, uniquely, ended this run"
+ * will build the once-only side effect the contract warns against one tier up
+ * instead. Saying it here costs one string.
+ */
+const RUN_CANCEL_TRUE_NOTICE =
+    'A suspended run was cancelled and a terminal `cancelled` log recorded. ⚠️ This answer is not exclusive to '
+    + 'this call: overlapping cancels of one run can each answer `true` and each record the terminal log, so do '
+    + 'not use it as an idempotency token for a once-only side effect.';
+
+/**
+ * [#13953] What the cancel door says on `false` — the two readings, both of
+ * them, because nothing above the engine can tell them apart.
+ *
+ * The contract's `false` is "no suspended run exists under the id, which
+ * callers treat as idempotent success". But an UNREADABLE durable store lands
+ * on the same `false`, and then the run may still be parked and resumable. The
+ * engine reports that path at `error` precisely because the caller cannot see
+ * it. A door that answered a bare `cancelled: false` would be reporting a
+ * clean idempotent no-op for a case where nothing is known — success hiding
+ * the condition, which is what #13909 exists to name.
+ */
+const RUN_CANCEL_FALSE_NOTICE =
+    'No suspended run was cancelled. ⚠️ Two conditions answer this way and the platform cannot tell them apart '
+    + 'from here: the run is already terminal or unknown (idempotent success), OR the durable store could not be '
+    + 'read, in which case the run may still be parked and resumable — the implementation reports that second '
+    + 'case in its own logs at `error`. Confirm the run\'s state before treating this as done.';
+
+/**
+ * [#13953] Read the status for a refusal code, fail-closed.
+ *
+ * `Object.prototype.hasOwnProperty` rather than a bare index read, because the
+ * code is a `string` off the wire-facing contract and a lookup of
+ * `'constructor'` or `'__proto__'` on a plain object literal answers a
+ * FUNCTION, which would then be spread into an HTTP status. The table is
+ * frozen and null-prototype-free, so the own-property test is what makes the
+ * read total.
+ */
+function restoreRefusalStatus(refusal: unknown): number {
+    if (typeof refusal !== 'string') return RESTORE_REFUSAL_UNKNOWN_STATUS;
+    if (!Object.prototype.hasOwnProperty.call(RESTORE_REFUSAL_STATUS, refusal)) {
+        return RESTORE_REFUSAL_UNKNOWN_STATUS;
+    }
+    return RESTORE_REFUSAL_STATUS[refusal];
+}
+
 /**
  * [#7968] The screen route's gate: **the run's own trigger identity, OR the
  * `sys_automation_run` read grant as an operator override.**
@@ -913,6 +1334,91 @@ async function respondToFlowTrigger(
 }
 
 /**
+ * The two `AutomationResult.status` members a `success: false` result can
+ * carry — the enum `ResumeFailureDetailsSchema.status` publishes, spelled
+ * once here and `satisfies`-bound to it (a member the spec drops reds this
+ * line; a member the spec adds is caught by the spec's own subset pin).
+ */
+const TERMINAL_FAILURE_STATUSES = ['failed', 'stranded'] as const satisfies readonly NonNullable<ResumeFailureDetails['status']>[];
+
+/** The guard {@link resumeFailureDetails} relays `status` through — a narrowing, never a default. */
+function isTerminalFailureStatus(status: AutomationResult['status']): status is (typeof TERMINAL_FAILURE_STATUSES)[number] {
+    return status !== undefined && (TERMINAL_FAILURE_STATUSES as readonly string[]).includes(status);
+}
+
+/**
+ * [#15221] The machine-readable verdict the resume door's `400 FLOW_FAILED`
+ * arm carries in `error.details`, beside the run's two artefacts — the
+ * #16472 family ruling (maintainer 2026-09-07, option A), applied to this
+ * door: `status: 'stranded'` and `repairable`, so a client branches without a
+ * message regex, and ⛔ no `FLOW_STRANDED` sibling code (a new code is a
+ * ledger event; the console needing one is its own card).
+ *
+ * The structure is `ResumeFailureDetailsSchema` (`@objectstack/spec/api`),
+ * declared once for every carrier the ruling names; this door is the
+ * PRODUCER of one of them, so the whole object is bound to that declaration
+ * at compile time (the return type IS `ResumeFailureDetails`): the two
+ * members the door owns are computed, and `status` is relayed through a
+ * guard on the two terminal-failure members the published enum names.
+ *
+ * What each member says, and why it is shaped the way it is:
+ *
+ *  - `runId` — the run this door was asked to resume (the path's `:runId`).
+ *    The engine stamps `'stranded'` on exactly one exit, `resumeInternal`'s
+ *    own catch arm for the run being resumed, so the resumed run IS the run
+ *    that is actually stranded; the engine result carries no `runId` on a
+ *    terminal exit (the contract sets it on `'paused'` only), and this door
+ *    knows the id from the request rather than sniffing it out of the
+ *    engine's message.
+ *  - `status` — the engine's own verdict, forwarded when it stamped one and
+ *    never synthesised. Measured on the engine: the stranded exit stamps
+ *    `'stranded'`; the other exit that reaches this arm — a subflow child
+ *    that failed terminally — stamps nothing, so that arm carries no
+ *    `status` today rather than a `'failed'` this door made up. Reading the
+ *    producer's verdict is the whole rule (PD #12; `flow-dispatch-status.ts`
+ *    says it for the trigger table). It is relayed through a GUARD on the
+ *    two terminal-failure members (`'failed' | 'stranded'`) — exactly the
+ *    members `ResumeFailureDetailsSchema.status` publishes — so the binding
+ *    is true by construction and not by accident of what is reachable: a
+ *    `success: false` result stamped with a `success: true` verdict
+ *    (`'completed'` / `'paused'` / `'refused'`, unreachable per the contract)
+ *    is neither forwarded under a schema that refuses it nor turned into
+ *    anything else. `TERMINAL_FAILURE_STATUSES` is `satisfies`-bound to the
+ *    schema's enum, so a member the spec drops reds this file.
+ *  - `repairable` — `status === 'stranded'`, and ALWAYS present on this arm.
+ *    Present-and-false on the plain terminal exit is a deliberate contract,
+ *    not an implementation detail: an ABSENT member would be
+ *    indistinguishable from a server that predates this field, and
+ *    `StrandedDecisionDetails.repairable` (`@objectstack/types`, the approvals
+ *    door's carrier) already fixed the vocabulary — `false` is the honest
+ *    answer for every other exit, including the ones that report no status
+ *    at all, because promising a repair verb that will refuse is worse than
+ *    promising nothing.
+ *
+ * ⛔ Not reused from `@objectstack/types`: `strandedDecisionDetails` /
+ * `strandedDecisionFailure` are an all-four-or-nothing envelope whose
+ * `finalized` and `decision` are approvals facts with no referent at a
+ * generic resume (this door has no decision to report), and its reader
+ * refuses a partial envelope by design. Only the `repairable` / `runId`
+ * vocabulary is shared, through the spec declaration.
+ *
+ * ⛔ Not on the trigger door and not on `/actions`: neither ever resumes, so
+ * "repairable" has no referent there; their `400 FLOW_FAILED` details stay
+ * `{ errorMessage?, summary? }`, and an absent `repairable` there means "not
+ * a resume", never "not repairable". Pinned as exact `details` equality at
+ * both doors: the trigger door in `automation-resume-stranded-details.test.ts`,
+ * `/actions` in `actions-flow-dispatch-status.test.ts` (#9585's artefacts pin).
+ */
+function resumeFailureDetails(runId: string, result: AutomationResult): ResumeFailureDetails {
+    const status = isTerminalFailureStatus(result.status) ? result.status : undefined;
+    return {
+        runId,
+        repairable: status === 'stranded',
+        ...(status !== undefined ? { status } : {}),
+    };
+}
+
+/**
  * Handles Automation requests
  * path: sub-path after /automation/
  *
@@ -957,7 +1463,25 @@ async function respondToFlowTrigger(
  *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
  *   GET    /:name/runs/:runId    → getRun
  *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
- *   POST   /:name/runs/:runId/resume → resume a paused run (screen input / ADR-0019)
+ *   POST   /:name/runs/:runId/resume → resume a paused run (screen input / ADR-0019;
+ *                                  a run that resumed and then failed → 400
+ *                                  `FLOW_FAILED` whose details carry the engine's
+ *                                  verdict — `status: 'stranded'` + `repairable` —
+ *                                  beside `errorMessage` / `summary`, #15221)
+ *   POST   /:name/runs/:runId/cancel → cancel a suspended run (ADR-0044,
+ *                                  #13953). Body `{ reason? }`, closed. Answers
+ *                                  200 `{ runId, cancelled, notice }` both ways —
+ *                                  `false` is idempotent success AND an
+ *                                  unreadable store, and the notice says so
+ *                                  ⚑ operator verb — the ADR-0095 PLATFORM_ADMIN
+ *                                    rung, unconditionally (#13953)
+ *   POST   /:name/runs/:runId/restore-suspension → put back the suspension a
+ *                                  failed resume consumed (#13909, #13953). Body
+ *                                  `{ reason? }`, closed; `requestedBy` comes from
+ *                                  the authenticated caller, ⛔ never the wire.
+ *                                  Refusals are refusals (404/409/503; an
+ *                                  unrecognised refusal code → 500), ⛔ never a 200
+ *                                  ⚑ operator verb — the same rung, same gate
  *   GET    /:name/runs/:runId/screen → the screen a paused run awaits
  *                                  ⚑ run's trigger identity OR the
  *                                    `sys_automation_run` grant (#7968)
@@ -1048,6 +1572,23 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // AND, in `group`/`isolated`, be the platform operator.
     if (isFlowActivationWrite(parts, m)) {
         const refusal = await refuseUngrantedFlowActivationWrite(deps, context);
+        if (refusal) return refusal;
+    }
+
+    // [#13953] RUN-LIFECYCLE GATE — the two operator verbs (`cancel`,
+    // `restore-suspension`) need the platform operator, unconditionally.
+    // Placed with the three gates above and AHEAD of the service probe for
+    // their reason, read one more tier up: which standing a route requires
+    // must not vary with which automation service a deployment mounts, an
+    // unentitled caller must not learn from a 501-vs-403 whether automation is
+    // mounted here, and nothing may be cancelled or re-armed before the
+    // refusal — "cancel first, refuse second" is the worst shape a run
+    // lifecycle door can have. Ahead of the body checks too, so the envelope
+    // is not enumerable by probing 422s from outside the operator cohort.
+    // Which routes: `isRunLifecycleWrite` above, the SAME predicate the two
+    // route arms fire on.
+    if (isRunLifecycleWrite(parts, m)) {
+        const refusal = refuseUngrantedRunLifecycleWrite(deps, context);
         if (refusal) return refusal;
     }
 
@@ -1490,6 +2031,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         //                        existence is unknown; the same call is expected
         //                        to work once it recovers (#4420)
         //   RESUME_IN_PROGRESS → 409, a concurrent resume already has this run
+        // A result with NO code and `success: false` consumed its pause and
+        // ran: 400 `FLOW_FAILED` (#8684), whose details carry the engine's
+        // own verdict since #15221 — `status: 'stranded'` + `repairable`
+        // (`resumeFailureDetails` above) — beside `errorMessage` / `summary`.
         // All are enforced in the ENGINE, at the one place a signal reaches the
         // variable map — deliberately not re-implemented here. Guarding a field
         // at a time in the transport is what let `output` reopen the hole
@@ -1691,6 +2236,26 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // deliberately does not copy it. `summary` rides along for the
                 // same reason it was on the 200 body: a failed run's per-node
                 // accounting is how a caller finds WHICH node failed.
+                //
+                // [#15221] And the engine's VERDICT rides with them. Of the
+                // two exits above, only the flow-itself-failed one can be
+                // `status: 'stranded'` (#14384 / #13937: the pause a durable
+                // decision was waiting on is gone and an operator verb can
+                // re-arm the run) — and until now this arm copied
+                // `errorMessage` and `summary` off the result and dropped
+                // `status`, so `'stranded'` could not reach the wire through
+                // any door and an HTTP-only caller read "beyond reach" and
+                // "repair waiting" as one and the same 400. The #16472
+                // ruling (option A) carries it here, in the details of the
+                // EXISTING code: `runId`, `status` (verbatim, when stamped)
+                // and `repairable` (`status === 'stranded'`, always present —
+                // false on the plain terminal exit, deliberately, see
+                // `resumeFailureDetails`), declared once as
+                // `ResumeFailureDetailsSchema` in `@objectstack/spec/api`.
+                // ⛔ No `FLOW_STRANDED` sibling code: the console treats
+                // `400 FLOW_FAILED` as terminal (#8684) and a client that
+                // wants to branch reads `details.repairable`, never a regex
+                // over the message.
                 if (result?.success === false) {
                     return {
                         handled: true,
@@ -1698,12 +2263,162 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                             code: 'FLOW_FAILED',
                             ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
                             ...(result.summary !== undefined ? { summary: result.summary } : {}),
+                            ...resumeFailureDetails(parts[2], result),
                         }),
                     };
                 }
                 return { handled: true, response: deps.success(result) };
             }
             return { handled: true, response: deps.error('Resume not supported', 501) };
+        }
+
+        // POST /:name/runs/:runId/cancel → cancel a suspended run (ADR-0044).
+        //
+        // [#13953] The FIRST of the two operator run-lifecycle doors the
+        // maintainer ruled (2026-09-05, option A). Both verbs existed on the
+        // engine with no way for an operator to reach them: no REST route, no
+        // CLI command, and — until #16563 — not on `IAutomationService` either.
+        //
+        // ⚑ Gated ABOVE, on the platform-operator rung and nothing else
+        // (`refuseUngrantedRunLifecycleWrite`). The arm repeats the same
+        // `isRunLifecycleWrite` predicate the gate fired on, `parts[0] !==
+        // 'trigger'` included, so route and gate cannot drift.
+        //
+        // Body: the closed `{ reason? }` envelope. `reason` is the operator's
+        // own words and is relayed VERBATIM — the engine lands it on the
+        // terminal `cancelled` log's `error`, and the contract calls it "why,
+        // in the operator's words", so this door does not decorate it with the
+        // caller's identity or anything else. ⚠️ Stated rather than hidden:
+        // `cancelRun` has no `requestedBy` slot (the repair verb does), so what
+        // the terminal record carries about WHO cancelled is whatever the
+        // operator wrote. Inventing a slot for it here would be a second name
+        // for a contract parameter that does not exist.
+        //
+        // ⛔ NO ONCE-ONLY SIDE EFFECT IS KEYED OFF THE RETURN VALUE, and that
+        // is a ruling this arm implements rather than a habit. The engine has
+        // no cancel-side compare-and-set: `cancelRun` does a
+        // `loadSuspendedRunStrict` then an unconditional delete-by-id, and only
+        // `resume` passes the `claimAdvance` compare-and-set through
+        // `forgetSuspendedRun`. So two cancels of one run overlapping in time
+        // each read the row, each delete, each record the terminal log, and
+        // EACH RETURN `true` — the contract now says so in terms ("a caller may
+        // not read `true` as sole authorship, nor use it as an idempotency
+        // token for a once-only side effect"). Whether the engine should grow
+        // the CAS is open and deliberately not decided here (#13953 dispatch
+        // ruling ①: an independent behaviour change that would also force
+        // rewriting the contract sentence #16563 just landed). ⇒ This arm
+        // calls the verb and answers; it fires no notification, writes no audit
+        // entry and announces no kernel event. A door that did any of those on
+        // `true` would fire them twice. Pinned in
+        // `automation-run-lifecycle-door.test.ts`.
+        //
+        // The answer is a 200 either way, because `false` is idempotent success
+        // per the contract — but it is NEVER a bare success. ⚠️ `false` is
+        // TWO conditions the caller cannot tell apart: "no suspended run under
+        // this id" (already terminal, or unknown) and "the durable store could
+        // not be READ, so the run may still be parked". Nothing above the
+        // engine can distinguish them — the engine reports the second at
+        // `error` for exactly that reason — so the door SAYS SO in the
+        // response rather than letting `cancelled: false` read as a clean
+        // no-op. #13909's posture, applied to the one verb that can hide a
+        // condition inside a success: ⛔ never a door that returns success
+        // while hiding the condition.
+        if (isRunLifecycleWrite(parts, m) && parts[3] === RUN_CANCEL_SEGMENT) {
+            if (typeof automationService.cancelRun !== 'function') {
+                return { handled: true, response: deps.error(RUN_CANCEL_UNSUPPORTED_MESSAGE, 501) };
+            }
+            const bodyRefusal = refuseInvalidRunLifecycleBody(deps, body, 'cancel');
+            if (bodyRefusal) return bodyRefusal;
+            const reason = (body as { reason?: string } | undefined | null)?.reason;
+            const cancelled = await automationService.cancelRun(parts[2], reason);
+            return {
+                handled: true,
+                response: deps.success({
+                    runId: parts[2],
+                    cancelled,
+                    notice: cancelled ? RUN_CANCEL_TRUE_NOTICE : RUN_CANCEL_FALSE_NOTICE,
+                }),
+            };
+        }
+
+        // POST /:name/runs/:runId/restore-suspension → put back the suspension
+        // a failed resume consumed (#13909).
+        //
+        // [#13953] The SECOND operator door. This is the verb that re-arms a
+        // run the platform recorded as TERMINALLY FAILED, which is why the card
+        // says "who may do this" is a real question and not the same answer as
+        // "who may resume" — see the gate above for the answer and why it is
+        // required unconditionally.
+        //
+        // ⭐ `requestedBy` comes from the AUTHENTICATED CALLER, never from the
+        // body. The implementation's trace records who asked and why (and
+        // writes `not recorded` when `requestedBy` is absent), and that record
+        // is the whole reason the optional parameters are on the signature
+        // rather than the ruling's `restoreConsumedSuspension(runId)`
+        // shorthand. A wire-settable `requestedBy` would let one operator write
+        // another's name into it; the body validator refuses the key by name so
+        // a caller who tries gets a loud refusal rather than the silent
+        // impression that it took.
+        //
+        // The result is NOT an `AutomationResult` — it is the narrower
+        // structural type the contract declares, and `refusal` on it is
+        // `string`, a covariant widening of the engine's closed eight-member
+        // union. `restoreRefusalStatus` above is therefore a NON-EXHAUSTIVE
+        // switch by construction and answers fail-closed (500) for anything it
+        // does not recognise, including a `restored: false` carrying no code at
+        // all. ⛔ The vocabulary is not narrowed or extended here — closing it
+        // is a spec card.
+        //
+        // Refusals are answered as refusals (4xx/5xx), never as a 200 carrying
+        // `restored: false`, which would read as "your repair ran and the run
+        // did not come back". The engine's own one-sentence `reason` is
+        // relayed as the message — it is what tells "this run is fine" from
+        // "this run is beyond this verb" from "I could not read the store" —
+        // and the code itself rides `details.refusal` rather than
+        // `details.code`, so `error.code` stays inside the ADR-0112 closed
+        // catalog (derived from the status) instead of minting eight
+        // unregistered members at a call site.
+        if (isRunLifecycleWrite(parts, m) && parts[3] === RUN_RESTORE_SEGMENT) {
+            if (typeof automationService.restoreConsumedSuspension !== 'function') {
+                return { handled: true, response: deps.error(RUN_RESTORE_UNSUPPORTED_MESSAGE, 501) };
+            }
+            const bodyRefusal = refuseInvalidRunLifecycleBody(deps, body, 'restore-suspension');
+            if (bodyRefusal) return bodyRefusal;
+            const reason = (body as { reason?: string } | undefined | null)?.reason;
+            const requestedBy = (context as any)?.executionContext?.userId;
+            const result = await automationService.restoreConsumedSuspension(parts[2], {
+                ...(typeof requestedBy === 'string' && requestedBy ? { requestedBy } : {}),
+                ...(reason !== undefined ? { reason } : {}),
+            });
+            if (result?.restored === true) {
+                // The runId answered is the one this door was ASKED about (the
+                // path's `:runId`), for the reason `resumeFailureDetails`
+                // documents for its own: it is what the door knows, and
+                // echoing a service's own copy of it would relay a
+                // disagreement instead of reporting one.
+                return {
+                    handled: true,
+                    response: deps.success({ runId: parts[2], restored: true, reason: result.reason }),
+                };
+            }
+            const status = restoreRefusalStatus(result?.refusal);
+            const message = typeof result?.reason === 'string' && result.reason
+                ? result.reason
+                : RUN_RESTORE_UNCLASSIFIED_MESSAGE;
+            return {
+                handled: true,
+                response: deps.error(message, status, {
+                    runId: parts[2],
+                    restored: false,
+                    // The implementation's own code, relayed for an operator to
+                    // act on. ⛔ Deliberately NOT `details.code`: that key is
+                    // PROMOTED into `error.code`, which ADR-0112 closes to
+                    // `StandardErrorCode` ∪ the registered ledger, and none of
+                    // the engine's eight are members. `error.code` is derived
+                    // from the status instead.
+                    ...(typeof result?.refusal === 'string' ? { refusal: result.refusal } : {}),
+                }),
+            };
         }
 
         // GET /:name/runs/:runId/screen → the screen a paused run awaits

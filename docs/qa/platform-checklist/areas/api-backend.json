@@ -1966,7 +1966,7 @@
       "title": "RestServerConfig.crud is the CRUD surface's construction contract: five switches gate six mounts, dataPrefix moves the routes and their discovery advertisement together, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1980,7 +1980,7 @@
           "a scratch vitest harness in packages/rest for the variant half: construct a RestServer with the config under test, call registerRoutes(), and read the route table back with getRoutes() — packages/rest/src/rest-batch-size-cap.test.ts is the shape to copy"
         ],
         "knownGaps": [
-          "NO stock boot authors this sub-object. `os serve` constructs the REST plugin with a fixed config (only project scoping is threaded) and `os dev` passes none at all, so `crud.operations` / `crud.dataPrefix` are reachable only through createRestApiPlugin({ api: ... }) or createHonoServerPlugin({ restConfig }) in embedder code. Every non-default clause below is therefore scored with oracle `test` against a real RestServer, and the run record must say so instead of claiming a live deployment was reconfigured",
+          "NO stock boot authors this sub-object. `os serve` constructs the REST plugin with a fixed config (only project scoping is threaded) and `os dev` passes none at all, so `crud.operations` / `crud.dataPrefix` are reachable only through createRestApiPlugin({ api: ... }) in embedder code. CORRECTED 2026-09-08 (#15543): this gap used to name a second door, createHonoServerPlugin({ restConfig }) — no such function exists (definition probe: zero across the tree, positive control finds createRestApiPlugin at packages/rest/src/rest-api-plugin.ts#createRestApiPlugin). HonoServerPlugin is a class whose restConfig option has one reader taking api.basePath for the SPA fallback; it never constructs a REST server, so a harness must not try to reach these keys through it. Every non-default clause below is therefore scored with oracle `test` against a real RestServer, and the run record must say so instead of claiming a live deployment was reconfigured. RULED 2026-09-07 (#15543; director seat, summon #17, decision batch #2): this is the RECORDED POSTURE, not a gap awaiting a fix. The keys stay and keep their runtime reads, threading a config through is not taken and retiring them is refused, so the harness scoring described here is the PERMANENT method for every non-default clause rather than a workaround to be retired when some future boot path grows a flag. The schema now says so in its own docblocks (packages/spec/src/api/rest-server.zod.ts, WHO CAN WRITE THIS CONFIG) and the per-key reachability rows are in packages/spec/liveness/{crud,metadata,batch}_endpoints.json, so a runner no longer has to re-derive it from the boot paths.",
           "the MOUNT half has no permanent pin: packages/rest/src/rest-sub-config-parse-not-cast.test.ts asserts the NORMALIZED CONFIG a switch produces, and nothing asserts that the route disappears from the route table — the scratch harness is the only observation until that pin exists (recorded in FOLLOW-UPS.md)"
         ]
       },
@@ -2068,6 +2068,12 @@
           "date": "2026-09-04",
           "change": "new — `crud_endpoints` was UNCLASSIFIED in coverage.json: the checklist drove the mounted CRUD routes (query-contract-matrix, crud-roundtrip) but nothing covered the deployment config that decides WHICH of them exist, what they are mounted under, or that the two retired keys refuse. Authored against the shipped surface rather than the ledger's prose: the six-mounts-from-five-switches asymmetry (POST /query rides `operations.list`) and the discovery co-movement were read out of registerCrudEndpoints and registerDiscoveryEndpoints",
           "ref": "#14961"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-08",
+          "change": "the knownGaps were semantically re-characterised, not merely annotated: what they describe as the harness-scoring workaround is now the PERMANENT method, by ruling (#15543, director seat, summon #17, decision batch #2, 2026-09-07) that the crud / metadata / batch keys stay, are embedder-only, and get their reachability written into the schema docblocks and the liveness ledger instead of being re-derived from the boot paths at every run. A runner reading the old text would be waiting for a boot-path flag that is not coming, which is the semantic change this bump records. Two factual corrections ride along, both measured rather than inherited: the door `createHonoServerPlugin({ restConfig })` these gaps named DOES NOT EXIST (HonoServerPlugin is a class whose restConfig reader takes only api.basePath for the SPA fallback and never constructs a REST server), and `os serve` does read a config file — the stack's own top-level `api:` block — forwarding exactly two keys out of it (`packages/cli/src/commands/serve.ts#apiConfig`), so 'nothing the CLI reads' was an over-claim. The acceptance clauses, steps, variants and oracles are untouched: what moved is what a runner should conclude from a non-default clause being unreachable, not what it must measure.",
+          "ref": "#15543"
         }
       ]
     },
@@ -2076,7 +2082,7 @@
       "title": "RestServerConfig.batch is the bulk surface's construction contract: three switches and enableBatchEndpoint gate four per-object mounts (each ANDed with its protocol member), maxBatchSize is the one cap every bulk door measures, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2091,7 +2097,7 @@
           "a scratch vitest harness in packages/rest for the variant half — packages/rest/src/rest-batch-size-cap.test.ts already constructs a RestServer with a non-default cap and reads getRoutes(); copy that shape"
         ],
         "knownGaps": [
-          "NO stock boot authors this sub-object (same door as the crud block: `os serve` fixes the config, `os dev` passes none), so every non-default clause is scored with oracle `test` against a real RestServer and the run record must say so",
+          "NO stock boot authors this sub-object (same door as the crud block: `os serve` fixes the config, `os dev` passes none), so every non-default clause is scored with oracle `test` against a real RestServer and the run record must say so. RULED 2026-09-07 (#15543; director seat, summon #17, decision batch #2): this is the RECORDED POSTURE, not a gap awaiting a fix. The keys stay and keep their runtime reads, threading a config through is not taken and retiring them is refused, so the harness scoring described here is the PERMANENT method for every non-default clause rather than a workaround to be retired when some future boot path grows a flag. The schema now says so in its own docblocks (packages/spec/src/api/rest-server.zod.ts, WHO CAN WRITE THIS CONFIG) and the per-key reachability rows are in packages/spec/liveness/{crud,metadata,batch}_endpoints.json, so a runner no longer has to re-derive it from the boot paths.",
           "the mount half of `enableBatchEndpoint` / `operations.*Many` has no permanent pin — the existing pins assert the normalized config and the cap, not the route table (recorded in FOLLOW-UPS.md)"
         ]
       },
@@ -2185,6 +2191,12 @@
           "date": "2026-09-04",
           "change": "new — `batch_endpoints` was UNCLASSIFIED in coverage.json: two items drove the bulk doors' behaviour on a default boot and neither covered the sub-object that mounts them. Two asymmetries were read out of registerBatchEndpoints rather than assumed: the cross-object POST /batch is NOT under enableBatchEndpoint, and all four per-object gates are ANDs with a protocol member, so a missing protocol member and a false switch are indistinguishable from the route table alone",
           "ref": "#14961"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-08",
+          "change": "the knownGaps were semantically re-characterised, not merely annotated: what they describe as the harness-scoring workaround is now the PERMANENT method, by ruling (#15543, director seat, summon #17, decision batch #2, 2026-09-07) that the crud / metadata / batch keys stay, are embedder-only, and get their reachability written into the schema docblocks and the liveness ledger instead of being re-derived from the boot paths at every run. A runner reading the old text would be waiting for a boot-path flag that is not coming, which is the semantic change this bump records. Two factual corrections ride along, both measured rather than inherited: the door `createHonoServerPlugin({ restConfig })` these gaps named DOES NOT EXIST (HonoServerPlugin is a class whose restConfig reader takes only api.basePath for the SPA fallback and never constructs a REST server), and `os serve` does read a config file — the stack's own top-level `api:` block — forwarding exactly two keys out of it (`packages/cli/src/commands/serve.ts#apiConfig`), so 'nothing the CLI reads' was an over-claim. The acceptance clauses, steps, variants and oracles are untouched: what moved is what a runner should conclude from a non-default clause being unreachable, not what it must measure.",
+          "ref": "#15543"
         }
       ]
     },
@@ -2193,7 +2205,7 @@
       "title": "RestServerConfig.metadata is the metadata surface's construction contract: prefix moves eleven mounts and their discovery advertisement, four endpoint switches each gate exactly the face its name states (#15542/#15854), maskObjectFields is the ADR-0106 D8 disclosure gate, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2209,7 +2221,7 @@
           "a scratch vitest harness in packages/rest for the variant half (construct, registerRoutes(), getRoutes())"
         ],
         "knownGaps": [
-          "NO stock boot authors this sub-object (`os serve` fixes the config, `os dev` passes none), so every non-default clause is scored with oracle `test` and the run record must say so",
+          "NO stock boot authors this sub-object (`os serve` fixes the config, `os dev` passes none), so every non-default clause is scored with oracle `test` and the run record must say so. RULED 2026-09-07 (#15543; director seat, summon #17, decision batch #2): this is the RECORDED POSTURE, not a gap awaiting a fix. The keys stay and keep their runtime reads, threading a config through is not taken and retiring them is refused, so the harness scoring described here is the PERMANENT method for every non-default clause rather than a workaround to be retired when some future boot path grows a flag. The schema now says so in its own docblocks (packages/spec/src/api/rest-server.zod.ts, WHO CAN WRITE THIS CONFIG) and the per-key reachability rows are in packages/spec/liveness/{crud,metadata,batch}_endpoints.json, so a runner no longer has to re-derive it from the boot paths.",
           "OS_ALLOW_UNMASKED_OBJECT_METADATA is a deployment-wide escape hatch that also covers the runtime /metadata dispatcher; a boot that sets it makes the masking clause vacuous — record the env posture beside the verdict"
         ]
       },
@@ -2309,6 +2321,12 @@
           "date": "2026-09-06",
           "change": "the radii this item enumerates MOVED, by ruling rather than by drift (#15542 comment 5557095147): every endpoints.* switch now gates exactly the face its name states. The whole-store operations (/diagnostics, /_drafts, POST /_migrate-stored) left `items` for a new key `maintenance`; `items` is down to its one declared mount; `item` gained the per-item PUT/DELETE and the history family it never gated. The acceptance clause is kept SATISFIABLE and non-vacuous exactly as the ruling requires — it still demands the run enumerate each switch's real radius from a route-table diff, and the new radii are what it enumerates; what changed is the expected sets, not the obligation to measure them",
           "ref": "#15542"
+        },
+        {
+          "revision": 3,
+          "date": "2026-09-08",
+          "change": "the knownGaps were semantically re-characterised, not merely annotated: what they describe as the harness-scoring workaround is now the PERMANENT method, by ruling (#15543, director seat, summon #17, decision batch #2, 2026-09-07) that the crud / metadata / batch keys stay, are embedder-only, and get their reachability written into the schema docblocks and the liveness ledger instead of being re-derived from the boot paths at every run. A runner reading the old text would be waiting for a boot-path flag that is not coming, which is the semantic change this bump records. Two factual corrections ride along, both measured rather than inherited: the door `createHonoServerPlugin({ restConfig })` these gaps named DOES NOT EXIST (HonoServerPlugin is a class whose restConfig reader takes only api.basePath for the SPA fallback and never constructs a REST server), and `os serve` does read a config file — the stack's own top-level `api:` block — forwarding exactly two keys out of it (`packages/cli/src/commands/serve.ts#apiConfig`), so 'nothing the CLI reads' was an over-claim. The acceptance clauses, steps, variants and oracles are untouched: what moved is what a runner should conclude from a non-default clause being unreachable, not what it must measure.",
+          "ref": "#15543"
         }
       ]
     },

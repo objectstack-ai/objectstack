@@ -1553,6 +1553,39 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     }
                 });
 
+                // [#13953] The two OPERATOR RUN-LIFECYCLE verbs — cancel a
+                // suspended run (ADR-0044) and put back the suspension a failed
+                // resume consumed (#13909). LITERAL registrations, one per verb,
+                // for the reason `resume` above is one: nothing else registered
+                // on this router answers a 5-segment POST under `/automation`,
+                // so a ledger row with no `server!.post` here answers Hono's
+                // `notFound` at runtime while every ledger-reading guard passes
+                // it — the exact class the route-ledger ↔ live-mount parity gate
+                // (#7526) exists to catch, and the class it caught this in.
+                //
+                // ⛔ These arms carry NO authority logic. The gate is one
+                // predicate in `domains/automation.ts` (`isRunLifecycleWrite`,
+                // the ADR-0095 posture rung, unconditional) read by the gate and
+                // by both route arms there; a second spelling here would be a
+                // second policy that happens to agree today.
+                server!.post(`${base}/automation/:name/runs/:runId/cancel`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/runs/${req.params.runId}/cancel`, req.body, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
+                server!.post(`${base}/automation/:name/runs/:runId/restore-suspension`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/runs/${req.params.runId}/restore-suspension`, req.body, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
                 server!.get(`${base}/automation/:name/runs/:runId/screen`, async (req: any, res: any) => {
                     try {
                         const result = await dispatcher.dispatch('GET', `/automation/${req.params.name}/runs/${req.params.runId}/screen`, undefined, req.query, { request: req });

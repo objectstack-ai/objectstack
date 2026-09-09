@@ -22,6 +22,24 @@ import { RENAMED_DEFS, carryAuthorableKey, checkRenameTable } from './lib/rename
 // at #5317 so the pipe-direction rule (#4488) is assertable without running the
 // whole generator — see scripts/zod-graph.test.ts.
 import { zodChildSchemas, zodShapeOf } from './lib/zod-graph';
+// The never-published ratchet (#16431). Sibling of the disappearance ratchet
+// below, and deliberately a different domain: that one guards "was published,
+// stopped being published", this one guards "never was published". Its module
+// header is the authority on why one cannot see the other.
+import {
+  UNEMITTED_BASELINE_FILE,
+  checkUnemittedSchemas,
+  countByCause,
+  causeOf,
+  hasUnemittedProblems,
+  ledgerKey,
+  readUnemittedBaseline,
+  type UnemittedSkip,
+} from './lib/unemitted-schemas';
+import {
+  projectByPruningUnionBranches,
+  type PrunedBranch,
+} from './lib/union-branch-projection';
 // Who owns what under json-schema/. This generator shares that directory with
 // gen:openapi, and used to clear it by deleting the directory itself (#5371).
 import {
@@ -350,6 +368,29 @@ const zodByDefKey = new Map<string, z.ZodType>();
 // in it the loser is already gone — the record has to be kept alongside (#5832).
 const emittedDefs: EmittedDef[] = [];
 
+// Every export this build saw as a `z.ZodType`, emitted or not, and every one
+// it could not project — the two inputs the never-published ratchet (#16431)
+// adjudicates against its committed ledger near the end of this file. Collected
+// here rather than re-derived later because this loop is the only place that
+// sees an export the generator produced NOTHING for: `generatedSchemas`,
+// `zodByDefKey` and `emittedDefs` are all keyed by a def key such an export
+// never gets, which is precisely why nothing downstream could ever count them.
+const exportedZodKeys = new Set<string>();
+const unemittedSkips: UnemittedSkip[] = [];
+
+// Every export that reached a published surface only because the projection
+// dropped a union branch with no JSON form (#16431 (a)). Recorded here — and
+// printed in the summary, and written onto the artifact itself as
+// `x-unprojectable-branches` — because a schema that is NARROWER than its Zod
+// type with nothing saying so is the same silence this card was filed about,
+// one level down: the difference would otherwise live only in the two files
+// nobody diffs against each other.
+const branchPrunedProjections: Array<{
+  readonly namespace: string;
+  readonly exportKey: string;
+  readonly pruned: readonly PrunedBranch[];
+}> = [];
+
 // Error messages for schema types that inherently cannot be represented in JSON Schema.
 // These are expected warnings, not build-breaking errors.
 const KNOWN_UNSUPPORTED_PATTERNS = [
@@ -384,6 +425,7 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
       if (value instanceof z.ZodType) {
         // Suffix-only strip — shared with build-docs.ts; see lib/schema-name.ts (#4592).
         const schemaName = schemaNameFromExportKey(key);
+        exportedZodKeys.add(`${namespaceName}.${key}`);
 
         try {
           // Convert to JSON Schema using Zod v4's built-in toJSONSchema().
@@ -396,6 +438,7 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
           // schema (that's how PageTabsProps vanished in #2967 — see #2978).
           let jsonSchema: Record<string, unknown>;
           let io: 'output' | 'input' = 'output';
+          let prunedBranches: readonly PrunedBranch[] = [];
           try {
             jsonSchema = z.toJSONSchema(value, {
               target: 'draft-2020-12',
@@ -403,12 +446,32 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
           } catch (outputError) {
             if (!isKnownUnsupported(outputError)) throw outputError;
             io = 'input';
-            // Throws again for types unrepresentable in either direction
-            // (functions, Date, BigInt, custom) — caught by the outer skip.
-            jsonSchema = z.toJSONSchema(value, {
-              target: 'draft-2020-12',
-              io: 'input',
-            }) as Record<string, unknown>;
+            try {
+              jsonSchema = z.toJSONSchema(value, {
+                target: 'draft-2020-12',
+                io: 'input',
+              }) as Record<string, unknown>;
+            } catch (inputError) {
+              if (!isKnownUnsupported(inputError)) throw inputError;
+              // THIRD attempt, #16431 (a): both directions above refuse the
+              // WHOLE schema over one node, so try the projection that drops
+              // union branches with no JSON form. `orderingComparandSchema` is
+              // `number | Date | string | { $field }`; a JSON document can
+              // carry three of those and no Date instance, so the union's set
+              // of valid JSON documents is unchanged by the drop while the
+              // reference section it was costing is not.
+              //
+              // ⛔ Returns null unless the projection is faithful — a marked
+              // node outside a union position, or nothing to drop. The skip is
+              // then re-thrown with the message Zod produced, so this attempt
+              // can never change WHY an export is skipped, and so never the
+              // `cause` recorded for it in unemitted-schemas.baseline.json.
+              const projected = projectByPruningUnionBranches(value, { target: 'draft-2020-12' });
+              if (!projected) throw inputError;
+              jsonSchema = projected.schema;
+              io = projected.io;
+              prunedBranches = projected.pruned;
+            }
           }
 
           // Add $id URL and version metadata for IDE autocomplete and schema resolution
@@ -419,6 +482,19 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
             // Flag that this schema describes the author-time (pre-parse)
             // shape — parse-time transforms/defaults are not applied in it.
             jsonSchema['x-io'] = 'input';
+          }
+          if (prunedBranches.length > 0) {
+            // Say it on the artifact, not only in the build log (#16431 (a)).
+            // A reader of this file — or of the reference page rendered from it
+            // — can otherwise not tell that the Zod type carries a branch no
+            // JSON document could ever satisfy, and the `.describe()` prose
+            // above the union DOES name it (the ordering comparand's text says
+            // "a number, a Date, a string, or a { $field } reference").
+            jsonSchema['x-unprojectable-branches'] = prunedBranches.map((branch) => ({
+              at: branch.at,
+              type: branch.type,
+            }));
+            branchPrunedProjections.push({ namespace: namespaceName, exportKey: key, pruned: prunedBranches });
           }
 
           const fileName = `${schemaName}.json`;
@@ -440,6 +516,10 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
             const msg = error instanceof Error ? error.message : String(error);
             console.warn(`  ⊘ ${namespaceName}.${key}: ${msg} (skipped)`);
             skippedCount++;
+            // The population the #16431 ratchet holds closed. This line used to
+            // be the ONLY record that an export reached no published surface,
+            // and it is a warn in a build that exits 0.
+            unemittedSkips.push({ namespace: namespaceName, exportKey: key, message: msg });
           } else {
             console.error(`  ✗ Failed to generate schema for ${namespaceName}.${key}:`, error);
             errorCount++;
@@ -453,7 +533,29 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
 console.log(`\n─── Summary ───`);
 console.log(`  Generated: ${count}${inputModeCount > 0 ? ` (${inputModeCount} as input shape)` : ''}`);
 if (skippedCount > 0) {
-  console.log(`  Skipped:   ${skippedCount} (unsupported types: function, date, bigint, custom)`);
+  // The cause list is DERIVED from this build's own skips (#16431 (a)). It was
+  // a hard-coded `function, date, bigint, custom` — a fixed list that had
+  // stopped describing the tree: `bigint` was in it and is not a cause here,
+  // `undefined` is a cause here and was not in it. A summary line that names
+  // the wrong families is worse than a bare count, because it reads as a
+  // measurement.
+  const causeList = [...countByCause(unemittedSkips).keys()].join(', ');
+  console.log(`  Skipped:   ${skippedCount} (unsupported types: ${causeList})`);
+}
+if (branchPrunedProjections.length > 0) {
+  // Never a silent widening: every entry here published ONLY the branches that
+  // have a JSON form, and each dropped branch is named on the artifact too.
+  const droppedCount = branchPrunedProjections.reduce((sum, p) => sum + p.pruned.length, 0);
+  console.log(
+    `  Projected: ${branchPrunedProjections.length} export(s) after dropping ` +
+      `${droppedCount} union branch(es) with no JSON form (#16431):`,
+  );
+  for (const projection of branchPrunedProjections) {
+    const types = [...new Set(projection.pruned.map((b) => b.type))].sort().join(', ');
+    console.log(
+      `     ⤷ ${projection.namespace}.${projection.exportKey} — dropped ${projection.pruned.length} (${types})`,
+    );
+  }
 }
 
 if (errorCount > 0) {
@@ -2587,6 +2689,151 @@ if (defaultsChanged && !CHECK) {
       (written.length > 0 ? `\n     touched: ${written.map((n) => `${n}.json`).join(', ')}` : '') +
       (removed.length > 0 ? `\n     removed: ${removed.map((n) => `${n}.json`).join(', ')}` : ''),
   );
+}
+
+// ─── Ratchet: an export that was NEVER published (#16431) ────────────
+//
+// The disappearance ratchet above guards one direction — a def key the manifest
+// records that this build no longer emits. It cannot see the other: an export
+// that produced no JSON Schema on its FIRST build never entered the manifest,
+// so there is no baseline entry for it to go missing from. Until this block,
+// the whole record of such an export was the `⊘ … (skipped)` warn printed
+// during the loop, in a build that exits 0 — which made "this contract is
+// deliberately not a published JSON-Schema surface" and "this contract's
+// `.describe()` prose reaches no reference page at all" the same colour on
+// every instrument this repo had.
+//
+// Measured on the tree that landed this: 23 exports, across six namespaces,
+// four distinct causes. So the criterion here is structural — an exported
+// `z.ZodType` with no emitted JSON Schema, whatever the reason — never a test
+// for one unrepresentable type. Growth is refused; the recorded population is
+// printed in full on every run, the same way an authorised default change is
+// (#4666), because a population that passes in silence is the failure #4690
+// names.
+//
+// This runs LAST of the ratchets, deliberately. Every red the file could
+// already produce keeps its exact wording and precedence — an export that
+// STOPS emitting is adjudicated above, by the ratchet whose remedy
+// (RETIRED_DEFS_BY_MAJOR + the manifest deletion) is the right one for it, and
+// never by this block's "declare it in the ledger", which would be wrong advice
+// for a schema that was published yesterday.
+const unemittedBaseline = readUnemittedBaseline(PKG_DIR);
+if (!unemittedBaseline) {
+  console.error(`\n❌ ${UNEMITTED_BASELINE_FILE} is missing — it is a committed, hand-edited ledger (#16431).`);
+  console.error(
+    `\n   ${unemittedSkips.length} export(s) in this build produce no JSON Schema. Without the ledger\n` +
+      `   there is nothing to hold that population closed, and the 24th member arrives as a\n` +
+      `   \`console.warn\` in a build that exits 0 — the exact state #16431 measured. Restore\n` +
+      `   packages/spec/${UNEMITTED_BASELINE_FILE} from git rather than regenerating it: it has\n` +
+      `   no generator on purpose (see scripts/lib/unemitted-schemas.ts).`,
+  );
+  process.exit(1);
+}
+
+const unemittedProblems = checkUnemittedSchemas({
+  skips: unemittedSkips,
+  exportedZodKeys,
+  baseline: unemittedBaseline,
+});
+
+if (hasUnemittedProblems(unemittedProblems)) {
+  const { undeclared, repaired, vanished, miscaused, unreasoned } = unemittedProblems;
+
+  if (undeclared.length > 0) {
+    console.error(
+      `\n❌ ${undeclared.length} exported schema(s) emit NO JSON Schema and are not declared in ${UNEMITTED_BASELINE_FILE}:`,
+    );
+    for (const skip of undeclared) {
+      console.error(`     + ${ledgerKey(skip)}  (${causeOf(skip.message)}) — ${skip.message}`);
+    }
+    console.error(
+      `\n   Such an export publishes nothing: no file under json-schema/, no entry in\n` +
+        `   json-schema.manifest/, and — because content/docs/references/** renders from that\n` +
+        `   directory — no reference section. Its \`.describe()\` prose reaches no reader, and\n` +
+        `   the disappearance ratchet can never report it later, because it was never in the\n` +
+        `   baseline (#2978, #16431).\n\n` +
+        `   Preferred remedy: make it emit — narrow the unrepresentable member, or move the\n` +
+        `   non-serialisable part out of the exported schema.\n\n` +
+        `   If the export genuinely does not belong on a published JSON-Schema surface (a React\n` +
+        `   props contract, a driver interface of \`z.function()\` members), admit it DELIBERATELY\n` +
+        `   by adding it to packages/spec/${UNEMITTED_BASELINE_FILE}:\n\n` +
+        undeclared
+          .map(
+            (skip) =>
+              `        "${ledgerKey(skip)}": {\n` +
+              `          "cause": "${causeOf(skip.message)}",\n` +
+              `          "reason": "…what this export is, why no reader loses anything by its absence from content/docs/references/**…"\n` +
+              `        },\n`,
+          )
+          .join('') +
+        `\n   \`reason\` is required and is printed by every build that accepts the population, so\n` +
+        `   write it for the author who goes looking for this schema's reference page.`,
+    );
+  }
+
+  if (repaired.length > 0) {
+    console.error(`\n❌ ${repaired.length} ledger entry(ies) in ${UNEMITTED_BASELINE_FILE} now EMIT a JSON Schema:`);
+    for (const key of repaired) console.error(`     - ${key}`);
+    console.error(
+      `\n   Good news, and the line has to go with it — in this same PR. A ledger that keeps an\n` +
+        `   entry after its export was repaired has stopped describing the tree and started\n` +
+        `   covering for it: the next un-emitted export can then arrive under a name that is\n` +
+        `   already spoken for, and nobody can see which member was replaced.`,
+    );
+  }
+
+  if (vanished.length > 0) {
+    console.error(`\n❌ ${vanished.length} ledger entry(ies) in ${UNEMITTED_BASELINE_FILE} name no exported schema:`);
+    for (const key of vanished) console.error(`     - ${key}`);
+    console.error(
+      `\n   The export was removed or renamed. Delete the line (a rename gets a new line under\n` +
+        `   the new name, carrying the same reason), so the ledger keeps naming exactly the\n` +
+        `   population this build measures.`,
+    );
+  }
+
+  if (miscaused.length > 0) {
+    console.error(`\n❌ ${miscaused.length} ledger entry(ies) record a cause this build does not observe:`);
+    for (const m of miscaused) {
+      console.error(`     ~ ${m.key}: recorded "${m.recorded}", this build sees "${m.observed}" — ${m.message}`);
+    }
+    console.error(
+      `\n   The recorded \`cause\` is re-checked on every run for the same reason a declared\n` +
+        `   default change re-checks both its endpoints (#4666): a \`reason\` written about a\n` +
+        `   \`z.date()\` that is now a \`z.function()\` describes a repair that never happened, and\n` +
+        `   would keep reading as current forever. Re-read the entry and rewrite BOTH fields —\n` +
+        `   or, if a Zod upgrade re-worded the message, extend CAUSE_PATTERNS in\n` +
+        `   scripts/lib/unemitted-schemas.ts so the family survives the rewording.`,
+    );
+  }
+
+  if (unreasoned.length > 0) {
+    console.error(`\n❌ ${unreasoned.length} ledger entry(ies) carry an empty \`reason\`:`);
+    for (const key of unreasoned) console.error(`     - ${key}`);
+    console.error(
+      `\n   A baseline that records only that a member EXISTS is a count wearing a ledger's\n` +
+        `   shape. The reason is the whole instrument: it is what tells the next reader whether\n` +
+        `   this export is fine unpublished or is a reference page somebody is still missing.`,
+    );
+  }
+
+  process.exit(1);
+}
+
+// The accepted population, printed in full on every run — see the #4666 block
+// above for the same discipline. This is the report #16431 exists to produce:
+// before it, the only way to learn the size of this population was to read
+// 1600 lines of build output looking for `⊘`.
+if (unemittedSkips.length > 0) {
+  const byCause = [...countByCause(unemittedSkips)].map(([cause, n]) => `${n} ${cause}`).join(', ');
+  console.log(
+    `\n🕳️  ${unemittedSkips.length} exported schema(s) emit no JSON Schema — all declared in ` +
+      `${UNEMITTED_BASELINE_FILE} (${byCause}) (#16431):`,
+  );
+  for (const skip of unemittedSkips) {
+    console.log(`     ${ledgerKey(skip)}  (${causeOf(skip.message)})`);
+    console.log(`       ${unemittedBaseline.entries[ledgerKey(skip)].reason}`);
+  }
 }
 
 // ─── Generate Bundled Schema ─────────────────────────────────────────

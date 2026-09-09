@@ -58,6 +58,25 @@
  * the build is newer than the sources, because a phantom "breaking removal" has
  * cost real triage time before (#4687, and the trap is recorded in AGENTS.md).
  *
+ * ## Git environment isolation (#16753)
+ *
+ * `.githooks/pre-commit` and `.githooks/pre-push` invoke this file, so git
+ * exports `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` into it -- the exact
+ * path #16624 travelled -- and those outrank `cwd` in every `git` child it
+ * spawns. Each spawn site is classified against the boundary
+ * `scripts/git-env.mjs` carries:
+ *
+ *   - a child whose subject is a repository its OWN `cwd` and arguments name --
+ *     the throwaway fixture, and the read against this checkout's index -- is
+ *     spawned with `env: gitFreeEnv()`, as is the node child `runHook` spawns
+ *     INSIDE the fixture, which runs git children of its own.
+ *   - `gitDirPath()` and `mergeInProgress()`'s `rev-parse HEAD` keep the ambient
+ *     environment: their subject is the commit or push git is performing right
+ *     now, so the exported variables ARE the question. Each carries a ⛔ note.
+ *   - a NETWORK child would keep the ambient environment too (`GIT_CONFIG_*`
+ *     and `GIT_SSL_CAINFO` carry its transport). This file spawns none:
+ *     measured with a control on #16753.
+ *
  * Usage:
  *   node scripts/check-regen-pending.mjs              # pre-commit
  *   node scripts/check-regen-pending.mjs --pre-push   # pre-push: never defers
@@ -65,13 +84,14 @@
  */
 
 import { execFileSync, execSync, spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PENDING_MARKER, entryForPath, ownerDir, ownerOf, ownerRunCommand } from './regen-artifacts.mjs';
 import { inspectBuildStamp, inspectDeclarationStamp } from './build-input-hash.mjs';
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import {
   EXIT_PREREQUISITE_NOT_MET,
@@ -353,6 +373,10 @@ export function bundlesAreStale(specDir = SPEC_DIR) {
  * two agents merging in parallel cannot collect each other's debt.
  */
 function gitDirPath() {
+  // ⛔ AMBIENT ENVIRONMENT ON PURPOSE -- never `gitFreeEnv()` here (#16753).
+  // This runs from a hook, and the repository git is committing or pushing is
+  // the one it exported; the marker belongs in THAT git dir. Deriving it from
+  // `cwd` instead would put the deferral's record somewhere nothing collects it.
   return execFileSync('git', ['rev-parse', '--absolute-git-dir'], { encoding: 'utf8' }).trim();
 }
 
@@ -389,6 +413,8 @@ export function mergeInProgress(gitDir) {
   const mergeHeads = readFileSync(file, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean);
   let head = '';
   try {
+    // ⛔ Ambient, for `gitDirPath()`'s reason: the HEAD being recorded is the one
+    // of the merge git is completing right now (#16753).
     head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     head = '(root)'; // A merge as the first commit has no HEAD. Vanishingly rare, not an error.
@@ -825,7 +851,7 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 // -- Why the CALLEE NAME is the battery --
 //
 // This file has no `selfTest()` entry function: the `--self-test` dispatch at
-// the bottom invokes THREE named callees, each printing its own section and
+// the bottom invokes FOUR named callees, each printing its own section and
 // returning a boolean. So the roster's unit is the CALLEE, and its label is the
 // one the SOURCE ALREADY CARRIES -- the function's own name. Nothing is invented
 // and nothing is judged per comment, and a set difference names WHICH sub-check
@@ -835,17 +861,17 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 // is why each floor is 1 rather than the number of assertions the callee
 // happens to contain.
 //
-// STOP -- the three callees' own inner sinks are NOT batteries here, and they
+// STOP -- the four callees' own inner sinks are NOT batteries here, and they
 // are worth naming because all three are different shapes: `fixtureSelfTest`'s
-// `check()` helper (14 calls), `decisionTableSelfTest`'s literal 8-row table
-// with its driving loop, and `prePushIsArmedSelfTest`'s bare boolean. Recipe A
-// (PR #15271, `check-sdui-manifest`) does make a table row a battery -- for a
-// file whose SELF-TEST *is* the table: one literal table, one driving loop over
-// it, one sink. Here the table is a local of ONE callee among three, and that
-// callee already reduces its rows to a single returned verdict of its own.
-// Flooring those rows would floor one callee's internals while the other two
-// stayed at callee granularity -- a roster whose unit changes per entry. The
-// rule: the battery is the unit the DISPATCH names.
+// `check()` helper, `decisionTableSelfTest`'s literal table with its driving
+// loop, and `prePushIsArmedSelfTest`'s bare boolean. Recipe A (PR #15271,
+// `check-sdui-manifest`) does make a table row a battery -- for a file whose
+// SELF-TEST *is* the table: one literal table, one driving loop over it, one
+// sink. Here the table is a local of ONE callee among three, and that callee
+// already reduces its rows to a single returned verdict of its own. Flooring
+// those rows would floor one callee's internals while the other three stayed at
+// callee granularity -- a roster whose unit changes per entry. The rule: the
+// battery is the unit the DISPATCH names.
 //
 // STOP -- the TWO assertions written INLINE in the dispatch block (`noDist`,
 // `noTree`) are deliberately OUTSIDE this roster, and that is a DECLARED GAP,
@@ -867,6 +893,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   prePushIsArmedSelfTest: 1,
   decisionTableSelfTest: 1,
   fixtureSelfTest: 1,
+  ambientGitEnvIsolation: 1,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -875,7 +902,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // key in the literal above, so the roster falls below this number; the
 // roster/dispatch cross-check in `batteryFloorFailures()` is the other half, and
 // it names WHICH callee was listed twice.
-const SELF_TEST_BATTERY_FLOOR = 3;
+const SELF_TEST_BATTERY_FLOOR = 4;
 
 // The key a registration is filed under when a callee registers no name at all.
 // It is not a declared battery, so it reds by the same set difference rather
@@ -885,7 +912,7 @@ const UNATTRIBUTED_BATTERY = '(no callee named)';
 // The battery ledger, read by `batteryFloorFailures()` from the dispatch block
 // at the very bottom of this file. It is MODULE-level rather than local to a
 // self-test body because this file HAS no self-test body: the registrations
-// happen inside three separate callees and the floor is read at the dispatch's
+// happen inside four separate callees and the floor is read at the dispatch's
 // verdict site, so the ledger has to outlive every one of those frames.
 //
 // Named for the roster's role, deliberately WITHOUT a self-test spelling:
@@ -899,7 +926,7 @@ const batterySeen = new Map();
 /**
  * Record that a self-test callee RAN.
  *
- * Called as the FIRST statement of each of the three callees the `--self-test`
+ * Called as the FIRST statement of each of the four callees the `--self-test`
  * dispatch invokes -- above any early return, so a callee that bails out early
  * still reports that it ran, and the floor is never met by a frame that returned
  * before doing anything.
@@ -912,7 +939,7 @@ function registerCase(name) {
 /**
  * The floor: every declared callee RAN (#13799).
  *
- * Evaluated at the dispatch's verdict site -- after all three callees have had
+ * Evaluated at the dispatch's verdict site -- after all four callees have had
  * their chance and immediately before the success line -- and reached only from
  * the `--self-test` branch, so a production `pre-commit` / `pre-push` run never
  * reads the ledger at all.
@@ -1006,7 +1033,7 @@ function fixtureSelfTest() {
   registerCase('fixtureSelfTest');
   const dir = mkdtempSync(join(tmpdir(), 'os-regen-defer-'));
   const git = (args, opts = {}) =>
-    execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
+    execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'], ...opts });
   const results = [];
   const check = (label, cond) => {
     results.push(cond);
@@ -1086,10 +1113,17 @@ function fixtureSelfTest() {
     // `spawnSync`, not `execFileSync`: every message this script prints goes to
     // STDERR, which execFileSync returns only on the failure path — capturing the
     // accept-path wording is half of what is under test here.
+    // ⚠️ `gitFreeEnv()`, not `process.env` (#16753). This child is not a `git`
+    // child, but it RE-ENTERS THIS FILE inside the fixture and spawns git
+    // children of its own -- `gitDirPath()` first among them, which is ambient
+    // by design. Handing it an inherited `GIT_DIR` therefore points the whole
+    // deferral state machine at the REAL clone: the marker is read, appended to
+    // and deleted in the shared git dir, from a case whose entire subject is a
+    // throwaway repository.
     const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), ...args], {
       cwd: dir,
       encoding: 'utf8',
-      env: { ...process.env, OS_REGEN_GATE_CWD: dir },
+      env: { ...gitFreeEnv(), OS_REGEN_GATE_CWD: dir },
     });
     return { code: r.status ?? 1, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   };
@@ -1294,6 +1328,7 @@ function prePushIsArmedSelfTest() {
     mode = execFileSync('git', ['ls-files', '-s', '.githooks/pre-push'], {
       cwd: REPO_ROOT,
       encoding: 'utf8',
+      env: gitFreeEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
     }).trim().split(/\s+/)[0] ?? '';
   } catch (err) {
@@ -1338,6 +1373,153 @@ function decisionTableSelfTest() {
   return ok;
 }
 
+/* The recursion fuse for `ambientGitEnvIsolation` below. The probe re-enters
+ * this file's own `--self-test`, and the inner run must not re-enter it again.
+ *
+ * ⛔ Deliberately NOT a `GIT_`-prefixed name: `gitFreeEnv()` strips every one of
+ * those, so a `GIT_`-spelled fuse would be blown open by the very call this
+ * battery exists to verify -- and the probe would recurse until the box ran out.
+ */
+const AMBIENT_ISOLATION_FUSE = 'OS_REGEN_AMBIENT_ISOLATION_INNER';
+
+/**
+ * ⭐ The throwaway repository `fixtureSelfTest` builds must be isolated from the
+ * AMBIENT one (#16753 -- Tier A of #16644; the incident is #16624).
+ *
+ * `.githooks/pre-commit` and `.githooks/pre-push` invoke this file, so git
+ * exports `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` into it -- and those
+ * outrank `cwd` in every `git` child it spawns. A `git init` / `git config` /
+ * `git add` aimed at the fixture's temp directory therefore lands on the REAL
+ * repository. Measured, on this box: 8,190 paths staged as deleted in the shared
+ * index and `core.bare = true` written into the `.git/config` every linked
+ * worktree reads, from a self-test that printed `ok` throughout.
+ *
+ * ⛔ THE STAND-IN IS DISPOSABLE AND MUST STAY THAT WAY. Pointing these variables
+ * at the checkout this file lives in would not TEST the incident, it would BE
+ * the incident -- for every agent sharing the clone. A throwaway repository
+ * demonstrates the property just as well: what is under test is that an ambient
+ * `GIT_DIR` outranks `cwd`, and any real repository shows that.
+ *
+ * The probe re-enters the WHOLE `--self-test` rather than one helper, because
+ * the property is a property of every spawn site at once -- including the node
+ * child `runHook` spawns, which re-enters this file INSIDE the fixture and runs
+ * git children of its own. A per-site assertion is exactly the thing a new spawn
+ * site can be added without.
+ *
+ * ⚠️ MEASURED, and the reason the fingerprint is not the index alone: with all
+ * three variables set, git resolves the work tree to the stand-in, so `git add
+ * -A` re-adds the stand-in's OWN files and the index comes back unchanged --
+ * `scripts/git-env.mjs` records the same asymmetry. What moves under all three
+ * is the CONFIG, and then the fixture's commits move refs and HEAD. So the
+ * fingerprint is config + index + refs + HEAD, and a leak has to move none.
+ */
+function ambientGitEnvIsolation() {
+  registerCase('ambientGitEnvIsolation');
+  if (process.env[AMBIENT_ISOLATION_FUSE]) {
+    console.log('  ✓ inner run -- the outer run is the probe');
+    return true;
+  }
+
+  const standIn = mkdtempSync(join(tmpdir(), 'os-regen-standin-'));
+  const elsewhere = mkdtempSync(join(tmpdir(), 'os-regen-elsewhere-'));
+  const same = (a, b) => {
+    try {
+      return realpathSync(a) === realpathSync(b);
+    } catch {
+      return a === b;
+    }
+  };
+  try {
+    const standInGit = (...args) => execFileSync('git', args, {
+      cwd: standIn,
+      encoding: 'utf8',
+      env: gitFreeEnv(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    standInGit('init', '-q', '-b', 'main', '.');
+    standInGit('config', 'user.email', 'stand-in@objectstack.invalid');
+    standInGit('config', 'user.name', 'os-regen stand-in');
+    writeFileSync(join(standIn, 'tracked.txt'), 'the file the stand-in tracks\n');
+    standInGit('add', '-A');
+    standInGit('commit', '-qm', 'the commit the stand-in would lose');
+    const standInGitDir = standInGit('rev-parse', '--absolute-git-dir').trim();
+
+    const leaky = {
+      ...process.env,
+      GIT_DIR: standInGitDir,
+      GIT_WORK_TREE: standIn,
+      GIT_INDEX_FILE: join(standInGitDir, 'index'),
+      [AMBIENT_ISOLATION_FUSE]: '1',
+    };
+
+    /* -- The firing control, and it is the case that matters --
+     * "The stand-in is untouched" is also what an environment that never reached
+     * the child produces. So before any verdict is read out of the fingerprint,
+     * a plain `git` child spawned in an UNRELATED directory has to answer with
+     * the stand-in's git dir -- i.e. the leak is live, here, now. */
+    const seen = execFileSync('git', ['rev-parse', '--absolute-git-dir'], {
+      cwd: elsewhere,
+      encoding: 'utf8',
+      env: leaky,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+    if (!same(seen, standInGitDir)) {
+      console.log(
+        '  ✗ the leaked git environment never reached the child, so "the stand-in is untouched"\n'
+          + `      would prove nothing: a git child in ${elsewhere} answered ${seen}`,
+      );
+      return false;
+    }
+
+    const fingerprint = () => JSON.stringify({
+      config: readFileSync(join(standInGitDir, 'config'), 'utf8'),
+      index: standInGit('ls-files'),
+      refs: standInGit('for-each-ref', '--format=%(refname) %(objectname)'),
+      head: readFileSync(join(standInGitDir, 'HEAD'), 'utf8'),
+    }, null, 1);
+
+    const before = fingerprint();
+    const inner = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--self-test'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      env: leaky,
+    });
+    const after = fingerprint();
+
+    if (after !== before) {
+      console.log(
+        '  ✗ ⛔ a `--self-test` run under an ambient GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE WROTE\n'
+          + '      THE REPOSITORY THOSE VARIABLES NAME. On the shared checkout that is #16624: 8,190\n'
+          + '      paths staged as deleted and core.bare=true in the config every worktree reads.\n'
+          + '      Every throwaway-repo `git` child owes `gitFreeEnv()` from scripts/git-env.mjs.\n'
+          + `      stand-in BEFORE: ${before}\n`
+          + `      stand-in AFTER:  ${after}`,
+      );
+      return false;
+    }
+    if (inner.status !== 0) {
+      console.log(
+        `  ✗ the inner --self-test exited ${inner.status} under a leaked git environment. The stand-in\n`
+          + '      is byte-identical, so this is not the leak -- it is the run itself failing.\n'
+          + `      ${`${inner.stdout ?? ''}${inner.stderr ?? ''}`.trim().split('\n').slice(-14).join('\n      ')}`,
+      );
+      return false;
+    }
+
+    console.log(
+      '  ✓ a full --self-test under a leaked GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE left the disposable'
+        + '\n      stand-in repository byte-identical (config, index, refs, HEAD)',
+    );
+    return true;
+  } catch (err) {
+    console.log(`  ✗ ambient-git-env isolation could not run: ${err?.stderr?.toString() || err?.message || err}`);
+    return false;
+  } finally {
+    rmSync(standIn, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
+}
+
 if (invokedDirectly) {
   if (process.argv.includes('--self-test')) {
     // Touches no repo state: the interesting logic is the staleness rules, and
@@ -1353,7 +1535,7 @@ if (invokedDirectly) {
     const noTree = schemaTreeIsStale(join(REPO_ROOT, 'scripts')) === true;
     console.log(`${noTree ? '✓' : '✗'} a directory with no json-schema/ reads as STALE (conservative default)`);
 
-    // The three callees as a literal LIST rather than three bare calls, so the
+    // The four callees as a literal LIST rather than four bare calls, so the
     // names this block invokes are data the floor below can cross-check the
     // roster against, in both directions. The names are read off the function
     // declarations themselves (`fn.name`), so a renamed callee moves this list
@@ -1372,6 +1554,7 @@ if (invokedDirectly) {
       ['\ndeferred-merge collection point:', prePushIsArmedSelfTest],
       ['\ndeferred-merge decision table:', decisionTableSelfTest],
       ['\ndeferred-merge sequence, replayed on a throwaway repo:', fixtureSelfTest],
+      ['\nambient git environment isolation, on a disposable stand-in:', ambientGitEnvIsolation],
     ];
     const results = callees.map(([banner, run]) => {
       console.log(banner);

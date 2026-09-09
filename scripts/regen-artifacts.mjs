@@ -282,10 +282,17 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // nothing on its page a regeneration cannot restore.
   //
   // No `readsDist`/`readsSchemaTree`: the census is an AST walk over `src/`, so a
-  // merged tree is the whole prerequisite. `gen` cannot launder a POPULATION change
-  // either — `--fix` re-anchors a pure shift and REFUSES when a site arrived or
-  // vanished, leaving the page untouched and the gate red (measured: exit 1, zero
-  // anchors rewritten, `[declared-count] ruling-sites says 109, the census says 110`).
+  // merged tree is the whole prerequisite. `gen` still cannot launder a POPULATION
+  // change into a row nobody wrote: a site that arrived or vanished needs a human
+  // to add or drop its table row, and `--fix` does not touch table rows. #16919
+  // narrowed what stays a REFUSAL, though — `--fix` now regenerates every
+  // `DECLARED_COUNTS` sentence (the headline, the decomposition table, the ruling
+  // quote, …) straight from the census, the same computation the COUNTS check
+  // already runs, applied as a write instead of a comparison. So a merge that
+  // silently produced a wrong SUM (the shape #16919 was filed over — two branches
+  // each correctly bump the same sentence, text-merge clean, and the merged total
+  // is neither side's number) is repaired by running the generator on the merged
+  // tree, not by a human re-deriving and re-typing the number by hand.
   {
     path: 'content/docs/permissions/system-context.mdx',
     gen: 'gen:system-context-census',
@@ -785,6 +792,21 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       'MIXED, exactly as `skills/README.md` above — one spliced `BEGIN/END GENERATED: skills` '
       + 'block inside 267 lines of hand-written guide prose. Same generator, same deferral hazard, '
       + 'same answer: guard the block with `check:skill-docs`, leave the prose to text-merge.',
+  },
+  {
+    path: 'packages/create-objectstack/src/templates/*/package.json',
+    gen: 'gen:scaffold-emission-policy',
+    owner: ROOT_OWNER,
+    why:
+      'MIXED, and the generated part is TWO VALUES of it. `gen:scaffold-emission-policy` rewrites '
+      + "only `engines.pnpm` and `devDependencies.typescript` from the CLI's shared `SCAFFOLD_*` "
+      + 'constants; everything else in the file — the scripts block, the dependency LIST, and the '
+      + '`@objectstack/*` ranges a different pass (`scripts/sync-template-versions.mjs`) stamps at '
+      + 'version time — is authored or owned elsewhere. So "discard both sides and re-run the '
+      + 'generator" is not even defined here: the generator REFUSES a template that does not '
+      + 'already declare the keys it stamps, and it would reproduce none of the rest. Guarding the '
+      + 'two values with `check:scaffold-emission-policy` is the whole mechanism; a conflict in '
+      + 'this file is a human\'s, exactly as it was before those two values were generated.',
   },
   {
     path: 'packages/spec/json-schema/**',

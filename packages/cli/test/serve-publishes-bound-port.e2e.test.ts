@@ -20,6 +20,44 @@
  * half of the criterion and the easier one to break in passing: every ordinary
  * boot must publish exactly what it published before.
  *
+ * ## ⚠️ THE NON-ZERO ARM ASSERTS THE BOUND PORT, NOT THE REQUESTED ONE
+ *
+ * It used to assert `published === asked` under the premise "when that port is
+ * free". That premise is a RACE, not a fact: `randomPort()` bind-probes a port
+ * that is free at THAT INSTANT and then closes the listener, and on this
+ * fleet's six-shard shared runner another process can take it during the
+ * seconds between that probe and the spawned child's `listen()`. The child then
+ * auto-shifts — which is exactly the behaviour the sibling arm below tests ON
+ * PURPOSE — and the assertion was reading the RUNNER rather than the CLI.
+ * Measured cost: it did not merely fail a pull request, it dropped one out of
+ * the merge queue, rebuilt every entry behind it and burned a 24-minute Test
+ * Core cycle for the whole batch — on a pull request whose diff was entirely
+ * under `scripts/`, so to the seat driving it the drop looked like a real
+ * defect.
+ *
+ * ⛔ The repair is NOT to skip, disable or quarantine this arm. The property it
+ * guards is real; what was wrong is the QUANTITY the assertion pointed at. It
+ * now asserts what #13062 actually cares about — the published port is the port
+ * this server BOUND — through two legs that hold whether or not the request was
+ * honoured:
+ *
+ *   LEG 1  a client reaches the published port while the child is up, so
+ *          something really is listening on the number that was published;
+ *   LEG 2  that port stops answering once THIS child's process group dies, so
+ *          the listener WAS this server and not whatever else held the number.
+ *
+ * Leg 2 is the one that catches the defect in the only population where
+ * requested and bound can differ: a boot that published the port it ASKED for
+ * while binding another leaves the asked-for port still answering after its own
+ * teardown, because something else is what holds it.
+ *
+ * ⛔ `reserve-then-release` is the same race relocated and is deliberately not
+ * used. The requested-versus-bound relation is still asserted — that is the
+ * "nothing an ordinary boot publishes may move" half and it is not dropped —
+ * but it is read out of the CHILD's own #12543 drift notice, a statement
+ * contemporaneous with its own bind, instead of out of this harness's stale
+ * free-check.
+ *
  * ## ⚠️ THE INSTRUMENT, AND ITS PROOF — the card demanded both
  *
  * The report this card was filed from could NOT confirm a bound port by
@@ -120,6 +158,46 @@ function reachable(port: number): Promise<boolean> {
     socket.on('timeout', () => done(false));
     socket.on('error', () => done(false));
   });
+}
+
+/**
+ * `serve`'s own DEV AUTO-SHIFT notice (#12543) — the one line that holds BOTH
+ * the port that was asked for and the port that was taken instead.
+ *
+ * ⭐ Why this and not another free-check. "Was the request honoured?" cannot be
+ * answered by probing `asked` from out here: whatever held it may have let it
+ * go by the time this harness looks, and whatever the harness saw a moment
+ * earlier is what the header calls a race rather than a fact. The notice is the
+ * CHILD's own statement, made at the moment it decided which port to bind, so
+ * it is contemporaneous with the bind by construction and no scheduling on this
+ * container can move it.
+ *
+ * It reaches this harness reliably: `serve.ts` prints it through
+ * `printDiagnostic` to **stderr** before the boot-quiet window opens, so it
+ * cannot be swallowed and it survives a boot that dies later — and `bootServe`
+ * below captures stderr from the first chunk.
+ *
+ * ⚠️ The pattern is the fifth copy of one regex in this package
+ * (`serve-port-drift-notice.e2e.test.ts` pins it end to end; three unit files
+ * hold it too). It is re-spelled rather than imported because the shared
+ * harness does not export it and this card's fence does not reach that file;
+ * see the PR's acceptance notes. Colour is not stripped first on purpose:
+ * `chalk.yellow()` wraps the whole line, so the escapes sit at its ends and
+ * never between these two numbers — and `childEnv` pins `NO_COLOR=1` anyway.
+ */
+const DRIFT_NOTICE = /Port (\d+) is in use — serving on (\d+) instead\./;
+
+/** What the child said about its own bind, or `null` if it said nothing. */
+interface DriftNotice {
+  /** The port it was asked for. */
+  requested: number;
+  /** The port it took instead. */
+  bound: number;
+}
+
+function driftNoticeOf(output: string): DriftNotice | null {
+  const match = DRIFT_NOTICE.exec(output);
+  return match === null ? null : { requested: Number(match[1]), bound: Number(match[2]) };
 }
 
 interface Booted {
@@ -357,26 +435,64 @@ describe('#13062 `os serve --port 0` — the request that can never be the answe
 
 describe('#13062 the non-zero half — nothing an ordinary boot publishes may move', () => {
   it(
-    'publishes exactly the port it was asked for when that port is free',
+    'publishes the port it BOUND — the one it was asked for, or the one it announced it took instead',
     async () => {
       const asked = Number(randomPort());
       const booted = await bootServe(bareDir, ['--port', String(asked)], newHome());
+      let published = -1;
       try {
         const { ipc, banner, runtimeFile } = channelsOf(booted);
-        // ⛔ Byte for byte what these channels published before this change:
-        // requested and bound coincide here, and that is the whole population
-        // of ordinary boots.
-        expect(ipc).toBe(asked);
-        expect(banner).toBe(asked);
-        expect(runtimeFile).toBe(asked);
-        expect(booted.ipc?.url).toBe(`http://localhost:${asked}`);
-        expect(await reachable(asked)).toBe(true);
+
+        // ONE number on all three channels — not three that happen to agree
+        // with an element of the argv list this harness passed in.
+        expect(banner).toBe(ipc);
+        expect(runtimeFile).toBe(ipc);
+        expect(Number.isInteger(ipc)).toBe(true);
+        expect(ipc as number).toBeGreaterThan(0);
+        expect(booted.ipc?.url).toBe(`http://localhost:${ipc}`);
+
+        // ⭐ LEG 1 of "published == BOUND": a client reaches the published
+        // port. The instrument above proved it can answer NO before this was
+        // allowed to mean YES.
+        expect(await reachable(ipc as number)).toBe(true);
+
+        // ⭐ REQUESTED versus BOUND, decided by the CHILD's own statement.
+        // This is the "nothing an ordinary boot publishes may move" half: with
+        // no drift notice the child bound what it was asked for, so the
+        // published number must still be byte for byte what these channels
+        // published before #13062 — and with one, the published number must be
+        // the port the child itself said it took.
+        const shift = driftNoticeOf(booted.stdout + booted.stderr);
+        if (shift === null) {
+          expect(
+            ipc,
+            'the child printed no #12543 auto-shift notice, so it bound the port it was asked '
+            + 'for — and then published a different number',
+          ).toBe(asked);
+        } else {
+          expect(
+            shift.requested,
+            'the auto-shift notice names a requested port this test never asked for',
+          ).toBe(asked);
+          expect(
+            ipc,
+            'the child announced it took one port and then published another',
+          ).toBe(shift.bound);
+          expect(ipc).not.toBe(asked);
+        }
+
+        published = ipc as number;
       } finally {
         await booted.stop();
       }
-      // The child is gone, so the port it held is gone with it. This is the
-      // orphan check as well: a surviving grandchild would still be listening.
-      expect(await reachable(asked)).toBe(false);
+
+      // ⭐ LEG 2 of "published == BOUND", and the orphan check in one probe:
+      // the child is gone, so the port THIS server held is gone with it. A boot
+      // that published the port it was ASKED for while binding another would
+      // leave that number still answering here, held by whatever took it; and a
+      // surviving grandchild (`tsx` runs the CLI one level down) would leave the
+      // real one answering.
+      expect(await reachable(published)).toBe(false);
     },
     240_000,
   );

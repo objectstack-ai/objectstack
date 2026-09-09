@@ -55,7 +55,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 import { AnalyticsQuerySchema } from '@objectstack/spec/data';
-import type { AnalyticsQuery, Cube } from '@objectstack/spec/data';
+import type { AnalyticsDateRange, AnalyticsQuery, Cube } from '@objectstack/spec/data';
 
 const REAL_TZ = process.env.TZ;
 
@@ -98,7 +98,8 @@ const asQuery = (input: AnalyticsQuery): AnalyticsQuery => AnalyticsQuerySchema.
 /** Ask `range` over rows planted at `instants`; answer which probes came back. */
 async function probesSelected(
     instants: string[],
-    opts: { range?: string; timezone?: string } = {},
+    // `range` is the CLOSED contract (#16041): a preset name or an explicit window.
+    opts: { range?: AnalyticsDateRange; timezone?: string } = {},
 ): Promise<string[]> {
     const driver = new InMemoryDriver({
         initialData: {
@@ -303,33 +304,116 @@ describe('#16042 — the resolution is host-independent and degrades to UTC', ()
     });
 });
 
-describe("#16042 — `last N …` anchors on the zone's calendar too", () => {
-    const c = CELLS[0]; // Asia/Shanghai: local day 2026-09-07, UTC day 2026-09-06
+describe("#16042 — the rolling `last_N_days` window anchors on the zone's calendar too", () => {
+    // ⭐ REINSTATED under #16322, in the spelling the contract now admits.
+    //
+    // This case was retired by #16041: it fed `dateRange: 'last 7 days'`, a
+    // relative dialect the closed vocabulary does not contain, and re-spelling
+    // it was not available at the time — MEASURED, not assumed:
+    // `parseDateRangeString` matched `startsWith('last ')`, so `'last_7_days'`
+    // fell to the `[range, range]` fallback and matched EVERY row. #16322
+    // aligned the parser to `DATE_RANGE_PRESETS`, so the case is expressible
+    // again and the coverage it lost — the `last_N_days` leg anchoring to the
+    // SUPPLIED zone's calendar day AND to that zone's midnight — is back.
+    //
+    // ⚠️ The window it pins is unchanged from the retired cell, because the
+    // preset means the same thing the dialect did on this leg: Asia/Shanghai
+    // opening at 2026-08-30T16:00:00.000Z against UTC's
+    // 2026-08-30T00:00:00.000Z, with the no-timezone control taking the extra
+    // sixteen hours of rows.
+    const ZONE = 'Asia/Shanghai';
+    const INSTANT = '2026-09-06T20:00:00Z';   // local 2026-09-07 04:00
+    const TZ_START = '2026-08-30T16:00:00.000Z';
+    const UTC_START = '2026-08-30T00:00:00.000Z';
 
-    it("'last 7 days' starts 7 days before the ZONE's day, at the zone's midnight", async () => {
-        // 7 days before Shanghai's 2026-09-07 is 2026-08-31; that day begins at
-        // 2026-08-30T16:00:00.000Z. Computed independently: Shanghai is +08:00
-        // year-round, so its midnight is the previous day's 16:00Z.
-        const tzStart = '2026-08-30T16:00:00.000Z';
-        const utcStart = '2026-08-30T00:00:00.000Z'; // 7 days before UTC's 2026-09-06
-        expect(tzStart).not.toBe(utcStart);
+    /**
+     * Probes chosen to make the sixteen-hour difference VISIBLE as rows: two
+     * sit inside the UTC window and outside the zone's, one sits outside both,
+     * and three sit inside both. ⛔ None sits on the upper bound — that leg
+     * ends at NOW and is a separate question (`endExclusive` is false for the
+     * rolling family, `memory-analytics-date-range-token-end-exclusive.test.ts`
+     * owns the boundary reading).
+     */
+    const PROBES = [
+        '2026-08-29T23:59:59.999Z',   // before both windows
+        UTC_START,                     // the extra sixteen hours: UTC only …
+        '2026-08-30T08:00:00.000Z',    // … and its midpoint
+        TZ_START,                      // the zone's window opens here
+        '2026-09-01T00:00:00.000Z',    // comfortably inside both
+        '2026-09-06T19:00:00.000Z',    // an hour before the frozen clock
+    ];
 
-        // The upper bound of a `last N` window is the current INSTANT, so a
-        // probe must sit before it; both probes do.
-        const probes = [utcStart, tzStart, iso(ms(tzStart) - 1)];
+    it("'last_7_days' starts 7 days before the ZONE's day, at the zone's midnight", async () => {
+        const inZone = await at(ZONE, INSTANT, () =>
+            probesSelected(PROBES, { range: 'last_7_days', timezone: ZONE }));
+        const noZone = await at(ZONE, INSTANT, () =>
+            probesSelected(PROBES, { range: 'last_7_days' }));
 
-        await at('Asia/Tokyo', c.instant, async () => {
-            // AFTER — the window opens at Shanghai's midnight, so the probe one
-            // millisecond earlier is OUT.
-            await expect(probesSelected(probes, { range: 'last 7 days', timezone: c.zone })).resolves.toEqual(
-                [tzStart].sort(),
-            );
-            // BEFORE — with no timezone the window opens 16 hours earlier, at
-            // UTC midnight, and takes all three probes. That extra row IS the
-            // defect, in the `last N` leg.
-            await expect(probesSelected(probes, { range: 'last 7 days' })).resolves.toEqual(
-                [...probes].sort(),
-            );
+        // The zone's window: opens at Shanghai's midnight on 2026-08-31 — seven
+        // days before Shanghai's calendar day, which is already 2026-09-07.
+        expect(inZone).toEqual([
+            TZ_START,
+            '2026-09-01T00:00:00.000Z',
+            '2026-09-06T19:00:00.000Z',
+        ].sort());
+
+        // The CONTROL, and the "before" in the same test: with no timezone the
+        // window is the UTC one, and it takes the extra sixteen hours of rows.
+        expect(noZone).toEqual([
+            UTC_START,
+            '2026-08-30T08:00:00.000Z',
+            TZ_START,
+            '2026-09-01T00:00:00.000Z',
+            '2026-09-06T19:00:00.000Z',
+        ].sort());
+
+        // Stated as the difference, so a repair that merely made both answers
+        // equal cannot pass: the zone answer is a STRICT subset, short by
+        // exactly the sixteen hours between the two midnights.
+        expect(noZone.filter((p) => !inZone.includes(p)))
+            .toEqual([UTC_START, '2026-08-30T08:00:00.000Z'].sort());
+        expect(ms(TZ_START) - ms(UTC_START)).toBe(16 * 3_600_000);
+    });
+
+    it('the answer does not depend on the PROCESS timezone', async () => {
+        // Half 1 of #16042 read from the QUERY, never from the host — the same
+        // property the DST file measures for the process-calendar arithmetic.
+        const expected = await at('UTC', INSTANT, () =>
+            probesSelected(PROBES, { range: 'last_7_days', timezone: ZONE }));
+        for (const hostZone of ['America/Los_Angeles', 'Asia/Tokyo', 'Pacific/Chatham']) {
+            await expect(
+                at(hostZone, INSTANT, () => probesSelected(PROBES, { range: 'last_7_days', timezone: ZONE })),
+                `host TZ=${hostZone} changed the answer`,
+            ).resolves.toEqual(expected);
+        }
+    });
+
+    it('⛔ an unrecognised range is REFUSED here, not widened — the fallback is gone', async () => {
+        // The third retirement this card owed back, in its new form: the
+        // `[range, range]` fallback that made this whole family match every row
+        // is a refusal now. The shared conformance fixture
+        // (`packages/core/src/utils/analytics-date-range-conformance.ts`)
+        // holds memory and the SQL analytics path to the SAME envelope; this
+        // cell is the driver-local half, next to the window it protects.
+        await at(ZONE, INSTANT, async () => {
+            const driver = new InMemoryDriver({ initialData: { events: [] } });
+            await driver.connect();
+            const service = new MemoryAnalyticsService({ driver, cubes: [CUBE] });
+            const query = {
+                cube: 'events',
+                measures: ['events.count'],
+                dimensions: ['events.probe'],
+                // ⛔ Not through `asQuery`: the schema door refuses this first
+                // (#16041), and what this pins is the DRIVER's own answer for
+                // an in-process caller that reached it past that door.
+                timeDimensions: [{ dimension: 'events.createdAt', dateRange: 'last 7 days' }],
+            } as unknown as AnalyticsQuery;
+            const err = await service.query(query).then(() => null, (e: unknown) => e as Error & {
+                code?: string; status?: number;
+            });
+            expect(err, 'an unresolvable window must be a refusal, never a window').not.toBeNull();
+            expect(err!.code).toBe('ANALYTICS_DATE_RANGE_UNRECOGNIZED');
+            expect(err!.status).toBe(400);
         });
     });
 });

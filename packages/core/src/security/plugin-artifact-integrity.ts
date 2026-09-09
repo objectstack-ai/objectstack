@@ -7,11 +7,12 @@
  * `integrity` map (artifact-relative path → SRI-style `sha256-<base64>`
  * digest, the format `os plugin build` writes). Like its sibling
  * `plugin-artifact-signature.ts`, this module is pure and dependency-free
- * (node:crypto only) so it stays byte-for-byte portable to the cloud
- * control plane, which owes the unpack-time re-verification leg
- * (ADR-0025 §3.5 step 5 — tracked on #11331, NOT discharged by this
- * module). The framework caller is the `os plugin publish` preflight: the
- * publisher self-checks its own artifact before upload.
+ * (node:crypto only) so it stays byte-for-byte portable to whatever runs
+ * the unpack-time re-verification leg — the future runtime loader
+ * (ADR-0025 §3.5 steps 4–7), not the cloud control plane (tracked on
+ * #11331, NOT discharged by this module). The framework caller is the
+ * `os plugin publish` preflight: the publisher self-checks its own
+ * artifact before upload.
  *
  * Verdict semantics:
  *   - absent map (`undefined` / `null`) → ok, `skipped: true` — the field

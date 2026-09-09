@@ -69,6 +69,21 @@
  * the one this repo's plugin wiring can exercise without OTP transport config.
  * `/two-factor/verify-backup-code` does NOT rotate and is unaffected either
  * way; it is listed for neither.
+ *
+ * ## #16535 — the same stale closure, the body's OTHER member
+ *
+ * `valid(ctx)` echoes `{ token, user }` out of that one entry-time session, so
+ * `user` is stale for exactly the same reason `token` was. On the enrolment
+ * lane the vendor writes `twoFactorEnabled: true` BEFORE calling the closure,
+ * so a successful `/two-factor/verify-totp` reported the flag as still `false`
+ * to the caller who had just switched it on. Measured differentially:
+ * `/two-factor/verify-backup-code` in the same session — which does not rotate
+ * — echoed `true`, proving the row had flipped and the `false` was a snapshot.
+ *
+ * The repair is the same predicate applied to the other member, and it is
+ * narrowed twice over: only the members the vendor already echoed are written
+ * (the payload's shape is a published contract), and the row is re-read by the
+ * id the response itself published. See `freshEchoedUser` below.
  */
 
 /** The 2FA verification routes whose vendor implementation rotates the session. */
@@ -141,8 +156,61 @@ async function echoedTokenPayload(ctx: any): Promise<{ token: string } | undefin
 }
 
 /**
- * Repair the `token` a 2FA verification echoes, so it names the session the
- * same response installed rather than the one it deleted.
+ * [#16535] The user the response is already describing, re-read as the row
+ * stands NOW — or `undefined` when it cannot be read.
+ *
+ * Two deliberate narrowings, each of which is the whole safety argument for
+ * one hazard:
+ *
+ * 1. **Only the members the vendor already echoed are written.** The echoed
+ *    `user` is a published wire shape (`AuthWireUser` in `@objectstack/client`),
+ *    and better-auth's own output filter is a DENY-list — handing the raw row
+ *    forward would put every column the row happens to carry on the wire. So
+ *    the echoed key set is the ceiling: this corrects VALUES, never the shape.
+ * 2. **The row is read through `internalAdapter`, by the id the response
+ *    already published.** Same seam and same output transform that produced the
+ *    echo in the first place, so a value's representation cannot drift; and
+ *    reading by the echoed id means the repair can never substitute a different
+ *    principal into a response — the mirror of #10701 reading its token back
+ *    out of the response's own cookie.
+ */
+async function freshEchoedUser(ctx: any, echoed: unknown): Promise<Record<string, unknown> | undefined> {
+  if (!echoed || typeof echoed !== 'object') return undefined;
+  const id = (echoed as Record<string, unknown>).id;
+  if (typeof id !== 'string' || !id) return undefined;
+
+  const row = await ctx?.context?.internalAdapter?.findUserById?.(id);
+  if (!row || typeof row !== 'object' || (row as Record<string, unknown>).id !== id) return undefined;
+
+  const fresh = row as Record<string, unknown>;
+  const repaired: Record<string, unknown> = { ...(echoed as Record<string, unknown>) };
+  for (const key of Object.keys(repaired)) {
+    // `hasOwnProperty.call`, not `in`: a member the row does not carry keeps
+    // the value the vendor echoed, and no prototype member is ever adopted.
+    if (Object.prototype.hasOwnProperty.call(fresh, key)) repaired[key] = fresh[key];
+  }
+  return repaired;
+}
+
+/**
+ * Repair what a 2FA verification echoes, so the body describes the state the
+ * same response installed rather than the state it left behind.
+ *
+ * Two members, one defect, one predicate:
+ *
+ * - `token` (#10701) named the session row the route had just DELETED.
+ * - `user` (#16535) is the PRE-rotation snapshot of the caller. On the
+ *   enrolment lane the vendor writes `twoFactorEnabled: true` and only then
+ *   calls the `valid(ctx)` closure it built at entry, so a successful
+ *   enrolment answers `twoFactorEnabled: false` to the user who just switched
+ *   2FA on. `/two-factor/verify-otp` carries the byte-identical block, which is
+ *   why the repair keys on the path TABLE and not on one route.
+ *
+ * Both are gated on the same mechanism — the response staged a session cookie
+ * whose token differs from the one echoed — so the sign-in-challenge lane,
+ * where `valid()` mints the session it echoes, stays a byte-for-byte no-op, and
+ * `/two-factor/verify-backup-code`, which does not rotate and already echoes
+ * the live row, is in neither list and is not read, let alone rewritten.
  *
  * A no-op for every other path, for a failed verification, for a response that
  * installs no session cookie, and — the common case — whenever the echoed token
@@ -152,6 +220,9 @@ async function echoedTokenPayload(ctx: any): Promise<{ token: string } | undefin
  * a failure because the response body could not be tidied; the caller's cookie
  * is valid either way, and this repair only widens which credentials from the
  * response work. Any unexpected shape therefore leaves the payload untouched.
+ * That posture is inherited by the row read: an adapter that throws or answers
+ * nothing degrades to the vendor's own echo — never to a failed verification,
+ * and never to a lost `token` repair, which is written first for that reason.
  */
 export async function echoInstalledSessionToken(ctx: any): Promise<void> {
   try {
@@ -161,6 +232,9 @@ export async function echoInstalledSessionToken(ctx: any): Promise<void> {
     const installed = await installedSessionToken(ctx);
     if (!installed || installed === payload.token) return;
     payload.token = installed;
+
+    const fresh = await freshEchoedUser(ctx, (payload as Record<string, unknown>).user);
+    if (fresh) (payload as Record<string, unknown>).user = fresh;
   } catch {
     /* leave the payload exactly as the vendor route wrote it */
   }

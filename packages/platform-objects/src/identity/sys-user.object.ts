@@ -86,7 +86,7 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
-      // Gated on the org CAPABILITY, not multi-org (ADR-0081 D1): the
+      // Gated on the org CAPABILITY, not multi-org (cloud ADR-0081 D1): the
       // better-auth organization plugin is always mounted, and single-org
       // mode now bootstraps a Default Organization (plugin-auth) so the
       // endpoint's active-org resolution works there too. This is THE
@@ -611,10 +611,11 @@ export const SysUser = ObjectSchema.create({
     role: Field.text({
       label: 'Platform Role',
       required: false,
-      readonly: true, // ADR-0092 — set via the Set Platform Role action, never the edit form
+      readonly: true, // ADR-0092 — never the edit form; no writer since #9968 (platform admin: `sys_user_permission_set` / `admin_full_access`)
       maxLength: 64,
       group: 'Admin',
-      description: 'Platform-level role (admin, user, …). Set via the Set Platform Role action.',
+      description:
+        'Legacy better-auth role scalar (admin, user, …). ObjectStack no longer writes it (ADR-0068 D2) — grant platform-admin standing with an unscoped `admin_full_access` assignment in `sys_user_permission_set`.',
     }),
 
     banned: Field.boolean({

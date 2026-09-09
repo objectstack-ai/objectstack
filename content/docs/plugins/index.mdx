@@ -75,10 +75,20 @@ Plugins follow a strict three-phase lifecycle (`init()` → `start()` → `destr
 
 ## Creating a Plugin
 
-The fastest way to create a plugin is with the CLI scaffolding:
+<Callout type="info">
+**Which artifact this page means.** Every plugin taught here is a **kernel code
+plugin** — TypeScript implementing the `Plugin` contract, built by `tsc`, published as
+`@objectstack/plugin-<name>`. That is what `os create plugin` scaffolds. If what you
+want instead is a **metadata package** — declarative objects another stack loads, with
+no kernel code — the scaffolder is `os init <name> -t plugin`, and
+[Which scaffolder?](/docs/deployment/cli#os-init) routes between the two by artifact
+rather than by the word `plugin`, which the CLI spells the same for both.
+</Callout>
+
+The fastest way to create a kernel code plugin is with the CLI scaffolding:
 
 ```bash
-# Create a new plugin project in the current directory
+# Create a new kernel code plugin project in the current directory
 os create plugin my-feature
 
 # This creates:

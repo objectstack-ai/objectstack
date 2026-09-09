@@ -1460,7 +1460,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     sections: {
       identity: {
         label: "Identity",
-        description: "Permission Sets stack on top of a Profile to grant additional access. Profiles are the base set assigned 1:1 to each user."
+        description: "Permission sets are the only capability container: a user gets the union of every set they hold, so sets only ever add access. Positions distribute sets to people."
       },
       system_permissions: {
         label: "System Permissions",

@@ -29,7 +29,7 @@ import {
 import { CONNECT_AGENT_UI_BUNDLE } from '@objectstack/mcp';
 import { SetupAppTranslations } from '@objectstack/platform-objects';
 import * as PlatformPages from '@objectstack/platform-objects/pages';
-import { PAGE_COMPONENT_COPY_KEYS, translatePage } from '@objectstack/spec/system';
+import { PAGE_COMPONENT_COPY_KEYS, translatePage, walkAddressedPageComponents } from '@objectstack/spec/system';
 import { collectExpectedEntries } from '../src/utils/i18n-extract.js';
 
 /** The pages exactly as the plugins register them with the kernel. */
@@ -289,18 +289,24 @@ const walkParityPage = (): Record<string, any> => ({
               null,
             ],
             // NOT descended by `translatePage`: `body`/`footer` are a
-            // renderer-side back-compat fallback, and `items[].children` sits
-            // one level deeper than the slot the ruling names.
+            // renderer-side back-compat fallback, not an authorable
+            // composition spelling.
             body: [{ id: 'card_body_child', type: 'object-metric', properties: { title: 'Body child' } }],
             footer: [{ id: 'card_footer_child', type: 'object-metric', properties: { title: 'Footer child' } }],
-            items: [{ children: [{ id: 'tab_child', type: 'object-metric', properties: { title: 'Tab child' } }] }],
+            // DESCENDED since #16772 — a `page:tabs` / `page:accordion`
+            // panel's `items[].children`, one level below the container.
+            items: [{ label: 'Panel', children: [{ id: 'tab_child', type: 'object-metric', properties: { title: 'Tab child' } }] }],
           },
         },
       ],
     },
   ],
-  // NOT walked by `translatePage` at all — it maps `regions` only.
-  slots: { aside: { id: 'slot_child', type: 'object-metric', properties: { title: 'Slot child' } } },
+  // A ROOT since #16772 — a `kind: 'slotted'` page authors its components
+  // here (one component or an array per slot); walked after the regions.
+  slots: {
+    aside: { id: 'slot_child', type: 'object-metric', properties: { title: 'Slot child' } },
+    details: [{ id: 'slot_list_child', type: 'record:details', properties: { title: 'Slot list child' } }],
+  },
 });
 
 /** A container chain deeper than the resolver's descent cap. */
@@ -352,26 +358,189 @@ describe('i18n-extract ↔ translatePage walk parity (#13109)', () => {
     // Both directions, named separately so a failure says WHICH half broke.
     expect({ offeredButIgnored: [...offered].filter((id) => !applied.has(id)).sort() })
       .toEqual({ offeredButIgnored: [] });
-    // The ONE standing exception, pre-dating this card and deliberate: a
-    // region-level `page:header`'s copy is offered under `pages.PAGE.title` /
-    // `.subtitle` instead, because emitting it here too would offer one string
-    // under two keys. The resolver still honours the id route for it, so it
-    // shows up as applied-not-offered — listed explicitly rather than filtered
-    // out of the fixture, so the exception stays visible and bounded to one id.
+    // NO standing exception any more. This list used to read `['hdr']` — a
+    // region-level `page:header` carrying an id, whose copy the extractor
+    // deliberately offers under `pages.PAGE.title` / `.subtitle` while the
+    // resolver went on honouring the id route for it and PREFERRING it. That
+    // was the second half of the failure pair `walkAddressedPageComponents`
+    // exists to prevent (the resolver reading an id the extractor omits), and
+    // the 2026-09-06 ruling (decision batch #58) closed it by making the
+    // page-name route canonical for this component. Empty in BOTH directions
+    // is now the invariant; an entry reappearing here is a regression, not an
+    // exception to document.
     expect({ appliedButNotOffered: [...applied].filter((id) => !offered.has(id)).sort() })
-      .toEqual({ appliedButNotOffered: ['hdr'] });
+      .toEqual({ appliedButNotOffered: [] });
   });
 
   it('pins the two sets by name, so a shape that stops being reachable is visible', () => {
     const page = walkParityPage();
     expect([...idsExtractorOffers(page)].sort()).toEqual([
       'card', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header', 'region_metric',
+      'slot_child', 'slot_list_child', 'tab_child',
     ]);
-    // `card_body_child`, `card_footer_child`, `tab_child` and `slot_child` are
-    // absent from BOTH sides — the shapes `translatePage` does not descend.
+    // `card_body_child` and `card_footer_child` are absent from BOTH sides —
+    // the shapes `translatePage` does not descend. `tab_child`, `slot_child`
+    // and `slot_list_child` are present on BOTH sides since #16772 widened
+    // the shared walk to `items[].children` and to the `slots.<slot>` roots.
+    // `hdr` — the region-level `page:header` — is absent from BOTH sides since
+    // the ruling. `nested_header` stays: a `page:header` inside a container is
+    // reached by the id route only, so the id key is the only key it has.
     expect([...idsResolverApplies(page)].sort()).toEqual([
-      'card', 'hdr', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header', 'region_metric',
+      'card', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header', 'region_metric',
+      'slot_child', 'slot_list_child', 'tab_child',
     ]);
+  });
+
+  it('offers and reads the page-name header route for a `slots.header` page:header — a slotted page has a header too (#16772)', () => {
+    const page = {
+      name: 'slotted_header_page',
+      label: 'Contract',
+      kind: 'slotted',
+      regions: [],
+      slots: {
+        header: { id: 'hdr', type: 'page:header', properties: { title: 'Contract detail', subtitle: 'Lifecycle' } },
+      },
+    };
+    const offered = collectExpectedEntries({ pages: [page] } as any)
+      .filter((e) => e.path[0] === 'pages' && e.path[1] === page.name)
+      .map((e) => e.path.slice(2).join('.'))
+      .sort();
+    // Page-name route offered; the id route NOT offered for a root-level
+    // header, exactly as for a region-level one.
+    expect(offered).toEqual(['label', 'subtitle', 'title']);
+
+    const bundle = {
+      en: { pages: { slotted_header_page: { title: 'T::title', subtitle: 'T::subtitle', components: { hdr: { title: 'ID-ROUTE' } } } } },
+    } as any;
+    const out = translatePage(page as any, bundle, { locale: 'en' });
+    expect(out.slots.header.properties).toEqual({ title: 'T::title', subtitle: 'T::subtitle' });
+  });
+
+  // ── The ruled invariant, pinned directly (decision batch #58, 2026-09-06) ──
+  //
+  // Maintainer 「同意」, option 1, verbatim: "The page-name route is canonical
+  // for a region-level `page:header`. `translatePage` stops reading the id
+  // route (`pages.PAGE.components.HEADERID.*`) for a `page:header` at region
+  // level; a `page:header` nested inside a container stays id-only, as its doc
+  // already says. One component, one address — `title` and `subtitle` now
+  // follow the same rule."
+  //
+  // The set comparisons above measure `title` alone, because that is the key
+  // both fixtures carry. This case walks the WHOLE shared key list and asserts
+  // BOTH verbs of the failure pair on one component, in one place: the id key
+  // is neither OFFERED nor READ. It also pins the three things that must NOT
+  // move with it — the page-name route still translates the header, a nested
+  // `page:header` is still id-addressed, and a bundle carrying both routes
+  // resolves to the page-name one — so a regression that simply stops
+  // translating region-level headers cannot pass here either.
+  const headerRoutePage = (): Record<string, any> => ({
+    name: 'header_route_page',
+    regions: [
+      {
+        name: 'top',
+        components: [
+          // Region level, WITH an id — the shape the card measured (hotcrm's
+          // five headers all carry one).
+          { id: 'home_header', type: 'page:header', properties: { title: 'Sales Home', subtitle: 'Welcome back' } },
+        ],
+      },
+      {
+        name: 'main',
+        components: [
+          {
+            id: 'wrap',
+            type: 'page:card',
+            properties: {
+              title: 'Wrap',
+              children: [
+                // Nested — the page-name route does not reach it, so the id
+                // route is the ONLY route it has. Unchanged by the ruling.
+                { id: 'inner_header', type: 'page:header', properties: { title: 'Inner header' } },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  /** Every key of the shared list under one id, sentinel-valued. */
+  const everyKeyFor = (id: string): Record<string, string> =>
+    Object.fromEntries(PAGE_COMPONENT_COPY_KEYS.map((k) => [k, `ID::${id}::${k}`]));
+
+  it('neither offers nor reads the id key for a region-level `page:header` (batch #58)', () => {
+    const page = headerRoutePage();
+
+    // Half one — the extractor offers NOTHING under `components.home_header`,
+    // for any key of the shared list.
+    expect(componentRows(page).filter((r) => r.key.startsWith('home_header.'))).toEqual([]);
+
+    // Half two — the resolver reads nothing there either. The bundle offers
+    // every key of the shared list under that id; a sentinel reaching the
+    // output would mean the id route is still live for this component.
+    const idBundle = {
+      en: {
+        pages: {
+          header_route_page: {
+            components: { home_header: everyKeyFor('home_header'), wrap: everyKeyFor('wrap') },
+          },
+        },
+      },
+    } as any;
+    const viaId = translatePage(page as any, idBundle, { locale: 'en' });
+    const header = viaId.regions[0].components[0];
+    expect(header.properties).toEqual({ title: 'Sales Home', subtitle: 'Welcome back' });
+    expect(header.label).toBeUndefined();
+    // Positive control for that empty: the SAME bundle shape does reach a
+    // component the id route serves, so the two assertions above are a reading
+    // and not an inert fixture.
+    expect(viaId.regions[1].components[0].properties.title).toEqual('ID::wrap::title');
+
+    // Half three — the page-name route still translates the header. The fix is
+    // "one address", not "no address".
+    const nameBundle = {
+      en: { pages: { header_route_page: { title: 'BY-NAME', subtitle: 'SUB-BY-NAME' } } },
+    } as any;
+    const viaName = translatePage(page as any, nameBundle, { locale: 'en' });
+    expect(viaName.regions[0].components[0].properties)
+      .toEqual({ title: 'BY-NAME', subtitle: 'SUB-BY-NAME' });
+    // ...and it stops at region level: the nested header keeps its literal.
+    expect(viaName.regions[1].components[0].properties.children[0].properties.title)
+      .toEqual('Inner header');
+
+    // Half four — a nested `page:header` is still reached, by the id route.
+    const nestedBundle = {
+      en: {
+        pages: {
+          header_route_page: { title: 'BY-NAME', components: { inner_header: { title: 'ID::inner' } } },
+        },
+      },
+    } as any;
+    const viaNested = translatePage(page as any, nestedBundle, { locale: 'en' });
+    expect(viaNested.regions[1].components[0].properties.children[0].properties.title)
+      .toEqual('ID::inner');
+    // The extractor offers that nested id, which is the other half of "stays
+    // id-only" — the two sides agree about it as much as about the region one.
+    expect(componentRows(page).filter((r) => r.key === 'inner_header.title'))
+      .toEqual([{ key: 'inner_header.title', value: 'Inner header' }]);
+
+    // Half five — the card's Leg A shape 3, inverted. Both routes present:
+    // BEFORE the ruling the id route won here ("ZH-by-ID"); the page-name
+    // route is canonical now, so the components key is inert on this component
+    // and the bundle that overrode a header title through it falls back.
+    const bothBundle = {
+      en: {
+        pages: {
+          header_route_page: {
+            title: 'BY-NAME',
+            subtitle: 'SUB-BY-NAME',
+            components: { home_header: { title: 'BY-ID' } },
+          },
+        },
+      },
+    } as any;
+    expect(translatePage(page as any, bothBundle, { locale: 'en' }).regions[0].components[0].properties)
+      .toEqual({ title: 'BY-NAME', subtitle: 'SUB-BY-NAME' });
   });
 
   it('carries the whole shared key list down into nesting, label either/or included', () => {
@@ -414,7 +583,10 @@ describe('i18n-extract ↔ translatePage walk parity (#13109)', () => {
       .toEqual([{ key: 'twice.title', value: 'First nested wins' }]);
     // A region-level `page:header` emits nothing here, but its id still BLOCKS
     // a nested namesake — the resolver counts it as region-level, so offering
-    // the nested one would be a key the resolver ignores.
+    // the nested one would be a key the resolver ignores. The ruling changed
+    // what the resolver READS for that id, not who OWNS it: the arbitration is
+    // a property of the document and both consumers still decide it the same
+    // way, which is why this half is unchanged.
     expect(rows.filter((r) => r.key.startsWith('hdr_id.'))).toEqual([]);
 
     // And the resolver agrees about which component the entry lands on.
@@ -432,7 +604,10 @@ describe('i18n-extract ↔ translatePage walk parity (#13109)', () => {
     const translated = translatePage(page as any, bundle, { locale: 'en' });
     const region = translated.regions[0].components;
     expect(region[0].properties.title).toEqual('S');
-    expect(region[1].properties.title).toEqual('H');
+    // `hdr_id` is the region-level `page:header`: the bundle's `H` under
+    // `components.hdr_id.title` is NOT read, and this page has no
+    // `pages.walk_collision_page.title` either, so the authored literal stands.
+    expect(region[1].properties.title).toEqual('Header holds this id');
     const nested = region[2].properties.children;
     expect(nested.map((c: any) => c.properties.title)).toEqual([
       'Nested namesake loses',
@@ -616,22 +791,35 @@ describe('shipped platform record pages -- i18n ownership (#14817)', () => {
     expect(SHIPPED_LOCALES.length).toBeGreaterThan(1);
   });
 
-  it('records that the extractor reaches the page label and nothing under `slots`', () => {
-    // A BOUNDARY PIN, not an endorsement. It states the measured fact that the
-    // shared walk roots at `regions[].components[]` and these pages author
-    // `regions: []`, so the 45 inline sites under `slots.*` have no bundle
-    // face. If the walk is ever widened -- a maintainer decision open on
-    // #14749 -- this reds, and the person widening it is told, at the exact
-    // moment they can act on it, that these three pages gain a bundle surface
-    // that needs entries and a coverage home. That notice is the whole value:
-    // today the same change would land green over an unmeasured population.
+  it('records that the walk now reaches under `slots`, that these pages author no component id there, and so the extractor still offers the label alone', () => {
+    // A BOUNDARY PIN, not an endorsement — re-measured, and the reason moved.
+    // Until #16772 `offered: ['label']` held because the shared walk rooted at
+    // `regions[].components[]` and these pages author `regions: []`: the 45
+    // inline sites under `slots.*` were UNREACHABLE. #16772 widened the walk
+    // to the `slots.<slot>` roots and to `items[].children`, and the notice the
+    // old pin promised fired — so this is the answer to it, measured off the
+    // documents: the walk now VISITS every component under `slots` (`reached`
+    // below), and not one of them carries an `id`, so nothing is addressable
+    // by `pages.<name>.components.<id>` and the extractor still offers the
+    // page label alone. These pages gained no bundle surface, need no entries,
+    // and their coverage home stays this file (the inline-map case below).
+    // Both halves are held so the next change is told precisely: `reached`
+    // reds if the roots narrow again; `offered` grows the day one of these
+    // components takes an id, and that component then needs a bundle entry.
     for (const page of RECORD_PAGES) {
+      let visited = 0;
+      let addressed = 0;
+      walkAddressedPageComponents(page as any, (component, ctx) => {
+        visited += 1;
+        if (ctx.addressed) addressed += 1;
+        return component;
+      });
       const offered = collectExpectedEntries({ pages: [page] } as any)
         .filter((e) => e.path[0] === 'pages' && e.path[1] === page.name)
         .map((e) => e.path.slice(2).join('.'))
         .sort();
-      expect({ page: page.name, regions: page.regions, offered })
-        .toEqual({ page: page.name, regions: [], offered: ['label'] });
+      expect({ page: page.name, regions: page.regions, reached: visited > 0, addressed, offered })
+        .toEqual({ page: page.name, regions: [], reached: true, addressed: 0, offered: ['label'] });
     }
   });
 

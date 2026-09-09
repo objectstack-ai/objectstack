@@ -11,8 +11,10 @@ import {
   Logger,
   createLogger,
   nextUtcCalendarDay,
-  calendarPartsInTzOrUtc,
-  zonedDateStartToUtcMs,
+  // [#16322] The ONE lowering of the closed `dateRange` preset vocabulary and
+  // the ONE refusal for a string outside it, shared with the SQL analytics
+  // path so the two backends cannot answer one input differently again.
+  resolveAnalyticsDateRangeString,
 } from '@objectstack/core';
 import {
   assertFilterConditionShape,
@@ -623,6 +625,40 @@ export interface MemoryAnalyticsConfig {
 }
 
 /**
+ * [#16179] A `timeDimensions[].dateRange` resolved to its two bounds, together
+ * with what the UPPER one means.
+ *
+ * `AnalyticsDateRange` is a union of two arms (`AnalyticsDateRangeSchema`) and
+ * they do NOT agree on that question, which is the whole reason this carries a
+ * flag instead of a bare pair:
+ *
+ * - an explicit `[a, b]` is the CALLER's window, and `b` is a bound they wrote
+ *   meaning "include b" — the reading `$lte` has published since this face
+ *   existed. ⛔ Never narrow it here; doing so is a silent behaviour change on
+ *   a published package, and it is the route this card deliberately did not
+ *   take;
+ * - a preset name is resolved BY this driver, and `'today'`'s upper bound is
+ *   the first instant of TOMORROW — the day's exclusive end, not a moment the
+ *   day contains. Compared with `$lte` it made `'today'` one day plus one
+ *   instant long, so two adjacent day windows overlapped at midnight and a row
+ *   stamped there was counted in BOTH.
+ *
+ * The distinction is available where it is made — one line above the bound
+ * construction, at the `Array.isArray` that discriminates the union's arms —
+ * so the two paths never had to share an answer.
+ */
+interface ResolvedDateRange {
+  /** `[start, end]`, in the spelling the bounds are compared as. */
+  readonly bounds: readonly string[];
+  /**
+   * Is `end` the first instant AFTER the window rather than its last instant?
+   * `true` only for a window this driver RESOLVED; ⛔ never for one a caller
+   * wrote out.
+   */
+  readonly endExclusive: boolean;
+}
+
+/**
  * Memory-Based Analytics Service
  * 
  * Implements IAnalyticsService using InMemoryDriver's aggregation capabilities.
@@ -743,9 +779,15 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       for (const timeDim of query.timeDimensions) {
         const fieldPath = this.resolveFieldPath(cube, timeDim.dimension);
         if (timeDim.dateRange) {
-          const range = Array.isArray(timeDim.dateRange)
-            ? timeDim.dateRange
+          // [#16179] The union's two arms are discriminated HERE, and the
+          // answer travels the two lines down to the bound construction rather
+          // than being re-derived from the bounds themselves — which is not
+          // possible, because a resolved window and a caller's window are
+          // rendered identically (`toISOString()` on both sides).
+          const resolved: ResolvedDateRange = Array.isArray(timeDim.dateRange)
+            ? { bounds: timeDim.dateRange, endExclusive: false }
             : this.parseDateRangeString(timeDim.dateRange, query.timezone);
+          const range = resolved.bounds;
 
           if (range.length === 2) {
             // The window matches BOTH stored forms of a datetime value — the
@@ -763,12 +805,31 @@ export class MemoryAnalyticsService implements IAnalyticsService {
             // inherits `<= day`'s whole-day intent via `< nextDay`.
             const start = String(range[0]);
             const end = String(range[1]);
-            const nextDay = nextUtcCalendarDay(end);
-            const stringBounds = nextDay != null
-              ? { $gte: start, $lt: nextDay }
+            // [#16179] The upper bound is EXCLUSIVE by exactly two routes, and
+            // they are mutually exclusive by construction:
+            //
+            //   - the RESOLVER produced the window, so `end` is already the
+            //     instant the window stops before -- `'today'`'s end is the
+            //     first instant of tomorrow. ⛔ It must NOT be widened again:
+            //     it is an instant, so `nextUtcCalendarDay` refuses it anyway
+            //     (`calendar-day.ts`, pinned by `calendar-day.test.ts`), and
+            //     asking is what would make a future bare-day resolver widen a
+            //     bound that was already exclusive.
+            //   - the CALLER wrote a bare `YYYY-MM-DD`, which denotes the WHOLE
+            //     day and widens to `< nextDay` (#4042; the SQL twin is #3777).
+            //
+            // Anything else -- a full timestamp the CALLER wrote -- keeps
+            // instant semantics and stays INCLUSIVE, byte for byte as before.
+            const widenedDay = resolved.endExclusive ? null : nextUtcCalendarDay(end);
+            const upperString = resolved.endExclusive ? end : widenedDay;
+            const upperDate = widenedDay != null
+              ? new Date(`${widenedDay}T00:00:00.000Z`)
+              : (resolved.endExclusive ? new Date(end) : null);
+            const stringBounds = upperString != null
+              ? { $gte: start, $lt: upperString }
               : { $gte: start, $lte: end };
-            const dateBounds = nextDay != null
-              ? { $gte: new Date(start), $lt: new Date(`${nextDay}T00:00:00.000Z`) }
+            const dateBounds = upperDate != null
+              ? { $gte: new Date(start), $lt: upperDate }
               : { $gte: new Date(start), $lte: new Date(end) };
             pipeline.push({
               $match: {
@@ -1418,122 +1479,60 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     return sql.trim();
   }
 
-  private parseDateRangeString(range: string, timezone?: string): string[] {
-    // Simple parser for common date range strings
-    // In production, this would use a proper date range parser
-    //
-    // [#15825] ONE calendar, and it is UTC -- the same one `toISOString()`
-    // renders every bound below on. Two INDEPENDENT defects lived here:
-    //
-    //   1. The window BOUNDARY was `new Date(y, m, d)` -- LOCAL midnight --
-    //      rendered as UTC. Wrong on every day of the year in every non-UTC
-    //      process, with no DST transition needed: measured 2026-09-05, the
-    //      `'today'` bucket ran from the previous 16:00Z at `Asia/Shanghai`,
-    //      from 07:00Z at `America/Los_Angeles` (08:00Z outside its DST).
-    //   2. The `last N ...` legs did their arithmetic on the LOCAL calendar
-    //      (`setDate` / `setMonth` / `setFullYear`) and rendered on the UTC
-    //      one. `setDate` preserves WALL-CLOCK time, so the instant moves
-    //      n x 24h only while every local day in the window is 24 hours
-    //      long; across a DST transition it moves 23h or 25h and the window
-    //      start slips an hour.
-    //
-    // ⛔ They do not fix each other: `setUTCDate` alone leaves the
-    // local-midnight boundary in place, and `Date.UTC` alone leaves the
-    // arithmetic mixed. Each is pinned by its own file, and each was ablated
-    // separately to prove it -- `memory-analytics-date-range-utc-window.test.ts`
-    // (boundary; red in any non-UTC zone, no transition instant needed) and
-    // `memory-analytics-date-range-dst.test.ts` (arithmetic; CANNOT go red at
-    // TZ=UTC, where the two spellings are indistinguishable -- which is
-    // exactly why nothing in CI ever reddened on this).
-    //
-    // UTC is the target calendar, not merely "a consistent one". The rest of
-    // the platform resolves a bare date to the UTC day: `@objectstack/core`'s
-    // `{today}` filter-token macro builds its reference day as
-    // `new Date(Date.UTC(year, month - 1, day))` and falls back to UTC parts
-    // when the context carries no timezone, and `{TODAY()}` in flow templates
-    // resolves to the UTC day (#14852, same two-calendar shape). So the same
-    // analytics question asked through this path and through a flow token no
-    // longer selects different rows in one deployment -- that agreement, not
-    // the hour count, is what this repair restores. ⚠️ That paragraph scopes
-    // itself to a query carrying NO timezone; a query that carries one is
-    // answered on THAT zone's calendar -- see [#16042] below.
-    //
-    // [#16042] The reference TIMEZONE, which this path used to accept and drop.
-    //
-    // `AnalyticsQuery.timezone` is declared optional with no default precisely
-    // because an ABSENT value is a meaningful state that the engine resolves
-    // (`selection.timezone ?? context.timezone ?? 'UTC'`, ADR-0053 Phase 2 —
-    // `service-analytics`' `buildQuery` resolves that whole chain and writes the
-    // ANSWER into `query.timezone` before a driver ever sees it). So a driver
-    // owes the chain's last two links: the value it was handed, else UTC. The
-    // third state -- accepting the field and ignoring it -- is the one that
-    // misleads, and it is what a caller asking `'today'` with
-    // `timezone: 'Asia/Shanghai'` got: the UTC day, silently, with no warning.
-    //
-    // TWO halves, and each needs its own primitive:
-    //
-    //   1. WHICH calendar day "now" is -- `calendarPartsInTzOrUtc(now, tz)`,
-    //      read from the platform tz database. Arithmetic then runs on a UTC
-    //      "proxy" date built from those parts, the `proxyDay()` pattern in
-    //      `@objectstack/core`'s filter-token macros: working in UTC keeps
-    //      `last N months` free of DST jumps, and the zone only decides which
-    //      calendar day the window is anchored to.
-    //   2. WHERE that day BEGINS as an instant -- `zonedDateStartToUtcMs(ymd,
-    //      tz)`, that zone's local midnight. This half is required because the
-    //      bounds here are rendered with `toISOString()` and compared against
-    //      DATETIME values, which is exactly the case ADR-0053 settles in
-    //      `service-analytics`' drill ranges: "`datetime` -> the reference tz's
-    //      MIDNIGHT INSTANT (ISO), because the bucket is defined on that tz's
-    //      calendar"; only a `date`-typed, tz-naive column takes the bare
-    //      `YYYY-MM-DD` calendar bound.
-    //
-    // ⛔ Half 1 alone is NOT the fix, and the failure is silent: it would
-    // anchor to Shanghai's calendar day but cut it at UTC midnight, a window
-    // that is neither the UTC day nor the Shanghai day but an 8-hour-shifted
-    // hybrid -- worse for that caller than the UTC day they get today.
-    // ⛔ Nor is `+ 86_400_000` a next-day boundary once a zone is in play:
-    // measured on `America/New_York`, 2026-03-08 begins at 05:00Z and 2026-03-09
-    // at 04:00Z, so that spring-forward day is 23 hours long.
-    //
-    // NO-TIMEZONE CASE UNCHANGED, by construction: `zonedDateStartToUtcMs`
-    // returns plain UTC midnight for an unset, `'UTC'`, or unknown zone, so
-    // every bound below is byte-identical to #15825's for a query carrying no
-    // timezone -- the common case, and the one this must not disturb. An
-    // unknown zone degrades to UTC rather than throwing, the same call
-    // `calendarPartsInTzOrUtc` makes one line above.
-    const now = new Date();
-    const ref = calendarPartsInTzOrUtc(now, timezone);
-    const today = new Date(Date.UTC(ref.year, ref.month - 1, ref.day));
-    /** That proxy day's `YYYY-MM-DD`, then the instant it BEGINS in `timezone`. */
-    const boundary = (proxy: Date): string =>
-      new Date(zonedDateStartToUtcMs(proxy.toISOString().slice(0, 10), timezone)).toISOString();
-
-    if (range === 'today') {
-      // The next calendar day, via the proxy calendar -- never `+ 86_400_000`.
-      const tomorrow = new Date(today.getTime());
-      tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-      return [boundary(today), boundary(tomorrow)];
-    } else if (range.startsWith('last ')) {
-      const parts = range.split(' ');
-      const num = parseInt(parts[1]);
-      const unit = parts[2];
-      const start = new Date(today);
-      
-      if (unit.startsWith('day')) {
-        start.setUTCDate(start.getUTCDate() - num);
-      } else if (unit.startsWith('week')) {
-        start.setUTCDate(start.getUTCDate() - num * 7);
-      } else if (unit.startsWith('month')) {
-        start.setUTCMonth(start.getUTCMonth() - num);
-      } else if (unit.startsWith('year')) {
-        start.setUTCFullYear(start.getUTCFullYear() - num);
-      }
-      
-      // The upper bound is the current INSTANT, which no zone moves.
-      return [boundary(start), now.toISOString()];
-    }
-
-    return [range, range]; // Fallback
+  /**
+   * The STRING arm of `timeDimensions[].dateRange`, resolved against the ONE
+   * closed vocabulary — or refused (#16322, the driver half of #16041).
+   *
+   * ## What this method stopped doing, and why each half had to go
+   *
+   * It used to be a hand-rolled parser with two branches and a fallback, and
+   * ALL THREE were defects by the time #16041 closed the contract:
+   *
+   *   - `range === 'today'` was the only preset it understood. Every other
+   *     member of the declared vocabulary fell past it — MEASURED on the built
+   *     dist over five probe rows (2020, 2026-08-31, 2026-09-05, now, 2099):
+   *     `today` selected 1/5, and the other twelve selected **5/5, 2099
+   *     included**. So a VALID preset like `last_30_days` was accepted by the
+   *     schema and then silently widened to all of history: the exact defect
+   *     class #16041 abolished at the contract, relocated onto the
+   *     newly-blessed vocabulary.
+   *   - `range.startsWith('last ')` matched a SPACE, a relative dialect
+   *     (`'last 7 days'`) the closed vocabulary does not contain and the
+   *     schema door now refuses. It could never fire for a preset name, which
+   *     spells them `last_7_days`.
+   *   - the `[range, range]` fallback is the silent widening itself, and it is
+   *     what the refusal below replaces. ⛔ It must not come back in any
+   *     spelling: an unresolvable window is a REFUSAL, not a window.
+   *
+   * ## ⛔ The calendar arithmetic did not move here — it left
+   *
+   * #15825's two defects (a LOCAL-midnight boundary rendered as UTC, and
+   * `last N …` arithmetic done on the local calendar) and #16042's dropped
+   * `timezone` were repaired in this method, and are now repaired ONCE for
+   * every analytics face in `@objectstack/core`'s
+   * {@link resolveAnalyticsDateRangeString} — the same package, one file over
+   * from the `{date-macro}` resolver whose tokens it lowers. ⛔ Re-deriving any
+   * of it here is the three-drifting-copies shape the vocabulary module's own
+   * header records; the SQL analytics path calls the same function, which is
+   * what makes "the drivers agree" checkable rather than asserted.
+   *
+   * ## ⭐ What survives unchanged
+   *
+   * `'today'` still resolves to `[that zone's midnight, tomorrow's midnight)`
+   * with `endExclusive: true` — #16179's repair, byte for byte, because the
+   * shared resolver states the same window in the same tokens. The three
+   * rolling `last_N_days` presets end at NOW and stay INCLUSIVE. And the
+   * explicit `[a, b]` array arm never arrives here at all: it is discriminated
+   * at the call site and keeps its published `$lte` reading.
+   *
+   * @throws the ADR-0112 `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` envelope for
+   *   a string outside `DATE_RANGE_PRESETS` — the same code, status and
+   *   wording the schema door and the SQL analytics path answer with, since
+   *   all three call one constructor.
+   */
+  private parseDateRangeString(range: string, timezone?: string): ResolvedDateRange {
+    const window = resolveAnalyticsDateRangeString(range, { timezone });
+    return { bounds: [window.start, window.end], endExclusive: window.endExclusive };
   }
 
   private generateSqlFromPipeline(table: string, pipeline: Record<string, any>[]): string {

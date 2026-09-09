@@ -40,6 +40,7 @@ import {
   AuditMetaItemResponseSchema,
   RollbackMetaItemResponseSchema,
   DiffMetaItemResponseSchema,
+  HistoryMetaItemResponseSchema,
   ResolvedBookSchema,
   PackagePublishResultSchema,
   DiscardPackageDraftsResponseSchema,
@@ -60,6 +61,9 @@ const BOUND_PAYLOAD_SCHEMAS: ReadonlyArray<readonly [string, unknown]> = [
   ['AuditMetaItemResponseSchema', AuditMetaItemResponseSchema],
   ['RollbackMetaItemResponseSchema', RollbackMetaItemResponseSchema],
   ['DiffMetaItemResponseSchema', DiffMetaItemResponseSchema],
+  // [#13523] Bound at the ledger row and on both SDK exits of the history
+  // door, so the hazard this suite pins now reaches it too.
+  ['HistoryMetaItemResponseSchema', HistoryMetaItemResponseSchema],
   ['ResolvedBookSchema', ResolvedBookSchema],
   ['PackagePublishResultSchema', PackagePublishResultSchema],
   ['DiscardPackageDraftsResponseSchema', DiscardPackageDraftsResponseSchema],

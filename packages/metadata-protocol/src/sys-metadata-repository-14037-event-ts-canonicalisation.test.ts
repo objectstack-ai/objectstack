@@ -13,11 +13,20 @@
  * straight past it into the declared field.
  *
  * `recorded_at` is a declared `Field.datetime` on `sys_metadata_history`, and
- * that does NOT protect it: `SqlDriver#formatOutput` folds declared datetime
- * columns (`normalizeSqliteDatetimeOutput`) only inside its
- * `if (this.isSqlite)` arm, and `withPostgresCalendarDayAsText` leaves
- * `timestamptz` / `timestamp` deliberately untouched. Pinned live in
- * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`.
+ * when this landed that did NOT protect it: `SqlDriver#formatOutput` folded
+ * declared datetime columns (`normalizeSqliteDatetimeOutput`) only inside its
+ * `if (this.isSqlite)` arm. #13973 ([ADR-0053 D-F1]) has since lifted that fold
+ * out of the gate — it runs on every dialect — and the pin that recorded the
+ * asymmetry now records the canonical-text contract
+ * (`packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`
+ * §B, inverted on purpose).
+ *
+ * ⚠️ `withPostgresCalendarDayAsText` is untouched by that ruling and still
+ * leaves `timestamptz` / `timestamp` deliberately alone ([ADR-0053 D-F2]) — the
+ * client still hands back a `Date`; the driver folds it at its own read
+ * boundary now. And the `Date` this file plants stays reachable: an INVALID
+ * `Date` leaves `driver-sql` unchanged ([ADR-0053 D-F3]) and non-SQL drivers
+ * materialise their own, so what is pinned below is a live adapter arm.
  *
  * ## Why it matters downstream, not just as a type
  *

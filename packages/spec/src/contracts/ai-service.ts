@@ -193,6 +193,140 @@ export interface AIToolDefinition {
 }
 
 // ---------------------------------------------------------------------------
+// Action Confirmation Contract
+// ---------------------------------------------------------------------------
+
+/**
+ * The member an AI-facing action call carries to state that the human in the
+ * loop has confirmed it.
+ *
+ * ONE exported constant, because the member's SPELLING is the whole contract:
+ * the door that refuses and the client that retries have to agree on it, and a
+ * door hand-spelling its own `'confirm'` is precisely how two doors drift into
+ * two dialects (Prime Directive #12). Every AI-facing action door reads this.
+ *
+ * It rides as a TOP-LEVEL member of the action request. The two request
+ * shapes it is destined for are the MCP `run_action` tool input (`actionName`
+ * / `objectName` / `recordId` / `params`, `packages/mcp/src/mcp-http-tools.ts`)
+ * and the runtime action door's own request object — the `input` argument of
+ * `invokeBusinessAction` (`objectName` / `recordId` / `params`,
+ * `packages/runtime/src/action-execution.ts`), which the MCP bridge builds
+ * that object from. Each grows the member in the change that enforces it, so
+ * neither ever accepts-and-ignores it. Two placements were rejected, and the
+ * reasons are the contract:
+ *
+ * - NOT inside `params`. That bag is not a free surface: it is CLOSED against
+ *   the action author's own declared input vocabulary. `enforceActionParams`
+ *   (ADR-0104 D2, strict by default since 17.0) rejects any key that is
+ *   neither a declared param nor one of the built-ins, so on an action that
+ *   declares params at all a platform `confirm` riding there is REFUSED as an
+ *   unknown action param — a 400 raised before the confirmation gate is ever
+ *   reached, not merely a collision with a name the author might already have
+ *   used. On an action declaring no params that check is a pass-through, so
+ *   the same member would be silently accepted there instead: one placement,
+ *   two opposite behaviours, which on its own disqualifies it for a safety
+ *   member.
+ * - NOT a transport header. A header is invisible to the tool schema an agent
+ *   reads, so the model cannot discover the retry it is being told to make;
+ *   and a header exists only at an HTTP edge, while the action door itself is
+ *   a plain function handed a request object rather than a transport envelope
+ *   — there is no header there for it to ride on. A free-form header would
+ *   also be an OPEN channel, which is the one thing a safety member must not
+ *   be.
+ */
+export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
+
+/**
+ * The confirmation half of an AI-facing action request — a CLOSED boolean
+ * member, declared once here and mixed into each door's own request shape
+ * rather than restated by it.
+ *
+ * ## What the member means
+ *
+ * `confirm: true` asserts that the human in the loop has approved THIS call.
+ * It is an attestation carried by the request, not a workflow: there is no
+ * queue, no parking, no server-side approval record, and a refused call is
+ * simply not executed. The caller fixes the request and retries.
+ *
+ * Absent, `false`, or any non-`true` value is NOT a confirmation. Executors
+ * MUST treat only the boolean `true` as an attestation — a truthy string is a
+ * transport artefact, not a decision.
+ *
+ * ## Which predicate gates the refusal — the DECLARED flag, never a heuristic
+ *
+ * An AI-facing action door MUST refuse a call when, and only when,
+ * `action.ai.requiresConfirmation === true` — the flag the action's AUTHOR
+ * declared — and the request does not carry the confirmation member as `true`.
+ *
+ * The predicate is deliberately narrower than the one behind the
+ * `requiresConfirmation` field of a tool/action LISTING (see
+ * {@link AIToolDefinition.requiresConfirmation}). That field answers "should a
+ * client ASK the human before calling?" and falls back to the runtime's
+ * `actionLooksDestructive` heuristic (`packages/runtime/src/action-execution.ts`)
+ * when the author declared nothing — the signals that heuristic reads are
+ * named once, beside the authorable key in `ui/action.zod.ts`, and are not
+ * restated here. This one answers "will the server REFUSE without an
+ * attestation?", and an author who declared nothing has asked for nothing:
+ * gating the refusal on the heuristic would start refusing calls that work
+ * today, on a guess the author never made.
+ *
+ * So the two are not the same predicate and MUST NOT be collapsed:
+ *
+ * - listing `requiresConfirmation: true` + declared flag absent → the client
+ *   is ADVISED to confirm; the door does not refuse.
+ * - declared `ai.requiresConfirmation: true` → the door REFUSES without the
+ *   member, and the listing reports `true` as well.
+ * - declared `ai.requiresConfirmation: false` → no refusal, whatever the
+ *   action looks like to that heuristic. An explicit `false` is the author
+ *   asserting the action is safe unattended, and it overrides the heuristic in
+ *   that direction too.
+ *
+ * The member is ACCEPTED on every AI-facing action call and only REQUIRED on
+ * the declared-gated ones, so a client that always confirms whenever a listing
+ * says `requiresConfirmation: true` is always correct. Inferring the opposite
+ * — that a listing's `false` means no door will ever refuse — is sound only
+ * because the listing's predicate is the wider of the two.
+ *
+ * ## The refusal
+ *
+ * A door that refuses answers 428 with `error.code` `ACTION_CONFIRMATION_REQUIRED`
+ * (registered under `@objectstack/runtime` in `ERROR_CODE_LEDGER`) and
+ * `error.details` shaped as {@link ActionConfirmationRequiredDetails}, which
+ * names the action and the exact member to set. Nothing dispatches: the
+ * action body does not run, no record is read or written, and the refusal
+ * carries no `status`.
+ */
+export interface AIActionConfirmation {
+    /**
+     * `true` when the human in the loop has approved this call. Only the
+     * boolean `true` is an attestation; see the interface doc.
+     */
+    confirm?: boolean;
+}
+
+/**
+ * The `error.details` payload of an `ACTION_CONFIRMATION_REQUIRED` refusal.
+ *
+ * Machine-readable on purpose, and the reason the refusal is a contract rather
+ * than a message: an agent that has just been refused must be able to build
+ * the retry WITHOUT re-parsing the prose it was handed. It gets back the
+ * action it addressed and the member to set — so the fix is mechanical, and a
+ * client never has to hard-code the member's spelling from documentation.
+ */
+export interface ActionConfirmationRequiredDetails {
+    /** The declarative action name the refused call addressed. */
+    actionName: string;
+    /** The object the action operates on; omitted for object-less actions. */
+    objectName?: string;
+    /**
+     * The request member the caller must set to `true` and retry — always the
+     * value of {@link AI_ACTION_CONFIRMATION_MEMBER}, echoed so the caller
+     * reads it off the refusal instead of restating it.
+     */
+    confirmationMember: typeof AI_ACTION_CONFIRMATION_MEMBER;
+}
+
+// ---------------------------------------------------------------------------
 // IAIService
 // ---------------------------------------------------------------------------
 

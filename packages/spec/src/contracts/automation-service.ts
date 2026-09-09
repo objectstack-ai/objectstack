@@ -342,10 +342,15 @@ export interface AutomationResult {
      * something to repair. This member is the ruling's contract half; the
      * engine begins stamping it when #13937's services half (the re-arm verb
      * and the catch-arm stamp in `resumeInternal`) lands. plugin-approvals'
-     * `StrandedRunState` (`'missing' | 'failed'`) is a report-only label over
-     * a request's run and is deliberately NOT promoted to this status (same
-     * ruling): it classifies WHY a request's run is unrecoverable, this names
-     * the run's own lifecycle verdict.
+     * `StrandedRunState` is a report-only label over a request's run and is
+     * deliberately NOT promoted to this status (same ruling): it classifies
+     * WHY a request's run is unrecoverable, this names the run's own lifecycle
+     * verdict. ⛔ Its members are deliberately NOT restated here: the union is
+     * plugin-local — declared, and documented member by member, on the type
+     * itself in `plugins/plugin-approvals/src/approval-service.ts` — and
+     * `automation-result-status.pin.test.ts` excludes it from its pins on
+     * purpose, so a member list copied into this file is unpinned prose that
+     * goes stale the next time the plugin splits an arm.
      *
      * `'refused'` names the run that reached an `end` node declaring
      * `outcome: 'refused'` (#14945; maintainer ruling 2026-09-05, option 2′):
@@ -681,4 +686,159 @@ export interface IAutomationService {
      * non-screen node still resolves to `null`.
      */
     getSuspendedScreen?(runId: string): Promise<ScreenSpec | null>;
+
+    /**
+     * **Operator verb — end a suspended run** (ADR-0044's run-cancel
+     * primitive; the #13953 ruling A, contract half, #16495).
+     *
+     * Consumes the run's continuation and records a terminal `cancelled` run
+     * log, so it stops surfacing as resumable; `reason` lands on that terminal
+     * record's `error`. Answers `true` when it cancelled a suspended run, and
+     * `false` when no suspended run exists under the id — it is already
+     * terminal, or unknown — which callers treat as idempotent success. `true`
+     * is NOT exclusive to this call — this contract carries no cancel-side
+     * exclusivity guarantee, so two cancels of one run overlapping in time can
+     * each answer `true` (and each record the terminal log): a caller may not
+     * read `true` as sole authorship, nor use it as an idempotency token for a
+     * once-only side effect. ⚠️ A durable store the implementation could not
+     * READ also answers `false`: the two are indistinguishable to the caller
+     * and the run may still be parked, which is why an implementation reports
+     * that path at `error` — nothing above it can tell the difference.
+     *
+     * **The persistent face (the #13953 ruling, maintainer 2026-09-05):**
+     * "listing and acting go through `sys_automation_run` (the persistent
+     * face), never engine memory". The run this verb acts on is the one the
+     * durable `sys_automation_run` row knows under `runId`: an implementation
+     * reads the store-authoritative suspended row, not a per-process snapshot,
+     * so the verb answers the same way on every replica — and a door lists
+     * the candidates it offers an operator from `sys_automation_run` rows,
+     * never from one process's in-memory journal (a confident zero from the
+     * wrong process is exactly the failure #13909 exists to name).
+     *
+     * **Who may call it (same ruling):** a platform-operator verb "gated on
+     * the existing `platform_admin` position (no new permission type, no
+     * per-run ownership — a run belongs to the environment, not a user)".
+     * That gate is the door's (the REST route of #13953's services half), not
+     * this method's: an in-process owner — plugin-approvals' revise-window
+     * recall (ADR-0044) — cancels on behalf of a decision it already
+     * authorized and recorded.
+     *
+     * **Optional, deliberately.** Cancelling a suspension is a capability of
+     * the flow-engine implementation, exactly like {@link resume} and
+     * {@link listSuspendedRuns}; a script-runner slot never suspends and has
+     * nothing to cancel. A service that does not declare this member has NO
+     * operator door for it: a door MUST probe for presence and refuse
+     * fail-closed when it is absent — never answer success for a verb it
+     * could not dispatch (#13909's posture: no door that returns success to
+     * hide the condition).
+     *
+     * @param runId - The suspended run's id (its `sys_automation_run` row)
+     * @param reason - Why, in the operator's words; recorded on the terminal
+     *   `cancelled` log as its `error`. The signature follows the engine, not
+     *   the ruling's `cancelRun(runId)` shorthand: a door calling through
+     *   this contract must be able to say why.
+     * @returns `true` when this call cancelled a suspended run; `false` when
+     *   none exists under the id (idempotent) — or when the store could not
+     *   be read, see above
+     */
+    cancelRun?(runId: string, reason?: string): Promise<boolean>;
+
+    /**
+     * **Operator verb — the exit from a run a resume left terminally
+     * unresumable** (#13909; the #13953 ruling A, contract half, #16495).
+     * Puts back the suspension a failed resume consumed, so the run is
+     * resumable again.
+     *
+     * The state it exits from is `AutomationResult.status: 'stranded'`
+     * (#13937 shape 4): a resume CONSUMED the suspension, a downstream node
+     * threw, and the run is recorded as failed — {@link resume} answers
+     * `RUN_NOT_FOUND` on it, {@link cancelRun} is a no-op on it, and nothing
+     * moves it automatically. This is the explicit operator verb that
+     * `'stranded'` names. There is no retry, no sweeper, no self-healing arm:
+     * an operator (or an admin door standing in for one) asks for THIS run,
+     * by id, on purpose.
+     *
+     * What it does, exactly, and what it does not:
+     *  - the pause goes back VERBATIM — its own variables, step log, node,
+     *    screen — and nothing else; ⚠️ the resume signal is NOT replayed (the
+     *    continuation must be re-issued through {@link resume}, through the
+     *    same authority gate as any other), and ⚠️ the failed attempt is NOT
+     *    undone — this re-arms a pause, it does not roll a transaction back;
+     *  - it does not resume: it re-arms the pause and stops;
+     *  - it is idempotent by construction: a suspension is keyed by run id,
+     *    so a second restore finds one live and is refused (`RUN_SUSPENDED`),
+     *    across processes and across a restart;
+     *  - it never throws: every outcome, an unreadable store included, is the
+     *    result below naming what was observed.
+     *
+     * **The persistent face (the #13953 ruling, maintainer 2026-09-05):**
+     * "listing and acting go through `sys_automation_run` (the persistent
+     * face), never engine memory". The consumed suspension this verb puts
+     * back is the snapshot the run's terminal `sys_automation_run` row carries
+     * (#13937 reads that row and a process's hot copy as two witnesses of one
+     * strand: the row is the record every replica can read, and a hot copy is
+     * honoured only for the same pause the row describes, or where there is
+     * no row to ask). And the list of runs an operator may repair is a QUERY
+     * over `sys_automation_run` terminal rows carrying a restorable snapshot,
+     * never a read of engine memory — a lister backed by one process's
+     * journal answers ZERO in every process that did not itself strand the
+     * run, and a confident zero is the failure this whole class is about.
+     * ⛔ This contract declares no lister; #13953's services half owns the
+     * door.
+     *
+     * **Who may call it (same ruling):** a platform-operator verb "gated on
+     * the existing `platform_admin` position (no new permission type, no
+     * per-run ownership — a run belongs to the environment, not a user)".
+     * That gate is the door's, not this method's. Re-arming a run the
+     * platform recorded as terminally failed is a real decision, which is why
+     * "who asked, and why" is part of the signature rather than the ruling's
+     * `restoreConsumedSuspension(runId)` shorthand: the implementation's
+     * trace records both, and writes `not recorded` when `requestedBy` is
+     * absent — itself something an operator can find later.
+     *
+     * **Optional, deliberately** — for the reason {@link cancelRun} is: a
+     * service that does not declare this member has NO operator door for it,
+     * and a door MUST probe for presence and refuse fail-closed when it is
+     * absent, never answer a restore it could not dispatch.
+     *
+     * **The result is deliberately NARROWER than the implementation's.** The
+     * engine answers its own wider `SuspensionRestoreResult` — a closed
+     * eight-member refusal vocabulary plus the restored run's flow, node and
+     * consumption time. That type lives with the engine and is not moved
+     * here (#16495, route (i)): `refusal` is typed as the string the
+     * implementation answers, not as an enumeration this contract would have
+     * to keep in step, and the wider type satisfies this one under
+     * `implements`. What a door needs is here — `restored`, the `runId`
+     * echoed, the refusal code and its one-sentence `reason`. A second
+     * consumer that needs the vocabulary itself is a spec card, never a
+     * widening at a call site.
+     *
+     * @param runId - The run to re-arm (its `sys_automation_run` row)
+     * @param options.requestedBy - Who asked; logged, `not recorded` when
+     *   absent
+     * @param options.reason - Why; logged the same way
+     * @returns `restored: true` only when a suspension was actually put back
+     *   by THIS call, and then `refusal` is absent; otherwise
+     *   `restored: false` with `refusal` naming the code the implementation
+     *   observed. `reason` is always present, both ways — one sentence naming
+     *   what was observed, so an operator whose repair is refused can tell
+     *   "this run is fine" from "this run is beyond this verb" from "I could
+     *   not read the store".
+     */
+    restoreConsumedSuspension?(
+        runId: string,
+        options?: { requestedBy?: string; reason?: string },
+    ): Promise<{
+        /** `true` only when a suspension was actually put back by THIS call. */
+        restored: boolean;
+        /** The run id, echoed. */
+        runId: string;
+        /**
+         * The refusal code the implementation observed (its own closed
+         * vocabulary — see above); absent exactly when `restored` is `true`.
+         */
+        refusal?: string;
+        /** One sentence naming what was observed — always present, both ways. */
+        reason: string;
+    }>;
 }

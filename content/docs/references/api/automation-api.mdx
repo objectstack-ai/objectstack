@@ -13,6 +13,7 @@ triggering executions, and querying execution history.
 Base path: /api/automation
 
 **Endpoints**
+```
 GET    /api/automation                         — List flows
 GET    /api/automation/:name                   — Get flow
 POST   /api/automation                         — Create flow
@@ -22,6 +23,7 @@ POST   /api/automation/:name/trigger           — Trigger flow execution
 POST   /api/automation/:name/toggle            — Enable/disable flow
 GET    /api/automation/:name/runs              — List execution runs
 GET    /api/automation/:name/runs/:runId       — Get single execution run
+```
 
 <Callout type="info">
 **Source:** `packages/spec/src/api/automation-api.zod.ts`
@@ -30,8 +32,8 @@ GET    /api/automation/:name/runs/:runId       — Get single execution run
 ## TypeScript Usage
 
 ```typescript
-import { AutomationApiErrorCode, AutomationFlowPathParamsSchema, AutomationRunPathParamsSchema, CreateFlowRequestSchema, CreateFlowResponseSchema, DeleteFlowRequestSchema, DeleteFlowResponseSchema, FlowSummarySchema, GetFlowRequestSchema, GetFlowResponseSchema, GetRunRequestSchema, GetRunResponseSchema, ListFlowsRequestSchema, ListFlowsResponseSchema, ListRunsRequestSchema, ListRunsResponseSchema, ToggleFlowRequestSchema, ToggleFlowResponseSchema, TriggerFlowRequestSchema, TriggerFlowResponseSchema, UpdateFlowRequestSchema, UpdateFlowResponseSchema } from '@objectstack/spec/api';
-import type { AutomationApiErrorCode, AutomationFlowPathParams, AutomationRunPathParams, CreateFlowRequest, CreateFlowResponse, DeleteFlowRequest, DeleteFlowResponse, FlowSummary, GetFlowRequest, GetFlowResponse, GetRunRequest, GetRunResponse, ListFlowsRequest, ListFlowsResponse, ListRunsRequest, ListRunsResponse, ToggleFlowRequest, ToggleFlowResponse, TriggerFlowRequest, TriggerFlowResponse, UpdateFlowRequest, UpdateFlowResponse } from '@objectstack/spec/api';
+import { AutomationApiErrorCode, AutomationFlowPathParamsSchema, AutomationRunPathParamsSchema, CreateFlowRequestSchema, CreateFlowResponseSchema, DeleteFlowRequestSchema, DeleteFlowResponseSchema, FlowSummarySchema, GetFlowRequestSchema, GetFlowResponseSchema, GetRunRequestSchema, GetRunResponseSchema, ListFlowsRequestSchema, ListFlowsResponseSchema, ListRunsRequestSchema, ListRunsResponseSchema, ResumeFailureDetailsSchema, ToggleFlowRequestSchema, ToggleFlowResponseSchema, TriggerFlowRequestSchema, TriggerFlowResponseSchema, UpdateFlowRequestSchema, UpdateFlowResponseSchema } from '@objectstack/spec/api';
+import type { AutomationApiErrorCode, AutomationFlowPathParams, AutomationRunPathParams, CreateFlowRequest, CreateFlowResponse, DeleteFlowRequest, DeleteFlowResponse, FlowSummary, GetFlowRequest, GetFlowResponse, GetRunRequest, GetRunResponse, ListFlowsRequest, ListFlowsResponse, ListRunsRequest, ListRunsResponse, ResumeFailureDetails, ToggleFlowRequest, ToggleFlowResponse, TriggerFlowRequest, TriggerFlowResponse, UpdateFlowRequest, UpdateFlowResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = AutomationApiErrorCode.parse(data);
@@ -509,6 +511,19 @@ const result = AutomationApiErrorCode.parse(data);
 | **total** | `integer` | optional | Total matching runs |
 | **nextCursor** | `string` | optional | Cursor for the next page |
 | **hasMore** | `boolean` | ✅ | Whether more runs are available |
+
+
+---
+
+## ResumeFailureDetails
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **runId** | `string` | ✅ | The run the resume was addressed to - the run that failed, and on the `stranded` arm the run an operator verb can re-arm. Named so a caller acts on an identifier instead of parsing one out of the message |
+| **status** | `Enum<'failed' \| 'stranded'>` | optional | The engine's own lifecycle verdict for the run, forwarded verbatim when the producer stamped one and never synthesised by the door - absent when the engine reported no status (a subflow child that failed terminally, an engine that predates the discriminator). `stranded` is the terminally-failed-but-repairable run of `AutomationResult.status`; `failed` says the run ran and was rejected. These two terminal-failure members of that union are the only ones that can reach a 400 |
+| **repairable** | `boolean` | ✅ | Whether the engine says this run can still be re-armed by an operator verb - `true` exactly when `status` is `stranded`, derived from the engine's discriminator and never from the message text. Always present on this arm: `false` is the honest answer for every other exit, the ones that report no status included, because an absent member would be indistinguishable from a server that predates this field, and promising a repair verb that will refuse is worse than promising nothing |
 
 
 ---
