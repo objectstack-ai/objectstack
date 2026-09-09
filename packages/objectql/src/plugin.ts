@@ -162,7 +162,8 @@ export interface ObjectQLPluginOptions {
    * Skip both `syncRegisteredSchemas()` calls inside `start()` and
    * assume DDL is managed out-of-band (e.g. an `apps/cloud/scripts/migrate.ts`
    * run before deploy that connects directly to the database and creates
-   * all `sys_*` + custom tables once).
+   * all `sys_*` + custom tables once — that script lives in the separate
+   * `objectstack-ai/cloud` repo and is NOT a path in this one).
    *
    * Use this on cold-start-sensitive runtimes (Cloudflare Containers,
    * Lambda) where the platform's inbound-request budget is shorter than
@@ -1100,10 +1101,10 @@ export class ObjectQLPlugin implements Plugin {
     ) => {
       const now = stamp();
       // A "historical" import (#3493) reinstates the ORIGINAL timeline, so a
-      // client-supplied created_at/updated_at/updated_by is CLIENT-PREFERRED
-      // under `preserveAudit` — instead of being overwritten with the import
-      // instant. Opt-in and server-set only; a normal write leaves
-      // `preserveAudit` unset and still stamps now.
+      // client-supplied created_at/created_by/updated_at/updated_by is
+      // CLIENT-PREFERRED under `preserveAudit` — instead of being overwritten
+      // with the import instant. Opt-in and server-set only; a normal write
+      // leaves `preserveAudit` unset and still stamps now.
       //
       // [#15964] `created_at` takes the SAME SHAPE as `updated_at`, on the
       // maintainer ruling of 2026-09-06 (decision batch #54, option A). It was
@@ -1123,9 +1124,28 @@ export class ObjectQLPlugin implements Plugin {
         record.created_at = preserveAudit ? (record.created_at ?? now) : now;
       }
       record.updated_at = preserveAudit ? (record.updated_at ?? now) : now;
+      // [#16311] `created_by` takes the SAME SHAPE as `updated_by`, one field
+      // over — the identical laundering, measured on the same rig and closed
+      // the same way, because two fields fixed two ways inside one function is
+      // how this second card came to exist at all. It was
+      // `record.created_by ?? session.userId`: client-preferred with no flag,
+      // so an ordinary authenticated POST stored `created_by: 'forged_user'`
+      // while `updated_by` in the SAME payload was correctly overwritten with
+      // the session user — the control proving the strip ran on that row and
+      // took the sibling audit field.
+      //
+      // Both audit-user assignments stay INSIDE `if (session?.userId)`, and
+      // that guard is load-bearing rather than incidental. `created_by` is not
+      // symmetric with `created_at`: with no session the hook must assign
+      // NOTHING, so the engine strip takes a caller's forgery and the key is
+      // absent. Assigning `session.userId` unconditionally would write
+      // `undefined` into the key, making it one the hook "wrote"; #14259's
+      // guard would then spare it and a branch that is correct today would
+      // become a NEW hole. Pinned as row1 of
+      // `plugin-audit-created-by-create-side.test.ts`.
       if (session?.userId) {
         if (isInsert && hasField(objectName, 'created_by')) {
-          record.created_by = record.created_by ?? session.userId;
+          record.created_by = preserveAudit ? (record.created_by ?? session.userId) : session.userId;
         }
         if (hasField(objectName, 'updated_by')) {
           record.updated_by = preserveAudit ? (record.updated_by ?? session.userId) : session.userId;

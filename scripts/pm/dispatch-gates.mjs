@@ -503,6 +503,127 @@ const maskedComments = memoiseMask((source) => maskComments(source));
  */
 const maskedModuleBody = memoiseMask((source) => maskSelfTests(maskedComments(source)));
 
+/**
+ * ── The `#` half of the same discipline, for the file kind the follow already
+ *    admits (#16132) ───────────────────────────────────────────────────────
+ *
+ * `maskedModuleBody` reads line comments, block comments and a shebang, because every
+ * caller it was written for is JavaScript. `PROGRAM_TEXT_TARGET` admits a THIRD
+ * kind, and a shell script's prose is none of those three: on a `.sh` source every
+ * path a `#` comment mentions came back as a watch hint, because the JS-shaped
+ * literal regex reads a backticked path in prose as a template literal and a
+ * double-quoted one as a string. Measured on `be92d46`, over the 27 tracked
+ * `.sh` files: 37 hints as spelled, 8 once `#` comments are masked, and 8 of the
+ * 16 files that spell any hint at all had a population that was 100% prose.
+ * `scripts/bump-objectui.sh` was the sharpest — 7 hints, every one of them
+ * inside a `#` comment or an `echo` line. Re-taken unchanged after merging
+ * `5e53d73d`; the self-test asserts the DIRECTION rather than these numbers,
+ * because a reading belongs to a named commit and this one moves whenever a
+ * shell script gains or loses a comment.
+ *
+ * That is the one direction this file refuses everywhere else, stated twice next
+ * door: `spawnedProgramTargets` takes a missing lead over a fabricated one, and
+ * `readProgramTargetsInSource` blanks comments so a docblock naming a gate is
+ * not a read of it. Hint extraction paid for neither, for this kind.
+ *
+ * ## Why this is a per-LINE recogniser and not a shell parser
+ *
+ * A `#` opens a comment only at the start of a WORD, and only outside quotes —
+ * so `$#`, `${#a}`, `a#b` and a `#` inside `'…'` or `"…"` are not comment
+ * starts, and a naive blank-from-`#`-to-end-of-line corrupts exactly the lines
+ * worth reading. Quote tracking is therefore real, and it is where the cost of
+ * being WRONG is unbounded: one unbalanced quote silently disables the mask for
+ * the whole REST of the file, which is the fabricating direction.
+ *
+ * A flat scanner cannot keep shell's quoting straight, and the measurement is
+ * not marginal. Command substitution restarts quoting — `"$(printf '%s' "$x")"`
+ * is balanced in shell and reads as three separate spans to a scanner that does
+ * not model `$( … )` — and a here-string `<<<` looks like a here-doc introducer
+ * to anything that matches `<<` first. A cross-line implementation of both was
+ * built and measured on this tree before this one: it left 1,467 comment lines
+ * unmasked in `scripts/pm/os-verify-lock.sh` alone and 8 in
+ * `scripts/release-spec-changes.sh`, where the two surviving hints were the
+ * prose ones this card is about.
+ *
+ * ⇒ quote state is LINE-SCOPED: it opens and dies on its own line, and nothing
+ * is carried across a newline. Every misreading is then bounded to the line it
+ * is on, and the residue lands in the OVER-masking direction — a multi-line
+ * quoted string or a here-doc body whose line begins with `#` is masked as if
+ * it were a comment. That is a missing lead, on text that is data rather than a
+ * path the script opens, and it is the direction this file errs in everywhere.
+ * ⛔ Do not "fix" it into carried state: that trades a bounded over-mask for the
+ * unbounded under-mask measured above.
+ *
+ * Same projection as `blank` next door — spans become spaces, newlines and byte
+ * offsets survive — so this composes onto `maskedModuleBody`'s output rather
+ * than replacing it. The order is measured too, and it is the one that cannot
+ * widen: masking `#` FIRST stops a `#` comment containing `@objectstack/*` from
+ * opening a phantom JS block comment, which UNCOVERS code below it and adds
+ * hints (2 on this tree — `scripts/downstream-smoke.sh` and
+ * `.claude/hooks/guard-tree-enum.sh`). Masking `#` LAST can only blank more of
+ * an already-masked body, so the shell hint set is a subset of today's by
+ * construction.
+ */
+const SHELL_WORD_START = /[\s;&|()<>]/;
+
+function shellCommentSpans(source) {
+  const n = source.length;
+  const comment = new Uint8Array(n);
+  let quote = '';
+  // The character before the cursor, as the WORD rule sees it. A newline reads
+  // as a word boundary, so a `#` in column 0 is a comment start.
+  let prev = '\n';
+  let i = 0;
+  while (i < n) {
+    const ch = source[i];
+    if (ch === '\n') {
+      quote = '';
+      prev = '\n';
+      i++;
+      continue;
+    }
+    if (quote) {
+      // A backslash escapes inside `"…"` and is literal inside `'…'`.
+      if (quote === '"' && ch === '\\' && i + 1 < n && source[i + 1] !== '\n') {
+        i += 2;
+        continue;
+      }
+      if (ch === quote) quote = '';
+      i++;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < n && source[i + 1] !== '\n') {
+      prev = 'x';
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      prev = 'x';
+      i++;
+      continue;
+    }
+    if (ch === '#' && SHELL_WORD_START.test(prev)) {
+      while (i < n && source[i] !== '\n') comment[i++] = 1;
+      continue;
+    }
+    prev = ch;
+    i++;
+  }
+  return comment;
+}
+
+/**
+ * The source with its `#` COMMENT spans blanked — the shell counterpart of
+ * `maskComments`, and the same projection: spaces in, newlines and offsets kept.
+ */
+export function maskShellComments(source) {
+  return blank(String(source), shellCommentSpans(String(source)));
+}
+
+/** `maskShellComments(maskedModuleBody(source))`, memoised — see the block above. */
+const maskedHashCommentBody = memoiseMask((source) => maskShellComments(maskedModuleBody(source)));
+
 // ── What a gate that IMPORTS this module inherits (#11556) ─────────────────
 //
 // This module is importable and is NOT a discovered gate file — `check:pm-dispatch-gates`
@@ -4678,7 +4799,18 @@ function exclusionDeclSpans(moduleBody) {
  * have to remember to do it.
  */
 export function extractWatchHints(scriptSource, scriptPath = null, { tree = null } = {}) {
-  const moduleBody = maskedModuleBody(scriptSource);
+  // The `#` mask is KIND-scoped, so it is reached through the path rather than
+  // sniffed out of the bytes. A caller with no `scriptPath` therefore keeps the
+  // JS-only mask over a shell source, and that direction is the one this
+  // parameter fails in the OTHER way from everything else in this function: a
+  // forgotten path is a missing lead for the resolve below, and a FABRICATED
+  // one here. Both live callers pass it (`discoverFamilies`, twice); the
+  // pathless overload is the self-test's and `declaredInheritedPopulation`'s
+  // own fallback, and a shell module that declared an inherited population
+  // would be held to the path-aware set that `discoverFamilies` computes.
+  const moduleBody = hashCommentProgram(scriptPath)
+    ? maskedHashCommentBody(scriptSource)
+    : maskedModuleBody(scriptSource);
   const exclusions = exclusionDeclSpans(moduleBody);
   const hints = new Set();
   for (const m of moduleBody.matchAll(/['"`]([^'"`\n]{2,120})['"`]/g)) {
@@ -7371,6 +7503,27 @@ const SOURCE_READ_CALL = /\b(?:fs\.)?(?:readFileSync|copyFileSync)\s*\(/g;
 
 /** Program text, as opposed to data a gate parses — see the docblock above. */
 export const PROGRAM_TEXT_TARGET = /\.(?:[cm]?[jt]sx?|sh)$/;
+
+/**
+ * Program text this file's JS masker cannot read — derived from the other two
+ * kind tests rather than listed, so it cannot drift away from them (#16132).
+ *
+ * `PROGRAM_TEXT_TARGET` decides which kinds a population follow may reach;
+ * `SCANNED_SOURCE_EXTENSIONS` names the JS/TS half `maskedModuleBody` was
+ * written for. The remainder is the half whose comment syntax that masker does
+ * not know, and today it is exactly `.sh`. Spelling it as the DIFFERENCE means a
+ * kind added to the follow arrives already masked: the widening that admits it
+ * is the same edit that routes it here. A kind whose comments are not `#`
+ * would be over-masked by that default, which is a missing lead rather than a
+ * fabricated one — the direction the two scans next door both state.
+ */
+function hashCommentProgram(scriptPath) {
+  return (
+    typeof scriptPath === 'string'
+    && PROGRAM_TEXT_TARGET.test(scriptPath)
+    && !SCANNED_SOURCE_EXTENSIONS.test(scriptPath)
+  );
+}
 
 /**
  * The program files, of the tracked files a gate opens at an anchored path.
@@ -10833,12 +10986,24 @@ export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows 
  *
  * ## What the total deliberately does NOT cover
  *
- * The pending-changeset families, the unreachable listing and the always-runs
- * tail are each outside it, each with its own count printed under its own
- * heading. That is the same disclosure `machineReadableOutput` makes on stderr,
- * and it is made here for the same reason: a new number that reads as "the
- * complete account of what CI runs" would reproduce this card's own defect one
- * layer up.
+ * Every block printed BELOW this line is outside it, each with its own count
+ * under its own heading. That disclosure is made for the same reason
+ * `machineReadableOutput` makes its own on stderr: a new number that reads as
+ * "the complete account of what CI runs" would reproduce this card's own defect
+ * one layer up.
+ *
+ * ⛔ This comment deliberately does NOT list those blocks. It used to, and the
+ * rendering listed them too — one claim, written out twice — and the two copies
+ * drifted: both named three of the five blocks the same run printed, omitting
+ * the artifact rosters and the declared WIDE population. A harvester who
+ * followed the enumeration and stopped never reached either, and CI caught the
+ * difference on a family printed in the WIDE block (#16398). The list now
+ * exists ONCE, as the exported `outsideBlockNames`, built from the block counts
+ * its callers hand it so a block that printed cannot be missing from it and a
+ * block that did not print cannot be named. All THREE output lanes read it —
+ * this one, `--ran` and the `--commands`/`--json` stderr accounting, which used
+ * to carry short prose copies of their own (#16795). Amend it there; there is
+ * no second copy here to keep in step.
  *
  * `staleRows` and the row/family gap are surfaced rather than smoothed. A
  * consumer counting PRINTED rows in the convention block and comparing them
@@ -10846,7 +11011,9 @@ export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows 
  * explanation — a STALE row prints and contributes no command, and one family
  * hit by two kinds prints twice. Both are stated in the rendering.
  */
-export function familyReconciliation({ matchedRows = [], kindGroups = [], alwaysRunsRows = [] } = {}) {
+export function familyReconciliation({
+  matchedRows = [], kindGroups = [], alwaysRunsRows = [], rosterRows = [], widePopulationRows = [], pendingRows = [],
+} = {}) {
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   // The SAME expression commandsFor uses for its matched half. Written as a
   // second traversal it would be a second answer to a question this file
@@ -10919,6 +11086,22 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [], always
     staleRows,
     ciOnlyConventionRows,
     notRunnableConventionRows,
+    // Three counts that are NOT terms of the total and never enter the closure
+    // assertion below — they are the SIZES of three blocks printed under this
+    // line, carried here for the same reason `ciOnly` and `notRunnable` are:
+    // the rendering has to name what sits outside the answer, and a count it
+    // reads from the arrays that RENDER those blocks cannot disagree with them
+    // (#16398). They are handed to `outsideBlockNames`, which is the only place
+    // the list of outside blocks exists.
+    artifactRosters: rosterRows.length,
+    widePopulation: widePopulationRows.length,
+    // The THIRD block size (#16795). Its name was the one the enumeration still
+    // spelled UNCONDITIONALLY, while `pendingChangesetLines` returns nothing at
+    // zero — so on a card with no pending family the sentence pointed a reader
+    // below at a heading that is not there. That is this same defect facing the
+    // other way, and it is fixed the same way: by counting the array that
+    // renders the block rather than by writing the name out.
+    pendingChangeset: pendingRows.length,
   };
   if (recon.matched + recon.convention - recon.both + recon.alwaysRunsOnly !== recon.total) {
     throw new Error(
@@ -10930,6 +11113,83 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [], always
     );
   }
   return recon;
+}
+
+/**
+ * ⭐ The blocks that sit OUTSIDE a card's runnable total, enumerated ONCE for
+ * ALL THREE output lanes.
+ *
+ * This is one claim, and it has been spelled four different ways. The human
+ * rendering and a comment beside it each wrote it out in prose; the two copies
+ * drifted, and both named three of the five blocks the same run printed — the
+ * artifact rosters and the declared WIDE population, the two nothing else tells
+ * a seat to run. A harvester who followed the enumeration and stopped reached
+ * neither, and CI reddened on a family printed in the WIDE block (#16398). That
+ * card built the list once, for the human lane. The other two lanes kept their
+ * own short prose copies: `--ran` named three of five, and the
+ * `--commands`/`--json` stderr accounting named exactly ONE — on the very
+ * channel this file's own header tells consumers to use INSTEAD of harvesting
+ * the prose, which makes a whole block missing from it the same failure on the
+ * lane that was supposed to be the safe one (#16795).
+ *
+ * ⛔ So a lane never spells its own copy. It calls this with the counts it
+ * holds, and a block it does not know about is absent by construction rather
+ * than by care. Four copies of one sentence is how the sentence went wrong;
+ * this is the one copy.
+ *
+ * ⭐ Built from the block COUNTS, never written out: each count is the length
+ * of the very array `artifactRosterLines`, `widePopulationLines` or
+ * `pendingChangesetLines` renders, so the enumeration cannot name a set the
+ * output does not contain. A count of 0 drops the name, because at zero rows
+ * all three of those return nothing — pointing a reader "below" at a heading
+ * that is not there is this same defect facing the other way, and the
+ * pending-changeset name carried exactly that bug for as long as it was
+ * spelled unconditionally. The last two names have no count and no condition
+ * because their renderings have none: `unreachableLines` and `alwaysRunLines`
+ * print on EVERY run, at zero as at fifty.
+ *
+ * Named in the order a plain run PRINTS them, so a reader walking down the
+ * output meets the blocks in the order this list promised them.
+ */
+export function outsideBlockNames({ artifactRosters = 0, widePopulation = 0, pendingChangeset = 0 } = {}) {
+  return [
+    ...(artifactRosters > 0 ? [`the ${artifactRosters} artifact-roster famil(ies)`] : []),
+    ...(widePopulation > 0 ? [`the ${widePopulation} declared WIDE-population famil(ies)`] : []),
+    ...(pendingChangeset > 0 ? [`the ${pendingChangeset} pending-changeset famil(ies)`] : []),
+    'the unreachable listing',
+    'the always-runs tail',
+  ];
+}
+
+/**
+ * The same enumeration as one English phrase — the only place the join is
+ * spelled, for the reason the list itself has only one place.
+ *
+ * Every name opens with a lowercase article, so a sentence-initial use raises
+ * the leading letter at the point of use rather than keeping a second,
+ * capitalised copy of the list — which is the duplication this pair exists to
+ * remove.
+ */
+export function outsideBlocksPhrase(counts) {
+  const names = outsideBlockNames(counts);
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/**
+ * The three block sizes a `recon` from `familyReconciliation` carries, read
+ * back off it in the shape `outsideBlockNames` takes.
+ *
+ * A named reader rather than an object literal at each call site: the human
+ * lane and `--ran` both hand the same three counts across, and two literals
+ * spelling the same three key names is the smallest possible version of the
+ * duplication this whole construction removes.
+ */
+export function outsideBlockCounts(recon) {
+  return {
+    artifactRosters: recon?.artifactRosters ?? 0,
+    widePopulation: recon?.widePopulation ?? 0,
+    pendingChangeset: recon?.pendingChangeset ?? 0,
+  };
 }
 
 /**
@@ -10970,13 +11230,24 @@ export function familyReconciliationLines(recon) {
         ' Named under their own heading above with the variable in the value position, carried on their row in --json,' +
         ' and omitted from --commands by design.'
       : null;
+  // ⭐ The enumeration of what sits OUTSIDE this total, READ from the one place
+  // it exists (`outsideBlockNames`) and rendered by BOTH branches below. It is
+  // one claim, and a copy of it per lane is exactly how it went wrong — see
+  // that function for the two measured drifts and for why every name is
+  // conditional on the count of the array that renders its block.
+  const outsideBlocks = outsideBlocksPhrase(outsideBlockCounts(recon));
+  // Both uses below are sentence-initial and every name opens with a lowercase
+  // article, so the leading letter is raised here rather than by keeping a
+  // second, capitalised copy of the list — which is the duplication this whole
+  // construction exists to remove.
+  const outsideBlocksCapitalised = `${outsideBlocks.charAt(0).toUpperCase()}${outsideBlocks.slice(1)}`;
   if (recon.total === 0) {
     return [
       'Reconciliation — 0 famil(ies): this card\'s whole runnable answer, and the derivation COMPLETED to reach it.',
       '  0 named by PATH (the matched block) + 0 named by change KIND (the convention block). An empty answer, not a missing one.',
       ...(ciOnlyLine ? [ciOnlyLine] : []),
       ...(notRunnableLine ? [notRunnableLine] : []),
-      '  ⇒ --commands prints nothing for these paths and exits 0. The always-runs tail below still applies and is NOT covered by this number.',
+      `  ⇒ --commands prints nothing for these paths and exits 0. ${outsideBlocksCapitalised} below still apply and are NOT covered by this number.`,
     ];
   }
   const lines = [
@@ -11036,7 +11307,7 @@ export function familyReconciliationLines(recon) {
   }
   lines.push(
     `  ⛔ ${recon.total} is what THIS CARD owes by path and kind — NOT a complete account of what CI runs on the PR.` +
-      ' The pending-changeset families, the unreachable listing and the always-runs tail below are each OUTSIDE it, each with its own count.',
+      ` ${outsideBlocksCapitalised} below are each OUTSIDE it, each with its own count.`,
   );
   return lines;
 }
@@ -11330,8 +11601,19 @@ export function runReconciliation({
  * remainder is classified by the tool: a verdict a reader has to assemble from
  * several counts is a verdict that gets waved through once the counts are
  * routinely non-empty.
+ *
+ * `outside` carries the SIZES of the blocks a run without `--ran` prints below
+ * its reconciliation — the same three counts `familyReconciliation` puts on its
+ * own recon, taken from the same arrays. They are a parameter rather than a
+ * term of `runReconciliation` on purpose: this reconciliation's arithmetic is
+ * record-against-derived and closes over its own classes, and a block size is
+ * not one of them — it is an input to the SENTENCE, so it arrives where the
+ * sentence is written. Defaulting to zero counts keeps every caller that has no
+ * derivation beside it (the self-test's fixtures) naming exactly the two blocks
+ * that print unconditionally, which is the true answer for a run with none of
+ * the other three (#16795).
  */
-export function runReconciliationLines(recon) {
+export function runReconciliationLines(recon, outside = {}) {
   const lines = [];
   const marker = RUN_RECORD_UNMEASURED_MARKER;
   lines.push(
@@ -11392,9 +11674,17 @@ export function runReconciliationLines(recon) {
   for (const command of recon.conflicts) {
     lines.push(`  ⚠️ '${command}' is recorded BOTH as run and as ${marker}. Read as run; fix the record so it states one thing.`);
   }
+  // ⭐ The enumeration READ from the one place it exists, not a prose copy.
+  // This sentence used to spell three of the five blocks a plain run prints,
+  // omitting the artifact rosters and the declared WIDE population — the same
+  // short list, on a second lane, that #16398 measured a CI round trip for on
+  // the first one (#16795). It also named the pending-changeset families
+  // unconditionally, at a heading that is not printed when there are none.
+  // Both are structural now: `outsideBlockNames` cannot name a block whose
+  // count is zero, and cannot omit one whose count is not.
   lines.push(
     '  ⛔ This answers ONE link: what this card DERIVES against what you RAN. It is not a complete account of what CI runs on the PR —' +
-      ' the always-runs tail, the unreachable listing and the pending-changeset families are each outside the derived total, each printed under its own heading by a run without --ran.',
+      ` ${outsideBlocksPhrase(outside)} are each outside the derived total, each printed under its own heading by a run without --ran.`,
   );
   lines.push(
     recon.ok
@@ -11482,10 +11772,13 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
  * documented — there is no prose in the stream to pattern-match, and therefore
  * no spelling for a pattern to prefer.
  *
- * The stderr accounting exists so the two things stdout deliberately omits —
- * the pending-changeset families and the always-runs tail — are omitted OUT
- * LOUD. A quiet omission is the defect this mode was added to fix, and adding a
- * new one inside the fix is how that defect reproduces itself one layer up.
+ * The stderr accounting exists so everything stdout deliberately omits is
+ * omitted OUT LOUD. A quiet omission is the defect this mode was added to fix,
+ * and adding a new one inside the fix is how that defect reproduces itself one
+ * layer up — which is exactly what the closing disclaimer did: it named the
+ * always-runs tail and stopped, while FIVE blocks sit outside the command list
+ * and the declared WIDE population was not mentioned in it at all. It reads
+ * `outsideBlockNames` now, with the counts this function already holds (#16795).
  */
 function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], widePopulationRows = [], rosters = [] }) {
   const identity = repoIdentity();
@@ -11573,8 +11866,23 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
   // unreachable. ⛔ Never merged into the command list — these families are
   // `silent`, and no path a caller passes can move them.
   for (const line of artifactRosterLines(rosters)) console.error(`  ${line}`);
+  // ⭐ The closing disclaimer, READ from the one place the list exists. It named
+  // the always-runs tail alone, so a `--commands` consumer — the reader this
+  // file's own header sends here INSTEAD of the prose — was never told the
+  // declared WIDE population exists, which is the same defect on the lane that
+  // was supposed to be the safe one (#16795).
+  //
+  // The counts are the LENGTHS OF THE ARRAYS THAT RENDER THE BLOCKS on a plain
+  // run, deliberately not the runnable subsets the count lines above report:
+  // `widePopulationLines` prints its refused rows too, so sizing this name off
+  // `wideRunnable` would name a block by a number the block does not show. Each
+  // name is the block, not the part of it this lane happens to summarise.
   console.error(
-    '  ⛔ Not a complete account of what CI runs on this PR: the always-runs tail (workflows with no path filter) is NOT here. Run without --commands/--json for it.',
+    `  ⛔ Not a complete account of what CI runs on this PR: ${outsideBlocksPhrase({
+      artifactRosters: rosters.length,
+      widePopulation: widePopulationRows.length,
+      pendingChangeset: pending.length,
+    })} are each OUTSIDE the ${commands.length} command(s) on stdout. Run without --commands/--json to see every one of them named.`,
   );
 }
 
@@ -11734,7 +12042,17 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       pendingCommands: new Set(pending.map(({ entry }) => runnableInvocation(entry))),
       record: runRecord,
     });
-    for (const line of runReconciliationLines(recon)) console.log(line);
+    // The block sizes handed across as the SAME arrays a plain run renders
+    // those blocks from — never as recounts of them, for the reason the human
+    // lane's own call states: a second count could name a set the output does
+    // not contain (#16398, #16795). `--ran` prints none of these blocks itself;
+    // the sentence points at the run that does, and it must point at what THAT
+    // run would print for these paths, which is what these three arrays are.
+    for (const line of runReconciliationLines(recon, {
+      artifactRosters: rosters.length,
+      widePopulation: widePopulationRows.length,
+      pendingChangeset: pending.length,
+    })) console.log(line);
     return recon.ok ? 0 : 1;
   }
 
@@ -11767,7 +12085,14 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // the block it counts) and the reconciliation line below. Recomputing it in
   // either place would be two readings of one derivation, which is the drift
   // this card is about.
-  const recon = familyReconciliation({ matchedRows, kindGroups, alwaysRunsRows });
+  // `rosters`, `widePopulationRows` and `pending` are handed in as the SAME
+  // arrays the three conditional blocks below the reconciliation are rendered
+  // from, never as recounts of them: the line has to name every block that sits
+  // outside this total, and a second count of those rows could name a set the
+  // output does not contain (#16398, #16795).
+  const recon = familyReconciliation({
+    matchedRows, kindGroups, alwaysRunsRows, rosterRows: rosters, widePopulationRows, pendingRows: pending,
+  });
 
   console.log(`dispatch-gates: ${byCheck.size} check famil(ies) discovered across ${workflows.length} workflow file(s) — derived at runtime, nothing listed in this script.\n`);
   // The tier verdict prints on EVERY run, hit or not. Printing it only on a hit
@@ -14833,6 +15158,171 @@ function selfTest() {
   t(
     'a caller that passes no script path still gets the stripped spelling',
     extractWatchHints("import { f } from './lib/dist-freshness';").includes('lib/dist-freshness'),
+  );
+
+  // ── `#` COMMENTS on a shell-kind source (#16132) ──────────────────────────
+  //
+  // The card's fixture table, which is the whole of the acceptance criterion:
+  // three sources that were indistinguishable and must not be, and a fourth row
+  // that is the CONTROL — the JS masking discipline already reached this file
+  // kind, and this change may not cost it. ⛔ A pin written against only the
+  // negative rows would pass on an instrument that returned nothing at all, and
+  // a pin written against only the positive one would pass on the broken
+  // instrument, which returned `1` for all three.
+  const shTarget = 'scripts/bump-objectui.selftest.sh';
+  const shProseTick = '# see `' + shTarget + '` for the self-test\n';
+  const shProseQuote = '# see "' + shTarget + '" for the self-test\n';
+  const shInvocation = "bash '" + shTarget + "'\n";
+  const shJsComment = '// see `' + shTarget + '`\n';
+  const shHints = (src, path = 'scripts/fixture.sh') => extractWatchHints(src, path, { tree: hintTree });
+  t(
+    'a path a shell `#` comment quotes in BACKTICKS is not a hint',
+    shHints(shProseTick).length === 0,
+    shHints(shProseTick),
+  );
+  t(
+    '…nor one it quotes in DOUBLE QUOTES — the two spellings reach the scan as a template and as a string, and one fix must cover both',
+    shHints(shProseQuote).length === 0,
+    shHints(shProseQuote),
+  );
+  t(
+    '…while a REAL invocation on the same file still yields its hint, so the mask removed prose rather than the population',
+    shHints(shInvocation).join() === shTarget,
+    shHints(shInvocation),
+  );
+  t(
+    'and the fourth row still reads 0 — the `//` mask this change composes onto is untouched on a shell source',
+    shHints(shJsComment).length === 0,
+    shHints(shJsComment),
+  );
+  // KIND-SCOPED, in both directions. The same bytes on a `.mjs` path must keep
+  // spelling their hint: `#` is not a comment in JavaScript, and a mask that
+  // fired there would be a widening rather than this card's narrowing.
+  t(
+    'the `#` mask does NOT reach a JS source — the same prose on a .mjs path still spells its hint',
+    shHints(shProseTick, 'scripts/check-x.mjs').join() === shTarget,
+    shHints(shProseTick, 'scripts/check-x.mjs'),
+  );
+  t(
+    'the kind predicate is the DIFFERENCE of the two that already exist, so a widened follow arrives already masked',
+    hashCommentProgram('scripts/x.sh')
+      && !hashCommentProgram('scripts/x.mjs')
+      && !hashCommentProgram('packages/spec/src/x.ts')
+      && !hashCommentProgram('apps/docs/x.tsx')
+      && !hashCommentProgram('docs/x.md')
+      && !hashCommentProgram(null),
+  );
+  // A `#` opens a comment only at the start of a WORD, and only outside quotes.
+  // Each of these is a line a blank-from-`#`-to-end-of-line pass would destroy,
+  // and each carries a real hint AFTER the `#` so the case cannot pass by
+  // returning nothing.
+  t(
+    'a `#` that is not at a word start opens no comment — $#, ${#…} and a bare a#b all keep the hint beside them',
+    shHints('[ "$#" -gt 0 ] && cat "docs/a/b.md"\n').join() === 'docs/a/b.md'
+      && shHints('n=${#argv[@]} ; cat "docs/a/b.md"\n').join() === 'docs/a/b.md'
+      && shHints('git log --grep=fix#1 -- "docs/a/b.md"\n').join() === 'docs/a/b.md',
+  );
+  t(
+    'a `#` inside single or double quotes opens no comment either',
+    shHints("grep '#' \"docs/a/b.md\"\n").join() === 'docs/a/b.md'
+      && shHints('grep "#" "docs/a/b.md"\n').join() === 'docs/a/b.md',
+  );
+  t(
+    'a TRAILING `#` comment is masked without taking the code before it',
+    shHints('cat "docs/a/b.md"   # and see `docs/gone.md`\n').join() === 'docs/a/b.md',
+    shHints('cat "docs/a/b.md"   # and see `docs/gone.md`\n'),
+  );
+  // The two shapes that make a CROSS-LINE quote scanner desync on real shell,
+  // and the reason quote state is line-scoped instead. Both were measured on
+  // this tree against a here-doc-aware implementation before this one: a
+  // here-string read as a here-doc introducer, and a command substitution whose
+  // inner `"…"` closes the outer one. Either desync silently disables the mask
+  // for the rest of the file, which is the FABRICATING direction.
+  t(
+    'a `<<<` here-string does not disable the mask for what follows it',
+    shHints('awk \'{ print $2 }\' <<< "$rest"\n# see `docs/gone.md`\n').length === 0,
+    shHints('awk \'{ print $2 }\' <<< "$rest"\n# see `docs/gone.md`\n'),
+  );
+  t(
+    '…nor does a command substitution carrying its own quotes',
+    shHints('v="$(printf \'%s\' "$input" | head -1)"\n# see `docs/gone.md`\n').length === 0,
+    shHints('v="$(printf \'%s\' "$input" | head -1)"\n# see `docs/gone.md`\n'),
+  );
+  // The residue that line-scoping BUYS those two with, pinned so nobody
+  // "repairs" it back into carried state: a `#` beginning a line inside a
+  // multi-line quoted string or a here-doc BODY is masked as if it were a
+  // comment. That text is data rather than a path the script opens, so the cost
+  // is a missing lead — the direction this file errs in everywhere.
+  t(
+    '⭐ the deliberate over-mask: a `#` line inside a here-doc body is blanked, and that is the cheap direction, not a defect',
+    shHints('cat > /tmp/n <<\'EOF\'\n# see `docs/gone.md`\nEOF\n').length === 0,
+  );
+  // The projection, asserted as `blank`'s contract next door states it: spans
+  // become spaces, so every byte offset and every line number survives and a
+  // caller can index this output against the unmasked source.
+  const shProjectionSrc = 'cat "docs/a/b.md" # x\n# y\nbash \'scripts/z.sh\'\n';
+  const shProjected = maskShellComments(shProjectionSrc);
+  t(
+    'maskShellComments only ever BLANKS — same length, same newlines, and every surviving character is the source\'s own',
+    shProjected.length === shProjectionSrc.length
+      && shProjected.split('\n').length === shProjectionSrc.split('\n').length
+      && [...shProjected].every((c, k) => c === ' ' || c === shProjectionSrc[k])
+      && shProjected !== shProjectionSrc,
+  );
+  // ── LIVE, on this tree: the census the card was filed on ──────────────────
+  //
+  // Appending `.mjs` to a shell path turns the kind predicate off while leaving
+  // the writer's DIRECTORY — the only other thing `scriptPath` decides here —
+  // byte for byte the same, so it is the control for what this mask removed.
+  // ⛔ Written as a DIRECTION and a floor rather than as a count: a reading
+  // belongs to a named commit, and this one moves whenever a shell script gains
+  // or loses a comment.
+  const liveShellFiles = trackedFiles().filter((f) => f.endsWith('.sh'));
+  let shellGrew = 0;
+  let shellShrank = 0;
+  let shellBefore = 0;
+  let shellAfter = 0;
+  for (const f of liveShellFiles) {
+    const src = readFileSync(nodePath.join(ROOT, f), 'utf8');
+    const masked = extractWatchHints(src, f, { tree: hintTree });
+    const unmasked = extractWatchHints(src, `${f}.mjs`, { tree: hintTree });
+    shellBefore += unmasked.length;
+    shellAfter += masked.length;
+    if (masked.some((h) => !unmasked.includes(h))) shellGrew++;
+    else if (masked.length < unmasked.length) shellShrank++;
+  }
+  t(
+    `⭐ LIVE: over ${liveShellFiles.length} tracked .sh file(s) the mask never ADDS a hint — ${shellBefore} spelled without it, ${shellAfter} with`,
+    liveShellFiles.length > 0 && shellGrew === 0 && shellAfter < shellBefore,
+    JSON.stringify({ files: liveShellFiles.length, shellBefore, shellAfter, shellGrew, shellShrank }),
+  );
+  t(
+    '…non-vacuously: at least one live file really loses a hint, so the sweep is not passing over an instrument that changed nothing',
+    shellShrank >= 1,
+    JSON.stringify({ shellShrank }),
+  );
+  // The card's sharpest specimen, both ends. DEPARTURE alone would stay green
+  // on a mask that emptied the file, so the ARRIVAL half names a live shell
+  // script whose hint is spelled in CODE and must survive.
+  const liveBumpSrc = readFileSync(nodePath.join(ROOT, 'scripts/bump-objectui.sh'), 'utf8');
+  t(
+    'LIVE: the file the card measured no longer offers the path its `#` comments merely NAME',
+    !extractWatchHints(liveBumpSrc, 'scripts/bump-objectui.sh', { tree: hintTree }).includes(
+      'docs/releases-maintenance.md',
+    ),
+  );
+  t(
+    '…non-vacuously: that path IS spelled in the file, inside a `#` comment, and the unmasked control still reads it',
+    extractWatchHints(liveBumpSrc, 'scripts/bump-objectui.sh.mjs', { tree: hintTree }).includes(
+      'docs/releases-maintenance.md',
+    ),
+  );
+  const liveShardSelfTest = 'scripts/ci/select-shard-packages.selftest.sh';
+  t(
+    '⭐ LIVE ARRIVAL: a shell script whose hint is spelled in CODE still spells it, so the mask removed prose and not the population',
+    extractWatchHints(readFileSync(nodePath.join(ROOT, liveShardSelfTest), 'utf8'), liveShardSelfTest, {
+      tree: hintTree,
+    }).includes('scripts/ci/select-shard-packages.sh'),
   );
   // One resolver, not two. `firstPartyImportTargets` answers the same question
   // for the import follow; if they could disagree, one of them is the copy
@@ -21228,7 +21718,79 @@ function selfTest() {
     // ⛔ The new number must not become a second "complete account of what CI
     // runs" — that would reproduce this card's own defect one layer up. Same
     // disclosure machineReadableOutput already makes on stderr.
-    t('and disclaims the three sections it deliberately excludes', rl.some((l) => l.includes('NOT a complete account of what CI runs') && l.includes('always-runs tail')));
+    //
+    // ⭐ Pinned NAME BY NAME, because the weaker shape is what failed. This case
+    // used to ask only for the substring `always-runs tail`, so the sentence
+    // could name three of the five blocks the same run printed and stay green
+    // here for the whole time a harvester following it was missing two of them
+    // (#16398). Every name below is its own assertion: dropping ONE reds.
+    // Three DISTINCT counts (2 / 1 / 3), so a name wired to the wrong array
+    // reds here instead of reading right by coincidence.
+    const outsideRecon = familyReconciliation({
+      matchedRows: rRows,
+      kindGroups: rKinds,
+      rosterRows: [{ check: 'check:r1' }, { check: 'check:r2' }],
+      widePopulationRows: [{ check: 'check:w1' }],
+      pendingRows: [{ check: 'check:p1' }, { check: 'check:p2' }, { check: 'check:p3' }],
+    });
+    // The enumeration is read case-insensitively per NAME, because the leading
+    // name is raised to open the sentence; the exact rendered phrase is pinned
+    // once, below, where that capitalisation is part of the spelling.
+    const namesOutside = (line, names) => names.every((n) => (line ?? '').toLowerCase().includes(n.toLowerCase()));
+    const outsideLine = familyReconciliationLines(outsideRecon).find((l) => l.includes('NOT a complete account of what CI runs'));
+    t('the disclaimer of what sits outside the total is printed at all', Boolean(outsideLine));
+    for (const name of [
+      'the 2 artifact-roster famil(ies)',
+      'the 1 declared WIDE-population famil(ies)',
+      'the 3 pending-changeset famil(ies)',
+      'the unreachable listing',
+      'the always-runs tail',
+    ]) {
+      t(`and it names "${name}" — every block printed below it, not a subset`, namesOutside(outsideLine, [name]));
+    }
+    // The SPELLING of the whole enumeration, in print order, pinned for the
+    // reason the reconciliation line's own spelling is: a consumer may come to
+    // assert against it, and the order is the claim — a reader walking down the
+    // output meets the blocks in the order this line promised them.
+    t('and spells them in the order they are PRINTED below, as one phrase', (outsideLine ?? '').includes(
+      'The 2 artifact-roster famil(ies), the 1 declared WIDE-population famil(ies), the 3 pending-changeset famil(ies),'
+        + ' the unreachable listing and the always-runs tail below are each OUTSIDE it, each with its own count.',
+    ));
+    // The THREE counts are the lengths of the arrays that RENDER those blocks,
+    // so the enumeration cannot name a block the run did not print: at zero rows
+    // artifactRosterLines, widePopulationLines and pendingChangesetLines all
+    // return nothing, and a name pointing "below" at an absent heading is this
+    // same defect reversed.
+    const noBlocksLine = familyReconciliationLines(r).find((l) => l.includes('NOT a complete account of what CI runs'));
+    t('and names NEITHER block on a run that printed neither', !(noBlocksLine ?? '').toLowerCase().includes('artifact-roster') && !(noBlocksLine ?? '').toLowerCase().includes('wide-population'));
+    // ⭐ The third name was the one still spelled unconditionally after #16398:
+    // `pendingChangesetLines` returns nothing at zero, so on a card with no
+    // pending family the sentence pointed below at a heading that is not there
+    // (#16795). It is conditional on its own count now, like the two above it.
+    t('nor the pending-changeset block, whose heading is absent at zero too', !(noBlocksLine ?? '').toLowerCase().includes('pending-changeset'));
+    t('...while still naming the two blocks that print unconditionally', namesOutside(noBlocksLine, ['the unreachable listing', 'the always-runs tail']));
+    // ...and the CONTROL for that pair: a run with pending families and nothing
+    // else names the third block and neither of the other two, so the case
+    // above cannot be passing because the name went away for good.
+    const pendingOnlyLine = familyReconciliationLines(familyReconciliation({
+      matchedRows: rRows, kindGroups: rKinds, pendingRows: [{ check: 'check:p1' }, { check: 'check:p2' }],
+    })).find((l) => l.includes('NOT a complete account of what CI runs'));
+    t('and a run that printed ONLY the pending block names exactly that one', namesOutside(pendingOnlyLine, ['the 2 pending-changeset famil(ies)'])
+      && !(pendingOnlyLine ?? '').toLowerCase().includes('artifact-roster') && !(pendingOnlyLine ?? '').toLowerCase().includes('wide-population'));
+    // The ZERO-total branch renders the SAME list from the SAME expression: a
+    // card with no runnable family of its own still owes every block below, and
+    // two branches spelling this claim separately is how it drifted before.
+    const zeroOutside = familyReconciliationLines(familyReconciliation({
+      matchedRows: [], kindGroups: [], rosterRows: [{ check: 'check:r1' }], widePopulationRows: [{ check: 'check:w1' }],
+      pendingRows: [{ check: 'check:p1' }],
+    }));
+    t('the zero branch enumerates the same blocks rather than naming one of them', zeroOutside.some((l) => namesOutside(l, [
+      'the 1 artifact-roster famil(ies)',
+      'the 1 declared WIDE-population famil(ies)',
+      'the 1 pending-changeset famil(ies)',
+      'the unreachable listing',
+      'the always-runs tail',
+    ])));
     // ...and the SHORT-harvest warning is conditional, on the rule the ⛔
     // spelling warning already follows: on a card with no convention-only
     // family, a warning that one section is short is a claim this run measured
@@ -21873,6 +22435,132 @@ function selfTest() {
         && explainedText.includes('pending-changeset famil(ies)')
         && !explainedText.includes("Outside this card's derivation"),
     );
+
+    // ── ⭐ The OUTSIDE enumeration on the OTHER TWO lanes (#16795) ──────────
+    //
+    // The same claim as the human line's, and it was short on both. `--ran`
+    // named three of the five blocks a plain run prints — omitting the artifact
+    // rosters and the declared WIDE population, exactly the pair #16398
+    // measured a CI round trip for on the human lane. Both lanes read
+    // `outsideBlockNames` now, so a name here can neither drift from that list
+    // nor survive the block it points at being absent.
+    //
+    // ⭐ Pinned NAME BY NAME and with a NEGATIVE beside every positive, because
+    // the weak shape is what failed before: a case asking only for a substring
+    // stayed green for the whole time the sentence was naming three of five.
+    const laneCounts = { artifactRosters: 2, widePopulation: 1, pendingChangeset: 3 };
+    const outsideOf = (lines) => (lines.find((l) => l.includes('This answers ONE link')) ?? '');
+    const ranAllBlocks = outsideOf(runReconciliationLines(full, laneCounts));
+    for (const name of [
+      'the 2 artifact-roster famil(ies)',
+      'the 1 declared WIDE-population famil(ies)',
+      'the 3 pending-changeset famil(ies)',
+      'the unreachable listing',
+      'the always-runs tail',
+    ]) {
+      t(`--ran's disclaimer names "${name}" — every block a plain run prints, not a subset`, ranAllBlocks.includes(name));
+    }
+    t('and spells them in PRINT order, as the one phrase the human lane spells', ranAllBlocks.includes(
+      'the 2 artifact-roster famil(ies), the 1 declared WIDE-population famil(ies), the 3 pending-changeset famil(ies),'
+        + ' the unreachable listing and the always-runs tail are each outside the derived total',
+    ));
+    // The NEGATIVE: at zero rows those three blocks are not printed by the run
+    // this sentence points at, so naming them would send a reader to headings
+    // that are not there — the same defect facing the other way.
+    const ranNoBlocks = outsideOf(runReconciliationLines(full, { artifactRosters: 0, widePopulation: 0, pendingChangeset: 0 }));
+    t(
+      '--ran names NONE of the three conditional blocks on a derivation that has none',
+      !ranNoBlocks.toLowerCase().includes('artifact-roster')
+        && !ranNoBlocks.toLowerCase().includes('wide-population')
+        && !ranNoBlocks.toLowerCase().includes('pending-changeset'),
+    );
+    t('...while still naming the two that print unconditionally', ranNoBlocks.includes('the unreachable listing and the always-runs tail'));
+
+    // ── Lane 2: the `--commands` / `--json` stderr accounting ───────────────
+    //
+    // Driven through `machineReadableOutput` itself rather than through a
+    // helper, because the defect was in what that function PRINTS: it named the
+    // always-runs tail alone, and a `--commands` consumer — the reader this
+    // file's own header sends here INSTEAD of the prose — was never told the
+    // declared WIDE population exists at all. A case against the helper would
+    // have stayed green through exactly that.
+    const captureStderr = (run) => {
+      const captured = [];
+      const realError = console.error;
+      const realLog = console.log;
+      console.error = (...args) => captured.push(args.join(' '));
+      console.log = () => {};
+      try {
+        run();
+      } finally {
+        console.error = realError;
+        console.log = realLog;
+      }
+      return captured;
+    };
+    const laneTwo = (over = {}) => captureStderr(() => machineReadableOutput('commands', {
+      paths: ['scripts/pm/dispatch-gates.mjs'],
+      matchedRows: [{ check: 'check:m1', command: 'pnpm check:m1' }],
+      kindGroups: [],
+      pending: [{ check: 'check:p1' }, { check: 'check:p2' }, { check: 'check:p3' }],
+      counts: {},
+      alwaysRunsRows: [],
+      widePopulationRows: [{ check: 'check:w1', command: 'pnpm check:w1', workflows: ['w.yml'], reason: 'whole root', refused: null }],
+      rosters: [
+        { check: 'check:r1', command: 'pnpm check:r1', workflows: ['w.yml'], artifacts: [], dir: 'scripts', coversYourPath: false, checkerHealth: null },
+        { check: 'check:r2', command: 'pnpm check:r2', workflows: ['w.yml'], artifacts: [], dir: 'scripts', coversYourPath: false, checkerHealth: null },
+      ],
+      ...over,
+    })).find((l) => l.includes('Not a complete account of what CI runs')) ?? '';
+    const commandsAllBlocks = laneTwo();
+    for (const name of [
+      'the 2 artifact-roster famil(ies)',
+      'the 1 declared WIDE-population famil(ies)',
+      'the 3 pending-changeset famil(ies)',
+      'the unreachable listing',
+      'the always-runs tail',
+    ]) {
+      t(`--commands' closing disclaimer names "${name}" — every block outside the command list, where it used to name one`, commandsAllBlocks.includes(name));
+    }
+    // ⭐ The card's own repro, as a case: `grep -c 'WIDE' commands.err` read 0.
+    // The token is what a consumer greps for, and it was absent from the whole
+    // stream because the one line that could carry it named a different block.
+    t("...so the stream a --commands consumer reads carries the token 'WIDE' at all", commandsAllBlocks.includes('WIDE'));
+    // The NEGATIVE, for the reason the --ran one is there: a sentence that
+    // cannot drop a name is the same broken instrument as one that cannot add
+    // one, pointed the other way.
+    const commandsNoBlocks = laneTwo({ rosters: [], widePopulationRows: [], pending: [] });
+    t(
+      '--commands names NONE of the three conditional blocks when the run has none of them',
+      !commandsNoBlocks.toLowerCase().includes('artifact-roster')
+        && !commandsNoBlocks.toLowerCase().includes('wide-population')
+        && !commandsNoBlocks.toLowerCase().includes('pending-changeset'),
+    );
+    t('...while still naming the two that print unconditionally', commandsNoBlocks.includes('the unreachable listing and the always-runs tail'));
+    // ⛔ And the stream stays a STREAM: the accounting is stderr-only, so a
+    // consumer redirecting stdout gets commands with no prose in front of them.
+    // That is the property the whole mode exists for, and a disclaimer that
+    // grew onto stdout would delete it.
+    const laneTwoStdout = [];
+    {
+      const realLog = console.log;
+      const realError = console.error;
+      console.log = (...args) => laneTwoStdout.push(args.join(' '));
+      console.error = () => {};
+      try {
+        machineReadableOutput('commands', {
+          paths: ['scripts/pm/dispatch-gates.mjs'],
+          matchedRows: [{ check: 'check:m1', command: 'pnpm check:m1' }],
+          kindGroups: [], pending: [{ check: 'check:p1' }], counts: {}, alwaysRunsRows: [],
+          widePopulationRows: [{ check: 'check:w1', command: 'pnpm check:w1', workflows: ['w.yml'], reason: 'whole root', refused: null }],
+          rosters: [],
+        });
+      } finally {
+        console.log = realLog;
+        console.error = realError;
+      }
+    }
+    t('and the enumeration never reaches stdout, which carries the commands and nothing else', laneTwoStdout.join('\n') === 'pnpm check:m1');
 
     // ── argv: a two-token flag's value must not become a path ───────────────
     const ranSplit = splitArgv([RAN_FLAG, 'ran.list', 'packages/spec/src/index.ts', '--residue']);

@@ -1,7 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Response-envelope conformance for `/api/v1/packages/*` (#3843).
+ * Response-envelope conformance for the REST package registrar (#3843).
+ *
+ * [#14503] The registrar mounts ONE route now — `POST /packages/publish`. The
+ * `GET /packages`, `GET /packages/:id` and `DELETE /packages/:id` cases this
+ * file used to carry drove routes that duplicated the dispatcher's `/packages`
+ * domain and have been removed; that domain is their single implementation
+ * and `packages/runtime/src/domains/packages-single-door.test.ts` pins its
+ * envelope. Everything below is the publish route.
  *
  * This module was the *partially converted* one, which #3843 called "arguably
  * worse than untouched": 3 of its 16 bodies carried `success: true` and the rest
@@ -47,12 +54,9 @@ interface Captured {
   body: any;
 }
 
-/** A `PackageService` stub — only the four methods these routes reach. */
+/** A `PackageService` stub — only the method the publish route reaches. */
 type Svc = Partial<{
   publish: (arg: any) => Promise<any>;
-  list: () => Promise<any[]>;
-  get: (id: string, version?: string) => Promise<any>;
-  delete: (id: string, version?: string) => Promise<any>;
 }>;
 
 function mount(svc: Svc, options: any = {}) {
@@ -67,9 +71,9 @@ function mount(svc: Svc, options: any = {}) {
     listen: async () => {},
     close: async () => {},
   } as any;
-  // [#7033 / #7023] The package routes now carry an authorization gate. These
+  // [#7033 / #7023] The package route carries an authorization gate. These
   // envelope cases are about RESPONSE SHAPE, so the caller is stubbed to clear
-  // the gate (holding both the read and write capability); a test can override
+  // the gate (holding the write capability); a test can override
   // `resolveExecutionContext` to exercise the gate itself. The gate itself is
   // pinned in the `packages authz` describe at the bottom of this file.
   registerPackageRoutes(server, () => svc as any, '/api/v1', {
@@ -118,55 +122,6 @@ describe('packages envelope (#3843) — success bodies', () => {
         { body: { manifest: MANIFEST, metadata: { author: 'acme' } } },
       ),
     },
-    {
-      name: 'GET /packages',
-      status: 200,
-      dataKeys: ['packages', 'total'],
-      run: () => drive(
-        mount({ list: async () => [{ id: 'com.acme.crm', manifest: MANIFEST }] }),
-        'GET',
-        PKGS,
-      ),
-    },
-    {
-      name: 'GET /packages/:id',
-      status: 200,
-      dataKeys: ['package'],
-      run: () => drive(
-        mount({ get: async () => ({ id: 'com.acme.crm', manifest: MANIFEST }) }),
-        'GET',
-        `${PKGS}/:id`,
-        { params: { id: 'com.acme.crm' } },
-      ),
-    },
-    {
-      name: 'DELETE /packages/:id (version-scoped, durable registry)',
-      status: 200,
-      dataKeys: ['message'],
-      run: () => drive(
-        mount({ delete: async () => ({ success: true }) }),
-        'DELETE',
-        `${PKGS}/:id`,
-        { params: { id: 'com.acme.crm' }, query: { version: '1.0.0' } },
-      ),
-    },
-    {
-      name: 'DELETE /packages/:id (full uninstall via protocol)',
-      status: 200,
-      dataKeys: ['message', 'deletedCount', 'cleanups'],
-      run: () => drive(
-        mount({}, {
-          protocol: {
-            deletePackage: async () => ({
-              success: true, deletedCount: 3, failedCount: 0, failed: [], cleanups: [{ name: 'security', success: true, removed: 2 }],
-            }),
-          },
-        }),
-        'DELETE',
-        `${PKGS}/:id`,
-        { params: { id: 'com.acme.crm' } },
-      ),
-    },
   ];
 
   for (const c of CASES) {
@@ -195,9 +150,9 @@ describe('packages envelope (#3843) — success bodies', () => {
   it('the two shapes are now one — no payload beside the flag, none without it', async () => {
     for (const c of CASES) {
       const { body } = await c.run();
-      // The 13 bodies that had no flag.
+      // The bodies that had no flag.
       expect(typeof body.success, `${c.name} answers no success flag`).toBe('boolean');
-      // The 3 that had one, with the payload spread beside it.
+      // The ones that had one, with the payload spread beside it.
       for (const k of c.dataKeys) {
         expect(body[k], `${c.name} still answers a top-level ${k}`).toBeUndefined();
       }
@@ -205,20 +160,6 @@ describe('packages envelope (#3843) — success bodies', () => {
     }
   });
 
-  it('a registry-only package is still found when the database has none', async () => {
-    // Guards the fallback arm of GET /:id, which is a separate `sendOk` call.
-    const { status, body } = await drive(
-      mount({ get: async () => undefined }, {
-        protocol: { getMetaItems: async () => ({ items: [{ manifest: MANIFEST }] }) },
-      }),
-      'GET',
-      `${PKGS}/:id`,
-      { params: { id: 'com.acme.crm' } },
-    );
-    expect(status).toBe(200);
-    expect(body.success).toBe(true);
-    expect(body.data.package.source).toBe('registry');
-  });
 });
 
 describe('packages envelope (#3843) — error bodies', () => {
@@ -280,71 +221,28 @@ describe('packages envelope (#3843) — error bodies', () => {
       ),
     },
     {
-      name: 'reading a package that does not exist',
-      status: 404,
-      code: 'RESOURCE_NOT_FOUND',
-      run: () => drive(
-        mount({ get: async () => undefined }),
-        'GET',
-        `${PKGS}/:id`,
-        { params: { id: 'com.acme.nope' } },
-      ),
-    },
-    {
-      // Was a bare `{ success: false, failed, cleanups }` — a failure with no
-      // `error` at all.
-      name: 'an uninstall that leaves items behind',
-      status: 400,
-      code: 'PACKAGE_DELETE_PARTIAL',
-      run: () => drive(
-        mount({}, {
-          protocol: {
-            deletePackage: async () => ({
-              success: false, deletedCount: 1, failedCount: 2,
-              failed: [{ type: 'object', name: 'invoice', error: 'in use' }],
-              cleanups: [],
-            }),
-          },
-        }),
-        'DELETE',
-        `${PKGS}/:id`,
-        { params: { id: 'com.acme.crm' } },
-      ),
-    },
-    {
-      // And the other one: a bare `{ success: false }`.
-      //
-      // [#8275] Re-spelled, not replaced: the fixture and its envelope
-      // assertion are unchanged, only the STATUS this outcome answers moved.
-      // A returned failure here means the `DELETE FROM sys_packages` broke —
-      // a server fault — so it is a 5xx, the sibling of the `publish` case
-      // above. The code is untouched, and this suite's subject (the declared
-      // envelope) is unaffected by which status carries it.
-      name: 'a version-scoped delete whose statement broke — a driver fault, so a 5xx',
-      status: 500,
-      code: 'PACKAGE_DELETE_FAILED',
-      run: () => drive(
-        mount({ delete: async () => ({ success: false }) }),
-        'DELETE',
-        `${PKGS}/:id`,
-        { params: { id: 'com.acme.crm' }, query: { version: '1.0.0' } },
-      ),
-    },
-    {
-      // [#11063] Was: "NOT `GET /packages` — that route catches a failing
-      // `list()` in an INNER try and degrades to the registry-only listing, so
-      // its 500 arm is unreachable that way." That inner catch is gone; both
-      // read doors now reach this arm. `GET /:id` is kept as this case's
-      // subject so the case itself is unchanged, and the list door's own 500
-      // arm is pinned in `package-list-durable-read-refusal.test.ts`.
       name: 'an unexpected throw from the package service',
       status: 500,
       code: 'INTERNAL_ERROR',
       run: () => drive(
-        mount({ get: async () => { throw new Error('db down'); } }),
-        'GET',
-        `${PKGS}/:id`,
-        { params: { id: 'com.acme.crm' } },
+        mount({ publish: async () => { throw new Error('db down'); } }),
+        'POST',
+        `${PKGS}/publish`,
+        { body: { manifest: MANIFEST, metadata: {} } },
+      ),
+    },
+    {
+      // [#7563] The route mounts on every boot; a deployment that composes no
+      // `package` service answers its own 404 naming the SURFACE, never a 405
+      // borrowed from a sibling pattern.
+      name: 'a publish on a deployment that composes no package service',
+      status: 404,
+      code: 'RESOURCE_NOT_FOUND',
+      run: () => drive(
+        mount(undefined as any),
+        'POST',
+        `${PKGS}/publish`,
+        { body: { manifest: MANIFEST, metadata: {} } },
       ),
     },
   ];
@@ -378,95 +276,21 @@ describe('packages envelope (#3843) — error bodies', () => {
     }
   });
 
-  it('GET /packages no longer degrades to a 200 registry-only listing when the durable read fails (#11063)', async () => {
-    // REPLACED, not re-spelled. This pin used to record the opposite — a 200
-    // carrying the registry half alone — described as "pre-existing, deliberate
-    // (`// Database query failed — continue with registry-only packages`)". It
-    // pinned exactly the branch #11063 removed, so re-spelling it would have
-    // left an assertion that passes only because nothing is produced any more.
-    //
-    // ⚠️ Note what this fixture models: a BARE `Error`. Since #10965 the real
-    // `PackageService.list()` swallows its own driver faults and still answers
-    // `[]`, and re-throws only the declared `SERVICE_UNAVAILABLE` / 503 seam
-    // refusal — so this shape is the UNDECLARED arm (a 500 server fault), and
-    // the declared-refusal arm is pinned in
-    // `package-list-durable-read-refusal.test.ts` alongside the `total` and
-    // both-doors-agree assertions.
-    const { status, body } = await drive(
-      mount({ list: async () => { throw new Error('db down'); } }, {
-        protocol: { getMetaItems: async () => ({ items: [{ manifest: MANIFEST }] }) },
-      }),
-      'GET',
-      PKGS,
-    );
-    expect(status).toBe(500);
-    expect(body.success).toBe(false);
-    expect(body.error.code).toBe('INTERNAL_ERROR');
-    // The registry half is not served as if it were a complete listing, and no
-    // `total` is reported over a read that failed.
-    expect(body.data?.packages).toBeUndefined();
-    expect(body.data?.total).toBeUndefined();
-    expect(envelopeViolations(body), JSON.stringify(body)).toEqual([]);
-  });
-
-  it('a repeated `?version=` is refused identically on both verbs (#6307)', async () => {
-    // The rule is one rule, so the two verbs must answer the SAME code, status
-    // and message — two answers for one parameter would be a new inconsistency.
-    const get = await drive(
-      mount({ get: async () => ({ id: 'com.acme.crm', manifest: MANIFEST }) }),
-      'GET',
-      `${PKGS}/:id`,
-      { params: { id: 'com.acme.crm' }, query: { version: ['1.0.0', '2.0.0'] } },
-    );
-    const del = await drive(
-      mount({ delete: async () => ({ success: true }) }),
-      'DELETE',
-      `${PKGS}/:id`,
-      { params: { id: 'com.acme.crm' }, query: { version: ['1.0.0', '2.0.0'] } },
-    );
-    expect(get.status).toBe(400);
-    expect(del.status).toBe(400);
-    expect(get.body).toEqual(del.body);
-    expect(get.body.error.code).toBe('VALIDATION_ERROR');
-    expect(get.body.error.message).toContain('"version"');
-    expect(envelopeViolations(get.body)).toEqual([]);
-    expect(BaseResponseSchema.safeParse(get.body).success).toBe(true);
-  });
-
-  it('a partial uninstall keeps its per-item detail under `error.details`', async () => {
-    const { body } = await drive(
-      mount({}, {
-        protocol: {
-          deletePackage: async () => ({
-            success: false, deletedCount: 1, failedCount: 2,
-            failed: [{ type: 'object', name: 'invoice', error: 'in use' }],
-            cleanups: [{ name: 'security', success: true, removed: 1 }],
-          }),
-        },
-      }),
-      'DELETE',
-      `${PKGS}/:id`,
-      { params: { id: 'com.acme.crm' } },
-    );
-    // The `failed` / `cleanups` arrays were top-level siblings of a bare
-    // `success: false`; they survive where the envelope declares context.
-    expect(body.error.details.failed).toHaveLength(1);
-    expect(body.error.details.cleanups).toHaveLength(1);
-  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
 // packages authz (#7033 / #7023) — the REST TRANSPORT's own gate
 // ══════════════════════════════════════════════════════════════════════════════
 //
-// `/packages` has TWO HTTP transports: the runtime dispatcher domain
+// `/packages` had TWO HTTP transports: the runtime dispatcher domain
 // (`runtime/src/domains/packages.ts`, pinned in `packages-capability-gate.test.ts`)
-// AND this `@objectstack/rest` direct-mount registrar — a SEPARATE handler body
-// which, in the production stack, registers FIRST, so for the four routes it
-// declares (`POST /publish`, `GET /`, `GET /:id`, `DELETE /:id`) it is the
-// transport production actually serves. Its gate (`refusePackageRequest`)
-// therefore needs its OWN pins — gating only the dispatcher would leave these
-// four open, the exact one-transport gap #6603/#7019 paid for on `/meta`.
+// AND this `@objectstack/rest` direct-mount registrar — a SEPARATE handler body.
+// Since #14503 the registrar serves ONE route, `POST /publish`, and it is the
+// only door for that verb+path, so its gate (`refusePackageRequest`) needs its
+// OWN pins — gating only the dispatcher would leave it open, the exact
+// one-transport gap #6603/#7019 paid for on `/meta`. The read cohort
+// (`studio.access` / `setup.access`) is the dispatcher domain's to enforce and
+// is pinned there; this registrar has no read route left to gate.
 //
 // Reverse check for this block: delete `refusePackageRequest`'s body and every
 // case below goes red. The `mount` helper above injects a gate-clearing caller
@@ -482,13 +306,10 @@ describe('packages envelope (#3843) — error bodies', () => {
 // refusal `{ success:false, error:{ code:'FORBIDDEN' } }` (the sibling `/meta`
 // REST gate's code, in this surface's own wrapper).
 describe('packages authz (#7033 / #7023) — REST transport gate', () => {
-  /** A service whose four methods are spies, so "the target never ran" is an
+  /** A service whose method is a spy, so "the target never ran" is an
    * assertion, not an inference. */
   const spySvc = () => ({
     publish: vi.fn(async () => ({ success: true })),
-    list: vi.fn(async () => [{ id: 'com.acme.crm', manifest: MANIFEST }]),
-    get: vi.fn(async () => ({ id: 'com.acme.crm', manifest: MANIFEST })),
-    delete: vi.fn(async () => ({ success: true })),
   });
   /** Mount with an EXPLICIT resolver (pass `undefined` to prove fail-closed). */
   const gated = (svc: any, resolver: any) => mount(svc, { resolveExecutionContext: resolver });
@@ -498,16 +319,12 @@ describe('packages authz (#7033 / #7023) — REST transport gate', () => {
 
   type RouteShape = { method: string; path: string; body?: any; req?: Record<string, any>; spy: (s: any) => any };
   const PUBLISH: RouteShape = { method: 'POST', path: `${PKGS}/publish`, body: { manifest: MANIFEST, metadata: { author: 'acme' } }, spy: (s) => s.publish };
-  const DELETE_ONE: RouteShape = { method: 'DELETE', path: `${PKGS}/:id`, req: { params: { id: 'com.acme.crm' }, query: { version: '1.0.0' } }, spy: (s) => s.delete };
-  const LIST: RouteShape = { method: 'GET', path: PKGS, spy: (s) => s.list };
-  const GET_ONE: RouteShape = { method: 'GET', path: `${PKGS}/:id`, req: { params: { id: 'com.acme.crm' } }, spy: (s) => s.get };
-  const WRITE = [PUBLISH, DELETE_ONE];
-  const READ = [LIST, GET_ONE];
+  const WRITE = [PUBLISH];
   const label = (r: RouteShape) => `${r.method} ${r.path}`;
   const reqOf = (r: RouteShape) => ({ ...(r.body !== undefined ? { body: r.body } : {}), ...(r.req ?? {}) });
 
-  // ── the domain-wide anonymous floor — every route, both cohorts ──
-  for (const r of [...WRITE, ...READ]) {
+  // ── the domain-wide anonymous floor ──
+  for (const r of WRITE) {
     it(`401s an anonymous ${label(r)} (UNAUTHENTICATED) and never touches the service`, async () => {
       const svc = spySvc();
       const c = await drive(gated(svc, anonResolver), r.method, r.path, reqOf(r));
@@ -561,49 +378,4 @@ describe('packages authz (#7033 / #7023) — REST transport gate', () => {
       expect(r.spy(svc)).toHaveBeenCalled();
     });
   }
-
-  // ── read cohort: the ADR-0106 D4 set `studio.access` / `setup.access` ──
-  for (const r of READ) {
-    it(`403s a zero-capability caller on ${label(r)} (nested FORBIDDEN) and the service never runs`, async () => {
-      const svc = spySvc();
-      const c = await drive(gated(svc, asCaller([])), r.method, r.path, reqOf(r));
-      expect(c.status).toBe(403);
-      expect(c.body.error.code).toBe('FORBIDDEN');
-      expect(c.body.error.message).toContain('studio.access');
-      expect(r.spy(svc)).not.toHaveBeenCalled();
-    });
-
-    it(`403s a WRITE-only caller (manage_metadata) on ${label(r)} — the read cohort is a different set`, async () => {
-      const svc = spySvc();
-      const c = await drive(gated(svc, asCaller(['manage_metadata'])), r.method, r.path, reqOf(r));
-      expect(c.status).toBe(403);
-      expect(c.body.error.code).toBe('FORBIDDEN');
-      expect(r.spy(svc)).not.toHaveBeenCalled();
-    });
-
-    it(`lets a studio.access caller read ${label(r)}`, async () => {
-      const svc = spySvc();
-      const c = await drive(gated(svc, asCaller(['studio.access'])), r.method, r.path, reqOf(r));
-      expect(c.status).not.toBe(403);
-      expect(c.status).not.toBe(401);
-      expect(r.spy(svc)).toHaveBeenCalled();
-    });
-
-    it(`lets a setup.access caller read ${label(r)}`, async () => {
-      const svc = spySvc();
-      const c = await drive(gated(svc, asCaller(['setup.access'])), r.method, r.path, reqOf(r));
-      expect(c.status).not.toBe(403);
-      expect(c.status).not.toBe(401);
-      expect(r.spy(svc)).toHaveBeenCalled();
-    });
-
-    it(`lets an isSystem caller read ${label(r)}`, async () => {
-      const svc = spySvc();
-      const c = await drive(gated(svc, asSystem()), r.method, r.path, reqOf(r));
-      expect(c.status).not.toBe(403);
-      expect(c.status).not.toBe(401);
-      expect(r.spy(svc)).toHaveBeenCalled();
-    });
-  }
 });
-

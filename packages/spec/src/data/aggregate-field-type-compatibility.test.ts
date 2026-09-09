@@ -7,8 +7,14 @@
  * every `AggregationFunction` member has a row, and every `FieldType` member
  * is classified (in or out) on every row. The per-row memberships are pinned
  * as the LITERAL sets the ruling resolved to, and tied to the `field-value.zod`
- * semantic classes so a field type joining the numeric or temporal class
- * elsewhere reds this file until the table records a decision.
+ * semantic classes so a field type joining the numeric, temporal or boolean
+ * class elsewhere reds this file until the table records a decision.
+ *
+ * The boolean rows are pinned twice: literally, and against the spec's own
+ * conformance suite — every boolean case `AGGREGATION_CASES` requires a
+ * backend to ANSWER (#11152) must be a pair this table accepts, so the two
+ * tables in this package cannot contradict each other on the boolean axis
+ * (#16685) — the cross-pin reaches exactly as far as the `flag` cases.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -19,8 +25,10 @@ import {
   CALENDAR_DATE_TYPES,
   INSTANT_TYPES,
   CLOCK_TIME_TYPES,
+  BOOLEAN_VALUE_TYPES,
 } from './field-value.zod';
 import { isIncoherentAggregate } from './aggregation-policy';
+import { AGGREGATION_CASES } from './aggregation-conformance';
 import {
   AGGREGATE_FIELD_TYPE_COMPATIBILITY,
   isAggregateCompatibleWithFieldType,
@@ -31,6 +39,7 @@ const sorted = (xs: Iterable<string>) => [...xs].sort();
 const NUMERIC = ['currency', 'number', 'percent', 'progress', 'rating', 'slider', 'summary'];
 const ADDITIVE = NUMERIC.filter((t) => t !== 'percent');
 const TEMPORAL = ['date', 'datetime', 'time'];
+const BOOLEAN = ['boolean', 'toggle'];
 
 describe('AGGREGATE_FIELD_TYPE_COMPATIBILITY — totality', () => {
   it('every AggregationFunction member has a row, and no row is for a non-member', () => {
@@ -65,31 +74,44 @@ describe('AGGREGATE_FIELD_TYPE_COMPATIBILITY — the ruled rows, resolved agains
     expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.count_distinct)).toEqual(sorted(FieldType.options));
   });
 
-  it('`sum`: the numeric class EXCEPT `percent`', () => {
-    expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.sum)).toEqual(ADDITIVE);
+  it('`sum`: the numeric class EXCEPT `percent`, plus the boolean class', () => {
+    expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.sum)).toEqual(sorted([...ADDITIVE, ...BOOLEAN]));
     expect(isAggregateCompatibleWithFieldType('sum', 'percent')).toBe(false);
   });
 
-  it('`avg`: the numeric class, `percent` included', () => {
-    expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.avg)).toEqual(NUMERIC);
+  it('`avg`: the numeric class, `percent` included, plus the boolean class', () => {
+    expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.avg)).toEqual(sorted([...NUMERIC, ...BOOLEAN]));
   });
 
-  it('`min` / `max`: the numeric class plus the temporal class', () => {
-    expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.min)).toEqual(sorted([...NUMERIC, ...TEMPORAL]));
-    expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.max)).toEqual(sorted([...NUMERIC, ...TEMPORAL]));
+  it('`min` / `max`: the numeric class plus the temporal class plus the boolean class', () => {
+    expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.min)).toEqual(sorted([...NUMERIC, ...TEMPORAL, ...BOOLEAN]));
+    expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.max)).toEqual(sorted([...NUMERIC, ...TEMPORAL, ...BOOLEAN]));
   });
 
   it('the numeric bucket IS the field-value numeric class — a type joining it elsewhere must be decided here', () => {
-    // `avg` accepts exactly the numeric class; `sum` is that class minus the rate.
-    expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.avg)).toEqual(sorted(NUMERIC_VALUE_TYPES));
-    expect(sorted(AGGREGATE_FIELD_TYPE_COMPATIBILITY.sum)).toEqual(sorted([...NUMERIC_VALUE_TYPES].filter((t) => t !== 'percent')));
+    // Outside the boolean class, `avg` accepts exactly the numeric class and
+    // `sum` is that class minus the rate.
+    const avgNonBoolean = AGGREGATE_FIELD_TYPE_COMPATIBILITY.avg.filter((t) => !BOOLEAN_VALUE_TYPES.has(t));
+    const sumNonBoolean = AGGREGATE_FIELD_TYPE_COMPATIBILITY.sum.filter((t) => !BOOLEAN_VALUE_TYPES.has(t));
+    expect(sorted(avgNonBoolean)).toEqual(sorted(NUMERIC_VALUE_TYPES));
+    expect(sorted(sumNonBoolean)).toEqual(sorted([...NUMERIC_VALUE_TYPES].filter((t) => t !== 'percent')));
   });
 
   it('the temporal bucket IS the three field-value temporal classes', () => {
     const temporal = sorted([...CALENDAR_DATE_TYPES, ...INSTANT_TYPES, ...CLOCK_TIME_TYPES]);
     expect(temporal).toEqual(TEMPORAL);
-    const minOnly = AGGREGATE_FIELD_TYPE_COMPATIBILITY.min.filter((t) => !NUMERIC_VALUE_TYPES.has(t));
+    const minOnly = AGGREGATE_FIELD_TYPE_COMPATIBILITY.min.filter(
+      (t) => !NUMERIC_VALUE_TYPES.has(t) && !BOOLEAN_VALUE_TYPES.has(t),
+    );
     expect(sorted(minOnly)).toEqual(temporal);
+  });
+
+  it('the boolean bucket IS the field-value boolean class, and it is in all four arithmetic / order rows', () => {
+    expect(sorted(BOOLEAN_VALUE_TYPES)).toEqual(BOOLEAN);
+    for (const fn of ['sum', 'avg', 'min', 'max'] as const) {
+      const booleanMembers = AGGREGATE_FIELD_TYPE_COMPATIBILITY[fn].filter((t) => BOOLEAN_VALUE_TYPES.has(t));
+      expect(sorted(booleanMembers)).toEqual(BOOLEAN);
+    }
   });
 });
 
@@ -107,9 +129,29 @@ describe('isAggregateCompatibleWithFieldType — the pairs the card is about', (
     }
   });
 
-  it('refuses arithmetic over booleans (row as ruled; membership referred, see module TSDoc) and over the computed / text / structured types', () => {
+  it('accepts `sum` / `avg` / `min` / `max` over booleans — #11152 (numbers on every backend), upheld by decision batch #80', () => {
     for (const fn of ['sum', 'avg', 'min', 'max'] as const) {
-      for (const t of ['boolean', 'toggle', 'formula', 'autonumber', 'text', 'select', 'lookup', 'json', 'vector', 'file']) {
+      expect(isAggregateCompatibleWithFieldType(fn, 'boolean')).toBe(true);
+      expect(isAggregateCompatibleWithFieldType(fn, 'toggle')).toBe(true);
+    }
+  });
+
+  it('accepts every boolean pair the conformance suite requires a backend to ANSWER — the two spec tables cannot contradict', () => {
+    // `AGGREGATION_ROWS.flag` is the boolean aggregand (declared `type:
+    // 'boolean'` by every harness); each case over it is a pair #11152 pins
+    // on six backends. A table refusing one of them would refuse a pair the
+    // spec elsewhere REQUIRES an answer to (#16685).
+    const booleanCases = AGGREGATION_CASES.filter((c) => c.field === 'flag');
+    expect(sorted(new Set(booleanCases.map((c) => c.function)))).toEqual(sorted(AggregationFunction.options));
+    for (const c of booleanCases) {
+      expect(isAggregateCompatibleWithFieldType(c.function, 'boolean')).toBe(true);
+      expect(isAggregateCompatibleWithFieldType(c.function, 'toggle')).toBe(true);
+    }
+  });
+
+  it('refuses arithmetic over the computed / text / structured types', () => {
+    for (const fn of ['sum', 'avg', 'min', 'max'] as const) {
+      for (const t of ['formula', 'autonumber', 'text', 'select', 'lookup', 'json', 'vector', 'file']) {
         expect(isAggregateCompatibleWithFieldType(fn, t)).toBe(false);
       }
     }
@@ -160,13 +202,7 @@ describe('isAggregateCompatibleWithFieldType — the pairs the card is about', (
     expect(loose(Symbol('count'), 'number')).toBe(false);
   });
 
-  it('records the two overrides of existing opinions without changing the rows: booleans and the string classes', () => {
-    // Booleans: refused here by the ruling's default; #11152 / AGGREGATION_CASES
-    // answer them as numbers on every face. Row kept as ruled, question referred.
-    for (const fn of ['sum', 'avg', 'min', 'max']) {
-      expect(isAggregateCompatibleWithFieldType(fn, 'boolean')).toBe(false);
-      expect(isAggregateCompatibleWithFieldType(fn, 'toggle')).toBe(false);
-    }
+  it('records the one override of an existing opinion without changing the row: the string classes', () => {
     // String classes: min/max refused here; measureResultType (#15768) types
     // min/max over them as a supported 'string' result. Override recorded.
     for (const t of ['text', 'select', 'lookup', 'autonumber']) {

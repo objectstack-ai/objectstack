@@ -461,10 +461,14 @@ describe('the mirror direction: a reader that is never coming back', () => {
     // anyone contracted — and #14858 is the card that changed the CLI. ⛔ This
     // was not a broken test and the flip is not a regression.
     //
-    // What the child USED TO DO with its read end destroyed: oclif's
-    // `displayWarnings()` makes the first stderr write, the pipe is already
-    // gone, node raises `write EPIPE` as an `error` event on `process.stderr`,
-    // NOTHING WAS LISTENING, and the process died of an uncaught exception —
+    // What the child USED TO DO with its read end destroyed: node's OWN default
+    // `warning` handler makes the first stderr write and oclif's
+    // `displayWarnings()` the next two (#16691 re-traced the order — and every
+    // write on this path is a `console.error`, which is NOT the guard here that
+    // it is on `bin/run.js`; the docblock over the listener in `bin/run-dev.js`
+    // carries why). The pipe is already gone, node raises `write EPIPE` as an
+    // `error` event on `process.stderr`, NOTHING WAS LISTENING, and the process
+    // died of an uncaught exception —
     // exit 1, 938-1174 ms in, 12 of 12 runs, traced with a `--import` observer
     // that installed no listener here and wrapped no write. `writeStderr()` was
     // never called at all, so the bound this case was once named after was

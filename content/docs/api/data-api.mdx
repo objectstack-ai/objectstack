@@ -355,7 +355,13 @@ Gated by the object's `enable.clone` capability (default `true`); an object with
 top of the copied values (a bare field map is also accepted). The natural place
 to set a new name or clear a unique field.
 
-**Response** `201`: `{ object, id, sourceId, record }`
+**Response** `201`: `{ object, id, sourceId, record, droppedFields? }` — the
+bare `CloneDataResponseSchema` body, no envelope. `droppedFields` appears only
+when the engine stripped a static `readonly` column from the copy — one the
+source row carried (a clone is the one create that holds a read-only value the
+caller never typed) or one supplied through `overrides` — and names the dropped
+keys; the clone still succeeded and the field re-derived its default. It rides
+the body only: this route sets no `X-ObjectStack-Dropped-Fields` header.
 
 ---
 

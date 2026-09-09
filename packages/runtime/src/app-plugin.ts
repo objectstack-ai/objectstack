@@ -1215,6 +1215,11 @@ export class AppPlugin implements Plugin {
                  const sharedDatasets = mergeSeedDatasets(ctx, normalizedDatasets);
 
                  const loggerRef = ctx.logger;
+                 // [#16595] Same capture posture as `loggerRef`: the replayer
+                 // outlives `start()` and is invoked by SecurityPlugin's
+                 // sys_organization hook, so the locale is resolved once, here,
+                 // from the boot bundle rather than re-read per replay.
+                 const seedLocale = this.resolveSeedLocale();
                  const replayer = async (organizationId: string) => {
                      if (!organizationId) return { inserted: 0, updated: 0, skipped: 0, errors: [] as any[] };
                      const md = ctx.getService('metadata') as IMetadataService | undefined;
@@ -1244,6 +1249,13 @@ export class AppPlugin implements Plugin {
                              // unless a seed embeds `cel`os.user.id`` — see the
                              // lazy guard where it is resolved.
                              identity: seedIdentity,
+                             // [#16595] `Seed.locale`'s producer. Spread rather
+                             // than written as `locale: seedLocale` so an app
+                             // with no `i18n.defaultLocale` sends NO key at all
+                             // — `undefined` and absent parse the same here, but
+                             // absence is what the loader's unresolved-scope
+                             // warning is keyed on.
+                             ...(seedLocale ? { locale: seedLocale } : {}),
                          },
                      });
                      const result = await seedLoader.load(request);
@@ -1319,9 +1331,17 @@ export class AppPlugin implements Plugin {
                   if (metadata) {
                       const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger);
                       const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
+                      // [#16595] `Seed.locale`'s producer on the DEFAULT boot
+                      // path — see {@link resolveSeedLocale}.
+                      const seedLocale = this.resolveSeedLocale();
                       const request = SeedLoaderRequestSchema.parse({
                           seeds: normalizedDatasets,
-                          config: { defaultMode: 'upsert', multiPass: true, identity: seedIdentity },
+                          config: {
+                              defaultMode: 'upsert',
+                              multiPass: true,
+                              identity: seedIdentity,
+                              ...(seedLocale ? { locale: seedLocale } : {}),
+                          },
                       });
                       const result = await seedLoader.load(request);
                       const { totalInserted, totalUpdated, totalSkipped, totalErrored } = result.summary;
@@ -1578,6 +1598,38 @@ export class AppPlugin implements Plugin {
     }
 
     /**
+     * The producer half of `Seed.locale` (#16595) — the BCP-47 tag every seed
+     * load started by this plugin filters on, read off the app's declared
+     * `i18n.defaultLocale`.
+     *
+     * Same source, same spelling and the same envelope-vs-collection posture as
+     * {@link loadTranslations}' `setDefaultLocale` call: `i18n` is an ENVELOPE
+     * key, so it is read off `this.bundle` (with the legacy nested-manifest
+     * fallback) and NOT through `this.collections`.
+     *
+     * ⛔ Resolved HERE rather than inside `SeedLoaderService.load()`, which is
+     * where the sibling `env` axis resolves ITSELF (`resolveEnvConfig`, off
+     * `NODE_ENV`). That asymmetry is forced, not a style choice: `env` has an
+     * ambient, process-wide source the loader can read on its own, and a locale
+     * has none — the only thing that knows which locale this stack runs in is
+     * the app config the loader is never handed. So this axis needs a real
+     * producer at the call sites, which is what #16595 is.
+     *
+     * Returns `undefined` — never a `'en'` default — when the app declares no
+     * locale. Absence is the loader's UNRESTRICTED spelling ("seed every
+     * dataset"), i.e. today's behaviour; defaulting to `'en'` would silently
+     * DROP a `locale: ['zh-CN']` dataset on every stack that never declared an
+     * `i18n` block, turning a wiring change into a data change.
+     * `SeedLoaderService#warnOnUnresolvedLocaleScope` is what keeps that
+     * absence loud rather than silent.
+     */
+    private resolveSeedLocale(): string | undefined {
+        const i18nConfig = this.bundle?.i18n || (this.bundle?.manifest || this.bundle)?.i18n;
+        const declared = i18nConfig?.defaultLocale;
+        return typeof declared === 'string' && declared.length > 0 ? declared : undefined;
+    }
+
+    /**
      * 15.1 third-party eval — dev hot-reload of a NEW object registered its
      * metadata (and, via ObjectQL's `metadata:reloaded` hook, created its
      * table) but its seeds never ran: the seed pipeline in `start()` only
@@ -1635,9 +1687,18 @@ export class AppPlugin implements Plugin {
                 }
                 const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger);
                 const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
+                // [#16595] `Seed.locale`'s producer on the dev hot-reload
+                // path. Resolved from the BOOT bundle, not from `payload`: a
+                // reload re-parses the artifact's metadata collections, and
+                // `i18n` is an envelope key that does not travel in it.
+                const seedLocale = this.resolveSeedLocale();
                 const request = SeedLoaderRequestSchema.parse({
                     seeds,
-                    config: { defaultMode: 'upsert', multiPass: true },
+                    config: {
+                        defaultMode: 'upsert',
+                        multiPass: true,
+                        ...(seedLocale ? { locale: seedLocale } : {}),
+                    },
                 });
                 const result = await seedLoader.load(request);
                 const { totalInserted, totalUpdated, totalErrored } = result.summary;

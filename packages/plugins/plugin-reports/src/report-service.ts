@@ -18,6 +18,12 @@ import type {
 // `OwnerContextResolver`; naming the retired six-field shape here made this
 // file's own type say it could not see what that resolver returns.
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+// [#16291] THE membership predicate for `iana_time_zone` — the same one
+// `sys_report_schedule.timezone`'s `valueDomain: 'iana_time_zone'` write gate
+// consults (#15872), and the same one the settings door uses. Imported rather
+// than re-derived on purpose: a second hand-written time-zone judgement in this
+// package would be a second answer, and the two doors would drift.
+import { isValueDomainMember } from '@objectstack/spec/shared';
 import { Cron } from 'croner';
 
 /**
@@ -56,6 +62,32 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 const DEFAULT_FORMAT: ReportFormat = 'csv';
 const DEFAULT_INTERVAL_MIN = 1440;
 const DEFAULT_LIMIT = 1000;
+
+/** The default this file documents in four places, in one spelling. */
+const DEFAULT_TIMEZONE = 'UTC';
+
+/**
+ * The zone croner is actually handed for a schedule — `timezone || 'UTC'`, the
+ * exact expression every `new Cron(...)` call site in this file uses. Membership
+ * is judged on THIS string, never on the raw column value: a check that judges a
+ * different string than the scheduler receives is a phantom check.
+ */
+function effectiveTimezone(timezone?: string | null): string {
+  return timezone || DEFAULT_TIMEZONE;
+}
+
+/**
+ * [#16291] Is this schedule's zone one croner can resolve?
+ *
+ * croner 10.0.1 does NOT answer this at construction: `new Cron(expr, { timezone })`
+ * WITHOUT a callback validates the expression and nothing else, so a non-member
+ * zone constructs fine and only throws later, from `nextRun()`. That is why the
+ * create-time guard could not see the timezone half of its own input, and why
+ * asking the constructor harder is not the fix — asking the right question is.
+ */
+function isUsableTimezone(timezone?: string | null): boolean {
+  return isValueDomainMember('iana_time_zone', effectiveTimezone(timezone));
+}
 
 function uid(prefix: string): string {
   const g: any = globalThis as any;
@@ -602,17 +634,40 @@ export class ReportService implements IReportService {
     const now = this.clock.now();
     const interval = input.intervalMinutes ?? DEFAULT_INTERVAL_MIN;
     const cron = input.cronExpression?.trim() || null;
+    // [#16291] Validate the TIMEZONE explicitly, and first. The guard below has
+    // always stated its purpose as "a clear error at schedule time instead of a
+    // schedule that silently falls back to interval on sweep" — but it asked the
+    // callback-less `Cron` constructor, which validates the expression and lets
+    // any string through as the zone (croner defers that to `nextRun()`). So the
+    // half of the input the guard could not see produced VERBATIM the outcome the
+    // guard exists to prevent.
+    //
+    // The predicate is the one `sys_report_schedule.timezone` already enforces on
+    // write (#15872), applied to the string croner is actually handed, so this
+    // door can never accept a value the storage door refuses — it only says so
+    // earlier, and in words that name the input that is wrong.
+    const timezone = effectiveTimezone(input.timezone);
+    if (!isUsableTimezone(timezone)) {
+      throw new Error(
+        `VALIDATION_FAILED: invalid timezone '${timezone}': not a member of the 'iana_time_zone' value domain`,
+      );
+    }
     if (cron) {
       // Validate eagerly so an author gets a clear error at schedule time
       // instead of a schedule that silently falls back to interval on sweep.
       try {
-        new Cron(cron, { timezone: input.timezone || 'UTC' });
+        new Cron(cron, { timezone });
       } catch (err) {
         throw new Error(`VALIDATION_FAILED: invalid cron_expression '${cron}': ${(err as Error).message}`);
       }
     }
+    // The row stores, and the scheduler evaluates, the SAME string the guard just
+    // judged. `?? 'UTC'` here used to leave an empty-string `timezone` on the row
+    // while `nextRunAt`'s `|| 'UTC'` scheduled it in UTC — a row whose stored zone
+    // the storage gate would refuse and whose scheduler behaviour disagreed with
+    // it. `effectiveTimezone` is that one spelling.
     const nextRun = this.nextRunAt(
-      { cron_expression: cron, interval_minutes: interval, timezone: input.timezone ?? 'UTC' },
+      { cron_expression: cron, interval_minutes: interval, timezone },
       now,
     ).toISOString();
     const id = uid('rsch');
@@ -622,7 +677,7 @@ export class ReportService implements IReportService {
       name: input.name ?? null,
       interval_minutes: interval,
       cron_expression: cron,
-      timezone: input.timezone ?? 'UTC',
+      timezone,
       active: input.active !== false,
       recipients: input.recipients.join(','),
       format: input.format ?? 'html_table',
@@ -708,6 +763,49 @@ export class ReportService implements IReportService {
     let fired = 0, failed = 0, skipped = 0;
     for (const schedule of list) {
       try {
+        // [#16291] A stored zone croner cannot resolve is a CONFIGURATION fault,
+        // not a run failure, and it is the one case where continuing is worse
+        // than stopping: `nextRunAt` would discard the cron expression and
+        // re-derive `next_run_at` from `interval_minutes`, so "every weekday
+        // 09:00 Asia/Shanghai" becomes "every 1440 minutes, forever" — the wrong
+        // instants, indefinitely, rediscovered on every sweep.
+        //
+        // #15872 refuses such a value on the WRITE path, and `scheduleReport` now
+        // refuses it at the service door, but neither heals a row already stored:
+        // `valueDomain` is in the written-values-only transition-gate class, so
+        // rows that predate it are never re-validated. This arm is the only place
+        // those rows are seen at all, which is why the answer for them lives here.
+        //
+        // The answer is MARK AND STOP, not repair: the intended zone is not
+        // recoverable from a typo, and rewriting it to UTC would silently deliver
+        // at yet another set of wrong instants while looking healthy. So the
+        // schedule does not run, `next_run_at` is NOT advanced, and the row itself
+        // carries the reason. Leaving `active` alone and `next_run_at` in the past
+        // is deliberate: it is the same posture this loop already takes for a
+        // schedule whose report has vanished, and it means the sweep resumes the
+        // schedule by itself the moment an admin corrects the zone — no second
+        // action, no re-enable.
+        //
+        // Guarded on `cron_expression` because that is exactly where the zone is
+        // load-bearing: interval arithmetic never consults it, so an interval-only
+        // schedule carrying a legacy bad zone still delivers on the cadence its
+        // author asked for and is left alone.
+        const scheduleCron = (schedule.cron_expression ?? '').trim();
+        if (scheduleCron && !isUsableTimezone(schedule.timezone)) {
+          const badZone = effectiveTimezone(schedule.timezone);
+          failed++;
+          await this.markSchedule(schedule.id, {
+            last_status: 'failed',
+            last_error:
+              `timezone '${badZone}' is not a valid IANA time zone, so cron '${scheduleCron}' cannot be evaluated; ` +
+              'the schedule is not being run and next_run_at is not being advanced — correct the timezone to resume',
+          });
+          this.logger?.warn?.(
+            `ReportService.dispatchDue: schedule ${schedule.id} has unusable timezone '${badZone}'; not run, not rescheduled`,
+          );
+          continue;
+        }
+
         const row = await this.loadReportRow(schedule.report_id);
         if (!row) {
           skipped++;
@@ -804,23 +902,38 @@ export class ReportService implements IReportService {
    * `interval_minutes` (the documented `sys_report_schedule` contract) and is
    * evaluated in the schedule's `timezone` (default UTC) via croner — the same
    * library the job scheduler uses. Falls back to `from + interval_minutes` for
-   * interval schedules, and also if a cron expression is invalid or has no
-   * future occurrence (logged; never throws into the sweep). `from` is the
-   * reference instant (the injected clock), so `today()`-style boundaries honor
-   * the test clock.
+   * interval schedules, and also if a cron expression cannot be evaluated or has
+   * no future occurrence — both logged naming the expression AND the zone, since
+   * either can be the cause; never throws into the sweep. `from` is the reference
+   * instant (the injected clock), so `today()`-style boundaries honor the test
+   * clock.
+   *
+   * ⚠️ This stays a PURE function of its arguments — it computes an instant, it
+   * does not decide policy. The sweep's answer to an unusable zone (do not run,
+   * do not advance, mark the row) lives in `dispatchDue`, where the row and the
+   * engine are in hand; the fallback here survives only so a caller that has
+   * already passed that arm cannot throw into the loop.
    */
   private nextRunAt(
     schedule: { cron_expression?: string | null; interval_minutes?: number | null; timezone?: string | null },
     from: Date,
   ): Date {
     const cron = (schedule.cron_expression ?? '').trim();
+    const timezone = effectiveTimezone(schedule.timezone);
     if (cron) {
+      // [#16291] BOTH warnings name BOTH halves of what croner was handed, and
+      // neither accuses either half any more. A fall back to interval is
+      // attributable to the expression OR the zone — croner reports an unusable
+      // zone as a `CronDate` conversion TypeError out of `nextRun()`, which the
+      // old text relabelled `invalid cron '<expr>'` — and an investigator sent to
+      // audit a cron expression that was perfectly good is worse off than one
+      // told nothing. Say what failed, name both inputs, blame neither.
       try {
-        const next = new Cron(cron, { timezone: schedule.timezone || 'UTC' }).nextRun(from);
+        const next = new Cron(cron, { timezone }).nextRun(from);
         if (next) return next;
-        this.logger?.warn?.(`ReportService: cron '${cron}' has no next occurrence; falling back to interval`);
+        this.logger?.warn?.(`ReportService: cron '${cron}' (timezone '${timezone}') has no next occurrence; falling back to interval`);
       } catch (err) {
-        this.logger?.warn?.(`ReportService: invalid cron '${cron}'; falling back to interval`, err);
+        this.logger?.warn?.(`ReportService: cron '${cron}' (timezone '${timezone}') could not be evaluated; falling back to interval`, err);
       }
     }
     const interval = schedule.interval_minutes ?? DEFAULT_INTERVAL_MIN;

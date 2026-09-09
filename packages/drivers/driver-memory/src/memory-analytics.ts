@@ -623,6 +623,40 @@ export interface MemoryAnalyticsConfig {
 }
 
 /**
+ * [#16179] A `timeDimensions[].dateRange` resolved to its two bounds, together
+ * with what the UPPER one means.
+ *
+ * `AnalyticsDateRange` is a union of two arms (`AnalyticsDateRangeSchema`) and
+ * they do NOT agree on that question, which is the whole reason this carries a
+ * flag instead of a bare pair:
+ *
+ * - an explicit `[a, b]` is the CALLER's window, and `b` is a bound they wrote
+ *   meaning "include b" — the reading `$lte` has published since this face
+ *   existed. ⛔ Never narrow it here; doing so is a silent behaviour change on
+ *   a published package, and it is the route this card deliberately did not
+ *   take;
+ * - a preset name is resolved BY this driver, and `'today'`'s upper bound is
+ *   the first instant of TOMORROW — the day's exclusive end, not a moment the
+ *   day contains. Compared with `$lte` it made `'today'` one day plus one
+ *   instant long, so two adjacent day windows overlapped at midnight and a row
+ *   stamped there was counted in BOTH.
+ *
+ * The distinction is available where it is made — one line above the bound
+ * construction, at the `Array.isArray` that discriminates the union's arms —
+ * so the two paths never had to share an answer.
+ */
+interface ResolvedDateRange {
+  /** `[start, end]`, in the spelling the bounds are compared as. */
+  readonly bounds: readonly string[];
+  /**
+   * Is `end` the first instant AFTER the window rather than its last instant?
+   * `true` only for a window this driver RESOLVED; ⛔ never for one a caller
+   * wrote out.
+   */
+  readonly endExclusive: boolean;
+}
+
+/**
  * Memory-Based Analytics Service
  * 
  * Implements IAnalyticsService using InMemoryDriver's aggregation capabilities.
@@ -743,9 +777,15 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       for (const timeDim of query.timeDimensions) {
         const fieldPath = this.resolveFieldPath(cube, timeDim.dimension);
         if (timeDim.dateRange) {
-          const range = Array.isArray(timeDim.dateRange)
-            ? timeDim.dateRange
+          // [#16179] The union's two arms are discriminated HERE, and the
+          // answer travels the two lines down to the bound construction rather
+          // than being re-derived from the bounds themselves — which is not
+          // possible, because a resolved window and a caller's window are
+          // rendered identically (`toISOString()` on both sides).
+          const resolved: ResolvedDateRange = Array.isArray(timeDim.dateRange)
+            ? { bounds: timeDim.dateRange, endExclusive: false }
             : this.parseDateRangeString(timeDim.dateRange, query.timezone);
+          const range = resolved.bounds;
 
           if (range.length === 2) {
             // The window matches BOTH stored forms of a datetime value — the
@@ -763,12 +803,31 @@ export class MemoryAnalyticsService implements IAnalyticsService {
             // inherits `<= day`'s whole-day intent via `< nextDay`.
             const start = String(range[0]);
             const end = String(range[1]);
-            const nextDay = nextUtcCalendarDay(end);
-            const stringBounds = nextDay != null
-              ? { $gte: start, $lt: nextDay }
+            // [#16179] The upper bound is EXCLUSIVE by exactly two routes, and
+            // they are mutually exclusive by construction:
+            //
+            //   - the RESOLVER produced the window, so `end` is already the
+            //     instant the window stops before -- `'today'`'s end is the
+            //     first instant of tomorrow. ⛔ It must NOT be widened again:
+            //     it is an instant, so `nextUtcCalendarDay` refuses it anyway
+            //     (`calendar-day.ts`, pinned by `calendar-day.test.ts`), and
+            //     asking is what would make a future bare-day resolver widen a
+            //     bound that was already exclusive.
+            //   - the CALLER wrote a bare `YYYY-MM-DD`, which denotes the WHOLE
+            //     day and widens to `< nextDay` (#4042; the SQL twin is #3777).
+            //
+            // Anything else -- a full timestamp the CALLER wrote -- keeps
+            // instant semantics and stays INCLUSIVE, byte for byte as before.
+            const widenedDay = resolved.endExclusive ? null : nextUtcCalendarDay(end);
+            const upperString = resolved.endExclusive ? end : widenedDay;
+            const upperDate = widenedDay != null
+              ? new Date(`${widenedDay}T00:00:00.000Z`)
+              : (resolved.endExclusive ? new Date(end) : null);
+            const stringBounds = upperString != null
+              ? { $gte: start, $lt: upperString }
               : { $gte: start, $lte: end };
-            const dateBounds = nextDay != null
-              ? { $gte: new Date(start), $lt: new Date(`${nextDay}T00:00:00.000Z`) }
+            const dateBounds = upperDate != null
+              ? { $gte: new Date(start), $lt: upperDate }
               : { $gte: new Date(start), $lte: new Date(end) };
             pipeline.push({
               $match: {
@@ -1418,9 +1477,14 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     return sql.trim();
   }
 
-  private parseDateRangeString(range: string, timezone?: string): string[] {
+  private parseDateRangeString(range: string, timezone?: string): ResolvedDateRange {
     // Simple parser for common date range strings
     // In production, this would use a proper date range parser
+    //
+    // [#16179] Returns a {@link ResolvedDateRange}, not a bare pair: a window
+    // this function BUILT knows whether its upper bound is inclusive, and that
+    // answer cannot be recovered downstream -- a resolved bound and a caller's
+    // bound are the same `toISOString()` text. Each `return` below states it.
     //
     // [#15825] ONE calendar, and it is UTC -- the same one `toISOString()`
     // renders every bound below on. Two INDEPENDENT defects lived here:
@@ -1512,7 +1576,20 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       // The next calendar day, via the proxy calendar -- never `+ 86_400_000`.
       const tomorrow = new Date(today.getTime());
       tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-      return [boundary(today), boundary(tomorrow)];
+      // [#16179] `endExclusive`, and the flag is the whole repair: the upper
+      // bound is where TOMORROW begins, which is the one instant `'today'` must
+      // NOT contain. Compared inclusively it made every day window one instant
+      // too long, so two adjacent days overlapped at midnight and a row stamped
+      // there was counted twice -- silently, with no error and no warning.
+      //
+      // ⛔ Emitting a bare `YYYY-MM-DD` end instead -- the other spelling of
+      // this repair -- is NOT available on this path and the failure would be
+      // silent: `boundary()` renders that zone's midnight INSTANT, and a bare
+      // day would be widened by `nextUtcCalendarDay` and cut at `T00:00:00Z`,
+      // i.e. at UTC midnight, undoing #16042 for every non-UTC caller. Measured
+      // on `Asia/Shanghai`: the window ends at 2026-09-06T16:00:00.000Z, and
+      // the bare-day route would end it eight hours late.
+      return { bounds: [boundary(today), boundary(tomorrow)], endExclusive: true };
     } else if (range.startsWith('last ')) {
       const parts = range.split(' ');
       const num = parseInt(parts[1]);
@@ -1529,11 +1606,17 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         start.setUTCFullYear(start.getUTCFullYear() - num);
       }
       
-      // The upper bound is the current INSTANT, which no zone moves.
-      return [boundary(start), now.toISOString()];
+      // The upper bound is the current INSTANT, which no zone moves -- and it
+      // is a moment the window REACHES, not one it stops before, so it stays
+      // INCLUSIVE ([#16179] leaves this leg alone). ⚠️ No preset in the declared
+      // vocabulary reaches this branch today: `DATE_RANGE_PRESETS` spells them
+      // `last_7_days`, and `startsWith('last ')` wants a space (#16322).
+      return { bounds: [boundary(start), now.toISOString()], endExclusive: false };
     }
 
-    return [range, range]; // Fallback
+    // Fallback -- an inclusive pair of the raw string, unchanged and NOT this
+    // card's question (#16041 / #16322 own what an unresolved range matches).
+    return { bounds: [range, range], endExclusive: false };
   }
 
   private generateSqlFromPipeline(table: string, pipeline: Record<string, any>[]): string {

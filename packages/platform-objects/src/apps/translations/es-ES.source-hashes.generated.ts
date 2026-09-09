@@ -63,6 +63,7 @@ export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.dataset.sections.source.label": "8fe786e8e29c8cec",
   "metadataForms.doc.description": "f233af60238b0879",
   "metadataForms.doc.label": "3f35cf5088b999ad",
+  "metadataForms.email_template.fields.variables.helpText": "27197774c2cda633",
   "metadataForms.field.fields.placeholder.helpText": "07cecac0844860be",
   "metadataForms.field.fields.placeholder.label": "44d62b55b63fe718",
   "metadataForms.field.fields.rows.helpText": "66755b9447e67a15",

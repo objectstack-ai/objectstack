@@ -439,6 +439,56 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     expect(() => SolutionBlueprintStrictSchema.parse(missingKey)).toThrow();
   });
 
+  it('carries viewName on a strict nav item — nullable, and REQUIRED to be present (OpenAI strict)', () => {
+    // cloud#2150 shape pin. This mirror is the design step's output contract,
+    // so a `viewName` that exists only in the lenient schema is a fix on no
+    // path the product actually runs: `propose_blueprint` could never author a
+    // board entry, and `apply_blueprint` would accept a key nothing emits.
+    const navShape = (SolutionBlueprintStrictSchema as any).shape.app.unwrap().shape.nav.unwrap().element.shape;
+    expect('viewName' in navShape).toBe(true);
+
+    // null is accepted (the entry opens the object's default list)…
+    const bare = SolutionBlueprintStrictSchema.parse({
+      ...strictBp,
+      app: { name: 'ticketing', label: null, icon: null, nav: [
+        { type: 'object', target: 'ticket', label: '工单列表', icon: 'list', viewName: null },
+      ] },
+    });
+    expect(bare.app?.nav?.[0].viewName).toBeNull();
+
+    // …and the whole point of the card: list AND board for ONE object, told
+    // apart by the view each entry opens rather than by decoration.
+    const board = SolutionBlueprintStrictSchema.parse({
+      ...strictBp,
+      app: { name: 'ticketing', label: null, icon: null, nav: [
+        { type: 'object', target: 'ticket', label: '工单列表', icon: 'list', viewName: null },
+        { type: 'object', target: 'ticket', label: '工单看板', icon: 'kanban', viewName: 'ticket_status_board' },
+      ] },
+    });
+    expect(board.app?.nav?.map((n) => n.viewName)).toEqual([null, 'ticket_status_board']);
+
+    // …and OMITTING the key throws (strict mode: every key in `required`).
+    const missingKey = {
+      ...strictBp,
+      app: { name: 'ticketing', label: null, icon: null, nav: [{ type: 'object', target: 'ticket', label: null, icon: null }] },
+    };
+    expect(() => SolutionBlueprintStrictSchema.parse(missingKey)).toThrow();
+  });
+
+  it('accepts the QUALIFIED <object>.<view> spelling too — the applier normalizes, the mirror must not refuse', () => {
+    // `viewName` is deliberately un-regexed on BOTH sides: a view answers to a
+    // bare key and to the `<object>.<key>` name its staged record carries.
+    // Constraining it here would make one of the two legal to generate and
+    // illegal to apply (cloud#1967).
+    const parsed = SolutionBlueprintStrictSchema.parse({
+      ...strictBp,
+      app: { name: 'ticketing', label: null, icon: null, nav: [
+        { type: 'object', target: 'ticket', label: '工单看板', icon: 'kanban', viewName: 'ticket.ticket_status_board' },
+      ] },
+    });
+    expect(parsed.app?.nav?.[0].viewName).toBe('ticket.ticket_status_board');
+  });
+
   it('accepts a dashboard widget carrying the (nullable) measure + groupBy + condition keys', () => {
     const parsed = SolutionBlueprintStrictSchema.parse({
       ...strictBp,
@@ -509,6 +559,56 @@ describe('strict mirror ↔ lenient schema — key parity', () => {
       (SolutionBlueprintStrictSchema as any).shape.objects.element.shape,
     ).sort();
     expect(strictObjectKeys).toEqual(lenientObjectKeys);
+  });
+
+  it('the NAV ITEM schemas carry exactly the same keys', () => {
+    // Widened for cloud#2150, the third time the same gap was found one level
+    // further out (fields → objects → nav items). The nav item is where "which
+    // VIEW does this menu entry open" lives; with `viewName` on one side only,
+    // the design step could not author a board entry (mirror missing) or the
+    // applier would drop one it was handed (lenient missing). There are NO
+    // deliberate nav-level exclusions; if one ever becomes deliberate, list it
+    // explicitly here with its reason.
+    const lenientNavKeys = Object.keys(
+      (SolutionBlueprintSchema as any).shape.app.unwrap().shape.nav.unwrap().element.shape,
+    ).sort();
+    const strictNavKeys = Object.keys(
+      (SolutionBlueprintStrictSchema as any).shape.app.unwrap().shape.nav.unwrap().element.shape,
+    ).sort();
+    expect(strictNavKeys).toEqual(lenientNavKeys);
+  });
+
+  it('carries `viewName`, so a menu entry can say WHICH view it opens', () => {
+    // Guards the specific hole (cloud#2150): this surface can always author a
+    // kanban view AND a nav entry, so without a way to bind the two the model's
+    // only remaining move is a duplicate entry distinguished by label alone —
+    // which is what shipped, silently, to users.
+    const lenientNavKeys = Object.keys(
+      (SolutionBlueprintSchema as any).shape.app.unwrap().shape.nav.unwrap().element.shape,
+    );
+    const strictNavKeys = Object.keys(
+      (SolutionBlueprintStrictSchema as any).shape.app.unwrap().shape.nav.unwrap().element.shape,
+    );
+    expect(lenientNavKeys).toContain('viewName');
+    expect(strictNavKeys).toContain('viewName');
+  });
+
+  it('round-trips a list + board pair on ONE object through the lenient schema', () => {
+    const parsed = SolutionBlueprintSchema.parse({
+      summary: 's',
+      objects: [{ name: 'ticket', fields: [{ name: 'title', type: 'text' }, { name: 'status', type: 'select' }] }],
+      views: [{ object: 'ticket', name: 'ticket_status_board', type: 'kanban', groupBy: 'status' }],
+      app: {
+        name: 'ticket_management',
+        nav: [
+          { type: 'object', target: 'ticket', label: '工单列表', icon: 'list' },
+          { type: 'object', target: 'ticket', label: '工单看板', icon: 'kanban', viewName: 'ticket_status_board' },
+        ],
+      },
+    });
+    // The negative control rides along: the entry that named no view keeps
+    // carrying none, so the default-list behaviour is untouched.
+    expect(parsed.app?.nav?.map((n) => n.viewName)).toEqual([undefined, 'ticket_status_board']);
   });
 
   it('carries `expression`, so a formula field can state what it computes', () => {

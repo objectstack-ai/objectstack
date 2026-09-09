@@ -62,10 +62,23 @@ export default defineConfig({
       },
     ],
   },
-  // No `test` block: this package had no vitest config until now, so its suite
-  // ran on vitest's defaults. Leaving discovery untouched keeps this file's only
-  // effect the alias above — the sweep's population floors (76 object files / 51
+  // Discovery is untouched — but this file is NOT "the alias and nothing else".
+  // The `test` block above carries exactly one key, and it is a run-exit fix
+  // (`disableConsoleIntercept`, #10374), not a discovery key: no `include`,
+  // `exclude` or `dir` is set anywhere here, so this package's suite is still
+  // discovered on vitest's defaults, as it was before this file existed.
+  //
+  // Narrowing `include` here would silently drop cases while the gate this file
+  // answers went green: the sweep's population floors (76 object files / 51
   // in-scope / 9 packages) are measured by walking the filesystem, but the rest
-  // of the package's suite is discovered by vitest, and narrowing `include` here
-  // would silently drop cases while the gate this file answers went green.
+  // of the package's suite is discovered by vitest.
+  //
+  // The two claims this paragraph replaces — that a `test` block was absent
+  // here, and that the alias was this file's sole effect — were true as written
+  // (#7934/#8314), and were falsified in place when the disarm landed ABOVE them
+  // and left them standing (#10374/#13522): the same silent staleness the alias
+  // rationale above records against its own suite count. Deleting or rewriting
+  // this config now costs the disarm as well as the alias (#16189). Paraphrased
+  // rather than quoted, so a census grep for the retired wording does not land
+  // back on this file.
 });

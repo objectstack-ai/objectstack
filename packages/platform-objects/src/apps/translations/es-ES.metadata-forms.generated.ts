@@ -58,7 +58,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       isSystem: {
         label: "Integrado del sistema",
-        helpText: "Objeto de sistema (protegido contra eliminación)"
+        helpText: "Objeto de sistema (protegido contra eliminación; el uso compartido predeterminado es público)"
       },
       fields: {
         label: "Campos",
@@ -162,7 +162,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.reference": {
         label: "Referencia",
-        helpText: "Objeto de destino (para lookup/master_detail)"
+        helpText: "Nombre del objeto de destino. En un campo tree es opcional y, si se indica, debe ser este mismo objeto (un árbol es una jerarquía dentro de su propio objeto — para enlazar con otro objeto, usa un lookup)"
       },
       "fields.lookupFilters": {
         label: "Lookup Filters",
@@ -210,7 +210,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.trackHistory": {
         label: "Seguimiento de historial",
-        helpText: "Conservar historial de cambios"
+        helpText: "Resume este campo en la cronología de actividad del registro"
       },
       "fields.visibleWhen": {
         label: "Visible When",
@@ -666,7 +666,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       filter: {
         label: "Filtro",
-        helpText: "Condiciones de filtro"
+        helpText: "Condiciones de filtro — el mismo constructor visual que la barra de herramientas de la lista, con operadores y entradas de valor según el tipo de campo"
       },
       sort: {
         label: "Orden",
@@ -786,7 +786,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       type: {
         label: "Tipo",
-        helpText: "Tipo de página: list / record / home / app / utility. Cómo se ve una página de lista (grid / kanban / calendar) es una visualización configurada en Interface, no un tipo de página."
+        helpText: "Tipo de página. \"List / Interface\" vincula una vista de origen a una superficie curada — cómo se ve (grid / kanban / calendar / …) es una visualización configurada en Interface, no un tipo de página."
       },
       template: {
         label: "Plantilla",
@@ -1049,7 +1049,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       advanced: {
         label: "Avanzado",
-        description: "Operaciones masivas, exposición a IA y forma de solicitud API."
+        description: "Exposición a IA y forma de la solicitud API."
       }
     },
     fields: {
@@ -1087,7 +1087,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       body: {
         label: "Cuerpo",
-        helpText: "Código JavaScript que ejecutar"
+        helpText: "Una expresión L1 o un body JS L2 en sandbox"
       },
       "body.language": {
         label: "Language",
@@ -1164,7 +1164,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       basics: {
         label: "Aspectos básicos",
-        description: "Identidad y fuente de datos."
+        description: "Identidad y tipo de informe."
       },
       dataset_binding: {
         label: "Dataset binding",
@@ -1208,7 +1208,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       columns: {
         label: "Columnas",
-        helpText: "Columnas que mostrar en el informe"
+        helpText: "Nombres de dimensión en horizontal (solo matrix)"
       },
       order: {
         label: "Orden",
@@ -1427,7 +1427,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       variables: {
         label: "Variables de plantilla",
-        helpText: "Lista de nombres de variable referenciados en subject/body"
+        helpText: "[{ \"name\": \"user.name\", \"type\": \"string\", \"required\": true, \"description\": \"...\" }]"
       },
       fromOverride: {
         label: "Sobrescritura de remitente",
@@ -1460,7 +1460,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "Identidad",
-        description: "Los conjuntos de permisos se apilan sobre un perfil para conceder acceso adicional. Los perfiles son el conjunto base asignado 1:1 a cada usuario."
+        description: "Los conjuntos de permisos son el único contenedor de capacidades: un usuario obtiene la unión de todos los conjuntos que tiene, así que un conjunto solo puede añadir acceso. Las posiciones distribuyen los conjuntos a las personas."
       },
       system_permissions: {
         label: "Permisos del sistema",

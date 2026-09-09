@@ -105,6 +105,7 @@ import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
+import { validateFlowFilterTokens } from './validate-flow-filter-tokens.js';
 import { validatePresetComparands } from './validate-preset-comparands.js';
 import { validateEmptyCombinators } from './validate-empty-combinators.js';
 import { validateReferenceIntegrity } from './reference-integrity-suite.js';
@@ -611,6 +612,26 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateFilterTokens(stack),
+  },
+  // #16096 — the FLOW half of the same question, and a different answer,
+  // because a flow node's `config.filter` is evaluated by the automation
+  // template evaluator before ObjectQL ever sees it. Reports only the class
+  // NEITHER dialect resolves: a call to a name outside the flow template
+  // dialect's closed function table, where `resolveToken` raises a guard
+  // refusal and the node cannot run. The open arm (bare/dotted identifiers
+  // addressing the run's VariableMap) is deliberately left silent — judging it
+  // against the ObjectQL vocabulary reports 7 findings on this repo's own
+  // examples, all 7 false positives. Reads `flows` alone, so the per-write
+  // snapshot carries everything it needs.
+  {
+    name: 'validateFlowFilterTokens',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-flow-filter-tokens.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
+    run: (stack) => validateFlowFilterTokens(stack),
   },
   // #8793 (the ruled C half of #8690) — a declared dashboard date-range preset
   // name (`last_30_days`, …) authored as a bare ORDERING comparand resolves in
@@ -1389,7 +1410,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // rule therefore stays behind WHOLE (#8310's explicit call), as its own
   // entry.
   //
-  // This entry remains the rest of the D7 block (12 rule ids) as ONE
+  // This entry remains the rest of the D7 block (14 rule ids) as ONE
   // registration, not a per-rule split: the baseline/candidate differential is
   // what keeps a write of one declared type from leaking the other rules'
   // whole-stack findings — every finding derived from a sibling collection is

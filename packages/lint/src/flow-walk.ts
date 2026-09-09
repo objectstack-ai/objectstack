@@ -151,17 +151,18 @@ export function ownRegionKeys(nodeType: unknown): readonly string[] {
  * is the reverse of the double-count this view exists to prevent and strictly
  * worse: a double-count is visible in the output.
  *
- * The union stays the DEFAULT to bound this change to the two rules #16111
- * names — ⛔ NOT because it is the right argument for the caller still taking
- * it. `lint-flow-patterns.ts` reads the union view for its own recursive
- * template scan, so it is blind to an `http` node's `body` for exactly the
- * reason above: the same defect, one call site over, tracked on #16405. Once
- * that caller passes its own slots this default has no callers left and
- * `regionKeys` must become REQUIRED, so no later caller inherits the trap by
- * writing the shorter call.
+ * `regionKeys` is REQUIRED — there is deliberately no default (#16405). The
+ * union was the default until #16111's remaining caller was fixed, to bound
+ * that change to the two rules it named, and the cost of leaving it was exactly
+ * what this parameter documents: `lint-flow-patterns.ts` inherited the trap by
+ * writing the shorter call and was blind to an `http` node's `body` for the
+ * reason above, silently, for as long as the default existed. With the
+ * parameter required, the next caller that has not decided which question it is
+ * asking does not compile instead of quietly asking the wrong one.
  *
  * `regionKeys: []` is a real answer (strip nothing) and is distinct from
- * omitting the parameter.
+ * {@link ownRegionKeys}' answer for a non-container type, which happens to be
+ * the same empty list arrived at by asking.
  *
  * Exported since #5383 because {@link WalkedFlowNode.localConfig} is not the only
  * consumer that needs this view. `lint-flow-patterns.ts` walks graphs rather than
@@ -171,7 +172,7 @@ export function ownRegionKeys(nodeType: unknown): readonly string[] {
  */
 export function stripRegions(
   config: unknown,
-  regionKeys: Iterable<string> = REGION_CONFIG_KEYS,
+  regionKeys: Iterable<string>,
 ): AnyRec | undefined {
   if (!isRec(config)) return undefined;
   const strip = regionKeys instanceof Set ? regionKeys : new Set(regionKeys);

@@ -111,6 +111,9 @@ import {
   type AutomationReadySummary,
   type SeedSourceSummary,
 } from '../utils/format.js';
+// [#16630] The reader half of the degraded-boot data path — the kernel's own
+// missing-core-service list, fetched, never re-derived. See its header.
+import { readMissingCoreServices } from '../utils/degraded-capabilities.js';
 import { redirectStdoutToStderr } from '../utils/json-stdout.js';
 import {
   CONSOLE_PATH,
@@ -4735,6 +4738,18 @@ export default class Serve extends Command {
         if (Array.isArray(s) && s.length > 0) seedSummary = s;
       } catch { /* no seeds ran — nothing to show */ }
 
+      // ── Degraded-capabilities readout (#16630) ─────────────────────
+      // The banner and the kernel's `System started with degraded
+      // capabilities. Missing core services: …` warning used to be two
+      // statements about one boot with NO data path between them — printed
+      // from two packages, and the louder one (`✓ Server is ready`) was the
+      // wrong one. This read IS that path: the same kernel handle the two
+      // reads above use, the same `getService` accessor, and the kernel's own
+      // list handed on untouched. ⛔ Nothing here decides which services count
+      // as core — that judgement stays in one place, `ServiceRequirementDef`.
+      // Absent on every healthy boot, where the banner is unchanged.
+      const missingCoreServices = readMissingCoreServices(kernel);
+
       // ── Multi-node licence reading → telemetry (#12667) ────────────
       // The advisory the gate produced at boot, published where a deployment's
       // metrics pipeline already looks. Emitted HERE, after every plugin has
@@ -4825,6 +4840,10 @@ export default class Serve extends Command {
         seededAdmin,
         automation: automationSummary,
         seeds: seedSummary,
+        // #16630 — what the kernel already knows about this boot, so the ready
+        // line can say what state it is ready in. `undefined` on a healthy
+        // boot, where the ready block prints exactly what it always has.
+        missingCoreServices,
         // #4012 — every boot-phase `logger.warn` the quiet window intercepted,
         // replayed here. Without this the window is a drain: the ADR-0110 D5
         // `[action-governance]` inventory, degraded-boot notices and flow

@@ -196,6 +196,7 @@ export {
   REACT_BLOCK_NEEDS_RECORD_CONTEXT,
   REACT_PAGE_SOURCE_UNPARSEABLE,
   REACT_PROP_DEPRECATED,
+  REACT_PROP_RETIRED,
 } from './validate-react-page-props.js';
 export type { ReactPropFinding, ReactPropSeverity } from './validate-react-page-props.js';
 
@@ -306,6 +307,7 @@ export {
   SECURITY_PRIVATE_NO_READSCOPE,
   SECURITY_MASTER_DETAIL_UNGRANTED,
   SECURITY_FLS_UNQUALIFIED_KEY,
+  SECURITY_FLS_UNKNOWN_FIELD,
   SECURITY_GRANT_EXPIRED_AT_AUTHORING,
   SECURITY_DELEGATION_MISSING_REASON,
   SECURITY_CBP_NO_RELATION,
@@ -366,6 +368,10 @@ export type {
 } from './validate-dashboard-action-refs.js';
 
 export { validateFilterTokens, FILTER_TOKEN_UNKNOWN } from './validate-filter-tokens.js';
+export { validateFlowFilterTokens, FLOW_FILTER_TOKEN_UNKNOWN } from './validate-flow-filter-tokens.js';
+export type { FlowFilterTokenFinding } from './validate-flow-filter-tokens.js';
+export { classifyFlowTemplateToken, FLOW_TEMPLATE_DATE_FUNCTIONS, FLOW_TEMPLATE_VALUE_FUNCTIONS } from './flow-template-grammar.js';
+export type { FlowTemplateTokenVerdict } from './flow-template-grammar.js';
 export type { FilterTokenFinding, FilterTokenSeverity } from './validate-filter-tokens.js';
 export { validatePresetComparands, FILTER_PRESET_COMPARAND } from './validate-preset-comparands.js';
 export type { PresetComparandFinding, PresetComparandSeverity } from './validate-preset-comparands.js';

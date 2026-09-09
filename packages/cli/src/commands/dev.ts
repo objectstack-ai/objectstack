@@ -24,6 +24,9 @@ import { readEnvWithDeprecation, isMcpServerEnabled } from '@objectstack/types';
 // no range, no reader, no wording; a second copy of the bound is exactly what
 // #12620 and #12662 protected against.
 import { describePortSource, parseRequestedPort, formatInvalidPortNotice } from '../utils/port-contract.js';
+// The auth base-URL precedence chain, borrowed from the command that owns it
+// (#16734). ⛔ `dev` declares no chain of its own — see printMcpConnectHint.
+import { resolveAuthBaseUrl } from './serve.js';
 import type { ResolvedProjectDatabaseUrl } from '@objectstack/runtime';
 
 /**
@@ -61,6 +64,57 @@ export async function resolveDevDatabase(opts: {
     projectRoot: opts.cwd,
     artifactPath: opts.artifactPath,
   });
+}
+
+/**
+ * The `os dev` MCP connect hint — the three lines a reader PASTES (#3167,
+ * #16734).
+ *
+ * ## The origin these lines carry is the one an MCP client can REACH
+ *
+ * `Connect` is a COMMAND, not documentation: whatever address it names is the
+ * address `claude mcp add` registers. So the block has to print the origin the
+ * deployment is reachable on — which is exactly what the ready banner the
+ * serve child prints in the same boot output already carries, resolved through
+ * {@link resolveAuthBaseUrl} (`OS_AUTH_URL` → legacy `BETTER_AUTH_URL` →
+ * `OS_BASE_URL` → `http://localhost:<port>`).
+ *
+ * It used to be built from the child's `objectstack:listening` `url`, which is
+ * the socket the child BOUND, by construction. `OS_AUTH_URL` never entered
+ * that expression, so behind anything at all — a TLS reverse proxy, a compose
+ * stack that only `expose`s the app port — one boot printed two origins.
+ * MEASURED with `objectstack dev -p 4001` under
+ * `OS_AUTH_URL=https://localhost:4443`: the banner's `➜ MCP:` row said
+ * `https://localhost:4443/…` and this block said `http://localhost:4001/…`.
+ * Pasting the latter registers an MCP entry against an origin discovery never
+ * advertises and the proxy never exposes — and makes the correct row look
+ * like the typo.
+ *
+ * ⛔ The chain is NOT re-derived here: this calls the same function `serve`
+ * calls, with the port the child ACTUALLY bound. That is also why the ordinary
+ * local case needs no fallback of its own — with none of the three variables
+ * set, the resolver's own built-in tail answers `http://localhost:<boundPort>`,
+ * dev's auto-shifted port (3000 busy → 3001) included.
+ *
+ * ## `null` means print nothing, never guess
+ *
+ * `baseOrigin` is `null` when the chain produced a value that will not parse —
+ * a set-but-empty `OS_AUTH_URL=` (which does NOT fall through to the rest of
+ * the chain), or a value with no scheme. The banner's rule for that case is to
+ * print the paths with no origin in front of them and name the variable that
+ * fixes it. A connect COMMAND has no paths-only form, so the honest output
+ * here is no block at all: falling back to the bound socket would reprint, on
+ * the same screen, the exact address the banner just refused to print.
+ */
+export function printMcpConnectHint(opts: { boundPort: number | string; name: string }): void {
+  const { baseOrigin } = resolveAuthBaseUrl(opts.boundPort);
+  if (baseOrigin === null) return;
+  console.log();
+  console.log(chalk.cyan('  🤖 MCP server — connect a coding agent:'));
+  console.log(`     Endpoint  ${baseOrigin}/api/v1/mcp`);
+  console.log(`     Skill     ${baseOrigin}/api/v1/mcp/skill`);
+  console.log(chalk.dim(`     Connect   claude mcp add --transport http ${opts.name} ${baseOrigin}/api/v1/mcp`));
+  console.log(chalk.dim('     Disable   OS_MCP_SERVER_ENABLED=false'));
 }
 
 export default class Dev extends Command {
@@ -497,15 +551,11 @@ export default class Dev extends Command {
             // (OS_MCP_SERVER_ENABLED=false) advertises nothing, mirroring the
             // connect-UI / discovery gates that follow the same switch.
             if (isMcpServerEnabled()) {
-              const base =
-                typeof msg.url === 'string' && msg.url ? msg.url.replace(/\/+$/, '') : `http://localhost:${actual}`;
-              const name = path.basename(process.cwd()) || 'objectstack';
-              console.log();
-              console.log(chalk.cyan('  🤖 MCP server — connect a coding agent:'));
-              console.log(`     Endpoint  ${base}/api/v1/mcp`);
-              console.log(`     Skill     ${base}/api/v1/mcp/skill`);
-              console.log(chalk.dim(`     Connect   claude mcp add --transport http ${name} ${base}/api/v1/mcp`));
-              console.log(chalk.dim('     Disable   OS_MCP_SERVER_ENABLED=false'));
+              // ⛔ The ACTUALLY BOUND port, never the child's listen URL: the
+              // origin these lines carry is resolved from the runtime's own
+              // precedence chain inside the printer, so the banner the child
+              // prints and this block cannot name two different deployments.
+              printMcpConnectHint({ boundPort: actual, name: path.basename(process.cwd()) || 'objectstack' });
             }
           }
         });

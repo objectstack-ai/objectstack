@@ -1362,6 +1362,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/seed-loader-composite-key-diagnostic.test.ts",
+      "verb": "delete",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-composite-key-diagnostic.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-composite-key-diagnostic.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
       "file": "packages/metadata-protocol/src/seed-loader-deferred-dropped.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1448,6 +1463,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/seed-loader-existing-records-read-failure.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-locale-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-locale-scope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-locale-scope.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -2447,6 +2477,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/list-user-invitations-verification.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/list-user-invitations-verification.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/list-user-invitations-verification.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/member-role-canonical.test.ts",
       "verb": "update",
       "pinned": 1
@@ -2610,6 +2655,11 @@
       "file": "packages/plugins/plugin-security/src/authored-row-write-verdict.test.ts",
       "verb": "update",
       "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/bootstrap-platform-admin-promotion-selection.test.ts",
+      "verb": "update",
+      "pinned": 3
     },
     {
       "file": "packages/plugins/plugin-security/src/bootstrap-platform-admin-walled-owner.test.ts",
@@ -2784,6 +2834,21 @@
     {
       "file": "packages/plugins/plugin-security/src/resolve-permission-sets-for-context.pin.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/rls-check-membership-staging.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/rls-check-membership-staging.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/rls-check-membership-staging.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -3262,6 +3327,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/app-plugin.seed-locale-producer.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/domains/meta-published-runtime-publish.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3709,6 +3779,21 @@
     {
       "file": "packages/services/service-storage/src/metadata-store.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/mount-storage-routes.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/mount-storage-routes.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/mount-storage-routes.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

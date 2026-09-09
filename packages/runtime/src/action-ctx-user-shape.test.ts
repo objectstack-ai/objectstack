@@ -102,6 +102,22 @@ async function dispatchRest(ec: any, ql: any, context?: HttpProtocolContext) {
     return { response: res.response, actionCtx: ql.executeAction.mock.calls[0]?.[2] };
 }
 
+/**
+ * REST — the same action with NO `recordId`, so no subject load is attempted.
+ * [#16370] The row-scoped door refuses a load that did not deliver, so a case
+ * whose subject is something OTHER than the load reaches the handler here.
+ */
+async function dispatchRestNoRecord(ec: any, ql: any, context?: HttpProtocolContext) {
+    const kernel: any = {
+        context: { getService: (n: string) => (n === 'objectql' || n === 'data' ? ql : null) },
+    };
+    const ctx = context ?? ({ request: {}, environmentId: 'platform', executionContext: ec } as any);
+    const res: any = await new HttpDispatcher(kernel).handleActions(
+        '/crm_case/close_case', 'POST', {}, ctx,
+    );
+    return { response: res.response, actionCtx: ql.executeAction.mock.calls[0]?.[2] };
+}
+
 /** MCP — `run_action`. Returns the body ctx. */
 async function dispatchMcp(ec: any, ql: any) {
     const deps: any = { resolveService: async () => null, getObjectQL: async () => ql };
@@ -247,12 +263,28 @@ describe('#5372 — the FAILURE MODE: an unresolvable name is quiet', () => {
     it('an engine with no `find` at all does not break the dispatch', async () => {
         const ql = makeQl(DEV_ADMIN);
         delete (ql as any).find;
-        // The record pre-load needs `find` too, so this also proves the name
-        // resolution is not what turns a degraded engine into a 500.
-        const { response, actionCtx } = await dispatchRest(makeEc(), ql);
+        // No `recordId`, so no subject load is attempted and the ONE degraded
+        // read left is the name resolution — which is this case's subject: an
+        // unresolvable name falls back to the id and the action still runs.
+        const { response, actionCtx } = await dispatchRestNoRecord(makeEc(), ql);
 
         expect(response.status).toBe(200);
         expect(actionCtx.user.name).toBe('usr_admin');
+    });
+
+    it('[#16370] …and a ROW-SCOPED call on that engine fails CLOSED, not with a 500', async () => {
+        const ql = makeQl(DEV_ADMIN);
+        delete (ql as any).find;
+        // The subject pre-load needs `find` too, so on a degraded engine it
+        // cannot deliver the row. Since #16370 the door consumes that verdict:
+        // the refusal is the shared not-found envelope, ⛔ never a 500 and ⛔
+        // never a dispatch onto a row nobody read. The case above is the firing
+        // control that says this 404 is the LOAD's, not the name resolution's.
+        const { response } = await dispatchRest(makeEc(), ql);
+
+        expect(response.status).toBe(404);
+        expect(response.body.error.code).toBe('RECORD_NOT_FOUND');
+        expect(ql.executeAction).not.toHaveBeenCalled();
     });
 
     it('the read is system-elevated — resolving WHO the caller is cannot depend on their own grants', async () => {

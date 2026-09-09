@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-cluster-redis",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "Redis cluster driver for ObjectStack — implements IPubSub/ILock/IKV/ICounter against Redis using ioredis.",
   "type": "module",
@@ -32,7 +32,7 @@
     "@types/node": "^26.2.0",
     "ioredis-mock": "^8.13.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "objectstack",

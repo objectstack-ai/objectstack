@@ -63,11 +63,15 @@ const STDERR_DRAIN_POLL_MS = 50;
  * asynchronously and `process.exit` tears the process down with the buffer only
  * partly drained; `src/utils/format.ts` carries the whole argument for stdout
  * (`emitJson`). One thing makes it worse here: `settings.debug` is on, so
- * oclif's `displayWarnings()` has already queued ~138 KB of `ModuleLoadError`
- * blocks AHEAD of these lines. Measured on the #12964 repro with a reader that
- * was not draining: the pipe delivered exactly one 64 KiB buffer and everything
- * after it was lost — this diagnostic AND oclif's own `command … not found`,
- * which `handle()` writes a moment later and which the same tear-down takes.
+ * ~143 KB of `ModuleLoadError` blocks is already queued AHEAD of these lines —
+ * three quarters of it from oclif's `displayWarnings()` and the rest from node's
+ * OWN default `warning` handler, which stays attached and prints every warning
+ * as well (#16691, drained run: 147 729 bytes over 179 writes, 111 751 of them
+ * from `config.js`, 35 133 from `internal/process/warning.js`). Measured on the
+ * #12964 repro with a reader that was not draining: the pipe delivered exactly
+ * one 64 KiB buffer and everything after it was lost — this diagnostic AND
+ * oclif's own `command … not found`, which `handle()` writes a moment later and
+ * which the same tear-down takes.
  * That is why the merge queue saw it and a developer's terminal never does: a
  * TTY is written synchronously, a captured pipe is not.
  *
@@ -374,15 +378,18 @@ if (!process.env.TSX_TSCONFIG_PATH) {
  *
  * `process.stderr` is an `EventEmitter`, and an `error` event with nothing
  * listening IS an uncaught exception. With the parent's read end DESTROYED
- * (`stdio: ['ignore', 'ignore', 'pipe']`, then `child.stderr.destroy()`)
- * oclif's `displayWarnings()` makes the first write, the pipe is already gone,
- * node raises `write EPIPE` on `process.stderr`, and this process died of an
- * uncaught exception — 12 of 12 runs, 938-1174 ms in, well before `run()`
- * settles and before `writeStderr()` above is ever called. Traced with a
- * `--import` observer that installs NO listener on this stream and wraps no
- * write (`uncaughtExceptionMonitor`, which observes without preventing the
- * default crash — an `uncaughtException` handler would have changed the very
- * thing being read):
+ * (`stdio: ['ignore', 'ignore', 'pipe']`, then `child.stderr.destroy()`) the
+ * first write comes from node's OWN default `warning` handler
+ * (`internal/process/warning.js`: `onWarning` → `writeOut` → `console.error`),
+ * and oclif's `displayWarnings()` makes writes 2 and 3 of the same warning
+ * (#16691 re-traced the order; #15558 named `displayWarnings()` for the first
+ * one). The pipe is already gone, node raises `write EPIPE` on
+ * `process.stderr`, and this process died of an uncaught exception — 12 of 12
+ * runs, 938-1174 ms in, well before `run()` settles and before `writeStderr()`
+ * above is ever called. Traced with a `--import` observer that installs NO
+ * listener on this stream and wraps no write (`uncaughtExceptionMonitor`, which
+ * observes without preventing the default crash — an `uncaughtException` handler
+ * would have changed the very thing being read):
  *
  *     uncaughtException  code=EPIPE  msg=write EPIPE
  *           at afterWriteDispatched (node:internal/stream_base_commons:159:15)
@@ -394,6 +401,26 @@ if (!process.env.TSX_TSCONFIG_PATH) {
  * the never-read reader. So the closed reader was the one shape that could not
  * tell "the command failed" from "the CLI crashed", on the only channel it had
  * left.
+ *
+ * ⚠️ EVERY write on that path is a `console.error`, which is worth stating
+ * because it reads as if it should be survivable — `bin/run.js` records that
+ * Console's `ignoreErrors` keeps a warning block from crashing a process, and
+ * THERE it does. What saves a process is not the temporary listener
+ * `kWriteToConsole` parks across the write (its `finally` removes that one
+ * before the completion arrives) but Console's write CALLBACK, which re-attaches
+ * a `noop` when the completion reports an error — and only
+ * `if (stream.listenerCount('error') === 0)`. Under `tsx` that count is never 0:
+ * tsx registers an off-thread module-customization hook, so node pipes the hooks
+ * worker's stderr into `process.stderr` and `Stream.prototype.pipe` prepends its
+ * own `onerror` there (`node:internal/streams/legacy`). Console's keep-alive is
+ * therefore never installed; `onerror` takes the first EPIPE, tears the pipe's
+ * own listeners down including itself, finds no other `error` listener left and
+ * RE-EMITS on `process.stderr` — that second emit is the uncaught one.
+ * Ablated on plain node, one short line and nothing else changed: `console.error`
+ * alone 0/3, `module.register()` of a no-op hook plus the SAME `console.error`
+ * 3/3, a raw `process.stderr.write` 3/3 (#16691). ⇒ Payload size decides nothing
+ * here, and this listener is what covers the `console.error` sites too, not only
+ * `writeStderr()` above.
  *
  * ⛔ Deliberately NOT narrowed to `error.code === 'EPIPE'`, even though EPIPE is
  * the only code this path was measured to raise (4 events per run, no other

@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { SeedSchema, SeedMode } from './seed.zod';
+import { LocaleSchema } from '../system/translation.zod';
 
 /**
  * # Seed Loader Protocol
@@ -266,6 +267,23 @@ export const SeedLoaderConfigSchema = lazySchema(() => z.object({
    */
   env: z.enum(['prod', 'dev', 'test']).optional()
     .describe('Only load datasets matching this environment'),
+
+  /**
+   * Locale filter. Only datasets whose `Seed.locale` scope includes this locale
+   * are loaded; a dataset declaring no `locale` is unrestricted and always
+   * passes this axis.
+   *
+   * The two axes COMPOSE — a dataset is loaded when it passes `env` **and**
+   * `locale` — so neither can rescue a dataset the other excluded.
+   *
+   * When not specified the locale axis is inert and every dataset passes it,
+   * which is the pre-existing behaviour for a host that knows nothing about
+   * locales. The loader says so out loud when, and only when, some dataset
+   * actually narrowed its locale scope: a silently inert filter is how
+   * `Seed.env` spent releases being authorable and unenforced (framework#4704).
+   */
+  locale: LocaleSchema.optional()
+    .describe('Only load datasets scoped to this locale (BCP-47 tag)'),
 
   /**
    * Target organization for per-tenant seed loading.

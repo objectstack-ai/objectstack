@@ -21,6 +21,7 @@ import { FilterConditionSchema } from '../data/filter.zod';
  * batch-draft. This is the safety valve for low-specificity input.
  */
 
+/** Machine-name pattern every object, field and option name in a blueprint must match. */
 const SNAKE_CASE = /^[a-z_][a-z0-9_]*$/;
 
 /**
@@ -160,12 +161,35 @@ export type BlueprintDashboard = z.input<typeof BlueprintDashboardSchema>;
  * A proposed navigation item in the blueprint app — points at one of the
  * created objects or dashboards. `apply_blueprint` expands it into the full
  * `AppSchema` nav item (object → list view, dashboard → dashboard view).
+ *
+ * `viewName` is what makes "list AND board for the same table" expressible
+ * (cloud#2150). Without it this shape could only say WHICH OBJECT an entry
+ * opens, so a model that had just designed a kanban and wanted it in the menu
+ * had exactly one move left: emit a SECOND entry at the same `target`, with the
+ * intent carried only by `label`/`icon`. Both entries then opened the object's
+ * default view, and the cloud applier derived both ids from the target, so they
+ * collided — the user clicked 「工单看板」 and got the list, with no error
+ * anywhere (the target object really does exist, so the lint had nothing to
+ * say). The runtime could always express this: `ObjectNavItemSchema.viewName`
+ * is "Default list view to open". Only the blueprint could not, which is why
+ * the model's behaviour was reasonable and the schema was the defect.
+ *
+ * Deliberately NOT `.regex(SNAKE_CASE)`, unlike `target`. A view is identified
+ * downstream in two interchangeable spellings — the bare key a blueprint's
+ * `views[].name` carries (`ticket_status_board`) and the qualified
+ * `<object>.<key>` a staged view record's `name` carries — and the applier
+ * normalizes between them. Constraining this leaf to snake_case would make the
+ * qualified spelling legal to GENERATE (a strict mirror is per-leaf) and
+ * illegal to APPLY, which is the cloud#1967 failure mode: a blueprint the user
+ * already approved, refused wholesale at apply time.
  */
 export const BlueprintNavItemSchema = lazySchema(() => z.object({
   type: z.enum(['object', 'dashboard']).default('object').describe('What this nav entry opens'),
   target: z.string().regex(SNAKE_CASE).describe('Object or dashboard machine name to surface (snake_case)'),
   label: z.string().optional().describe('Nav entry label (defaults to the target label/name)'),
   icon: z.string().optional().describe('Lucide icon name for the nav entry'),
+  viewName: z.string().optional()
+    .describe('For type:"object" only — the `views[].name` this entry opens (e.g. "ticket_status_board"). Omit for the object\'s default list. SET it whenever this blueprint authors a kanban/calendar/gallery/gantt view the menu should reach: give the object ONE entry per view (a 「工单列表」 entry with no viewName plus a 「工单看板」 entry with viewName:"ticket_status_board"). Without it every entry on the same target opens the SAME default list, and a label/icon saying otherwise is decoration.'),
 }));
 export type BlueprintNavItem = z.input<typeof BlueprintNavItemSchema>;
 /** Post-parse shape of {@link BlueprintNavItem} — defaults applied, transforms run (ADR-0122). */
@@ -347,6 +371,16 @@ const StrictNavItem = z.object({
   target: strictIdent('Object or dashboard machine name to surface (snake_case)'),
   label: z.string().nullable().describe('Nav entry label, or null'),
   icon: z.string().nullable().describe('Lucide icon name, or null'),
+  // ⛔ Must stay in lockstep with the lenient `BlueprintNavItemSchema.viewName`
+  // (cloud#2150). THIS side is the one that decides whether the design step can
+  // author a board entry at all: `propose_blueprint`'s structured output is
+  // validated against this mirror, so a key present only in the lenient schema
+  // is a fix that exists nowhere on the main path — the applier would accept a
+  // `viewName` no proposal can ever contain. That is the `seedData` divergence
+  // (cloud#2118) with a different key name; the nav key-parity pin below fails
+  // if this line is removed.
+  viewName: z.string().nullable()
+    .describe('For type:"object" only — the `views[].name` this entry opens (e.g. "ticket_status_board"), or null for the object\'s default list. SET it whenever this blueprint authors a kanban/calendar/gallery/gantt view the menu should reach: give the object ONE entry per view (a 「工单列表」 entry with viewName null plus a 「工单看板」 entry with viewName "ticket_status_board"). Null on every entry means they all open the SAME default list, and a label/icon saying otherwise is decoration.'),
 });
 
 const StrictApp = z.object({

@@ -21,13 +21,18 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * The legacy branches matched `/mcp/skill` (exact or `?`-suffixed) BEFORE
  * the `/mcp` transport claimed everything else (exact, `/`, or `?` forms).
  * Entry order reproduces that precedence.
+ *
+ * [#16263] The two `?`-suffixed entries now say `match: 'prefix'` out loud —
+ * they always rode the bare-`startsWith` default, which is `'segment'` now,
+ * and a prefix ending in `'?'` has no `/` after it for a segment match to
+ * find. Declaring it keeps both routes matching exactly what they always did.
  */
 export function createMcpDomains(deps: DomainHandlerDeps): DomainRoute[] {
     return [
         { prefix: '/mcp/skill', match: 'segment', handler: (req, context) => handleMcpSkillRequest(deps, req.method, context) },
-        { prefix: '/mcp/skill?', handler: (req, context) => handleMcpSkillRequest(deps, req.method, context) },
+        { prefix: '/mcp/skill?', match: 'prefix', handler: (req, context) => handleMcpSkillRequest(deps, req.method, context) },
         { prefix: '/mcp', match: 'segment', handler: (req, context) => handleMcpRequest(deps, req.body, context) },
-        { prefix: '/mcp?', handler: (req, context) => handleMcpRequest(deps, req.body, context) },
+        { prefix: '/mcp?', match: 'prefix', handler: (req, context) => handleMcpRequest(deps, req.body, context) },
     ];
 }
 
@@ -326,7 +331,11 @@ function toMcpWebRequest(_deps: DomainHandlerDeps, raw: any, parsedBody: any): R
  * contract cannot drift from it, where a second hand-written `getMetaItems(…)`
  * signature silently could.
  */
-type McpMergedMetadataRead = Pick<MetadataProtocol, 'getMetaItems'>;
+// [#15238] Exported so the handle-typing pin beside this file can name it —
+// the same reason `domains/packages.ts` exports `PackagesDomainProtocol`. Not a
+// published-surface change: `packages/runtime`'s index does not re-export
+// `domains/`.
+export type McpMergedMetadataRead = Pick<MetadataProtocol, 'getMetaItems'>;
 
 /**
  * [#8726] Read this environment's `skill` rows through the merged listing.
@@ -606,7 +615,20 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
             // Resolved per request on the SAME per-environment seam `getMeta`
             // uses — never captured once at boot, which would serve one
             // environment's overlay rows to every other one.
-            const protocol: any = await deps.resolveService(context, 'protocol', envId);
+            //
+            // [#15238] Typed at the RESOLVE, not just at the callee's
+            // parameter. `resolveService` answers `any` for `'protocol'` (the
+            // slot is deliberately unmapped in `ServiceSlotContracts`), and
+            // this file was half-typed: {@link McpMergedMetadataRead} was
+            // already declared for the merged-read seam below, while the handle
+            // feeding it was annotated `any` — so any verb, spelt any way,
+            // could be reached from this site. Naming the existing type here
+            // closes that half. ⛔ Still `| undefined` and still every member
+            // optional: `readMergedSkillRows` keeps its own
+            // `typeof protocol.getMetaItems !== 'function'` probe, because a
+            // host may occupy the slot with a partial object.
+            const protocol: McpMergedMetadataRead | undefined =
+                await deps.resolveService(context, 'protocol', envId);
             return await readMergedSkillRows(deps, protocol, getMeta);
         },
 
