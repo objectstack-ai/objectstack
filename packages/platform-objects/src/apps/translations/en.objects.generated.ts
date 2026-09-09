@@ -35,7 +35,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "Platform Role",
-        help: "Platform-level role (admin, user, …). Set via the Set Platform Role action."
+        help: "Legacy better-auth role scalar (admin, user, …). ObjectStack no longer writes it (ADR-0068 D2) — grant platform-admin standing with an unscoped `admin_full_access` assignment in `sys_user_permission_set`."
       },
       banned: {
         label: "Banned",
