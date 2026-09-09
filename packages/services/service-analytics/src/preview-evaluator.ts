@@ -240,7 +240,7 @@ function extremumOf(rows: Row[], field: string, kind: 'min' | 'max'): unknown {
  * | `count_distinct` | the cardinality of the non-null values — numeric          |
  * | `sum`            | arithmetic over the operands that read as numbers         |
  * | `avg`            | the mean of the NON-NULL operands that read as numbers,   |
- * |                  | and `null` when there are none (#16219)                   |
+ * |                  | and `null` when NO ROW CARRIED A VALUE (#16219)           |
  * | `min` / `max`    | the winning operand, IN ITS OWN TYPE ({@link extremumOf}) |
  * | `number` / `string` / `boolean` | a custom-SQL metric the dataset path never mints — left on the historical numeric `default` |
  *
@@ -254,12 +254,12 @@ function extremumOf(rows: Row[], field: string, kind: 'min' | 'max'): unknown {
  * a value OF the column, so it has to come back in the shape the row carried.
  *
  * ⛔ `sum`/`avg` over a TEMPORAL operand is left exactly as it was — the
- * non-finite operands drop, and what is left over nothing is the platform's
- * ruled empty-group answer (`emptyGroupValueFor`: `0` for `sum`, `null` for
- * `avg`). There is no defined answer to invent (the SQL faces disagree with
- * each other on it), and #16099 is the open card for REFUSING an incoherent
- * aggregate/field-type pair — the layer that refuses is that card's ruling,
- * not this file's.
+ * non-finite operands drop and the answer is the numeric identity. There is no
+ * defined answer to invent (the SQL faces disagree with each other on it), and
+ * #16099 is the open card for REFUSING an incoherent aggregate/field-type pair
+ * — the layer that refuses is that card's ruling, not this file's. ⭐ #16219's
+ * empty-group `null` is deliberately NOT that case: it fires only when NO row
+ * carried a value, never when the values were present and unreadable as numbers.
  *
  * ⛔ `count`/`count_distinct` stay numeric. Counting `date`s is still counting;
  * the sibling descriptor rule (`measure-result-type.ts`) answers the same way.
@@ -327,13 +327,22 @@ function aggregate(rows: Row[], metricType: string, field: string): unknown {
     // {@link extremumOf} returns and the same one the live faces' SQL NULL
     // arrives as — never a second opinion about the ruling.
     case 'avg': {
-      const operands = rows
-        .filter((r) => r[field] != null)
-        .map((r) => Number(r[field]))
-        .filter((n) => Number.isFinite(n));
-      return operands.length
-        ? operands.reduce((a, b) => a + b, 0) / operands.length
-        : (emptyGroupValueFor(metricType) ?? null);
+      const present = rows.filter((r) => r[field] != null);
+      const operands = present.map((r) => Number(r[field])).filter((n) => Number.isFinite(n));
+      if (operands.length) return operands.reduce((a, b) => a + b, 0) / operands.length;
+      // ⭐ No numeric operand is TWO different situations, and only one of them
+      // is "averaging nothing":
+      //
+      //   • no row carried a value at all — the empty group. That is the
+      //     platform's ruled question and `emptyGroupValueFor` answers it.
+      //   • rows carried values that do not read as numbers — a `date` column
+      //     under `avg`. That is an INCOHERENT aggregate/field-type pair, which
+      //     #16099 owns and no layer refuses yet; the answer stays the numeric
+      //     identity it has always been. ⛔ Not this card's to move: `avg` over
+      //     a temporal operand is pinned as-is by `preview-aggregate-operand-type`
+      //     (#16203), and the live face answers a different number again
+      //     (SQLite's numeric affinity), so `null` here would invent a third.
+      return present.length ? 0 : (emptyGroupValueFor(metricType) ?? null);
     }
     case 'min': return extremumOf(rows, field, 'min');
     case 'max': return extremumOf(rows, field, 'max');

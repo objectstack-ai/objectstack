@@ -36,6 +36,17 @@ existing operand list — `0` is the additive identity, so the coercion never mo
 `sum`'s answer, and the `default` arm serves the custom-SQL metric types, which
 have no live standard to be moved towards.
 
+The `null` fires on an EMPTY group and never on an incoherent one. "No numeric
+operand" is two different situations: no row carried a value at all — the empty
+group the policy rules on — or rows carried values that do not read as numbers,
+such as a `date` column under `avg`. The second is an incoherent
+aggregate/field-type pair that #16099 owns and no layer refuses yet; it keeps the
+numeric identity it has always had, since the live face answers a different
+number again (SQLite's numeric affinity over a TEXT column) and a `null` there
+would invent a third answer. That boundary is pinned from both sides — by
+`preview-aggregate-operand-type.test.ts` (#16203) and by a control in the new
+differential.
+
 The live path is unchanged.
 
 Bumped `patch` rather than `minor`, on the same reasoning the sibling #16218

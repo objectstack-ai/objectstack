@@ -43,10 +43,16 @@
  *      non-null values — `AVG(col)` is defined that way in every dialect — and
  *      this file already agrees with itself twice over: `extremumOf` skips
  *      `v == null`, and #16218's `count` arm counts `r[field] != null`.
- *   2. **With no operands left the answer is the platform's, not this file's.**
- *      `emptyGroupValueFor` returns the identity `0` where counting/summing
- *      nothing is a measured fact and `undefined` where there is nothing to
- *      answer; `undefined` is spelled `null` on this wire.
+ *   2. **With no row carrying a value the answer is the platform's, not this
+ *      file's.** `emptyGroupValueFor` returns the identity `0` where
+ *      counting/summing nothing is a measured fact and `undefined` where there
+ *      is nothing to answer; `undefined` is spelled `null` on this wire.
+ *
+ * ⛔ Limb 2 fires on an EMPTY group, never on an incoherent one. A group whose
+ * rows carry `date` TEXT has values — they simply do not read as numbers — and
+ * that pair is #16099's to refuse, pinned as-is by `preview-aggregate-operand-
+ * type.test.ts` (#16203). It keeps the numeric identity, and the last control
+ * in this file holds that boundary.
  *
  * Limb 1 is what makes {@link ROWS}`.travel` a live control rather than a
  * decoration: its average diverged too, `(10 + 20 + 0) / 3 = 10` against the
@@ -322,6 +328,28 @@ describe('#16219 — the empty-operand answer is READ from the policy, not resta
       [{ category: 'x' }, { category: 'x', amount: null }],
     );
     expect(r.rows).toEqual([{ category: 'x', avg_amount: null }]);
+  });
+
+  it('⛔ values PRESENT but not numbers stay `0` — that is #16099, not this card', () => {
+    const CUBE = {
+      name: 'e', sql: 'expense',
+      dimensions: { category: { name: 'category', type: 'string', sql: 'category' } },
+      measures: { avg_spent_on: { name: 'avg_spent_on', type: 'avg', sql: 'spent_on' } },
+    } as unknown as Cube;
+    // The boundary this fix is drawn on. "No numeric operand" is two different
+    // situations and only one of them is averaging NOTHING: a group whose rows
+    // carry `date` TEXT carries values, they just do not read as numbers. That
+    // is an incoherent aggregate/field-type pair, #16099 owns the refusal, and
+    // `preview-aggregate-operand-type.test.ts` (#16203) pins the answer as the
+    // numeric identity it has always been. The live face answers a different
+    // number again (SQLite's numeric affinity over a TEXT column), so a `null`
+    // here would invent a THIRD answer to a question no layer has ruled on.
+    const r = evaluateAnalyticsQueryOverRows(
+      { measures: ['avg_spent_on'], dimensions: ['category'] },
+      CUBE,
+      [{ category: 'x', spent_on: '2026-05-12' }, { category: 'x', spent_on: '2026-06-01' }],
+    );
+    expect(r.rows).toEqual([{ category: 'x', avg_spent_on: 0 }]);
   });
 
   it('a single numeric operand still averages to itself', () => {
