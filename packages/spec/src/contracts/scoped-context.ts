@@ -108,8 +108,9 @@
  * here — the option VOCABULARY is `EngineQueryOptions`' to own and the engine's
  * to enforce (it rejects undeclared option keys since #4371); this interface's
  * job is the METHOD FACE. So the query bag is an object, the returns mirror
- * `IDataEngine`'s (`Promise<any[]>` / `Promise<any>`), and nothing here claims
- * to be the query schema.
+ * `IDataEngine`'s — `find` stays `Promise<any[]>`, and since #16231 `findOne`
+ * and `update` carry the same declared answer shapes their `IDataEngine`
+ * counterparts do — and nothing here claims to be the query schema.
  */
 
 import type { EngineTransactionInfo, EngineTransactionOptions } from './objectql-engine.js';
@@ -145,7 +146,7 @@ export interface IScopedObjectRepository {
      * nothing to do with what was asked, which no `if (!row)` can catch. When
      * any row genuinely will do, that is `find({ limit: 1 })`, which says so.
      */
-    findOne(query?: Record<string, unknown>): Promise<any>;
+    findOne(query?: Record<string, unknown>): Promise<Record<string, any> | null>;
 
     /** Count the records the query selects. */
     count(query?: Record<string, unknown>): Promise<number>;
@@ -161,7 +162,7 @@ export interface IScopedObjectRepository {
      * key out of the payload. The bulk form is `update(data, { where, multi: true })`;
      * there is no `updateMany`.
      */
-    update(data: any, options?: Record<string, unknown>): Promise<any>;
+    update(data: any, options?: Record<string, unknown>): Promise<Record<string, any> | number | null>;
 
     /** Update a single record by id — the id travels as the first argument. */
     updateById(id: string | number, data: any): Promise<any>;

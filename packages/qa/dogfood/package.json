@@ -19,8 +19,10 @@
     "@objectstack/mcp": "workspace:*",
     "@objectstack/metadata": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
+    "@objectstack/formula": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
+    "@objectstack/plugin-approvals": "workspace:*",
     "@objectstack/plugin-audit": "workspace:*",
     "@objectstack/plugin-auth": "workspace:*",
     "@objectstack/plugin-email": "workspace:*",
@@ -31,6 +33,7 @@
     "@objectstack/service-messaging": "workspace:*",
     "@objectstack/service-storage": "workspace:*",
     "@objectstack/spec": "workspace:*",
+    "@objectstack/trigger-record-change": "workspace:*",
     "@objectstack/types": "workspace:*",
     "@objectstack/verify": "workspace:*"
   },
@@ -42,6 +45,6 @@
     "@objectstack/driver-turso": "workspace:*",
     "@types/node": "^26.2.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }

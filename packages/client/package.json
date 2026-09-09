@@ -39,7 +39,7 @@
     "@objectstack/service-automation": "workspace:*",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "objectstack",

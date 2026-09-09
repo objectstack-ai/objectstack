@@ -1,0 +1,377 @@
+---
+title: 17.2.0
+description: "Release notes and upgrade checklist for 17.2.0 of the v17 line."
+---
+
+## Highlights — 17.2.0
+
+- **Two write-path guardrails close the "silently dropped predicate" hole.** A
+  by-id `update`/`delete` whose `where` names anything besides `id` now refuses
+  loudly instead of binding the row unconditionally and discarding the extra
+  keys — a compare-and-set written as `{ where: { id, status: {...} } }` used to
+  land unconditionally with no diagnostic (#11009). A by-id `update` whose
+  `data.id` and `where.id` are both truthy scalars that **disagree** now refuses
+  `UPDATE_ID_MISMATCH` (HTTP 400) instead of writing the payload row and
+  silently dropping the losing id (#11142). Both were unconditional writes
+  masquerading as conditional ones, not failures — flow `update_record` /
+  `delete_record` nodes that named `id` plus other filter keys without
+  declaring `multi: true` are where this is most likely to surface.
+- **Further ADR-0049 enforce-or-remove retirements.** `sys_position.permissions`
+  — a security-object column no producer ever wrote and no runtime path ever
+  read — is gone (#9885); so are `MetricSchema.filters`, the per-metric raw-SQL
+  filter nothing read (#10414), the `record:highlights` field `icon` (#10054),
+  and the `themes` carrier key plus `ThemeSchema` — `app.branding` remains the
+  one color-authoring surface (#10485).
+- **`http_request_errors_total` is retired** (#9834). Its only emitter never
+  saw the REST data API, the auth mount, or any inbound surface but the
+  dispatcher's own route Proxy, so the series undercounted from day one. A
+  dashboard or alert keyed on it now reads a flat zero — that zero is the
+  removal, not a healthy server.
+- **Analytics stops answering the wrong number on a cross-object filter.** A
+  filter nested inside a combinator (`$or`, `$not`, a nested `$and`) on the
+  ObjectQL path used to reach `engine.aggregate` unchecked, because the
+  cross-object envelope check only saw a top-level AND-ed leaf; both analytics
+  doors now refuse it the same way a top-level cross-object filter already was
+  (#10759), and a dataset's own definition-level `filter` gets the identical
+  guard (#10861).
+- **Driver introspection stops guessing.** `driver-sql`'s
+  `introspectPrimaryKeys` / `introspectForeignKeys` / `introspectUniqueConstraints`
+  used to swallow a failed read and report "no keys" with no diagnostic; a
+  failed read now throws by default (`{ onFailure: 'partial' }` opts back into
+  the old behaviour) — schema-drift comparisons and federated-object codegen
+  were consuming that silent absence as a real answer (#11161).
+- **CLI: two dead authoring surfaces are gone.** `os g agent` is retired and
+  now says why and points at skills — the kernel ships exactly two agents
+  (`ask`/`build`) per ADR-0063 §2, so scaffolding a third was already discarded
+  (#10359). The `@capabilities` hook-body directive comment is retired — the
+  build strips the `//` comment it read before any handler is a runtime
+  function, so it never reached a build that used it (#10917).
+- **A per-item publish naming `?package=` stops matching another package's
+  draft.** `POST /api/v1/meta/:type/:name/publish?package=PKG_ID` now resolves
+  its draft's org scope package-exactly, closing a path where the scope probe
+  could match a different package's draft in the caller's org and the
+  package-exact promote then 404'd over the caller's own publishable draft
+  sitting env-wide. A publish that states `?package=` no longer discovers a
+  package-less draft of the same `(type, name)` — retry without the query
+  parameter for that draft.
+
+
+## What's new in 17.2.0
+
+17.2.0 was published to the `latest` tag on **2026-08-23**, three days after
+17.1.0. The version-locked train moved the same **69 packages**, carrying **204
+distinct changelog entries and no major** — **19** of which mark themselves
+BREAKING. (Counted across the 69 package `CHANGELOG.md` files; an entry that
+lands in several packages is counted once.) The bundled Console advances one pin,
+`9a3daf8d37ad → 190fbd01d061`.
+
+⚠️ **Read this before treating the version number as a safety guarantee.** As
+with 17.1.0, several entries here landed after the 17.0.0 cut and ship as `minor`
+under the lockstep launch-window convention while being explicitly breaking —
+they say so in their own changelog entries. The theme is the same one 17.0.0 and
+17.1.0 established, one surface further in: **a write that declared a condition
+nobody evaluated stops reading as a working conditional write**, and a
+declared-but-unenforced authorable key is removed rather than maintained.
+
+### Breaking changes & migration in 17.2.0
+
+#### Two write-path guardrails close the "silently dropped predicate" hole (#11009, #11142)
+
+The by-id dispatch routes to `driver.update(object, id, …)` /
+`driver.delete(object, id, …)`, which bind **only** the primary key — every other
+`where` key was discarded with no diagnostic. A compare-and-set written as
+`{ where: { id, status: { $in: [...] } }, multi: false }` therefore evaluated to
+nothing and the write landed unconditionally, reading exactly like a working
+conditional write (`8cc8401`).
+
+Per call shape:
+
+- A `where` naming a scalar `id` **and nothing else** is unchanged — by-id, with
+  or without `multi: true`.
+- A `where` carrying a scalar `id` **plus other keys**, with a declared
+  `multi: true`, now routes to the **predicate path** (`driver.updateMany` /
+  `driver.deleteMany`), which compiles every `where` key. Previously this
+  dispatched by-id and dropped the extra keys.
+- The same shape **without** `multi: true` — and any by-id call via a scalar
+  `data.id` beside extra `where` keys — now **throws**, naming the keys the by-id
+  path would have dropped.
+
+A second shape refuses under its own code (`2810695`): a by-id `update` whose
+truthy scalar `options.where.id` names a **different** row than the truthy scalar
+payload `data.id` now answers `UPDATE_ID_MISMATCH`, HTTP `400`, naming both ids —
+including ids differing only in type (`42` beside `'42'`). Equal ids are
+unchanged, which is the normal REST spelling. A declared `multi: true` does not
+rescue the call.
+
+**Migration.** Each refusal is a one-line edit at the call site, and which edit is
+an intent decision no codemod may make for you:
+
+| You wrote | Decide |
+| :--- | :--- |
+| `{ where: { id, …other } }` without `multi` | declare `multi: true` so the full `where` is honoured (the result becomes the matched count), or drop the extra `where` keys to keep an unconditional single-row write |
+| `data.id` ≠ `where.id` | make the two ids equal (or drop `where.id`) to address the row by the payload id, or remove `id` from the payload to address it by `where.id` |
+
+⚠️ **Flow authors reach this through `update_record` / `delete_record` nodes**
+whose `filter` names `id` plus other keys without declaring `multi: true`. Those
+configs were silently unconditional before and refuse loudly now.
+
+#### `http_request_errors_total` is retired (#9834)
+
+⛔ **If you have a Grafana panel, an alert rule or a recording rule keyed on
+`http_request_errors_total`, it will read a FLAT ZERO after this upgrade.** That
+zero is the removal, not a healthy server, and it is the one way this change can
+hurt you — nothing throws, nothing warns, the series simply stops receiving
+samples (`914c413`). Its only emitter was the dispatcher's own route Proxy, so it
+never saw the auth mount, the REST data API, or any other inbound surface: it
+undercounted from day one.
+
+| Wrote | Write instead |
+| :--- | :--- |
+| `rate(http_request_errors_total[5m])` | `rate(http_requests_total{status=~"5.."}[5m])` — emitted by the transport, so it covers every inbound surface instead of the dispatcher's routes only |
+| `sum by (route) (http_request_errors_total)` | `sum by (route) (http_requests_total{status=~"5.."})` |
+| `SEMCONV.httpRequestErrorsTotal` / `RUNTIME_METRICS.httpRequestErrorsTotal` in host code | Delete the read. Both members are gone; `tsc` reports the missing property at the read site. |
+
+#### Four ADR-0049 enforce-or-remove retirements on the authorable surface
+
+Each of these was declared, projected and accepted while nothing read it. Because
+the authorable surface has been strict since 17.0.0 (#4001), an authored document
+that still carries one of these keys is now **refused by name at parse**, not
+silently dropped.
+
+| Retired | Where it lived | Write instead |
+| :--- | :--- | :--- |
+| `sys_position.permissions` (`3ee8ddf`, #9885) | a "JSON-serialized array of permission strings" textarea on the platform position object | Delete the key. Capability reaches a position **only** through permission-set bindings (`sys_position_permission_set` rows); prose documenting intent belongs in `description`. |
+| `MetricSchema.filters` (`a40dcc1`, #10414) | the per-metric raw-SQL filter | Delete the key. |
+| `record:highlights` highlight-field `icon` (`c684d00`, #10054) | advertised on six surfaces, drawn by nothing | Delete the key. |
+| the `themes` carrier key and `ThemeSchema` (`35ad101`, #10485) | the authoring surface nothing ever applied | `app.branding` remains the one color-authoring surface. |
+
+Physical columns on already-deployed databases are untouched — ADR-0045 schema
+sync is additive.
+
+#### Analytics stops answering the wrong number on a cross-object filter
+
+A filter nested inside a combinator (`$or`, `$not`, a nested `$and`) on the
+ObjectQL path used to reach `engine.aggregate` unchecked, because the
+cross-object envelope check only saw a top-level AND-ed leaf. Both analytics doors
+now refuse it the same way a top-level cross-object filter already was
+(`57e4571`, #10759), and a dataset's own definition-level `filter` gets the
+identical guard (`13a3dca`, #10861).
+
+#### Driver introspection stops guessing (#11161)
+
+`driver-sql`'s `introspectPrimaryKeys` / `introspectForeignKeys` /
+`introspectUniqueConstraints` wrapped their whole dialect dispatch in a bare
+`catch {}` and returned `[]`, so a query a live server rejected degraded to "this
+table has no primary key" with no diagnostic — a wrong answer downstream code
+acted on, not "we don't know". A failed read now **throws** by default;
+`{ onFailure: 'partial' }` opts a caller with a self-correcting short read back
+into the old behaviour (`9cc1940`). The un-hiding immediately paid: the Postgres
+arm of `introspectUniqueConstraints` had been invalid SQL all along, so live
+Postgres never reported a unique constraint through this method. That query is
+repaired in the same change.
+
+#### The external-datasource federation family requires a capability
+
+These routes previously admitted **any authenticated caller**. This is published
+SDK surface — `datasources.external.*` on `ObjectStackClient` and the CLI's
+`datasource` commands reach exactly these routes — so an existing integration
+presenting a valid credential that holds neither capability was served before and
+is **refused now**, `403 PERMISSION_DENIED` naming the missing capability
+(`9a1ed7a`, #9901; `6ce58a7`, #10255).
+
+| Route | SDK call | Now requires |
+| :--- | :--- | :--- |
+| `GET /:name/external/tables` | `datasources.external.listTables` | `manage_platform_settings` |
+| `POST /:name/external/tables/:remote/draft` | `datasources.external.draft` | `manage_platform_settings` |
+| `POST /:name/external/tables/:remote/import` | `datasources.external.import` | `manage_metadata` |
+| `POST /:name/external/refresh-catalog` | `datasources.external.refreshCatalog` | `manage_metadata` |
+| `POST /:name/external/validate` | `datasources.external.validate` | `manage_platform_settings` |
+
+**Migration.** Grant the calling credential's permission set the named capability.
+The platform's `admin_full_access` set carries both; a purpose-built operator set
+is the case to check.
+
+#### A per-item publish naming `?package=` stops matching another package's draft
+
+`POST /api/v1/meta/:type/:name/publish?package=PKG_ID` now resolves its draft's
+org scope **package-exactly**, closing a path where the scope probe could match a
+different package's draft in the caller's org and the package-exact promote then
+`404`'d over the caller's own publishable draft (`c74aefe`). What you may newly
+see: a publish that states `?package=` no longer discovers a draft of the same
+`(type, name)` authored with **no** package binding — it answers `404 [no_draft]`.
+**Remedy:** if the draft you mean is the package-less one, retry the publish
+without the `?package=` query parameter.
+
+#### Two dead CLI authoring surfaces are gone
+
+- **`os g agent` is retired** (`15b63e8`, ADR-0063 §2, #10359). ⛔ If a script, a
+  Makefile or a CI step runs it, **it now exits 1** — that is the intended
+  outcome and the one way this change interrupts you. The kernel ships exactly
+  two agents, `ask` and `build`, bound by surface, and the runtime catalog filters
+  out every non-platform agent record: the scaffolded file parsed, validated,
+  published, and then never appeared anywhere. The refusal names skills as the
+  surface to author instead.
+- **The `@capabilities` hook-body directive comment is retired** (`7940de5`,
+  #10917). **Nothing an author wrote has to change**: `loadConfig` runs every
+  config through `bundle-require` and esbuild, which strips `//` line comments
+  before the handler is ever a runtime function, so the directive reached the
+  extractor from none of the four ordinary authoring shapes. A config that still
+  carries the comment builds to the same artifact. Declare capabilities as data in
+  `body.capabilities` on the hook or action.
+
+#### Smaller breaking changes in 17.2.0
+
+- The better-auth-native `/api/v1/auth/admin/` routes refuse an anonymous caller
+  with the declared ADR-0112 envelope instead of a `401` whose body was the empty
+  string under an `application/json` header (`4d7c564`, #10349). Statuses and
+  admission are unchanged; what is added is the machine-readable `code`.
+- `IHttpOutbox.redeliver` and `MessagingService.redeliverHttp` change signature so
+  the caller's tenant is threaded rather than swept globally (`cdaa72f`, #10740).
+  `SqlHttpOutbox.redeliver` now rides the predicate path, so a delivery row
+  claimed between its read and its write is not reset and `redeliver` reports
+  `DELIVERY_NOT_ELIGIBLE` instead of success.
+- Thirteen logger sink types now declare a **non-optional** `warn`, so a
+  durability report always has somewhere to land (`e222a53`, `b47ba2c`, #9754,
+  #10556). Compile-time only — `error` stays optional, call sites keep the
+  `logger?.warn?.(…)` backstop, and no runtime behaviour changes. It can break a
+  host that injects its own reduced sink.
+- `driver-sql`'s `introspectSchema()` emits the spec introspection contract —
+  `primaryKey`, `dialect`, `introspectedAt` (`95437e7`, #10676, #10998).
+- The `/meta` FSM state route is singular: `meta.getLegalNextStates` moves and the
+  plural registration is retired (`67630c4`, #10077).
+
+### New capabilities in 17.2.0
+
+- **`lifecycle.ttl` accepts an `onlyWhen` row filter** mirroring
+  `retention.onlyWhen`, and the shared `onlyWhen` value union gains the platform's
+  canonical relative-date vocabulary (`8012960`).
+- **`os g skill NAME` scaffolds an AI skill**, written as `NAME.skill.ts` so the
+  loader finds it (`1c3a46f`, #11025) — the replacement surface `os g agent` now
+  points at.
+- **A per-column sortability projection** is served on
+  `GET /api/v1/meta/:type/:name` (`e5ea701`), so a console can disable the sort
+  affordance on a column the query engine will refuse rather than discovering it
+  at query time.
+- **`sharingModel` on the solution blueprint's object schema** — the enum
+  `private | public_read | public_read_write | controlled_by_parent` reaches the
+  design stage (`7d2d112`), and `nameField` joins the strict blueprint mirror
+  (`ceb33a9`).
+- **`theme` and `analytics_cube` are validated at the `/meta` write door**
+  (`2306a76`, #10194), so a Studio or API write is judged by the same rules as an
+  `os build`.
+- **`os migrate duplicates` reports the rows blocking the three `kernel:ready`
+  uniqueness reconciliations** (`2866d5f`) instead of leaving a boot to fail on
+  them.
+- **`MetadataRepository.watch()` replays from the durable log on a numeric
+  `since`** (`f334d66`), so a reconnecting watcher no longer silently starts from
+  now.
+- The runtime publish gate reaches further: list-view field rules judge a
+  standalone `view` write, and a standalone `ViewItem` record's nested
+  `config.sort` / `config.searchableFields` are judged there too (`adbcbfd`,
+  `f1b5ad3`, `def0d3e`) — Studio and metadata-API writes are held to the rules
+  `os build` already applied.
+- `os lint` reports an unparseable source instead of scoring it CLEAN
+  (`78818ec`, #10653); `os serve` refuses a relative `plugins: [...]` entry,
+  naming the two spellings that work (`e598b1c`).
+- Time-relative sweeps are idempotent per matched window (`73d9795`, #10220);
+  `sys_session` gains a declared ADR-0057 lifecycle policy (`dccbcec`, #7826); the
+  `manager` approver is screened to the request's organization (`13f533a`,
+  #10153); and the `__search` companion is no longer provisioned on objects whose
+  only companion source is the primary key (`2570ab0`, #10290).
+
+### New in Console (Studio) — objectui pin `9a3daf8d37ad → 190fbd01d061`
+
+One pin move (`208bd22`), derived from 113 releasing changesets over 141 objectui
+commits. What a console host or an author notices:
+
+- ⚠️ **Console hosts:** `options.actor` is removed from `MetadataClient`'s `save`
+  / `reset` / `publish` / `rollback`, and the `X-Actor` request header is no
+  longer emitted (objectui `8e00bfd28`). The six retired `@objectstack/spec/ui`
+  theme-schema re-exports leave `@object-ui/types/zod` with the `themes`
+  retirement above (objectui `920165d18`), and `ThemeComponentSchema`
+  (`type: 'theme'`) — a component kind no renderer implemented — is retired
+  (objectui `78cbdb530`), as is the register-meta key `defaultChildren`
+  (objectui `fa429cf6f`).
+- **`stack` reads its spacing from `gap` and nothing else** — the undeclared
+  `spacing` key it also accepted is gone (objectui `dd194635d`).
+- Authored predicates are actually consulted: `record:alert` binds its row through
+  `usePredicateRecordContext` so `properties.visible` is read (objectui
+  `8a4439081`), and a hoisted `properties.visible` stops swallowing a declared
+  `visibleWhen` (objectui `c86185eb5`).
+- `object-grid` / `object-form` / `detail-view` resolve their data source the same
+  way, and a block that resolves none says so (objectui `ebce5a367`); `ReportView`
+  reads `dataSource.object`, the one key the contract declares (objectui
+  `60d452ee0`); `data-table` reads the declared `header` (objectui `e719ebdd9`).
+- Create forms pre-fill the `current_user` `defaultValue` token with the acting
+  user (objectui `3c9fca3dc`); three more secret-field spellings stop rendering a
+  secret in clear text on the unregistered-widget branch (objectui `91783c47b`);
+  and a screen flow's resume result reaches the user on both outcomes (objectui
+  `c40f3b8ca`).
+
+The per-commit list is in `packages/console/CHANGELOG.md` under `## 17.2.0`,
+which records the upstream objectui commit for every entry.
+
+---
+
+
+## Upgrade checklist
+
+⚠️ One checklist per release, for the release you are landing on **and** every release you cross to get there — and see [how far each list has actually been walked](/docs/releases/v17#upgrade-checklists).
+
+### 17.2.0
+
+⚠️ **Not exercised.** No upgrade across 17.1.0 → 17.2.0 has been walked
+end-to-end. Every line here is derived from the change's own **Migration** note
+in [Breaking changes & migration in
+17.2.0](#breaking-changes--migration-in-1720); none of it carries a measurement,
+and the effort each one costs on a real deployment is unknown. Treat this list as
+a reading order for that section, not as a walked path.
+
+- **Audit every by-id write whose `where` names `id` plus other keys (#11009,
+  #11142).** This is the one that used to fail silently: a compare-and-set like
+  `{ where: { id, status: { $in: [...] } } }` dropped every key but `id` and
+  landed unconditionally. Declare `multi: true` to have the full `where` honoured
+  (the result becomes a matched count), or drop the extra keys to keep an
+  unconditional single-row write. **Flow authors reach this through
+  `update_record` / `delete_record` nodes** whose `filter` names `id` alongside
+  other keys — those configs were unconditional before and refuse loudly now.
+- **Make `data.id` and `where.id` agree**, or drop one of them. A by-id update
+  naming two different rows answers `UPDATE_ID_MISMATCH` / `400`, including ids
+  that differ only in type (`42` beside `'42'`).
+- **⛔ Rewrite any dashboard, alert rule or recording rule keyed on
+  `http_request_errors_total` (#9834).** It is retired, and nothing throws or
+  warns: the series simply stops receiving samples, so the panel reads a **flat
+  zero** that looks like a healthy server. Move to
+  `http_requests_total{status=~"5.."}`, which the transport emits and which
+  therefore covers every inbound surface rather than the dispatcher's routes only.
+  Delete any host-code read of `SEMCONV.httpRequestErrorsTotal` /
+  `RUNTIME_METRICS.httpRequestErrorsTotal`; `tsc` will point at the site.
+- **Delete four retired authorable keys, then re-run `os validate`**:
+  `sys_position.permissions`, `MetricSchema.filters`, the `record:highlights`
+  highlight-field `icon`, and the `themes` carrier key. Each is now refused **by
+  name at parse** rather than silently dropped, so a stack carrying one fails to
+  build. Deployed database columns are untouched.
+- **Grant the federation capabilities to any credential calling
+  `datasources.external.*`** (or the CLI's `datasource` commands). These routes
+  admitted any authenticated caller before and now require
+  `manage_platform_settings` or `manage_metadata` per route, answering `403
+  PERMISSION_DENIED` by name. `admin_full_access` already carries both; a
+  purpose-built operator set is the case to check.
+- **Remove `os g agent` from any script, Makefile or CI step** — it is retired and
+  exits 1. Author skills instead.
+- **Re-check analytics filters nested inside `$or` / `$not` / a nested `$and`.** A
+  cross-object filter in that position used to reach `aggregate` unchecked and
+  answer the wrong number; both analytics doors and a dataset's definition-level
+  `filter` now refuse it the way a top-level one already did.
+- **A publish naming `?package=` no longer finds a package-less draft** — it
+  answers `404 [no_draft]`. If the draft you mean carries no package binding,
+  retry the publish without the query parameter.
+- **Hosts injecting their own logger sink** must supply `warn`; it is
+  non-optional on thirteen sink types now. Compile-time only.
+- **Callers of `IHttpOutbox.redeliver` / `MessagingService.redeliverHttp`** move to
+  the new signature (the caller's tenant is threaded rather than swept globally),
+  and a delivery row claimed between read and write now reports
+  `DELIVERY_NOT_ELIGIBLE` instead of success.
+- **`meta.getLegalNextStates` is singular** — the plural route registration is
+  retired.
+
