@@ -1068,11 +1068,7 @@ export interface AuthWireUser {
     createdAt: string;
     /** ISO-8601. */
     updatedAt: string;
-    /**
-     * `twoFactor` plugin only. ⚠️ On the enrolment lane of `verifyTotp` this
-     * is echoed from the pre-flip snapshot — see
-     * {@link AuthTwoFactorVerificationResult}.
-     */
+    /** `twoFactor` plugin only. */
     twoFactorEnabled?: boolean;
     /**
      * `admin` plugin only. An open string: the vocabulary is the deployment's
@@ -1160,10 +1156,13 @@ export interface AuthTwoFactorVerificationResult {
      */
     token: string;
     /**
-     * ⚠️ On the ENROLMENT lane of `verifyTotp` the vendor echoes the user from
-     * its pre-rotation snapshot, so `twoFactorEnabled` reads `false` here
-     * although the flag has just flipped server-side (measured on a real SQL
-     * driver). Re-read the session for the live value.
+     * The caller, as the row stands when the response is written. The vendor
+     * echoes the user from its PRE-rotation snapshot on the enrolment lane, so
+     * `twoFactorEnabled` used to read `false` here although the flag had just
+     * flipped server-side; plugin-auth's `two-factor-rotated-token-echo`
+     * repairs that member from the row on the same rotating routes it repairs
+     * `token` on, so no second read is needed. The payload's shape is
+     * unchanged — the repair corrects values only.
      */
     user: AuthWireUser;
 }

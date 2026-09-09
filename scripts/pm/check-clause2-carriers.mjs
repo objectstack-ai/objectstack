@@ -1432,9 +1432,15 @@ export function pairWidening(pair, repo) {
  * enqueue gate before the card may enqueue -- the diff is a fact; the card's
  * semantics were a prediction", and until #16448 that gate was a human reading.
  *
- * ⚠️ A TELL, never a proof, in BOTH directions: a false positive costs the
- * author one word in the claim comment, and a false negative is the cost the
- * ruling accepted when it took the directional reading. So this row never
+ * ⚠️ A TELL, never a proof, in BOTH directions: a false negative is the cost
+ * the ruling accepted when it took the directional reading, and a false
+ * POSITIVE is repaired in the matcher — ⛔ not paid for by the author. This
+ * file priced it at "one word in the claim comment" until #16822 measured the
+ * price: the exit-0 condition is "no tell, OR the declaration is not `no`", so
+ * the only word that clears a false tell is `Clause-②: no` → `yes` — a
+ * widening recorded in a governance ledger that did not happen, and afterwards
+ * indistinguishable from one that did. ⛔ Nothing about this row is relaxed by
+ * saying so: the exit stays non-zero and stays a hard block. So this row never
  * asserts that the diff widens -- it asserts that the diff has the SHAPE of one
  * that does, while the claim says it does not, and names the file:line so the
  * author can answer with the file open.

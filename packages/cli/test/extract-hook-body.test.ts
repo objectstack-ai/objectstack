@@ -333,6 +333,82 @@ describe('extractHookBody', () => {
     const ext = extractHookBody(fn, 'hook contained');
     expect(ext.source).toContain('Math.round');
   });
+
+  // ── `create()` is not a body-reachable member (#16249) ───────────────────
+  //
+  // Same family as `sudo()` above, one layer over. The host `ObjectRepository`
+  // aliases `create(data)` to `insert(data)` and the spec contract
+  // `IScopedObjectRepository` declares `insert` only, while the VM installs
+  // `insert / update / delete / updateMany / deleteMany / upsert` and no
+  // `create` leaf — so a lowered body's `.create()` TypeErrors on its first
+  // run and, under a hook's default `onError: 'abort'`, aborts the triggering
+  // write. What made it worse than an omission: the extractor ledger in
+  // `@objectstack/lint` ADVERTISED `.create({…})` as legal syntax, so the one
+  // layer that actively told an author how to write it named a spelling that
+  // cannot run. That entry is withdrawn in the same change; these cases pin the
+  // build-time half.
+  it('rejects a handler calling ctx.api.object(x).create() (#16249)', () => {
+    const fn = async (ctx: any) => {
+      await ctx.api.object('crm_account').create({ name: ctx.input.name });
+    };
+    expect(() => extractHookBody(fn, 'hook seed')).toThrow(/`create\(\)` is not reachable/);
+  });
+
+  // The reason has to name the spelling the sandbox HAS — a refusal that only
+  // says "no" leaves the author where the blind `TypeError` left them.
+  it('names `.insert()` as the remedy, and the leaves the VM installs (#16249)', () => {
+    const fn = async (ctx: any) => {
+      await ctx.api.object('crm_account').create({ name: ctx.input.name });
+    };
+    let message = '';
+    try {
+      extractHookBody(fn, 'hook seed');
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toMatch(/`\.insert\(\{ \.\.\. \}\)`/);
+    expect(message).toMatch(/`insert` \/ `update` \/ `delete` \/ `updateMany` \/ `deleteMany` \/ `upsert`/);
+    expect(message).toMatch(/no `create` leaf/);
+    // The carve-out is stated in the refusal itself, so an author who hits it
+    // over an `Object.create()` false positive is told it is not the subject.
+    expect(message).toMatch(/`Object\.create\(\)` is unaffected/);
+  });
+
+  it('rejects the aliased receiver too — `const repo = ctx.api.object(x); repo.create()` (#16249)', () => {
+    // Receiver-loose, decided by `.sudo(` and not re-decided here: under-refusing
+    // is the failure only production sees.
+    const fn = async (ctx: any) => {
+      const repo = ctx.api.object('crm_account');
+      await repo.create({ name: ctx.input.name });
+    };
+    expect(() => extractHookBody(fn, 'hook seed alias')).toThrow(/`create\(\)` is not reachable/);
+  });
+
+  // ⭐ The carve-out, and the ONE thing `.sudo(` needed no equivalent of:
+  // `Object` is a real sandbox global (pinned in `SANDBOX_GLOBALS`), so
+  // `Object.create(null)` is working, lowerable code. A bare receiver-loose
+  // rule would refuse it — turning a correct body into a bundled closure, and a
+  // hard failure under `--strict-body`. That is a false refusal, not the safe
+  // direction, so the lookbehind excludes that ONE receiver.
+  it('does NOT refuse `Object.create(null)` — a real sandbox global (#16249)', () => {
+    const fn = (ctx: any) => {
+      const seen = Object.create(null);
+      seen[ctx.input.email] = true;
+      ctx.input.dedupe_key = Object.keys(seen).join(',');
+    };
+    const ext = extractHookBody(fn, 'hook dedupe');
+    expect(ext.source).toContain('Object.create(null)');
+  });
+
+  // The reverse leg, as `.sudo(` has: the majority case must still lower.
+  it('still extracts an ordinary ctx.api insert (#16249)', () => {
+    const fn = async (ctx: any) => {
+      await ctx.api.object('audit_log').insert({ event: ctx.input.event });
+    };
+    const ext = extractHookBody(fn, 'hook audit');
+    expect(ext.capabilities).toContain('api.write');
+    expect(ext.source).toMatch(/object\((['"])audit_log\1\)\.insert/);
+  });
 });
 
 /** Module-scope helper used by the #1876 free-identifier test above. */

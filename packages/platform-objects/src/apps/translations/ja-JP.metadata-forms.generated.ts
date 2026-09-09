@@ -162,7 +162,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.reference": {
         label: "参照",
-        helpText: "対象オブジェクト（lookup/master_detail 用）"
+        helpText: "対象オブジェクト名。tree フィールドでは省略可能で、指定する場合はこのオブジェクト自身でなければなりません（ツリーは同一オブジェクト内の階層です — 別のオブジェクトへリンクする場合は lookup を使います）"
       },
       "fields.lookupFilters": {
         label: "Lookup Filters",
@@ -1460,7 +1460,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "ID",
-        description: "権限セットはプロファイルに追加アクセス権を重ねる。プロファイルは各ユーザーに 1:1 で割り当てる基本セット。"
+        description: "権限セットは唯一の能力コンテナです。ユーザーは保持するすべてのセットの和集合を得るため、セットはアクセス権を追加することしかできません。ポジションがセットを人に配分します。"
       },
       system_permissions: {
         label: "システム権限",

@@ -4,7 +4,9 @@
     "_note": "Hand-maintained record of WHY each accepted registry-only input is deliberately not declared in spec (maintainer ruling 2026-08-18 on #9392). `--update` rewrites this file and drops this block — re-add it (updated) whenever the accepted set changes; an entry with no reason here is an accept nobody ruled.",
     "ObjectForm.initialData": "Alias spelling of `initialValues` (the drawer/modal presentations read it first). Aliases are not promoted into spec, per the alias-convergence direction.",
     "ObjectForm.mobile": "Internal presentation override, not an authoring surface.",
-    "ObjectForm.navigateOnSuccess": "Explicitly parked pending the 'action success navigation' family ruling (#9474/#9566, objectui#5034) — declaring it now risks freezing a spelling that family is shaping; revisit when `onSuccess` lands. The family landed on 2026-08-18 (PR #9601); the revisit is tracked on #9392."
+    "ObjectForm.navigateOnSuccess": "Explicitly parked pending the 'action success navigation' family ruling (#9474/#9566, objectui#5034) — declaring it now risks freezing a spelling that family is shaping; revisit when `onSuccess` lands. The family landed on 2026-08-18 (PR #9601); the revisit is tracked on #9392.",
+    "ListView.objectName": "TEMPORARY, with a stated expiry (#14791, maintainer ruling 2026-09-07, option B): the react-tier contract retired the ListView `objectName` / `viewType` overlay aliases with no deprecation window, so objectui plugin-list's designer `inputs` (`objectName` required, `viewType`) are registry-only until objectui#8510 removes them from the list-view registration (the metadata host stamps `objectName`, and `normalizeListViewSchema` supplies it from `data` at pin a472b071). Accepted only until objectui#8510 lands and the pin moves past it — DELETE this entry and the two inputs from the `ListView.registryOnly` row then; declaring the props back in spec or on the overlay is not an exit, it undoes the ruling.",
+    "ListView.viewType": "TEMPORARY, with a stated expiry (#14791, maintainer ruling 2026-09-07, option B): the react-tier contract retired the ListView `objectName` / `viewType` overlay aliases with no deprecation window, so objectui plugin-list's designer `inputs` (`objectName` required, `viewType`) are registry-only until objectui#8510 removes them from the list-view registration (the metadata host stamps `objectName`, and `normalizeListViewSchema` supplies it from `data` at pin a472b071). Accepted only until objectui#8510 lands and the pin moves past it — DELETE this entry and the two inputs from the `ListView.registryOnly` row then; declaring the props back in spec or on the overlay is not an exit, it undoes the ruling."
   },
   "blocks": {
     "ObjectForm": {
@@ -16,7 +18,10 @@
       "missing": false
     },
     "ListView": {
-      "registryOnly": [],
+      "registryOnly": [
+        "objectName",
+        "viewType"
+      ],
       "missing": false
     },
     "ObjectChart": {

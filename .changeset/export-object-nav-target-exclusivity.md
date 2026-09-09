@@ -1,0 +1,9 @@
+---
+"@objectstack/spec": minor
+---
+
+`objectNavTargetExclusivity` — the object-level check on an object navigation item that refuses `filters` combined with `recordId` / `viewName`, and `runAction` combined with `recordId` — is now EXPORTED from `@objectstack/spec/ui`, one function per refinement in the same posture as the `check*` exports. A hand-written mirror of the object nav item chains this very function in its own `superRefine` instead of restating the rule from prose; a restatement is what drifts: objectui's hand-written mirror re-implements neither rule — its `superRefine` checks only `id` / `label`, and the file names no `filters` rule beyond the field's declaration (measured at the pinned `.objectui-sha` and at objectui `origin/main`).
+
+**What moves for consumers: one new export.** No schema's accept set moves. `NavigationItemSchema` chains the check exactly where it did — its `type: 'object'` branch — and the exported `ObjectNavItemSchema` still does not chain it: which schema mounts the check is a separate question from whether a mirror can, and it is not decided here. The two deliberate asymmetries are unchanged and now pinned: `recordId` + `viewName` stays a tolerated legacy combination, and `runAction` is refused with `recordId` only (it still composes with `filters` / `viewName`).
+
+**Also corrected, in the same file:** the `filters` docblock stated a complete precedence order (`recordId` → `filters` → `viewName`) a few lines above saying the combination is unrepresentable, and the mirror copied that first half. The docblock now states only what the guard refuses, says in as many words that no precedence order is stated and why, and names the one legacy combination the guard tolerates. The `.describe()` strings — what reaches the generated references — are unchanged.

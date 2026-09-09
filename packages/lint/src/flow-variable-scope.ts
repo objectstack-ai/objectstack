@@ -69,6 +69,8 @@
 
 import { firstUndeclaredReference } from '@objectstack/formula';
 
+import { recordsOf } from './object-graph.js';
+
 type AnyRec = Record<string, unknown>;
 
 /** The node shape this module reads: `collectFlowGraphs`' element type, loosened. */
@@ -219,8 +221,13 @@ export function collectFlowVariableNames(
   }
 
   for (const graph of graphs) {
-    for (const item of graph.nodes) {
-      const flowNode = item as AnyRec;
+    // `recordsOf`, not a bare cast (#16751). Row 1 above guards each
+    // `flow.variables` member with `if (!item || typeof item !== 'object')`
+    // seven lines up; this loop did not, so a non-record region node made
+    // `flowNode.id` throw out of a collector that is contractually total.
+    // `collectFlowGraphs` only `Array.isArray`-checks a nested region's list,
+    // so the members reaching here carry no promise from the producer either.
+    for (const flowNode of recordsOf(graph.nodes)) {
       // Row 8 — the node id itself.
       if (typeof flowNode.id === 'string' && flowNode.id) names.add(flowNode.id);
       const rawConfig = flowNode.config;

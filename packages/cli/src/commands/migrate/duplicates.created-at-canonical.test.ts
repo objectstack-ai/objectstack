@@ -7,10 +7,9 @@
  *
  * `DuplicateHolder.createdAt` is declared `string | null`, and the mapper built
  * it with `String(row.created_at)`. `created_at` is a BUILTIN audit column — not
- * in `datetimeFields`, and `SqlDriver#formatOutput` repairs it only inside its
- * `if (this.isSqlite)` arm — and the holder probe reads through the raw-SQL seam,
- * so no presentation runs on this path at all. The dialect therefore decides what
- * arrives:
+ * in `datetimeFields`, so no declared-field coercion reaches it — and the holder
+ * probe reads through the raw-SQL seam, so `formatOutput` does not run on this
+ * path at all. The dialect therefore decides what arrives:
  *
  *  - **Postgres / MySQL** materialise a JS `Date`, so `String()` ran
  *    `Date.prototype.toString`: `Sun Aug 30 2026 18:19:25 GMT+0800 (China
@@ -43,8 +42,18 @@
  * expression really produced.
  *
  * ⛔ Not a `??` fallback and not a driver change: `withPostgresCalendarDayAsText`
- * is a deliberate driver decision and is untouched. The CLI is a leaf consumer
- * with a declared `string | null`, so the canonical spelling is owed here.
+ * is a deliberate driver decision and is untouched ([ADR-0053 D-F2]). The CLI is
+ * a leaf consumer with a declared `string | null`, so the canonical spelling is
+ * owed here.
+ *
+ * ⚠️ What keeps this file live is the SEAM, ⛔ not an `if (this.isSqlite)` gate
+ * inside `formatOutput`. That gate is gone: #13973 ([ADR-0053 D-F1]) lifted both
+ * of `formatOutput`'s timestamp passes — the `AUDIT_TIMESTAMP_COLUMNS` pass and
+ * the `normalizeSqliteDatetimeOutput` pass over `datetimeFields` — out of it and
+ * they run on EVERY dialect, so the RECORD read door presents the canonical text
+ * everywhere. The holder probe does not go through that door; §B3 of the pin
+ * named above reads the same row raw through knex and still gets the dialect's
+ * `Date` on the live cells, which is the fact §A1 drives.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

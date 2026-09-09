@@ -346,10 +346,24 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
   const attachments = (src: string, name: string): number =>
     src.match(new RegExp(`^[ \\t]*\\.superRefine\\(${name}\\)`, 'gm'))?.length ?? 0;
 
+  // …and a NAME is only a sound key for that count if the module declares it exactly
+  // once. `attachments()` and the `toContain` lines below both key on the spelling:
+  // a second, shadowing binding of the same name — a local `function checkX` inside
+  // another function, say — satisfies every one of them while the door chains a
+  // different function object, and if it happened to agree on the fixture matrix it
+  // would satisfy leg 2 as well. Measured on the diff that added this: four names,
+  // one declaration each — so this closes a residual hole in the pin, it does not fix
+  // a live shadowing (#16715). It must stay green.
+  const declarations = (src: string, name: string): number =>
+    src.match(new RegExp(`^\\s*(export )?function ${name}\\b`, 'gm'))?.length ?? 0;
+
   it('view.zod.ts declares both exports and chains them onto ListViewShapeSchema for ListViewSchema', () => {
     const src = read('view.zod.ts');
     expect(src).toContain('export function checkListViewPageMount(');
     expect(src).toContain('export function checkListViewCalendarVisualization(');
+    // Exactly one declaration each — the counts below key on these names.
+    expect(declarations(src, 'checkListViewPageMount')).toBe(1);
+    expect(declarations(src, 'checkListViewCalendarVisualization')).toBe(1);
     // The mirrored door, exactly: shape → page-mount check → calendar check.
     expect(src).toMatch(
       /ListViewShapeSchema\s*\.superRefine\(checkListViewPageMount\)\s*\.superRefine\(checkListViewCalendarVisualization\)/,
@@ -365,12 +379,14 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
   it('page.zod.ts declares the export and attaches it to PageSchema', () => {
     const src = read('page.zod.ts');
     expect(src).toContain('export function checkPageSourceCompleteness(');
+    expect(declarations(src, 'checkPageSourceCompleteness')).toBe(1);
     expect(attachments(src, 'checkPageSourceCompleteness')).toBe(1);
   });
 
   it('dashboard.zod.ts declares the export and attaches it to GlobalFilterSchema', () => {
     const src = read('dashboard.zod.ts');
     expect(src).toContain('export function checkGlobalFilterDateDefaultValue(');
+    expect(declarations(src, 'checkGlobalFilterDateDefaultValue')).toBe(1);
     expect(attachments(src, 'checkGlobalFilterDateDefaultValue')).toBe(1);
   });
 });
