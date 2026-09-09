@@ -771,6 +771,7 @@
     "resolveDocLocale": "src/system/doc.zod.ts#resolveDocLocale (function)",
     "resolveFlowScreenTitle": "src/system/i18n-resolver.ts#resolveFlowScreenTitle (function)",
     "resolveMetadataFormLabels": "src/system/i18n-resolver.ts#resolveMetadataFormLabels (function)",
+    "resolveMetadataFormSchemaTitles": "src/system/i18n-resolver.ts#resolveMetadataFormSchemaTitles (function)",
     "resolveMetadataTypeDescription": "src/system/i18n-resolver.ts#resolveMetadataTypeDescription (function)",
     "resolveMetadataTypeLabel": "src/system/i18n-resolver.ts#resolveMetadataTypeLabel (function)",
     "resolveObjectFieldLabels": "src/system/i18n-resolver.ts#resolveObjectFieldLabels (function)",
