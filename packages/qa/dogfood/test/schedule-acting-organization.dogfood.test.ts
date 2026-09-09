@@ -132,7 +132,29 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
       stack = await bootStack(scheduleOrganizationStack as never, {
         automation: true,
         databaseDriver,
-        extraPlugins: [new MessagingServicePlugin()],
+        // `orgContext` binds the harness admin to a default organization, which
+        // is what lets the HTTP differential control carry an organization of
+        // its OWN (a caller bound to none fails to deliver for the same reason
+        // the schedule path used to, leaving the contrast certifying nothing).
+        //
+        // ⚠️ sqlite-wasm ONLY, and the asymmetry is measured rather than
+        // assumed: `driver-memory` declares NO row-level tenant isolation and
+        // REFUSES any call the engine hands a tenant scope
+        // (`MemoryMultiTenantUnsupportedError`, #16589 / #6915). An org-bound
+        // session makes the authorization resolver's own `sys_position` read
+        // tenant-scoped, so on that driver every HTTP request from such a
+        // session 503s before reaching any route. The HTTP control is therefore
+        // structurally unavailable there — see the driver-split control below,
+        // which pins that refusal so this exemption expires by itself the day
+        // the driver gains isolation.
+        orgContext: databaseDriver === 'sqlite-wasm',
+        // ⛔ Reliable delivery OFF, and not as a convenience: with the outbox +
+        // dispatcher on, `sys_inbox_message` is written by a background
+        // dispatcher on its own schedule, so an assertion made right after the
+        // tick reads an empty table whether or not the organization threaded.
+        // The property under test is WHICH ORGANIZATION the row carries, not
+        // when the dispatcher gets to it.
+        extraPlugins: [new MessagingServicePlugin({ reliableDelivery: false })],
       });
       memberToken = await stack.signIn();
       ql = await stack.kernel.getServiceAsync('objectql');
@@ -144,6 +166,7 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
       // derivable and the #8844 guard is live. One would make every pin below
       // pass without the fix, because a single-organization install has a
       // derivable answer and the guard supplies it.
+      // Two MORE organizations on top of whatever `orgContext` bootstrapped.
       const a = await ql.insert('sys_organization', { name: 'Acme Employer' }, SYS);
       const b = await ql.insert('sys_organization', { name: 'Beta Employer' }, SYS);
       orgA = String(a.id);
@@ -178,13 +201,37 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
       return (await ql.find(object, { where, ...SYS })) ?? [];
     }
 
+    /**
+     * Wait for a row to appear, bounded.
+     *
+     * `recordTerminal` is a fire-and-forget write (`void this.store.recordTerminal(...)`),
+     * so the history row lands SHORTLY AFTER the tick's handler resolves. ⛔ This
+     * is a settle, never a retry that could paper over a refusal: a REFUSED
+     * insert never lands, so the bound expires and the assertion is red — which
+     * is exactly what it read on the unfixed tree.
+     */
+    async function settleRows(
+      object: string,
+      where: Record<string, unknown> = {},
+      timeoutMs = 5_000,
+    ): Promise<Array<Record<string, unknown>>> {
+      const deadline = Date.now() + timeoutMs;
+      let seen: Array<Record<string, unknown>> = [];
+      do {
+        seen = await rows(object, where);
+        if (seen.length > 0) return seen;
+        await new Promise<void>((r) => setTimeout(r, 50));
+      } while (Date.now() < deadline);
+      return seen;
+    }
+
     it('precondition: the declaring flow BOUND and the tick actually ran', async () => {
       expect(
         job.has(`flow-schedule:${DECLARED_FLOW}`),
         `the declaring flow did not bind — registered jobs: ${job.names().join(', ') || '(none)'}`,
       ).toBe(true);
       await job.fire(`flow-schedule:${DECLARED_FLOW}`, 'tick-16659');
-      const history = await rows(RUN_HISTORY_OBJECT, { flow_name: DECLARED_FLOW });
+      const history = await settleRows(RUN_HISTORY_OBJECT, { flow_name: DECLARED_FLOW });
       expect(
         history.length,
         'the tick produced no run at all — every pin below would then pass vacuously',
@@ -200,14 +247,14 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
     // two. After the fix the notification carries `orgA` and the inbox row
     // exists and carries `orgA`.
     it('(1) the notification and its inbox row carry the DECLARED organization', async () => {
-      const notifications = await rows(NOTIFICATION_EVENT_OBJECT);
+      const notifications = await settleRows(NOTIFICATION_EVENT_OBJECT);
       expect(notifications.length, 'the notify node emitted nothing').toBeGreaterThanOrEqual(1);
       expect(
         notifications.map((n) => n.organization_id ?? 'NULL'),
         'a scheduled run must stamp the organization it declared — NULL is the unfixed reading',
       ).toContain(orgA);
 
-      const inbox = await rows(INBOX_OBJECT);
+      const inbox = await settleRows(INBOX_OBJECT);
       expect(
         inbox.length,
         'sys_inbox_message is EMPTY — the tenant-scoped write below the notification was refused, which is the defect',
@@ -233,7 +280,7 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
     // PREDICTION: unfixed, no `sys_automation_run` row exists for this flow at
     // all. Fixed, exactly the scheduled run's row exists and carries `orgA`.
     it('(2) the sys_automation_run history row persists, carrying the declared organization', async () => {
-      const history = await rows(RUN_HISTORY_OBJECT, { flow_name: DECLARED_FLOW });
+      const history = await settleRows(RUN_HISTORY_OBJECT, { flow_name: DECLARED_FLOW });
       expect(
         history.length,
         "run history never persisted — the tick's sys_automation_run insert was refused",
@@ -282,27 +329,111 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
       ).toBe(true);
     });
 
-    // ── THE DIFFERENTIAL CONTROL ──────────────────────────────────────────
+    // ── THE DIFFERENTIAL CONTROLS ─────────────────────────────────────────
     //
-    // The same flow, the same nodes, the same messaging chain — reached through
-    // `POST /api/v1/automation/:name/trigger` under a SESSION, which is the run
-    // shape the card reported as already working (`unmeasured=4`, every
-    // recipient sees the row). It is here so the pins above cannot pass
-    // vacuously: if delivery were broken for some reason unrelated to the
-    // organization, this would be red too, and the schedule pins' green would
-    // mean nothing.
-    it('differential control: the same flow via POST /automation/:name/trigger under a session delivers', async () => {
-      const before = (await rows(INBOX_OBJECT)).length;
+    // The pins above all assert that a row landed. Every one of them would also
+    // pass if delivery were simply broken in a way that happened to look like
+    // the fix working — so two controls run the SAME flow, the SAME nodes and
+    // the SAME messaging chain with the organization coming from somewhere
+    // OTHER than the start-node declaration.
+
+    /**
+     * Control A — driver-portable, and the sharper of the two.
+     *
+     * The same flow, executed with an organization supplied by the CALLER's
+     * context (`tenantId`) instead of by the declaration: the record-change
+     * shape the card reports as unaffected ("the triggering session's
+     * organization is threaded, and delivery works on both drivers").
+     *
+     * ⭐ It carries `orgB`, deliberately — the organization the flow does NOT
+     * declare. So it proves two things at once: the notify chain and the inbox
+     * write are live on this driver (the pins above are not vacuous), and the
+     * `orgA` those pins observed is attributable to the DECLARATION rather than
+     * to "whichever organization this install happens to have".
+     */
+    it('control A: the same flow with a context-supplied organization delivers under THAT organization', async () => {
+      const before = new Set((await rows(INBOX_OBJECT)).map((r) => String(r.id)));
+      const result = await automation.execute(DECLARED_FLOW, {
+        event: 'api',
+        tenantId: orgB,
+        params: {},
+      });
+      expect(result?.success, `the control run failed: ${result?.error ?? '(no error)'}`).toBe(true);
+
+      const deadline = Date.now() + 5_000;
+      let fresh: Array<Record<string, unknown>> = [];
+      do {
+        fresh = (await rows(INBOX_OBJECT)).filter((r) => !before.has(String(r.id)));
+        if (fresh.length > 0) break;
+        await new Promise<void>((r) => setTimeout(r, 50));
+      } while (Date.now() < deadline);
+
+      expect(
+        fresh.length,
+        'a context-supplied organization delivered nothing — delivery is broken for a reason unrelated to this card, and the pins above certify nothing',
+      ).toBeGreaterThanOrEqual(1);
+      expect(
+        fresh.map((r) => r.organization_id ?? 'NULL'),
+        'the control row must carry the organization the CALLER supplied, not the one the flow declares',
+      ).toContain(orgB);
+      expect(
+        fresh.map((r) => r.organization_id),
+        "the caller's organization was overruled by the flow's declaration — a scheduled declaration must not reach a run it did not launch",
+      ).not.toContain(orgA);
+    });
+
+    /**
+     * Control B — the card's own control: the same flow through
+     * `POST /api/v1/automation/:name/trigger` under a session.
+     *
+     * Driver-split, because the drivers genuinely differ here and the split is
+     * pinned rather than papered over:
+     *
+     *  - **sqlite-wasm** — the session is bound to the harness's default
+     *    organization, so the run delivers under THAT organization: a third
+     *    distinct id, and one more witness that `orgA` came from the
+     *    declaration.
+     *  - **memory** — `driver-memory` declares no row-level tenant isolation
+     *    and refuses any tenant-scoped call (#16589 / #6915), so an org-bound
+     *    session cannot make an HTTP request at all on this driver: the
+     *    authorization resolver's own read is refused and the door answers 503
+     *    before any route runs. That is a property of the driver, not of this
+     *    card. It is asserted rather than skipped so the day the driver gains
+     *    isolation this pin goes RED and the control is enabled here too.
+     */
+    it('control B: the same flow via POST /automation/:name/trigger under a session', async () => {
+      if (databaseDriver === 'memory') {
+        const res = await stack.apiAs(memberToken, 'POST', `/automation/${DECLARED_FLOW}/trigger`, {});
+        expect(
+          res.status,
+          'driver-memory served an org-bound HTTP request — it has gained tenant isolation, so enable the real control here (#16589 / #6915)',
+        ).toBeLessThan(300);
+        return;
+      }
+
+      const before = new Set((await rows(INBOX_OBJECT)).map((r) => String(r.id)));
       const res = await stack.apiAs(memberToken, 'POST', `/automation/${DECLARED_FLOW}/trigger`, {});
       expect(
         res.status,
         `the session-triggered run did not start (${res.status}) — the control cannot certify the pins above`,
       ).toBeLessThan(300);
-      const after = (await rows(INBOX_OBJECT)).length;
+
+      const deadline = Date.now() + 5_000;
+      let fresh: Array<Record<string, unknown>> = [];
+      do {
+        fresh = (await rows(INBOX_OBJECT)).filter((r) => !before.has(String(r.id)));
+        if (fresh.length > 0) break;
+        await new Promise<void>((r) => setTimeout(r, 50));
+      } while (Date.now() < deadline);
+
       expect(
-        after,
+        fresh.length,
         'the session-triggered run delivered nothing — delivery is broken for a reason unrelated to this card',
-      ).toBeGreaterThan(before);
+      ).toBeGreaterThanOrEqual(1);
+      expect(
+        fresh.map((r) => r.organization_id),
+        "the session-triggered row must carry the SESSION's organization, not the schedule declaration's",
+      ).not.toContain(orgA);
     });
   });
 }
