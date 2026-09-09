@@ -8,6 +8,8 @@ Bind an environment artifact's install-time GRANTED permission set to the packag
 
 Absent, `{}` and a consented entry stay three distinct states. An artifact carrying no `grantedPermissions` key allocates no enforcer and registers nothing, so a package with no consent record loads exactly as it did; a per-plugin `{}` is a consent record that consented to nothing and registers a bag that denies every service, hook, host and path. A consent record naming a package the artifact does not carry is reported at `warn` rather than passing in silence.
 
+Fixed alongside, because without it the binding was unreachable: the `{ schemaVersion, metadata }` envelope unwrap in `loadArtifactBundle` handed the kernel `metadata` alone and dropped every key standing beside it, so an envelope artifact reached the kernel with `grantedPermissions` stripped. The loss was silent and indistinguishable from the legitimate absent reading. The unwrap now carries the key across when the envelope declares it, `{}` included, and never invents one.
+
 New exports from `@objectstack/runtime`: `registerArtifactGrantedPermissions`, `resolveArtifactGrantBinding`, `carriedPackageIds`, `ArtifactGrantBinding`.
 
 This is the registration half. Access-time enforcement runs through `SecurePluginContext`, which no production path constructs; that seam is ADR-0025 install-flow work and is unchanged here.
