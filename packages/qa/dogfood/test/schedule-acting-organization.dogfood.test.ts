@@ -329,6 +329,56 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
       ).toBe(true);
     });
 
+    // ⭐ (3) has a second half, and skipping it is how the first round of this
+    // card shipped a refusal the machine could not see. `job.has(...) === false`
+    // proves the JOB SERVICE was never asked; it says nothing about what the
+    // ENGINE recorded. `FlowTrigger.start()` returns `void`, so a trigger that
+    // logs and returns is indistinguishable from one that armed: the engine
+    // sets `boundFlowTriggers` and logs "bound" one line after the trigger said
+    // NOT BOUND, and every structured surface this repo built for "declared but
+    // not armed" then reports the opposite of the stderr line — Studio's badge
+    // via `getFlowRuntimeStates()`, and the silent-miss audit the automation
+    // plugin warns from at `kernel:bootstrapped` and the CLI prints in its
+    // startup summary via `getTriggerBindingAudit()`.
+    //
+    // PREDICTION, before the run: with a logged-and-returned refusal this pin
+    // is RED on both assertions (`bound: true`, audit empty of this flow); with
+    // the refusal thrown it is green, and the declaring flow stays out of the
+    // audit as the paired control.
+    it('(3, structured) the refused flow reads as NOT BOUND on every machine-readable surface', () => {
+      const states = automation.getFlowRuntimeStates() as Array<{ name: string; bound: boolean }>;
+      const refused = states.find((s) => s.name === UNDECLARED_FLOW);
+      expect(refused, `the refused flow is missing from getFlowRuntimeStates(): ${JSON.stringify(states.map((s) => s.name))}`).toBeTruthy();
+      expect(
+        refused!.bound,
+        "Studio's status badge says this flow is armed while the trigger refused it — the loud channel and the structured channel disagree, which is the silent miss this card closes",
+      ).toBe(false);
+      expect(
+        states.find((s) => s.name === DECLARED_FLOW)?.bound,
+        'control: the declaring flow must still read as bound, or this pin would pass with everything broken',
+      ).toBe(true);
+
+      const audit = automation.getTriggerBindingAudit() as Array<{
+        flowName: string;
+        triggerType: string;
+        reason: string;
+      }>;
+      const entry = audit.find((a) => a.flowName === UNDECLARED_FLOW);
+      expect(
+        entry,
+        `the silent-miss audit omits the refused flow, so the kernel:bootstrapped warning and the CLI startup summary both report every triggered flow as wired; audit: ${JSON.stringify(audit)}`,
+      ).toBeTruthy();
+      expect(entry!.triggerType).toBe('schedule');
+      expect(
+        entry!.reason,
+        'the audit must say the binding FAILED (the trigger is registered), not that no trigger exists',
+      ).toContain('binding failed');
+      expect(
+        audit.map((a) => a.flowName),
+        'control: a flow that bound must not be listed as a silent miss',
+      ).not.toContain(DECLARED_FLOW);
+    });
+
     // ── THE DIFFERENTIAL CONTROLS ─────────────────────────────────────────
     //
     // The pins above all assert that a row landed. Every one of them would also
@@ -393,21 +443,53 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
      *    organization, so the run delivers under THAT organization: a third
      *    distinct id, and one more witness that `orgA` came from the
      *    declaration.
-     *  - **memory** — `driver-memory` declares no row-level tenant isolation
-     *    and refuses any tenant-scoped call (#16589 / #6915), so an org-bound
-     *    session cannot make an HTTP request at all on this driver: the
-     *    authorization resolver's own read is refused and the door answers 503
-     *    before any route runs. That is a property of the driver, not of this
-     *    card. It is asserted rather than skipped so the day the driver gains
-     *    isolation this pin goes RED and the control is enabled here too.
+     *  - **memory** — the control is UNAVAILABLE, and this limb says so
+     *    plainly rather than asserting something that cannot fail.
+     *
+     *    All of control B's discriminating power comes from the session being
+     *    bound to an organization OF ITS OWN: the run then delivers under that
+     *    third id, and `orgA`'s absence is the witness. On `driver-memory` no
+     *    session can be org-bound — the driver declares no row-level tenant
+     *    isolation and refuses any tenant-scoped call
+     *    (`MEMORY_MULTI_TENANT_UNSUPPORTED`, #16589 / #6915), so the
+     *    authorization resolver's own `sys_position` read is refused and the
+     *    door answers 503 before any route runs. This suite therefore boots
+     *    memory with `orgContext: false`, which leaves the HTTP caller carrying
+     *    no organization at all — the very state the unfixed schedule path was
+     *    in. A run triggered that way discriminates nothing.
+     *
+     *    ⛔ The first shape of this limb asserted `status < 300` under a message
+     *    claiming it pinned a 503 refusal: opposite polarity, no delivery check,
+     *    so it certified nothing in either direction. What is pinned instead is
+     *    the REASON the control is unavailable, measured at the seam that makes
+     *    it so — a tenant-scoped read on this driver produces NO ANSWER. The
+     *    day the driver gains isolation that goes red and whoever fixes it
+     *    enables the real control here.
      */
     it('control B: the same flow via POST /automation/:name/trigger under a session', async () => {
       if (databaseDriver === 'memory') {
-        const res = await stack.apiAs(memberToken, 'POST', `/automation/${DECLARED_FLOW}/trigger`, {});
+        // Not the control — the control cannot run here. This pins the reason,
+        // so the exemption expires by itself.
+        let thrown: unknown = null;
+        let answered: unknown = null;
+        try {
+          answered = await ql.find(INBOX_OBJECT, { where: {}, context: { userId: recipientId, tenantId: orgA } });
+        } catch (err) {
+          thrown = err;
+        }
+
         expect(
-          res.status,
-          'driver-memory served an org-bound HTTP request — it has gained tenant isolation, so enable the real control here (#16589 / #6915)',
-        ).toBeLessThan(300);
+          thrown,
+          `driver-memory ANSWERED a tenant-scoped read (${JSON.stringify(answered)}) — it has gained row-level isolation, so an org-bound session is now possible here: boot this driver with orgContext and enable the real control B (#16589 / #6915)`,
+        ).toBeTruthy();
+        // ⛔ Taken as a nullable value, not with `.toHaveLength`: a refused call
+        // must produce NO row count at all, and `.not.toHaveLength` passes over
+        // a null target for the wrong reason.
+        expect(Array.isArray(answered) ? answered.length : null).toBeNull();
+        expect(
+          String((thrown as { code?: string }).code ?? (thrown as Error).message),
+          'the refusal must be the driver\'s own tenancy refusal, not some unrelated failure that happens to throw',
+        ).toContain('MULTI_TENANT_UNSUPPORTED');
         return;
       }
 
