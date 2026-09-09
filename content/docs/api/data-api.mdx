@@ -323,9 +323,13 @@ prior delete, and the response reports `succeeded: 0` with each row's
 ### Batch size
 
 Every bulk route above — `batch`, `createMany`, `updateMany`, `deleteMany` —
-caps how many records one request may carry. The limit is the deployment's
-`batch.maxBatchSize` (default **200**, configurable 1–1000); over it the request
-is rejected with `400 BATCH_TOO_LARGE` before anything is written:
+caps how many records one request may carry. The limit is
+`batch.maxBatchSize`, and it is **embedder-only** (#15543): it is written only
+by a host that constructs the `RestServerConfig` itself, never by `os serve` or
+the dev plugin. A CLI-started deployment therefore always gets the default of
+**200**, and no flag, config file or CLI option moves it; only the embedding
+host can set it, anywhere in 1–1000. Over the cap the request is rejected with
+`400 BATCH_TOO_LARGE` before anything is written:
 
 ```json
 {
