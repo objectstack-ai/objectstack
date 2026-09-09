@@ -161,6 +161,35 @@ describe('EnhancedApiErrorSchema', () => {
     expect('userMessage' in unmarked).toBe(false);
   });
 
+  // [#16335] Same field, same semantics as `ApiErrorSchema.refusal` — the
+  // producer-side refusal declaration of decision batch #58 (option C).
+  it('carries a producer-declared `refusal`, stays absent when undeclared, and refuses `false`', () => {
+    const declared = EnhancedApiErrorSchema.parse({
+      code: 'NOT_IMPLEMENTED',
+      message: 'References to a `field` item cannot be computed. Ask the owning object instead.',
+      httpStatus: 501,
+      refusal: true,
+    });
+    expect(declared.refusal).toBe(true);
+    expect(declared.message).toBe('References to a `field` item cannot be computed. Ask the owning object instead.');
+
+    const undeclared = EnhancedApiErrorSchema.parse({
+      code: 'NOT_IMPLEMENTED',
+      message: 'withheld as a fault',
+      httpStatus: 501,
+    });
+    expect('refusal' in undeclared).toBe(false);
+
+    const rejected = EnhancedApiErrorSchema.safeParse({
+      code: 'NOT_IMPLEMENTED',
+      message: 'x',
+      httpStatus: 501,
+      refusal: false,
+    });
+    expect(rejected.success).toBe(false);
+    expect(rejected.error?.issues[0]?.path).toEqual(['refusal']);
+  });
+
   it('should accept rate limit error with retry info', () => {
     const error = EnhancedApiErrorSchema.parse({
       code: 'RATE_LIMIT_EXCEEDED',
