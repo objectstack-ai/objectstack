@@ -50,6 +50,36 @@
 // rewording — and a change that quietly drops one would otherwise still pass on
 // the specimen.
 //
+// ## [#17027] The same argument, one severity up — and the probe-window slice
+//
+// The gate shipped with a SECOND boot check beside the predicate: any
+// error-level line in the boot window failed the run. Its stated cost was
+// nothing ("such a line already fails the run in section 4") and its stated
+// benefit was attribution. Measured, five hours later: it held a release for
+// six consecutive red runs on pack candidate `34304339043`, whose boot carried
+// exactly one error-level line — `@better-auth/oauth-provider@1.7.2` seeding
+// `sys_oauth_resource`, where the vendor documents the `identifier` UNIQUE
+// constraint AS its race-safety mechanism and catches the violation at DEBUG.
+// Our query engine logs that exception at ERROR on its way to that caller.
+// `VENDOR_RACE_BOOT` is that window, and a local pack smoke over the same
+// composition drove all eight auth probes and all four CRUD probes green.
+//
+// So a healthy boot has an error-level line, exactly as a healthy boot has warn
+// lines — the argument above, one severity up, with its own fixture. The boot
+// window is therefore judged by the composition-arrival predicate plus
+// `SMOKE_BOOT_ERROR_PATTERN`, an ALLOW-list of the boot-time error signatures
+// this gate asserts by name (#3091's line today). The general severity scan
+// still runs over the boot window and REPORTS: the specimen is printed on every
+// run, never suppressed, because a deny-list of specimens decides nothing and
+// the next benign-but-noisy line reopens the same card.
+//
+// The half nobody would have re-read is section 4. It re-scanned the WHOLE log
+// on the reasoning that "the boot half simply cannot reach here any more,
+// having already failed" — true only while the boot failed on any error-level
+// line. Left unsliced it would re-assert, after the probes, the population the
+// boot gate had just stopped judging, and red the run on a boot line all the
+// same. `SPLIT_LOG` and its boundary control are what hold that slice honest.
+//
 // ## Why these are executed assertions and not greps
 //
 // The pattern and the scrubber are read out of the script by SOURCING it, the
@@ -189,6 +219,93 @@ const HEALTHY_REGISTRY_BOOT = [
 ].join('\n');
 
 /**
+ * [#17027] A HEALTHY boot window that carries an ERROR-LEVEL line.
+ *
+ * Verbatim from pack run `34304339043` / job `102317840267` (main @ `d127f9b`),
+ * with the temp paths abbreviated the way the fixtures above abbreviate theirs,
+ * and with the `stack` value of the JSON payload elided — stated rather than
+ * glossed, because every predicate here keys on the head of the line and the
+ * elision is what keeps this file readable. `VENDORRACE_GENERIC_HITS` below is
+ * the vacuity guard that the elision did not cost the fixture its severity.
+ *
+ * ⭐ This fixture is to ERROR what `HEALTHY_REGISTRY_BOOT` is to WARN. The run
+ * it comes from booted `Plugins: 34 loaded` with `Auth` in the roster, and a
+ * local pack smoke of that same composition drove every declared first-run
+ * assertion green — eight auth probes and four CRUD probes — over this boot
+ * window. The error-level line is `@better-auth/oauth-provider@1.7.2` seeding
+ * its resource rows: `insertOnly` mode documents the `identifier` UNIQUE
+ * constraint AS its race-safety mechanism ("one wins, the other catches the
+ * constraint error and treats it as a no-op"), and the vendor's own catch logs
+ * the collision at DEBUG and carries on. Our query engine logs the exception at
+ * ERROR on its way out, before that caller ever sees it.
+ *
+ * So "any error-level line at boot" fails a healthy boot, which is the same
+ * disqualification the header makes for WARN — and the reason the boot window
+ * is judged by PREDICATE plus a named allow-list, never by level.
+ */
+const VENDOR_RACE_BOOT = [
+  '',
+  '◆ Development Mode',
+  '  Loading objectstack.config.ts...',
+  '[LocalCryptoProvider] No OS_SECRET_KEY/OS_DEV_CRYPTO_KEY set — generated a new AES-256-GCM key and persisted it to /tmp/z/dev-crypto-key (mode 0600).',
+  '  ⚠ Console dist not found — install `@object-ui/console` (already built) or run `pnpm --filter @object-ui/console build` in the objectui workspace',
+  '[sql-driver] DATABASE_ERROR — the backend refused a raw statement (SQLITE_ERROR). statement: SELECT "tenant_id" FROM "_objectstack_sequences" WHERE 1 = 0 - no such table: _objectstack_sequences ',
+  '2026-09-09T02:52:13.586Z ERROR Insert operation failed {"object":"sys_oauth_resource","error":{"message":"UNIQUE constraint failed: sys_oauth_resource.identifier [statement and bound values redacted]","stack":"SqliteError: … at _SqlDriver.create … at _ObjectQL.createWithAutonumberResync …"}}',
+  '  ↪ secret fields: LocalCryptoProvider wired (dev) — set OS_SECRET_KEY and swap for KMS/Vault in production',
+  '',
+  '  ✓ Server is ready',
+  '',
+  '  Plugins: 34 loaded',
+  '           ObjectQL, SqlDriver, HonoServer, Metadata, PlatformObjects, Auth, Security, Audit, RestAPI',
+  '',
+].join('\n');
+
+/**
+ * [#17027] The #3091 signature, in the boot window.
+ *
+ * This is the class the boot-window error scan PRESERVES by name. plugin-auth
+ * emits it from `auth-plugin.ts` when OIDC discovery route registration throws,
+ * i.e. the composition arrived and then failed to publish part of its surface —
+ * which `SMOKE_BOOT_FAILURE_PATTERN` deliberately does not match (nothing
+ * failed to LOAD) and which every auth probe below would otherwise report as a
+ * behaviour failure, a different owner. Both halves are asserted: the named
+ * pattern fires, and the composition-arrival predicate does not.
+ */
+const OIDC_BOOT = [
+  '  Loading objectstack.config.ts...',
+  '[auth] Failed to register OIDC discovery routes: TypeError: Cannot read properties of undefined',
+  '  ✓ Server is ready',
+  '  Plugins: 34 loaded',
+  '',
+].join('\n');
+
+/**
+ * [#17027] One log, both windows — the input the probe-window slice exists for.
+ *
+ * Lines 1-4 are the boot (line 3 carries the vendor-race ERROR); line 5 is
+ * where the boot gate's snapshot ended; lines 5-7 are what the probes provoked
+ * (line 6 carries a second, unrelated error-level line). `SPLIT_BOOT_LINES` is
+ * the boundary the gate itself computes with `awk 'END { print NR }'`.
+ *
+ * The two assertions this fixture buys are opposite and neither is optional: at
+ * the real boundary the probe-window error is reported and the boot one is not
+ * (or the slice suppresses what it must catch), and with the boundary pushed to
+ * the end of the file NOTHING is reported (or the slice is not slicing at all
+ * and the whole test is vacuous).
+ */
+const SPLIT_BOOT_LINES = 4;
+const SPLIT_LOG = [
+  '  Loading objectstack.config.ts...',
+  '[LocalCryptoProvider] No OS_SECRET_KEY set — generated a new key.',
+  '2026-09-09T02:52:13.586Z ERROR Insert operation failed {"object":"sys_oauth_resource","error":{"message":"UNIQUE constraint failed: sys_oauth_resource.identifier"}}',
+  '  ✓ Server is ready',
+  '  → probing GET /api/v1/auth/get-session',
+  '[error] auth: session lookup exploded',
+  '  → probing POST /api/v1/data/smoke_app_note',
+  '',
+].join('\n');
+
+/**
  * Every benign `failed to load` in the tree, plus the two near-misses that make
  * the legs' boundaries real rather than asserted.
  *
@@ -272,6 +389,10 @@ function runHarness(): Record<string, string> {
     NONSENSE: write('nonsense.log', NONSENSE),
     DECORATED: write('decorated.log', DECORATED_BOOT),
     REGISTRY: write('registry.log', HEALTHY_REGISTRY_BOOT),
+    // [#17027]
+    VENDORRACE: write('vendor-race.log', VENDOR_RACE_BOOT),
+    OIDC: write('oidc.log', OIDC_BOOT),
+    SPLIT: write('split.log', SPLIT_LOG),
   };
 
   const harness = path.join(dir, 'harness.sh');
@@ -290,6 +411,32 @@ function runHarness(): Record<string, string> {
       'echo "HAS_PATTERN=$([ -n "${SMOKE_BOOT_FAILURE_PATTERN:-}" ] && echo yes || echo no)"',
       'echo "HAS_SCRUB=$(type -t smoke_scrub_ansi)"',
       'echo "HAS_LINES=$(type -t smoke_boot_failure_lines)"',
+      // [#17027] the two seams the boot/probe split adds. Same reason as above:
+      // a rename that inlined either would leave this file measuring nothing.
+      'echo "HAS_BOOT_ERROR_PATTERN=$([ -n "${SMOKE_BOOT_ERROR_PATTERN:-}" ] && echo yes || echo no)"',
+      'echo "HAS_PROBE_WINDOW=$(type -t smoke_probe_window_error_lines)"',
+      // named <KEY> <fixture> — the boot-time error signatures asserted BY NAME.
+      'named() {',
+      '  local key=$1 src=$2 out st',
+      '  out=$(grep -nE "$SMOKE_BOOT_ERROR_PATTERN" "$src"); st=$?',
+      '  echo "${key}_NAMED_STATUS=$st"',
+      '  echo "${key}_NAMED_HITS=$(printf %s "$out" | grep -c . )"',
+      '}',
+      // generic <KEY> <fixture> — the general error-level scan, which the boot
+      // window REPORTS rather than fails on. Asserted so "not fatal" reads as a
+      // decision about a line that really is error-level, never as a miss.
+      'generic() {',
+      '  local key=$1 src=$2',
+      '  echo "${key}_GENERIC_HITS=$(grep -cE "$SMOKE_ERROR_LOG_PATTERN" "$src")"',
+      '}',
+      // probewin <KEY> <fixture> <boundary> — the real section-4 predicate.
+      'probewin() {',
+      '  local key=$1 src=$2 boot=$3 out st',
+      '  out=$(smoke_probe_window_error_lines "$src" "$boot"); st=$?',
+      '  echo "${key}_PROBE_STATUS=$st"',
+      '  echo "${key}_PROBE_HITS=$(printf %s "$out" | grep -c . )"',
+      '  echo "${key}_PROBE_FIRST=$(printf %s "$out" | head -1 | tr -d "\\n")"',
+      '}',
       // verdict <KEY> <fixture> — scrub, then run the REAL matcher.
       'verdict() {',
       // The scrub target is derived from SCRATCH and the KEY, never from `$src`:
@@ -314,6 +461,19 @@ function runHarness(): Record<string, string> {
       // Vacuity guard: the healthy fixture really does carry warn-shaped lines.
       `echo "HEALTHY_WARN_LINES=$(grep -c '⚠' ${JSON.stringify(fixtures.HEALTHY)})"`,
       `echo "REGISTRY_WARN_WORDS=$(grep -c 'WARN' ${JSON.stringify(fixtures.REGISTRY)})"`,
+      // [#17027] the named-signature and probe-window measurements.
+      `named VENDORRACE ${JSON.stringify(fixtures.VENDORRACE)}`,
+      `named OIDC ${JSON.stringify(fixtures.OIDC)}`,
+      `named HEALTHY ${JSON.stringify(fixtures.HEALTHY)}`,
+      `generic VENDORRACE ${JSON.stringify(fixtures.VENDORRACE)}`,
+      `generic HEALTHY ${JSON.stringify(fixtures.HEALTHY)}`,
+      // The real boundary, then the whole file — opposite expectations.
+      `probewin SPLIT ${JSON.stringify(fixtures.SPLIT)} ${SPLIT_BOOT_LINES}`,
+      `probewin SPLITALL ${JSON.stringify(fixtures.SPLIT)} $(awk 'END { print NR }' ${JSON.stringify(fixtures.SPLIT)})`,
+      // Vacuity guard for the slice: the fixture really does carry error-level
+      // lines on BOTH sides, so "0 hits past the end" is a slice doing its job
+      // and not an inert pattern.
+      `echo "SPLIT_GENERIC_HITS=$(grep -cE "$SMOKE_ERROR_LOG_PATTERN" ${JSON.stringify(fixtures.SPLIT)})"`,
       'exit 0',
     ].join('\n'),
     { mode: 0o755 },
@@ -336,6 +496,11 @@ describe.skipIf(!RUNNABLE)('[#16793] publish-smoke.sh judges the BOOT before it 
     expect(r.HAS_PATTERN, 'SMOKE_BOOT_FAILURE_PATTERN is not defined by the script').toBe('yes');
     expect(r.HAS_SCRUB).toBe('function');
     expect(r.HAS_LINES).toBe('function');
+    // [#17027] the boot/probe split's own two seams.
+    expect(r.HAS_BOOT_ERROR_PATTERN, 'SMOKE_BOOT_ERROR_PATTERN is not defined by the script').toBe(
+      'yes',
+    );
+    expect(r.HAS_PROBE_WINDOW).toBe('function');
   });
 
   it('BEFORE: the error-only scan is blind to the specimen — 0 hits in its boot window', () => {
@@ -408,6 +573,84 @@ describe.skipIf(!RUNNABLE)('[#16793] publish-smoke.sh judges the BOOT before it 
     // is lost is precisely the one carrying the plugin's name, which is the
     // measured reason the gate scrubs first rather than trusting NO_COLOR.
     expect(r.DECOR_UNSCRUBBED_NAMES_PLUGIN).toBe('2');
+  });
+
+  it('[#17027] FIRING CONTROL 3: a healthy boot passes even though it logs at ERROR', () => {
+    // The half neither HEALTHY_BOOT nor HEALTHY_REGISTRY_BOOT can test. Verbatim
+    // from the run whose probes were, once allowed to run, all green.
+    expect(r.VENDORRACE_STATUS, 'the vendor-race boot is not a failed boot').toBe('1');
+    expect(r.VENDORRACE_HITS).toBe('0');
+    // …and it is not one of the signatures this gate asserts by name either.
+    expect(r.VENDORRACE_NAMED_STATUS).toBe('1');
+    expect(r.VENDORRACE_NAMED_HITS).toBe('0');
+    // Vacuity guard, and the whole point: the line REALLY IS error-level, so
+    // "the boot does not fail on it" is a decision about a matched line rather
+    // than a pattern that quietly stopped matching. The gate still prints it.
+    expect(
+      Number(r.VENDORRACE_GENERIC_HITS),
+      'the fixture no longer carries an error-level line — the control is vacuous',
+    ).toBeGreaterThan(0);
+    // The two healthy fixtures above must NOT acquire one, or this control and
+    // theirs stop being different measurements.
+    expect(r.HEALTHY_GENERIC_HITS).toBe('0');
+    expect(r.HEALTHY_NAMED_HITS).toBe('0');
+  });
+
+  it('[#17027] the #3091 signature still reds the boot, by NAME', () => {
+    // The class the boot-window error scan preserves. Both halves: the named
+    // pattern fires…
+    expect(r.OIDC_NAMED_STATUS).toBe('0');
+    expect(r.OIDC_NAMED_HITS).toBe('1');
+    // …and the composition-arrival predicate does NOT, which is exactly why the
+    // named allow-list has to exist rather than being folded into leg A or B:
+    // the composition arrived, and then failed to publish part of its surface.
+    expect(r.OIDC_STATUS).toBe('1');
+    expect(r.OIDC_HITS).toBe('0');
+  });
+
+  it('[#17027] section 4 reports what the PROBES provoked, not the boot', () => {
+    expect(r.SPLIT_PROBE_STATUS).toBe('0');
+    expect(r.SPLIT_PROBE_HITS).toBe('1');
+    // The one it reports is the probe-window line, named — not the boot line
+    // the gate above already judged and declined to fail on.
+    expect(r.SPLIT_PROBE_FIRST).toContain('session lookup exploded');
+    expect(r.SPLIT_PROBE_FIRST).not.toContain('sys_oauth_resource');
+    // Vacuity guard: the fixture carries error-level lines on BOTH sides, so a
+    // slice that reported one is a slice that discarded another.
+    expect(Number(r.SPLIT_GENERIC_HITS)).toBe(2);
+  });
+
+  it('[#17027] BOUNDARY CONTROL: past the end of the log, nothing is reported', () => {
+    // The opposite expectation on the same fixture. Without it, a
+    // `smoke_probe_window_error_lines` that ignored its boundary argument and
+    // reported everything would still pass the test above on the first hit.
+    expect(r.SPLITALL_PROBE_STATUS).toBe('1');
+    expect(r.SPLITALL_PROBE_HITS).toBe('0');
+  });
+
+  it('[#17027] WIRING: the boot judges by predicate + name, section 4 by slice', () => {
+    // Text assertions, for the same reason ORDER below is one: these live under
+    // the sourcing guard, where sourcing cannot reach them. They grade what the
+    // gate is WIRED to; every assertion above grades what the seams DO.
+    const src = fs.readFileSync(SCRIPT, 'utf8');
+    const bootBlock = src.slice(
+      src.indexOf('BOOT_LOG="$SMOKE_ROOT/server.boot.log"'),
+      src.indexOf('# ── 3. probes '),
+    );
+    expect(bootBlock.length, 'the boot gate block could not be located').toBeGreaterThan(0);
+    // The named signatures are FATAL at boot…
+    expect(bootBlock).toContain('grep -nE "$SMOKE_BOOT_ERROR_PATTERN" "$BOOT_LOG"');
+    // …and the general severity scan is REPORTED, not failed on. A `fail` on it
+    // is the regression this card was filed about, and it is the one shape that
+    // must not come back.
+    expect(
+      /fail\s+"error-level log lines during BOOT/.test(bootBlock),
+      'the boot window fails on any error-level line again — see SMOKE_BOOT_ERROR_PATTERN',
+    ).toBe(false);
+    expect(bootBlock).toContain("BOOT_LINES=$(awk 'END { print NR }' \"$BOOT_LOG\")");
+    // Section 4 consumes that boundary rather than re-scanning the whole log.
+    const scanBlock = src.slice(src.indexOf('# ── 4. log scan '));
+    expect(scanBlock).toContain('smoke_probe_window_error_lines "$SCRUBBED_LOG" "$BOOT_LINES"');
   });
 
   it('ORDER: the gate is invoked before the probes, and section 4 stays put', () => {
