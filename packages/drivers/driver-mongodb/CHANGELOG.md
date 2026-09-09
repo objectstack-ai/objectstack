@@ -1,5 +1,209 @@
 # @objectstack/driver-mongodb
 
+## 17.4.0
+
+### Patch Changes
+
+- a06faeb: fix(driver-mongodb): put the test layer in front of tsc, so the package's own typecheck reports a PASS and not a NUMBER (#14917)
+  
+  `packages/drivers/driver-mongodb`'s `tsconfig.json` excluded `**/*.test.ts`, and
+  its `typecheck` script is `tsc --noEmit` against that very config. Measured at
+  `6ed4b811af` with the dependency closure built: that program admits **0** of the
+  package's 30 `src/**/*.test.ts` files while all **10** of its non-test `src/**`
+  files ARE there, so `pnpm --filter @objectstack/driver-mongodb typecheck`
+  exiting 0 was a true sentence carrying no information about any test file.
+  
+  The filing's headline — that a compile-time `Equals` / `IsAny` pin here is
+  "checked by nothing" — is **false**, and the correction on the card is right: a
+  second program does compile these files. `check-type-check-coverage.mjs`'s
+  `remeasureProject` drops only the test glob and compares the result against its
+  `TEST_DEBT` ledger. Confirmed here by ablation rather than argued: a
+  deliberately false `Equals` pin added to `mongodb-driver.test.ts` takes that
+  program from 10 errors to 11, above the ledger's recorded 10, which reddens it.
+  The pins were never phantoms. What was true is narrower, and is what this change
+  closes: the only program reading this layer was a **debt ratchet** — an
+  instrument that reports a number and fails when the number moves, not a gate
+  that reports a pass.
+  
+  Gives the package the #5286 sibling shape (`packages/rest`, `runtime`,
+  `objectql`, `core`): a `tsconfig.test.json` with module semantics only —
+  `esnext` / `bundler` / `lib: ES2022`, matching how vitest actually executes
+  these files — strictness inherited and untouched, named by the `typecheck`
+  script via `check:test-typecheck`.
+  
+  Measured: **10** errors under the ratchet's shape (matching its recorded number,
+  and its recorded composition `TS1309 x7, TS2550 x3`, class for class), and **0**
+  under the split. All 10 were config-tier in full — 7 `TS1309` (`await` at module
+  scope in a program NodeNext compiles as CJS, because this package has no `"type":
+  "module"`) and 3 `TS2550` (`Array.prototype.at` against a `lib` older than
+  es2022). Neither class says anything about a test, and nothing was exposed
+  behind them: there was no unresolved-import cascade here to collapse, so there
+  is no `+n` term. `noUnusedLocals` / `noUnusedParameters` are live for this
+  package (unlike `driver-turso`, which switches both off) and neither fires.
+  
+  The `TEST_DEBT` entry (10 errors) is **deleted**, not lowered — the graduation
+  this ratchet's invariant requires. No `test-typecheck-debt.json` is added:
+  residue is 0, so none is owed (#5286, maintainer-only to open). That leaves all
+  30 files unledgered, so any error any one of them gains is red on arrival.
+  
+  `check:type-source-resolution` went red from onboarding the new program (the
+  documented onboarding-limb case, #11490): a registry entry is added rather than
+  `paths`, with its numbers stated in place — 123 tsc programs / 309 pairs before,
+  124 / 310 after. The single new pair is `@objectstack/objectql`, a devDependency
+  that no non-test file in `src/` imports.
+  
+  No runtime code changes: not one test file and not one source file is edited, so
+  no shipped behaviour moves — the suite reports the same 552 passed / 147 skipped
+  across 30 files as before. The `patch` level reflects the published
+  `package.json` gaining `typecheck` / `check:test-typecheck` scripts and a `tsx`
+  devDependency.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [51ae731]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [4771bd9]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f89812e]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+  - @objectstack/spec@17.4.0
+  - @objectstack/core@17.4.0
+  - @objectstack/types@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

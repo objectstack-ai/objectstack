@@ -1,5 +1,537 @@
 # @objectstack/metadata
 
+## 17.4.0
+
+### Minor Changes
+
+- a56baa2: feat(metadata,objectql): a keyed plural read on `MetadataManager`, `listNames` fault parity, and an action audit that answers from the same identity and sources as the router
+  
+  Two plural reads of one metadata plane could disagree with a by-name read of
+  that same plane, and the ADR-0110 D5 action-governance audit stood on the
+  disagreement — reporting `registered handler with NO declaration … REFUSED at
+  dispatch` about a route the router was resolving and dispatching in the same
+  boot.
+  
+  **`MetadataManager.listNames` gains the per-loader `try`/`catch` that
+  `loadMany` and `list()` have carried since #5108.** One loader fault used to
+  produce two different facts depending only on which plural read a caller
+  reached for: `loadMany` swallowed it and answered short, `listNames` threw. It
+  now degrades the same way, through the same `reportLoaderReadFailure` /
+  `reportLoaderReadRecovered` helpers — one outage, one line, one vocabulary.
+  Callers that relied on `listNames` throwing to detect an outage should read
+  `listDiagnosed()`, which reports `degraded` explicitly.
+  
+  **New: `MetadataManager.loadManyKeyed(type, options?)`** — `loadMany` read under
+  the identity the STORE holds each item by, returning `{ name, data }` pairs. It
+  delegates to a loader's own `loadManyKeyed` where one is offered (on
+  `DatabaseLoader` that shares `loadMany`'s single query, so it costs nothing
+  extra) and otherwise falls back to that loader's `list()` + per-name `load()`.
+  ⛔ **`loadMany`'s published return shape does not change**, and no existing
+  consumer is touched: the key travels *beside* the body, never inside it, so a
+  body that deliberately carries no `name` stays byte-identical to what was
+  stored (#14205).
+  
+  **The action-governance audit now mirrors the router on both halves of the D5
+  bijection.** The declaration half enumerates the plane keyed
+  (`loadStandaloneActionsKeyed`), so a row whose body does not name itself — a
+  `sys_metadata` row keyed by its `name` column, or a `FilesystemLoader` file
+  whose identity is its path — is a declaration to the audit exactly as it is to
+  the router; the handler half also probes the plane BY NAME
+  (`lookupMetadataAction`, `loadDiagnosed`/`load`, injected like the existing
+  registry rung), so a loader fault a plural read swallows can no longer turn a
+  dispatchable handler into an accusation. Both probes stay conservative in one
+  direction only: a source that throws leaves the handler on the list.
+  
+  Additive on every published signature. `runActionGovernanceInventory` and
+  `collectEngineActionDeclarations` gain optional parameters and keep their old
+  ones working unchanged; declaration rows gain an optional `storeKey` (the new
+  exported `ActionDeclarationRow`).
+  
+  **Population change, reported:** `unboundDeclarations` now sees declarations
+  whose identity is the store key. Its BEFORE was **0, structurally rather than
+  by sampling** — a nameless row was dropped before reconciliation ran, so it
+  could never be reported however many a plane held. Its one deliberate
+  subtraction: a row with neither an own `name` nor a store key is no longer
+  reported as `actionName: undefined`, which read as a parse failure in the
+  warning rather than as a finding.
+  
+  Known boundary, stated in the audit's docblock rather than left to be
+  rediscovered: a boot-time audit runs outside any request scope, so if a
+  composition ever registered `metadata` as `SCOPED` the audit could not reach
+  that instance at all — before any read method runs. No shipped composition does
+  (`packages/metadata/src/plugin.ts` registers a static instance), and reaching a
+  request-scoped service from a boot-time audit is a separate change.
+- c1d274d: fix(metadata): two files sharing one stem are refused with both paths named, instead of one being listed twice and served by extension precedence (#14921)
+  
+  **BREAKING** accept-set narrowing on `FilesystemLoader`, shipped as `minor`
+  under the repo's launch-window convention for breaking changes. Ruled on
+  #14921 (2026-09-05, option 1 of three).
+  
+  **Remedy: delete or rename the duplicate file.** The refusal names every
+  colliding path and the metadata type, so the fix is visible at the point of
+  failure.
+  
+  `FilesystemLoader` derives a metadata name by stripping a flat file's
+  extension, and resolves a name back to a file under a FIXED extension
+  precedence (`.json` → `.yaml` → `.yml` → `.ts` → `.js`). Two files sharing a
+  stem therefore produced one name **twice** in `list()` while only the
+  first-precedence file was reachable through any name at all. With
+  `object/twin.json` and `object/twin.yaml` both present, `list()` answered
+  `['twin', 'twin']`, `twin.yaml` was addressable through nothing, and
+  `loadMany()` returned both bodies. `MetadataManager.listNames()` unions loader
+  output into a `Set`, which collapsed the duplicate and took the count
+  discrepancy with it — the file stayed unreachable either way, so a clean
+  `listNames()` was never evidence the collision had been absorbed.
+  
+  The invariant that broke: **what is listed is what is loadable.** The listed
+  set and the addressable set stopped being the same set. The failure was silent
+  in the direction that matters for authoring — convert `twin.json` to
+  `twin.yaml` and leave the old file behind, or land one from each of two
+  packages, and the JSON one is served forever with no diagnostic anywhere,
+  while `admitLoaderItems()`'s documented "keep the first and say nothing"
+  absorbs the collision a second time.
+  
+  `FilesystemLoader.list()` now throws `AmbiguousMetadataStemError`
+  (`AMBIGUOUS_METADATA_STEM`, HTTP 500) naming both paths and the type, and the
+  same refusal fronts the shared `loadMany()` / `loadManyKeyed()` walk, so the
+  two-body answer is gone rather than de-duplicated. `MetadataManager.listNames()`
+  and `list()` **propagate** it rather than absorbing it into their per-loader
+  degradation: an ambiguous stem is an authoring error no retry fixes, and
+  degrading it would drop every item the loader holds into a short-but-served
+  list while the server keeps reporting healthy. A real storage outage still
+  degrades exactly as before — the seams discriminate on a branded predicate,
+  `isAmbiguousMetadataStemError`, not on a blanket rethrow.
+  
+  **Refused shape**, precisely: two or more files **directly under
+  `ROOT/TYPE/`** whose basenames differ only by an extension belonging to one of
+  **this instance's registered serializers**. Register `javascript` and
+  `dual.json` + `dual.js` becomes ambiguous; under the manager's default format
+  set (`typescript` / `json` / `yaml`) it is not, because `.js` derives no name.
+  Nested files are untouched — they are neither listed nor resolvable (#14486),
+  so `crm/solo.json` beside a flat `solo.json` is not a collision. The refusal is
+  scoped to the type directory that holds it: a clean `view/` still lists while
+  `object/` refuses.
+  
+  New exports from the package root entry: `AmbiguousMetadataStemError`,
+  `isAmbiguousMetadataStemError`, `AMBIGUOUS_METADATA_STEM_CODE`,
+  `AMBIGUOUS_METADATA_STEM_STATUS`.
+  
+  Measured migration cost, which is what makes this narrowing cheap: **no tree in
+  this repository carries the shape.** A walk of all 7,770 tracked files across
+  526 directories found zero stem collisions among `.json` / `.yaml` / `.yml` /
+  `.ts` / `.js`, confirmed independently by a `git ls-files` pass, and the repo
+  holds no `.yaml`/`.yml` metadata file at all outside CI and workspace config.
+  No existing tree goes red.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing on a LOADER, not on any authorable key: no property of any spec schema is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite in a stored document. The affected artifact is a FILESYSTEM LAYOUT — two sibling files — which the ledger cannot address at all: a migration entry rewrites metadata bodies, and neither of the colliding files is wrong on its own. Which one an author wants kept is intent no entry can decide: they may have meant the conversion to `.yaml` to land and forgotten to delete the `.json`, or may have meant the opposite, and the two files carry no evidence of which. The refusal is the channel that reaches them, at the load site, naming both paths, the type, and the remedy. Measured in-repo population of affected trees is zero: a walk of 7,770 tracked files over 526 directories found no directory holding two files with one stem among the registered extensions, and there are no `.yaml`/`.yml` metadata files outside CI and workspace config. -->
+- e9fcd6b: feat(metadata)!: `DatabaseLoaderOptions.cache.ttl` → `cache.ttlMs` — the read-through cache TTL carries its unit in the key name (#14478)
+  
+  <!-- adr-0087: registered metadata-manager-config-cache-ttl-unit-in-key -->
+  
+  **BREAKING** rename on the exported `DatabaseLoaderOptions.cache` shape
+  (`DatabaseLoaderCacheOptions.ttl` → `ttlMs`), shipped as `minor` under the
+  launch-window convention. `MetadataManager` hands `config.cache.databaseLoader`
+  straight to `new DatabaseLoader({ cache })`, so this option is the spec key
+  `cache.databaseLoader.ttlMs` one layer down and renames with it: a loader
+  configured with `ttlMs: 60_000` expires entries after 60 seconds exactly as
+  `ttl: 60_000` did. The README example and the kernel metadata-service docs page
+  spell the new key.
+  
+  ```ts
+  // before
+  new DatabaseLoader({ driver, cache: { enabled: true, maxSize: 500, ttl: 60_000 } });
+  // after
+  new DatabaseLoader({ driver, cache: { enabled: true, maxSize: 500, ttlMs: 60_000 } });
+  ```
+- 3bd9b34: feat(metadata): `deriveViewContainerObject` gets a leaf `/view-container` subpath, so objectql's lean ADR-0076 entry stops loading the manager, chokidar, glob and js-yaml for a six-line pure function
+  
+  `packages/objectql/src/engine.ts` reached `deriveViewContainerObject` through
+  `@objectstack/metadata`'s ROOT entry. `core.ts` — the ADR-0076 lean entry —
+  re-exports `engine.ts`, so `@objectstack/objectql/core`'s module-init closure
+  inherited the whole root entry: `MetadataPlugin` -> `NodeMetadataManager` ->
+  `chokidar`, plus `glob`, `js-yaml` and `readdirp`.
+  
+  The same file already carried the answer 79 lines above, at its
+  `@objectstack/metadata/errors` import: that leaf subpath exists "precisely so a
+  cross-package consumer gets the predicate without the manager, the loaders or
+  the YAML/filesystem machinery behind the root entry". This is that pattern,
+  taken a second time.
+  
+  **Measured on the built artifacts, not asserted** — every module Node actually
+  evaluates when `@objectstack/objectql/core` is loaded in a fresh process,
+  recorded through a `module.registerHooks` load hook (ESM and CJS) plus
+  `require.cache`, byte sizes from `statSync`:
+  
+  | `@objectstack/objectql/core` | modules | bytes |
+  |:---|---:|---:|
+  | before (ESM `dist/core.mjs`) | 190 | 12,348,424 |
+  | after (ESM `dist/core.mjs`) | 185 | 11,849,808 |
+  | **delta** | **-5** | **-498,616 (-486.9 KiB)** |
+  | before (CJS `dist/core.js`) | 188 | 12,654,238 |
+  | after (CJS `dist/core.js`) | 183 | 12,141,034 |
+  | **delta** | **-5** | **-513,204 (-501.2 KiB)** |
+  
+  Six modules stop loading — `packages/metadata/dist/index.js` (237,747 B),
+  `js-yaml` (114,610 B), `glob` (82,749 B), `chokidar` (2 files, 54,220 B) and
+  `readdirp` (9,836 B) — and one 469-byte module takes their place. Marginal
+  module-init time for that root entry, measured on a warm lean closure, was
+  ~22 ms (median of 7; 20.4-27.5 ms) out of ~630 ms.
+  
+  ⚠️ The figure the finding was argued on — "~3.6 KB to ~450 KB" — is right about
+  the delta and wrong about the baseline: the lean entry's closure was already
+  ~11.5 MiB before this import existed, dominated by `@objectstack/spec`
+  (9,587,914 B) and `zod` (567,918 B), neither of which the metadata root entry
+  contributes. What the root import cost was ~487 KiB *on top of* that, not a
+  closure of 450 KB.
+  
+  The derivation itself moves to `packages/metadata/src/view-container.ts`, a
+  module with **no imports at all**, and `view-container-expansion.ts` imports
+  and re-exports it, so `index.ts`'s root export and `plugin.ts` keep their
+  spelling and the symbol stays on the root entry — this subpath is an additional
+  door, not a relocation. A re-export shim onto `view-container-expansion.ts` was
+  tried first and rejected on measurement: esbuild tree-shakes the unused
+  `expandRuntimeViewContainer` but keeps its two `@objectstack/spec` import
+  statements, so that shim's own closure was 84 modules / 3,035 KiB. The real
+  leaf's is 1 module / 469 B.
+  
+  `expandRuntimeViewContainer` is deliberately not exported from the new subpath:
+  `metadata-manager.ts` is its only caller, the root entry does not export it
+  either, and it is the half that carries the spec machinery.
+- 8647c87: A completed run of the ADR-0030 notification cut-over now records itself in the `sys_migration` deployment ledger, per the ruled claim matrix.
+  
+  `migrateSysNotificationToEvent` reports `migrated` / `already_done` / `not_applicable` / `error` to its caller and — until now — recorded nothing anywhere. Once that line had scrolled, "did this cut-over run here, and when" had no answer in the deployment even in principle. The ledger row is what answers it, and what a run of this migration may claim under `NOTIFICATION_EVENT_MIGRATION_ID` is stated on that constant in `@objectstack/spec/system`:
+  
+  - `last_run_at` — stamped on every completed non-`error` run (`migrated`, `already_done`, `not_applicable` alike).
+  - `applied_at` — stamped only on `migrated`. Never cleared: a later `already_done` leaves an earlier backfill's stamp alone, because the backfill really did happen.
+  - `verified_at` — never written, in either direction. This migration has no self-check, and `verified_at` means a self-check passed. On a store created after the cut-over the row already exists and `attestFreshDatastore` set `verified_at` at birth; that certificate survives a run untouched, because the column is omitted from the update rather than sent as `null`.
+  - `blocking: 0`, and `details` carrying `{ outcome }` verbatim.
+  - An `error` run writes no claim at all — it does not know what it did, so it does not say.
+  
+  **Receipt, not gate.** Nothing reads a row under this id as a precondition and nothing may: a gate would need the self-check that does not exist. The row is what an operator reads, in the shape `sys_migration` already documents for the seed-tenancy repair.
+  
+  Two additions to the published surface of `@objectstack/metadata/migrations`, both driven by that: a new `SysNotificationMigrationReceipt` type, and a new `receipt` member on `SysNotificationMigrationResult` reporting what became of the claim (`inserted` / `updated` / `not-claimed` / `no-ledger` / `failed`, with a reason on the last two). This directory takes no logger and reports to its caller, so the claim's own fate is reported the same way the migration's is — a receipt that could not be written is never swallowed. Reading a result is unaffected; code that CONSTRUCTS a `SysNotificationMigrationResult` by hand (a test double) now supplies `receipt`.
+
+### Patch Changes
+
+- 0c5d035: fix(metadata): a `HistoryCleanupManager` run that loses deletes now says so, at both of `start()`'s triggers
+  
+  A failing history cleanup was completely silent. Three things composed: every inner `catch` on the delete path is a bare `catch {`, so the error object is discarded; the only `console.error` in `runCleanup()` sits in its OUTER catch, which those inner catches prevent execution from reaching; and `start()` invoked the run as `void this.runCleanup()`, throwing away the `{ deleted, errors }` the run returns — at BOTH call sites, the immediate run and every interval tick. A driver whose deletes failed on every scheduled run therefore produced zero output and no reachable error count, while the history table grew past its retention policy with nothing to find.
+  
+  The repair reads the envelope instead of replacing it. `runCleanup()`'s contract, its inner catches and its counting are unchanged: reporting a failure to the CALLER is the third answer AGENTS.md → "Degradation log levels" allows a durability seam, and that same section names a log per failed write as the mirror-image failure. What was missing was a reader — `start()` is where the chain ends, since it returns `void` and an interval tick has no caller at all. Both call sites now go through one shared pass that reads the returned counts and, when a run lost deletes, prints one `error` line naming the consequence (rows past the retention policy are still in the table, nothing retries them, and the system keeps reporting healthy) and where to look. A run that loses nothing stays quiet, and a direct caller of `runCleanup()` sees exactly the same `{ deleted, errors }` as before.
+- 281bf0d: `HistoryCleanupManager` computes its retention cutoff on one calendar, not two.
+  
+  Both call sites — the age-based delete in `runCleanup()` and the preview count in `getCleanupStats()` — built the cutoff with `cutoffDate.setDate(cutoffDate.getDate() - maxAgeDays)` and then rendered it with `toISOString()`. `setDate`/`getDate` read and write the **local** calendar; `toISOString()` renders **UTC**. They now use `setUTCDate`/`getUTCDate`, so the arithmetic and the rendering agree.
+  
+  `setDate` preserves wall-clock time, so shifting the local calendar back `n` days moves the *instant* by exactly `n × 24h` only while every local day in the window is 24 hours long. When the window straddles a DST transition it is 23 hours (spring-forward) or 25 (fall-back), and the cutoff instant that goes into the `recorded_at: { $lt: … }` **delete** filter is off by the size of that transition — one hour in most zones, thirty minutes on Lord Howe Island. History rows within that slip of the retention boundary were deleted early, or retained too long.
+  
+  The exposure is not limited to the two transition days: the window only has to *straddle* a transition, so it grows with `maxAgeDays`. Measured over a 12-zone × 366-day × 48-half-hour sweep of 2026, in `America/New_York` the old spelling produced a wrong cutoff for 0.6% of instants at `maxAgeDays: 1`, 16.4% at 30, 49.7% at 90 and 69.4% at 180. In zones that do not observe DST (`UTC`, `Asia/Shanghai`, `Asia/Kolkata`, `Australia/Perth`) the rate is 0.0% at every `maxAgeDays` — which is why no test had ever gone red on this.
+  
+  This does **not** make retention timezone-aware, and does not change what `maxAgeDays` means. The cutoff was already intended to be `now − maxAgeDays × 24h`; it is now that in every zone rather than only in zones without DST. Nothing else in either filter moved: the `organization_id` scoping, the ADR-0009 `executionPinned` exclusion and the `maxVersions` path are untouched.
+- 3e7ef9c: Serve an Invalid `Date` from a driver instead of raising `RangeError` in `DatabaseLoader.stat`.
+  
+  `canonicalIsoInstant` reached `value.toISOString()` for any `Date`, and that call raises `RangeError: Invalid time value` for the one `Date` whose time value is `NaN`. `stat()` is a hot read path — REST `/meta/*`, ObjectQL plan resolution, runtime overlay merges — so one legacy `sys_metadata` row answered **500** where the spelling this repair replaced had served a visibly-wrong value.
+  
+  The shape is measured: mysql2 3.23.1 hands back a constant literally named `INVALID_DATE` for a zero `DATETIME`, and postgres-date 1.0.7 builds `new Date(NaN)` for every year in 275760..294276, which Postgres itself stores.
+  
+  The `Date` arm now guards on `Number.isNaN(value.getTime())` and answers `undefined`, so `stat()`'s own `?? new Date().toISOString()` — the branch an absent column already takes — publishes a parseable `MetadataStats.mtime`. `undefined` rather than visible text is deliberate here: `mtime` is declared `z.string().datetime()`, so the text `"Invalid Date"` would not produce a readable cell, it would produce a zod refusal at the consumer, moving the failure instead of removing it. A blank is excluded for the opposite reason — it hides the producer's bug.
+- 09c1d91: docs(metadata): the `@objectstack/metadata/errors` header records what the leaf entry actually loads — 4 packages, 83 modules, 2.2 MB — instead of leaving the reader to infer it is light (#15346)
+  
+  `packages/metadata/src/errors.ts` is the leaf subpath `@objectstack/metadata/errors`, and its header explains why the subpath exists: the root entry pulls the manager, every loader and the YAML/filesystem machinery behind them, and "a consumer that wants a 40-line predicate should not have to load any of that". Measured, that promise half holds — and the header did not say which half.
+  
+  **The half that holds, and stays:** MEASURED 2026-09-08 on `origin/main` `8c1515e847`, with `scripts/check-lean-entry-closure.mjs`'s exported `measure()`/`byPackage()` (one fresh child per published condition; module set collected through `module.registerHooks` unioned with `require.cache`). Both published conditions load exactly four packages, and the manager, every loader, `chokidar`, `glob`, `js-yaml` and `readdirp` are absent from all of them. That is the claim the header actually wrote, and it is accurate.
+  
+  **The half that had drifted:** the general conclusion a reader takes away. `import` loads 83 modules / 2,201,709 bytes; `require` loads 83 / 2,355,405. Since the maintainer's 2026-08-30 ruling the file re-exports from `@objectstack/types`, which builds to one bundled module importing **both** `@objectstack/spec/api` (1,401,253 B) and `@objectstack/spec/security` (195,367 B) at module top, as values — `api` is the dominant edge at 7x `security`, and the two spec entries are independent of each other.
+  
+  The header now separates the two costs the way the finding did, because conflating them is the available mistake: **in-repo the marginal contribution is 143 bytes** — the only current consumer of the subpath, `@objectstack/metadata-protocol`, declares `@objectstack/spec` itself and pays for that closure anyway — while the megabytes are what an **out-of-repo** consumer pays, which nothing here can measure. The figures are labelled PROVENANCE, dated and tree-pinned, in the manner the neighbouring gate keeps its own: nothing derives from them, nothing compares against them, and the header says to re-take them rather than quote them. They rot fast — the same measurement four days earlier at `6e67b86c0` found the same 83 modules but 2,487,842 bytes, 286,133 more, without this file changing at all.
+  
+  **Why `patch` and not `skip-changeset`, measured rather than assumed.** `@objectstack/metadata` is released (17.3.0) and `errors.ts` is a shipped source file, so "a comment publishes nothing" needed checking rather than asserting. Building the package before and after the edit: `dist/errors.js`, `dist/errors.cjs`, `dist/errors.d.ts` and `dist/errors.d.cts` are **byte-identical** (esbuild strips the comment, and there is no `sourcesContent`), but `dist/errors.js.map` and `dist/errors.cjs.map` **change** — the export statement moved from source line 65 to line 113, so the `mappings` VLQ moves with it (`;AAgEA,…` → `;AAgHA,…`), at identical file size. `npm pack --dry-run` lists both maps in the tarball. So this diff does publish bytes from a released package, which is exactly what `skip-changeset` is not for. Nothing executable and no type changes: a consumer's stack traces resolve to the right source line, and that is the whole of it.
+- 7629f4d: feat(spec)!: retire the three inert outer keys of `MetadataManagerConfig.cache` — `enabled`, `ttlSeconds` (formerly `ttl`) and `maxSize` — read by nothing; `cache.databaseLoader` is the only live half (#15624, ADR-0049)
+  
+  <!-- adr-0087: registered metadata-manager-config-inert-cache-keys-retired -->
+  
+  **BREAKING** accept-set narrowing, landing after the v17.0.0 cut (the lockstep
+  launch-window convention ships it as `minor`; the migration prescription is
+  registered under protocol major 18, where `os migrate meta` users will look).
+  ADR-0049 enforce-or-remove decides it: a declared-but-unenforced key with zero
+  measured readers comes off, and the published reference page stops teaching it.
+  
+  `MetadataManagerConfig.cache` declared three outer knobs — `enabled` (default
+  `true`), `ttlSeconds` (default 3600; spelled `ttl` until #14478) and `maxSize`
+  ("Max cache size in bytes") — beside the nested `databaseLoader` block, and
+  **nothing read the outer three**. The only runtime consumer of the block is
+  `MetadataManager` (`packages/metadata`), which hands `cache.databaseLoader` and
+  nothing else to `new DatabaseLoader({ cache })`; a reader census over
+  `packages/**` (tests and changelogs excluded) found no runtime reader of any
+  outer key, while the same grep shape found the nested `cache?.databaseLoader`
+  read twice — the control that makes the zero a measurement. An author writing
+  `cache: { enabled: false }` or `cache: { ttlSeconds: 60 }` got a clean parse
+  and a cache that behaved exactly as before, with no error and no warning, and
+  the published reference page (`references/kernel/metadata-loader`) documented
+  all three as if they configured something.
+  
+  **What is refused:** authoring `cache.enabled`, `cache.ttlSeconds`, `cache.ttl`
+  or `cache.maxSize` on `MetadataManagerConfig`, with any value — directly, through
+  `MetadataManagerOptions`, or through `MetadataPluginConfig.storage`. The nested
+  object is not `.strict()`, so each key is a `retiredKey()` tombstone rather than
+  a bare deletion (a deletion would have stripped it in silence — the same no-op
+  one layer down): authoring it is a `tsc` error (`never`) and a parse error
+  carrying the prescription, which names the live nested knob.
+  
+  **What stays, byte-identical:** the DatabaseLoader read-through cache under
+  `cache.databaseLoader` — `enabled` (default `true`), `maxSize` (an entry count,
+  default 500) and `ttlMs` (milliseconds, default 60000) — and every runtime
+  path. Parsed configs no longer carry the two former defaults (`enabled: true`,
+  `ttlSeconds: 3600`) that were materialized and never consulted.
+  
+  **The #14478 rename is folded in.** `cache.ttl` → `cache.ttlSeconds` was
+  registered under this same unreleased major and never reached a published
+  release, so it is absorbed by the removal: `cache.ttl`'s tombstone now
+  prescribes deletion (naming `cache.databaseLoader.ttlMs`) instead of a rename to
+  a key that is itself retired — an author upgrading from a published 17.x sees
+  one hop. The nested `cache.databaseLoader.ttl` → `ttlMs` half of that rename is
+  unchanged.
+  
+  ## FROM → TO
+  
+  ```ts
+  // before — parsed green; no runtime ever read the three outer numbers
+  new MetadataManager({
+    datasource: 'default',
+    cache: { enabled: true, ttlSeconds: 3600, maxSize: 10_485_760, databaseLoader: { ttlMs: 60_000 } },
+  });
+  
+  // after — delete the outer keys; the nested block is the cache that runs
+  new MetadataManager({
+    datasource: 'default',
+    cache: { databaseLoader: { enabled: true, maxSize: 500, ttlMs: 60_000 } },
+  });
+  ```
+  
+  **Migration.** Delete `cache.enabled`, `cache.ttlSeconds` / `cache.ttl` and
+  `cache.maxSize`; nothing replaces them, because nothing ever consumed them. If
+  you meant to switch the cache off, cap it or set its TTL, write
+  `cache.databaseLoader.enabled` / `.maxSize` (entries) / `.ttlMs` (milliseconds)
+  — those are honoured. No `os migrate meta` conversion runs on this surface: a
+  `MetadataManager` config is not a stack collection member and never a stored
+  row, so the chain has no seam for it; the D3 semantic entry
+  `metadata-manager-config-inert-cache-keys-retired` carries the prescription
+  into `spec-changes.json`, the upgrade guide and the `spec_changes` MCP tool.
+  
+  The retirement kit: `retiredKey()` tombstones on all three (and the absorbed
+  `ttl`), `RETIRED_KEYS_BY_MAJOR[18]` entries for each, the D3 semantic entry
+  above (the #14478 entry's outer half is re-worded from a rename to a deletion),
+  negative pins asserting each prescription and a positive pin asserting the
+  parse output no longer materializes the retired defaults, the published
+  reference pages regenerated, and the hand-written docs page and this package's
+  README (`@objectstack/metadata` ships `README.md`, hence its `patch`) no longer
+  authoring `cache.enabled`.
+- 6f23f0e: fix(metadata): keep the original notification instant when migrating `sys_notification` to the event model (#16312)
+  
+  `migrateSysNotificationToEvent` materializes each legacy inbox row into a
+  `sys_inbox_message` and a `sys_notification_receipt`, back-dating both to the
+  notification's own `created_at`. Both writes passed no options bag, so they
+  relied on the audit binder's create-side `record.created_at ?? now` — the
+  laundering #15964 removed, on the maintainer ruling of 2026-09-06. Without
+  that accident, every migrated inbox row and receipt is stamped with the moment
+  the migration RAN: a user's whole bell history collapses to "all arrived
+  today".
+  
+  The two writes now declare `{ context: { preserveAudit: true } }`, the explicit
+  historical-import channel the same ruling deliberately kept (#3493; it is what
+  REST import's `treatAsHistorical` sets). This is not a bypass of audit — it is
+  the door audit left open for a historical import. No exported symbol, schema or
+  config key moves.
+  
+  **Release ordering.** `@objectstack/objectql`'s side of #15964 is itself still
+  an unreleased changeset, so no published version of this migration has ever
+  written the flattened timeline. Releasing the two together keeps it that way.
+  
+  **If a deployment did run it from a build that has both halves**, the original
+  timeline is recoverable rather than lost: the source `sys_notification` rows
+  are rewritten in place, never deleted or archived, and `created_at` is not
+  among the legacy columns the run clears — so the notification's own instant is
+  still on the event row and reachable from both new rows through
+  `notification_id`.
+- efc5447: `RemoteLoader.list()` no longer reports a nameless remote body as a literal `undefined`.
+  
+  The method declares `Promise<string[]>` and read the collection as `loadMany<{ name: string }>(type)` before mapping `items.map(i => i.name)`. That type argument is an **assertion** about bodies that arrived over HTTP, and nothing checked it: a body with no top-level `name` yielded `undefined`, which went into an array the signature declares as `string[]`. `MetadataManager.listNames()` unions loader `list()` output unfiltered, so the violation reached consumers — measured on this fixture, `listNames()` answered `[ 'account', undefined, 42 ]`.
+  
+  The guard is `DatabaseLoader.list()`'s, one file away: the same cast-then-map spelling with `.filter(name => typeof name === 'string')` behind it. `RemoteLoader` was the only one of the four loaders in that directory with no guard at all — `MemoryLoader` answers with its store keys, and `FilesystemLoader` reports only names `findFile()` resolves. Dropping silently rather than throwing is the direction those siblings already carry: a name in the list that the door answers `null` for is the silent failure an author reads as their own typo, so the list is narrowed to agree with the door.
+  
+  Nothing that was validly returned before stops being returned: the only entries that disappear are the ones whose type the signature already ruled out. A caller that previously received `[undefined]` now receives `[]`. `loadMany()` is deliberately untouched — it keys nothing, so a body carrying no `name` is still served there; this loader reads over HTTP and holds no store key, so `body.name` is the only identity it has and the family's "identity is the store key" rule cannot be satisfied for it.
+- c5d6803: Published `.js.map` files no longer embed the complete original source text (`sourcesContent`) — comments included. `sourcemap: true` was esbuild shorthand, and esbuild's own default for `sourcesContent` is `true`; nobody had decided to publish every package's full source (including `@internal`/test-only comments) to npm inside its source maps, it fell out of a default nobody had looked at. Measured before this change: 55 of 57 publishable packages shipped embedded source text, and maps were roughly half of `@objectstack/spec`'s published bytes.
+  
+  `sourcesContent: false` is now set at one shared place (`scripts/tsup-drop-sources-content.mjs`, wired into every `tsup.config.ts` via tsup's `esbuildOptions` hook — most packages build through the repo-root config directly and pick this up with no config change of their own). `mappings` are untouched, so stack-trace positions still resolve correctly to the original file/line/column; only the embedded source text is gone.
+  
+  `@objectstack/cli` (built with `tsc`, not `tsup`) never embedded source text to begin with — its maps' `sources` entries point at `src/**` paths that are not part of the published tarball either way. That is not a defect unique to `cli`: every `tsup`-built package's `sources` entries are `../src/**`-relative paths that are equally outside `files: ["dist", …]`, and were merely masked by the embedded content that just stopped shipping. Shipping `src/**` in `files[]` to make `sources` resolve was rejected — it would put most of the removed bytes straight back. So `cli`'s maps are left exactly as `tsc` emits them: this is now the fleet-consistent shape (accurate `mappings`, non-resolving-but-honest `sources` labels, no embedded text), not an outlier.
+  
+  A new gate, `pnpm check:sourcemap-no-sources-content`, sweeps every built, non-private package's `dist/**/*.map` and fails if any of them carries a non-empty `sourcesContent` array — so a future `tsup.config.ts` that skips the shared hook, or a toolchain upgrade that changes esbuild's default back, is caught rather than silently re-publishing source text.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [159dbad]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [cbca47d]
+- Updated dependencies [acf4d38]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [51ae731]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [4ca358d]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [6acb37e]
+- Updated dependencies [7797102]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [0a038cc]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [97adce2]
+- Updated dependencies [a83482c]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [4771bd9]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [c930f85]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b3820c3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [4df2a98]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f89812e]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+- Updated dependencies [021a735]
+- Updated dependencies [7bdb163]
+  - @objectstack/spec@17.4.0
+  - @objectstack/core@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/metadata-core@17.4.0
+  - @objectstack/metadata-fs@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes
