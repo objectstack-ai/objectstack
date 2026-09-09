@@ -213,7 +213,7 @@ describe('[#16760] /get-session is lifted into the SessionResponse envelope it d
       // nothing to do with this card and that the lift cannot reach:
       // `SessionUserSchema.image` is declared `z.string().optional()`, which
       // does not admit `null`, and better-auth serves `"image": null` for a
-      // user who never set one.
+      // user who never set one. Filed as #17235 — delete this case with it.
       //
       // Pinned as the exhaustive issue list rather than as "it fails": if the
       // envelope ever regresses, the missing `success` and `data` show up here

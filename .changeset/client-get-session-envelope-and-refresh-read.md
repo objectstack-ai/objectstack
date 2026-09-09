@@ -60,4 +60,5 @@ stays signed in across the call.
 Two answers stay outside the declared type and are **not** addressed here: the
 anonymous `null`, which would need the published return annotation to widen, and
 `SessionUser.image`, declared `z.string().optional()` against a route that
-serves `null`. Both are filed separately.
+serves `null` (#17235). The sibling `auth.login` / `auth.register`, which
+normalize into `data` but set no `success`, are #17234.
