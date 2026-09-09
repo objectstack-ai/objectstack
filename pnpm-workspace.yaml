@@ -253,6 +253,12 @@ overrides:
   # (next optionalDep ^0.34.5 excludes the fix); react-router GHSA-qwww-vcr4-c8h2 has no
   # 7.x fix — fumadocs-core peer allows 8.x and docs uses the next adapter, so jump to 8;
   # @sveltejs/kit GHSA-866w-xmhq-wj7x/GHSA-wqjv-9729-c5q2 (better-auth optional peer);
+  # 2026-09-09 (#16999): sharp GHSA-rgj7-g3m4-5g8c (8.9 high) — the target lifts
+  # from ^0.35.0 to ^0.35.4; the selector is untouched, because <0.36.0 already
+  # sits at the 0.x compatibility boundary this block's header names. Still
+  # transitive-only via next's optional dependency, and 0.35.4 is a patch inside
+  # the 0.35 line the pin already held, so nothing declares a range that has to
+  # move in lockstep.
   # @hono/node-server GHSA-frvp-7c67-39w9 has no 1.x fix — @modelcontextprotocol/sdk
   # declares ^1.19.9 and only imports getRequestListener, which 2.x still exports.
   # ⚠️ @hono/node-server is the exception to this block's "transitive-only" heading:
@@ -261,7 +267,7 @@ overrides:
   # specifier — the resolved version is unchanged at 2.0.12, because the ^2.0.10 target
   # floats to the newest 2.x (measured, #6095).
   'brace-expansion@>=5.0.0 <6.0.0': '^5.0.9'
-  'sharp@>=0.34.0 <0.36.0': '^0.35.0'
+  'sharp@>=0.34.0 <0.36.0': '^0.35.4'
   'react-router@<8.3.0': '^8.3.0'
   '@sveltejs/kit@<2.69.1': '^2.69.1'
   '@hono/node-server@<3.0.0': '^2.0.10'
@@ -287,8 +293,24 @@ overrides:
   #     peer states what host hono we work against, and a host that pins an old
   #     hono owns that copy; narrowing it fixes nothing here and only breaks
   #     compatibility. check-override-consistency.mjs covers both forms.
+  #     2026-09-09 (#16999): three MORE hono advisories, GHSA-crvj-82cr-hjcx
+  #     (5.9), GHSA-g6gw-c38x-mqfc (5.3) and GHSA-gqvv-2mrq-wpjv (6.5), fixed in
+  #     4.13.5 — target lifted from ^4.12.34, selector stays at the 5.0.0
+  #     boundary, so this is the target-only lift that shape exists to allow.
+  #     The lift is ALSO what collapses the duplicate: the scanner flagged hono
+  #     at TWO resolved versions, 4.12.34 (pulled by @modelcontextprotocol/sdk)
+  #     and 4.13.2 (our three declarations, floated up by the old ^4.12.34
+  #     target). 4.12.34 satisfied ^4.12.34, so lockfile inertia left the
+  #     transitive copy sitting on the floor while ours moved; ^4.13.5 excludes
+  #     it, both edges must re-resolve, and the tree deduplicates onto one hono.
+  #     A bump that moved only our declarations would have left the 4.12.34 copy
+  #     flagged and the gate red. @hono/node-server peers hono ^4.12.34, which
+  #     4.13.x satisfies, so neither node-server version has to move.
+  #     The declared ranges go to ^4.13.5 in lockstep for the downstream-install
+  #     reason above; the @objectstack/hono PEER range stays ^4.12.8, unchanged,
+  #     for the reason above it.
   'fast-uri@<4.0.0': '^3.1.6'
-  'hono@<5.0.0': '^4.12.34'
+  'hono@<5.0.0': '^4.13.5'
   # OSV 2026-08-07 (#6407) — transitive-only, and the same "it has a fix, so
   # take the fix" disposition as the batch above:
   #   dompurify GHSA-55q2-fjhq-7xh7 (5.1 medium) — an IN_PLACE hook removal
