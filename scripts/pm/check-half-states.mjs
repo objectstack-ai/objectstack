@@ -10272,8 +10272,10 @@ export const SWEEP_COUNT_KEYS = [
   'threadReadTruncated',
   'threadReadPagesBought',
   // H52's coverage triple (#16662). `openQuestionCandidates` is how many OPEN
-  // `pm:dispatched` cards the row could speak about, `openQuestionJudged` how
-  // many had a COMPLETE thread in hand, and `openQuestionUnparsed` how many of
+  // cards the row could speak about — EVERY listed one, because the census
+  // measured that a report's questions outlive the `pm:dispatched` that
+  // produced them — `openQuestionJudged` how many had a COMPLETE thread in
+  // hand, and `openQuestionUnparsed` how many of
   // THOSE carried a newest report whose payload did not read — an UNKNOWN array
   // rather than an empty one, which is the third state this row refuses to fold
   // into clean. It rides H50's completing walk and buys nothing of its own.
@@ -21806,7 +21808,7 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H52 order: ⛔ a ruling comment does NOT stand the row down — the documented over-report', typeof h52([cm52(1, report52(Q52), T52), cm52(2, 'Ruling recorded — A, A, A.', '2026-09-08T09:00:00Z')]), 'string');
   t('H52 order: …and H33 cannot see that ruling either, which is why it was not reused', isTriageRulingComment('Ruling recorded — the three residuals: A, A, A'), false);
 
-  // Population — `pm:dispatched`, open.
+  // Population — every OPEN card, and ⛔ deliberately not one `pm:*` state.
   t('H52 population: an open `pm:dispatched` card is in', h52SpeaksAbout(DISPATCHED52), true);
   t('H52 population: a `pm:queue` card is IN — the census\'s LARGEST bucket at 19 carriers', h52SpeaksAbout(card52(['pm:queue'])), true);
   t('H52 population: …and `pm:blocked` (15) and `pm:on-hold` (14)', h52SpeaksAbout(card52(['pm:blocked'])) && h52SpeaksAbout(card52(['pm:on-hold'])), true);
