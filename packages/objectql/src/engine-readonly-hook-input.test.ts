@@ -70,7 +70,12 @@ function makeDriver() {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(object: string, ast: any) {
-      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      const rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      // The caller's bound, applied AFTER the filter and by PRESENCE
+      // (`check:objectql-double-limit`): a double that silently ignores
+      // `limit` answers with rows the engine asked it not to return, which is
+      // the one way a fake driver can make a paging bug pass.
+      return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
     },
     async findOne(object: string, ast: any) {
       for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return r;
