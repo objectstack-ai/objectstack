@@ -9788,19 +9788,19 @@ export function h50ThreadReadMismatch(issue, commentRows, sinceMs = Date.parse(T
 //
 // ## Population — measured, not assumed
 //
-// The first census (below) is what set it. The row was first written over open
+// The first census is what set it. The row was first written over open
 // `pm:dispatched` cards, on the reasoning that a report lands on a card in
-// flight; the census then read every open card on the board and found 62
-// carriers holding 120 questions, of which SEVEN carry `pm:dispatched`. The
-// other 55 had moved on: 15 `pm:awaiting-maintainer`, 14 `pm:blocked`, 12
-// `pm:on-hold`, 10 `pm:queue`. ⇒ A report's questions OUTLIVE the dispatch
-// that produced them, which is the defect's own shape — the card leaves
-// `pm:dispatched` and the question stays behind. A row scoped to the dispatch
-// would have converted 11% of an invisible state into a listable one and
-// reported the rest as clean.
+// flight; the census then read every open card on the board (599 of them,
+// 2026-09-09) and found 63 carriers holding 120 questions, of which ELEVEN
+// carry `pm:dispatched`. The other 52 had moved on: 19 `pm:queue`, 15
+// `pm:blocked`, 14 `pm:on-hold`, and 4 carrying no state label of this
+// vocabulary at all. ⇒ A report's questions OUTLIVE the dispatch that produced
+// them, which is the defect's own shape — the card leaves `pm:dispatched` and
+// the question stays behind. A row scoped to the dispatch would have converted
+// 17% of an invisible state into a listable one and reported the rest as clean.
 //
 //   IN        an OPEN card this sweep listed (`SEEN_LABEL_PAGES`) whose comment
-//             thread is ALREADY IN HAND and COMPLETE. 59 of the census's 62
+//             thread is ALREADY IN HAND and COMPLETE. 60 of the census's 63
 //             carriers are reachable from those label pages.
 //   OUT       a CLOSED card. ⚠️ The sharpest bound on the row, and the filing
 //             thread measured it: a ruled card's residual questions were
@@ -9808,7 +9808,7 @@ export function h50ThreadReadMismatch(issue, commentRows, sinceMs = Date.parse(T
 //             with it — a closed card is in no open query, so it is harder to
 //             find than the 17-day one. The standing patrol cannot pay for the
 //             closed archive four times a day; the first census paid for it
-//             once (2,100 closed `pm:dispatched` cards: 243 carriers, 415
+//             once (2,102 closed `pm:dispatched` cards: 253 carriers, 434
 //             questions), and the rule this row ships beside is what keeps a
 //             question alive past its card — residual questions get their OWN.
 //   OUT       an open card no label page lists: the census found 3 (two
@@ -9867,7 +9867,7 @@ export function h50ThreadReadMismatch(issue, commentRows, sinceMs = Date.parse(T
  * live precedents point opposite ways — `ACCEPT_VERDICT_MARKER` refuses `i`
  * because its verdict landed with no dialect behind it, `CLAIM_COMMENT_MARKER`
  * carries `i` as an accommodation for spellings the fleet had already shipped —
- * so the census settled it: over 2,698 threads it found FIVE reports opening
+ * so the census settled it: over 2,701 threads it found FIVE reports opening
  * `OS-DEV-REPORT`, all on closed cards from an early era and none in the open
  * population. A shipped dialect exists, so this marker is the second case and
  * not the first. ⚠️ The `i` is the whole accommodation: the anchor still refuses
@@ -9893,6 +9893,70 @@ export const H52_QUESTION_TEXT_CAP = 160;
  * the state bug `CLAIM_COMMENT_MARKER`'s note refuses by name.
  */
 export const FENCED_BLOCK_SOURCE = '```[ \\t]*[\\w-]*[ \\t]*\\r?\\n([\\s\\S]*?)```';
+
+/** How many candidate payloads one comment is scanned for before the reader stops. */
+export const H52_PAYLOAD_CANDIDATE_CAP = 8;
+
+/**
+ * The JSON object beginning at `text[start]`, or `null` when the braces never
+ * balance.
+ *
+ * String-aware, because a report payload routinely carries `{`, `}` and escaped
+ * quotes INSIDE its `summary` and `tests` strings — counting braces naively
+ * ends the object early and every such report reads as unparseable.
+ */
+export function balancedObjectAt(text, start) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * Every candidate payload in a report comment, in the order the reader tries
+ * them: FENCED blocks first, then an UNFENCED object opening its own line.
+ *
+ * ⚠️ The unfenced half is a MEASUREMENT, not a generosity. The first census read
+ * 991 report comments on closed cards and 106 on open ones; of the 13 open cards
+ * whose newest report a fenced-only reader could not parse, most carried the
+ * object with no fence at all — and one was a report whose own `status` was
+ * `needs_decision`, i.e. exactly the card this row exists to find, reading as
+ * UNJUDGED because of a markdown fence. ⛔ A fence is not part of the report
+ * contract, so a reader that requires one is the defect, not the report. With
+ * both forms read, the open board's unparseable tail fell from 13 to 4.
+ *
+ * Line-anchored (`^{`) rather than "any `{`", so a brace inside prose never
+ * starts a scan, and capped at `H52_PAYLOAD_CANDIDATE_CAP` so a long comment
+ * cannot turn one comment into an unbounded parse.
+ */
+export function devReportPayloadCandidates(text) {
+  const out = [];
+  const fenced = new RegExp(FENCED_BLOCK_SOURCE, 'g');
+  let m;
+  while ((m = fenced.exec(text)) && out.length < H52_PAYLOAD_CANDIDATE_CAP) out.push(m[1]);
+  const opener = /^\{/gm;
+  let o;
+  while ((o = opener.exec(text)) && out.length < H52_PAYLOAD_CANDIDATE_CAP) {
+    const block = balancedObjectAt(text, o.index);
+    if (block !== null) out.push(block);
+  }
+  return out;
+}
 
 /**
  * One `open_questions` entry as the text a reader can act on, or `null` when the
@@ -9921,12 +9985,10 @@ export function devReportQuestionText(entry) {
 export function devReportOpenQuestions(body) {
   const text = String(body ?? '');
   if (!OS_DEV_REPORT_MARKER.test(text)) return { marked: false };
-  const re = new RegExp(FENCED_BLOCK_SOURCE, 'g');
-  let m;
-  while ((m = re.exec(text))) {
+  for (const candidate of devReportPayloadCandidates(text)) {
     let doc;
     try {
-      doc = JSON.parse(m[1]);
+      doc = JSON.parse(candidate);
     } catch {
       continue;
     }
@@ -9961,7 +10023,7 @@ export function latestDevReport(commentRows) {
  * what is even counted is where a silent hole would live.
  *
  * ⚠️ Deliberately NOT narrowed to a `pm:*` state. The census measured that a
- * report's questions outlive the dispatch that produced them — 55 of 62 live
+ * report's questions outlive the dispatch that produced them — 52 of 63 live
  * carriers had already left `pm:dispatched` — so any state narrowing here is a
  * measured hole rather than a bound. What bounds this row is the CACHE, one
  * level up, and the coverage pair reports that bound as a number.
@@ -21694,6 +21756,19 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H52 payload: a JSON array (not an object) is not a report payload', devReportOpenQuestions('os-dev-report\n\n```json\n[1,2]\n```').parsed, false);
   t('H52 payload: `open_questions: null` is not an array, so UNJUDGED', devReportOpenQuestions('os-dev-report\n\n```json\n{"open_questions":null}\n```').parsed, false);
 
+  // The UNFENCED payload — measured on 13 open carriers, one of them a report
+  // whose own `status` was `needs_decision`.
+  t('H52 payload: an UNFENCED object opening its own line reads — 13 open carriers wrote it that way', devReportOpenQuestions('os-dev-report\n{"open_questions":[{"question":"q"}]}\n').questions.length, 1);
+  t('H52 payload: …with a blank line between marker and object, as the fleet writes it', devReportOpenQuestions('os-dev-report\n\n{"open_questions":[]}\n').parsed, true);
+  t('H52 payload: braces INSIDE a string do not end the object early', devReportOpenQuestions('os-dev-report\n{"summary":"a { b } c","open_questions":[{"question":"q"}]}\n').questions.length, 1);
+  t('H52 payload: …nor does an ESCAPED quote inside one', devReportOpenQuestions('os-dev-report\n' + JSON.stringify({ summary: 'he said "{"', open_questions: [] })).parsed, true);
+  t('H52 payload: a brace in PROSE never starts a scan — the opener is line-anchored', devReportOpenQuestions('os-dev-report\n\nthe shape { "open_questions": [1] } is prose\n').parsed, false);
+  t('H52 payload: an unbalanced object is `null`, not a truncated parse', balancedObjectAt('{"a":1', 0), null);
+  t('H52 payload: a balanced object is returned whole', balancedObjectAt('x{"a":{"b":1}}y', 1), '{"a":{"b":1}}');
+  t('H52 payload: the FENCED form is tried first, so a fenced report is unchanged', devReportOpenQuestions('os-dev-report\n\n```json\n{"open_questions":[{"question":"fenced"}]}\n```\n{"open_questions":[]}\n').questions[0], 'fenced');
+  t('H52 payload: the candidate scan is capped', H52_PAYLOAD_CANDIDATE_CAP, 8);
+  t('H52 payload: …and the cap really bounds the list', devReportPayloadCandidates('os-dev-report\n' + '{"a":1}\n'.repeat(50)).length, 8);
+
   // Question text — the sentence must never print `[object Object]`.
   t('H52 text: the contract shape reads its `question`', devReportQuestionText({ question: ' q ' }), 'q');
   t('H52 text: a bare string reads as itself', devReportQuestionText('q'), 'q');
@@ -21733,10 +21808,10 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
 
   // Population — `pm:dispatched`, open.
   t('H52 population: an open `pm:dispatched` card is in', h52SpeaksAbout(DISPATCHED52), true);
-  t('H52 population: a `pm:queue` card is IN — the census measured 10 carriers there', h52SpeaksAbout(card52(['pm:queue'])), true);
-  t('H52 population: …and `pm:awaiting-maintainer`, the census\'s LARGEST bucket at 15', h52SpeaksAbout(card52(['pm:awaiting-maintainer'])), true);
-  t('H52 population: …and `pm:blocked` (14) and `pm:on-hold` (12)', h52SpeaksAbout(card52(['pm:blocked'])) && h52SpeaksAbout(card52(['pm:on-hold'])), true);
-  t('H52 population: ⛔ NOT narrowed to `pm:dispatched` — that would have covered 7 of 62', typeof h52(OPEN52, card52(['pm:queue'])), 'string');
+  t('H52 population: a `pm:queue` card is IN — the census\'s LARGEST bucket at 19 carriers', h52SpeaksAbout(card52(['pm:queue'])), true);
+  t('H52 population: …and `pm:blocked` (15) and `pm:on-hold` (14)', h52SpeaksAbout(card52(['pm:blocked'])) && h52SpeaksAbout(card52(['pm:on-hold'])), true);
+  t('H52 population: …and `pm:awaiting-maintainer`, which held carriers one census earlier', h52SpeaksAbout(card52(['pm:awaiting-maintainer'])), true);
+  t('H52 population: ⛔ NOT narrowed to `pm:dispatched` — that would have covered 11 of 63', typeof h52(OPEN52, card52(['pm:queue'])), 'string');
   t('H52 population: a card with no `pm:*` label at all is still judged when its thread is in hand', typeof h52(OPEN52, card52(['bug'])), 'string');
   t('H52 population: ⛔ a CLOSED card is out — the row states this bound in words', h52SpeaksAbout(card52(['pm:dispatched'], { state: 'closed' })), false);
   t('H52 population: an unassigned dispatched card is still judged (H1 fires beside it)', typeof h52(OPEN52, { ...DISPATCHED52, assignees: [] }), 'string');
