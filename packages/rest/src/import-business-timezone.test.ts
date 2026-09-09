@@ -447,12 +447,12 @@ describe('POST /data/:object/import — the round trip a customer actually runs'
 
     const original = await engine.findOne('shift', { where: { id: '1' } });
     const reimported = await engine.findOne('shift', { where: { id: '2' } });
-    expect(storedInstant(reimported.scanned_at)).toBe(storedInstant(original.scanned_at));
-    expect(storedInstant(reimported.scanned_at)).toBe(CROSS_MONTH_UTC);
+    expect(storedInstant(reimported!.scanned_at)).toBe(storedInstant(original!.scanned_at));
+    expect(storedInstant(reimported!.scanned_at)).toBe(CROSS_MONTH_UTC);
     // Stated as the report does: the row is still in the month it was exported
     // from. Under the process clock it stored 2026-08-01T13:00Z on this host.
-    expect(storedInstant(reimported.scanned_at)).not.toBe('2026-08-01T13:00:00.000Z');
-    expect(String(reimported.due)).toContain('2026-08-01');
+    expect(storedInstant(reimported!.scanned_at)).not.toBe('2026-08-01T13:00:00.000Z');
+    expect(String(reimported!.due)).toContain('2026-08-01');
   });
 
   it('the same file imported by a UTC tenant is a different instant — the zone decides, not the host', async () => {
@@ -468,6 +468,6 @@ describe('POST /data/:object/import — the round trip a customer actually runs'
     );
     expect(jsonRes._json).toMatchObject({ total: 1, ok: 1, errors: 0, created: 1 });
     const stored = await engine.findOne('shift', { where: { id: '2' } });
-    expect(storedInstant(stored.scanned_at)).toBe('2026-08-01T06:00:00.000Z');
+    expect(storedInstant(stored!.scanned_at)).toBe('2026-08-01T06:00:00.000Z');
   });
 });

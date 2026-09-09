@@ -2858,6 +2858,47 @@ export function wholeTreePopulationRefusal(entry) {
 }
 
 /**
+ * Whether a hint sitting beside a WIDE-population declaration is compatible
+ * with it, rather than a competing claim about the population (#16828, found
+ * on `check:route-envelope`).
+ *
+ * The refusal below used to fire on ANY named hint at all, on the theory that
+ * a gate claiming "no subtree glob places me" contradicts itself the moment
+ * its own source spells one. That is true of a hint that REACHES beyond the
+ * one file it names — a bare directory, or a glob — because such a hint is
+ * itself an attempt to spell the population, and two competing spellings of
+ * one population is exactly the coin toss this file refuses everywhere else.
+ * It is NOT true of a hint that reaches nothing but itself: an exact file path
+ * ending in a source/doc extension. `hintCovers`'s own plain branch matches
+ * such a hint only by EQUALITY — nothing can start with `<file>.ts/` — so
+ * admitting one changes nothing the marker claims about the population's
+ * WIDTH; it only records that one member of it happens to already be on
+ * record (`check:route-envelope`'s `MODULES` table, keyed by exact path, is
+ * the specimen: 30-plus such hints, every one a route module the gate already
+ * audits, none of them any narrower a claim than "this one file exists").
+ *
+ * A hint that DOES reach beyond itself is admitted only when the marker's own
+ * REASON TEXT names it — the same bar `wholeTreePopulationRefusal` holds a
+ * repo-root walk to (a claim with no reason behind it puts a row out on
+ * nothing). `check:route-envelope` carries exactly one such hint,
+ * `DISPATCHER_DOMAIN_DIR` (`packages/runtime/src/domains`): a directory whose
+ * own membership is exhaustively audited by `discoverDomains()` against the
+ * separate `DISPATCHER_DOMAINS` table, so it is a second, independently closed
+ * surface rather than a rival spelling of the FIRST one the marker is about.
+ * Naming it in the reason is what lets a reader tell the two apart instead of
+ * being asked to trust a silent exemption.
+ *
+ * A glob is never exempt this way, named or not: `judgedAsPattern` reports a
+ * hint that is ITSELF a population spelling — reason text that repeats it
+ * back is not an account of it, it is the same contradiction typed twice.
+ */
+function widePopulationHintCompatible(hint, reason) {
+  if (judgedAsPattern(hint)) return false;
+  if (/\.[A-Za-z0-9]{1,6}$/.test(hint)) return true;
+  return reason.includes(hint);
+}
+
+/**
  * Why this family's WIDE-population declaration must be refused, or null when
  * it stands. Pure, and reading only what the discovery already put on the
  * entry — the same contract `wholeTreePopulationRefusal` above states, and for
@@ -2874,12 +2915,17 @@ export function wholeTreePopulationRefusal(entry) {
  *                  card — the opposite disposition from this one — so the pair
  *                  would place the family by whichever branch was read first.
  *   NAMES PATHS    the declaration says no subtree glob places this gate, and
- *                  the gate's own source spells one. One of the two is wrong
- *                  and the derivation cannot tell which: the marker's whole
- *                  content is the sentence a reader trusts, so a marker sitting
- *                  above a live population is the rot direction that costs —
- *                  the reader is told "nothing here can be narrowed" while the
- *                  matched column narrows it.
+ *                  the gate's own source spells one anyway — a hint
+ *                  `widePopulationHintCompatible` above does not clear. One of
+ *                  the two is wrong and the derivation cannot tell which: the
+ *                  marker's whole content is the sentence a reader trusts, so
+ *                  a marker sitting above an unaccounted-for population is the
+ *                  rot direction that costs — the reader is told "nothing
+ *                  here can be narrowed" while the matched column narrows it.
+ *                  ⚠️ This is deliberately NOT "does the gate name any path at
+ *                  all" (#16828): an enumerated exact-file member, or a
+ *                  subtree the reason itself names, is not that contradiction
+ *                  — see `widePopulationHintCompatible`'s own docblock.
  */
 export function widePopulationRefusal(entry) {
   const reason = entry?.widePopulationReason ?? null;
@@ -2894,13 +2940,14 @@ export function widePopulationRefusal(entry) {
       + 'these two carry OPPOSITE dispositions: a whole-tree family is owed by every card and its command is inside every '
       + "card's runnable total, a wide-population one is owed by CI and is in no card's. Delete the one that is not true.";
   }
-  if ((entry?.hints ?? []).length > 0) {
-    return 'declares wide-population and its own source NAMES paths: '
-      + `${(entry.hints ?? []).slice(0, 4).join(', ')}${(entry.hints ?? []).length > 4 ? ', …' : ''}. `
-      + 'The declaration says no subtree glob places this gate and the gate spells one, so one of the two is wrong and '
-      + 'nothing here can tell which. If the literals are the real population, delete the marker and let the matched '
-      + 'column do its job; if they are artifacts rather than a population, the marker stands and the literals do not '
-      + 'belong in a scanned position.';
+  const uncovered = (entry?.hints ?? []).filter((h) => !widePopulationHintCompatible(h, reason));
+  if (uncovered.length > 0) {
+    return 'declares wide-population and its own source NAMES paths that reach beyond the single file each one names: '
+      + `${uncovered.slice(0, 4).join(', ')}${uncovered.length > 4 ? ', …' : ''}. `
+      + 'The declaration says no subtree glob places this gate and the gate spells one it does not account for, so one of '
+      + 'the two is wrong and nothing here can tell which. If the literal is the real population, delete the marker and '
+      + 'let the matched column do its job; if it is a second, separately audited surface, name it in the reason text; '
+      + 'if it is an artifact rather than a population, it does not belong in a scanned position.';
   }
   return null;
 }
@@ -18403,6 +18450,81 @@ function selfTest() {
       const why = widePopulationRefusal({ ...wpLive, hints: ['packages/rest/src', 'docs/adr'] }) ?? '';
       return why.includes('NAMES paths') && why.includes('packages/rest/src');
     })(),
+  );
+  // #16828: the line is NOT "does the gate name any path" — an enumerated
+  // exact-file member never contradicts a wide declaration, because
+  // `hintCovers` can only ever match one by equality. `check:route-envelope`
+  // is the specimen: a `MODULES` table keyed by 30-plus exact file paths,
+  // none of them a claim about the population's width.
+  t(
+    'a wide declaration over ONLY exact-file hints stands — an enumerated member is not a competing spelling of the population',
+    widePopulationRefusal({
+      ...wpLive,
+      hints: ['packages/rest/src/storage-routes.ts', 'packages/rest/src/error-response.ts'],
+    }) === null,
+  );
+  // A hint that reaches beyond itself (no extension — a bare directory) is
+  // still compatible when the marker's own reason text names it: the second,
+  // separately audited surface `check:route-envelope`'s DISPATCHER_DOMAIN_DIR
+  // is, held to the same "the reason is what a reader trusts" bar
+  // `wholeTreePopulationRefusal` holds a repo-root walk to.
+  t(
+    'a directory hint that reaches beyond itself stands when the reason text names it by name',
+    widePopulationRefusal({
+      ...wpLive,
+      widePopulationReason: 'walks packages/ entire; packages/runtime/src/domains is a second, separately audited surface',
+      hints: ['packages/runtime/src/domains'],
+    }) === null,
+  );
+  // The SAME directory hint, unnamed in the reason, is still refused — the
+  // exemption is not "any directory a real gate happens to carry", it is
+  // "an account the reader can check", and a silent one is not that.
+  t(
+    'the same directory hint is still refused when the reason does not name it — silence is not an account',
+    (() => {
+      const why = widePopulationRefusal({ ...wpLive, hints: ['packages/runtime/src/domains'] }) ?? '';
+      return why.includes('NAMES paths') && why.includes('packages/runtime/src/domains');
+    })(),
+  );
+  // A glob is never exempt this way, even repeated verbatim in the reason:
+  // `judgedAsPattern` marks it as ITSELF a population spelling, and a reason
+  // that only echoes it back is the same contradiction typed twice, not an
+  // account of it. A bare trailing `/**` does NOT qualify — it COLLAPSES to
+  // the identical plain directory prefix (`collapseHint`'s own docblock:
+  // `packages/**` -> `packages`), so it is judged exactly like the directory
+  // case above, on purpose. The species this asserts against is the one
+  // `judgedAsPattern` actually flags: a glob in a NON-final segment.
+  t(
+    'a glob hint is refused even when the reason text repeats it back verbatim',
+    (() => {
+      const why = widePopulationRefusal({
+        ...wpLive,
+        widePopulationReason: 'walks packages/ entire; packages/*/src is already covered',
+        hints: ['packages/*/src'],
+      }) ?? '';
+      return why.includes('NAMES paths') && why.includes('packages/*/src');
+    })(),
+  );
+  // The bare-trailing-`/**` spelling is the CONTRAST case: it is not a
+  // `judgedAsPattern` glob at all (it collapses to a plain prefix), so it is
+  // exempt under the SAME "reason names it" rule as any other directory hint.
+  t(
+    'a bare trailing /** hint is not a glob for this purpose — it stands when the reason names it, same as a plain directory',
+    widePopulationRefusal({
+      ...wpLive,
+      widePopulationReason: 'walks packages/ entire; packages/runtime/src/domains/** is a second, separately audited surface',
+      hints: ['packages/runtime/src/domains/**'],
+    }) === null,
+  );
+  // A mix of the two compatible shapes together stands — the predicate is
+  // per-hint, not "the whole set must be one shape".
+  t(
+    'a mix of exact-file hints and a reason-named directory hint stands together',
+    widePopulationRefusal({
+      ...wpLive,
+      widePopulationReason: 'walks packages/ entire; packages/runtime/src/domains is a second, separately audited surface',
+      hints: ['packages/rest/src/storage-routes.ts', 'packages/runtime/src/domains'],
+    }) === null,
   );
 
   // Placement, column by column. The card path is under the very root these

@@ -125,7 +125,7 @@ describe('an owning run and the approvals record lock (#3703 / #3712 / #3760)', 
 
     await expect(writeAs(dataCtx)).resolves.toBeDefined();
     const row = await engine.findOne('opportunity', { where: { id: oppId } });
-    expect(row.amount).toBe(200);
+    expect(row!.amount).toBe(200);
   });
 
   it('still blocks a DIFFERENT run', async () => {
@@ -172,6 +172,6 @@ describe('an owning run and the approvals record lock (#3703 / #3712 / #3760)', 
 
     await expect(writeAs(dataCtx)).resolves.toBeDefined();
     const row = await engine.findOne('opportunity', { where: { id: oppId } });
-    expect(row.amount).toBe(200);
+    expect(row!.amount).toBe(200);
   });
 });
