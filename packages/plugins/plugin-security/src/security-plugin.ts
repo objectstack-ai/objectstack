@@ -1493,6 +1493,13 @@ export class SecurityPlugin implements Plugin {
       // silently degrading a consumer's feature detection at runtime.
       const securityService: ISecurityService = {
         getReadFilter: (object: string, context?: any) => this.getReadFilter(object, context),
+        // The OBJECT-level half of the same read. `getReadFilter` answers
+        // "which rows" and answers `undefined` for a caller with NO grant at
+        // all, so a door holding only the filter cannot tell "unrestricted"
+        // from "not permitted" — which is how the analytics raw-SQL path served
+        // a row count for an object whose `/data` door answers 403. Exposed
+        // here so every door that bypasses the middleware asks BOTH halves.
+        canReadObject: (object: string, context?: any) => this.canReadObject(object, context),
         // [#3547] Readable-field projection for a context — the authoritative
         // column set for a read-derived export (`export ⊆ list`, #3391).
         // Same field mask as the read middleware (no drift). The REST export
@@ -1652,7 +1659,7 @@ export class SecurityPlugin implements Plugin {
           discardPermissionSetOverlay(overlayDiscardDeps, callerContext, id),
       });
       ctx.registerService('security', registeredSecurityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, canReadObject, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -4643,6 +4650,120 @@ export class SecurityPlugin implements Plugin {
     // enumerates fields it names) — the exact complement of maskResults' delete
     // set, so the export header matches list's readable columns by construction.
     return allFields.filter((f) => fieldPerms[f]?.readable !== false || partialRules[f] !== undefined);
+  }
+
+  /**
+   * Whether `context` may READ `object` at all — the OBJECT-level admission,
+   * exposed for the read doors that bypass the engine middleware.
+   *
+   * The middleware answers this before it composes any row filter; a door that
+   * compiles its own statement (the analytics native-SQL strategy is the one in
+   * the tree) never reaches the middleware and so never asked. `getReadFilter`
+   * is not a substitute: it answers "which ROWS", and its `undefined` means "no
+   * row restriction" — the same answer a caller with NO grant on the object
+   * gets. So a door holding only the filter reads an ungranted principal as an
+   * unrestricted one, and answers `200 {"rows":[{"cnt":24}]}` where
+   * `GET /data/<object>` answers `403 PERMISSION_DENIED` for the same principal
+   * on the same deployment.
+   *
+   * ## The arms, in the middleware's own order
+   *
+   * Every one of them is the SAME primitive the middleware calls, not a second
+   * reading of the same declaration — which is what makes "the two doors reach
+   * one verdict" a property of the code rather than a promise:
+   *
+   *   1. `isSystem` → admit (the middleware's total bypass);
+   *   2. no permission sets resolved → admit (the middleware guards its whole
+   *      CRUD gate with `if (permissionSets.length > 0)`; reporting a denial the
+   *      data path would not enforce is its own kind of drift);
+   *   3. `secMeta.unresolved` → DENY (#3545 — `isPrivate` would default to
+   *      `false`, which is exactly what lets a plain `'*'` wildcard reach an
+   *      object ADR-0066 D2 says it must not);
+   *   4. ADR-0066 D3/⑤ `requiredPermissions` capability AND-gate for the read
+   *      CRUD class, checked BEFORE the grant, for the caller AND (D10) the
+   *      delegator;
+   *   5. the `allowRead` CRUD grant ({@link PermissionEvaluator.checkObjectPermission}
+   *      on `find`);
+   *   6. ADR-0090 D10 — the delegator must independently hold the same grant;
+   *      a dangling delegator denies.
+   *
+   * `find` is the operation asked for, not `aggregate`, and the two are the same
+   * question: `OPERATION_PERMISSION_MAP` maps `find`, `findOne`, `count` and
+   * `aggregate` all onto `allowRead`. Asking `find` keeps the answer readable as
+   * "may this caller read this object", which is what every consuming door needs.
+   *
+   * Fails CLOSED (an access-narrowing answer): a throw anywhere inside denies,
+   * and callers must treat a throw as a denial too.
+   *
+   * ⛔ Object-level ONLY. `true` never means "unrestricted" — the row scope is
+   * still {@link getReadFilter}'s and it is still mandatory. Nothing here may be
+   * used to widen.
+   */
+  async canReadObject(object: string, context?: any): Promise<boolean> {
+    const objectName = String(object ?? '');
+    if (!objectName) return false;
+    // 1. System operations bypass (mirrors the middleware's isSystem skip).
+    if (context?.isSystem) return true;
+
+    try {
+      const permissionSets = await this.resolvePermissionSetsForContext(context);
+      // 2. No sets resolved (unauthenticated, or a deployment with no sets) →
+      //    no permission-set restriction applies, exactly as the middleware
+      //    treats it.
+      if (permissionSets.length === 0) return true;
+
+      const { isPrivate, unresolved, requiredPermissions } =
+        await this.getObjectSecurityMeta(objectName);
+      // 3. [#3545] Posture unresolvable → deny.
+      if (unresolved) return false;
+
+      // [ADR-0090 D10] Resolve the delegator ONCE — arms 4 and 6 both need it,
+      // and a dangling link denies before either runs.
+      let delegatorSets: PermissionSet[] | null = null;
+      if (context?.onBehalfOf?.userId) {
+        const del = await resolveDelegatorContext(this.ql, context);
+        if (del.kind === 'missing') return false;
+        if (del.kind === 'resolved') {
+          delegatorSets = await this.resolvePermissionSetsForContext(del.context);
+        }
+      }
+
+      // 4. [ADR-0066 D3/⑤] The capability AND-gate, ahead of the grant, for both
+      //    principals — a caller missing any required capability is denied
+      //    however permissive their grants are.
+      const required = requiredCapsForOperation(requiredPermissions, 'find');
+      if (required.length > 0) {
+        const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
+        if (required.some((cap) => !held.has(cap))) return false;
+        if (delegatorSets && delegatorSets.length > 0) {
+          const delHeld = this.permissionEvaluator.getSystemPermissions(delegatorSets);
+          if (required.some((cap) => !delHeld.has(cap))) return false;
+        }
+      }
+
+      // 5. The object-level CRUD grant.
+      if (!this.permissionEvaluator.checkObjectPermission('find', objectName, permissionSets, { isPrivate })) {
+        return false;
+      }
+
+      // 6. [ADR-0090 D10] The delegator must independently grant the same read.
+      if (
+        delegatorSets &&
+        delegatorSets.length > 0 &&
+        !this.permissionEvaluator.checkObjectPermission('find', objectName, delegatorSets, { isPrivate })
+      ) {
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      this.logger.error?.(
+        `[security] canReadObject could not resolve the object-level read admission for ` +
+          `'${objectName}' (user ${context?.userId ?? 'unknown'}) — denying (fail-closed)`,
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      return false;
+    }
   }
 
   /**

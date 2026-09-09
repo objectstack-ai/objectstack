@@ -282,10 +282,17 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // nothing on its page a regeneration cannot restore.
   //
   // No `readsDist`/`readsSchemaTree`: the census is an AST walk over `src/`, so a
-  // merged tree is the whole prerequisite. `gen` cannot launder a POPULATION change
-  // either — `--fix` re-anchors a pure shift and REFUSES when a site arrived or
-  // vanished, leaving the page untouched and the gate red (measured: exit 1, zero
-  // anchors rewritten, `[declared-count] ruling-sites says 109, the census says 110`).
+  // merged tree is the whole prerequisite. `gen` still cannot launder a POPULATION
+  // change into a row nobody wrote: a site that arrived or vanished needs a human
+  // to add or drop its table row, and `--fix` does not touch table rows. #16919
+  // narrowed what stays a REFUSAL, though — `--fix` now regenerates every
+  // `DECLARED_COUNTS` sentence (the headline, the decomposition table, the ruling
+  // quote, …) straight from the census, the same computation the COUNTS check
+  // already runs, applied as a write instead of a comparison. So a merge that
+  // silently produced a wrong SUM (the shape #16919 was filed over — two branches
+  // each correctly bump the same sentence, text-merge clean, and the merged total
+  // is neither side's number) is repaired by running the generator on the merged
+  // tree, not by a human re-deriving and re-typing the number by hand.
   {
     path: 'content/docs/permissions/system-context.mdx',
     gen: 'gen:system-context-census',
