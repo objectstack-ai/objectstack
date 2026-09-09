@@ -1113,8 +1113,12 @@ export interface AuthPasswordChangeResult {
      * ⚠️ SECRET — an unsigned session token. When `revokeOtherSessions: true`
      * made the server rotate the caller's session this is the NEW session's
      * token (every other session is gone and the cookie the caller held is
-     * dead); `null` otherwise. A bearer-mode caller has to store it itself —
-     * this SDK does not.
+     * dead); `null` otherwise.
+     *
+     * A bearer-mode caller no longer has to store it by hand: `changePassword`
+     * adopts a non-null value into the client's own credential before it
+     * resolves, the way `login()` adopts the token it is handed. The field is
+     * unchanged and still echoed, for a caller that keeps its own store.
      */
     token: string | null;
     /** The caller, as better-auth's session held it when the write ran. */
@@ -1153,6 +1157,11 @@ export interface AuthTwoFactorVerificationResult {
      * `two-factor-rotated-token-echo` repairs the vendor's stale echo).
      * Through this SDK `verifyBackupCode` cannot send `disableSession`, so
      * the token is always present.
+     *
+     * `verifyTotp` adopts it into the client's own credential; `verifyBackupCode`
+     * does NOT, and the asymmetry is the wire fact rather than an omission —
+     * `/two-factor/verify-backup-code` never rotates, so what it echoes is the
+     * session the caller is already presenting.
      */
     token: string;
     /**
@@ -1437,6 +1446,18 @@ const DEFAULT_DATA_PREFIX = '/data';
  * value in every case where it can read one.
  */
 const DEFAULT_META_PREFIX = '/meta';
+
+/**
+ * The response header better-auth's `bearer()` plugin puts a freshly installed
+ * session token in — the SIGNED `<token>.<sig>` form, emitted on every response
+ * that stages a session cookie, and added to `Access-Control-Expose-Headers` by
+ * the plugin itself so a cross-origin caller can read it.
+ *
+ * Read on exactly one route (`twoFactor.disable`), for the reason
+ * {@link ObjectStackClient.adoptRotatedSessionToken} states. Not exported: it
+ * names a vendor wire detail, not a capability this SDK offers.
+ */
+const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
 
 export class ObjectStackClient {
   private baseUrl: string;
@@ -4205,8 +4226,10 @@ export class ObjectStackClient {
      * better-auth: POST /change-password.
      * Set `revokeOtherSessions: true` to invalidate every other session
      * after the change — the server then ROTATES the caller's session too and
-     * answers the new token in `token`; this SDK does not store it, so a
-     * bearer-mode caller must.
+     * answers the new token in `token`, and this SDK ADOPTS it (#16534), so a
+     * bearer-mode caller stays signed in across the change. Without
+     * `revokeOtherSessions` nothing rotates, the field is `null`, and the
+     * stored credential is left exactly as it was.
      */
     changePassword: async (req: {
       currentPassword: string;
@@ -4218,7 +4241,9 @@ export class ObjectStackClient {
         method: 'POST',
         body: JSON.stringify(req),
       });
-      return res.json();
+      const result = (await res.json()) as AuthPasswordChangeResult;
+      this.adoptRotatedSessionToken(result?.token);
+      return result;
     },
 
     /**
@@ -4414,8 +4439,11 @@ export class ObjectStackClient {
        * this browser for the configured trust period.
        *
        * On the enrolment lane the server rotates the session and answers the
-       * LIVE token in `token`; this SDK does not store it — a bearer-mode
-       * caller must, or its next call answers 401.
+       * LIVE token in `token`; this SDK ADOPTS it (#16534), so a bearer-mode
+       * caller stays signed in through enrolment instead of meeting a 401 on
+       * its next call. On the sign-in-challenge lane the same field carries
+       * the session the challenge just completed, and adopting it is how the
+       * SDK finishes signing in.
        */
       verifyTotp: async (req: { code: string; trustDevice?: boolean }): Promise<AuthTwoFactorVerificationResult> => {
         const route = this.getRoute('auth');
@@ -4423,16 +4451,21 @@ export class ObjectStackClient {
           method: 'POST',
           body: JSON.stringify(req),
         });
-        return res.json();
+        const result = (await res.json()) as AuthTwoFactorVerificationResult;
+        this.adoptRotatedSessionToken(result?.token);
+        return result;
       },
 
       /**
        * Disable 2FA for the current user. Requires the password again.
        *
        * ⚠️ The server ROTATES the caller's session on success and echoes only
-       * the receipt (the new token rides the `Set-Cookie` and the bearer
-       * plugin's `set-auth-token` header, neither of which this SDK reads), so
-       * a bearer-mode caller's stored token is dead after this call.
+       * the receipt — the new token rides the `Set-Cookie` and the bearer
+       * plugin's `set-auth-token` header. This SDK READS that header (#16534)
+       * and adopts the rotated session, which is the only route in the family
+       * where the credential is not in the body at all. A cookie-only
+       * deployment sends no such header; there is then nothing to adopt and
+       * the stored credential is left as it was.
        */
       disable: async (req: { password: string }): Promise<AuthStatusReceipt> => {
         const route = this.getRoute('auth');
@@ -4440,6 +4473,7 @@ export class ObjectStackClient {
           method: 'POST',
           body: JSON.stringify(req),
         });
+        this.adoptRotatedSessionToken(res.headers.get(SET_AUTH_TOKEN_HEADER));
         return res.json();
       },
 
@@ -6672,6 +6706,41 @@ export class ObjectStackClient {
     }
     // Already unwrapped or non-standard
     return body as T;
+  }
+
+  /**
+   * Adopt a session token the server rotated this client onto mid-request.
+   *
+   * Three better-auth routes ROTATE the caller's session on success: they mint
+   * a new session, install it in `Set-Cookie` (and, through `bearer()`, in the
+   * `set-auth-token` response header), and DELETE the row the caller was
+   * presenting — `changePassword({ revokeOtherSessions: true })`, the enrolment
+   * lane of `twoFactor.verifyTotp`, and `twoFactor.disable`. A browser carries
+   * the cookie across on its own; a bearer caller — this SDK's own mode — kept
+   * presenting the DELETED session's token, so its very next call answered
+   * `401 UNAUTHORIZED` (#16534).
+   *
+   * ⚠️ Called from those three routes ONLY, never from the shared `fetch`
+   * wrapper, and the narrowness is the design rather than an implementation
+   * detail. `set-auth-token` rides EVERY response that stages a session cookie,
+   * rotation or not — `POST /update-user` stages one to carry the updated user
+   * — and it carries the SIGNED `<token>.<sig>` spelling while every JSON
+   * `token` echo carries the UNSIGNED one. A wrapper-level read would therefore
+   * rewrite `this.token` into a different spelling of the SAME session on
+   * ordinary traffic: a stored credential that churns on writes that rotated
+   * nothing. Storing only where the server actually rotated keeps the stored
+   * value equal to the credential the caller was last granted.
+   *
+   * For the same reason `verifyBackupCode` does not call this: its lane never
+   * rotates, so its `token` echo is the session the caller already holds.
+   *
+   * `login()` / `register()` / `refreshToken()` keep their own assignments:
+   * those read a normalized `{ data: { token } }` envelope this SDK builds, and
+   * they establish a session rather than follow a rotation.
+   */
+  private adoptRotatedSessionToken(token: string | null | undefined): void {
+    if (typeof token !== 'string' || token.length === 0) return;
+    this.token = token;
   }
 
   private async fetch(url: string, options: RequestInit = {}): Promise<Response> {

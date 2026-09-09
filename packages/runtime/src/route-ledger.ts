@@ -270,6 +270,32 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
   '/.well-known/objectstack',
 ] as const;
 
+/**
+ * The ledger.
+ *
+ * CENSUS (generated): this list holds 82 rows.
+ *
+ * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
+ * `pnpm check:route-ledger-census` counts the rows below and fails when the two
+ * disagree; `node scripts/check-route-ledger-census.mjs --fix` rewrites the
+ * digits and nothing else. It exists because this list is CENSUS-SHAPED: its
+ * value is its completeness, and a WRONG row fails a gate that reads rows while
+ * a MISSING row fails only a gate that knows how many rows there should be.
+ * #16758 filed the second kind, after an index-slice edit meant to add two rows
+ * removed 105 lines — route rows plus the whole `/actions` section — and exited
+ * 0, caught only because an unrelated gate happened to redden.
+ *
+ * So a PR that really adds two rows moves this number by two, in the same diff
+ * as the rows; one that claims to and removes twenty-six cannot. ⛔ Do not
+ * "correct" the digits to make a build green — regenerate them, and read what
+ * they moved by.
+ *
+ * It is a DELETION detector and deliberately NOT a route-granularity check
+ * against what the dispatcher registers: whether this ledger should be checked
+ * per route, given `DomainHandlerRegistry.list()` exposes domains and not
+ * routes, is an open maintainer decision in #17041. A census stays correct
+ * whichever way that is ruled.
+ */
 export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   // ── well-known ────────────────────────────────────────────────────────────
   { route: 'GET /.well-known/objectstack', domain: '/.well-known/objectstack', absolute: true,

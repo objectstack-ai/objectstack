@@ -63,6 +63,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
+import { CONFIG_MISS_FAMILY, discoverConfigMissFamily } from './helpers/config-miss-family.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -206,6 +207,41 @@ afterAll(() => {
 describe('the family this contract has to hold across', () => {
   it('is exactly the set listed here — a new member goes red until it is driven too', () => {
     expect(discoverFamily()).toEqual(Object.keys(FAMILY).sort());
+  });
+
+  it('and the commands that fail BEFORE boot are covered too, by the sibling pin', () => {
+    // [#15547] THIS file's discovery is `bootSchemaStack`-based, so it is
+    // structurally blind to a command that refuses at `resolveConfigPath()` —
+    // above the kernel, with no boot to discover. Ten published `--json` faces
+    // sat in that gap while `--json` stdout was, on paper, pinned.
+    //
+    // ⛔ The repair is NOT to widen the discovery above: these ten emit no boot
+    // diagnostics, so driving them through `BOOT_DIAGNOSTICS` would assert
+    // lines they never write. The POPULATION is widened across the PAIR
+    // instead — `config-miss-stdout-purity.e2e.test.ts` drives them, this
+    // reconciliation names them, and the shared discovery lives in one module
+    // so neither file can lose the other's half silently. Delete the sibling's
+    // helper and this import stops resolving; shrink the discovery and this
+    // assertion goes red.
+    const preBoot = discoverConfigMissFamily();
+    expect(preBoot).toEqual(Object.keys(CONFIG_MISS_FAMILY).sort());
+    expect(preBoot).toHaveLength(10);
+
+    // The two families are NOT disjoint, and measuring that was worth more
+    // than assuming it: `os migrate meta` is in both, legitimately and by
+    // design — it boots a kernel under `--stored` and refuses at
+    // `resolveConfigPath()` under `--from N`. So a shared MEMBER is fine and
+    // pinned; what must never happen is the two files driving the same
+    // INVOCATION and disagreeing about its verdict, which is an argv question.
+    const overlap = preBoot.filter((id) => id in FAMILY);
+    expect(overlap).toEqual(['migrate meta']);
+    for (const id of overlap) {
+      const bootArgv = FAMILY[id].join(' ');
+      const preBootMember = CONFIG_MISS_FAMILY[id];
+      for (const argv of [preBootMember.explicit, preBootMember.auto]) {
+        if (argv) expect(argv.join(' ')).not.toBe(bootArgv);
+      }
+    }
   });
 });
 
