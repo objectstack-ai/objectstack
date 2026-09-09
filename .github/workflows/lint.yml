@@ -25,6 +25,24 @@ on:
   # queue builds or the queue stalls. This workflow has no PR-only steps, so
   # the trigger alone is enough.
   merge_group:
+  # ── THE HOURLY FULL RUN (#16467), the half this file owns ────────────────
+  # The card's ruling is that the hourly run covers BOTH required-context
+  # files, not just ci.yml, and the reason is measured rather than symmetric:
+  # the push-on-`main` run of THIS workflow is the only post-merge full-battery
+  # run of the families `scripts/ci/select-gate-families.sh` scopes away on
+  # merge groups (the PM dispatch-gates self-test, both ratchets, the
+  # verify-lock self-test, the comment-mask corpus). A scoped family that goes
+  # red on `main` after a queue build skipped it had, until this trigger, no
+  # run that would notice and no filer that would say so.
+  #
+  # The selector already treats every event that is neither `merge_group` nor
+  # `pull_request` as "run every family", so this trigger alone restores the
+  # full battery here — no step in this file changes.
+  #
+  # ⛔ A NEW TRIGGER KEY, not a widening of `push:`; see ci.yml's `on:` block.
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 # ── MEASURED 2026-08-25 (#12211) — a NEGATIVE result, recorded so it is not
 # re-measured. After the stale-ledger outage the queue's check set was measured
@@ -68,8 +86,14 @@ on:
 # Same policy as ci.yml: superseded runs on the same PR/branch waste runners
 # and delay feedback; cancel them. Push runs to main group by commit ref, so an
 # in-flight main run is cancelled only by a newer main push.
+#
+# ⭐ `github.event_name` is in the key for the reason ci.yml's concurrency block
+# states in full (#16467): on a `schedule` event the remaining two segments are
+# byte-identical to a push to `main`, so without it the next merge cancels the
+# hourly full run. `scripts/ci/scheduled-full-run.mjs --check-concurrency`
+# evaluates THIS expression too and reds if the two groups ever collapse again.
 concurrency:
-  group: lint-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: lint-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3401,6 +3425,35 @@ jobs:
       # group selects nothing WITHOUT the #10057 complaint). Offline; ~2s.
       - name: Test Core package selection self-test
         run: pnpm check:select-shard-packages
+
+      # The hourly full run's own contract (#16467). Two halves, one script:
+      #
+      #   --self-test        the card's IDENTITY, DE-DUP and BODY, driven
+      #                      offline. The filer is a `workflow_run` workflow, so
+      #                      it can only ever run from the default branch and
+      #                      NOTHING on a pull request can exercise it — the
+      #                      same position merge-queue-triage.yml is in. A
+      #                      de-dup rule tested only by the live workflow gets
+      #                      its first real test on the night it files its
+      #                      second duplicate, and this one fires hourly.
+      #   --check-concurrency
+      #                      evaluates ci.yml's and THIS file's
+      #                      `concurrency.group` expressions against a
+      #                      push-shaped and a schedule-shaped context and reds
+      #                      when the two collapse onto one group. They did
+      #                      until #16467: on a `schedule` event the other two
+      #                      segments are byte-identical to a push to `main`, so
+      #                      `cancel-in-progress` let the next merge kill the
+      #                      hourly run. It also refuses the two degenerate ways
+      #                      to make them differ — a run-unique key, and a
+      #                      constant one — since both switch cancellation off
+      #                      or on for every event in the file.
+      #
+      # Offline, no network, ~0.1 s.
+      - name: Hourly full run self-test and concurrency gate
+        run: |
+          node scripts/ci/scheduled-full-run.mjs --self-test
+          node scripts/ci/scheduled-full-run.mjs --check-concurrency
 
       # Gate-family selection self-test (#16496). The "Select the gate families
       # this run pays for" step at the top of this job is a thin call into
