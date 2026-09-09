@@ -202,6 +202,109 @@ describe('validateObjectReferences — field relationship targets (#16611)', () 
   });
 });
 
+describe('validateObjectReferences — artifact packages[] as resolution context (#16611)', () => {
+  /**
+   * The shape `compile.ts`'s per-package leg hands the rules (ADR-0130 D4): ONE
+   * package's collections at the top level, and the whole artifact's
+   * `packages[]` beside them as context. Modelled on
+   * `examples/app-multi-package`, whose `orders` package reads `crm_account`
+   * out of its `core` sibling.
+   */
+  const ORDERS_BODY = {
+    id: 'com.example.multi.orders',
+    objects: [
+      {
+        name: 'crm_order',
+        fields: {
+          number: { type: 'text' },
+          account: { type: 'lookup', reference: 'crm_account' },
+        },
+      },
+    ],
+  };
+  const CORE_BODY = {
+    id: 'com.example.multi.core',
+    objects: [{ name: 'crm_account', fields: { name: { type: 'text' } } }],
+  };
+  const perPackageStack = (body: Record<string, unknown>, packages: unknown) => ({
+    ...body,
+    manifest: body,
+    packages,
+  });
+
+  it('CONTROL — the same package judged ALONE still errors, so the context is what does the work', () => {
+    // Without this leg "green" is indistinguishable from the rung having been
+    // switched off: this is the exact finding that reds `Build Core` on
+    // `examples/app-multi-package` when the ladder lands by itself.
+    const findings = validateObjectReferences(perPackageStack(ORDERS_BODY, undefined));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].rule).toBe(OBJECT_REFERENCE_UNKNOWN);
+    expect(findings[0].path).toBe('objects[0].fields.account.reference');
+    expect(findings[0].message).toContain('lookup target "crm_account"');
+  });
+
+  it('resolves a lookup into an object a SIBLING package of the same artifact provides', () => {
+    const artifact = [{ manifest: ORDERS_BODY }, { manifest: CORE_BODY }];
+    expect(validateObjectReferences(perPackageStack(ORDERS_BODY, artifact))).toEqual([]);
+    // …and the sibling, judged from its own side, is unaffected.
+    expect(validateObjectReferences(perPackageStack(CORE_BODY, artifact))).toEqual([]);
+  });
+
+  it('NON-DEGENERACY — a name NO package in the artifact provides still errors', () => {
+    // The whole distinction between the ruled fix and "skip the field site per
+    // package": the site is still judged, against a wider set. `crm_contract`
+    // is the card's cross-REPO spelling — no entry here ships it.
+    const dangling = {
+      ...ORDERS_BODY,
+      objects: [
+        { name: 'crm_order', fields: { contract: { type: 'lookup', reference: 'crm_contract' } } },
+      ],
+    };
+    const findings = validateObjectReferences(
+      perPackageStack(dangling, [{ manifest: dangling }, { manifest: CORE_BODY }]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].rule).toBe(OBJECT_REFERENCE_UNKNOWN);
+    expect(findings[0].path).toBe('objects[0].fields.contract.reference');
+    // The remedy lists what the ARTIFACT provides, not only this package's own
+    // objects — that is the list the author actually has to choose from.
+    expect(findings[0].hint).toContain('Defined objects: crm_account, crm_order.');
+  });
+
+  it('carries the context to every site on the rule, not only the field one', () => {
+    const withNav = {
+      ...ORDERS_BODY,
+      navigation: [{ name: 'accounts', objectName: 'crm_account', requiresObject: 'crm_account' }],
+      actions: [{ name: 'link', params: [{ name: 'a', type: 'lookup', reference: 'crm_account' }] }],
+    };
+    expect(
+      validateObjectReferences(
+        perPackageStack(withNav, [{ manifest: withNav }, { manifest: CORE_BODY }]),
+      ),
+    ).toEqual([]);
+  });
+
+  it('reads only names a package REALLY declares — an entry with no body contributes none', () => {
+    // A future `{ ref, integrity }` external segment carries no manifest
+    // content (ADR-0130 D4). Inventing a name for such an entry would silence
+    // the ladder, which is the one mistake this context must not make.
+    const findings = validateObjectReferences(
+      perPackageStack(ORDERS_BODY, [{ ref: 'sha256-x' }, { manifest: { id: 'x' } }, 'not-an-entry']),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('objects[0].fields.account.reference');
+  });
+
+  it('ignores a `packages` value that is not a list of entries', () => {
+    for (const packages of [null, 42, 'core']) {
+      const findings = validateObjectReferences(perPackageStack(ORDERS_BODY, packages));
+      expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.account.reference']);
+    }
+  });
+});
+
 describe('validateObjectReferences — dashboard global filters', () => {
   // The other HotCRM `object: 'user'` instance.
   it('errors on optionsFrom.object naming a nonexistent object', () => {

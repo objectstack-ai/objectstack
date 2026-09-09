@@ -55,7 +55,10 @@
  * platform-prefixed reference shipped. This rule resolves against the curated
  * `PLATFORM_PROVIDED_OBJECT_NAMES` registry instead:
  *
- *   1. resolves in the stack's own objects            → OK
+ *   1. resolves in the stack's own objects, or in the objects an entry of this
+ *      artifact's `packages[]` provides (ADR-0130 D4 — the release artifact IS
+ *      the co-ownership boundary, so a name a sibling package in the SAME
+ *      artifact ships is resolved, never guessed at)            → OK
  *   2. unresolved, NOT platform-prefixed              → ERROR
  *        (`user`, `total_revenue` — no cross-package story exists for an
  *         unprefixed name, since a stack's objects are namespace-prefixed;
@@ -139,6 +142,37 @@ function isInterpolated(target: string): boolean {
 }
 
 /**
+ * Every object name declared by an entry of `packages[]` — what THIS ARTIFACT
+ * provides, beyond the collections the stack in hand carries at its top level.
+ *
+ * Read from the ADR-0130 D4 entry shape (`{ manifest: <assembled body> }`,
+ * `ArtifactPackageSchema`), which is a wrapper by decision: the body lives under
+ * `manifest` so a future `{ ref, integrity }` external segment is an additive
+ * key. An entry with no readable body contributes nothing — a segment reference
+ * carries no manifest content, and inventing a name for it would be the one
+ * mistake this context must not make, since a name in here SILENCES the ladder.
+ *
+ * ⛔ Nothing else is read off the entry: not its id, not its dependencies. The
+ * question this answers is only "does the artifact provide this object name",
+ * which is exactly the co-ownership boundary ADR-0130 draws — ⛔ not "is the
+ * referencing package allowed to depend on the providing one", which is
+ * `resolvePluginOrder`'s question (ADR-0130 D5 / ADR-0116) and belongs where the
+ * dependency graph lives, not in a name-resolution rule.
+ */
+function artifactProvidedObjectNames(stack: AnyRec): string[] {
+  const names: string[] = [];
+  for (const entry of recordsOf(stack.packages)) {
+    const body = entry.manifest;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
+    for (const obj of recordsOf((body as AnyRec).objects)) {
+      const n = strName(obj.name);
+      if (n) names.push(n);
+    }
+  }
+  return names;
+}
+
+/**
  * Validate every object-name reference on the surfaces listed in the module
  * header. Returns findings (empty = clean).
  */
@@ -154,6 +188,27 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
   }
 
   /**
+   * Rung ① widened to the ARTIFACT — this stack's own objects PLUS every object
+   * name the artifact's `packages[]` provide (#16611).
+   *
+   * `os build` runs this table twice: once over the union and once per PACKAGE
+   * (`compile.ts` step 3b-ii), because the artifact registers per package. The
+   * per-package leg used to hand each package's body over with nothing else, so
+   * a reference from one package into an object a SIBLING package in the same
+   * artifact ships resolved to nothing and landed on rung ② — an error. ADR-0130
+   * makes the release artifact the co-ownership boundary, so that miss is the
+   * RUN's blind spot, not the author's mistake, and the fix is to give the run
+   * the context it was missing rather than to stop judging the site.
+   *
+   * ⛔ This is not a skip. Every name is still resolved; what changed is the set
+   * it resolves against, so a reference no package in the artifact provides is
+   * still rung ② and still errors — on the per-package leg exactly as on the
+   * union one.
+   */
+  const resolvable = new Set(ownObjects);
+  for (const n of artifactProvidedObjectNames(stack)) resolvable.add(n);
+
+  /**
    * Resolve one reference through the ladder and record a finding if it fails.
    * `subject` describes the reference for the message ("record-picker target").
    */
@@ -167,7 +222,7 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
     const name = strName(target);
     if (!name) return;
     if (isInterpolated(name)) return; // resolved at render time
-    if (ownObjects.has(name)) return; // ① own object
+    if (resolvable.has(name)) return; // ① own object, or one this artifact's packages[] provide
     if (isPlatformProvidedObjectName(name)) return; // ③ known platform object
 
     if (hasPlatformObjectPrefix(name)) {
@@ -202,11 +257,11 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
       message:
         `${subject} "${name}" resolves to no object defined in this stack. ` +
         `The reference is inert at runtime — nothing reports the miss.` +
-        suggestName(name, ownObjects),
+        suggestName(name, resolvable),
       hint:
         `Point it at one of this stack's objects, or at a platform object by its full ` +
         `name (the platform user object is "sys_user", not "user"). ${fix}` +
-        (ownObjects.size > 0 ? ` Defined objects: ${[...ownObjects].sort().join(', ')}.` : ''),
+        (resolvable.size > 0 ? ` Defined objects: ${[...resolvable].sort().join(', ')}.` : ''),
     });
   };
 
@@ -221,12 +276,13 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
   // advises.
   //
   // `objectExtensions[].fields` is deliberately NOT walked. An extension exists
-  // to add fields to an object ANOTHER package owns, so every reference it
-  // carries is cross-package by construction — the case this ladder has no
-  // rung for. The declared escape for that case (a marker on the field, or
-  // resolution against composition) is its own authorable surface and its own
-  // card; judging the extension here would refuse the legitimate case by the
-  // rule that exists to catch the typo.
+  // to add fields to an object ANOTHER package owns, and the package it owns it
+  // from is routinely one this artifact does NOT carry — a platform object, an
+  // official plugin's, another product's. `resolvable` covers the packages in
+  // THIS artifact and nothing beyond it, so judging an extension here would
+  // refuse the legitimate cross-ARTIFACT case by the rule that exists to catch
+  // the typo. That case's declared escape (resolution against declared manifest
+  // dependencies) is its own card; ⛔ not an authored marker on the field.
   for (let oi = 0; oi < objects.length; oi++) {
     const obj = objects[oi];
     if (!obj || typeof obj !== 'object') continue;
