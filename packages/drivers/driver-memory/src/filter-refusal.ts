@@ -122,7 +122,9 @@ export function unsupportedTimeGranularityError(dimension: string, granularity: 
       `TimeUpdateInterval declares the value — but the canonical bucket-key vocabulary defines a ` +
       `label only for ${BUCKET_GRANULARITIES.join(', ')}, and a sub-day bucket has no key any ` +
       `other backend's pushed-down SQL would agree with. It is refused rather than silently left ` +
-      `unbucketed, which answers one group per distinct timestamp (#16178). Ask for a coarser ` +
+      // The tracker id stays in this function's doc comment, where a reader who can
+      // resolve it is looking; a runtime string reaches operators who cannot.
+      `unbucketed, which answers one group per distinct timestamp. Ask for a coarser ` +
       `granularity, or drop the key and group on the raw timestamp deliberately.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
