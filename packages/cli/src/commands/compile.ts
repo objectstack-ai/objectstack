@@ -42,6 +42,7 @@ import {
   emitJson,
   isExitSignal,
   errorCodeFields,
+  isReportedError,
 } from '../utils/format.js';
 import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
 // [#14553] The compile-time half of the navigation-contribution group ruling.
@@ -95,9 +96,40 @@ function artifactPackages(parsed: Record<string, unknown>): Array<{
  * would REFUSE, by name, every collection key this superset deliberately puts
  * under `manifest` — and re-opening it to stop the refusal would re-open the
  * real manifest surface with it.
+ *
+ * ## `packages` — the second key, and the only one (#16611)
+ *
+ * The body carries the collections this package OWNS. Judged with nothing else,
+ * a rule that resolves an object NAME concludes that a name a SIBLING package in
+ * the same artifact ships exists nowhere: `examples/app-multi-package`'s
+ * `crm_order.account` → `crm_account` — a lookup that fixture's README
+ * documents as the point of the fixture — is owned by its `core` package and
+ * read from its `orders` one. ADR-0130 makes the release artifact the
+ * co-ownership boundary, so a per-package pass that cannot see a sibling
+ * package's objects is THIS RUN's defect and not the author's; the ruled fix
+ * (director seat, decision batch #86) hands the per-package stack the
+ * artifact's own `packages[]` as RESOLUTION CONTEXT.
+ *
+ * Two properties make that safe, and they are the whole design:
+ *
+ *   1. ⛔ It changes what a rule can RESOLVE, never what it JUDGES. The
+ *      collections read off the top level are still this package's alone, so
+ *      every per-package finding this leg exists to produce is still produced.
+ *      ⛔ This is NOT "skip the site per package" — that would silence the gate
+ *      on the one command that ships.
+ *   2. A name no entry of `packages[]` provides resolves in neither run, so a
+ *      genuinely dangling reference still errors here exactly as it does in the
+ *      union run above.
+ *
+ * The array is passed through verbatim rather than reduced to a name list: the
+ * consuming rule owns which of an entry's contents are resolution context, and a
+ * set computed here would be a second copy of that decision, free to drift.
  */
-function packageBodyAsStack(body: Record<string, unknown>): Record<string, unknown> {
-  return { ...body, manifest: body };
+function packageBodyAsStack(
+  body: Record<string, unknown>,
+  artifactPackageEntries: unknown,
+): Record<string, unknown> {
+  return { ...body, manifest: body, packages: artifactPackageEntries };
 }
 
 /** Identity of one finding, for the per-package de-duplication below. */
@@ -437,6 +469,13 @@ export default class Compile extends Command {
       //     every finding twice and the author cannot tell a real per-package
       //     finding from an echo. What survives the filter is exactly the set
       //     the union could not see.
+      //
+      //     [#16611] Each package's stack is handed the artifact's `packages[]`
+      //     as RESOLUTION CONTEXT — see `packageBodyAsStack`. The list read here
+      //     is the one `artifactPackages` above walked, off the same parsed
+      //     stack, so the context a package resolves against is exactly the set
+      //     of packages this artifact will register (ADR-0130 D4/D5).
+      const artifactPackageEntries = (result.data as Record<string, unknown>).packages;
       const packageEntries = artifactPackages(result.data as Record<string, unknown>);
       if (packageEntries.length > 0) {
         if (!flags.json) {
@@ -445,7 +484,7 @@ export default class Compile extends Command {
         const alreadyReported = new Set(findings.map(findingKey));
         const perPackageErrors: Array<{ package: string } & typeof ruleErrors[number]> = [];
         for (const pkg of packageEntries) {
-          const asStack = packageBodyAsStack(pkg.body);
+          const asStack = packageBodyAsStack(pkg.body, artifactPackageEntries);
           const pkgFindings = runAuthoringRules('build', {
             normalized: asStack,
             parsed: asStack,
@@ -915,6 +954,16 @@ export default class Compile extends Command {
         await emitJson({ success: false, error: error.message, ...errorCodeFields(error), warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
         this.exit(1);
       }
+      // [#15547] `resolveConfigPath()` already wrote its refusal and hint lines
+      // to stderr before throwing, so this face has nothing left to render —
+      // and `this.error()` below is NOT a no-op for it: it re-renders the same
+      // sentence as an oclif `›   Error:` block AND raises this face's exit
+      // status from 1 to 2. Measured on the published entry, `os compile
+      // ./missing.ts` (and `os build`, which inherits this catch): exit 2 with
+      // 483 stderr bytes, where the other eight faces answer exit 1 with 296.
+      // `this.exit(1)` throws the ExitError the `--json` branch already relies
+      // on, so the status and the bytes both stay where they were.
+      if (isReportedError(error)) this.exit(1);
       console.log('');
       printError(error.message || String(error));
       this.error(error.message || String(error));
