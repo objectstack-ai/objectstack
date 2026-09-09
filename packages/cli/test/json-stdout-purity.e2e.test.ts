@@ -227,10 +227,21 @@ describe('the family this contract has to hold across', () => {
     expect(preBoot).toEqual(Object.keys(CONFIG_MISS_FAMILY).sort());
     expect(preBoot).toHaveLength(10);
 
-    // Disjoint by construction, and worth asserting: a command appearing in
-    // BOTH would be driven twice under contradictory expectations, and the two
-    // files would start disagreeing about which one owns its verdict.
-    expect(preBoot.filter((id) => id in FAMILY)).toEqual([]);
+    // The two families are NOT disjoint, and measuring that was worth more
+    // than assuming it: `os migrate meta` is in both, legitimately and by
+    // design — it boots a kernel under `--stored` and refuses at
+    // `resolveConfigPath()` under `--from N`. So a shared MEMBER is fine and
+    // pinned; what must never happen is the two files driving the same
+    // INVOCATION and disagreeing about its verdict, which is an argv question.
+    const overlap = preBoot.filter((id) => id in FAMILY);
+    expect(overlap).toEqual(['migrate meta']);
+    for (const id of overlap) {
+      const bootArgv = FAMILY[id].join(' ');
+      const preBootMember = CONFIG_MISS_FAMILY[id];
+      for (const argv of [preBootMember.explicit, preBootMember.auto]) {
+        if (argv) expect(argv.join(' ')).not.toBe(bootArgv);
+      }
+    }
   });
 });
 
