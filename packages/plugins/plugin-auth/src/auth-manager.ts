@@ -5600,6 +5600,37 @@ export class AuthManager {
   }
 
   /**
+   * [#16399] The configured base path with a leading slash GUARANTEED and
+   * everything else left alone. This is the one place in this file that adds a
+   * leading slash; every other base-path reader is derived from it.
+   *
+   * ## ⛔ This mirrors better-auth's rule — it is not a normalisation of ours
+   *
+   * better-auth resolves the string it is handed exactly this way before
+   * composing `ctx.context.baseURL`, the value `@better-auth/oauth-provider`
+   * 1.7.2 stamps as the access-token `iss`. So `getAuthIssuer()` is
+   * `getCanonicalOrigin()` + this, and the pair cannot drift. Measured on a
+   * real `betterAuth()` built by `createAuthInstance`, reading
+   * `(await auth.$context).baseURL`:
+   *
+   *     handed 'api/v1/auth'      ctx.baseURL  http://localhost:3000/api/v1/auth
+   *     handed '/api/v1/auth'     ctx.baseURL  http://localhost:3000/api/v1/auth
+   *     handed '/api/v1/auth/'    ctx.baseURL  http://localhost:3000/api/v1/auth/
+   *     handed 'api/v1/auth/'     ctx.baseURL  http://localhost:3000/api/v1/auth/
+   *     handed '/api/v1/auth///'  ctx.baseURL  http://localhost:3000/api/v1/auth///
+   *
+   * ⇒ a trailing slash SURVIVES into the issuer, so stripping one here would
+   * make this manager's own verifier reject every token its AS mints — the
+   * fail-closed break `configuredBasePath()` above records. ⛔ Never strip
+   * anything in this method. Stripping belongs one layer down in
+   * `getBasePath()`, which is a MOUNT path, not a published identifier.
+   */
+  private rootedBasePath(): string {
+    const configured = this.configuredBasePath();
+    return configured.startsWith('/') ? configured : `/${configured}`;
+  }
+
+  /**
    * [#16025] The path prefix better-auth's routes are reachable under, in the
    * single NORMALISED spelling an HTTP adapter can mount: a leading slash added
    * when absent, trailing slashes stripped.
@@ -5638,33 +5669,22 @@ export class AuthManager {
    * `/api/v1/auth/` — measured on the same probe, which drove its whole OAuth
    * exchange through that mount.
    *
-   * **It is NOT the single definition of the base path.** FOUR readers of
-   * `this.config.basePath` existed in this file; this card leaves THREE, by
-   * collapsing the string handed to better-auth and `betterAuthEndpointPath`'s
-   * normalising copy onto `configuredBasePath()`. The two that remain keep
-   * their own normalisers:
+   * **It is NOT the single definition of the base path — but there IS one, one
+   * layer down [#16399].** FOUR readers of `this.config.basePath` existed in
+   * this file; #16025 left THREE, each with its own normaliser. There is now
+   * exactly ONE read of `this.config.basePath` in this file
+   * (`configuredBasePath()`) and one chain above it:
    *
-   *     getAuthIssuer()      adds a leading slash, KEEPS a trailing one
-   *     getMcpResourceUrl()  adds nothing, strips a trailing `/auth`
+   *     configuredBasePath()   the configured value VERBATIM — what better-auth is handed
+   *       └─ rootedBasePath()  + a leading slash when absent (better-auth's own rule)
+   *            ├─ getAuthIssuer()      = origin + this          (published `iss`)
+   *            └─ getBasePath()        = this, trailing slashes stripped   (mount path)
+   *                 └─ getMcpResourceUrl()  = origin + this minus `/auth` + `/mcp`
    *
-   * They are deliberately untouched, and collapsing them is not a free move.
-   * `getAuthIssuer()` is the `iss` this AS advertises and `getMcpResourceUrl()`
-   * is the RFC 8707 resource identifier a token's `aud` is matched against —
-   * both compared by exact string by relying parties, so moving either
-   * re-selects tokens. Measured on this manager, at this commit:
-   *
-   *     basePath '/api/v1/auth/'   getAuthIssuer()     -> …/api/v1/auth/   (trailing slash KEPT —
-   *                                                                        and better-auth is handed
-   *                                                                        the same spelling, which is
-   *                                                                        why the pair still agrees)
-   *     basePath 'api/v1/auth'     getMcpResourceUrl() -> http://localhost:3000api/v1/mcp
-   *                                                                       (malformed; pre-existing,
-   *                                                                        unchanged by this card)
-   *
-   * ⇒ ⛔ Do not read this method as licence to assume one answer exists. Two
-   * more spellings of "the auth base path" are live in this file, and retiring
-   * them is a decision about published OAuth identifiers, not a tidy-up. Filed
-   * as #16399 rather than taken on a mount card.
+   * ⇒ a fourth normaliser cannot be added without deleting a link of that
+   * chain. The two remaining values still DIFFER, and deliberately so: an
+   * issuer must mirror what better-auth stamps (trailing slash and all), while
+   * a mount path and the MCP resource URL must be canonical.
    *
    * ## ⛔ No value moves — what this card actually changed here
    *
@@ -5688,8 +5708,7 @@ export class AuthManager {
    * which is the very move measured above to reject live tokens.
    */
   getBasePath(): string {
-    const configured = this.configuredBasePath();
-    return (configured.startsWith('/') ? configured : `/${configured}`).replace(/\/+$/, '');
+    return this.rootedBasePath().replace(/\/+$/, '');
   }
 
   /**
@@ -6018,20 +6037,47 @@ export class AuthManager {
    * The OAuth issuer identifier: better-auth's `baseURL` INCLUDING `basePath`
    * (e.g. `https://acme.example.com/api/v1/auth`) — this is the `iss` claim
    * the jwt plugin stamps on access tokens and what the AS metadata reports.
+   *
+   * ⛔ [#16399] This value is NOT canonicalised, and must not be: it has to
+   * equal what better-auth composes from the string `createAuthInstance` hands
+   * it, byte for byte, because `verifyMcpAccessToken` gives jose this string as
+   * `issuer` and jose compares `iss` by exact string. `rootedBasePath()` is
+   * that composition — see its docblock for the measured table, and
+   * `auth-manager-base-path.test.ts` for the pin against a real `betterAuth()`.
+   * Stripping a configured trailing slash here rejects every MCP access token
+   * the deployment mints.
    */
   getAuthIssuer(): string {
-    const basePath = this.config.basePath || '/api/v1/auth';
-    return `${this.getCanonicalOrigin()}${basePath.startsWith('/') ? basePath : `/${basePath}`}`;
+    return `${this.getCanonicalOrigin()}${this.rootedBasePath()}`;
   }
 
   /**
    * The MCP resource identifier (RFC 8707 `resource` / token `aud`):
    * `<origin><apiPrefix>/mcp`. Derived from the auth basePath so the two can
    * never disagree about the API prefix.
+   *
+   * ## [#16399] Derived from the NORMALISED base path, unlike `getAuthIssuer()`
+   *
+   * This one is a location on this host — `auth-plugin.ts` reads a path back
+   * out of it with `new URL(...).pathname` to mount the RFC 9728 §3.1
+   * path-inserted well-known route — so it takes `getBasePath()`, not the
+   * configured spelling. Before that it read `this.config.basePath` directly
+   * and added no leading slash, so a `basePath` written without one produced a
+   * value that is not a URL at all:
+   *
+   *     basePath 'api/v1/auth'  ->  http://localhost:3000api/v1/mcp
+   *
+   * `new URL()` THROWS on that (`3000api` is not a port), and
+   * `@better-auth/oauth-provider` 1.7.2 refuses it outright — measured, at
+   * plugin init: `skipping resource seed for http://localhost:3000api/v1/mcp —
+   * resource identifier … must be an absolute URI (RFC 8707 §2)`. So the
+   * `sys_oauth_resource` row is never seeded, `enforcePerClientResources`
+   * stays at its `true` default, and every MCP client is refused for want of a
+   * link row. That input class could never mint or match a token, which is why
+   * repairing it re-selects nothing.
    */
   getMcpResourceUrl(): string {
-    const basePath = this.config.basePath || '/api/v1/auth';
-    const apiPrefix = basePath.replace(/\/auth\/?$/, '');
+    const apiPrefix = this.getBasePath().replace(/\/auth$/, '');
     return `${this.getCanonicalOrigin()}${apiPrefix}/mcp`;
   }
 
