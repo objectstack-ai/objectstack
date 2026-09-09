@@ -228,18 +228,22 @@ describe('validateEmptyCombinators — the surfaces it walks', () => {
     expect(findings[0].message).toContain('matches NO row');
   });
 
-  it('covers objects, views, reports, datasets, pages and apps', () => {
+  it('covers objects, views, reports, datasets and apps', () => {
+    // No `pages` row any more: the page-level filter doors — the four
+    // `object-*` `filter` props and the binding-level `dataSource.filter` —
+    // carry `z.array(ViewFilterRuleSchema)` since #15442 / #15449 (ui#6206-B,
+    // one filter orthography), and this rule judges Filter Protocol NODES
+    // only (`isFilterNode` excludes arrays). The `object-grid { $or: [] }`
+    // this row used to author is refused by the spec at `filter` now, so a
+    // page row here could only pin an off-spec fixture. `pages` stays in
+    // `EMPTY_COMBINATOR_SURFACES`: the walker is key-name based, and an author
+    // still writing the retired record form gets this located error beside
+    // the schema refusal rather than nothing.
     const findings = validateEmptyCombinators({
       objects: [{ name: 'lead', listViews: { mine: { filter: { $or: [] } } } }],
       views: [{ name: 'all', list: { filter: { $and: [] } } }],
       reports: [{ name: 'weekly', runtimeFilter: { $not: {} } }],
       datasets: [{ name: 'cases', filter: {} }],
-      pages: [
-        {
-          name: 'home',
-          regions: [{ components: [{ type: 'object-grid', properties: { filter: { $or: [] } } }] }],
-        },
-      ],
       apps: [{ name: 'crm', navigation: [{ id: 'n', type: 'object', filters: { $and: [] } }] }],
     });
 
@@ -247,7 +251,6 @@ describe('validateEmptyCombinators — the surfaces it walks', () => {
       'app "crm"',
       'dataset "cases"',
       'object "lead"',
-      'page "home"',
       'report "weekly"',
       'view "all"',
     ]);
