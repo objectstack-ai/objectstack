@@ -614,6 +614,55 @@ describe('#16535 — condition ②: every rotating path in the table is covered'
     expect(returned.user.twoFactorEnabled).toBe(true);
   });
 
+  it('leaves a path OUTSIDE the table alone, `user` included', async () => {
+    // `/two-factor/verify-backup-code` does not rotate and is in neither list.
+    // This is the seam-level twin of the end-to-end negative control above.
+    const returned: any = {
+      token: 'stale-token',
+      user: { id: 'user_1', email: EMAIL, twoFactorEnabled: false },
+    };
+    const ctx = fakeRotatingCtx('/two-factor/verify-backup-code', returned, async () => ({
+      id: 'user_1',
+      email: EMAIL,
+      twoFactorEnabled: true,
+    }));
+
+    await echoInstalledSessionToken(ctx);
+
+    expect(returned.token).toBe('stale-token');
+    expect(returned.user.twoFactorEnabled).toBe(false);
+  });
+
+  it('leaves `user` alone when no session was rotated', async () => {
+    // The sign-in-challenge lane: the installed token IS the echoed one, so the
+    // predicate is false and nothing — token or user — is rewritten.
+    const returned: any = {
+      token: 'installed-token',
+      user: { id: 'user_1', email: EMAIL, twoFactorEnabled: false },
+    };
+    let reads = 0;
+    const ctx = fakeRotatingCtx('/two-factor/verify-totp', returned, async () => {
+      reads += 1;
+      return { id: 'user_1', email: EMAIL, twoFactorEnabled: true };
+    });
+
+    await echoInstalledSessionToken(ctx);
+
+    expect(returned.user.twoFactorEnabled).toBe(false);
+    expect(reads, 'the row was read on a lane that installed no new session').toBe(0);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+describe('#16535 — the two narrowings the repair is built on', () => {
+  // Neither is decoration: ablating the key-set ceiling reddens exactly ONE pin
+  // in this file — the widening one — while condition ① and both
+  // `verify-backup-code` controls stay green. That single pin is the whole
+  // difference between this repair and a blanket "re-read the row and forward
+  // it", which is why it is measured at the seam rather than only end to end
+  // (the fixture rows happen to carry no surplus column, so the end-to-end
+  // parity pins cannot see it).
+
   it('follows the row DOWN as well as up — the echo tracks the row, not a literal', async () => {
     // The assertion condition ① forbids is `toBe(true)`: it passes just as well
     // when the echo has stopped describing the row at all. This is the direct
@@ -675,44 +724,6 @@ describe('#16535 — condition ②: every rotating path in the table is covered'
 
     expect(returned.user.twoFactorEnabled).toBe(true);
     expect(Object.keys(returned.user).sort()).toEqual(['email', 'id', 'twoFactorEnabled']);
-  });
-
-  it('leaves a path OUTSIDE the table alone, `user` included', async () => {
-    // `/two-factor/verify-backup-code` does not rotate and is in neither list.
-    // This is the seam-level twin of the end-to-end negative control above.
-    const returned: any = {
-      token: 'stale-token',
-      user: { id: 'user_1', email: EMAIL, twoFactorEnabled: false },
-    };
-    const ctx = fakeRotatingCtx('/two-factor/verify-backup-code', returned, async () => ({
-      id: 'user_1',
-      email: EMAIL,
-      twoFactorEnabled: true,
-    }));
-
-    await echoInstalledSessionToken(ctx);
-
-    expect(returned.token).toBe('stale-token');
-    expect(returned.user.twoFactorEnabled).toBe(false);
-  });
-
-  it('leaves `user` alone when no session was rotated', async () => {
-    // The sign-in-challenge lane: the installed token IS the echoed one, so the
-    // predicate is false and nothing — token or user — is rewritten.
-    const returned: any = {
-      token: 'installed-token',
-      user: { id: 'user_1', email: EMAIL, twoFactorEnabled: false },
-    };
-    let reads = 0;
-    const ctx = fakeRotatingCtx('/two-factor/verify-totp', returned, async () => {
-      reads += 1;
-      return { id: 'user_1', email: EMAIL, twoFactorEnabled: true };
-    });
-
-    await echoInstalledSessionToken(ctx);
-
-    expect(returned.user.twoFactorEnabled).toBe(false);
-    expect(reads, 'the row was read on a lane that installed no new session').toBe(0);
   });
 });
 
