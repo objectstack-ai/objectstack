@@ -31,10 +31,14 @@
  *
  * ## Why the two commands do NOT refuse identically
  *
- * `os init`'s argument IS the package name. `os create`'s argument is composed
- * into a SCOPED one (`@objectstack/plugin-<name>`), and npm's 214-character
- * ceiling counts the scope — so a name that is legal for `init` can compose to
- * one npm refuses. `refuses a name only the composed length catches` pins that
+ * `os init`'s argument IS the package name. `os create`'s argument is COMPOSED
+ * into a longer one — `plugin-<name>` standalone, `@objectstack/plugin-<name>`
+ * for `--in-repo` since #15530 — and npm's 214-character ceiling counts every
+ * character of the composition, so a name that is legal for `init` can compose
+ * to one npm refuses in either placement. The population below is derived from
+ * the placement list for exactly that reason, and the composed-length case is
+ * built from the constant rather than from an assumed prefix width.
+ * `refuses a name only the composed length catches` pins that
  * asymmetry from both ends: the shared validator passes the name (asserted
  * directly), `create` refuses it, and `init` still accepts it. ⛔ Moving that
  * length rule into the shared validator would break `init` for a name npm
@@ -213,6 +217,9 @@ describe('os create: the composed package name is judged for every template', ()
 
   it('reads the name off the DEFAULT placement the same way the command does', () => {
     const emitted = emittedPackageName(templates.plugin, DEFAULT_PLACEMENT, VALID_NAME);
-    expect(emitted).toBe(`@objectstack/plugin-${VALID_NAME}`);
+    // The default is standalone, which emits unscoped since #15530. What the
+    // composition IS is pinned in `create.test.ts`; what this asserts is that
+    // the length check reads the same string the command would write.
+    expect(emitted).toBe(`plugin-${VALID_NAME}`);
   });
 });
