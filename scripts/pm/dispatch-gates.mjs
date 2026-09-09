@@ -555,14 +555,42 @@ const maskedModuleBody = memoiseMask((source) => maskSelfTests(maskedComments(so
  * unbounded under-mask measured above.
  *
  * Same projection as `blank` next door — spans become spaces, newlines and byte
- * offsets survive — so this composes onto `maskedModuleBody`'s output rather
- * than replacing it. The order is measured too, and it is the one that cannot
- * widen: masking `#` FIRST stops a `#` comment containing `@objectstack/*` from
- * opening a phantom JS block comment, which UNCOVERS code below it and adds
- * hints (2 on this tree — `scripts/downstream-smoke.sh` and
- * `.claude/hooks/guard-tree-enum.sh`). Masking `#` LAST can only blank more of
- * an already-masked body, so the shell hint set is a subset of today's by
- * construction.
+ * offsets survive — so this composes WITH the JS mask rather than replacing it.
+ *
+ * ## The ORDER, and why it is now `#` FIRST (#16744)
+ *
+ * Masking `#` LAST can only blank more of an already-masked body, so the shell
+ * hint set was a subset of the JS-masked one by CONSTRUCTION. That is why the
+ * card above took it: it could not widen, and widening was out of its scope.
+ * The price it left unpaid is the OTHER direction of the same "THIRD kind"
+ * defect. A `#` comment spelling `@objectstack/*`, a glob, or any other
+ * two-character block-comment opener is not a comment to the JS scanner — it
+ * opens a BLOCK comment that runs to the next terminator and blanks every line
+ * of real shell CODE in between, with nothing in the output saying a region was
+ * skipped. Re-measured per byte on `ce7bae8b`, over the 31 tracked `.sh` files:
+ * 12 of them hand a caller shell code as prose, 73,859 bytes in
+ * `scripts/pm/os-verify-lock.sh` alone.
+ *
+ * So `#` is masked FIRST now: shell prose never reaches the JS scanner and
+ * cannot open a phantom comment. This UNCOVERS the code below such a comment
+ * and therefore ADDS hints — 2 on this tree, `node_modules/@objectstack/spec/dist`
+ * in `scripts/downstream-smoke.sh` and one site in
+ * `.claude/hooks/guard-tree-enum.sh`, both of them real code the follow was
+ * blind to. ⛔ The shell hint set is therefore NOT a subset of the JS-masked one
+ * any more, and the live sweep in the self-test pins what the additions ARE —
+ * ⛔ never that there are none, which is the blindness this removed.
+ *
+ * The JS mask still RUNS on a shell source, and still runs BEFORE
+ * `maskSelfTests` as that function's header requires. Keeping it is the whole
+ * difference between this order and "do not run the JS scanner over a non-JS
+ * kind at all": the latter also drops the `//` masking pinned below on a `.sh`
+ * source, which is a reconciliation across both cards rather than this fix.
+ *
+ * Composed from the raw maskers rather than through `maskedModuleBody` — the
+ * intermediate is a DIFFERENT string on this path, so there is no half to
+ * share, and routing it through the JS memo would only fill that cache with
+ * shell-derived keys no JS caller can hit. The memo below is keyed on the raw
+ * source, so the whole chain is still derived once per source.
  */
 const SHELL_WORD_START = /[\s;&|()<>]/;
 
@@ -621,8 +649,10 @@ export function maskShellComments(source) {
   return blank(String(source), shellCommentSpans(String(source)));
 }
 
-/** `maskShellComments(maskedModuleBody(source))`, memoised — see the block above. */
-const maskedHashCommentBody = memoiseMask((source) => maskShellComments(maskedModuleBody(source)));
+/** `maskSelfTests(maskComments(maskShellComments(source)))`, memoised — see the block above. */
+const maskedHashCommentBody = memoiseMask((source) =>
+  maskSelfTests(maskComments(maskShellComments(source))),
+);
 
 // ── What a gate that IMPORTS this module inherits (#11556) ─────────────────
 //
@@ -15541,6 +15571,46 @@ function selfTest() {
     shHints(shJsComment).length === 0,
     shHints(shJsComment),
   );
+  // ── The PHANTOM BLOCK COMMENT the order used to open (#16744) ─────────────
+  //
+  // The other direction of the same "THIRD kind" defect, and the card's whole
+  // acceptance criterion: two sources that differ in FOUR CHARACTERS OF PROSE,
+  // both of which must read the one hint their code spells. The first carries a
+  // block-comment opener inside a `#` comment; while `#` was masked LAST that
+  // opener reached the JS scanner and blanked the real `DEST=` line under it.
+  //
+  // ⛔ The control is not decoration. A change that only makes the first row
+  // fire — by disabling the mask, or by dropping the JS scanner on this kind —
+  // takes the second row down with it or leaves it as the ONLY row that fires.
+  // Both rows read 1, or this is not the fix.
+  const shPhantom = '# published @objectstack/* packages\nDEST="node_modules/@objectstack/spec/dist"\n';
+  const shPhantomControl = '# published packages\nDEST="node_modules/@objectstack/spec/dist"\n';
+  t(
+    '⭐ a `/*` inside a `#` comment no longer opens a block comment over the shell code below it',
+    shHints(shPhantom, 'scripts/x.sh').join() === 'node_modules/@objectstack/spec/dist',
+    shHints(shPhantom, 'scripts/x.sh'),
+  );
+  t(
+    '⭐ CONTROL: the same code under a comment with NO opener still reads its one hint — the mask was fixed, not switched off',
+    shHints(shPhantomControl, 'scripts/x.sh').join() === 'node_modules/@objectstack/spec/dist',
+    shHints(shPhantomControl, 'scripts/x.sh'),
+  );
+  // The span, not just the line: an unterminated opener ran to the END OF FILE,
+  // so the cost was every hint below it rather than the one line beside it.
+  const shPhantomSpan =
+    '# everything below this line is /* invisible\n'
+    + 'bash "scripts/one.sh"\n'
+    + 'bash "scripts/two.sh"\n';
+  t(
+    '…and it ran to END OF FILE, so the recovered span is every hint below the comment, not one line',
+    shHints(shPhantomSpan, 'scripts/x.sh').join() === 'scripts/one.sh,scripts/two.sh',
+    shHints(shPhantomSpan, 'scripts/x.sh'),
+  );
+  t(
+    '…non-vacuously: the JS-kind control on the same bytes still loses both, which is what this order costs a `.sh` file',
+    shHints(shPhantomSpan, 'scripts/x.sh.mjs').length === 0,
+    shHints(shPhantomSpan, 'scripts/x.sh.mjs'),
+  );
   // KIND-SCOPED, in both directions. The same bytes on a `.mjs` path must keep
   // spelling their hint: `#` is not a comment in JavaScript, and a mask that
   // fired there would be a widening rather than this card's narrowing.
@@ -15628,24 +15698,45 @@ function selfTest() {
   let shellShrank = 0;
   let shellBefore = 0;
   let shellAfter = 0;
+  const shellAddedProse = [];
   for (const f of liveShellFiles) {
     const src = readFileSync(nodePath.join(ROOT, f), 'utf8');
     const masked = extractWatchHints(src, f, { tree: hintTree });
     const unmasked = extractWatchHints(src, `${f}.mjs`, { tree: hintTree });
     shellBefore += unmasked.length;
     shellAfter += masked.length;
-    if (masked.some((h) => !unmasked.includes(h))) shellGrew++;
+    const added = masked.filter((h) => !unmasked.includes(h));
+    // An ADDED hint is admissible only if it is spelled in CODE: its literal has
+    // to survive the `#` mask. One spelled only inside a `#` comment would be
+    // the FABRICATING direction arriving through the very reorder that fixed
+    // the under-mask, so it is collected by name rather than counted.
+    const code = maskShellComments(src);
+    for (const h of added) if (!code.includes(h)) shellAddedProse.push([f, h]);
+    if (added.length) shellGrew++;
     else if (masked.length < unmasked.length) shellShrank++;
   }
   t(
-    `⭐ LIVE: over ${liveShellFiles.length} tracked .sh file(s) the mask never ADDS a hint — ${shellBefore} spelled without it, ${shellAfter} with`,
-    liveShellFiles.length > 0 && shellGrew === 0 && shellAfter < shellBefore,
-    JSON.stringify({ files: liveShellFiles.length, shellBefore, shellAfter, shellGrew, shellShrank }),
+    `⭐ LIVE: over ${liveShellFiles.length} tracked .sh file(s) every hint the \`#\` mask ADDS is spelled in CODE — ${shellBefore} hints without the mask, ${shellAfter} with`,
+    liveShellFiles.length > 0 && shellAddedProse.length === 0 && shellAfter < shellBefore,
+    JSON.stringify({ files: liveShellFiles.length, shellBefore, shellAfter, shellGrew, shellShrank, shellAddedProse }),
   );
   t(
     '…non-vacuously: at least one live file really loses a hint, so the sweep is not passing over an instrument that changed nothing',
     shellShrank >= 1,
     JSON.stringify({ shellShrank }),
+  );
+  // ⛔ This case replaced a `shellGrew === 0` pin (#16132), and the replacement
+  // is the point of #16744 rather than a relaxation of it. That spelling was
+  // true only because `#` was masked LAST, which left shell prose to reach the
+  // JS scanner first: a `#` comment containing `/*` opened a phantom block
+  // comment over the real code below it, so the code could not spell a hint in
+  // EITHER column and the difference read 0. Masking `#` FIRST uncovers that
+  // code, so additions are now expected — and the honest invariant is what they
+  // ARE, not that there are none.
+  t(
+    '…and the additions really happen, so the case above is not a subset test wearing a code test\'s name',
+    shellGrew >= 1,
+    JSON.stringify({ shellGrew }),
   );
   // The card's sharpest specimen, both ends. DEPARTURE alone would stay green
   // on a mask that emptied the file, so the ARRIVAL half names a live shell
@@ -15661,6 +15752,26 @@ function selfTest() {
     '…non-vacuously: that path IS spelled in the file, inside a `#` comment, and the unmasked control still reads it',
     extractWatchHints(liveBumpSrc, 'scripts/bump-objectui.sh.mjs', { tree: hintTree }).includes(
       'docs/releases-maintenance.md',
+    ),
+  );
+  // ⭐ LIVE RECOVERY (#16744): the site the card named, both ends. The `.mjs`
+  // control is what makes it a recovery rather than an ordinary arrival — the
+  // JS-only path STILL cannot read this line, because the phantom comment the
+  // header's `@objectstack/*` opens is what hid it, and that is precisely what
+  // masking `#` first removes.
+  const liveDownstream = 'scripts/downstream-smoke.sh';
+  const liveDownstreamSrc = readFileSync(nodePath.join(ROOT, liveDownstream), 'utf8');
+  t(
+    '⭐ LIVE RECOVERY: a path spelled in real shell CODE under a `#` comment carrying a block-comment opener is read again',
+    extractWatchHints(liveDownstreamSrc, liveDownstream, { tree: hintTree }).includes(
+      'node_modules/@objectstack/spec/dist',
+    ),
+    extractWatchHints(liveDownstreamSrc, liveDownstream, { tree: hintTree }),
+  );
+  t(
+    '…non-vacuously: the JS-kind control on the same bytes still cannot see it, so a phantom comment is what was hiding it',
+    !extractWatchHints(liveDownstreamSrc, `${liveDownstream}.mjs`, { tree: hintTree }).includes(
+      'node_modules/@objectstack/spec/dist',
     ),
   );
   const liveShardSelfTest = 'scripts/ci/select-shard-packages.selftest.sh';
