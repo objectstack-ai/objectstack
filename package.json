@@ -128,6 +128,7 @@
     "check:adr-0087-registration": "node scripts/check-adr-0087-registration.mjs --self-test && node scripts/check-adr-0087-registration.mjs",
     "check:changeset-gate-self-tests": "node scripts/check-empty-changeset.mjs --self-test && node scripts/check-adr-0087-registration.mjs --self-test && node scripts/check-changeset-no-major.mjs --self-test",
     "check:lockstep-package-count": "node scripts/check-lockstep-package-count.mjs --self-test && node scripts/check-lockstep-package-count.mjs",
+    "check:route-ledger-census": "node scripts/check-route-ledger-census.mjs --self-test && node scripts/check-route-ledger-census.mjs",
     "check:override-consistency": "node scripts/check-override-consistency.mjs --self-test && node scripts/check-override-consistency.mjs",
     "check:vendor-export-contract": "node scripts/check-vendor-export-contract.mjs --self-test && node scripts/check-vendor-export-contract.mjs",
     "check:vendor-export-contract-resolve": "node scripts/check-vendor-export-contract.mjs --self-test && node scripts/check-vendor-export-contract.mjs --resolve",
