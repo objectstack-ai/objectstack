@@ -816,4 +816,32 @@ describe('#16535 — the same measurement on a real SqlDriver', () => {
     expect(consumed.status, `verify-backup-code: ${await consumed.clone().text()}`).toBe(200);
     expect(((await consumed.clone().json()) as any).user.twoFactorEnabled).toBe(rowValue);
   }, 120_000);
+
+  it('the repaired `user` keeps the vendor wire shape AND its wire types on SQL', async () => {
+    // This is the leg where a shape regression would actually appear: SQLite
+    // stores booleans as `1`/`0`, so a repair that forwarded row values without
+    // travelling the adapter's output transform would put a NUMBER where
+    // `AuthWireUser.emailVerified` declares a boolean — invisible to any
+    // assertion about `twoFactorEnabled` alone.
+    const backend = await sqlBackend();
+    const { manager, backupCodes, rotatedCookie, echoedUser } = await arrangeCompletedEnrolment(backend);
+
+    const consumed = await post(
+      manager,
+      '/two-factor/verify-backup-code',
+      { code: backupCodes[0] },
+      { cookie: rotatedCookie },
+    );
+    expect(consumed.status).toBe(200);
+    const untouched = ((await consumed.clone().json()) as any).user as Record<string, unknown>;
+
+    expect(Object.keys(echoedUser).sort()).toEqual(Object.keys(untouched).sort());
+    for (const key of Object.keys(untouched)) {
+      expect(
+        typeof echoedUser[key],
+        `\`user.${key}\` changed wire type: ${JSON.stringify(echoedUser[key])} vs ${JSON.stringify(untouched[key])}`,
+      ).toBe(typeof untouched[key]);
+    }
+    expect(typeof echoedUser.twoFactorEnabled, 'the repaired member is not a JSON boolean').toBe('boolean');
+  }, 120_000);
 });

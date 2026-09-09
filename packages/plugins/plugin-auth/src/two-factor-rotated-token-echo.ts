@@ -185,7 +185,9 @@ async function freshEchoedUser(ctx: any, echoed: unknown): Promise<Record<string
   const fresh = row as Record<string, unknown>;
   const repaired: Record<string, unknown> = { ...(echoed as Record<string, unknown>) };
   for (const key of Object.keys(repaired)) {
-    if (Object.hasOwn(fresh, key)) repaired[key] = fresh[key];
+    // `hasOwnProperty.call`, not `in`: a member the row does not carry keeps
+    // the value the vendor echoed, and no prototype member is ever adopted.
+    if (Object.prototype.hasOwnProperty.call(fresh, key)) repaired[key] = fresh[key];
   }
   return repaired;
 }
