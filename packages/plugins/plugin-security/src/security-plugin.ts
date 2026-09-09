@@ -194,6 +194,26 @@ export function hasPlatformAdminCapability(held: ReadonlySet<string>): boolean {
 }
 
 /**
+ * [#16608] The insert-side write `check`, installed on the operation context
+ * for the engine to run once the `beforeInsert` chain has produced the row that
+ * will be stored.
+ *
+ * Structurally identical to `OperationContext.postHookWriteImageCheck` in
+ * `@objectstack/objectql`, and deliberately declared here rather than imported:
+ * this package depends on the engine only as a devDependency (the middleware is
+ * registered through a duck-typed handle), so importing the engine's type would
+ * put a package that is not a runtime dependency into this package's published
+ * `.d.ts`. The two spellings are welded by a test that runs BOTH packages, not
+ * by the type system — see `insert-check-post-image.test.ts`.
+ */
+interface InsertCheckSeam {
+  /** Refuses by throwing. Receives the rows as `beforeInsert` left them. */
+  evaluate(rows: readonly Record<string, unknown>[]): void;
+  /** Set by the engine immediately before `evaluate` runs. */
+  honoured?: boolean;
+}
+
+/**
  * [ADR-0066 D3/⑤] Object `requiredPermissions` normalized into per-CRUD buckets.
  * `all` holds capabilities required for EVERY operation (the `string[]` form);
  * the per-op buckets hold capabilities from the `{read,create,update,delete}`
@@ -1668,6 +1688,13 @@ export class SecurityPlugin implements Plugin {
 
     // Register security middleware
     ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+      // [#16608] The insert-side write `check`, once step 3.6 has installed it
+      // on the operation context for the engine to run after `beforeInsert`.
+      // Held here so the post-`next()` assertion below can read whether the
+      // seam was honoured — an installed judgement that never ran is a write
+      // this middleware did not gate, and it fails CLOSED and loudly rather
+      // than passing for an allowed one.
+      let insertCheckSeam: InsertCheckSeam | null = null;
       // [#10757] Retire every memoized permission-set resolution the moment a
       // WRITE passes through the engine. Deliberately the FIRST statement in
       // the middleware — ahead of the `isSystem` bypass immediately below —
@@ -2776,6 +2803,42 @@ export class SecurityPlugin implements Plugin {
       // row that fails the check is DENIED (fail closed, D5) — never silently
       // written. Scoped to policies that EXPLICITLY declare `check`, so an
       // object governed only by `using` is unaffected.
+      //
+      // ── [#16608] WHICH IMAGE, on an INSERT ────────────────────────────────
+      //
+      // Both verbs judge THE ROW THAT WILL EXIST. `update` reaches it here, by
+      // merging the caller's pre-image with the change set. `insert` could not:
+      // it has no pre-image, and this middleware runs BEFORE the engine's
+      // operation — so `opCtx.data` is the caller's payload as it arrived, and
+      // the `beforeInsert` hooks that derive the row's real values have not run.
+      //
+      // A denormalised scoping field is exactly what an RLS predicate compares
+      // (ADR-0055: a predicate cannot traverse a lookup) and exactly what an app
+      // stamps in `beforeInsert` so a caller cannot choose it. Judging the raw
+      // payload therefore inverted the policy on both sides, measured on 17.3.0:
+      //
+      //   • the value the app derives is NOT on the image, so the only way to
+      //     pass a `check` over it was for the caller to SEND the value the hook
+      //     exists to make un-sendable (same identity, same object, same second:
+      //     payload with the stamped field 201, payload without it 403, and the
+      //     stored row identical either way);
+      //   • the value the caller sent IS on the image and is then overwritten,
+      //     so an insert naming an in-scope organization on a parent belonging
+      //     to ANOTHER organization PASSED the check and stored the parent's
+      //     organization — a row whose stored scope the caller does not hold.
+      //
+      // Ruled 2026-09-07 (maintainer, 「同意」): the insert post-image becomes the
+      // hook-mutated payload — the row that will be stored — so insert and
+      // update judge the same thing. Mechanically that means the judgement can
+      // no longer happen HERE for an insert; it is installed on the operation
+      // context and run by the engine once the `beforeInsert` chain is done
+      // (`OperationContext.postHookWriteImageCheck`, `@objectstack/objectql`),
+      // still ahead of every producer and every statement.
+      //
+      // ⛔ The alternative — keep the order and write the contract that a
+      // checked field must arrive from the caller — is REFUSED, not deferred:
+      // it institutionalises the contradiction (the caller sending the value the
+      // hook exists to make un-sendable) and needs a permanent lint to keep it.
       if (
         (opCtx.operation === 'insert' || opCtx.operation === 'update') &&
         opCtx.data &&
@@ -2798,28 +2861,9 @@ export class SecurityPlugin implements Plugin {
           : null;
         const checkParts = [checkFilter, delCheckFilter].filter(Boolean) as Record<string, unknown>[];
         if (checkParts.length > 0) {
-          // Build the post-image. Insert → the new row. Update by-id → the
-          // pre-image merged with the change set (so a check on an unchanged
-          // field still sees its value). A bulk update (no single id) cannot
-          // form a post-image here — it is governed by the using-based AST
-          // scoping (step 3); we log and skip rather than guess.
-          let postImage: Record<string, unknown> | null = { ...(opCtx.data as Record<string, unknown>) };
-          if (opCtx.operation === 'update') {
-            const targetId = this.extractSingleId(opCtx);
-            if (targetId == null) {
-              this.logger.warn?.(
-                `[Security] RLS check on bulk update '${opCtx.object}' is not post-image validated ` +
-                  `(governed by the using-scoped where); single-id writes are checked.`,
-              );
-              postImage = null;
-            } else if (this.ql) {
-              // Shares the memoized caller pre-image with the step-3.5 owner
-              // echo check — the identical (object, id, caller-context) row.
-              const pre = await this.getCallerPreImage(opCtx, targetId);
-              if (pre) postImage = { ...pre, ...(opCtx.data as Record<string, unknown>) };
-            }
-          }
-          if (postImage && !checkParts.every((f) => matchesFilterCondition(postImage as any, f as any))) {
+          // The ONE refusal, shared by both verbs — so an insert judged inside
+          // the engine and an update judged here answer a caller identically.
+          const denyCheck = (): never => {
             this.logger.warn?.(
               `[Security] RLS check FAILED on ${opCtx.operation} '${opCtx.object}' — write denied (fail-closed)`,
             );
@@ -2847,6 +2891,48 @@ export class SecurityPlugin implements Plugin {
               { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
               developerMessage,
             );
+          };
+          const satisfiesCheck = (image: Record<string, unknown>): boolean =>
+            checkParts.every((f) => matchesFilterCondition(image as any, f as any));
+
+          if (opCtx.operation === 'insert') {
+            // [#16608] Install the judgement; the engine runs it on the row the
+            // `beforeInsert` chain produced. The compiled filter is captured
+            // HERE — while the caller's permission sets, the delegator's, the
+            // staged membership and this request's context are all resolved —
+            // and only the IMAGE is deferred. Deferring the compilation too
+            // would move authorization inputs into the engine's timeline for no
+            // gain.
+            insertCheckSeam = {
+              evaluate: (rows) => {
+                for (const row of rows) {
+                  if (!row || typeof row !== 'object') continue;
+                  if (!satisfiesCheck(row)) denyCheck();
+                }
+              },
+            };
+            opCtx.postHookWriteImageCheck = insertCheckSeam;
+          } else {
+            // UPDATE — unchanged. Build the post-image: the caller's pre-image
+            // merged with the change set (so a check on an unchanged field
+            // still sees its value). A bulk update (no single id) cannot form a
+            // post-image here — it is governed by the using-based AST scoping
+            // (step 3); we log and skip rather than guess.
+            let postImage: Record<string, unknown> | null = { ...(opCtx.data as Record<string, unknown>) };
+            const targetId = this.extractSingleId(opCtx);
+            if (targetId == null) {
+              this.logger.warn?.(
+                `[Security] RLS check on bulk update '${opCtx.object}' is not post-image validated ` +
+                  `(governed by the using-scoped where); single-id writes are checked.`,
+              );
+              postImage = null;
+            } else if (this.ql) {
+              // Shares the memoized caller pre-image with the step-3.5 owner
+              // echo check — the identical (object, id, caller-context) row.
+              const pre = await this.getCallerPreImage(opCtx, targetId);
+              if (pre) postImage = { ...pre, ...(opCtx.data as Record<string, unknown>) };
+            }
+            if (postImage && !satisfiesCheck(postImage)) denyCheck();
           }
         }
       }
@@ -3216,6 +3302,36 @@ export class SecurityPlugin implements Plugin {
       }
 
       await next();
+
+      // [#16608] FAIL CLOSED on a seam that was never run. `honoured` is set by
+      // the engine immediately before it calls the judgement, so an unset flag
+      // means one thing only: the write went past without the insert `check`
+      // being evaluated at all — an engine that does not implement the seam, or
+      // a host that executed the operation itself. The row may already be
+      // stored, which is exactly why this is LOUD: the alternative is a gate
+      // that silently stops gating and a deployment that never finds out.
+      // ⛔ Do not soften this into a warning: a middleware that cannot say a
+      // write was checked must not report that it was.
+      if (insertCheckSeam && insertCheckSeam.honoured !== true) {
+        const developerMessage =
+          `[Security] Access denied: the insert on '${opCtx.object}' was executed without the row-level CHECK ` +
+          `being evaluated — the engine did not run OperationContext.postHookWriteImageCheck. ` +
+          `The write is NOT vouched for by this gate.`;
+        // Contract arg order (#5637): `error(message, error?: Error, meta?)` —
+        // the structured fields ride in the THIRD position. There is no `Error`
+        // to carry here: nothing threw, the seam simply never ran.
+        ctx.logger.error(developerMessage, undefined, {
+          operation: opCtx.operation,
+          object: opCtx.object,
+          positions,
+          userId: opCtx.context?.userId ?? 'unknown',
+        });
+        throw new PermissionDeniedError(
+          userFacingDenialMessage(ctx, 'record_change_not_allowed', opCtx.context?.locale),
+          { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+          developerMessage,
+        );
+      }
 
       // 4. Field-level security: mask restricted fields in returned records.
       // Covers reads AND the record echoed back by a write — otherwise a caller
