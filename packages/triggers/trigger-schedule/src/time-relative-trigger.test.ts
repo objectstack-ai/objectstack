@@ -729,3 +729,62 @@ describe('TimeRelativeTriggerPlugin', () => {
         await expect(fake.readyHandlers[0]()).resolves.toBeUndefined();
     });
 });
+
+// ─── The acting-organization refusal (#16659) ───────────────────────
+//
+// The time-relative sweep is NOT the weaker case for carrying an organization,
+// it is the stronger one: it queries with `context: { isSystem: true }` on
+// purpose, so an org-less sweep selects across every tenant and then launches a
+// run that can write into none of them.
+
+describe('TimeRelativeTrigger — the acting-organization refusal (#16659)', () => {
+    const DESC = { object: 'contracts', dateField: 'end_date', withinDays: 60 };
+
+    function recordingLogger(): { logger: TriggerLogger; errors: string[] } {
+        const errors: string[] = [];
+        return {
+            logger: {
+                info: () => {},
+                debug: () => {},
+                warn: () => {},
+                error: (msg: string) => void errors.push(String(msg)),
+            },
+            errors,
+        };
+    }
+
+    it('THROWS from start() and arms no sweep, naming the flow and the key', () => {
+        const job = fakeJobService();
+        const { engine } = fakeDataEngine([]);
+        const log = recordingLogger();
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, log.logger, NOW);
+
+        expect(() =>
+            trigger.start(binding(DESC, { organization: undefined, config: { timeRelative: DESC } }), async () => {}),
+        ).toThrow(/declares no acting organization/);
+
+        expect(job.jobs.size, 'a refused sweep must have no job at all').toBe(0);
+        expect(log.errors).toHaveLength(1);
+        expect(log.errors[0]).toContain('[time-relative] NOT BOUND');
+        expect(log.errors[0]).toContain('renewal_alert');
+        // The sentence is the time-relative one, not the plain-schedule one.
+        expect(log.errors[0]).toContain('time-relative flow');
+    });
+
+    it('a hot re-publish that REMOVES the key drops the prior sweep', async () => {
+        const job = fakeJobService();
+        const { engine } = fakeDataEngine([]);
+        const log = recordingLogger();
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, log.logger, NOW);
+
+        trigger.start(binding(DESC), async () => {});
+        await flush();
+        expect(job.jobs.size, 'precondition: the declaring binding armed').toBe(1);
+
+        expect(() =>
+            trigger.start(binding(DESC, { organization: undefined, config: { timeRelative: DESC } }), async () => {}),
+        ).toThrow();
+        await flush();
+        expect(job.jobs.size).toBe(0);
+    });
+});
