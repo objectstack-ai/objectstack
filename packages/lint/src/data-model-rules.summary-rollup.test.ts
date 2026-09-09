@@ -169,8 +169,10 @@ describe('rollup/non-numeric-aggregand — stays silent where it cannot resolve,
     expect(findings(model('datetime', 'count'))).toEqual([]);
   });
 
-  // `sum` / `avg` over a non-numeric child is a different shape (the analytics
-  // table already refuses those pairs) and is deliberately not this rule's.
+  // `sum` / `avg` over a non-numeric child is a different shape, whose accept
+  // set the analytics table's own rows already exclude, and is deliberately not
+  // this rule's. (Nothing in this tree consults that table — an open gap
+  // reported with this change, not one this rule silently absorbs.)
   it('does not fire for sum or avg', () => {
     expect(findings(model('datetime', 'sum'))).toEqual([]);
     expect(findings(model('datetime', 'avg'))).toEqual([]);

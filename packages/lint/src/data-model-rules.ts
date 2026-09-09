@@ -648,7 +648,11 @@ export function lintDataModel(objects: any[]): LintIssue[] {
       //
       // Scoped to `min`/`max` deliberately: `count` ignores the field
       // entirely, and `sum`/`avg` over a non-numeric child is a different
-      // shape — one the analytics table already refuses — judged elsewhere.
+      // shape, whose accept set the analytics table's own rows already
+      // EXCLUDE. Measured on this tree, nothing consults that table on the
+      // roll-up door (or anywhere else), so that is an open gap, not a
+      // refusal this rule may lean on — and widening here to cover it would
+      // be a second account of a pair the table already rules on.
       if (type === 'summary') {
         const ops = def.summaryOperations;
         const fn = ops?.function;
