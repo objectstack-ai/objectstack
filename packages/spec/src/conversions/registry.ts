@@ -8993,6 +8993,15 @@ const tursoConfigTimeoutToTimeoutMs: MetadataConversion = {
  * would be a transform with no seam that ever runs, so they take D3 semantic
  * entries and their prescriptions carry no `os migrate meta` sentence.
  *
+ * This family carries a D3 twin as well, `connector-sync-schedule-retired`,
+ * per the #15954 ruling's letter ("its D3 entry says so and names the
+ * measured zero in-repo authors and the NOT-MEASURED out-of-repo
+ * population"): the strip below is mechanical, but the cadence the author
+ * meant has no mechanical destination, and the author population outside
+ * this repo is NOT MEASURED — the twin carries both on the fields the upgrade
+ * guide, `spec-changes.json` and `os migrate meta` project; this comment
+ * projects nowhere.
+ *
  * `retiredFromLoadPath`: `DataSyncConfigSchema` tombstones the key
  * (`retiredKey`, tsc `never` + the parse-time prescription — the
  * `errorMapping` posture on the same connector), so a live parse refuses
@@ -9012,7 +9021,9 @@ const connectorSyncScheduleRemoved: MetadataConversion = {
     "connector key 'syncConfig.schedule' removed (#16320, ADR-0049 — the cron slot on "
     + 'connector-attached sync was parsed and never evaluated: no engine schedules a connector '
     + "sync, so the cadence an author declared never fired. The `DataSyncConfig` def and every "
-    + 'other key on it stay; a sync on a cadence is a `job` whose handler drives the connector)',
+    + 'other key on it stay; a sync on a cadence is a `job` whose handler drives the connector. '
+    + 'The residue — the cadence you meant, and the out-of-repo author population this repo '
+    + 'could not measure — is the D3 twin `connector-sync-schedule-retired`)',
   apply(stack, emit) {
     return mapCollection(stack, 'connectors', (c, path) => {
       const syncConfig = c.syncConfig;

@@ -6,6 +6,8 @@ import type { ZodTypeAny } from 'zod';
 import { ScheduledExportSchema, ScheduleExportRequestSchema, type ScheduledExport, type ScheduleExportRequest } from './api/export.zod';
 import { ScheduleStateSchema, type ScheduleState } from './automation/execution.zod';
 import { CONVERSIONS_BY_MAJOR } from './conversions/registry';
+import { applyConversionsToStoredItem } from './conversions/stored';
+import type { ConversionNotice } from './conversions/types';
 import {
   ConnectorSchema,
   DataSyncConfigSchema,
@@ -30,7 +32,10 @@ import {
 // tree forces the split: of the seven positions, exactly ONE is reachable from
 // a stack manifest (`stack.connectors[]` → `Connector.syncConfig` →
 // `DataSyncConfig.schedule`), so only that family carries an ADR-0087 D2
-// conversion and the house `os migrate meta` sentence; the other six (export
+// conversion and the house `os migrate meta` sentence — and, per the ruling's
+// letter, a D3 twin that carries the measured author population on fields
+// that PROJECT ("its D3 entry says so and names the measured zero in-repo
+// authors and the NOT-MEASURED out-of-repo population"); the other six (export
 // API bodies, runtime schedule state, cache / DR operator config) are no stack
 // collection member and no metadata type, so a conversion there would be a
 // transform with no seam that ever runs — they take a D3 semantic entry each
@@ -202,6 +207,9 @@ const CARRIERS: Array<Pick<RetiredSite, 'qualified' | 'schema' | 'wellFormed' | 
 ];
 
 const CONVERSION_ID = 'connector-sync-schedule-removed';
+/** The connector family's D3 twin — the ruling's carrier of the population reading. */
+const SEMANTIC_TWIN_ID = 'connector-sync-schedule-retired';
+/** The four families with NO stack seam: a D3 semantic entry each and no D2. */
 const SEMANTIC_IDS = [
   'export-schedule-cron-retired',
   'schedule-state-cron-expression-retired',
@@ -298,7 +306,14 @@ describe('[#16320] cron-typed positions retirement — refusal at every site', (
     const schema = getMetadataTypeSchema('connector');
     expect(schema, 'no schema bound for `connector`').toBeDefined();
     const authored = { ...CONNECTOR_WELL_FORMED, syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON } };
-    expect(schema!.safeParse(authored).success).toBe(false);
+    // The same envelope the carriers get — path, code and the prescription
+    // with its migrate sentence — so a rebinding to a shape that refuses for
+    // some OTHER reason (a strict unknown-key verdict, say) reads red here.
+    const issue = findIssue(schema!, authored, ['syncConfig', 'schedule'], 'connector via /meta/connector');
+    expect(issue?.code).toBe('invalid_type');
+    expect(issue?.path).toEqual(['syncConfig', 'schedule']);
+    expect(issue?.message).toMatch(/^`connector\.syncConfig\.schedule` was removed in @objectstack\/spec 17/);
+    expect(issue?.message).toMatch(HOUSE_MIGRATE_SENTENCE);
     expect(schema!.safeParse(CONNECTOR_WELL_FORMED).success).toBe(true);
   });
 
@@ -438,9 +453,47 @@ describe('[#16320] ADR-0087 registration — one shape per family', () => {
     const step = MIGRATIONS_BY_MAJOR[18];
     expect(step).toBeDefined();
     expect(step!.conversionIds, `${CONVERSION_ID} must be graduated into the step-18 chain`).toContain(CONVERSION_ID);
-    // No D3 semantic twin: the strip is fully mechanical, and the `semantic`
-    // list is the residue D2 cannot express.
-    expect(step!.semantic.filter((s) => /sync-schedule|connector-sync/.test(s.id))).toEqual([]);
+  });
+
+  it('the connector family ALSO carries the D3 twin the ruling names, with the population reading on projecting fields', () => {
+    // #15954, literally: "`connectors[].syncConfig.schedule` is the one
+    // stack-collection member: its D3 entry says so and names the measured
+    // zero in-repo authors and the NOT-MEASURED out-of-repo population." The
+    // strip is the D2's; what no conversion can carry — the population this
+    // repo could not measure — lives on `reason` / `acceptanceCriteria`, the
+    // fields `spec-changes.json`, the upgrade guide and `os migrate meta`
+    // project. A first cut of this pin asserted the twin's ABSENCE (mechanical
+    // strip ⇒ no residue, the `connector-error-mapping-removed` shape); that
+    // was a deviation from the ruling's letter, and it inverts here.
+    const step = MIGRATIONS_BY_MAJOR[18]!;
+    const twin = step.semantic.find((s) => s.id === SEMANTIC_TWIN_ID);
+    expect(twin, `${SEMANTIC_TWIN_ID} must be wired into the step-18 chain`).toBeDefined();
+    expect(twin!.surface).toMatch(/connectors\[\]\.syncConfig\.schedule/);
+    // The wording IS the contract here — the ruling names what the entry says.
+    expect(twin!.reason).toMatch(/ZERO in-repo authors/);
+    expect(twin!.reason).toMatch(/NOT MEASURED/);
+    expect(twin!.acceptanceCriteria).toMatch(/by hand/);
+    // It names its D2 half, so a reader of either finds the other.
+    expect(twin!.replacement).toContain(CONVERSION_ID);
+    // Exactly one twin — the filter that once asserted emptiness now asserts the singleton.
+    expect(step.semantic.filter((s) => /sync-schedule|connector-sync/.test(s.id)).map((s) => s.id)).toEqual([SEMANTIC_TWIN_ID]);
+  });
+
+  it('replays the connector strip over a stored 17.x `connector` row — the seam `retiredFromLoadPath` exists for', () => {
+    // The live parse refuses (the tombstone); a row at rest has no author to
+    // teach, so the stored seam replays the FULL chain, retired entries
+    // included (ADR-0087 addendum). This is the family's own evidence for
+    // that seam, beside the object / action rows `stored.test.ts` pins.
+    const row = { ...CONNECTOR_WELL_FORMED, syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON } };
+    const notices: ConversionNotice[] = [];
+    const out = applyConversionsToStoredItem('connector', row, { onNotice: (n) => notices.push(n) });
+    expect(out.syncConfig).toEqual(SYNC_WELL_FORMED);
+    expect(out).not.toHaveProperty(['syncConfig', 'schedule']);
+    expect(notices.map((n) => n.conversionId)).toContain(CONVERSION_ID);
+    // The converted row is what the door now accepts — the seam hands the live schema a clean row.
+    expect(DeclarativeConnectorEntrySchema.safeParse(out).success).toBe(true);
+    // A row that never authored the key keeps its identity (copy-on-write).
+    expect(applyConversionsToStoredItem('connector', CONNECTOR_WELL_FORMED)).toEqual(CONNECTOR_WELL_FORMED);
   });
 
   it('the other four families take a D3 semantic entry each, and NO D2 conversion', () => {

@@ -152,10 +152,15 @@ describe('controls and the author-facing type', () => {
 });
 
 /**
- * Through the stack: the three typed positions a `defineStack` manifest can
- * reach (`jobs[].schedule.expression`, `connectors[].syncConfig.schedule`,
- * `objects[].titleFormat`) refuse at the named path via
- * `ObjectStackDefinitionSchema` — the choke point `os validate` parses through.
+ * Through the stack: the typed positions a `defineStack` manifest can reach
+ * (`jobs[].schedule.expression`, `objects[].titleFormat`) refuse at the named
+ * path via `ObjectStackDefinitionSchema` — the choke point `os validate`
+ * parses through. There were three when this narrowing landed:
+ * `connectors[].syncConfig.schedule` was the third, and #16320 retired it
+ * (ADR-0049 — nothing evaluated it). It stays in this block as the tombstone
+ * it now is: the envelope that used to draw the dialect verdict draws the
+ * retired-key refusal at the same path, so the roster shrinks HERE rather than
+ * a stale control quietly passing a cron through a slot that no longer exists.
  */
 describe('through `ObjectStackDefinitionSchema` — the stack-reachable typed slots refuse at the named path', () => {
   const manifest = { id: 'com.example.typed', name: 'typed-slots', version: '1.0.0', type: 'app' as const };
@@ -172,12 +177,11 @@ describe('through `ObjectStackDefinitionSchema` — the stack-reachable typed sl
 
   it('control: the same stack with a bare string in every typed slot parses green and normalizes each to its envelope', () => {
     const result = ObjectStackDefinitionSchema.safeParse({
-      manifest, jobs: [job('0 1 * * *')], connectors: [connector('*/15 * * * *')], objects: [object('{{record.name}}')],
+      manifest, jobs: [job('0 1 * * *')], objects: [object('{{record.name}}')],
     });
     expect(result.success, result.success ? '' : JSON.stringify(result.error.issues)).toBe(true);
     if (!result.success) return;
     expect(result.data.jobs?.[0]?.schedule).toMatchObject({ expression: { dialect: 'cron', source: '0 1 * * *' } });
-    expect(result.data.connectors?.[0]?.syncConfig?.schedule).toEqual({ dialect: 'cron', source: '*/15 * * * *' });
     expect(result.data.objects?.[0]?.titleFormat).toEqual({ dialect: 'template', source: '{{record.name}}' });
   });
 
@@ -193,10 +197,20 @@ describe('through `ObjectStackDefinitionSchema` — the stack-reachable typed sl
     ]);
   });
 
-  it('`connectors[].syncConfig.schedule` refuses a `template` envelope at `connectors.0.syncConfig.schedule`', () => {
-    expect(stackIssues({ manifest, connectors: [connector({ dialect: 'template', source: '{{x}}' })] })).toEqual([
-      { code: 'invalid_union', path: 'connectors.0.syncConfig.schedule', message: TYPED_EXPRESSION_DIALECT_ONLY.cron },
-    ]);
+  it('[#16320] `connectors[].syncConfig.schedule` is no longer a typed slot — the tombstone refuses ANY value at `connectors.0.syncConfig.schedule` as `invalid_type`, never as a dialect verdict', () => {
+    // The foreign envelope this case used to narrow on, the cron envelope the
+    // slot used to normalize TO, and the bare string it used to accept: all
+    // three draw the same retired-key refusal now, at the same path.
+    for (const authored of [{ dialect: 'template', source: '{{x}}' }, { dialect: 'cron', source: '*/15 * * * *' }, '*/15 * * * *']) {
+      const issues = stackIssues({ manifest, connectors: [connector(authored)] });
+      expect(issues, JSON.stringify(authored)).toHaveLength(1);
+      expect(issues[0]).toMatchObject({ code: 'invalid_type', path: 'connectors.0.syncConfig.schedule' });
+      expect(issues[0]!.message).not.toBe(TYPED_EXPRESSION_DIALECT_ONLY.cron);
+      expect(issues[0]!.message).toMatch(/^`connector\.syncConfig\.schedule` was removed in @objectstack\/spec 17/);
+    }
+    // Control: the same connector minus the key parses.
+    const control = ObjectStackDefinitionSchema.safeParse({ manifest, connectors: [{ name: 'sap', label: 'SAP', type: 'saas' as const }] });
+    expect(control.success, control.success ? '' : JSON.stringify(control.error.issues)).toBe(true);
   });
 
   it('`objects[].titleFormat` refuses a `cron` envelope at `objects.0.titleFormat`', () => {

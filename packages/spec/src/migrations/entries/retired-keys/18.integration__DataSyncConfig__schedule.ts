@@ -18,12 +18,17 @@
 // shape: a D2 conversion, `connector-sync-schedule-removed` (one strip per
 // `connectors[]` entry that authored the key, `retiredFromLoadPath`), wired
 // into the step-18 chain, and the house `os migrate meta --from 17` sentence
-// on the prescription — which must be true of the tool, and here is. No D3
-// semantic entry: the strip is fully mechanical, and the chain's `semantic`
-// list is the residue D2 cannot express.
+// on the prescription — which must be true of the tool, and here is. And a
+// D3 twin, `connector-sync-schedule-retired`, per the #15954 ruling's letter
+// ("its D3 entry says so and names the measured zero in-repo authors and the
+// NOT-MEASURED out-of-repo population"): the strip is the D2's; the twin
+// carries the population reading on fields that PROJECT (`reason`,
+// `acceptanceCriteria` → the upgrade guide, `spec-changes.json`, `os migrate
+// meta`), which this comment does not.
 //
 // Measured author population (the only family whose entry owes one, since it
-// is the only stack-collection member): zero in-repo authors — `examples/**`,
+// is the only stack-collection member; the projecting copy is the D3 twin's
+// `reason`): zero in-repo authors — `examples/**`,
 // `skills/**`, `content/docs/**` (generated references excluded) and every
 // package outside `packages/spec` swept for `syncConfig` + `schedule`, with the
 // declaring file lighting the control; objectui at the pinned sha

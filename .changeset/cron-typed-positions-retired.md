@@ -4,7 +4,7 @@
 
 feat(spec)!: retire the seven cron-typed positions nothing evaluated — export schedules, `ScheduleState.cronExpression`, `DataSyncConfig.schedule`, `CacheWarmup.schedule`, backup / DR-test schedules (ADR-0049)
 
-<!-- adr-0087: registered connector-sync-schedule-removed, export-schedule-cron-retired, schedule-state-cron-expression-retired, cache-warmup-schedule-retired, disaster-recovery-schedules-retired -->
+<!-- adr-0087: registered connector-sync-schedule-removed, connector-sync-schedule-retired, export-schedule-cron-retired, schedule-state-cron-expression-retired, cache-warmup-schedule-retired, disaster-recovery-schedules-retired -->
 
 **BREAKING** — an accept-set narrowing on seven authorable positions. Executes the
 maintainer ruling of 2026-09-06 (director decision batch #56, 「其他同意」 on the per-family
@@ -111,7 +111,11 @@ The retirement kit — one shape per family, as the ruling says:
   `api/ScheduleExportRequest:schedule.cronExpression`,
   `system/DisasterRecoveryPlan:testing.schedule`); ONE D2 conversion for the connector
   family (`connector-sync-schedule-removed`, one strip per `connectors[]` entry, wired
-  into the step-18 chain); four D3 semantic entries for the other four families
+  into the step-18 chain) plus its D3 twin `connector-sync-schedule-retired`, which
+  carries the measured author population — zero in-repo authors, out-of-repo stacks NOT
+  MEASURED from this repo — on the fields the upgrade guide, `spec-changes.json` and
+  `os migrate meta` project, as the #15954 ruling's letter requires; four D3 semantic
+  entries for the other four families
 - no liveness-ledger row: none of the five schemas is an enrolled ledger type
 - the ADR-0058 D7 expression-conformance ledger loses its `cron-declared-unwired` row
   (every position it covered is a tombstone now, so discovery by roster name no longer

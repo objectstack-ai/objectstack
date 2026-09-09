@@ -248,8 +248,10 @@ export type ConnectorConflictResolution = z.input<typeof ConnectorConflictResolu
  * in `RETIRED_KEYS_BY_MAJOR[18]`. This is the ONE position of the seven that a
  * stack manifest reaches, so unlike its siblings it carries a D2 conversion,
  * `connector-sync-schedule-removed` (one strip per `connectors[]` entry that
- * authored the key), and the house `os migrate meta` sentence — which must be
- * true of the tool, and here is. Measured population: zero in-repo authors
+ * authored the key), the house `os migrate meta` sentence — which must be
+ * true of the tool, and here is — and, per the #15954 ruling's letter, a D3
+ * twin `connector-sync-schedule-retired` that carries the population reading
+ * on fields that PROJECT (this comment does not): zero in-repo authors
  * (examples, docs, skills swept with controls; objectui at the pinned sha
  * clean); out-of-repo stacks NOT MEASURED from this repo.
  */
