@@ -158,11 +158,12 @@ import {
  *
  * Both shipped statements agree: `summary` is a member of the spec's
  * `NUMERIC_VALUE_TYPES` (so `valueSchemaFor` answers `z.number().finite()`)
- * and `driver-sql`'s DDL answers `col = table.float(name)`. The producer's
+ * and `driver-sql`'s DDL answers an exact-decimal column (`table.decimal`
+ * since #16318; `col = table.float(name)` before it). The producer's
  * `number` is therefore the CORRECT word and no correction applies. That a
  * roll-up may declare `summaryOperations.function: 'min'` over a non-numeric
  * child field — which `aggregateSummaryValue` returns verbatim, into that
- * float column — is a defect one layer down in the same family; it is filed,
+ * numeric column — is a defect one layer down in the same family; it is filed,
  * and it is a statement about `summary`'s own storage, not about what this
  * rule should say for the declared type.
  *

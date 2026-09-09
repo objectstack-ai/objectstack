@@ -263,9 +263,16 @@ quantity:
 - `min`/`max`: Range validation
 
 **Database mapping:**
-- SQL driver: a floating-point column (`REAL` on PostgreSQL/SQLite, `FLOAT` on
-  MySQL). `precision`/`scale` are validation and display metadata — the DDL does
-  **not** emit `NUMERIC(precision, scale)`.
+- SQL driver: an exact-decimal column — `NUMERIC(65,30)` on PostgreSQL,
+  `DECIMAL(65,30)` on MySQL, and `float` on SQLite, which applies neither
+  precision nor scale. The pair comes from one per-field-type table in
+  `packages/spec` (`NUMERIC_COLUMN_REPRESENTATION`) that every producer of DDL
+  reads, and `65,30` is MySQL's documented `DECIMAL` maximum — the portable
+  ceiling rather than a taste. A field's own `precision`/`scale` stay validation
+  and display metadata: they do **not** size the column, so the DDL still never
+  emits a `NUMERIC` sized from your declaration.
+- ⚠️ New columns only. A column created before this landed keeps the `REAL` /
+  `FLOAT` it already has — nothing retypes it, and no migration is planned.
 - MongoDB: `Number`
 
 **Use cases:**
@@ -309,8 +316,11 @@ deprecated in the spec.
 - `precision` (0–10, default 2) for decimal places
 
 **Database mapping:**
-- SQL driver: a floating-point column (`REAL` / `FLOAT`) — one column, no
-  companion currency column and no JSON blob
+- SQL driver: an exact-decimal column (`NUMERIC(65,30)` / `DECIMAL(65,30)`, and
+  `float` on SQLite) — one column, no companion currency column and no JSON blob.
+  Money is the member the exactness is for: the `REAL` column this replaced was
+  measured to take `1234567.89` and read it back `1234567.9`. New columns only —
+  an existing `REAL` money column is left exactly as it is
 - MongoDB: `Number`
 
 ---
@@ -331,7 +341,7 @@ discount_rate:
 
 **Storage:** the percentage **number itself** — `25.5` means 25.5%, matching the
 `min: 0` / `max: 100` bounds above. It is *not* rescaled to a 0–1 ratio on write.
-Physically it is the same floating-point column as `number`.
+Physically it is the same exact-decimal column as `number`.
 
 <Callout>
 The separate `percent` **template filter** (`{{ record.rate | percent }}`) does
@@ -1174,7 +1184,7 @@ The column each type gets from the SQL driver, per dialect:
 |---------------|------------|-------|--------|
 | `text` / `textarea` / `html` | `TEXT` \* | `TEXT` \* | `TEXT` \* |
 | `email` / `url` / `phone` / `password` | `VARCHAR(maxLength)` † | `VARCHAR(maxLength)` † | `VARCHAR(maxLength)` † |
-| `number` / `currency` / `percent` | `REAL` | `FLOAT` | `REAL` |
+| `number` / `currency` / `percent` | `NUMERIC(65,30)` ‡ | `DECIMAL(65,30)` ‡ | `float` ‡ |
 | `date` | `DATE` | `DATE` | `TEXT` (`YYYY-MM-DD`) |
 | `datetime` | `TIMESTAMPTZ` | `DATETIME(3)` | `TEXT` (canonical `…Z`) |
 | `time` | `TIME` | `TIME(3)` | `TEXT` (`HH:MM:SS[.fff]`) |
@@ -1182,10 +1192,22 @@ The column each type gets from the SQL driver, per dialect:
 | `select` / `radio` | `VARCHAR(255)` | `VARCHAR(255)` | `VARCHAR(255)` |
 | `multiselect` / `tags` | `JSON` | `JSON` | `TEXT` (JSON) |
 | `lookup` / `master_detail` / `tree` | `VARCHAR(255)` | `VARCHAR(255)` | `VARCHAR(255)` |
-| `summary` | `REAL` | `FLOAT` | `REAL` |
+| `summary` | `NUMERIC(65,30)` ‡ | `DECIMAL(65,30)` ‡ | `float` ‡ |
 | `autonumber` | `VARCHAR(255)` | `VARCHAR(255)` | `VARCHAR(255)` |
 | `formula` | *(no column — virtual)* | *(no column)* | *(no column)* |
 | `json` / `location` / `address` | `JSON` | `JSON` | `TEXT` (JSON) |
+
+‡ The numeric family takes one physical representation, stated per field type
+in `packages/spec` (`NUMERIC_COLUMN_REPRESENTATION`) and read by every producer
+of DDL — `SqlDriver.createColumn` and both `os generate migration` formats — so
+one declaration can no longer produce three different columns. `number` /
+`currency` / `percent` / `slider` / `progress` / `summary` are the exact-decimal
+members; `rating` is `INTEGER` on PostgreSQL and MySQL, which is where a
+fractional star count is refused (SQLite refuses no fractional value and stores
+it as a REAL). On SQLite knex compiles the exact-decimal column and the `float`
+column it replaced to the identical `float` DDL, so that dialect keeps REAL
+affinity and gains no exactness. **New columns only** — a column that already
+exists keeps its `REAL` / `FLOAT`, and no migration is planned for it.
 
 \* The text family is `VARCHAR(maxLength)` rather than `TEXT`, on all three
 dialects, when **both** hold: the field declares a `maxLength` of 768 or less,

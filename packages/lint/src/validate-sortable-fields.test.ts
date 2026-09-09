@@ -24,7 +24,8 @@ const opportunityFields = {
   stage: { type: 'select', label: 'Stage' },
   // Virtual — computed on read, no stored column on any driver.
   expected_revenue: { type: 'formula', label: 'Expected Revenue' },
-  // Stored: `table.float`, maintained by the engine. Sorts correctly.
+  // Stored: `table.decimal` since #16318 (`table.float` before it), maintained
+  // by the engine. Sorts correctly.
   open_task_count: { type: 'summary', label: 'Open Tasks' },
   // Stored: `table.string`, engine-assigned. Sorts correctly.
   opp_no: { type: 'autonumber', label: 'Opportunity No.' },
@@ -102,8 +103,9 @@ describe('validateSortableFields — the virtuality verdict (#9257)', () => {
  *
  * The trap is that the spec DOES group all three — `COMPUTED_VALUE_TYPES` is
  * `formula` / `summary` / `autonumber` — but that set is the WRITE contract
- * ("never client-written"), not a storage fact. `summary` is a `table.float`
- * the engine maintains and `autonumber` a `table.string` it assigns; both have
+ * ("never client-written"), not a storage fact. `summary` is a `table.decimal`
+ * the engine maintains (a `table.float` before #16318) and `autonumber` a
+ * `table.string` it assigns; both have
  * a real column and both sort. Only `formula` has none.
  */
 describe('validateSortableFields — what it must NOT flag', () => {

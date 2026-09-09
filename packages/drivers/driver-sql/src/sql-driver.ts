@@ -265,6 +265,9 @@ const NUMERIC_SCALAR_TYPES = new Set<string>([
   'integer', 'int', 'float',
 ]);
 
+/** Shared empty answer for {@link SqlDriver.numericRepairFieldsFor}. */
+const EMPTY_NUMERIC_REPAIR_FIELDS: readonly string[] = Object.freeze([]);
+
 /**
  * The builtin audit-timestamp columns every managed object carries. They are
  * stamped to a single canonical instant format on SQLite (see
@@ -4380,6 +4383,25 @@ export class SqlDriver implements IDataDriver {
   protected jsonFields: Record<string, string[]> = {};
   protected booleanFields: Record<string, string[]> = {};
   protected numericFields: Record<string, string[]> = {};
+  /**
+   * [#16318] The SPEC numeric class only — the members of
+   * `NUMERIC_VALUE_TYPES`, without the driver's SQL aliases
+   * (`integer`/`int`/`float`). This is the set whose physical column
+   * `NUMERIC_COLUMN_REPRESENTATION` decides, so it is the only set whose read
+   * back a dialect move by THIS table can have changed.
+   *
+   * Why a second list rather than a wider use of {@link numericFields}: the
+   * read coercion runs on every dialect since #16318, and `numericFields`
+   * carries the aliases an EXTERNAL/introspected object (ADR-0015) maps onto
+   * columns this platform never created. `node-postgres` hands back `int8` as
+   * a STRING, so coercing through the alias list would put `Number()` on a
+   * pre-existing external `bigint` — silently rounding above 2^53 on a column
+   * the #16318 ruling excluded from its scope in as many words (「不考虑现有
+   * 数据」, new tables only). ⛔ The every-dialect pass reads THIS list; the
+   * SQLite legacy-TEXT repair keeps reading the wider one, exactly as it did
+   * before, so no dialect loses a repair it already had.
+   */
+  protected declaredNumericFields: Record<string, string[]> = {};
   protected dateFields: Record<string, Set<string>> = {};
   protected datetimeFields: Record<string, Set<string>> = {};
   /**
@@ -9635,6 +9657,7 @@ export class SqlDriver implements IDataDriver {
     this.jsonFields[shard] = this.jsonFields[base] ?? [];
     this.booleanFields[shard] = this.booleanFields[base] ?? [];
     this.numericFields[shard] = this.numericFields[base] ?? [];
+    this.declaredNumericFields[shard] = this.declaredNumericFields[base] ?? [];
     this.autoNumberFields[shard] = this.autoNumberFields[base] ?? [];
     if (this.dateFields[base]) this.dateFields[shard] = this.dateFields[base];
     if (this.datetimeFields[base]) this.datetimeFields[shard] = this.datetimeFields[base];
@@ -9761,6 +9784,7 @@ export class SqlDriver implements IDataDriver {
     const jsonCols: string[] = [];
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
+    const declaredNumericCols: string[] = [];
     const dateCols: string[] = [];
     const datetimeCols: string[] = [];
     const timeCols: string[] = [];
@@ -9773,6 +9797,7 @@ export class SqlDriver implements IDataDriver {
         if (this.isJsonField(type, field)) jsonCols.push(name);
         if (type === 'boolean' || type === 'toggle') booleanCols.push(name);
         if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) numericCols.push(name);
+        if (NUMERIC_VALUE_TYPES.has(type) && !field.multiple) declaredNumericCols.push(name);
         if (type === 'date') dateCols.push(name);
         if (type === 'datetime') datetimeCols.push(name);
         if (type === 'time') timeCols.push(name);
@@ -9785,6 +9810,7 @@ export class SqlDriver implements IDataDriver {
     this.jsonFields[key] = jsonCols;
     this.booleanFields[key] = booleanCols;
     this.numericFields[key] = numericCols;
+    this.declaredNumericFields[key] = declaredNumericCols;
     this.autoNumberFields[key] = autoNumberCols;
     this.tenantFieldByTable[key] = tenantField;
     if (dateCols.length) this.dateFields[key] = new Set(dateCols);
@@ -9831,6 +9857,7 @@ export class SqlDriver implements IDataDriver {
     const jsonCols: string[] = [];
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
+    const declaredNumericCols: string[] = [];
     const autoNumberCols: Array<{ name: string; format: string; tokens: AutonumberToken[]; tenantField: string | null }> = [];
     // Tenant-isolation column: explicit tenancy opt-out → declared field →
     // implicit `organization_id`. See {@link computeAndRecordTenantField}
@@ -9854,6 +9881,10 @@ export class SqlDriver implements IDataDriver {
         if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) {
           numericCols.push(name);
         }
+        // [#16318] The spec class alone — see `declaredNumericFields`.
+        if (NUMERIC_VALUE_TYPES.has(type) && !field.multiple) {
+          declaredNumericCols.push(name);
+        }
         if (type === 'date') {
           (this.dateFields[tableName] ??= new Set()).add(name);
         }
@@ -9876,6 +9907,7 @@ export class SqlDriver implements IDataDriver {
     this.jsonFields[tableName] = jsonCols;
     this.booleanFields[tableName] = booleanCols;
     this.numericFields[tableName] = numericCols;
+    this.declaredNumericFields[tableName] = declaredNumericCols;
     this.autoNumberFields[tableName] = autoNumberCols;
     this.tenantFieldByTable[tableName] = tenantField;
     // [#11067] The declared shape's answer to "does this table carry
@@ -13129,8 +13161,47 @@ export class SqlDriver implements IDataDriver {
    * that string-valued numerics exist only for legacy TEXT-affinity columns;
    * #16318 falsified that premise by moving the numeric family to an exact
    * decimal, which node-postgres and mysql2 both hand back as a string, so it
-   * runs on every dialect now.
+   * runs on every dialect now — over the fields
+   * {@link numericRepairFieldsFor} names, which is NOT the same set on every
+   * dialect.
    */
+  /**
+   * [#16318] The fields the numeric read-repair may touch on THIS dialect —
+   * one answer for `formatOutput`'s row pass and for
+   * {@link readPresentationKind}'s `aggregate()`/`distinct()` door, because a
+   * field presented as a number through one and as a string through the other
+   * is the divergence #11782 closed for booleans.
+   *
+   * The two lists differ ON PURPOSE, and the difference is the scope bound the
+   * #16318 ruling drew (new tables only, 「不考虑现有数据」):
+   *
+   *   - SQLite reads {@link numericFields} — `NUMERIC_SCALAR_TYPES`, the spec
+   *     class PLUS the driver aliases. Unchanged: this is the legacy
+   *     TEXT-affinity repair that pass was written for, and narrowing it here
+   *     would drop a repair SQLite has had since #2025.
+   *   - Every other dialect reads {@link declaredNumericFields} — the spec
+   *     class ALONE. Those are the field types whose column this change
+   *     retypes, so they are the only ones whose read it can have changed. An
+   *     alias (`integer`/`int`/`float`) names a column on an EXTERNAL or
+   *     introspected object (ADR-0015) that this platform did not create and
+   *     this table does not decide; `node-postgres` returns `int8` as a
+   *     STRING, so including them would put `Number()` on a pre-existing
+   *     `bigint` and round it silently above 2^53 — a read-path change to
+   *     existing deployments, which is exactly what the ruling excluded.
+   *
+   * ⚠️ The residual bound, stated because scoping does not remove it: the read
+   * seam is a JS double either way. A `number`/`currency`/… field mapped onto
+   * a pre-existing wide column still arrives through `Number()`, and 30
+   * fraction digits do not survive binary64 (see the changeset). What the
+   * scope buys is that no column class OUTSIDE this table's reach had its read
+   * changed by this table.
+   */
+  protected numericRepairFieldsFor(table: string | null | undefined): readonly string[] {
+    if (!table) return EMPTY_NUMERIC_REPAIR_FIELDS;
+    const list = this.isSqlite ? this.numericFields[table] : this.declaredNumericFields[table];
+    return list ?? EMPTY_NUMERIC_REPAIR_FIELDS;
+  }
+
   protected readPresentationKind(
     table: string | null | undefined,
     field: string,
@@ -13147,7 +13218,7 @@ export class SqlDriver implements IDataDriver {
     // node-postgres and by mysql2, so `aggregate()` / `distinct()` would present
     // a declared numeric field as a string on exactly the dialects `find()` now
     // presents it as a number. One class, one answer, on every door.
-    if (this.numericFields[table]?.includes(field)) return 'number';
+    if (this.numericRepairFieldsFor(table).includes(field)) return 'number';
     return null;
   }
 
@@ -16466,9 +16537,12 @@ export class SqlDriver implements IDataDriver {
       //
       // ⚠️ The read path is what makes the move safe on the server dialects:
       // node-postgres parses `numeric` to a STRING and `real` to a number, and
-      // it is `NUMERIC_SCALAR_TYPES`' existing `numericFields` coercion —
-      // already registered for all seven of these types — that turns it back
-      // into a JS number on the way out.
+      // it is `formatOutput`'s existing numeric coercion — registered for all
+      // seven of these types through `declaredNumericFields` — that turns it
+      // back into a JS number on the way out. ⚠️ Through a JS double: 30
+      // fraction digits do not survive binary64, so the COLUMN is exact and
+      // `find()` is exact only up to a double. The bound is stated in the
+      // changeset and in `numericRepairFieldsFor`.
       case 'number':
       case 'currency':
       case 'percent':
@@ -17083,7 +17157,11 @@ export class SqlDriver implements IDataDriver {
     // value or when the column was created. Only strings are touched — a
     // REAL/INTEGER column already yields a number — and a genuinely non-numeric
     // value (junk legacy data) is left intact rather than turned into NaN.
-    // See NUMERIC_SCALAR_TYPES.
+    // ⛔ The field list is {@link numericRepairFieldsFor}, NOT `numericFields`:
+    // it is the wider alias-carrying list on SQLite and the spec class alone
+    // everywhere else, so this pass cannot reach a column class #16318 does not
+    // decide (an external `bigint` above all). Read that method before widening
+    // this line — the narrowing IS the scope bound the ruling drew.
     //
     // ⚠️ [#16318] This pass was SQLite-only until the numeric family moved to an
     // exact-decimal column, on the stated premise that string-valued numerics
@@ -17101,8 +17179,8 @@ export class SqlDriver implements IDataDriver {
     // Two SQLite readings stay exactly as they were: the legacy TEXT-affinity
     // repair this pass was written for, and a fresh column, which knex declares
     // `float` for both the old float arm and the new decimal one.
-    const numericFields = this.numericFields[object];
-    if (numericFields && numericFields.length > 0) {
+    const numericFields = this.numericRepairFieldsFor(object);
+    if (numericFields.length > 0) {
       for (const field of numericFields) {
         const v = data[field];
         if (typeof v === 'string' && v.trim() !== '') {

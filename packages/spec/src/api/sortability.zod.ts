@@ -61,7 +61,8 @@
  * ## Considered and deliberately NOT members
  *
  * - `summary` / `autonumber` — the other two `COMPUTED_VALUE_TYPES`. They sort
- *   CORRECTLY (`summary` is an engine-maintained `table.float`, `autonumber`
+ *   CORRECTLY (`summary` is an engine-maintained exact-decimal column —
+ *   `table.decimal` since #16318, `table.float` before it — and `autonumber`
  *   an engine-assigned `table.string`; measured on #6924), which is exactly
  *   why virtuality is judged by the storage predicate and never by the write
  *   contract — widening would refuse the two types that work.

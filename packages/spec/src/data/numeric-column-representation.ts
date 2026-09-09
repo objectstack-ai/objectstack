@@ -95,15 +95,42 @@
  * supported"). A stated pair is the only spelling all three accept, which is
  * what the ruling asked for.
  *
- * ## The residual bound, stated rather than assumed
+ * ## The residual bound, stated rather than assumed — and it starts EARLIER
+ * ## than "below 1e-30"
  *
- * An exact-decimal column is bounded where a float is not, so this table is
- * not lossless in every direction. Magnitudes below 1e-30 round to zero and
- * magnitudes at or above 1e35 are REFUSED, where today's `real` keeps about
- * seven significant digits out to ~1e38. Two things make that the right
- * trade: a refusal is loud and a silent rounding is not, and the sql format's
- * `numeric(18,2)` already refuses everything at or above 1e16 today. It is a
- * bound, and it is stated here so no reader has to rediscover it.
+ * An exact-decimal column is bounded where a float is not, so this table is not
+ * lossless in every direction. The bound to state is **at most
+ * {@link NUMERIC_COLUMN_SCALE} fractional digits are kept**, not "below 1e-30
+ * rounds to zero" — the second is a corollary of the first and understates
+ * where the loss begins by seventeen orders of magnitude. A double carries
+ * about 17 significant decimal digits, so once a value has 13 or more leading
+ * zeros after the point, its last digits fall past the 30th place and are
+ * rounded away SILENTLY. Measured, live, through this driver:
+ *
+ * ```
+ *   value written        PostgreSQL 16.13 stored        MySQL 8.0.46 stored
+ *   1.2345678901234567e-11  0.000000000012345678901234567000   (same)
+ *   1.2345678901234567e-13  0.000000000000123456789012345670   ...345660  <- MySQL
+ *                                                                            already
+ *                                                                            differs
+ *   1.2345678901234567e-15  0.000000000000001234567890123457   (same)  <- both lose
+ *   1e-31                   0.000000000000000000000000000000   (same)  <- zero
+ *   0.5  (CONTROL)          0.500000000000000000000000000000   (same)  <- exact
+ * ```
+ *
+ * So: exact through 1e-13, trailing digits gone below it, zero below 1e-30 —
+ * and magnitudes at or above 1e35 are REFUSED outright, where today's `real`
+ * keeps about seven significant digits out to ~1e38. Two things still make that
+ * the right trade: a refusal is loud and a silent rounding is not, and the sql
+ * format's `numeric(18,2)` already refuses everything at or above 1e16 today.
+ *
+ * ⚠️ And the READ seam is a JS double even where the column is exact. A 30-scale
+ * decimal string reaches a caller through `Number()`, so `find()` is exact only
+ * up to binary64: a value not born as a JS double — one written by SQL, a
+ * `summary` summed in SQL, anything at or above 2^53 — round-trips through the
+ * COLUMN exactly and through `find()` approximately. The fidelity this table
+ * buys is exact-column-through-a-double, which is more than `real` gave in both
+ * places and is not the same as end-to-end exactness.
  *
  * ## SQLite, per type — the constraint the report raised, answered
  *
@@ -151,10 +178,20 @@
  * retypes no existing column (schema sync is additive and never alters a
  * column's type in place), it plans no migration, and no drift finding reads
  * it. A deployment created before this table keeps its `real` columns, keeps
- * their values, and keeps reading them back as JS numbers through
- * `NUMERIC_SCALAR_TYPES`' read coercion — which is also what makes the new
- * columns read back as numbers, since node-postgres parses `numeric` to a
- * STRING and `real` to a number.
+ * their values, and keeps reading them back as JS numbers through the driver's
+ * read coercion — which is also what makes the new columns read back as
+ * numbers, since node-postgres parses `numeric` to a STRING and `real` to a
+ * number.
+ *
+ * ⚠️ The bound is enforced on the READ path too, not only on the DDL. That
+ * coercion now runs on every dialect (it was SQLite-only on a premise this
+ * table falsified), and off SQLite it is scoped to the members of this table —
+ * `SqlDriver.numericRepairFieldsFor`. The driver's SQL aliases (`integer` /
+ * `int` / `float`), which name EXTERNAL and introspected columns this platform
+ * never created, are deliberately outside it: node-postgres hands a `bigint`
+ * back as a string, and coercing that would round an existing column above 2^53
+ * — a change to existing data's read, which is precisely what 「不考虑现有数据」
+ * excludes.
  */
 
 import { NUMERIC_VALUE_TYPES } from './field-value.zod';

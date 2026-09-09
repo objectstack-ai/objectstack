@@ -67,7 +67,8 @@
  * ⛔ NOT the spec's `COMPUTED_VALUE_TYPES` (`formula` / `summary` /
  * `autonumber`). That is the WRITE contract — "never client-written" — and
  * gating a sort with it would refuse the two types that sort CORRECTLY:
- * `summary` is a `table.float` maintained by the engine and `autonumber` a
+ * `summary` is a `table.decimal` maintained by the engine (a `table.float`
+ * before #16318) and `autonumber` a
  * `table.string` the engine assigns. The distinction is pinned by name in the
  * engine's own conformance suite and restated in `protocol.ts`'s
  * `UNMATERIALIZED_SORT_TYPES` note; widening here would produce the false

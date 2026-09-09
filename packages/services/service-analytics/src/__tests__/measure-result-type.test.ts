@@ -186,7 +186,7 @@ const FIELD_TYPE_VERDICTS: ReadonlyArray<{
   { type: 'rating', bucket: 'numeric-correct', why: 'spec NUMERIC_VALUE_TYPES; a numeric column' },
   { type: 'slider', bucket: 'numeric-correct', why: 'spec NUMERIC_VALUE_TYPES; a numeric column' },
   { type: 'progress', bucket: 'numeric-correct', why: 'spec NUMERIC_VALUE_TYPES; a numeric column' },
-  { type: 'summary', bucket: 'numeric-correct', why: 'spec NUMERIC_VALUE_TYPES and DDL table.float — both shipped statements say numeric' },
+  { type: 'summary', bucket: 'numeric-correct', why: 'spec NUMERIC_VALUE_TYPES and an exact-decimal DDL column (table.decimal, #16318) — both shipped statements say numeric' },
   // ── measured, and the readings do not converge ──
   { type: 'boolean', bucket: 'backend-dependent', why: 'Postgres has no min(boolean) at all; SQLite answers 0/1 as numbers; the driver seam has been recorded answering false/true' },
   { type: 'toggle', bucket: 'backend-dependent', why: 'a boolean rendered as a switch — same column, same three readings' },
@@ -663,7 +663,8 @@ describe('E) a min/max over a string-valued column is described as string, not n
     // not on `sourceFieldMeta`'s return shape (and is itself optional).
     expect(typeOf(result.fields, 'min_margin')).toBe('number');
     // `summary` — genuinely numeric on both shipped statements (spec
-    // NUMERIC_VALUE_TYPES, DDL `table.float`), so `number` is CORRECT here
+    // NUMERIC_VALUE_TYPES, DDL `table.decimal` since #16318), so `number` is
+    // CORRECT here
     // rather than merely unexamined.
     expect(typeOf(result.fields, 'min_child_total')).toBe('number');
   });
