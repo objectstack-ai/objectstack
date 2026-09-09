@@ -99,8 +99,32 @@ function supersededOrgAdminSetName(posture: TenancyPosture, suppressUnbounded = 
 
 interface MaybeLogger {
   info?: (message: string, meta?: Record<string, any>) => void;
-  warn?: (message: string, meta?: Record<string, any>) => void;
+  /**
+   * [#9754] NON-optional, and it is the `error?` member below that makes it so.
+   * An optional `error` with no declared alternative is a contract that permits
+   * silence: a value of this type could carry no channel at all, and the
+   * durability report this module owes — a standing capability withdrawn, or a
+   * revoke that did not land — would have nowhere to go. `warn` is the level a
+   * durability degradation degrades TO and no further (AGENTS.md, "Degradation
+   * log levels"), so it is the one that must exist in every value of the type.
+   * ⛔ Not solved by requiring `error` instead (hosts legitimately inject
+   * reduced sinks), and ⛔ not by requiring `info`: a lost write reported at
+   * `info` reads as normal operation.
+   */
+  warn: (message: string, meta?: Record<string, any>) => void;
   debug?: (message: string, meta?: Record<string, any>) => void;
+  /**
+   * [#15840] The level the ruling names for the one read whose un-answered
+   * value would otherwise DESTROY standing state. Optional like its siblings:
+   * this is an input the caller supplies, not a channel this module publishes.
+   *
+   * ⚠️ Three parameters, not two: the platform `Logger` contract
+   * (`packages/spec/src/contracts/logger.ts`) takes the `Error` in its OWN
+   * second argument at this level and only this level. Declaring the sibling
+   * `(message, meta)` shape here would make the real `ctx.logger` unassignable
+   * — measured, as three TS2322s in `security-plugin.ts`.
+   */
+  error?: (message: string, error?: Error, meta?: Record<string, any>) => void;
 }
 
 function genId(prefix: string): string {
@@ -147,25 +171,66 @@ async function tryFind(
    */
   context: { isSystem: true; tenantId?: string } = SYSTEM_CTX,
 ): Promise<any[]> {
-  try {
-    const rows = await ql.find(object, { where, limit }, { context });
-    // Bare array, driven — see `engine-find-bare-array.pin.test.ts`, which boots
-    // a real engine over a real `SqlDriver` and pins this seam. The `{ records }`
-    // limb removed from here was dead code that read as a contract.
-    //
-    // The `[]` arm is left exactly as it was: this function's whole contract is
-    // `Promise<any[]>` best-effort, and turning it into a gap is a different
-    // change with a different blast radius than removing an unreachable limb.
-    return Array.isArray(rows) ? rows : [];
-  } catch (e) {
+  const answer = await readRows(ql, object, where, limit, context);
+  if (answer.answered) return answer.rows;
+  if (answer.why === 'threw') {
     // Reads legitimately fail before the tables exist (boot ordering), so this
     // is debug rather than warn — but it is no longer nothing (#4640).
     logger?.debug?.('[security] org-admin reconcile read failed — treated as no rows', {
       object,
-      error: (e as Error)?.message,
+      error: (answer.error as Error)?.message,
     });
-    return [];
   }
+  return [];
+}
+
+/**
+ * [#15840] What `tryFind` above throws away: WHETHER THE READ ANSWERED.
+ *
+ * `tryFind` maps both "the store answered nothing" and "the store did not
+ * answer" onto the same `[]`. For most of this module's reads that is a
+ * defensible best-effort contract — a missing answer means a grant is not
+ * created, and the next boot sweep asks again. For exactly one read it is not:
+ * the `sys_member` read that decides {@link reconcileOrgAdminGrant}'s
+ * `shouldGrant`. There, `[]` means "this user is not an admin of this org",
+ * which is the input to a DELETE — so an un-answered read withdraws a standing
+ * capability, and the store keeps it withdrawn after the fault clears.
+ *
+ * This is the read-seam invention rule in AGENTS.md, and #15840's ruling
+ * (decision batch #105 item 5, option A) is per-site, ⛔ NOT a uniform sweep:
+ * only the caller that turns the value into a revoke asks this question. Every
+ * other caller keeps going through `tryFind` and behaves exactly as it did.
+ *
+ * A non-array answer is reported as "did not answer" rather than as an empty
+ * page for the same reason: an engine that handed back `{ records: [...] }`
+ * would be carrying the memberships, and reading that envelope as "not a
+ * member" is the same wrongful revoke by another route. It is unreached on the
+ * shipped engine (#15598 drove every seam), and it stays unreachable-by-value
+ * rather than being silently re-invented here.
+ */
+type ReadAnswer =
+  | { answered: true; rows: any[] }
+  | { answered: false; why: 'threw'; error: unknown }
+  | { answered: false; why: 'not_an_array'; error?: undefined };
+
+async function readRows(
+  ql: any,
+  object: string,
+  where: any,
+  limit: number,
+  context: { isSystem: true; tenantId?: string },
+): Promise<ReadAnswer> {
+  let rows: any;
+  try {
+    rows = await ql.find(object, { where, limit }, { context });
+  } catch (e) {
+    return { answered: false, why: 'threw', error: e };
+  }
+  // Bare array, driven — see `engine-find-bare-array.pin.test.ts`, which boots
+  // a real engine over a real `SqlDriver` and pins this seam. The `{ records }`
+  // limb removed from here was dead code that read as a contract.
+  if (Array.isArray(rows)) return { answered: true, rows };
+  return { answered: false, why: 'not_an_array' };
 }
 
 async function tryInsert(ql: any, object: string, data: any, logger?: MaybeLogger): Promise<any | null> {
@@ -521,6 +586,11 @@ async function resolvePermissionSetIdsForName(
  *   removal symmetrically).
  *
  * Returns a structured report for observability. Never throws.
+ *
+ * [#15840] One `skipped` reason is load-bearing rather than diagnostic:
+ * `membership_unreadable` means the `sys_member` read did not answer, so this
+ * call declined to decide at all. It is NOT `noop` and NOT `revoked` — the pair
+ * is left exactly as it was found, and the caller's next round asks again.
  */
 export async function reconcileOrgAdminGrant(
   ql: any,
@@ -599,13 +669,38 @@ export async function reconcileOrgAdminGrant(
   //    in this org. Better-auth allows multiple membership rows per
   //    pair under some edge cases (legacy data) — any qualifying row
   //    is enough.
-  const memberships = await tryFind(
+  //
+  // [#15840] This is the read the ruling names, and it is the only read in this
+  // module asked through {@link readRows} instead of `tryFind`. `[]` here does
+  // not mean "nothing to do": it means `shouldGrant === false`, which is the
+  // input to the revoke branch below. So an un-answered read must NOT be spelled
+  // `[]` — that is the difference between "this user is not an admin" and "the
+  // store would not tell me", and the first of those DELETES a standing grant.
+  //
+  // ⛔ The skip lands HERE, before the superseded-revoke leg and before either
+  // branch: the ruling's disposition is that a read fault "skips that user for
+  // the round" and "never enters the revoke branch". A round that could not read
+  // performs no write at all — nothing is granted, so nothing widens, and
+  // nothing is revoked, so nothing standing is destroyed by a transient fault.
+  // The next `sys_member` write and the `kernel:ready` backfill ask again.
+  const membershipRead = await readRows(
     ql,
     'sys_member',
     { user_id: userId, organization_id: orgId },
     10,
-    logger,
+    SYSTEM_CTX,
   );
+  if (!membershipRead.answered) {
+    logger?.error?.(
+      '[security] org-admin reconcile SKIPPED — the sys_member read did not answer, so this ' +
+        'round cannot tell "not a member" from "could not ask"; NOTHING was granted or revoked ' +
+        'for this pair, and any standing grant is left exactly as it was',
+      membershipRead.error instanceof Error ? membershipRead.error : undefined,
+      { object: 'sys_member', userId, orgId, why: membershipRead.why },
+    );
+    return { action: 'skipped', reason: 'membership_unreadable' };
+  }
+  const memberships = membershipRead.rows;
   // The row that QUALIFIES is also the row the grant is provenance-linked to
   // (#4586) — "this capability exists because of that membership".
   const qualifyingMembership = memberships.find((m: any) => isAdminRole(m?.role));
