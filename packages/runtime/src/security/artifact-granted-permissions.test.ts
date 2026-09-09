@@ -53,7 +53,7 @@ describe('#13457 — the artifact carries the package ids the grant map is keyed
         // The id lives one level down on this shape — the same `bundle.manifest
         // || bundle` unwrap AppPlugin's constructor performs. Reading the
         // artifact's own top level here would return `undefined` and silently
-        // gate nothing on every single-package artifact.
+        // register nothing on every single-package artifact.
         expect(carriedPackageIds({ manifest: { id: 'com.acme.solo' } })).toEqual(['com.acme.solo']);
     });
 });
@@ -65,7 +65,7 @@ describe('#13457 — absent, `{}`, and consented are THREE states, never two', (
         const binding = registerArtifactGrantedPermissions(artifact(), e);
 
         expect(binding.declared).toBe(false);
-        expect(binding.gated).toEqual([]);
+        expect(binding.registered).toEqual([]);
         // ⭐ The clause-1.3 pin: nothing is registered, so nothing is denied.
         // The collapse this catches — looping over the CARRIED packages and
         // registering `grants[id]` for each — would register `undefined` here
@@ -83,8 +83,8 @@ describe('#13457 — absent, `{}`, and consented are THREE states, never two', (
         // `declared` is the only thing that separates them, which is why it is
         // on the record at all.
         expect(binding.declared).toBe(true);
-        expect(binding.gated).toEqual([]);
-        expect(binding.ungated).toEqual(['com.acme.crm', 'com.acme.reports']);
+        expect(binding.registered).toEqual([]);
+        expect(binding.unregistered).toEqual(['com.acme.crm', 'com.acme.reports']);
     });
 
     it('a `{}` ENTRY is a consent record that consented to nothing — registered, and denies', () => {
@@ -94,7 +94,7 @@ describe('#13457 — absent, `{}`, and consented are THREE states, never two', (
             e,
         );
 
-        expect(binding.gated).toEqual(['com.acme.crm']);
+        expect(binding.registered).toEqual(['com.acme.crm']);
         const perms = e.getPluginPermissions('com.acme.crm');
         // ⭐ DEFINED — the discriminator against the absent case one test up,
         // where the identical read is `undefined`. Both deny; only one of them
@@ -123,7 +123,7 @@ describe('#13457 — absent, `{}`, and consented are THREE states, never two', (
         expect(perms.canWriteFile('/tmp/x')).toBe(false);
     });
 
-    it('a package the map does NOT name stays ungated while its sibling is gated', () => {
+    it('a package the map does NOT name stays unregistered while its sibling is registered', () => {
         // ⭐ The boot-brick pin, and the reason the walk reads the MAP's keys
         // rather than the package list: a first-party package sharing an
         // artifact with a consent-bearing one must keep loading exactly as it
@@ -134,8 +134,8 @@ describe('#13457 — absent, `{}`, and consented are THREE states, never two', (
             e,
         );
 
-        expect(binding.gated).toEqual(['com.acme.crm']);
-        expect(binding.ungated).toEqual(['com.acme.reports']);
+        expect(binding.registered).toEqual(['com.acme.crm']);
+        expect(binding.unregistered).toEqual(['com.acme.reports']);
         expect(e.getPluginPermissions('com.acme.reports')).toBeUndefined();
     });
 });
@@ -152,7 +152,7 @@ describe('#13457 — a consent record that binds to nothing is said out loud', (
         );
 
         expect(binding.unbound).toEqual(['com.acme.ghost']);
-        expect(binding.gated).toEqual([]);
+        expect(binding.registered).toEqual([]);
         expect(e.getPluginPermissions('com.acme.ghost')).toBeUndefined();
         expect(
             log.warn.mock.calls.some((c: unknown[]) => String(c[0]).includes('bound to NO package')),
@@ -162,27 +162,96 @@ describe('#13457 — a consent record that binds to nothing is said out loud', (
     it('a map that is not a record at all reads as declared-with-nothing-bound', () => {
         const binding = resolveArtifactGrantBinding(artifact({ grantedPermissions: [] }));
         expect(binding.declared).toBe(true);
-        expect(binding.gated).toEqual([]);
+        expect(binding.registered).toEqual([]);
     });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('#13457 — the unattributable-consent case cannot reach this seam', () => {
-    // The artifact contract has no spelling for "a consent record exists but
-    // cannot be attributed": when a manifest carries no top-level string `id`
-    // the producer emits it under NO name, so to a consumer that case is
-    // indistinguishable from "no consent record". This pin records WHY the
-    // consumer never has to choose a behaviour for it: a package with no usable
-    // id is refused BEFORE any grant question, by the platform's own package
-    // sorter — and `ManifestSchema.id` is a required `z.string()`, so
-    // `ArtifactPackageSchema` refuses the same shape one door earlier.
-    it('a `packages[]` entry with no usable id is refused, not silently ungated', () => {
-        expect(() => carriedPackageIds({ packages: [{ manifest: { name: '', version: '1.0.0' } }] }))
-            .toThrow(/no usable package id|not a package entry/);
+// The artifact contract has no spelling for "a consent record exists but cannot
+// be attributed": when a manifest carries no top-level string `id` the producer
+// emits it under NO name, so to a consumer that case is indistinguishable from
+// "no consent record".
+//
+// ⚠️ An earlier revision of this block claimed that case "cannot reach this
+// seam", closed by two doors. MEASURED FALSE (#13457 contract review ⑤): the
+// doors refuse two spellings and the THIRD — `{ id: '', name: 'x' }` — walks
+// through both, because `artifactPackageId` is `id || name`. The fixture hid it
+// by setting id and name to `''` together. Corrected here, and the case that
+// escapes is pinned rather than described.
+//
+// ⛔ Each door test pins ITS OWN door. The earlier spelling asserted
+// `/no usable package id|not a package entry/` on BOTH, so either test passed on
+// either door: it pinned "refused by some door", never which — an alternation
+// that would survive deleting a whole door. Both doors raise the SAME ADR-0112
+// code and status, so only the message separates them.
+describe('#13457 — which unattributable-consent spellings the doors refuse, and the one they do not', () => {
+    /** The refusal both doors share, so the message assertions carry the rest. */
+    const envelope = (err: any) => {
+        expect(err).toBeDefined();
+        expect(err.code).toBe('INVALID_ARTIFACT_PACKAGE_ENTRY');
+        expect(err.status).toBe(422);
+    };
+    const thrownBy = (fn: () => unknown): any => {
+        try { fn(); } catch (e) { return e; }
+        return undefined;
+    };
+
+    it('DOOR 1 (schema) — no top-level `id` is refused by `ArtifactPackageSchema`, which names `manifest.id`', () => {
+        // `ManifestSchema.id` is a required `z.string()`, so the entry never
+        // reaches the id door at all.
+        const err = thrownBy(() => carriedPackageIds({ packages: [{ manifest: { name: '', version: '1.0.0' } }] }));
+        envelope(err);
+        expect(err.message).toContain('is not a package entry');
+        expect(err.message).toContain('manifest.id');
+        // ⛔ THIS door, not the other one: the id door never ran.
+        expect(err.message).not.toContain('no usable package id');
     });
 
-    it('an empty-string id is refused too — `\'\'` is not a key anything can be attributed to', () => {
-        expect(() => carriedPackageIds({ packages: [{ manifest: body('') }] }))
-            .toThrow(/no usable package id|not a package entry/);
+    it('DOOR 2 (id) — `\'\'` passes the schema and is refused by `artifactPackageId`, one door later', () => {
+        // `z.string()` has no `.min(1)`, so `''` is a VALID manifest id to the
+        // schema; it is `artifactPackageId` that yields `undefined` for it.
+        const err = thrownBy(() => carriedPackageIds({ packages: [{ manifest: body('') }] }));
+        envelope(err);
+        expect(err.message).toContain('no usable package id');
+        // ⛔ THIS door, not the other one: the schema admitted the entry.
+        expect(err.message).not.toContain('is not a package entry');
+    });
+
+    // ⭐ The correction: the spelling NEITHER door refuses.
+    it('NEITHER door refuses `{ id: \'\', name: \'x\' }` — `artifactPackageId` is `id || name`, so it is carried as `x`', () => {
+        expect(carriedPackageIds({ packages: [{ manifest: body('', { id: '', name: 'x' }) }] }))
+            .toEqual(['x']);
+    });
+
+    it('so a consent record keyed by the unattributable `\'\'` binds to NOTHING — loudly, and fail-OPEN', () => {
+        // ⛔ What this pins is that the residual is fail-OPEN, not that it is
+        // handled: the `''` key names no carried package, so it is reported as
+        // `unbound` and registered nowhere. Nothing is silently DENIED — the
+        // package still loads with no consent record at all, exactly as an
+        // artifact that never declared one does. Whether an unbindable consent
+        // record should instead REFUSE the artifact is an open decision
+        // (#17148), and this test is what will go red when it is taken.
+        const e = enforcer();
+        const log = logger();
+        const binding = registerArtifactGrantedPermissions(
+            {
+                manifest: { id: 'com.acme.crm', name: 'Acme CRM', version: '1.0.0', type: 'app' },
+                packages: [{ manifest: body('', { id: '', name: 'x' }) }],
+                grantedPermissions: { '': CONSENTED },
+            },
+            e,
+            { logger: log as never },
+        );
+
+        expect(binding.carried).toEqual(['x']);
+        expect(binding.registered).toEqual([]);
+        expect(binding.unbound).toEqual(['']);
+        // Through the enforcer's OWN readback: neither the unattributable key
+        // nor the package it failed to name is registered, so neither is denied.
+        expect(e.getPluginPermissions('')).toBeUndefined();
+        expect(e.getPluginPermissions('x')).toBeUndefined();
+        expect(
+            log.warn.mock.calls.some((c: unknown[]) => String(c[0]).includes('bound to NO package')),
+        ).toBe(true);
     });
 });

@@ -214,7 +214,7 @@ export class AppPlugin implements Plugin {
      * What the artifact's `grantedPermissions` map bound to on this boot —
      * `undefined` when the key was absent. Public so a composition pin can read
      * the binding without re-deriving it, and so a caller can tell a declared
-     * empty map (`declared: true`, nothing gated) from an absent one.
+     * empty map (`declared: true`, nothing registered) from an absent one.
      */
     get grantBinding(): ArtifactGrantBinding | undefined {
         return this.grantBindingResult;
@@ -411,8 +411,8 @@ export class AppPlugin implements Plugin {
         this.grantBindingResult = binding;
         ctx.logger.info('[AppPlugin] registered install-time granted permissions', {
             pluginName: this.name,
-            gated: [...binding.gated],
-            ungated: [...binding.ungated],
+            registered: [...binding.registered],
+            unregistered: [...binding.unregistered],
             unbound: [...binding.unbound],
         });
     }

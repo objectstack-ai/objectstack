@@ -43,7 +43,7 @@
  *      that consented to NOTHING. ⇒ registered, and `buildPermissionsFromGrants`
  *      turns it into a bag that denies every service, hook, host and path.
  *   3. the key is present and does NOT name this package — same as (1) FOR
- *      THAT PACKAGE: no entry, no registration, no gate.
+ *      THAT PACKAGE: no entry, no registration, nothing on the enforcer.
  *
  * ⛔ The tempting spelling — `for (const id of carried)
  * enforcer.registerGrantedPermissions(id, grants[id])` — collapses (3) into (2)
@@ -76,15 +76,28 @@ export interface ArtifactGrantBinding {
     /**
      * Did the artifact carry a `grantedPermissions` key at all? `false` is
      * state (1) above — no consent record — and is NOT the same reading as a
-     * declared but empty map, which is `true` with an empty {@link gated}.
+     * declared but empty map, which is `true` with an empty {@link registered}.
      */
     readonly declared: boolean;
     /** Package ids this artifact carries, in the order the loader registers them. */
     readonly carried: readonly string[];
-    /** Ids that carried a consent record and are now registered on the enforcer. */
-    readonly gated: readonly string[];
-    /** Carried ids with NO consent record — ungated, byte-for-byte today's behaviour. */
-    readonly ungated: readonly string[];
+    /**
+     * Ids that carried a consent record — the set
+     * {@link registerArtifactGrantedPermissions} registers on the enforcer, one
+     * `registerGrantedPermissions` call each.
+     *
+     * ⛔ The name says REGISTERED, and must keep saying it. An earlier spelling
+     * called this `gated`, which claimed an enforcement that does not exist:
+     * registration is ALL that happens here, nothing on this tree queries the
+     * registry, and so an id in this list is under no gate whatsoever. Rename it
+     * back only together with the code that makes the claim true.
+     */
+    readonly registered: readonly string[];
+    /**
+     * Carried ids with NO consent record — nothing is registered for them, and
+     * they load byte-for-byte as they do today.
+     */
+    readonly unregistered: readonly string[];
     /**
      * Map keys naming a package this artifact does NOT carry. The producer pins
      * that this is empty (*"the map never names a plugin the artifact does not
@@ -95,7 +108,7 @@ export interface ArtifactGrantBinding {
 }
 
 const EMPTY: ArtifactGrantBinding = {
-    declared: false, carried: [], gated: [], ungated: [], unbound: [],
+    declared: false, carried: [], registered: [], unregistered: [], unbound: [],
 };
 
 /** True for a plain object — the only shape `z.record(...)` produces. */
@@ -141,23 +154,23 @@ export function resolveArtifactGrantBinding(artifact: unknown): ArtifactGrantBin
         // produce. Reported as declared-with-nothing-bound rather than silently
         // treated as absent: a carrier that ships garbage here is a carrier
         // whose consent records are gone.
-        return { declared: true, carried: [], gated: [], ungated: [], unbound: [] };
+        return { declared: true, carried: [], registered: [], unregistered: [], unbound: [] };
     }
     const carried = carriedPackageIds(artifact);
-    const gated: string[] = [];
+    const registered: string[] = [];
     const unbound: string[] = [];
     // Driven by the MAP's keys — see the header. `Object.keys` reads own
     // enumerable keys only, so nothing on `Object.prototype` can fabricate an
     // entry, and a key present with any value (`{}` included) is an entry.
     for (const key of Object.keys(grants)) {
-        if (carried.includes(key)) gated.push(key);
+        if (carried.includes(key)) registered.push(key);
         else unbound.push(key);
     }
     return {
         declared: true,
         carried,
-        gated,
-        ungated: carried.filter((id) => !gated.includes(id)),
+        registered,
+        unregistered: carried.filter((id) => !registered.includes(id)),
         unbound,
     };
 }
@@ -178,13 +191,20 @@ export function registerArtifactGrantedPermissions(
     const binding = resolveArtifactGrantBinding(artifact);
     if (!binding.declared) return binding;
 
-    const grants = (artifact as { grantedPermissions?: Record<string, unknown> }).grantedPermissions ?? {};
-    for (const id of binding.gated) {
-        // The VALUE as the carrier wrote it: `{}` registers a deny-everything
-        // bag, a populated entry registers exactly the consented surface. ⛔ No
-        // `?? {}` and no default — both spellings would erase the distinction
-        // the producer pins.
-        enforcer.registerGrantedPermissions(id, grants[id] as GrantedPermissions);
+    const grants = (artifact as { grantedPermissions?: unknown } | null | undefined)?.grantedPermissions;
+    // ⛔ No `?? {}` and no default — both spellings are the erasure this module
+    // exists to refuse, and `app-plugin.ts` forbids them by name on this very
+    // key. The narrowing below is the type-honest spelling of a fact the walk
+    // already established: `registered` is non-empty ONLY on the plain-record
+    // branch of `resolveArtifactGrantBinding`, so this reads the carrier's own
+    // record or it iterates nothing at all — it never substitutes a stand-in.
+    if (isPlainRecord(grants)) {
+        for (const id of binding.registered) {
+            // The VALUE as the carrier wrote it: `{}` registers a
+            // deny-everything bag, a populated entry registers exactly the
+            // consented surface.
+            enforcer.registerGrantedPermissions(id, grants[id] as GrantedPermissions);
+        }
     }
 
     if (binding.unbound.length > 0) {

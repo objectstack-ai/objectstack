@@ -95,9 +95,12 @@ export async function loadArtifactBundle(
         // install-time consented set BESIDE `metadata` (outside the checksum
         // digest), and names the materialize-time loader as its consumer — so
         // before this line an envelope artifact reached the kernel with every
-        // consent record stripped, and the gate had nothing to enforce. Nothing
-        // threw: the key was simply absent, which is also a legitimate reading
-        // ("no consent record"), which is why it could be lost in silence.
+        // consent record stripped, and the enforcer had nothing to register.
+        // (⛔ Not "the gate had nothing to enforce": there is no gate — this
+        // round fills the registry, and nothing on this tree queries it yet.)
+        // Nothing threw: the key was simply absent, which is also a legitimate
+        // reading ("no consent record"), which is why it could be lost in
+        // silence.
         // ⛔ `!== undefined`, never a truthiness or emptiness test: `{}` is a
         // consent record that consented to nothing and must survive the unwrap
         // as `{}`, while a genuinely absent key must NOT be created here.

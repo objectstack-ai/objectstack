@@ -69,12 +69,12 @@ describe('#13457 — AppPlugin.init binds the artifact\'s granted permissions', 
         expect(plugin.name).toBe('plugin.app.com.acme.crm');
         expect(e!.getPluginPermissions('com.acme.crm')!.canAccessService('object')).toBe(true);
         expect(e!.getPluginPermissions('com.acme.crm')!.canAccessService('storage')).toBe(false);
-        // The sibling package carries no consent record — ungated, unregistered.
+        // The sibling package carries no consent record — nothing registered for it.
         expect(e!.getPluginPermissions('com.acme.reports')).toBeUndefined();
         expect(plugin.grantBinding).toMatchObject({
             declared: true,
-            gated: ['com.acme.crm'],
-            ungated: ['com.acme.reports'],
+            registered: ['com.acme.crm'],
+            unregistered: ['com.acme.reports'],
             unbound: [],
         });
     });
@@ -90,7 +90,7 @@ describe('#13457 — AppPlugin.init binds the artifact\'s granted permissions', 
         });
         await plugin.init(ctx);
 
-        expect(plugin.grantBinding).toMatchObject({ declared: true, gated: [], unbound: ['com.acme.ghost'] });
+        expect(plugin.grantBinding).toMatchObject({ declared: true, registered: [], unbound: ['com.acme.ghost'] });
         expect(
             ctx.logger.warn.mock.calls.some((c: unknown[]) => String(c[0]).includes('bound to NO package')),
         ).toBe(true);
