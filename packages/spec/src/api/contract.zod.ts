@@ -186,8 +186,9 @@ export const ApiErrorSchema = lazySchema(() => z.object({
    */
   refusal: z.literal(true).optional().describe(
     'Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is '
-    + 'authored for the caller, so boundaries keep it verbatim (relay half: #16146 — until it lands, '
-    + 'a declared refusal is still withheld). Absent (the default) on a declared fault, whose '
+    + 'authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the '
+    + 'REST withhold arms read it, a declared refusal is still withheld). Absent (the default) on a '
+    + 'declared fault, whose '
     + '`message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence '
     + 'is the declaration — `true` is the only value.',
   ),
