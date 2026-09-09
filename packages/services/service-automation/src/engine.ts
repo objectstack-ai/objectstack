@@ -440,8 +440,10 @@ export interface FlowTriggerBinding {
      * of the very write that triggered it.
      *
      * `undefined` here is a REFUSAL condition for the trigger that receives it,
-     * never a default to be filled in downstream — see the schedule trigger's
-     * `reportMissingOrganization`.
+     * never a default to be filled in downstream: the time triggers THROW from
+     * `start()` on it, so {@link activateFlowTrigger}'s catch records the flow
+     * as unbound and {@link getTriggerBindingAudit} lists it — see the schedule
+     * trigger's `refuseMissingOrganization`.
      */
     readonly organization?: string;
     /** The raw start-node `config`, for trigger-specific fields not modeled above. */

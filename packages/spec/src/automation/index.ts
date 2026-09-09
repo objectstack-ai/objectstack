@@ -42,11 +42,14 @@ export * from './approval.zod';
 export * from './time-relative-trigger.zod';
 export * from './flow-trigger-kind';
 // The acting-organization declaration a time-triggered flow carries, and the
-// one refusal sentence `FlowSchema`, the schedule trigger and the time-relative
-// sweep all say it with (#16659). Named beside `flow-trigger-kind` because it is
-// read through the same resolver: the two kinds that owe an organization are
-// exactly the two that launch from a clock rather than from a session.
-export * from './schedule-organization';
+// one refusal sentence the schedule trigger and the time-relative sweep both
+// say it with (#16659). ⛔ `FlowSchema` does NOT emit that sentence: the key is
+// enforced at BIND, not at parse, because the start node's `config` is an open
+// record and a parse-time requirement would make every package-shipped
+// scheduled flow unparseable. Named beside `flow-trigger-kind` because the two
+// kinds that owe an organization are exactly the two that flow-trigger-kind
+// resolves to a clock rather than to a session.
+export * from './schedule-organization.zod';
 // `sync.zod.ts` (L1 "Simple Sync": DataSyncConfig, its ConflictResolution enum
 // and the Sync factory) was removed here (#4738, ledger #4535 C13+C15). The L1
 // layer was narrative-only — zero importers across objectstack / cloud /

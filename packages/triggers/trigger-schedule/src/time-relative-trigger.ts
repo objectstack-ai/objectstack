@@ -10,7 +10,7 @@ import type { TimeRelativeTrigger as TimeRelativeDescriptor } from '@objectstack
 import {
     normalizeSchedule,
     reportBindFailure,
-    reportMissingOrganization,
+    refuseMissingOrganization,
     resolveBindingOrganization,
 } from './schedule-trigger.js';
 import type { FlowTrigger, FlowTriggerBinding, JobServiceSurface, TriggerLogger } from './schedule-trigger.js';
@@ -254,9 +254,14 @@ export class TimeRelativeTrigger implements FlowTrigger {
         // that can write into none of them.
         const organization = resolveBindingOrganization(binding);
         if (organization === null) {
-            reportMissingOrganization(this.logger, 'time-relative', binding.flowName, binding);
+            // Drop any prior sweep FIRST: a hot re-publish that removes the key
+            // must not leave the previous, still-armed job sweeping org-less
+            // behind an error saying it was refused. The call below throws, so
+            // the engine's catch records the refusal instead of marking this
+            // flow bound — see `refuseMissingOrganization`'s header for why a
+            // logged-and-returned refusal is invisible to every audit surface.
             this.stop(binding.flowName);
-            return;
+            refuseMissingOrganization(this.logger, 'time-relative', binding.flowName, binding);
         }
 
         // Cadence: the flow's start-node schedule descriptor, or a daily default.

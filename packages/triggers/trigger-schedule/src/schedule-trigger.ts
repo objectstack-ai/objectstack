@@ -6,7 +6,7 @@ import type { JobSchedule, JobHandler } from '@objectstack/spec/contracts';
 import {
     SCHEDULE_ORGANIZATION_KEY,
     ScheduleOrganizationSchema,
-    SCHEDULE_ORGANIZATION_NEAR_MISSES,
+    findScheduleOrganizationNearMissInConfig,
     describeMissingScheduleOrganization,
 } from '@objectstack/spec/automation';
 
@@ -273,7 +273,30 @@ export function resolveBindingOrganization(binding: FlowTriggerBinding): string 
 
 /**
  * Refuse to bind a time-triggered flow that declares no acting organization
- * (#16659), and say why at `error`.
+ * (#16659): say why at `error`, then THROW so the engine records the refusal.
+ *
+ * ## Why it throws, and does not merely log and return
+ *
+ * `FlowTrigger.start` returns `void`, so a trigger that logs and returns is
+ * indistinguishable — to the engine — from one that armed successfully. The
+ * engine's `activateFlowTrigger` then runs `boundFlowTriggers.set(flowName, …)`
+ * and logs `Flow '<name>' bound to trigger 'schedule'` one line after this
+ * function said NOT BOUND, and every structured surface built for exactly this
+ * state reports the opposite of it: `getFlowRuntimeStates()` (Studio's status
+ * badge) answers `bound: true`, and `getTriggerBindingAudit()` — the silent-miss
+ * audit the automation plugin warns from at `kernel:bootstrapped` and the CLI
+ * prints in its startup summary — skips the flow because it is in
+ * `boundFlowTriggers`. A refusal only an operator reading stderr can see, in a
+ * repo that built three machine-readable channels to say "declared but not
+ * armed", is the same silent-miss shape this card exists to close.
+ *
+ * Throwing is the engine's DESIGNED path for this: `activateFlowTrigger` wraps
+ * `trigger.start(...)` in a `try/catch` whose `catch` logs the plugin-supplied
+ * thrown text and — because the `set` is inside the `try`, after the call — never
+ * marks the flow bound. The audit then lists it with `binding failed — see
+ * earlier warnings`, which points at the `error` line this function already
+ * emitted. The message is the same sentence both times, so the loud channel and
+ * the structured channel cannot drift.
  *
  * ## Why this REFUSES rather than binding and degrading
  *
@@ -302,24 +325,19 @@ export function resolveBindingOrganization(binding: FlowTriggerBinding): string 
  * silently authoritative to every report, export and cleanup script that
  * filters by organization.
  */
-export function reportMissingOrganization(
+export function refuseMissingOrganization(
     logger: TriggerLogger,
     tag: 'schedule' | 'time-relative',
     flowName: string,
     binding: FlowTriggerBinding,
-): void {
-    const config = binding.config ?? {};
-    const nearMiss = SCHEDULE_ORGANIZATION_NEAR_MISSES.find(
-        (k) => Object.prototype.hasOwnProperty.call(config, k) && config[k] != null && config[k] !== '',
-    );
+): never {
+    const sentence = describeMissingScheduleOrganization(flowName, {
+        kind: tag === 'time-relative' ? 'time_relative' : 'schedule',
+        nearMiss: findScheduleOrganizationNearMissInConfig(binding.config),
+    });
     const report = logger.error?.bind(logger) ?? logger.warn.bind(logger);
-    report(
-        `[${tag}] NOT BOUND — ` +
-            describeMissingScheduleOrganization(flowName, {
-                kind: tag === 'time-relative' ? 'time_relative' : 'schedule',
-                nearMiss,
-            }),
-    );
+    report(`[${tag}] NOT BOUND — ${sentence}`);
+    throw new Error(sentence);
 }
 
 /**
@@ -510,13 +528,12 @@ export class ScheduleTrigger implements FlowTrigger {
         // remedy.
         const organization = resolveBindingOrganization(binding);
         if (organization === null) {
-            reportMissingOrganization(this.logger, 'schedule', binding.flowName, binding);
-            // Drop any prior binding for this flow. A hot re-publish that
+            // Drop any prior binding for this flow FIRST. A hot re-publish that
             // REMOVES the organization must not leave the previous, still-armed
             // job firing org-less ticks behind an error that says it was
-            // refused.
+            // refused — and the throw below leaves this method immediately.
             this.stop(binding.flowName);
-            return;
+            refuseMissingOrganization(this.logger, 'schedule', binding.flowName, binding);
         }
 
         const jobService = this.getJobService();

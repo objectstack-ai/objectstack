@@ -1,7 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { resolveFlowTriggerKind } from './flow-trigger-kind';
 
 /**
  * The ACTING ORGANIZATION of a time-triggered flow — the one start-node key
@@ -89,28 +88,20 @@ export const ScheduleOrganizationSchema = z
 export type ScheduleOrganization = z.infer<typeof ScheduleOrganizationSchema>;
 
 /**
- * The trigger kinds this declaration is required on — the two that launch a run
- * from a clock rather than from a session.
- *
- * `record_change` and `api` are absent BY CONSTRUCTION, not by exemption: both
- * are fired by a caller who already carries an organization, and threading a
- * second, declared one would let a flow overrule the tenant of the very write
- * that triggered it.
- */
-export const TIME_TRIGGERED_FLOW_KINDS: readonly string[] = Object.freeze([
-  'schedule',
-  'time_relative',
-]);
-
-/**
  * Spellings an author reaches for that are NOT this key, in the order a
  * diagnostic should try them. The start node's `config` is an OPEN record by
  * design (ADR-0018), so none of these is refused by any schema — a flow
  * carrying `organizationId` parses, binds, and runs with no organization at
  * all. Naming them in the refusal is the only place the mistake becomes
  * visible, so this list is load-bearing rather than decorative.
+ *
+ * Module-local on purpose: its only reader is
+ * {@link findScheduleOrganizationNearMissInConfig} in this file, and an export
+ * whose consumers all live inside its own package does not belong on a
+ * published barrel. A caller that needs the vocabulary needs the ANSWER, which
+ * that function gives.
  */
-export const SCHEDULE_ORGANIZATION_NEAR_MISSES: readonly string[] = Object.freeze([
+const SCHEDULE_ORGANIZATION_NEAR_MISSES: readonly string[] = Object.freeze([
   'organizationId',
   'organization_id',
   'organizationID',
@@ -153,28 +144,40 @@ export function resolveScheduleOrganization(flow: unknown): string | undefined {
 }
 
 /**
- * The near-miss key an organization-less flow actually wrote, if any — so the
- * refusal can say "you wrote `organizationId`" instead of "you wrote nothing".
+ * The near-miss key an organization-less START NODE `config` actually wrote, if
+ * any — so the refusal can say "you wrote `organizationId`" instead of "you
+ * wrote nothing".
+ *
+ * ⛔ Takes the start node's `config` record, NOT a flow — hence the name. The
+ * caller that needs this is a TRIGGER, and a trigger never holds the flow: the
+ * engine parses the start node and hands it a binding whose `config` is that
+ * record. A flow-shaped overload would answer `undefined` for the very input
+ * the only caller has, which is the silent-acceptance this module exists to
+ * end, so the argument it wants is the one the name asks for.
+ *
+ * Anything that is not a record answers `undefined` rather than throwing,
+ * matching {@link resolveScheduleOrganization}'s structural posture.
  */
-export function findScheduleOrganizationNearMiss(flow: unknown): string | undefined {
-  const config = startConfigOf(flow);
+export function findScheduleOrganizationNearMissInConfig(
+  startConfig: unknown,
+): string | undefined {
+  if (!startConfig || typeof startConfig !== 'object') return undefined;
+  const config = startConfig as Record<string, unknown>;
   return SCHEDULE_ORGANIZATION_NEAR_MISSES.find(
     (k) => Object.prototype.hasOwnProperty.call(config, k) && config[k] != null && config[k] !== '',
   );
 }
 
 /**
- * Does this flow OWE an acting organization? True for the two time-triggered
- * kinds, false for everything else.
- */
-export function requiresScheduleOrganization(flow: unknown): boolean {
-  const kind = resolveFlowTriggerKind(flow);
-  return kind !== undefined && TIME_TRIGGERED_FLOW_KINDS.includes(kind);
-}
-
-/**
- * The one refusal sentence, so validation, the schedule trigger and the
- * time-relative trigger all say the same thing about the same defect.
+ * The one refusal sentence, so the schedule trigger and the time-relative
+ * trigger say the same thing about the same defect.
+ *
+ * ⛔ `FlowSchema` does NOT emit it, and deliberately does not: the start node's
+ * `config` is an open record (ADR-0018) and every flow this repo's own packages
+ * ship would become unparseable if the key were required at parse time.
+ * Enforcement is at BIND — the two triggers below — which is where the
+ * consequence lives: there is no path by which an organization-less
+ * time-triggered run reaches the data layer once bind refuses.
  *
  * It names the flow (the ruling requires that), the key, where the key goes,
  * and — when the author wrote a near-miss — which spelling of theirs was
