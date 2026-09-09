@@ -99,7 +99,19 @@ function supersededOrgAdminSetName(posture: TenancyPosture, suppressUnbounded = 
 
 interface MaybeLogger {
   info?: (message: string, meta?: Record<string, any>) => void;
-  warn?: (message: string, meta?: Record<string, any>) => void;
+  /**
+   * [#9754] NON-optional, and it is the `error?` member below that makes it so.
+   * An optional `error` with no declared alternative is a contract that permits
+   * silence: a value of this type could carry no channel at all, and the
+   * durability report this module owes — a standing capability withdrawn, or a
+   * revoke that did not land — would have nowhere to go. `warn` is the level a
+   * durability degradation degrades TO and no further (AGENTS.md, "Degradation
+   * log levels"), so it is the one that must exist in every value of the type.
+   * ⛔ Not solved by requiring `error` instead (hosts legitimately inject
+   * reduced sinks), and ⛔ not by requiring `info`: a lost write reported at
+   * `info` reads as normal operation.
+   */
+  warn: (message: string, meta?: Record<string, any>) => void;
   debug?: (message: string, meta?: Record<string, any>) => void;
   /**
    * [#15840] The level the ruling names for the one read whose un-answered
