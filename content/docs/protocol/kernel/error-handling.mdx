@@ -418,10 +418,8 @@ never crosses HTTP. The refusal is emitted as the flat body shown above, and
     "code": "RATE_LIMIT_EXCEEDED",
     "message": "Rate limit exceeded",
     "details": {
-      "limit": 1000,
-      "window": "1m",
       "retryAfterSeconds": 45,
-      "quota_reset": "2024-01-16T14:31:00Z"
+      "resetAt": "2024-01-16T14:31:00Z"
     }
   }
 }
@@ -525,12 +523,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
   "success": false,
   "error": {
     "code": "SERVICE_UNAVAILABLE",
-    "message": "Service temporarily unavailable",
-    "details": {
-      "reason": "database_maintenance",
-      "retryAfterSeconds": 300,
-      "estimated_completion": "2024-01-16T15:00:00Z"
-    }
+    "message": "Service temporarily unavailable"
   }
 }
 ```
@@ -650,11 +643,8 @@ Content-Type: application/json
     "code": "RATE_LIMIT_EXCEEDED",
     "message": "Rate limit exceeded: 1000 requests per minute",
     "details": {
-      "limit": 1000,
-      "window": "1m",
       "retryAfterSeconds": 45,
-      "quota_reset": "2024-01-16T14:31:00Z",
-      "upgrade_url": "https://app.acme.com/billing/upgrade"
+      "resetAt": "2024-01-16T14:31:00Z"
     },
     "requestId": "req_ghi789",
     "timestamp": "2024-01-16T14:30:15Z"
