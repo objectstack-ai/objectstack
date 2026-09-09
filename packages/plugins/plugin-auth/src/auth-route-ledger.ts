@@ -155,7 +155,7 @@ export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
   // does not move with it: the design question is the standing one, and a
   // future design starts from #7724's deletion semantics.
   { route: 'POST /api/v1/auth/delete-user', family: 'core-auth', source: 'better-auth', disposition: 'disabled', client: 'auth.deleteUser', note: 'better-auth publishes the endpoint but user.deleteUser is deliberately unconfigured, so it answers 404 (as does its GET /delete-user/callback half); self-service deletion needs a deliberate B2B design first — maintainer ruling 2026-08-12 on #7735' },
-  { route: 'GET /api/v1/auth/get-session', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.me', note: 'auth.me and auth.refreshToken both target it' },
+  { route: 'GET /api/v1/auth/get-session', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.me', note: 'auth.me, auth.refreshToken and organizations.getActiveMember all target it — the last one reads only the caller\'s own user id from it, as step 1 of its two-request self-membership lookup' },
   { route: 'POST /api/v1/auth/link-social', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.accounts.linkSocial' },
   { route: 'GET /api/v1/auth/list-accounts', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.accounts.list' },
   { route: 'GET /api/v1/auth/list-sessions', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.sessions.list' },
@@ -259,7 +259,7 @@ export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
   { route: 'POST /api/v1/auth/organization/leave', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.leave', requires: 'organization' },
   { route: 'GET /api/v1/auth/organization/list', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.list', requires: 'organization' },
   { route: 'GET /api/v1/auth/organization/list-invitations', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.invitations.list', requires: 'organization' },
-  { route: 'GET /api/v1/auth/organization/list-members', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.listMembers', requires: 'organization' },
+  { route: 'GET /api/v1/auth/organization/list-members', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.listMembers', requires: 'organization', note: 'organizations.listMembers and organizations.getActiveMember both build it — the latter with filterField=userId&filterValue=<the caller>&limit=1, because no better-auth route answers \'my membership row in the organisation I name\' (get-active-member reads only session.activeOrganizationId)' },
   { route: 'GET /api/v1/auth/organization/list-team-members', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.teams.listMembers', requires: 'organization' },
   { route: 'GET /api/v1/auth/organization/list-teams', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.teams.list', requires: 'organization' },
   { route: 'GET /api/v1/auth/organization/list-user-invitations', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.invitations.listMine', requires: 'organization' },
