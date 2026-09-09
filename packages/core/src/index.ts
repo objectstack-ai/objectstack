@@ -77,6 +77,14 @@ export * from './utils/advisory-aggregation.js';
 // Export the runtime filter-placeholder resolver (framework#3582)
 export * from './utils/filter-tokens.js';
 
+// [#16322] The ONE lowering of the closed `timeDimensions[].dateRange` preset
+// vocabulary into a window, and the ONE refusal for a string outside it. Here
+// for the same reason as the resolver above: `driver-memory`'s cube face and
+// `@objectstack/service-analytics`' two SQL strategies both lower that field,
+// they cannot import each other, and a second implementation is exactly how
+// the two backends came to answer one bad input with opposite wrong answers.
+export * from './utils/analytics-date-range.js';
+
 // [#8690] Can a temporal column's storage rule read this comparand? The VALUE
 // half of the field-typed judgement behind the engine's temporal-comparand door
 // and the analytics raw-SQL decline — one rule, two packages that do not depend
