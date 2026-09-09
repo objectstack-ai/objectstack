@@ -1,0 +1,11 @@
+---
+"@objectstack/spec": patch
+---
+
+`id_field` now gets a named answer instead of a bare refusal: `FIELD_KEY_GUIDANCE` declares it a retirement with **no successor**, which is the spec-side fact objectui's ingestion choke point needs before it can canonicalise the key (objectui#7650 ruling A — retired spellings are folded once, at ingestion, never at the consumer).
+
+The direction was a factual finding, not a preference, and it went the way the cheaper branch happens to point — so here is the evidence rather than the verdict alone. A lookup stores the referenced record's id, and which field holds that value is not an authored per-field choice: the picker resolves record identity itself. Nothing on `FieldSchema` names it, nothing in `objectql` / `runtime` / `metadata-protocol` reads a per-field id key, and the two places the platform does let a reference be stored by something other than an id are declared elsewhere — `APPROVER_VALUE_BINDINGS.valueField` (per approver type, e.g. `position` routing by `sys_position.name`) and a seed dataset's `externalId`, the channel lookup references already resolve through. So there is no member to fold onto, and the prescription says what to reach for instead: `displayField` for the candidate's label, a dataset `externalId` for a portable natural key.
+
+**The entry is keyed `id_field`, in snake_case, and that is deliberate.** The two channels this table feeds disagree about the key face. A `to` becomes a `strictObject` alias, matched through `aliasProbe` — case folded, separators stripped — so one camelCase row covers every spelling. A `why` becomes strict guidance, matched exactly and case-sensitively on the authored spelling. A camelCase row would therefore never be reached by the key authors write, and every existing test in the file would still pass, because none of them asks whether an entry is ever consulted.
+
+That gap is closed too. Three assertions read the channel that actually answers an authored field key — `FieldSchema.safeParse`, since the schema is strict and the authoring-key walker stays silent on a strict surface by its own posture rule — and pin that the refusal carries this table's sentence verbatim, that a retirement suppresses the rename channel, and that the same-named `idField` on the `inlineColumns` GridColumn mirror is a different schema that stays live.
