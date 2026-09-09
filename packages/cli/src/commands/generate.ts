@@ -1428,20 +1428,21 @@ function declaredColumnDefault(field: unknown, type: string): DeclaredColumnDefa
  * `generate-declared-column-default.pin.test.ts` recomputes them from the
  * driver's own builder rather than trusting these literals.
  *
- * ⭐ A NUMBER is quoted too, and that is a measurement rather than a style
- * choice. knex quotes every bound default (`default '42'`, `default '9.99'`),
- * and PostgreSQL keeps the two forms textually APART in
- * `information_schema.column_default`: an unquoted `DEFAULT 42` on a
- * `DECIMAL(18,2)` column is recorded as `42`, the quoted one as `'42'::numeric`
- * — which is what the driver's own column carries. Same value, permanently
- * different default TEXT, and #15521 already paid for that exact row once (a
- * schema differ comparing default text reported the audit pair forever). A
- * BOOLEAN is left bare: knex binds it as `'1'`, PostgreSQL records `true` for
- * both spellings, so the catalog agrees either way and the readable one wins in
- * a file a human opens.
+ * ⭐ EVERY literal is quoted — number and boolean included — and that is a
+ * measurement, not a style choice. knex binds every default it is given as a
+ * quoted literal (`default '42'`, `default '9.99'`, `default '1'` for `true`),
+ * which is the form the driver's own tables therefore carry, and the two
+ * spellings do NOT collapse: PostgreSQL records an unquoted `DEFAULT 42` on a
+ * `DECIMAL(18,2)` column as `42` and the quoted one as `'42'::numeric`. Same
+ * value, permanently different default TEXT — the row #15521 already paid for
+ * once, where a schema differ comparing default text reported the audit pair
+ * forever. Booleans are the case where quoting looks wrong and is not: `'1'` and
+ * `'0'` are what knex emits, PostgreSQL normalises both to `true` / `false`, and
+ * a SQLite table built by the driver carries the quoted form verbatim — so one
+ * rule agrees with the driver on both dialects where two rules agree on one.
  *
- * A string literal is single-quoted with `'` doubled — SQL's own escape, and the
- * form `information_schema.column_default` reads back for the driver's own.
+ * The quote itself is doubled, SQL's own escape and the form
+ * `information_schema.column_default` reads back for the driver's own column.
  */
 function columnDefaultSql(field: unknown, type: string): string {
   const declared = declaredColumnDefault(field, type);
@@ -1450,10 +1451,12 @@ function columnDefaultSql(field: unknown, type: string): string {
     case 'now': return ' DEFAULT CURRENT_TIMESTAMP';
     case 'now-date': return " DEFAULT (timezone('utc', now())::date)";
     case 'now-time': return " DEFAULT (timezone('utc', now())::time(3))";
-    case 'literal':
-      return typeof declared.value === 'boolean'
-        ? ` DEFAULT ${String(declared.value)}`
-        : ` DEFAULT '${String(declared.value).replace(/'/g, "''")}'`;
+    case 'literal': {
+      const bound = typeof declared.value === 'boolean'
+        ? (declared.value ? '1' : '0')
+        : String(declared.value);
+      return ` DEFAULT '${bound.replace(/'/g, "''")}'`;
+    }
   }
 }
 
