@@ -330,6 +330,75 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     expect(findings[0].message).toContain("declares no field 'owner.name'");
   });
 
+  it('reports the EMPTY remainder — a truncated key masks nothing either', () => {
+    // ⚠️ This was skipped by an earlier revision with a comment claiming the
+    // schema owned the shape. It does not: `PermissionSetSchema.fields` is
+    // `z.record(z.string(), FieldPermissionSchema)` with a bare string key —
+    // pinned below against the LIVE schema, so the premise cannot rot silently
+    // — and this rule is the only reader of those keys in the package. The key
+    // passes `startsWith('crm_account.')` at runtime and resolves to the empty
+    // column name, so it is the identical fail open.
+    const findings = validateSecurityPosture(flsStack('crm_account.')).filter(
+      (f) => f.rule === SECURITY_FLS_UNKNOWN_FIELD,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('permissions[0].fields["crm_account."]');
+    expect(findings[0].message).toMatch(/names NO field/);
+    // The consequence half is the same sentence the dangling case carries — an
+    // author must be told what it costs, not merely that the key is malformed.
+    expect(findings[0].message).toMatch(/NEVER ENFORCES/);
+    expect(findings[0].message).toMatch(/stays as readable and as editable/);
+    // ⛔ And it must not read as the dangling-field message: there is no field
+    // name to quote, so the wrong branch would render `declares no field ''`.
+    expect(findings[0].message).not.toContain("declares no field");
+  });
+
+  it('the empty-remainder premise: the schema really does NOT constrain the key', () => {
+    // The control that keeps the test above honest. If a future revision adds a
+    // key regex or a refine to `PermissionSetSchema.fields`, this pin goes red
+    // and the rule's justification is re-opened deliberately, instead of the
+    // rule quietly becoming a second opinion on the schema (Prime Directive
+    // #12). Read off the LIVE schema, with a control that the read is not
+    // vacuous.
+    const fieldsSchema = PermissionSetSchema.shape.fields;
+    expect(fieldsSchema, 'PermissionSetSchema must declare `fields` at all').toBeDefined();
+    // A bare-string key accepts the truncated spelling: the schema parses it.
+    const parsed = PermissionSetSchema.safeParse({
+      name: 'ps',
+      label: 'PS',
+      objects: {},
+      fields: { 'crm_account.': { readable: false, editable: false } },
+    });
+    expect(parsed.success, 'the schema ACCEPTS a truncated FLS key — so this rule is its only reader').toBe(true);
+    // Control: the same shape with a key the schema also accepts, proving the
+    // `true` above is not a blanket accept-anything reading of `safeParse`.
+    expect(
+      PermissionSetSchema.safeParse({ name: 'ps', label: 'PS', objects: {}, notADeclaredKey: 1 }).success,
+      'control — the schema is not accepting everything',
+    ).toBe(false);
+  });
+
+  it('skip 1 still holds for a truncated key naming an unknown object', () => {
+    // The deliberate non-widening: `'no_such_object.'` is unmatchable too, but
+    // judging it would mean judging a key whose OBJECT half this stack cannot
+    // resolve — the same disposition `'.description'` (empty object name) is
+    // left to. Named here so the silence is a decision on record, not an
+    // oversight, and measured against a firing control in the same run.
+    expect(
+      rulesOf({
+        objects: [ACCOUNT],
+        permissions: [{ name: 'ps', label: 'PS', objects: {}, fields: { 'no_such_object.': { readable: false } } }],
+      }),
+    ).toEqual([]);
+    expect(
+      rulesOf({
+        objects: [ACCOUNT],
+        permissions: [{ name: 'ps', label: 'PS', objects: {}, fields: { 'crm_account.': { readable: false } } }],
+      }),
+    ).toEqual([SECURITY_FLS_UNKNOWN_FIELD]);
+  });
+
   it('reports every dangling key, and only the dangling ones', () => {
     const findings = validateSecurityPosture({
       objects: [ACCOUNT],
@@ -1231,6 +1300,7 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       'findings', 'objects', 'permissionSets', 'privateObjects', 'grantedObjects', 'stackSetNames',
       'records', 'reason', 'until', 'setName', 'flsKey', 'opts', 'path', 'i', 'e', 'fields', 'crm_opportunity',
       'flsGraph', // #16108: the shared object index — `.has` / `.get`, JS Map methods.
+      'flsField', // #16108: the key's remainder, a string — `.length`, a JS property.
       'declared', // #16108: one object's sorted field-name list — `.length` / `.slice` / `.join`.
       'entries', // #7503: the rule's own field list — `.find`, a JS method.
       'matched', // #14747: one tier's candidate list — `.length` / `.map`, JS methods.

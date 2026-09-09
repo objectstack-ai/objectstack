@@ -684,27 +684,58 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
       if (dot < 0) continue; // the bare-key shape — judged by the rule above
       const flsObject = flsKey.slice(0, dot);
       const flsField = flsKey.slice(dot + 1);
-      if (!flsField) continue; // `'crm_account.'` names no field at all — a shape the schema owns
       if (!flsGraph.has(flsObject)) continue; // skip 1: not this stack's object
       const surface = flsGraph.get(flsObject);
       if (!surface) continue; // skip 2: no readable field map
       if (surface.names.has(flsField) || surface.injected.has(flsField)) continue; // resolves (skip 3 included)
 
+      // [#16108] The EMPTY remainder (`'crm_account.'`) is the same defect and
+      // is reported by this rule, not deferred to the schema.
+      //
+      // ⚠️ An earlier revision skipped it with the comment "a shape the schema
+      // owns". That was FALSE, and measured to be: `PermissionSetSchema.fields`
+      // is `z.record(z.string(), FieldPermissionSchema)`
+      // (`packages/spec/src/security/permission.zod.ts`) — a bare `z.string()`
+      // key with no `.regex`, and that file carries no `refine`/`superRefine`
+      // at all — and this loop is the only reader of permission-set `fields`
+      // keys in this package. So nothing anywhere reported it, while at runtime
+      // it passes `startsWith('crm_account.')` and resolves to the empty column
+      // name, matching no column: the same fail-open this rule exists to close.
+      // ⛔ A comment crediting coverage to a component that has none is how a
+      // real gap gets recorded as handled — the accounting trap this card's own
+      // downstream note is about, one level in.
+      //
+      // It is judged HERE, after the two object skips, and deliberately not
+      // before them. An empty field name is in fact unmatchable independently
+      // of the object — `FieldSchema.name` is `/^[a-z_][a-z0-9_]*$/`, so no
+      // object of any package can declare one — but hoisting the check above
+      // skip 1 would start this rule judging keys whose OBJECT half it cannot
+      // resolve, which is exactly the disposition `'.description'` (empty
+      // object name) and a mis-cased object name are deliberately left to. One
+      // story, one guard order: the object must be visible before the key is
+      // judged. `'no_such_object.'` therefore falls to skip 1, like every other
+      // key naming an object this stack does not define.
+      const emptyField = flsField.length === 0;
+
       const declared = [...surface.names].sort();
       const roster = declared.length <= 12 ? declared.join(', ') : `${declared.slice(0, 12).join(', ')}, …`;
+      const wrote = emptyField
+        ? `field-permission key '${flsKey}' names NO field — everything after the '${flsObject}.' prefix is empty`
+        : `field-permission key '${flsKey}' is object-qualified but "${flsObject}" declares no field '${flsField}'`;
+      const looksRight = emptyField
+        ? `A truncated key is what a half-finished edit leaves behind.`
+        : `Unlike an unqualified key this one looks correct in review, and it is exactly what a field rename leaves behind.`;
       findings.push({
         severity: 'error',
         rule: SECURITY_FLS_UNKNOWN_FIELD,
         where: `permission set "${psName}"`,
         path: `${psPath}.fields["${flsKey}"]`,
         message:
-          `field-permission key '${flsKey}' is object-qualified but "${flsObject}" declares no field ` +
-          `'${flsField}'. The runtime resolves an FLS key by stripping the '${flsObject}.' prefix and ` +
+          `${wrote}. The runtime resolves an FLS key by stripping the '${flsObject}.' prefix and ` +
           `looking the remainder up as a column, so this key matches NOTHING: the masking it declares ` +
           `NEVER ENFORCES, and the field it was meant to cover stays as readable and as editable as the ` +
           `object-level grant leaves it — for every holder of this set. Nothing reports that at runtime. ` +
-          `Unlike an unqualified key this one looks correct in review, and it is exactly what a field ` +
-          `rename leaves behind.`,
+          `${looksRight}`,
         hint:
           `Point the key at a field "${flsObject}" really declares (${roster}), or delete the entry if the ` +
           `field is gone — an entry that cannot match is not protection. If the masking is still wanted, ` +
