@@ -1,6 +1,12 @@
 ---
-"@objectstack/service-analytics": patch
+"@objectstack/service-analytics": minor
 ---
+
+**The published `DimensionLabelDeps` type (re-exported from this package's `index.ts`) gains
+one new optional key, `translateSelectOptions`** — the surface the level is graded against,
+per the same "a new key on a published exported type is the mechanical floor for clause ②"
+rule #16778 shipped under. Backward compatible (optional, additive, no removed/renamed key,
+no wire-shape change), so `minor` rather than `major`.
 
 A dataset's `select`-field dimension now renders its option label in the request's locale on
 a dataset-backed chart, matching what `GET /meta/object/:name` (and hence the console's list
