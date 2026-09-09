@@ -35,7 +35,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "Platform Role",
-        help: "Platform-level role (admin, user, …). Set via the Set Platform Role action."
+        help: "Legacy better-auth role scalar (admin, user, …). ObjectStack no longer writes it (ADR-0068 D2) — grant platform-admin standing with an unscoped `admin_full_access` assignment in `sys_user_permission_set`."
       },
       banned: {
         label: "Banned",
@@ -3568,6 +3568,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       deviation_detail: {
         label: "Deviation Detail (JSON)",
         help: "JSON-encoded first counterexample behind deviation_observed_at (object, field, type, parse issue), so an operator can find the value that closed the irreversible gate."
+      },
+      columns_moved_at: {
+        label: "Columns Moved At",
+        help: "When this deployment last completed the COLUMN MOVE for this migration — the step that retypes the migrated columns and rewrites the values they hold into the new encoding. Separate evidence from applied_at and verified_at, which attest the backfill and its self-check only: a deployment can carry both and still store the legacy encoding. Null says exactly that, and is an expected steady state rather than an error — it is what a consumer that cannot read this field must assume."
       },
       created_at: {
         label: "Created At"

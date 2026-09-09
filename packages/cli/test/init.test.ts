@@ -323,12 +323,16 @@ describe('benign peer-skew declarations (#10326)', () => {
   const settings = renderPnpmWorkspaceYaml().replace(/^\s*#.*$/gm, '');
 
   it('widens better-auth\'s stale better-sqlite3 peer rather than pinning ours back', () => {
-    // better-auth 1.7.1 peers `^12.0.0` while the tree resolves 13.x. The peer
-    // is OPTIONAL and governs one configuration only — a raw better-sqlite3
+    // better-auth peers `^12.0.0` while the tree resolves 13.x. The peer is
+    // OPTIONAL and governs one configuration only — a raw better-sqlite3
     // `Database` passed to better-auth's `database` option — which ObjectStack
     // never does (AuthManager passes an ObjectQL adapter factory). Measured on
     // the configuration it does govern, 1.7.1 behaves identically on 13.0.3 and
-    // 12.11.1, so 13 is right and the upstream range is stale.
+    // 12.11.1; re-measured on the pinned 1.7.2 (#16813), the published package
+    // does not reference better-sqlite3 in any file, so no call site of ours
+    // can reach an API that moved 12 -> 13. 13 is right, the range is stale.
+    // The declaration this widening is ABOUT is pinned in
+    // `test/better-sqlite3-peer-declaration.pin.test.ts`.
     expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['better-auth>better-sqlite3']).toBe('13');
     expect(settings).toMatch(/^ {4}'better-auth>better-sqlite3': '13'$/m);
   });

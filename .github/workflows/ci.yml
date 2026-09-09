@@ -888,6 +888,81 @@ jobs:
             --scheduled "$RUNNER_TEMP/shard-packages.txt" \
             --package-list "$RUNNER_TEMP/turbo-ls.json"
 
+      # ── Per-file test timings, captured for the aggregator (#16454) ───────
+      #
+      # Cutting tests is decided per test file BY COST, so the cost has to be
+      # visible first. This shard reads the timings it already printed and
+      # hands them up; `Test Core` merges the six and publishes the table.
+      #
+      # WHERE THE NUMBERS COME FROM, and why no second test run is needed:
+      #   per FILE     the vitest module lines already in `test-core.log`.
+      #                Measured before this was written, because the default
+      #                reporter appends a file's duration only when the module
+      #                HAS one: on run 34317273493 every file line carried its
+      #                milliseconds, including files far under the 300ms
+      #                slowTestThreshold (which this repo never sets — it picks
+      #                the colour, not the presence). So the stream is enough
+      #                and no machine-readable reporter is added to the shard's
+      #                30-minute wall. The script's header carries the
+      #                measurement and its control.
+      #   per PACKAGE  `.turbo/runs/*.json`, the same `--summarize` output the
+      #                step above already uploads — turbo's own execution
+      #                windows, the unit scripts/test-shard-timings.json was
+      #                measured in, so the drift column compares like with
+      #                like. Cache REPLAYS and FAILED tasks are refused there
+      #                rather than averaged in as near-zero measurements.
+      #
+      # ⛔ REPORT ONLY — `if: always()` + `continue-on-error: true`, both
+      # load-bearing and for different reasons. `always()` so a red shard still
+      # contributes what it timed (a slow suite is most interesting when it has
+      # just failed), and `continue-on-error` because an unguarded step here
+      # sits on the shard's PASS/FAIL path: it would abort the job before the
+      # attestation pair below ever ran, evicting a green shard from the merge
+      # queue on a diagnostics fault. That is #14469, measured on the upload
+      # step above. This card's ruling is report only, no red.
+      #
+      # ⛔ These two steps must stay ABOVE the attestation pair at the bottom of
+      # the job, exactly like the run-summary upload above:
+      # check-shard-attestation.mjs requires `--emit` + upload-artifact to be
+      # the job's LAST TWO steps and pins that statically (#6082). Adding steps
+      # here is fine; moving them below that pair is not — and ⛔ that pair does
+      # not acquire an `if:` or a `continue-on-error:` to "match" these.
+      #
+      # The `--self-test` runs here because this is where CI names the script,
+      # which is what check:self-test-wired requires. ⚠ Under
+      # `continue-on-error` its verdict is VISIBLE but not enforcing: inside
+      # this workflow, no step this card may add is permitted to fail anything.
+      # Giving that self-test teeth means a `check:` step in lint.yml, which is
+      # deliberately NOT taken here.
+      - name: Capture this shard's test timings
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ ! -f "$RUNNER_TEMP/test-core.log" ]; then
+            echo "No test log — the test step did not get far enough to produce one."
+            exit 0
+          fi
+          node scripts/report-test-timings.mjs --self-test
+          node scripts/report-test-timings.mjs --capture \
+            --log "$RUNNER_TEMP/test-core.log" \
+            --summaries .turbo/runs \
+            --shard "${{ matrix.shard }}/6" \
+            --out "$RUNNER_TEMP/test-timings/shard-${{ matrix.shard }}.json"
+
+      # 1 day, matching the run-summary upload above: this is an intermediate
+      # the aggregator consumes minutes later in the SAME run. The 14-day
+      # retention this card asks for is on the MERGED table, published by
+      # `Test Core`.
+      - name: Publish this shard's test timings
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-core-timings-${{ matrix.shard }}-of-6
+          path: ${{ runner.temp }}/test-timings/
+          if-no-files-found: ignore
+          retention-days: 1
+
       # A stall's full diagnostic reports (JS stacks, libuv handles, heap
       # summary per process) outlive the in-log digest — keep them so a #4250
       # occurrence can be dissected offline. Free when nothing stalled: the
@@ -1026,6 +1101,76 @@ jobs:
             --filter-result "$OS_FILTER_RESULT" \
             --download-outcome "$OS_DOWNLOAD_OUTCOME" \
             --leg "test/6:$OS_TEST_RESULT"
+
+      # ── The timing table this gate publishes (#16454) ─────────────────────
+      #
+      # The slowest 20 test FILES and slowest 10 PACKAGES of this run, each
+      # package's measured seconds beside its pinned weight from
+      # scripts/test-shard-timings.json, written to the job summary and kept as
+      # an artifact for 14 days.
+      #
+      # ⛔ BOTH STEPS SIT AFTER `Verify test shard results` AND CARRY
+      # `if: always()` + `continue-on-error: true`. `Test Core` is the required
+      # branch-protection context and the verdict above is the whole reason the
+      # job exists; a reporting step must be unable to delay it, displace it, or
+      # redden it. Ordering after the verdict is what makes "cannot delay"
+      # true, and the two flags are what make "cannot redden" true — a
+      # diagnostics fault here (an artifact-service 403 is the measured one,
+      # #14469) must not evict a green run.
+      #
+      # ⛔ Steps, deliberately, NOT a new `needs:` entry: this job's
+      # `OS_AGGREGATOR_MEMBERS` / `OS_AGGREGATOR_NON_MEMBERS` block is asserted
+      # EQUAL to `needs:` in both directions by check:aggregator-roster
+      # (#10490), so widening `needs:` here to reach the shards' artifacts would
+      # red that gate and, worse, enlarge what this required context claims to
+      # stand for. The shard captures are same-run artifacts and need nothing
+      # beyond the `contents: read` this job already has.
+      #
+      # An EMPTY merge is reported as NOT MEASURED in words rather than as an
+      # empty table — the two look identical on a summary page and only one of
+      # them needs a person. The tool exits EXIT_PREREQUISITE_NOT_MET there,
+      # which `continue-on-error` absorbs while the words stay on the page.
+      #
+      # BOOTSTRAP WINDOW: the first runs after this lands have shard captures
+      # only from shards that ran WITH it. A `pull_request` run always builds
+      # its own shards from this ref, so a PR sees a complete table from the
+      # first run; there is no back-fill and no window in which this reads a
+      # partial merge as a whole one — the "parsed X of Y declared" counter
+      # under the table is what says so on every run, including the first.
+      - name: Download this run's shard test timings
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: test-core-timings-*
+          path: ${{ runner.temp }}/test-timings
+          merge-multiple: true
+
+      - name: Publish the test timing table
+        if: always()
+        continue-on-error: true
+        run: |
+          node scripts/report-test-timings.mjs --merge \
+            --captures "$RUNNER_TEMP/test-timings" \
+            --out "$RUNNER_TEMP/test-timing-table/test-timing-table.md" \
+            --json "$RUNNER_TEMP/test-timing-table/test-timing-table.json"
+          # Echo the table into the JOB LOG as well as the job summary. A job
+          # summary is readable in the web UI and by essentially nothing else —
+          # there is no REST endpoint that returns one — so without this the
+          # only machine-readable copy is the artifact, and reaching that needs
+          # an artifact download. The log is the copy a seat, a script or
+          # `gh run view --log` can actually read.
+          cat "$RUNNER_TEMP/test-timing-table/test-timing-table.md" || true
+
+      - name: Publish the merged timing table artifact
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-core-timing-table
+          path: ${{ runner.temp }}/test-timing-table/
+          if-no-files-found: ignore
+          retention-days: 14
 
 
   # ── Temporal conformance against live, non-UTC servers (ADR-0053 D-A3) ─────

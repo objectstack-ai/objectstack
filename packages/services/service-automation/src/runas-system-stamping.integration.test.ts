@@ -134,9 +134,9 @@ describe("runAs:'system' create_record stamps organization_id / owner_id / creat
     expect(row, 'the sweep must have created the row').toBeTruthy();
     // The issue's step 2, inverted: the three platform columns are all
     // non-NULL, and each equals what the trigger context knew.
-    expect(row.created_by, 'created_by must be the triggering user').toBe('usr_admin');
-    expect(row.owner_id, 'owner_id must be the acting user (the runAs:user default, restored)').toBe('usr_admin');
-    expect(row.organization_id, "organization_id must be the trigger context's org").toBe('org_1');
+    expect(row!.created_by, 'created_by must be the triggering user').toBe('usr_admin');
+    expect(row!.owner_id, 'owner_id must be the acting user (the runAs:user default, restored)').toBe('usr_admin');
+    expect(row!.organization_id, "organization_id must be the trigger context's org").toBe('org_1');
   });
 
   it("flow-authored ownership wins: an explicit `fields.owner_id` is never overwritten", async () => {
@@ -153,10 +153,10 @@ describe("runAs:'system' create_record stamps organization_id / owner_id / creat
     // ADR-0073 D3 — flow logic sets ownership explicitly; the stamp is the
     // fill-only default underneath it, exactly like the security middleware's
     // own "empty means stamp" rule on the user path.
-    expect(row.owner_id).toBe('usr_assignee');
+    expect(row!.owner_id).toBe('usr_assignee');
     // Attribution is untouched by the ownership choice.
-    expect(row.created_by).toBe('usr_admin');
-    expect(row.organization_id).toBe('org_1');
+    expect(row!.created_by).toBe('usr_admin');
+    expect(row!.organization_id).toBe('org_1');
   });
 
   it('a USER-LESS system run (schedule shape) stamps nothing — and that is the contract, not a gap', async () => {
@@ -175,12 +175,12 @@ describe("runAs:'system' create_record stamps organization_id / owner_id / creat
     // banned alternative. ADR-0073's automation principal (a real identity for
     // these runs) is M2, gated on its first consumer. Provenance still names
     // the writer: the run's `svc:flow:*` actor label and flowRunId (#4366/#3712).
-    expect(row.created_by ?? null).toBeNull();
-    expect(row.owner_id ?? null).toBeNull();
+    expect(row!.created_by ?? null).toBeNull();
+    expect(row!.owner_id ?? null).toBeNull();
     // The schedule trigger supplies no org today, so there is nothing to
     // stamp; a schedule-run in an org-partitioned deployment needs the flow's
     // `fields` to place rows (or a future org-aware schedule binding).
-    expect(row.organization_id ?? null).toBeNull();
+    expect(row!.organization_id ?? null).toBeNull();
   });
 
   it("REGRESSION: the runAs:'user' path is unchanged — audit + org stamps still land", async () => {
@@ -192,8 +192,8 @@ describe("runAs:'system' create_record stamps organization_id / owner_id / creat
     expect(res.success, `run failed: ${JSON.stringify(res)}`).toBe(true);
 
     const row = await taskByTitle('renew D');
-    expect(row.created_by).toBe('usr_admin');
-    expect(row.organization_id).toBe('org_1');
+    expect(row!.created_by).toBe('usr_admin');
+    expect(row!.organization_id).toBe('org_1');
     // (`owner_id` on the user path is the security middleware's stamp; the
     // full-security composition below covers it. This harness pins that the
     // audit + tenant machinery behave identically before and after the fix.)
@@ -273,19 +273,19 @@ describe('the #5494 admission flip: row content, not caller, decides (real Secur
     expect(res.success, `run failed: ${JSON.stringify(res)}`).toBe(true);
 
     const row = await rowByTitle('flip A');
-    expect(row.created_by).toBe('usr_member');
-    expect(row.owner_id).toBe('usr_member');
-    expect(row.organization_id).toBe('org_1');
+    expect(row!.created_by).toBe('usr_member');
+    expect(row!.owner_id).toBe('usr_member');
+    expect(row!.organization_id).toBe('org_1');
 
     // Step 3, inverted: the same member — no elevation, no transfer grant —
     // repairs and completes the record the sweep made for them.
     await expect(
-      ql.update('crm_task', { id: row.id, status: 'done' }, { context: { ...MEMBER_CTX } }),
+      ql.update('crm_task', { id: row!.id, status: 'done' }, { context: { ...MEMBER_CTX } }),
     ).resolves.toBeDefined();
-    expect((await rowByTitle('flip A')).status).toBe('done');
+    expect((await rowByTitle('flip A'))!.status).toBe('done');
 
     await expect(
-      ql.delete('crm_task', { where: { id: row.id }, context: { ...MEMBER_CTX } }),
+      ql.delete('crm_task', { where: { id: row!.id }, context: { ...MEMBER_CTX } }),
     ).resolves.toBeDefined();
     expect(await rowByTitle('flip A')).toBeFalsy();
   });
@@ -298,7 +298,7 @@ describe('the #5494 admission flip: row content, not caller, decides (real Secur
     const res = await automation.execute('night_sweep', { event: 'schedule', params: {} } as any);
     expect(res.success).toBe(true);
     const row = await rowByTitle('flip B');
-    expect(row.created_by ?? null).toBeNull();
+    expect(row!.created_by ?? null).toBeNull();
 
     // The SAME member context that succeeded above is denied here: the only
     // difference between the two attempts is the row's stamp columns — the
@@ -323,10 +323,10 @@ describe('the #5494 admission flip: row content, not caller, decides (real Secur
       developerMessage: expect.stringContaining('(row-level security)'),
     };
     await expect(
-      ql.update('crm_task', { id: row.id, status: 'done' }, { context: { ...MEMBER_CTX } }),
+      ql.update('crm_task', { id: row!.id, status: 'done' }, { context: { ...MEMBER_CTX } }),
     ).rejects.toMatchObject(rowLevelDenial);
     await expect(
-      ql.delete('crm_task', { where: { id: row.id }, context: { ...MEMBER_CTX } }),
+      ql.delete('crm_task', { where: { id: row!.id }, context: { ...MEMBER_CTX } }),
     ).rejects.toMatchObject(rowLevelDenial);
   });
 });

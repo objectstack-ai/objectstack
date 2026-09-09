@@ -564,6 +564,16 @@ const TRACKING_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/431
 // needs to, the guard comes with the export.
 const EXIT_OK = 0;
 const EXIT_FINDINGS = 1;
+/**
+ * The exit code for a POPULATION REFUSAL (#13014), distinct from a finding's 1
+ * and from a prerequisite's 3.
+ *
+ * A refusal and a finding are different verdicts and must not share a code: 1
+ * says "this workspace has problems, here they are", 2 says "this run read too
+ * little of the workspace to say anything about it". Both fail CI, so the split
+ * costs nothing there and buys a reader the difference.
+ */
+const EXIT_POPULATION_REFUSED = 2;
 const EXIT_PREREQUISITE_NOT_MET = 3;
 
 /**
@@ -2085,6 +2095,13 @@ function testCoverage(dir, scripts) {
     hidesTests: hiddenTests.length > 0,
     testFiles: hiddenTests.length,
     hiddenTests,
+    // The WALK's own totals (#13014), carried beside the subsets derived from
+    // them. Every field below this one is a filtered remainder -- files the
+    // programs did NOT read -- so all of them read zero both when a package is
+    // perfectly covered and when the walk returned nothing. These two are the
+    // only numbers here that tell those apart.
+    walkedTestFiles: testRels.length,
+    walkedSourceFiles: sourceRels.length,
     pinFiles: pinFiles.sort(),
     declaredIncludes,
     // The script bodies GENERATED_COVERED asks "does this run the generator,
@@ -2118,6 +2135,178 @@ function testCoverage(dir, scripts) {
 }
 
 /** Every workspace member as { name, dir, scripts, hasTsconfig, hidesTests, testFiles }. */
+// ---------------------------------------------------------------------------
+// POPULATION FLOORS -- the protection the ledgers give today and will stop
+// giving on the day they succeed (#13014's residual R1).
+//
+// Every clause in `evaluate` is a statement about the packages it was handed.
+// Hand it none and each of them is vacuously satisfied, so what actually stops
+// a silently-empty run today is the LEDGER reconciliation: a DEBT, EXEMPT,
+// TEST_DEBT or GENERATED_INCLUDE_ROOTS entry naming a package the enumeration
+// no longer produces reds with "names no workspace package".
+//
+// That protection is emergent, and it is on a timer. Measured on `origin/main`
+// (854639b311) against a fixture root whose `pnpm-workspace.yaml` names
+// `packages/*` over an EMPTY `packages/` directory:
+//
+//   * with the ledgers as they ship: exit 1, 8 problems, and every one of them
+//     is a ledger row naming a package that is not there -- not one is a
+//     statement about type-check coverage;
+//   * with those same ledgers emptied: exit 0, and the gate prints
+//     `check-type-check-coverage: OK -- 0/0 workspace packages type-checked`.
+//
+// Emptying them is not a hypothetical. `PHANTOM_PIN_DEBT` and
+// `UNCHECKED_SOURCE_DEBT` are ALREADY `{}` on the tree this was measured on --
+// the ratchet reached zero and took its share of the floor with it, exactly as
+// designed and with nothing anywhere saying so. The remaining four are the same
+// ratchet at an earlier point on the same path, and the gate's own text calls
+// reaching zero the goal.
+//
+// ⛔ So the floors below are over the DERIVED population -- what the workspace
+// enumeration produced and what the per-package walk found -- and NEVER over a
+// ledger's size. A floor on a ledger would red the ratchet's own success, which
+// is the defect and not the repair.
+//
+// ## The three rows measure three stages, not one number three times
+//
+//   packages          -- the enumeration itself (`workspacePackageDirs`). Zero
+//                        here is the measured blindness above.
+//   walkedTestFiles   -- what `walkPackageFiles` found, on the TESTS_COVERED
+//                        side of its own filter.
+//   walkedSourceFiles -- the same walk on the SOURCES_COVERED side.
+//
+// The second and third are separate because they are what the walk's filter
+// splits, and a break in that filter moves one without the other. Both are
+// needed beside the first for a reason the first cannot cover: with the
+// enumeration intact and the walk returning nothing, `hiddenTests`,
+// `pinFiles` and `uncheckedSources` are all empty -- which is the same shape a
+// perfectly covered workspace produces. The gate cannot tell those apart from
+// its own findings, because both are the ABSENCE of a finding.
+//
+// ## Why `covered` is not a row, deliberately
+//
+// The 76-of-80 figure is protected already and adding a floor would be a second
+// tolerance for a fact that has one: if manifest reading broke, `covered` falls
+// to zero and COVERED fires for every package in the same run. Recorded as a
+// considered omission, not an oversight.
+//
+// ## Re-measuring
+//
+// Every count is printed by `populationProvenanceLine` on each green run, so
+// reproducing the record is running the gate. Re-measuring UP is free; LOWERING
+// a floor to make a run pass is the move this block exists to make visible.
+
+/**
+ * The census the floors were derived from, and the commit it was taken on --
+ * one claim about one named tree, so a count and its provenance cannot be
+ * edited apart. ⛔ Never repoint `ref` without re-running all three counts.
+ *
+ * Taken on `854639b311` by running this gate with the floors in place and
+ * reading `populationProvenanceLine`. The diff that added them touches only
+ * `scripts/`, and every count here is a function of `pnpm-workspace.yaml` and
+ * the package directories it names, so these are the numbers a clean run of
+ * that commit produces.
+ */
+const MEASURED_POPULATION = Object.freeze({
+  ref: '854639b311',
+  packages: 80,
+  walkedTestFiles: 3503,
+  walkedSourceFiles: 2521,
+});
+
+// Roughly a fifth of headroom on each, the band the precedent
+// (`check-dual-build-cjs-loads`) derived and holds at 85-87% of its own record.
+// ⛔ These are floors, not targets: a run BELOW one is an enumeration or a walk
+// to fix, never a number to lower.
+const MIN_PACKAGES = 64;
+const MIN_WALKED_TEST_FILES = 2800;
+const MIN_WALKED_SOURCE_FILES = 2000;
+
+/**
+ * The first floor a run falls below, as a refusal message -- or `null` when
+ * every count clears. Pure, so `--self-test` drives every row with no tree.
+ *
+ * ⛔ Each `why` names ONLY the stage its own count measures. A row that fell
+ * says which reader went quiet and nothing else: the other rows report
+ * themselves, and listing every way a run can collapse would put causes that
+ * did not occur in front of the reader.
+ *
+ * @param {{packages?: number, walkedTestFiles?: number, walkedSourceFiles?: number}} counts
+ * @returns {string | null}
+ *
+ * ⛔ NOT exported, deliberately. `check:entry-guard` refuses a `scripts/**` file
+ * that exports a binding AND runs on import -- whatever its top level does then
+ * runs inside the importer -- and this file's top level IS its dispatch. The
+ * self-test lives in this same module and reaches it directly, so an export
+ * would buy nothing and cost that rule. (The precedent this shape is copied
+ * from, `check-dual-build-cjs-loads.mjs`, exports because it already guards its
+ * dispatch with `isEntrypoint`; retrofitting that here is a change to two large
+ * gates' argv handling and not this card's subject.)
+ */
+function populationFloorProblem(counts) {
+  const rows = [
+    [counts?.packages ?? 0, MIN_PACKAGES, MEASURED_POPULATION.packages,
+      'workspace package(s) enumerated',
+      'This is the population every per-package clause is asked about. With none of it, each '
+        + 'clause is vacuously satisfied and the summary line reports a coverage ratio over an '
+        + 'empty set.'],
+    [counts?.walkedTestFiles ?? 0, MIN_WALKED_TEST_FILES, MEASURED_POPULATION.walkedTestFiles,
+      'test file(s) found by the per-package walk',
+      'TESTS_COVERED and PINS_CHECKED are decided against what this walk hands over. A walk that '
+        + 'returns nothing hides no tests and pins nothing, which is the same silence a fully '
+        + 'covered workspace produces.'],
+    [counts?.walkedSourceFiles ?? 0, MIN_WALKED_SOURCE_FILES, MEASURED_POPULATION.walkedSourceFiles,
+      'non-test source file(s) found by the per-package walk',
+      'SOURCES_COVERED is decided against this half of the same walk. With none of it every '
+        + 'source directory reads as accounted for, because the clause reports the REMAINDER and '
+        + 'the remainder of nothing is nothing.'],
+  ];
+  for (const [got, min, measured, what, why] of rows) {
+    if (got >= min) continue;
+    return `measured only ${got} ${what}, below the floor of ${min} `
+      + `(${measured} on ${MEASURED_POPULATION.ref}).\n`
+      + `  ${why}\n`
+      + '  ⛔ NOT a pass: nothing, or nearly nothing, was read. This says WHICH population fell and\n'
+      + '  nothing about why the others stand — they are reported by their own rows.';
+  }
+  return null;
+}
+
+/**
+ * The provenance footer for a PASSING run: what this run read, the floors it
+ * cleared, and the census those floors came from, side by side.
+ *
+ * The floors are inequalities on purpose, so no run can contradict the record.
+ * Without this line the record could stop describing the tree with nothing
+ * anywhere saying so. The delta is INFORMATION, never a verdict: this
+ * population moves in both directions for good reasons -- a package merged
+ * away, a test tree deleted -- and only the floors decide. Pure.
+ *
+ * @param {{packages?: number, walkedTestFiles?: number, walkedSourceFiles?: number}} counts
+ * @returns {string}
+ *
+ * ⛔ NOT exported, deliberately. `check:entry-guard` refuses a `scripts/**` file
+ * that exports a binding AND runs on import -- whatever its top level does then
+ * runs inside the importer -- and this file's top level IS its dispatch. The
+ * self-test lives in this same module and reaches it directly, so an export
+ * would buy nothing and cost that rule. (The precedent this shape is copied
+ * from, `check-dual-build-cjs-loads.mjs`, exports because it already guards its
+ * dispatch with `isEntrypoint`; retrofitting that here is a change to two large
+ * gates' argv handling and not this card's subject.)
+ */
+function populationProvenanceLine(counts) {
+  const got = [counts?.packages ?? 0, counts?.walkedTestFiles ?? 0, counts?.walkedSourceFiles ?? 0];
+  const rec = [MEASURED_POPULATION.packages, MEASURED_POPULATION.walkedTestFiles,
+    MEASURED_POPULATION.walkedSourceFiles];
+  const floors = [MIN_PACKAGES, MIN_WALKED_TEST_FILES, MIN_WALKED_SOURCE_FILES];
+  const delta = got.map((g, i) => (g === rec[i] ? '=' : `${g > rec[i] ? '+' : ''}${g - rec[i]}`));
+  return `  provenance — packages/walkedTestFiles/walkedSourceFiles: this run ${got.join('/')}`
+    + ` · floors ${floors.join('/')} · derived from ${rec.join('/')} measured on ${MEASURED_POPULATION.ref}`
+    + ` (${delta.join('/')} vs the record).\n`
+    + '  ⚠ The delta is information, not a verdict — this population grows AND shrinks for good'
+    + ' reasons, and only the floors decide.';
+}
+
 function workspacePackages() {
   // Membership comes from scripts/workspace-enumerator.mjs (#11510) — this repo's
   // one parse of the workspace file, and one of nine private copies before it.
@@ -4533,6 +4722,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'ratchet-remedy authority (#8435)': 3,
   'graduation remedy (#11491)': 8,
   'TS6059 wiring (#10779)': 2,
+  'population-floor cases': 23,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -4541,7 +4731,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // key in the literal above, so the roster falls below this number; the table
 // cross-check in `batteryFloorFailures()` is the other half, and names WHICH
 // label collided.
-const SELF_TEST_BATTERY_FLOOR = 61;
+const SELF_TEST_BATTERY_FLOOR = 62;
 
 // The ledger `batteryFloorFailures()` reads.
 //
@@ -6877,6 +7067,102 @@ function selfTest() {
   failures.push(...workspaceEnumeratorSelfTest({ root: ROOT }));
   failures.push(...workspaceEnumeratorFloorFailures());
 
+  // ── The POPULATION FLOORS (#13014) ────────────────────────────────────────
+  //
+  // Driven as pure functions, so every row is exercised with no workspace at
+  // all. Both directions on every count: a value that FIRES it and a value that
+  // does not, because a floor asserted only in the failing direction is one
+  // that could be firing on everything.
+  {
+    const fullPop = {
+      packages: MEASURED_POPULATION.packages,
+      walkedTestFiles: MEASURED_POPULATION.walkedTestFiles,
+      walkedSourceFiles: MEASURED_POPULATION.walkedSourceFiles,
+    };
+    const pop = (label, ok) => {
+      registerCase('population-floor cases');
+      if (!ok) failures.push(label);
+    };
+    pop('FLOOR — the recorded census clears every floor',
+      populationFloorProblem(fullPop) === null);
+    pop('FLOOR — a dead workspace enumeration refuses',
+      populationFloorProblem({ ...fullPop, packages: 0 }) !== null);
+    pop('FLOOR — a walk that found no test file refuses',
+      populationFloorProblem({ ...fullPop, walkedTestFiles: 0 }) !== null);
+    pop('FLOOR — a walk that found no source file refuses',
+      populationFloorProblem({ ...fullPop, walkedSourceFiles: 0 }) !== null);
+    // The nonsense direction for each row: a count AT its own floor is a pass,
+    // so no row can be firing unconditionally.
+    pop('FLOOR — packages exactly at its floor passes',
+      populationFloorProblem({ ...fullPop, packages: MIN_PACKAGES }) === null);
+    pop('FLOOR — walkedTestFiles exactly at its floor passes',
+      populationFloorProblem({ ...fullPop, walkedTestFiles: MIN_WALKED_TEST_FILES }) === null);
+    pop('FLOOR — walkedSourceFiles exactly at its floor passes',
+      populationFloorProblem({ ...fullPop, walkedSourceFiles: MIN_WALKED_SOURCE_FILES }) === null);
+    pop('FLOOR — one below the floor is where each row turns over',
+      populationFloorProblem({ ...fullPop, packages: MIN_PACKAGES - 1 }) !== null
+        && populationFloorProblem({ ...fullPop, walkedTestFiles: MIN_WALKED_TEST_FILES - 1 }) !== null
+        && populationFloorProblem({ ...fullPop, walkedSourceFiles: MIN_WALKED_SOURCE_FILES - 1 }) !== null);
+    pop('FLOOR — a missing count is zero, not "unmeasured but fine"',
+      populationFloorProblem({}) !== null);
+    // ⛔ A floor above its own record reds a healthy tree, which is a failed
+    // patch and not a stricter gate.
+    pop('FLOOR — every floor sits at or below its own record',
+      MIN_PACKAGES <= MEASURED_POPULATION.packages
+        && MIN_WALKED_TEST_FILES <= MEASURED_POPULATION.walkedTestFiles
+        && MIN_WALKED_SOURCE_FILES <= MEASURED_POPULATION.walkedSourceFiles);
+    pop('FLOOR — the refusal cites the ref its record was taken on',
+      (populationFloorProblem({ ...fullPop, packages: 0 }) ?? '').includes(MEASURED_POPULATION.ref));
+    // ⛔ A floor over a LEDGER would red the ratchet's own success, which is the
+    // defect this block repairs and not a stricter version of it. Asserted
+    // rather than only written in the header: the census is a closed set of
+    // three derived counts, and a fourth row keyed to a ledger would break this.
+    pop('FLOOR — the census names only derived populations, never a ledger',
+      Object.keys(MEASURED_POPULATION).join(',') === 'ref,packages,walkedTestFiles,walkedSourceFiles');
+    pop('FLOOR — an emptied ledger alone cannot move any floor',
+      populationFloorProblem(fullPop) === null
+        && Object.keys(PHANTOM_PIN_DEBT).length === 0
+        && Object.keys(UNCHECKED_SOURCE_DEBT).length === 0);
+    // HONESTY (#13014 acceptance): a fallen row names ITS OWN stage and says
+    // nothing about the rows that are standing.
+    const pkgMsg = populationFloorProblem({ ...fullPop, packages: 0 }) ?? '';
+    pop('FLOOR — a fallen enumeration names the enumeration',
+      /workspace package\(s\) enumerated/.test(pkgMsg));
+    pop('FLOOR — and blames neither half of the per-package walk',
+      !/per-package walk/.test(pkgMsg));
+    const srcMsg = populationFloorProblem({ ...fullPop, walkedSourceFiles: 0 }) ?? '';
+    pop('FLOOR — a fallen source walk names SOURCES_COVERED, not the enumeration',
+      /SOURCES_COVERED/.test(srcMsg) && !/enumerated/.test(srcMsg));
+    pop('FLOOR — the first row to fall is the one reported, in row order',
+      /enumerated/.test(populationFloorProblem({ packages: 0, walkedTestFiles: 0 }) ?? ''));
+    // The collapse this block was written against, at the size it was measured:
+    // a workspace file naming `packages/*` over an empty directory. Before this
+    // floor that tree printed `OK -- 0/0 workspace packages type-checked`.
+    pop('FLOOR — the measured empty-workspace collapse is refused',
+      populationFloorProblem({ packages: 0, walkedTestFiles: 0, walkedSourceFiles: 0 }) !== null);
+    // The provenance line, driven both ways: it reports, it never decides.
+    pop('PROVENANCE — an exact match reads as three equals signs',
+      populationProvenanceLine(fullPop).includes('=/=/='));
+    pop('PROVENANCE — growth is signed and shrinkage is not mistaken for it',
+      populationProvenanceLine({ ...fullPop, packages: MEASURED_POPULATION.packages + 4 }).includes('+4/')
+        && populationProvenanceLine({ ...fullPop, walkedSourceFiles: MEASURED_POPULATION.walkedSourceFiles - 7 }).includes('/-7'));
+    pop('PROVENANCE — the floors and the record are both on the line',
+      populationProvenanceLine(fullPop)
+        .includes(`floors ${MIN_PACKAGES}/${MIN_WALKED_TEST_FILES}/${MIN_WALKED_SOURCE_FILES}`)
+        && populationProvenanceLine(fullPop).includes(`measured on ${MEASURED_POPULATION.ref}`));
+    // Without this the pass path could stop calling it and the record would
+    // quietly stop being reconciled in the log.
+    pop('PROVENANCE — the pass path still prints it',
+      readFileSync(join(import.meta.dirname, 'check-type-check-coverage.mjs'), 'utf8')
+        .includes(`console.log(${'populationProvenanceLine'}(populationCounts));`));
+    // ⛔ And the refusal must not be reachable from the pass path's own counts.
+    pop('FLOOR — a refusal, a finding and a prerequisite do not share an exit code',
+      EXIT_POPULATION_REFUSED !== EXIT_FINDINGS
+        && EXIT_POPULATION_REFUSED !== EXIT_OK
+        && EXIT_POPULATION_REFUSED !== EXIT_PREREQUISITE_NOT_MET);
+  }
+
+
   if (failures.length) {
     console.error(`✗ check:type-check-coverage --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error('  • ' + f);
@@ -6933,6 +7219,23 @@ if (process.argv.includes('--self-test')) {
 const packages = workspacePackages();
 const { root, state } = observed();
 const problems = evaluate(packages, root, state);
+// ⛔ Before any verdict: a run that enumerated (almost) nothing must refuse
+// rather than report a ratio over an empty set. Ordered ahead of the findings
+// branch because "nothing was measured" outranks "here are findings" -- the
+// findings would be drawn from the same collapsed population (#13014). The ROOT
+// package is deliberately outside these counts: it is built by `observed()`
+// rather than enumerated, so it is present in every run including the empty one
+// and can float no floor.
+const populationCounts = {
+  packages: packages.length,
+  walkedTestFiles: packages.reduce((n, p) => n + (p.walkedTestFiles ?? 0), 0),
+  walkedSourceFiles: packages.reduce((n, p) => n + (p.walkedSourceFiles ?? 0), 0),
+};
+const populationFloor = populationFloorProblem(populationCounts);
+if (populationFloor !== null) {
+  console.error(`check-type-check-coverage REFUSES — ${populationFloor}`);
+  process.exit(EXIT_POPULATION_REFUSED);
+}
 // The same subject list `evaluate` asks the four per-package clauses of
 // (#15483). Every layer figure below is a count over the clauses' population,
 // so reading it from a narrower list would report the root's hidden tests,
@@ -6995,6 +7298,10 @@ console.log(
           `recorded ${e.errors})`).join(', ')}. Each is a note waiting to be re-tallied onto what its ` +
         `package now measures (#10722).`),
 );
+// Printed on every green run, for the reason the layer figures above are: the
+// record behind the floors could stop describing the workspace with nothing
+// anywhere saying so, and both green logs would read the same (#13014).
+console.log(populationProvenanceLine(populationCounts));
 
 // MEASURED runs only when asked, and only after the structural verdict above is
 // clean: a ledger entry naming a package that no longer exists has nothing to
