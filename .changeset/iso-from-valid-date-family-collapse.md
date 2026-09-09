@@ -1,5 +1,5 @@
 ---
-"@objectstack/metadata": patch
+"@objectstack/metadata": minor
 "@objectstack/metadata-protocol": patch
 ---
 
@@ -55,15 +55,43 @@ to materialise for these columns. They now arrive as the declared *type* (a
 string) that simply is not a valid datetime, so the producer's bug stays visible
 instead of being papered over.
 
-## One behaviour change worth reading twice
+## One behaviour change worth reading twice — and it is why this is `minor`
 
 `DatabaseLoader.stat()` computes `record.updatedAt ?? record.createdAt`. An
 Invalid `updated_at` used to WIN that `??` — a `Date` is truthy and not nullish —
 so a row with an unreadable `updated_at` and a good `created_at` published
 `new Date()` as its `mtime`. It now folds to `undefined` one step earlier and
 loses the `??`, so the row publishes its `created_at`: a stored instant in place
-of a fabricated one, and exactly the "same `?? <default>` chain an absent column
+of a fabricated one, and exactly the "same `?? DEFAULT` chain an absent column
 takes" that `#14078`'s own ruling text prescribes for the shape.
+
+⚠️ **The old answer was LEGAL.** `new Date().toISOString()` satisfies
+`MetadataStats.mtime`'s `z.string().datetime()` perfectly well, and the
+pre-existing pin asserted exactly that. So this one site is **not** the repair of
+a violation — it is one legal published answer replaced by a different legal
+published answer on a published read verb. Nothing was refused before and is
+permitted now; a consumer simply receives a different instant.
+
+## Why the two levels differ
+
+- **`@objectstack/metadata` — `minor`.** Its four repaired sites, on their own,
+  are the "repairing an implementation that silently violated its own already
+  published declared type" case: the values that changed there are ones
+  `MetadataRecordSchema` / `MetadataHistoryRecordSchema` already refused, and
+  nothing a consumer legitimately received has moved. But this package also
+  carries `stat()`, and that site changes a **legal** published answer, which the
+  paragraph above measures. The level is per package, so the four repaired sites
+  ride along at `minor`.
+- **`@objectstack/metadata-protocol` — `patch`.** Neither of its two sites moves
+  a legal published answer. `rowToEvent` only stops emitting values
+  `MetadataEventSchema` refused (a `Date`, a `number`, an opaque object in a
+  field declared `z.string()`), and `listCommits` is byte-identical on all seven
+  probe inputs.
+
+⛔ No declared type narrowed, no export was added or removed (neither helper was
+ever exported), and no envelope or accept set moved — so this is `minor` by the
+changed-answer row, not a breaking change, and it carries no ADR-0087
+disposition.
 
 ## What deliberately did NOT collapse
 
