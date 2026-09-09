@@ -59,7 +59,9 @@
  * Ledger-sourced population keys with no classifying matrix row.
  *
  * MEASURED 2026-08-31 against `rest-route-ledger.ts` (94 rows / 19 families)
- * and `route-ledger.ts` (80 rows / 21 domains): 40 keys minted, 6 classified
+ * and `route-ledger.ts` (80 rows / 21 domains — 82 since the two operator
+ * run-lifecycle rows landed, both under the already-classified `/automation`
+ * domain, so the key arithmetic below is unmoved): 40 keys minted, 6 classified
  * by rows that already pin the same surface through the probe table, 34 here.
  *
  * ⛔ SHRINK-ONLY. See rules 1–4 above; the test enforces all four.

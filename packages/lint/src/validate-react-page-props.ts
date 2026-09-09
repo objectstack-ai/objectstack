@@ -37,6 +37,7 @@ import { createRequire } from 'node:module';
 import type ts from 'typescript';
 import {
   REACT_BLOCKS,
+  REACT_RETIRED_OVERLAY_PROPS,
   RECORD_CONTEXT_BLOCK_TAGS,
   REACT_RECORD_BLOCK_ALTERNATIVES,
   ChartAggregateSchema,
@@ -127,17 +128,25 @@ interface BlockSpec {
    * restated: prop name → its canonical replacement + the authoring note the
    * warning quotes. A `required` prop that is deprecated is a required
    * BINDING, not a required spelling — the canonical `replacedBy` prop
-   * satisfies it (see the missing-required check below). [#14791] The one
-   * exception is ListView's object binding, whose canonical replacement no
-   * renderer reads yet: see `objectProviderBindsNothing`.
+   * satisfies it (see the missing-required check below).
    */
   deprecated: Map<string, { replacedBy: string; note: string }>;
+  /**
+   * [#14791] Overlay spellings RETIRED from the block, read from the contract's
+   * `REACT_RETIRED_OVERLAY_PROPS`: prop name → the prop that carries the
+   * binding now + the one-line fix. Writing one is an error carrying that
+   * fix, never a typo guess and never silence — the renderer may still read
+   * the old key, which is exactly how a retired spelling would keep shipping.
+   */
+  retired: Map<string, { replacedBy: string; note: string }>;
+  /** The contract's own description per required binding — the hint when one is missing. */
+  requiredDescriptions: Map<string, string>;
 }
 const BLOCKS: Map<string, BlockSpec> = new Map(
   (
     REACT_BLOCKS as Array<{
       tag: string;
-      interactions: Array<{ name: string; required?: boolean; deprecated?: { replacedBy: string; note: string } }>;
+      interactions: Array<{ name: string; required?: boolean; description: string; deprecated?: { replacedBy: string; note: string } }>;
     }>
   ).map((b) => [
     b.tag,
@@ -146,6 +155,10 @@ const BLOCKS: Map<string, BlockSpec> = new Map(
       knownProps: new Set(b.interactions.map((i) => i.name)),
       deprecated: new Map(
         b.interactions.filter((i) => i.deprecated).map((i) => [i.name, i.deprecated!]),
+      ),
+      retired: new Map(Object.entries(REACT_RETIRED_OVERLAY_PROPS[b.tag] ?? {})),
+      requiredDescriptions: new Map(
+        b.interactions.filter((i) => i.required).map((i) => [i.name, i.description]),
       ),
     },
   ]),
@@ -306,6 +319,15 @@ export const REACT_PAGE_SOURCE_UNPARSEABLE = 'react-page-source-unparseable';
  * "alias + loud deprecation", same shape as `approval-approver-type-deprecated`.
  */
 export const REACT_PROP_DEPRECATED = 'react-prop-deprecated';
+
+/**
+ * [#14791] A prop written in a react-tier spelling the contract has RETIRED
+ * (maintainer ruling 2026-09-07: `<ListView objectName>` / `viewType` go with
+ * no deprecation window). Error, never warning: the contract no longer
+ * publishes the spelling, and the finding carries the prescription — the
+ * react-tier twin of a metadata schema's `retiredKey()` tombstone.
+ */
+export const REACT_PROP_RETIRED = 'react-prop-retired';
 
 export const REACT_CHART_FIELD_UNKNOWN = 'react-chart-field-unknown';
 export const REACT_CHART_FIELD_UNPROVISIONED = 'react-chart-field-unprovisioned';
@@ -874,69 +896,20 @@ function reactFieldRefs(
 /**
  * The object a block is bound to.
  *
- * `objectName` is the only spelling that binds one. ListView's canonical
- * `data={{ provider: 'object', object }}` is deliberately NOT read here
- * (#14791 step 1): no renderer folds it into `objectName`, so resolving field
- * refs through it would check them against an object the page never queries —
- * and, when an author writes both spellings, against the WRONG one, since the
- * renderer reads `objectName`. The canonical read returns in step 3, once the
- * consumer fold has landed.
- *
- * The comment this replaces claimed the canonical-first precedence mirrored a
- * one-directional fold in objectui's `normalizeListViewSchema`. That fold does
- * not exist: `normalize-list-view.ts` contains no `.object` read at all, and
- * `ListView.tsx`'s only query is `dataSource.find(schema.objectName, …)`.
+ * `<ListView>` binds through ListViewSchema's own data source —
+ * `data={{ provider: 'object', object }}`, the only spelling since #14791
+ * retired the `objectName` alias. objectui's `normalizeListViewSchema` folds
+ * that source onto the key its renderer reads (console pin a472b071), so
+ * resolving field refs through it checks them against the object the page
+ * really queries. A non-object provider (`'value'` rows, the renderer-owned
+ * `'api'`) binds no object to resolve against, and a non-static `data` is
+ * unresolvable rather than wrong (ADR-0072 D1) — both return undefined and the
+ * field checks skip. Every other block binds by its `objectName` overlay prop.
  */
-function boundObjectName(values: ReadonlyMap<string, unknown>): string | undefined {
-  return strOf(values.get('objectName'));
-}
-
-/**
- * The ListView deprecations whose canonical replacement NO renderer reads yet.
- *
- * Maintainer ruling 2026-09-03 (option B, step 1 of 3): the react tier keeps
- * converging on the metadata-tier vocabulary, but until objectui folds
- * `data={{ provider: 'object', object }}` into `objectName` and reads `type`
- * for the view kind, both canonical spellings reach a renderer that ignores
- * them. Measured on objectui `a27d153c`: `ListView.tsx` contains zero
- * occurrences of `data.object`, `dataConfig.object`, `provider === 'object'`
- * and `specType`, against 52 of `schema.objectName`.
- *
- * So the deprecation warning must not send an author to a spelling that
- * renders nothing — for these two props it says the opposite of the usual
- * deprecate-first advice. Step 3 deletes this set along with the aliases.
- */
-const UNFOLDED_DEPRECATIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  ['ListView', new Set(['objectName', 'viewType'])],
-]);
-const replacementUnread = (tag: string, prop: string): boolean =>
-  UNFOLDED_DEPRECATIONS.get(tag)?.has(prop) ?? false;
-
-/**
- * Does the author's canonical ListView binding bind nothing?
- *
- * The same ruling, its sharper half: a required prop that is deprecated is
- * normally satisfied by its canonical replacement (the mechanism the contract
- * publishes). For ListView's object binding that mechanism blesses a page
- * which renders an EMPTY LIST with no diagnostic, so it stops applying here
- * and `os validate` fails loudly instead.
- *
- * Scoped to the OBJECT provider on purpose. `ListView.tsx`'s fetch effect
- * implements `provider: 'value'`, a plain-array shorthand and the
- * renderer-owned `api` provider; only `provider: 'object'` falls through them
- * all to the `objectName`-gated fetch, which clears the loading state and
- * returns no rows. Refusing the providers that DO render would tighten past
- * what renders — the opposite of this step's stated reason. A non-static
- * `data` is unresolvable rather than wrong (ADR-0072 D1) and still satisfies.
- */
-function objectProviderBindsNothing(
-  tag: string,
-  req: string,
-  values: ReadonlyMap<string, unknown>,
-): boolean {
-  if (tag !== 'ListView' || req !== 'objectName') return false;
+function boundObjectName(tag: string, values: ReadonlyMap<string, unknown>): string | undefined {
+  if (tag !== 'ListView') return strOf(values.get('objectName'));
   const data = values.get('data');
-  return isRec(data) && data.provider === 'object';
+  return isRec(data) && data.provider === 'object' ? strOf(data.object) : undefined;
 }
 
 function checkBlockFieldProps(
@@ -950,7 +923,7 @@ function checkBlockFieldProps(
   // one, so it must hand over the same index rather than answer differently.
   unprovisionedAnchors?: ReadonlyMap<string, ReadonlySet<string>>,
 ): ReactPropFinding[] {
-  const objectName = boundObjectName(values);
+  const objectName = boundObjectName(tag, values);
   const out: PageFieldFinding[] = [];
 
   const spec = REACT_FIELD_SPECS[tag];
@@ -1175,55 +1148,55 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
               // [#11284] A required prop that is DEPRECATED requires the
               // binding, not the spelling: the canonical replacement satisfies
               // it, so the new vocabulary is accepted without the old one.
-              // [#14791] …EXCEPT where no renderer reads that replacement, in
-              // which case accepting it would bless an empty list.
               const dep = block.deprecated.get(req);
-              const bindsNothing = objectProviderBindsNothing(tag, req, values);
-              if (dep && used.has(dep.replacedBy) && !bindsNothing) continue;
-              const unread = dep !== undefined && replacementUnread(tag, req);
+              if (dep && used.has(dep.replacedBy)) continue;
+              // [#14791] A RETIRED spelling of this binding is on the element:
+              // the retired-prop error below already names the exact prop
+              // that carries it, so a second finding would only repeat the fix.
+              if ([...used].some((u) => block.retired.get(u)?.replacedBy === req)) continue;
               findings.push({
                 severity: 'error',
                 rule: 'react-prop-missing-required',
                 where, path,
-                // The message never offers the canonical spelling for a
-                // replacement no renderer reads — with or without a `data`
-                // prop present, `objectName` is the only answer that renders.
-                message: unread
-                  ? `<${tag}> is missing its "${req}" binding — pass ${req}={…}.${
-                      bindsNothing
-                        ? ` A data={{ provider: 'object', … }} source does not bind a <${tag}>: the renderer reads "${req}" only, so this page would render an empty list.`
-                        : ''
-                    }`
-                  : dep
-                    ? `<${tag}> is missing its "${req}" binding — pass ${dep.replacedBy}={…} (canonical) or ${req}={…} (deprecated).`
-                    : `<${tag}> is missing the required prop "${req}".`,
-                hint: unread
-                  ? `Write ${req}="…" — it is the spelling this block renders today. The metadata-tier data source binds it only once the renderer folds that source in.`
-                  : dep ? dep.note : `Pass ${req}={…}. See the react-tier component contract.`,
+                message: dep
+                  ? `<${tag}> is missing its "${req}" binding — pass ${dep.replacedBy}={…} (canonical) or ${req}={…} (deprecated).`
+                  : `<${tag}> is missing the required prop "${req}".`,
+                // The contract's own description of the binding says how to
+                // write it — the author gets the spelling, not a pointer.
+                hint: dep
+                  ? dep.note
+                  : block.requiredDescriptions.get(req) ?? `Pass ${req}={…}. See the react-tier component contract.`,
               });
             }
           }
           for (const u of used) {
+            // [#14791] A RETIRED spelling: the contract no longer publishes
+            // it, so this is an error carrying the prescription — never a typo
+            // guess, and never silence, since the renderer may still read the
+            // old key and would let the page ship on it.
+            const ret = block.retired.get(u);
+            if (ret) {
+              findings.push({
+                severity: 'error',
+                rule: REACT_PROP_RETIRED,
+                where, path,
+                // (#14791 — the id stays here, out of the string authors read.)
+                message: `<${tag}> prop "${u}" is retired — the contract's only spelling is "${ret.replacedBy}".`,
+                hint: ret.note,
+              });
+              continue;
+            }
             // [#11284] Deprecate-first: the old spelling keeps working, and
             // every use says so — the contract's note names the canonical
             // metadata-tier spelling to write instead.
             const dep = block.deprecated.get(u);
             if (dep) {
-              // [#14791] The contract's own note tells the author to write the
-              // canonical spelling instead. For the two ListView aliases that
-              // is advice to render nothing, so the warning says the opposite
-              // until the consumer fold lands (step 2 of the ruling).
-              const unread = replacementUnread(tag, u);
               findings.push({
                 severity: 'warning',
                 rule: REACT_PROP_DEPRECATED,
                 where, path,
-                message: unread
-                  ? `<${tag}> prop "${u}" is the deprecated spelling of the metadata-tier "${dep.replacedBy}", and is still the only one this block renders — keep writing it until the renderer reads "${dep.replacedBy}".`
-                  : `<${tag}> prop "${u}" is the deprecated spelling of the metadata-tier "${dep.replacedBy}" and is removed after the deprecation window (#11284).`,
-                hint: unread
-                  ? `Keep "${u}" for now: the contract's note points at "${dep.replacedBy}", but that spelling does not reach this renderer yet, so following it today renders nothing.`
-                  : dep.note,
+                message: `<${tag}> prop "${u}" is the deprecated spelling of the metadata-tier "${dep.replacedBy}" and is removed after the deprecation window (#11284).`,
+                hint: dep.note,
               });
             }
             const near = nearestKnown(u, block.knownProps);
@@ -1255,9 +1228,7 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
             findings.push(
               ...checkSearchableFieldList(
                 values.get('searchableFields'),
-                // [#14791] `objectName` only — the canonical data source does
-                // not reach this renderer, so it binds nothing to search.
-                boundObjectName(values),
+                boundObjectName(tag, values),
                 searchTargets,
                 where,
                 `${path} › searchableFields`,

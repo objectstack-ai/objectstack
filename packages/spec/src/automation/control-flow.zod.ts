@@ -58,14 +58,26 @@
  *
  * `validateControlFlow` is a **sibling guard, not a key gate** — it answers
  * "is this region single-entry / single-exit / acyclic", which no amount of
- * key strictness can answer. The two do not overlap and cannot fight: the
- * schema rejects undeclared KEYS, the analysis rejects malformed STRUCTURE.
- * They do now meet at one seam, deliberately — `validateControlFlow`
- * `safeParse`s each region slot before analyzing it, so from #4001 that parse
- * is also where a region's undeclared key surfaces, reported as
- * `<where>: invalid region — <the strictObject message>`. Nothing was
- * duplicated and nothing was removed; the structural prose this guard exists
- * for is untouched, and it simply stopped silently repairing its own input.
+ * key strictness can answer. The two are no longer disjoint, and since #16134
+ * that is deliberate: the schema rejects undeclared KEYS *and* one structural
+ * fact — a duplicate node id — while the analysis rejects malformed STRUCTURE.
+ * They meet at two seams.
+ *
+ * **#4001** — `validateControlFlow` `safeParse`s each region slot before
+ * analyzing it, so that parse is also where a region's undeclared key
+ * surfaces, reported as `<where>: invalid region — <the strictObject
+ * message>`. That seam duplicated nothing and removed nothing, and left the
+ * structural prose this guard exists for untouched; it simply stopped silently
+ * repairing its own input.
+ *
+ * **#16134** — `FlowSchema`'s `superRefine` holds ONE node-id space across the
+ * top-level `nodes[]` and every region body, judged at every depth
+ * `collectFlowGraphs` walks. That walk stops at `MAX_REGION_DEPTH` (32), so
+ * past the ceiling a region is left raw and `analyzeRegion`'s own
+ * `duplicate node id` line, reached through this guard, is the only refusal of
+ * a within-region duplicate (a cross-region collision beyond the ceiling is
+ * not judged). The two guards overlap there by design and hand off at that
+ * measured boundary.
  */
 
 import { z } from 'zod';
@@ -406,7 +418,16 @@ export function analyzeRegion(region: { nodes: FlowNodeParsed[]; edges?: FlowEdg
     return { errors: ['region has no nodes'] };
   }
 
-  // Unique ids.
+  // Unique ids — an invariant this analysis needs (the degree maps below key
+  // on id), and the author-facing rule's last line of defence. A flow has ONE
+  // node-id space, judged by `FlowSchema` at parse over every depth
+  // `collectFlowGraphs` walks — nesting up to `MAX_REGION_DEPTH` (#16134) — so
+  // within that ceiling a parsed flow never arrives here carrying a collision.
+  // Beyond it a region is left raw and reaches this line through
+  // `validateControlFlow`, where this is the ONLY refusal of a within-region
+  // duplicate: delete it and the degree maps would silently de-duplicate the
+  // collision instead. It also guards direct callers that hand in a raw region
+  // (`bpmn-mapping`).
   const ids = new Set<string>();
   for (const n of nodes) {
     if (ids.has(n.id)) errors.push(`duplicate node id '${n.id}'`);
@@ -477,7 +498,12 @@ export function findRegionEntry(region: { nodes: FlowNodeParsed[]; edges?: FlowE
 
 // ─── Where the containers keep their regions ─────────────────────────
 
-/** A dict — region-shaped enough to reach its `nodes` / `edges`. */
+/**
+ * A dict — region-shaped enough to reach its `nodes` / `edges`, and the same
+ * test a member of a node list must pass to be a node at all. One spelling for
+ * both, so what {@link collectFlowGraphs} walks cannot drift from what it hands
+ * out.
+ */
 function isRegionDict(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -681,6 +707,25 @@ export interface FlowGraph {
    * `loop 'sweep' body → try_catch 'guard' catch`.
    */
   readonly scope: string;
+  /**
+   * The same location as {@link scope}, as the key path from the flow root to
+   * the object holding this graph's `nodes` / `edges`: `[]` for the flow
+   * itself, `['nodes', 1, 'config', 'body']` for a loop body,
+   * `['nodes', 1, 'config', 'branches', 0]` for a parallel branch. A Zod issue
+   * about a region node is anchored where the author wrote it —
+   * `[...path, 'nodes', i, 'id']` — rather than described in prose (#16134).
+   */
+  readonly path: readonly (string | number)[];
+  /**
+   * Every member is a record. A node list read out of a container's open
+   * `z.record` config can hold whatever the author typed — an empty YAML list
+   * item deserialises to `null` — and a region its own schema refused is left
+   * RAW for {@link validateControlFlow} to name. The walk therefore drops a
+   * non-record member rather than hand out an array that does not match this
+   * declared type (#16752). Only this array is narrowed: the schema refusal
+   * that owns the malformed region still fires, and {@link path} still indexes
+   * the RAW list, so a finding stays anchored where the author wrote it.
+   */
   readonly nodes: readonly FlowNodeParsed[];
   readonly edges: readonly FlowEdgeParsed[];
 }
@@ -706,23 +751,47 @@ export function collectFlowGraphs(
     nodes: readonly FlowNodeParsed[],
     edges: readonly FlowEdgeParsed[],
     scope: string,
+    path: readonly (string | number)[],
     depth: number,
   ): void => {
-    graphs.push({ scope, nodes, edges });
+    // A region its own schema refused is left RAW by `parseFlowNodeRegions` for
+    // `validateControlFlow` to name, so an element here can be whatever the
+    // author typed — `null` included. What is HANDED OUT and what is WALKED both
+    // drop it, through the one predicate above.
+    //
+    // Handed out (#16752): `FlowGraph.nodes` is declared `readonly
+    // FlowNodeParsed[]`, and an array whose members every caller must re-check
+    // is not that array. This list is one the walk picked up out of an open
+    // `z.record` config ITSELF — no caller ever held it, so no coercion at a
+    // call site can reach it. Identity is preserved when nothing is dropped.
+    //
+    // Walked (#16134): skip a non-record rather than read `.config` off it —
+    // this walk runs inside `FlowSchema`'s parse, where a thrown TypeError would
+    // escape `safeParse`, which is why this is a skip and not a throw. The schema
+    // refusal that owns the malformed region still fires, reached now where the
+    // throw used to pre-empt it.
+    const kept = nodes.filter((node) => isRegionDict(node));
+    graphs.push({ scope, path, nodes: kept.length === nodes.length ? nodes : kept, edges });
     if (depth >= MAX_REGION_DEPTH) return;
-    for (const node of nodes) {
+    // Indexed over the RAW list, never `kept`: `path` anchors a Zod issue where
+    // the author wrote the node, so dropping a member must not renumber the
+    // siblings that outlive it. `Array.isArray` on the inner list below proves
+    // the LIST, never its MEMBERS — the sentence removed from four lint readers.
+    nodes.forEach((node, index) => {
+      if (!isRegionDict(node)) return;
       for (const slot of regionSlotsOf(node)) {
         if (!isRegionDict(slot.raw) || !Array.isArray(slot.raw.nodes)) continue;
         visit(
           slot.raw.nodes as FlowNodeParsed[],
           Array.isArray(slot.raw.edges) ? (slot.raw.edges as FlowEdgeParsed[]) : [],
           scope ? `${scope} → ${slot.label}` : slot.label,
+          [...path, 'nodes', index, 'config', slot.key, ...(slot.index === undefined ? [] : [slot.index])],
           depth + 1,
         );
       }
-    }
+    });
   };
 
-  visit(flow.nodes ?? [], flow.edges ?? [], '', 0);
+  visit(flow.nodes ?? [], flow.edges ?? [], '', [], 0);
   return graphs;
 }

@@ -60,8 +60,17 @@ function makeEngine(seed: { users?: Array<{ id: string }>; members?: Array<{ use
   ];
   return {
     _members: members,
-    insert: vi.fn(async (_object: string, row: any) => {
-      members.push({ organization_id: row.organization_id, user_id: row.user_id });
+    // ⛔ Table-AWARE on purpose. This double used to push every insert into
+    // `members` whatever object it named, so any unrelated write — auth boot
+    // seeds an `sys_oauth_resource` row for the MCP RFC 8707 resource — landed
+    // in `_members` as `{organization_id: undefined, user_id: undefined}` and
+    // reddened the membership assertions with a row that is not a membership.
+    // A double that answers about the wrong table is not a cheaper double, it
+    // is a wrong one.
+    insert: vi.fn(async (object: string, row: any) => {
+      if (object === 'sys_member') {
+        members.push({ organization_id: row.organization_id, user_id: row.user_id });
+      }
       return row;
     }),
     find: vi.fn(async (object: string, query: any) => {
@@ -253,7 +262,10 @@ describe('auth.membership_policy — the setting', () => {
     // And the corroborating evidence: `no-target-org` can only be reached by
     // ASKING for the target org. Under the policy skip it is never consulted.
     expect(defaultOrgId).not.toHaveBeenCalled();
-    expect(engine.insert).not.toHaveBeenCalled();
+    // Scoped to `sys_member`: auth boot legitimately inserts the MCP
+    // `sys_oauth_resource` seed row, which says nothing about membership.
+    expect(engine.insert.mock.calls.map((c: any[]) => c[0])).not.toContain('sys_member');
+    expect(engine._members).toEqual([]);
   });
 
   it('the unset default still auto-binds a new sign-up (unchanged behaviour)', async () => {
@@ -294,7 +306,9 @@ describe('auth.membership_policy — the setting', () => {
       reason: 'policy',
     });
     expect(defaultOrgId).not.toHaveBeenCalled();
-    expect(engine.insert).not.toHaveBeenCalled();
+    // Same scoping as the sign-up leg above, same reason.
+    expect(engine.insert.mock.calls.map((c: any[]) => c[0])).not.toContain('sys_member');
+    expect(engine._members).toEqual([]);
   });
 
   it('the backfill still binds pre-existing member-less users under the unset default', async () => {

@@ -1460,7 +1460,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "Identidad",
-        description: "Los conjuntos de permisos se apilan sobre un perfil para conceder acceso adicional. Los perfiles son el conjunto base asignado 1:1 a cada usuario."
+        description: "Los conjuntos de permisos son el único contenedor de capacidades: un usuario obtiene la unión de todos los conjuntos que tiene, así que un conjunto solo puede añadir acceso. Las posiciones distribuyen los conjuntos a las personas."
       },
       system_permissions: {
         label: "Permisos del sistema",

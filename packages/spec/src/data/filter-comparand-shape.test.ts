@@ -362,7 +362,9 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
     expect(parseFilterAST({ author: { name: 'x' } })).toEqual({ author: { name: 'x' } });
     // A scalar operator carrying an array is answered per driver, not here.
     expect(parseFilterAST({ tags: { $eq: ['a', 'b'] } })).toEqual({ tags: { $eq: ['a', 'b'] } });
-    // An implicit-equality array comparand keeps its array-equality semantics.
+    // An implicit-equality array comparand is passed through for the driver to
+    // answer; what it MEANS is not this door's ruling (see the comparand door's
+    // own list of the cases it deliberately does not rule).
     expect(parseFilterAST({ tags: ['a', 'b'] })).toEqual({ tags: ['a', 'b'] });
     // An unknown `$` key at node level belongs to the by-name refusals
     // downstream, which carry the specific prescription.

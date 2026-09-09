@@ -17,6 +17,7 @@ import { ArtifactReferenceSchema } from '../cloud/marketplace.zod';
  * Base path: /api/v1/packages
  *
  * @example Endpoints
+ * ```
  * POST   /api/v1/packages/install              — Install a package
  * POST   /api/v1/packages/upgrade              — Upgrade a package
  * POST   /api/v1/packages/resolve-dependencies — Resolve dependencies
@@ -25,6 +26,7 @@ import { ArtifactReferenceSchema } from '../cloud/marketplace.zod';
  * GET    /api/v1/packages/:packageId           — Get package details
  * POST   /api/v1/packages/:packageId/rollback  — Rollback a package
  * DELETE /api/v1/packages/:packageId           — Uninstall a package
+ * ```
  */
 
 // ==========================================

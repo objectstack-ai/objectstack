@@ -17,12 +17,22 @@
  *   - `rowToItem()` (reached by `get()`) — `updated_at` / `created_at`, the
  *     BUILTIN audit columns.
  *
- * On Postgres and MySQL both arrive out of the record read door as a JS
- * `Date`: `SqlDriver#formatOutput` repairs the audit columns and folds
- * declared `datetime` columns only inside its `if (this.isSqlite)` arm, and
- * `withPostgresCalendarDayAsText` leaves `timestamptz` / `timestamp`
- * deliberately untouched. That dialect fact is pinned live in
- * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`.
+ * When this landed, both arrived out of the record read door as a JS `Date` on
+ * Postgres and MySQL: `SqlDriver#formatOutput` repaired the audit columns and
+ * folded declared `datetime` columns only inside its `if (this.isSqlite)` arm.
+ * #13973 ([ADR-0053 D-F1]) has since lifted both passes out of that gate — they
+ * run on EVERY dialect — and the pin that recorded the asymmetry records the
+ * canonical-text contract instead
+ * (`packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`
+ * §B1, inverted on purpose).
+ *
+ * ⚠️ `withPostgresCalendarDayAsText` is untouched by that ruling
+ * ([ADR-0053 D-F2]) and still leaves `timestamptz` / `timestamp` deliberately
+ * alone — the CLIENT still hands back a `Date`; what changed is that the driver
+ * folds it at its own read boundary. The `Date` this file plants therefore
+ * still reaches both adapters: `driver-sql` hands an INVALID `Date` through
+ * unchanged ([ADR-0053 D-F3]) and non-SQL drivers materialise their own, so
+ * what is pinned below is a live adapter arm rather than a historical one.
  *
  * ## Why nothing reported it, and what that costs THIS file
  *
