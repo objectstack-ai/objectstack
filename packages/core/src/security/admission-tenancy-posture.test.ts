@@ -34,12 +34,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-// The ONE comment stripper (`pnpm check:comment-mask-adoption`) — a private
-// regex pair joins two measured failure families, so §3's reading goes through
-// the shared module. Typed by the hand-written `scripts/js-comment-mask.d.mts`
-// beside it, so this `.mjs` specifier needs no shim.
-import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
-
 import { ObjectKernel } from '../kernel.js';
 import { ServiceLifecycle } from '../plugin-loader.js';
 import { isServiceNotRegisteredError } from '../service-not-registered.js';
@@ -255,16 +249,36 @@ describe('[#16013] §2 — the resolver is a THUNK, and the seams depend on how 
 
 describe('[#16013] §3 — the helper must never learn how to REACH the service', () => {
   const SOURCE = readFileSync(new URL('./admission-tenancy-posture.ts', import.meta.url), 'utf8');
-  /** Source with comments BLANKED — the doc names these symbols on purpose. */
-  const CODE = maskComments(SOURCE);
+  const DECL = 'export async function classifyAdmissionTenancyPosture';
+  /**
+   * The IMPLEMENTATION, sliced BY SYMBOL from its declaration to end of file.
+   *
+   * ⚠️ Why a slice and ⛔ not a comment-stripped whole file: the module doc
+   * NAMES several of the forbidden symbols on purpose — it exists to say why
+   * they are not here — so a whole-file reading would have to strip comments,
+   * and a private stripper is its own defect class
+   * (`pnpm check:comment-mask-adoption`). The slice needs no stripping at all,
+   * and the test below asserts that fact rather than assuming it.
+   */
+  const IMPL = SOURCE.slice(SOURCE.indexOf(DECL));
+
+  it('the sliced region really is the implementation, and really is comment-free', () => {
+    // The reading's own preconditions, measured — an `indexOf` miss would make
+    // every assertion below run over the WHOLE file and pass for the wrong
+    // reason (or fail for one).
+    expect(SOURCE.indexOf(DECL)).toBeGreaterThan(0);
+    expect(IMPL.startsWith(DECL)).toBe(true);
+    expect(IMPL).not.toContain('/*');
+    expect(IMPL).not.toContain('//');
+  });
 
   it('names no accessor, no kernel and no context — the resolution stays at each seam', () => {
     for (const forbidden of ['getServiceAsync', 'getKernel', 'PluginContext', 'getService(']) {
-      expect(CODE).not.toContain(forbidden);
+      expect(IMPL).not.toContain(forbidden);
     }
-    // POSITIVE CONTROL for the reading: the stripper left the real code behind.
-    expect(CODE).toContain('classifyAdmissionTenancyPosture');
-    expect(CODE).toContain('isServiceNotRegisteredError');
+    // POSITIVE CONTROL for the reading: the real body is inside the slice.
+    expect(IMPL).toContain('isServiceNotRegisteredError');
+    expect(IMPL).toContain('AuthzStoreUnavailableError');
   });
 
   it('takes exactly one parameter — a per-seam flag would be the copies with extra steps', () => {
