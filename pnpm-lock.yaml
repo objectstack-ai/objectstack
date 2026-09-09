@@ -2017,6 +2017,9 @@ importers:
       '@objectstack/example-showcase':
         specifier: workspace:*
         version: link:../../../examples/app-showcase
+      '@objectstack/formula':
+        specifier: workspace:*
+        version: link:../../formula
       '@objectstack/mcp':
         specifier: workspace:*
         version: link:../../mcp
@@ -2032,6 +2035,9 @@ importers:
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
+      '@objectstack/plugin-approvals':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-approvals
       '@objectstack/plugin-audit':
         specifier: workspace:*
         version: link:../../plugins/plugin-audit
@@ -2062,6 +2068,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/trigger-record-change':
+        specifier: workspace:*
+        version: link:../../triggers/trigger-record-change
       '@objectstack/types':
         specifier: workspace:*
         version: link:../../types
