@@ -43,7 +43,17 @@ console shipped a private overlay for exactly those three.
   `ja-JP` and `es-ES`.
 
 Additive: no key removed, no accept set changed, no parsed output moved.
-`DashboardSchema.columns` deliberately still declares no `.default(12)` —
-`defineStack` parses in strict mode by default and the console renderer
-branches positioned-vs-auto-flow on `columns != null`, so materialising the
-default would change how a `columns`-less dashboard lays out; see #16458.
+
+`DashboardSchema.columns` deliberately still declares no `.default(12)`, and
+the reason is stronger than the one #16458 assumed. The card reasoned that the
+renderer already falls back to 12, which would make `.default(12)`
+behaviour-preserving. Measured at objectui `origin/main`
+(`packages/plugin-dashboard/src/DashboardRenderer.tsx`), it does not: a
+`columns`-less dashboard is INFERRED from the widget spans — `maxSpan > 4`
+yields 12 and everything else yields **4** — and the next line switches the
+whole layout on that value (`hasExplicitColumns = schema.columns != null ||
+inferredColumns !== 4`, positioned grid vs responsive auto-flow). Declaring the
+default would therefore both retire the inference and flip every auto-flow
+dashboard into the positioned grid. A default that silently materialises a key
+is expensive to take back, so the round stopped at the declared condition and
+left the key alone; see #16458.
