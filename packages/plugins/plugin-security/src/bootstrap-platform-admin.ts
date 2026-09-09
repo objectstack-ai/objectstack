@@ -578,7 +578,18 @@ export async function bootstrapPlatformAdmin(
   const isUnscopedHumanHolder = (r: any) =>
     !r.organization_id && r.user_id !== SystemUserId.SYSTEM;
 
-  let adminGrantRowsExamined = 0;
+  // Counted by row IDENTITY, not by read: the two legs overlap by construction
+  // (leg A's rows are a subset of leg B's population), and a number that
+  // double-counted them would answer "how many reads did you make" while
+  // calling itself rows examined.
+  const examinedGrantRowIds = new Set<string>();
+  const countExamined = (rows: any[]) => {
+    for (const r of rows) {
+      examinedGrantRowIds.add(
+        r?.id === undefined || r?.id === null ? `?${examinedGrantRowIds.size}` : String(r.id),
+      );
+    }
+  };
   let adminGrantScanTruncated = false;
 
   // Leg A — the narrow question, asked of the driver.
@@ -589,7 +600,7 @@ export async function bootstrapPlatformAdmin(
     PLATFORM_ADMIN_GRANT_PAGE_SIZE,
     ADMIN_GRANT_SCAN_ORDER,
   );
-  adminGrantRowsExamined += unscopedGrantRows.length;
+  countExamined(unscopedGrantRows);
   let unscopedHolder: any | undefined = unscopedGrantRows.find(isUnscopedHumanHolder);
 
   // Leg B — the ordered, bounded scan that still applies the exact predicate.
@@ -607,7 +618,7 @@ export async function bootstrapPlatformAdmin(
         offset,
       );
       if (page.length === 0) break;
-      adminGrantRowsExamined += page.length;
+      countExamined(page);
       unscopedHolder = page.find(isUnscopedHumanHolder);
       if (unscopedHolder) break;
       if (page.length < pageLimit) break;
@@ -621,6 +632,7 @@ export async function bootstrapPlatformAdmin(
   // grant and hands it the seeded business records. So it says the number it
   // examined rather than letting the promotion below read as a statement about
   // the whole table.
+  const adminGrantRowsExamined = examinedGrantRowIds.size;
   if (adminGrantScanTruncated && !unscopedHolder) {
     const truncation =
       '[security] the existing-platform-admin check stopped at its ceiling of '
