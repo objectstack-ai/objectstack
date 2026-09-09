@@ -151,6 +151,19 @@ export default defineConfig({
               find: /^@objectstack\/trigger-record-change$/,
               replacement: path.resolve(__dirname, '../../triggers/trigger-record-change/src/index.ts'),
             },
+            // [#16659] `schedule-acting-organization.dogfood.test.ts` drives
+            // `ScheduleTrigger` itself: the pin's whole subject is which
+            // organization the trigger puts on the run it launches, and that
+            // a flow declaring none is refused at bind. A dist merely behind
+            // would run the pin green against the trigger's OLD context
+            // construction — the exact shape this card is about, since the
+            // defect was a run that reported itself healthy while carrying
+            // nothing. Aliased to source so the verdict is about THIS
+            // checkout.
+            {
+              find: /^@objectstack\/trigger-schedule$/,
+              replacement: path.resolve(__dirname, '../../triggers/trigger-schedule/src/index.ts'),
+            },
           ],
         },
         test: {
