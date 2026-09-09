@@ -623,10 +623,20 @@ describe('validateRlsPredicateEnforceability — the messages name the COST, not
     expect(f.where).toBe('permission set "sales_manager" policy "opportunity_private_owner_only" on object "crm_opportunity"');
     expect(f.path).toBe('permissions[0].rowLevelSecurity[0].using');
     expect(f.severity).toBe('error');
-    // ⚠️ BOTH directions, because they are not the same and the fail-OPEN one is
-    // the dangerous half: an author told "this denies everything" about a
-    // predicate that in fact matches everything hardens the wrong thing.
-    expect(f.message).toMatch(/one of the two directions is fail-OPEN/);
+    // ⚠️ ONE direction, and the pin says so on purpose. This block used to
+    // assert the opposite — that the field half had a fail-OPEN leg decided by
+    // position — which was true of the runtime at the time and is now false:
+    // column existence is judged on the COMPILED predicate, so position and
+    // polarity are normalised away before the check runs. An author told "one
+    // of these directions is fail-OPEN" would now harden against a hole that
+    // no longer exists, and would not fix the name.
+    expect(f.message).not.toMatch(/fail-OPEN/);
+    expect(f.message).toMatch(/judges column existence on the COMPILED predicate/);
+    expect(f.message).toMatch(/the position and the polarity you wrote it in make no difference/);
+    // …and every shape the old text split across two directions is named in
+    // the one direction, so an author recognises their own predicate in it.
+    expect(f.message).toMatch(/`field != x`/);
+    expect(f.message).toMatch(/any arm after the first/);
     // ⛔ …and NOT by citing a tracker id. This string reaches authors,
     // operators and generated surfaces, none of whom can resolve `#NNNN`
     // (`check:doc-authoring`); the id lives in the adjacent `//` comment, which
@@ -634,17 +644,19 @@ describe('validateRlsPredicateEnforceability — the messages name the COST, not
     // author does not re-add it and learn this from CI instead.
     expect(f.message).not.toMatch(/#\d{3,}/);
     expect(f.hint).not.toMatch(/#\d{3,}/);
-    // closed leg — the LEADING position the safety net recognises
-    expect(f.message).toMatch(/fails CLOSED/);
+    // the cost, which is the same cost the variable half carries
+    expect(f.message).toMatch(/DROP the policy at request time/);
     expect(f.message).toMatch(/RLS_DENY_FILTER/);
     expect(f.message).toMatch(/ZERO rows/);
-    // open leg — a negation or any arm after the first
-    expect(f.message).toMatch(/leaves the policy KEPT/);
-    expect(f.message).toMatch(/SATISFIES the negated constraint/);
-    expect(f.message).toMatch(/DEFEATED/);
-    // …and the limits, stated rather than overstated
-    expect(f.message).toMatch(/NOT a cross-tenant leak/);
-    expect(f.message).toMatch(/driver-sql is NOT MEASURED/);
+    expect(f.message).toMatch(/DISAPPEARS for every holder of this permission set/);
+    // ⛔ …and NOT the three claims the rewritten text retired. The
+    // cross-tenant sentence went with them: it was there to bound a leak
+    // reading that the message no longer makes, and a denial needs no such
+    // disclaimer. Overstating the old defect was the risk; restating a bound
+    // on a defect the text does not describe is just noise.
+    expect(f.message).not.toMatch(/leaves the policy KEPT/);
+    expect(f.message).not.toMatch(/DEFEATED/);
+    expect(f.message).not.toMatch(/driver-sql is NOT MEASURED/);
     // …and the miss itself, with the platform's own "did you mean".
     expect(f.message).toMatch(/"is_private_nope" is not a field on object "crm_opportunity"/);
     expect(f.message).toMatch(/Did you mean "is_private"\?/);
@@ -673,10 +685,15 @@ describe('validateRlsPredicateEnforceability — the messages name the COST, not
     expect(f.rule).toBe(RLS_PREDICATE_UNKNOWN_FIELD);
     expect(f.path).toBe('permissions[0].rowLevelSecurity[0].check');
     expect(f.message).toMatch(/PermissionDeniedError/);
-    // The write path has the SAME asymmetry, measured against the same controls:
-    // a positive phantom constraint refuses the post-image, a negated one is
-    // satisfied vacuously and permits the write the policy was written to refuse.
-    expect(f.message).toMatch(/permits exactly the writes it was written to refuse/);
+    // ⚠️ The write leg says the SAME thing the read leg does — one direction —
+    // and it is the leg whose old text was not merely stale but misattributed:
+    // it credited a fail-closed to the `extractTargetField` safety net, and
+    // `computeWriteCheckFilter` never had one. The vacuous-permit sentence
+    // survives as an explicit statement about an OLDER runtime, so an operator
+    // reading this against a deployment that predates the guard is not told the
+    // wrong thing.
+    expect(f.message).toMatch(/On a runtime older than that guard this clause failed OPEN/);
+    expect(f.message).toMatch(/PERMITTED exactly the writes the policy was written to refuse/);
     expect(f.message).not.toMatch(/select \/ update \/ delete matches ZERO/);
   });
 });
@@ -803,23 +820,28 @@ describe('validateRlsPredicateEnforceability — the reference pass never throws
   });
 });
 
-describe('validateRlsPredicateEnforceability — the fail-OPEN field shapes are reported too', () => {
+describe('validateRlsPredicateEnforceability — the once-fail-OPEN field shapes are reported too', () => {
   /**
    * The half the card's escalation clause did not name. It asked for a
    * fail-OPEN *variable*, and the compiler refuses those in every position; the
-   * hole is field-shaped instead.
+   * hole was field-shaped instead.
    *
-   * `extractTargetField` matches only a LEADING `field ==` / `=` / `in`, so for
-   * each shape below the safety net returns `null`, the policy is KEPT, and the
-   * phantom column lowers to a negated constraint that a row without that
-   * column satisfies (`noValueSatisfiesNegation`). Measured: 3 of 3 rows,
-   * against 1 of 3 for the real narrowing and 0 of 3 for the same phantom
-   * column in a positive position — read path and write path alike.
+   * `extractTargetField` matched only a LEADING `field ==` / `=` / `in`, so for
+   * each shape below the safety net returned `null`, the policy was KEPT, and
+   * the phantom column lowered to a negated constraint that a row without that
+   * column satisfies (`noValueSatisfiesNegation`). Measured on the runtime of
+   * the day: 3 of 3 rows, against 1 of 3 for the real narrowing and 0 of 3 for
+   * the same phantom column in a positive position — read path and write path
+   * alike, the write path being the worse one because it had no
+   * field-existence net at all.
    *
-   * The runtime repair is #17042 and is deliberately NOT attempted here. What
-   * this rule owes is that the miss is REPORTED in these positions too, which
-   * is what these cases pin: a rule that only caught the leading position would
-   * satisfy the card and miss the dangerous half entirely.
+   * ⚠️ The runtime has since been repaired: `RLSCompiler.compileFilter` judges
+   * column existence on the COMPILED predicate, which both faces pass through,
+   * so all five shapes now fail CLOSED. That does NOT retire these cases —
+   * `noValueSatisfiesNegation` is deliberately unchanged, so the shapes are
+   * still exactly the ones whose miss used to invert, and DETECTING them is
+   * still this rule's job. A rule that only caught the leading position would
+   * satisfy the card and miss the half that was dangerous.
    */
   it.each([
     ['a bare negation', 'nope_a != "x"'],

@@ -502,12 +502,22 @@ function filterFieldPaths(filter: Record<string, unknown> | null): Set<string> {
 /**
  * What a reference miss costs at request time, per clause. Measured, not inferred.
  *
- * ⚠️ The two KINDS do not have the same failure direction, and the field half
- * does not have ONE direction. An unresolved variable is refused by the compiler
- * in every position, so it always fails closed. A missing FIELD fails closed or
- * fails OPEN depending on where in the predicate it sits, and the message says
- * which — an author told "this denies everything" about a predicate that in fact
- * matches everything would harden exactly the wrong thing.
+ * ⚠️ This text was rewritten once, and the reason it was wrong is worth keeping:
+ * it said the field half had TWO directions — fail-closed in the leading
+ * position `extractTargetField` recognises, fail-OPEN everywhere else — and it
+ * attributed the WRITE leg's fail-closed to that same safety net. Both halves
+ * were wrong to leave standing. The runtime now judges column existence on the
+ * COMPILED predicate, inside `RLSCompiler.compileFilter`, which both the read
+ * layer and the ADR-0058 D4 write gate pass through: position and polarity are
+ * normalised away before the check runs, so a miss fails CLOSED everywhere, on
+ * both clauses. And the write path never had an `extractTargetField` net to
+ * credit — `computeWriteCheckFilter` compiled `check` with no field-existence
+ * check at all, which is why a negated miss there PERMITTED the write until the
+ * compiler-side guard landed.
+ *
+ * ⇒ Both KINDS now have one direction each, and it is the same direction. What
+ * this text still owes an author is that the miss is not a harmless typo: it
+ * turns the policy into a blanket refusal for every holder of the set.
  */
 function referenceConsequence(clause: 'using' | 'check', kind: 'field' | 'variable'): string {
   if (kind === 'variable') {
@@ -529,39 +539,31 @@ function referenceConsequence(clause: 'using' | 'check', kind: 'field' | 'variab
           'and behaves as a blanket refusal for every holder of this permission set.';
   }
 
-  // ── The FIELD half. Which direction it takes is decided by position, and one
-  // of the two is fail-OPEN. The runtime repair is tracked in #17042; the id
-  // stays HERE and never in the returned string, because that string reaches
-  // authors, operators and generated surfaces, none of whom can resolve
+  // ── The FIELD half. ONE direction, in every position and every polarity,
+  // since the runtime moved the column check onto the COMPILED predicate. The
+  // tracker id stays HERE and never in the returned string, because that string
+  // reaches authors, operators and generated surfaces, none of whom can resolve
   // `#NNNN` (`check:doc-authoring`, maintainer ruling 2026-08-12).
-  const closed =
-    clause === 'using'
-      ? 'the field-existence safety net in `SecurityPlugin` DROPS the policy and, when it was the only ' +
-        'applicable one, arms the `RLS_DENY_FILTER` sentinel — every select / update / delete matches ZERO ' +
-        'rows and the object disappears for every holder of this permission set'
-      : 'the post-image can never satisfy the constraint, so every insert / update the policy governs ' +
-        'fails with `PermissionDeniedError` — a blanket refusal for every holder of this permission set';
-  const open =
-    clause === 'using'
-      ? 'every row inside the tenant wall SATISFIES the negated constraint, so the policy stops narrowing ' +
-        'and matches everything the wall admits'
-      : 'the post-image SATISFIES the negated constraint vacuously, so the check permits exactly the ' +
-        'writes it was written to refuse';
-  return (
-    'What it costs depends on WHERE the miss sits, and one of the two directions is fail-OPEN. ' +
-    'The safety net recognises only a LEADING `field ==` / `=` / `in` — `extractTargetField` is that ' +
-    `shape match — so a miss THERE fails CLOSED: ${closed}. A miss the net does NOT recognise — a ` +
-    'negation (`field != x`, `!(field == x)`, `!(field in [...])`), or any arm after the first — leaves ' +
-    'the policy KEPT, and a row that has no such column satisfies a negation: ' +
-    `${open}. The authored narrowing is then DEFEATED rather than enforced. ` +
-    'Measured on the driver-memory matcher and on `matchesFilterCondition` (the write path), each against ' +
-    'two controls: the real narrowing selects 1 of 3 rows, the SAME phantom column in a positive position ' +
-    'selects 0 of 3, and each negation shape selects 3 of 3. ⛔ It is NOT a cross-tenant leak — tenancy is ' +
-    'a separate layer and holds; what is defeated is the narrowing authored INSIDE the wall. ' +
-    'driver-mongodb follows the same shared ruling; driver-sql is NOT MEASURED and is expected to fail ' +
-    'closed by raising `no such column`. Repairing that is the runtime\'s job, not this rule\'s — what ' +
-    'this diagnostic owes you is WHICH direction your predicate is in.'
-  );
+  const dropped =
+    '`RLSCompiler` judges column existence on the COMPILED predicate, so the position and the polarity ' +
+    'you wrote it in make no difference — a leading `field ==`, a negation (`field != x`, ' +
+    '`!(field == x)`, `!(field in [...])`) and any arm after the first all lower to the same tree and ' +
+    'all DROP the policy at request time, with one WARN line as the only signal. ';
+  return clause === 'using'
+    ? dropped +
+        'When it is the only applicable policy for that object and operation the layer falls back to the ' +
+        '`RLS_DENY_FILTER` sentinel: every select / update / delete matches ZERO rows, so the object ' +
+        'DISAPPEARS for every holder of this permission set — not because they were denied, but because ' +
+        'the narrowing they were granted names a column that is not there. When other policies also ' +
+        'apply, this one vanishes from the OR and grants none of the access it appears to.'
+    : dropped +
+        'On the ADR-0058 D4 write path that leaves the post-image `check` unsatisfiable: every insert / ' +
+        'update the policy governs fails with `PermissionDeniedError`. The policy reads as a write rule ' +
+        'and behaves as a blanket refusal for every holder of this permission set. ⚠️ On a runtime older ' +
+        'than that guard this clause failed OPEN rather than closed — the write path had no ' +
+        'field-existence check at all, so a negated miss was satisfied VACUOUSLY by the post-image and ' +
+        'PERMITTED exactly the writes the policy was written to refuse, on every driver. Fix the name ' +
+        'rather than relying on either behaviour.';
 }
 
 /**
