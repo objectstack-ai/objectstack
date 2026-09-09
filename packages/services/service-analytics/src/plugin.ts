@@ -482,17 +482,73 @@ export class AnalyticsServicePlugin implements Plugin {
         | undefined
         | Promise<FilterCondition | null | undefined>;
     }
+    /**
+     * The three resolutions of the `security` service, for the ROW-LEVEL half
+     * of the read — the same three the OBJECT-LEVEL bridge below tells apart,
+     * and for the same reason.
+     *
+     *   ABSENT   — `getService('security')` returns nothing. No row-scope
+     *              provider on this deployment, which is a legitimate
+     *              configuration (a single-tenant kernel that ships no
+     *              `plugin-security`), reported loudly at init below. Today's
+     *              behaviour is kept EXACTLY: no scope, query runs.
+     *   UNUSABLE — a security service exists but cannot answer: resolving it
+     *              THREW, or the object it returned carries no
+     *              `getReadFilter`. A wired-but-broken provider, and the
+     *              answer here is NOT "no row restriction" — that value means
+     *              one thing only (`ISecurityService.getReadFilter`: "this
+     *              caller has no row restriction on this object"), and
+     *              spending it on a provider that never answered is how a
+     *              query ends up running with no row-level policy at all.
+     *              It REFUSES, and says why.
+     *   USABLE   — ask it.
+     *
+     * ⛔ The refusal is a THROW, not a louder log over an `undefined`: a log is
+     * not a refusal. `AnalyticsService.resolveReadScopes` is the fail-closed
+     * seam that already denies the whole query when this provider throws (it
+     * has since ADR-0021 D-C), so serving nothing — the same outcome the
+     * object-level bridge produces — needs no new error code and no new
+     * envelope here.
+     */
+    type SecurityReadFilterResolution =
+      | { kind: 'usable'; svc: SecurityReadFilter }
+      | { kind: 'absent' }
+      | { kind: 'unusable'; why: string };
     let getReadScope = this.options.getReadScope;
     let autoBridgedReadScope = false;
     let securityPresentAtInit = false;
     if (!getReadScope) {
-      const trySecurity = (): SecurityReadFilter | undefined => {
+      const trySecurity = (): SecurityReadFilterResolution => {
+        let svc: SecurityReadFilter | undefined;
         try {
-          const svc = ctx.getService<SecurityReadFilter>('security');
-          return svc && typeof svc.getReadFilter === 'function' ? svc : undefined;
-        } catch {
-          return undefined;
+          svc = ctx.getService<SecurityReadFilter>('security');
+        } catch (e) {
+          // ⛔ Not `absent`. A throwing resolver is a service that exists and
+          // failed, and a failed security lookup is a refusal everywhere else
+          // in this stack — including the object-level bridge below, which
+          // used to be spelled exactly like this one and now denies.
+          return {
+            kind: 'unusable',
+            why:
+              `resolving the "security" service threw ` +
+              `(${String((e as Error)?.message ?? e)})`,
+          };
         }
+        if (!svc) return { kind: 'absent' };
+        if (typeof svc.getReadFilter !== 'function') {
+          // `getReadFilter` is a REQUIRED member of `ISecurityService`, so a
+          // conforming provider never lands here — reaching it means the
+          // registered object is not the contract it claims to be, and a
+          // provider that cannot answer "which rows" must not be read as
+          // "every row".
+          return {
+            kind: 'unusable',
+            why:
+              'the registered "security" service exposes no getReadFilter(), ' +
+              'so it cannot answer a row-level read scope',
+          };
+        }
+        return { kind: 'usable', svc };
       };
       // ALWAYS wire the bridge — resolution happens at call time, mirroring the
       // executeAggregate / executeRawSql auto-bridges above. Gating the
@@ -502,8 +558,26 @@ export class AnalyticsServicePlugin implements Plugin {
       // strategy ran unscoped and only a WARN marked it. The repo's own
       // `bootStack` harness registers in exactly that order, which is why no
       // dogfood test could ever observe analytics RLS.
-      securityPresentAtInit = !!trySecurity();
-      getReadScope = (object, context) => trySecurity()?.getReadFilter(object, context);
+      securityPresentAtInit = trySecurity().kind === 'usable';
+      getReadScope = (object, context) => {
+        const resolved = trySecurity();
+        // No security service resolved at call time → no row-scope provider on
+        // this deployment, the state reported at init. Unchanged.
+        if (resolved.kind === 'absent') return undefined;
+        if (resolved.kind === 'unusable') {
+          ctx.logger.error(
+            `[Analytics] row-level read scope could not be resolved for "${object}" — ` +
+            `refusing the query (fail-closed): ${resolved.why}. ` +
+            'A security service is wired on this deployment, so analytics must not fall ' +
+            'open and serve rows with no row-level policy applied.',
+          );
+          throw new Error(
+            `[Analytics] row-level read scope could not be resolved for "${object}"; ` +
+            'query refused (fail-closed).',
+          );
+        }
+        return resolved.svc.getReadFilter(object, context);
+      };
       autoBridgedReadScope = true;
     }
 
