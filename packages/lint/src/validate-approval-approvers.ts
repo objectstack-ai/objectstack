@@ -21,6 +21,7 @@
  * | approval-approver-type-unknown             | warning  | contract-first (PD #12)    |
  * | approval-escalation-reassign-no-target     | warning  | silent notify degradation  |
  * | approval-approvers-may-resolve-empty       | info     | empty-position dead-end (#3424) |
+ * | approval-approvers-may-resolve-empty       | info     | unset-manager dead-end (#16748) |
  * | approval-expression-invalid                | error/info | #3447 P2 closed-root expressions |
  * | approval-expression-no-empty-policy        | info     | #3447 P2 empty-slate policy |
  * | approval-decision-outputs-reserved         | error    | #3447 P2 resume envelope   |
@@ -84,8 +85,37 @@ const RESERVED_OUTPUT_KEYS = new Set(['decision', 'requestId']);
  * tiers, and the opaque `queue` are deliberately excluded: any of them present
  * signals the author has a non-group route, so the node isn't purely
  * group-gated.
+ *
+ * ⛔ `manager` stays OUT of this set and is judged by its own arm below
+ * ({@link MANAGER_ONLY_REMEDY}), for two reasons that are not interchangeable:
+ * the group message ("routes to a group (position/team/department)") would be
+ * false about it, and the REMEDY differs — an unstaffed position is staffed
+ * in-product, an unset `sys_user.manager_id` is not (#16748). Folding `manager`
+ * in here would also change a `position` verdict this package pins: a
+ * `[position, manager]` node is silent today, and that pin is the existing
+ * arm's contract, not an oversight to sweep up.
  */
 const GROUP_ROUTED_TYPES = new Set(['position', 'team', 'department']);
+
+/**
+ * How an operator actually populates `sys_user.manager_id` (#16748 / #16678).
+ *
+ * ⚠️ NOT "edit the user in the Console". The column has NO product write
+ * surface today: `getManagedUpdateWhitelist('sys_user')` is exactly
+ * `{name, image, locale}` (ADR-0092 platform-object write narrowing), the auth
+ * admin endpoints do not accept it, and the Console renders no field for it. So
+ * the only honest prescription is the provisioning path.
+ *
+ * ⛔ DEPENDENCY — #16678 holds the open question of whether `manager_id` should
+ * GAIN a product write surface. If it ever does, this string is the line that
+ * goes stale: it would then be wrong to tell an author their only route is
+ * provisioning. Update it in the same change that opens the write surface.
+ */
+const MANAGER_ONLY_REMEDY =
+  `sys_user.manager_id has no product write surface today (#16678) — the data API's managed-update ` +
+  `whitelist is {name, image, locale}, the auth admin endpoints do not accept the column and the ` +
+  `Console renders no field for it — so it is populated by SCIM provisioning, a seed / bulk import ` +
+  `or directory sync, NOT by editing the user in the Console.`;
 
 export type ApprovalApproverSeverity = 'error' | 'warning' | 'info';
 
@@ -130,6 +160,41 @@ const TYPE_FIX: Record<string, string> = {
 };
 
 /**
+ * Does this stack itself show that it wires `sys_user.manager_id`?
+ *
+ * The ONLY manager-chain evidence a stack can carry is its own seed rows
+ * (`stack.data` — `SeedSchema[]`, `{ object, records, … }`), so this is the
+ * whole of what a static check may read on the question. It reads it and says
+ * no more than it read: a stack that seeds a `sys_user` row carrying a
+ * non-empty `manager_id` demonstrably knows about the column and populates it,
+ * so the advisory below would be noise there. A stack that seeds none has given
+ * the linter nothing, which is not the same as the column being unset at
+ * runtime — hence the advisory's wording, which flags the SHAPE and explicitly
+ * does not assert the slate is empty.
+ *
+ * ⛔ This is deliberately NOT "every seeded user has a manager": the top of any
+ * real reporting chain legitimately has none, so an all-rows test would fire on
+ * a correctly-seeded stack forever. Nor does a seeded chain prove anything
+ * about users who arrive later by sign-up or SCIM — which is exactly why the
+ * finding it suppresses is `info`, not an error.
+ */
+function stackWiresManagerChain(stack: AnyRec): boolean {
+  const seeds = Array.isArray(stack.data) ? (stack.data as AnyRec[]) : [];
+  for (const seed of seeds) {
+    if (!seed || typeof seed !== 'object') continue;
+    if (seed.object !== 'sys_user') continue;
+    const rows = Array.isArray(seed.records) ? (seed.records as unknown[]) : [];
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      const managerId = (row as AnyRec).manager_id;
+      if (typeof managerId === 'string' && managerId.trim() !== '') return true;
+      if (typeof managerId === 'number') return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Validate the approvers of every Approval node in the stack's flows.
  * Returns findings (empty = clean).
  */
@@ -139,6 +204,9 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
 
   const flows = recordsOf(stack.flows);
   const validTypes = new Set<string>(ApproverType.options);
+  // Stack-level, so it is read once and every node is judged on the same
+  // evidence — a per-node re-read would let two identical nodes disagree.
+  const managerChainWired = stackWiresManagerChain(stack);
 
   for (let fi = 0; fi < flows.length; fi++) {
     const flow = flows[fi];
@@ -358,6 +426,56 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             `Make sure at least one target is always staffed, or add a guaranteed-staffed ` +
             `fallback approver, e.g. { type: 'org_membership_level', value: 'owner' }. A request ` +
             `that still lands empty is recoverable only by a platform/tenant admin override (#3424).`,
+        });
+      }
+
+      // Unset-manager dead-end (#16748) — the empty-slate rule's other half.
+      //
+      // `{ type: 'manager' }` resolves through `lookupManager`: it reads
+      // `sys_user.manager_id` of `record[value] ?? record.owner_id` and returns
+      // NULL when the column is unset, so the approver contributes nobody. When
+      // the whole slate is manager rungs that is the same empty-slate dead-end
+      // the #3424 arm above flags for positions — with a strictly WORSE cause.
+      // An unstaffed position is an operator's to fix in-product; an unset
+      // `manager_id` is not (see {@link MANAGER_ONLY_REMEDY}). So the rule that
+      // exists for the recoverable rung was, until this arm, silent on the
+      // unrecoverable one — and `manager` is the canonical first rung of a
+      // tiered ladder, so the silent case was also the common one.
+      //
+      // ⛔ Scoped to slates that are ENTIRELY manager rungs, which keeps it
+      // disjoint from the arm above by construction (`manager` is not in
+      // GROUP_ROUTED_TYPES, so that arm's `every` is false whenever this one's
+      // is true — no node can draw both findings) and leaves every `position`
+      // verdict, mixed slates included, exactly as it was.
+      //
+      // Advisory (`info`), the same tier as its sibling: this reads the SHAPE.
+      // It does not read row data, and the message says so rather than
+      // asserting a slate is empty — a lint rule must not claim a runtime fact
+      // it did not read. `stackWiresManagerChain` is the one manager-chain fact
+      // a stack CAN put in front of it, and it silences the advisory.
+      if (
+        !managerChainWired &&
+        routable.length > 0 &&
+        routable.every((a) => canonicalApproverType(String((a as AnyRec).type)) === 'manager')
+      ) {
+        const locks = (cfg as AnyRec).lockRecord !== false; // default true
+        findings.push({
+          severity: 'info',
+          rule: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
+          where,
+          path: `${nodePath}.config.approvers`,
+          message:
+            `every approver on this node is { type: 'manager' }, resolved at runtime from ` +
+            `sys_user.manager_id of the record's owner — a static check cannot read that column, ` +
+            `so this does not assert the slate IS empty; it reports that nothing else on the node ` +
+            `can approve if it is. Where manager_id is unset the expansion returns nobody, the ` +
+            `request resolves to an empty slate and waits forever` +
+            (locks ? `, and (lockRecord) the record stays locked with no in-product recovery.` : `.`),
+          hint:
+            `${MANAGER_ONLY_REMEDY} Populate it for everyone who submits this request, or add a ` +
+            `fallback approver that cannot resolve empty, e.g. ` +
+            `{ type: 'org_membership_level', value: 'owner' }. A request that still lands empty is ` +
+            `recoverable only by a platform/tenant admin override (#3424).`,
         });
       }
 

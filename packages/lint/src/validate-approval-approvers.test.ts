@@ -220,6 +220,164 @@ describe('validateApprovalApprovers', () => {
   });
 });
 
+// ── unset-manager dead-end (#16748) ──────────────────────────────────────
+//
+// The #3424 arm above reasons about `position`/`team`/`department` and was
+// silent on `{ type: 'manager' }` — measured on the parent commit as
+// `git grep -c "'manager'"` = 0 against `'position'` = 4 in the rule file, and
+// confirmed behaviourally: a manager-only node returned `[]`.
+//
+// Every count here carries its controls, because an implementation that simply
+// always fires satisfies the positive case on its own and is indistinguishable
+// without them.
+
+describe('unset-manager dead-end (#16748)', () => {
+  const managerOnly = () => stackWithApprovers([{ type: 'manager' }]);
+
+  /** A stack that demonstrably wires `sys_user.manager_id` in its own seeds. */
+  const withSeededManagerChain = (stack: Record<string, unknown>) => {
+    stack.data = [{
+      object: 'sys_user',
+      mode: 'upsert',
+      externalId: 'name',
+      records: [
+        { name: 'ceo' },                          // top of the chain — no manager, correctly
+        { name: 'ic', manager_id: 'ceo' },
+      ],
+    }];
+    return stack;
+  };
+
+  it('FIRES on a node whose whole slate is { type: manager }, at info', () => {
+    const findings = validateApprovalApprovers(managerOnly());
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY);
+    // ⛔ Tier boundary: the same advisory tier as its `position` sibling. An
+    // `error` here would red every stack that authors a manager rung today.
+    expect(findings[0].severity).toBe('info');
+    expect(findings[0].path).toBe('flows[0].nodes[1].config.approvers');
+    expect(findings[0].message).toContain('locked'); // lockRecord defaults true
+  });
+
+  it('names the REAL remedy — provisioning, not the Console', () => {
+    const [finding] = validateApprovalApprovers(managerOnly());
+    // The prescription an operator can actually carry out (#16678: the column
+    // has no product write surface).
+    expect(finding.hint).toContain('SCIM');
+    expect(finding.hint).toContain('import');
+    expect(finding.hint).toContain('directory sync');
+    expect(finding.hint).toContain('no product write surface');
+    // ⛔ And it must not send them to a surface that cannot write it. The word
+    // "Console" appears only inside that denial, never as an instruction.
+    expect(finding.hint).toContain('NOT by editing the user in the Console');
+    expect(finding.hint).not.toMatch(/[Ee]dit .{0,40}in the Console\b(?!.*NOT)/);
+    // It still offers the escape that does not depend on #16678 at all.
+    expect(finding.hint).toContain("org_membership_level', value: 'owner'");
+  });
+
+  it('does not claim a runtime fact it did not read', () => {
+    const [finding] = validateApprovalApprovers(managerOnly());
+    expect(finding.message).toContain('a static check cannot read that column');
+    expect(finding.message).toContain('does not assert the slate IS empty');
+  });
+
+  // ── negative controls ──────────────────────────────────────────────────
+
+  it('NEGATIVE: a populated manager chain in the stack emits nothing', () => {
+    expect(validateApprovalApprovers(withSeededManagerChain(managerOnly()))).toEqual([]);
+  });
+
+  it('NEGATIVE: a stack authoring neither rung emits nothing', () => {
+    expect(validateApprovalApprovers(stackWithApprovers([{ type: 'user', value: 'u1' }]))).toEqual([]);
+    expect(validateApprovalApprovers({ flows: [] })).toEqual([]);
+    expect(validateApprovalApprovers({})).toEqual([]);
+  });
+
+  it('NEGATIVE: a fallback that cannot resolve empty silences it', () => {
+    expect(validateApprovalApprovers(stackWithApprovers([
+      { type: 'manager' },
+      { type: 'org_membership_level', value: 'owner' },
+    ]))).toEqual([]);
+    expect(validateApprovalApprovers(stackWithApprovers([
+      { type: 'manager' },
+      { type: 'user', value: 'u1' },
+    ]))).toEqual([]);
+  });
+
+  // ── the suppressor's own controls ──────────────────────────────────────
+
+  it('the seed suppressor discriminates: it reads sys_user.manager_id and only that', () => {
+    // FIRING control — sys_user rows that carry no manager_id suppress nothing.
+    const noChain = managerOnly();
+    noChain.data = [{ object: 'sys_user', mode: 'upsert', records: [{ name: 'ic' }] }];
+    expect(validateApprovalApprovers(noChain)).toHaveLength(1);
+
+    // NONSENSE control — the same column on some OTHER object is not evidence
+    // about `sys_user`, and an empty / malformed `data` is not evidence either.
+    const wrongObject = managerOnly();
+    wrongObject.data = [{ object: 'sys_team', mode: 'upsert', records: [{ name: 't', manager_id: 'ceo' }] }];
+    expect(validateApprovalApprovers(wrongObject)).toHaveLength(1);
+
+    const junk = managerOnly();
+    junk.data = ['garbage', null, { object: 'sys_user' }, { object: 'sys_user', records: 'oops' }];
+    expect(validateApprovalApprovers(junk)).toHaveLength(1);
+
+    // And a blank string is not a populated chain.
+    const blank = managerOnly();
+    blank.data = [{ object: 'sys_user', records: [{ name: 'ic', manager_id: '   ' }] }];
+    expect(validateApprovalApprovers(blank)).toHaveLength(1);
+  });
+
+  // ── regression controls: the `position` arm is untouched ───────────────
+
+  it('REGRESSION: the position arm keeps its own verdict and its own message', () => {
+    const positionOnly = validateApprovalApprovers(stackWithApprovers([
+      { type: 'position', value: 'exec' },
+    ]));
+    expect(positionOnly).toHaveLength(1);
+    expect(positionOnly[0].message).toContain('routes to a group (position/team/department)');
+    expect(positionOnly[0].message).not.toContain('manager_id');
+
+    // The mixed slate this package has always pinned as silent stays silent —
+    // this arm is scoped to slates that are ENTIRELY manager rungs.
+    expect(validateApprovalApprovers(stackWithApprovers([
+      { type: 'position', value: 'exec' },
+      { type: 'manager' },
+    ]))).toEqual([]);
+  });
+
+  it('the two arms are disjoint — no node ever draws both findings', () => {
+    for (const approvers of [
+      [{ type: 'manager' }],
+      [{ type: 'manager' }, { type: 'manager', value: 'requested_by' }],
+      [{ type: 'position', value: 'exec' }],
+      [{ type: 'position', value: 'exec' }, { type: 'team', value: 't1' }],
+      [{ type: 'position', value: 'exec' }, { type: 'manager' }],
+    ]) {
+      const hits = validateApprovalApprovers(stackWithApprovers(approvers))
+        .filter((f) => f.rule === APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY);
+      expect(hits.length).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('a multi-rung manager ladder is one finding, not one per rung', () => {
+    const findings = validateApprovalApprovers(stackWithApprovers([
+      { type: 'manager' },
+      { type: 'manager', value: 'requested_by' },
+    ]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY);
+  });
+
+  it('drops the record-lock clause when lockRecord is false', () => {
+    const stack = managerOnly();
+    (stack.flows as any)[0].nodes[1].config.lockRecord = false;
+    const findings = validateApprovalApprovers(stack);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).not.toContain('locked');
+  });
+});
+
 // ── #3447 P2: expression approvers / decision outputs ─────────────────────
 
 describe('expression approvers (#3447 P2)', () => {
