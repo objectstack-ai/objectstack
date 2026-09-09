@@ -292,7 +292,32 @@ export const CEILINGS = new Map([
   // narratives, incident post-mortems and rationale tails leave the corpus; one
   // rule per ≤120-byte line, 红线 first, templates last). Landed count, headroom
   // 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/SKILL.md', 811],
+  // Raised 811 → 812 by the queue-entry third-case ruling — an ORDINARY raise
+  // under this map's own maintainer exit, ⛔ not a cross-file move. Maintainer,
+  // live PM chat with the director seat, 2026-09-08, decision batch #91, under
+  // the standing delegation 「继续决策」, adopting option A of the skills seat's
+  // recommendation; the director record's own words (#16516):
+  //   Ruled content is not growth: the ratchet's own maintainer exit exists for
+  //   exactly this, and the precedent (`state-machine.md` 43→44) is on the map.
+  //   Land the ready text (115 / 112 / 116 B lines) with all three conjunctive
+  //   conditions intact. ⛔ B refused (collapsing an unrelated rule to a pointer
+  //   is an unmeasured weakening of something else); ⛔ C refused (SKILL.md:44
+  //   同 PR 同改 is not waived); ⛔ D refused by triage already.
+  // The content is the #16502 ruling (decision batch #73, 2026-09-07, maintainer
+  // 「同意」 on options C + D): a red on a NON-required check admits a PR to the
+  // queue only when (a) the check's own source names the red as by-design on a
+  // pushed branch, (b) the check does not run on `merge_group`, and (c) the PR
+  // comment records which check and why — three conjunctive conditions, none
+  // droppable. ONE line, and it could not be paid in place — measured, not
+  // assumed: the conditions need ≥107 B against 8 spare bytes on the 112 B rule
+  // line; the tightest self-contained one-line form is 137 B; and of the file's
+  // 601 adjacent bullet pairs ZERO merge under the 120-byte cap (smallest 121 B,
+  // and that one splices two rules). So the two-case premise line is compressed
+  // in place (88 → 115 B) to carry the case's head and the conditions land as one
+  // 112 B line; re-wrap funding is refused per the 2026-08-17 rule, and deleting
+  // a ruled clause is refused on the state-machine precedent. Landed count,
+  // headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/SKILL.md', 812],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -744,7 +769,15 @@ export const CEILINGS = new Map([
   // instead of the corpus. Set at the landed line count (headroom 0, same
   // convention as every entry above); it is a NEW file, so this is an added row
   // and no other row moves.
-  ['.claude/skills/pm-dispatch/references/core-rules.md', 150],
+  // Raised 150 → 151 by the same queue-entry third-case ruling (decision batch
+  // #91, 2026-09-08, option A — quoted in full at the SKILL.md entry above): the
+  // twin line that SKILL.md:44 orders (一条规则在本文与核心条款一处改动,另一处同
+  // PR 同改), one 116 B line stating the sole exception with all three conditions.
+  // Could not be paid in place: the rule line holds 114 B of 120, and of this
+  // file's 121 adjacent bullet pairs ZERO merge under the cap (smallest 156 B).
+  // Landing it in SKILL.md alone was option C, refused by the ruling: the twin
+  // obligation is not waived. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/core-rules.md', 151],
   // The app-vs-platform boundary — the deciding question (could this be written
   // from the metadata alone, with no knowledge of this company?), the publication
   // test (one consumer is a use, two is a contract) and the two anti-patterns.
