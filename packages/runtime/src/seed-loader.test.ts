@@ -70,7 +70,13 @@ function createMockEngine(data: Record<string, any[]> = {}): IDataEngine {
     }),
     delete: vi.fn(async (_objectName: string, options?: any) => {
       assertEngineDeleteDispatch(options);
-      return { deleted: 1 };
+      // [#16231] `IDataEngine.delete` declares its two dispatch answers now —
+      // whether the by-id row was there, or the predicate path's affected
+      // count. This double used to answer an invented envelope that no driver
+      // and no engine has ever produced; nothing in the loader reads it, which
+      // is precisely why `Promise` of `any` let the fiction stand. One row
+      // removed, spelled the way the predicate exit spells it.
+      return 1;
     }),
     count: vi.fn(async (objectName: string) => (store[objectName] || []).length),
     aggregate: vi.fn(async () => []),
