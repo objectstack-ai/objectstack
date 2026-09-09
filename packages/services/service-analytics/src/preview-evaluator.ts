@@ -24,7 +24,7 @@ import {
   utcInstantMs,
 } from '@objectstack/core';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
-import type { Cube } from '@objectstack/spec/data';
+import { emptyGroupValueFor, type Cube } from '@objectstack/spec/data';
 
 type Row = Record<string, unknown>;
 
@@ -238,7 +238,9 @@ function extremumOf(rows: Row[], field: string, kind: 'min' | 'max'): unknown {
  * | `count`          | over `*` the ROW count; over a declared COLUMN that       |
  * |                  | column's NON-NULL count — numeric either way              |
  * | `count_distinct` | the cardinality of the non-null values — numeric          |
- * | `sum` / `avg`    | arithmetic over the operands that read as numbers         |
+ * | `sum`            | arithmetic over the operands that read as numbers         |
+ * | `avg`            | the mean of the NON-NULL operands that read as numbers,   |
+ * |                  | and `null` when there are none (#16219)                   |
  * | `min` / `max`    | the winning operand, IN ITS OWN TYPE ({@link extremumOf}) |
  * | `number` / `string` / `boolean` | a custom-SQL metric the dataset path never mints — left on the historical numeric `default` |
  *
@@ -252,10 +254,12 @@ function extremumOf(rows: Row[], field: string, kind: 'min' | 'max'): unknown {
  * a value OF the column, so it has to come back in the shape the row carried.
  *
  * ⛔ `sum`/`avg` over a TEMPORAL operand is left exactly as it was — the
- * non-finite operands drop and the answer is the numeric identity. There is no
- * defined answer to invent (the SQL faces disagree with each other on it), and
- * #16099 is the open card for REFUSING an incoherent aggregate/field-type pair
- * — the layer that refuses is that card's ruling, not this file's.
+ * non-finite operands drop, and what is left over nothing is the platform's
+ * ruled empty-group answer (`emptyGroupValueFor`: `0` for `sum`, `null` for
+ * `avg`). There is no defined answer to invent (the SQL faces disagree with
+ * each other on it), and #16099 is the open card for REFUSING an incoherent
+ * aggregate/field-type pair — the layer that refuses is that card's ruling,
+ * not this file's.
  *
  * ⛔ `count`/`count_distinct` stay numeric. Counting `date`s is still counting;
  * the sibling descriptor rule (`measure-result-type.ts`) answers the same way.
@@ -290,7 +294,47 @@ function aggregate(rows: Row[], metricType: string, field: string): unknown {
     // count) under the author's `count_distinct` name.
     case 'count_distinct': return new Set(rows.map((r) => r[field]).filter((v) => v != null)).size;
     case 'sum': return nums.reduce((a, b) => a + b, 0);
-    case 'avg': return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+    // [#16219] Averaging NOTHING has no answer, and this arm used to invent
+    // one. The live faces answer SQL NULL over the same rows (`AVG(col)` is
+    // defined over non-null values in every dialect), so a drafted chart read
+    // `0` where the published chart read blank — and `0` is a PLAUSIBLE
+    // average, indistinguishable from one somebody measured.
+    //
+    // ⭐ Two limbs, and only the second is visible in the line this replaced.
+    // `Number(null)` is `0` and `Number.isFinite` accepts it, so `nums` above
+    // counts every NULL as a zero OPERAND: a group whose field is NULL in every
+    // row took the TRUE branch with `nums = [0, 0]` and averaged the nulls — the
+    // `: 0` fallback never ran there at all. The same coercion pulled a group
+    // that DOES have values off the live answer too: `(10 + 20 + 0) / 3 = 10`
+    // against SQLite's 15. So the operand list is rebuilt here over the rows
+    // that carry a value, exactly as {@link extremumOf} (`v == null` → skip) and
+    // #16218's `count` arm (`r[field] != null`) already do.
+    //
+    // ⛔ Scoped to this arm rather than folded into `nums`: `sum` is immune to
+    // the coercion (`0` is the additive identity, so both spellings answer the
+    // same number) and the numeric `default` below is the historical answer for
+    // the custom-SQL metric types, which has no live standard to be moved
+    // towards. Widening either would be an unrequested value change.
+    //
+    // ⛔ And the empty answer is not a hard-coded `null`: what an aggregate
+    // answers over an empty operand set is the platform's ruling and lives in
+    // exactly one place — `emptyGroupValueFor` (`@objectstack/spec/data`), which
+    // hands back the identity `0` where counting or summing nothing is a
+    // measured fact and `undefined` where there is nothing to answer. It is
+    // READ, never restated, by `fillEmptyGroups`, `sql-driver` and
+    // `driver-turso`, and #16203 cited it for `min`/`max` in this same function.
+    // `?? null` is only the wire spelling of that `undefined` — the same `null`
+    // {@link extremumOf} returns and the same one the live faces' SQL NULL
+    // arrives as — never a second opinion about the ruling.
+    case 'avg': {
+      const operands = rows
+        .filter((r) => r[field] != null)
+        .map((r) => Number(r[field]))
+        .filter((n) => Number.isFinite(n));
+      return operands.length
+        ? operands.reduce((a, b) => a + b, 0) / operands.length
+        : (emptyGroupValueFor(metricType) ?? null);
+    }
     case 'min': return extremumOf(rows, field, 'min');
     case 'max': return extremumOf(rows, field, 'max');
     default: return nums.length ? nums.reduce((a, b) => a + b, 0) : rows.length;
