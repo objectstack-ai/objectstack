@@ -1129,7 +1129,8 @@ export const FieldSchema = lazySchema(() => {
    * Used by `lookup` and `master_detail` field types to define cross-object references.
    * The `reference` property is **required** for these types — it identifies the target
    * object whose records this field links to, and the superRefine below enforces it:
-   * a `lookup` / `master_detail` whose `reference` is missing or empty is refused at
+   * a `lookup` / `master_detail` whose `reference` is missing, empty, or
+   * whitespace-only is refused at
    * parse time. The engine uses `reference` during $expand
    * post-processing to resolve foreign key IDs into full related objects via batch queries.
    * 
@@ -1822,9 +1823,23 @@ export const FieldSchema = lazySchema(() => {
   // measured as accepted before this check). `Field.lookup()` /
   // `Field.masterDetail()` take the target as their first positional
   // argument, so helper-authored fields cannot miss it.
+  //
+  // [#16126] The emptiness test is applied to the TRIMMED value, so a
+  // whitespace-only `reference` joins `undefined` and `''` under this one
+  // issue and this one message. It names no object either: the declared
+  // grammar for an object name is `/^[a-z_][a-z0-9_]*$/` (`ObjectSchema`'s
+  // own `fields` key schema), so no whitespace-bearing string can ever
+  // resolve to one, and all three consequences the message lists hold
+  // verbatim for `'   '`. It is also the state a cleared target picker
+  // emits: `''` and `'   '` are one authoring gesture that was getting
+  // opposite verdicts. The notion of blank is `.trim()` — the same one
+  // `EvaluatedExpressionSchema` applies to `source`, not a third one.
+  // Trimming is for the TEST only: a value with surrounding whitespace is
+  // authored and is still stored as written, and a non-string still
+  // answers `invalid_type` from the base schema before this runs.
   if (
     (field.type === 'lookup' || field.type === 'master_detail') &&
-    (field.reference === undefined || field.reference === '')
+    (field.reference === undefined || field.reference.trim() === '')
   ) {
     ctx.addIssue({
       code: 'custom',

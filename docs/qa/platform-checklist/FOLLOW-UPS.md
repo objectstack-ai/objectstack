@@ -194,12 +194,16 @@ director summon #14, decision batch #42): the class, its barrel export, its
 advertised it are gone, and that section now states plainly that plugin security scanning
 is not a platform capability. Repair was refused by name. Do not re-derive it.
 
-**What SURVIVES that removal, in the same document.** `PHASE2_IMPLEMENTATION.md` sections
-4 and 5 still tell readers to `import … from '@objectstack/core/security'` — a subpath
-`packages/core/package.json` declares in no `exports` entry, so it resolves for no
-consumer of the published package. Deliberately left: the two repairs (declare the
-subpath, or repoint both sections at the root barrel) differ in whether they widen the
-published contract, which is not a lane's call. Filed separately.
+**What SURVIVED that removal in the same document, and how it was closed.**
+`PHASE2_IMPLEMENTATION.md` sections 4 and 5 used to tell readers to `import … from
+'@objectstack/core/security'` — a subpath `packages/core/package.json` declares in no
+`exports` entry, so it resolved for no consumer of the published package. Filed
+separately as #15931 and repaired in **PR #16205**: both lines now name
+`@objectstack/core`, the root barrel that already carried both classes outward through
+`export * from './security/index.js'`. Of the two repairs this row had left open —
+declare the subpath, or repoint both sections at the root barrel — the one that does
+**not** widen the published contract was taken, so `packages/core/package.json` still
+declares exactly `.` and `./logger`. Do not re-derive the subpath.
 
 ### 7b. Docs drift (PD#10 class — file as docs fixes, not checklist items)
 

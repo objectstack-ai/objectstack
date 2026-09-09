@@ -1167,7 +1167,13 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
             // Should now be in registry
             const cached = registry.getItem('app', 'test_app');
-            expect(cached).toEqual(sampleApp);
+            // [#16702] `_provenance: 'org'` is the SERVER's own sentence about
+            // every `sys_metadata` row, stated by the shared hydrator on a copy
+            // before the artifact envelope is merged — the same statement the
+            // `object` branch below has always made. Asserted explicitly rather
+            // than relaxed to `toMatchObject`, so an UNEXPECTED extra key still
+            // reds this pin.
+            expect(cached).toEqual({ ...sampleApp, _provenance: 'org' });
         });
 
         it('should try alternate type name in DB when primary type has no records', async () => {
@@ -1322,8 +1328,14 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             expect(result.loaded).toBe(2);
             expect(result.errors).toBe(0);
 
-            expect(registry.getItem('app', 'test_app')).toEqual(sampleApp);
-            expect(registry.getItem('app', 'app2')).toEqual(app2);
+            // [#16702] `_provenance: 'org'` is the SERVER's own sentence about
+            // every `sys_metadata` row, stated by the shared hydrator on a copy
+            // before the artifact envelope is merged — the same statement the
+            // `object` branch below has always made. Asserted explicitly rather
+            // than relaxed to `toMatchObject`, so an UNEXPECTED extra key still
+            // reds this pin.
+            expect(registry.getItem('app', 'test_app')).toEqual({ ...sampleApp, _provenance: 'org' });
+            expect(registry.getItem('app', 'app2')).toEqual({ ...app2, _provenance: 'org' });
         });
 
         it('should query only active state records', async () => {
@@ -1375,7 +1387,13 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
             expect(result.loaded).toBe(1);
             expect(result.errors).toBe(0);
-            expect(registry.getItem('app', 'test_app')).toEqual(sampleApp);
+            // [#16702] `_provenance: 'org'` is the SERVER's own sentence about
+            // every `sys_metadata` row, stated by the shared hydrator on a copy
+            // before the artifact envelope is merged — the same statement the
+            // `object` branch below has always made. Asserted explicitly rather
+            // than relaxed to `toMatchObject`, so an UNEXPECTED extra key still
+            // reds this pin.
+            expect(registry.getItem('app', 'test_app')).toEqual({ ...sampleApp, _provenance: 'org' });
         });
 
         it('should load records of different types', async () => {
@@ -1391,7 +1409,13 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             const result = await protocol.loadMetaFromDb();
 
             expect(result.loaded).toBe(2);
-            expect(registry.getItem('app', 'test_app')).toEqual(sampleApp);
+            // [#16702] `_provenance: 'org'` is the SERVER's own sentence about
+            // every `sys_metadata` row, stated by the shared hydrator on a copy
+            // before the artifact envelope is merged — the same statement the
+            // `object` branch below has always made. Asserted explicitly rather
+            // than relaxed to `toMatchObject`, so an UNEXPECTED extra key still
+            // reds this pin.
+            expect(registry.getItem('app', 'test_app')).toEqual({ ...sampleApp, _provenance: 'org' });
             // Object schemas pass through registerObject -> applyProtection (ADR-0010 §3.7),
             // which stamps the internal `_packageId`/`_provenance` envelope markers used by
             // listItems() filtering, the HTTP dispatcher and the runtime. Those are an

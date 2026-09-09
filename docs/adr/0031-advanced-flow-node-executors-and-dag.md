@@ -139,6 +139,10 @@ self-contained region in `config` — `config.body` for `loop`,
 1. **Well-formed by construction.** A nested region is its *own* graph, so
    single-entry is intrinsic and there are no scope markers to balance or leak
    across — validation (`analyzeRegion`/`validateControlFlow`) is local.
+   "Self-contained" describes control flow and variable scope, not id reuse: a
+   flow's node ids are **one space** across its top-level `nodes[]` and every
+   region body at every depth, and `FlowSchema` refuses a collision at parse
+   (#16134).
 2. **The shared `engine.ts` traversal stays untouched.** The container executor
    runs its body via a scoped `AutomationEngine.runRegion()`; the main DAG
    `traverseNext` never learns about scope markers (deliberate, given the

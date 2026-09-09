@@ -1928,6 +1928,52 @@ export function translationModulePayload(
 }
 
 /**
+ * The `TranslationData` SECTIONS a module of the given kind COVERS — the first
+ * dotted segment its leaves carry, which is the identity
+ * {@link narrowToCommittedSections} narrows a provenance table by.
+ *
+ * Beside {@link translationModulePayload} and switched on the same `kind`, so
+ * "what a module holds" and "which sections it commits" are ONE decision. The
+ * caller was two literals — `committed.push('objects')` and
+ * `committed.push('metadataForms')`, chosen by which modules were emitted — and
+ * a literal cannot follow the payload: under `kind: 'stack'` the module holds
+ * every group the stack authors (`objects`, `apps`, `dashboards`, ...) while the
+ * caller named exactly one of them. Replacing that list with a longer list of
+ * literals only moves the day it goes wrong to the next group added.
+ *
+ * ⚠️ The sections are NOT simply the payload's own top-level keys, and reading
+ * them off it would be WRONG for two of the three kinds. `'objects'` and
+ * `'metadataForms'` select the sub-tree ROOTED AT one section, so those keys are
+ * object and form names (`kpi_metric`) — deriving the section list from them
+ * would commit `['kpi_metric']` and narrow away every `objects.*` record, which
+ * is the one path this repository's single `--source-hashes` config is on.
+ * `'stack'` selects a `TranslationData`-shaped subtree, so THERE the top-level
+ * keys are sections — every group the stack authors, today's and any added
+ * later, with nothing here to update.
+ *
+ * The switch is exhaustive on purpose: a fourth kind that selects one section
+ * needs no edit (`[kind]` already names it), and a fourth AGGREGATE kind fails
+ * to compile here rather than silently committing its own name as a section.
+ */
+export function translationModuleSections(
+  data: TranslationData,
+  kind: TranslationModuleKind,
+): string[] {
+  switch (kind) {
+    case 'stack':
+      return Object.keys(stackAuthoredSubtree(data));
+    case 'objects':
+    case 'metadataForms':
+      // The selector's own name IS the section it roots at.
+      return [kind];
+    default: {
+      const exhaustive: never = kind;
+      return exhaustive;
+    }
+  }
+}
+
+/**
  * String leaves under a nested translation tree.
  *
  * The structural measure every key count in this mechanism is taken with — the

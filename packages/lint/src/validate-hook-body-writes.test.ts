@@ -233,17 +233,45 @@ describe('validateHookBodyWrites — ctx.input writes', () => {
 });
 
 describe('validateHookBodyWrites — ctx.api writes', () => {
-  it('checks insert/create/update payloads (argument 0) against the named object', () => {
+  it('checks insert/update payloads (argument 0) against the named object', () => {
     const findings = validateHookBodyWrites(
       stackWith(
         "await ctx.api.object('crm_contact').insert({ emial: 'a' }); " +
-          "await ctx.api.object('crm_contact').create({ email: 'b' }); " +
           "await ctx.api.object('crm_contact').update({ id, email: 'c' });",
       ),
     );
     expect(findings).toHaveLength(1);
     expect(findings[0].message).toContain("ctx.api.object('crm_contact').insert");
     expect(findings[0].hint).toContain("'email'");
+  });
+
+  // ⭐ [#16249] `create` is WITHDRAWN from `API_WRITE_METHODS` and from the
+  // ledger's advertised syntax. This case used to sit inside the one above as a
+  // `.create({ email: 'b' })` line with a VALID field — which produced no
+  // finding before the withdrawal and produces none after it, so it would have
+  // gone on passing while measuring nothing. Spelled with a MISSPELLED field,
+  // it is a real pin: a re-added `create` entry makes this line produce a
+  // second finding and reddens the length assertion.
+  //
+  // Grading the payload was the defect, not the silence: it told an author the
+  // call was fine and the field was the only question, when the VM installs no
+  // `create` leaf and the call is `TypeError: not a function` on its first run.
+  // `objectstack build` now refuses `.create(` at lowering, so this shape does
+  // not reach a real `body.source` at all — the fixture reaches the extractor
+  // directly, which is exactly what makes it a pin on THIS module.
+  it('does not grade a .create() payload — the verb is withdrawn from the ledger (#16249)', () => {
+    const findings = validateHookBodyWrites(
+      stackWith("await ctx.api.object('crm_contact').create({ emial: 'b' });"),
+    );
+    expect(findings).toEqual([]);
+    // The control, sharing the failing query's vocabulary: the SAME misspelling
+    // through the verb the sandbox does have is still graded, so the zero above
+    // is a reading about `create` and not about the fixture.
+    const control = validateHookBodyWrites(
+      stackWith("await ctx.api.object('crm_contact').insert({ emial: 'b' });"),
+    );
+    expect(control).toHaveLength(1);
+    expect(control[0].message).toContain("ctx.api.object('crm_contact').insert");
   });
 
   // [#13858] The message is the whole product of an advisory rule, so the

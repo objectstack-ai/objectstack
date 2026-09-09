@@ -33,10 +33,18 @@ const ENVELOPE = { dialect: 'cel', source: CONDITION };
 
 const gate = { id: 'gate', type: 'decision', label: 'Gate' };
 const write = { id: 'write', type: 'create_record', label: 'Write' };
-/** A well-formed region whose single edge carries a BARE STRING condition. */
-const gatedRegion = () => ({
-  nodes: [structuredClone(gate), structuredClone(write)],
-  edges: [{ id: 'b1', source: 'gate', target: 'write', type: 'conditional', condition: CONDITION }],
+/**
+ * A well-formed region whose single edge carries a BARE STRING condition.
+ *
+ * `suffix` keeps two regions of one flow apart: a flow has ONE node-id space
+ * across its top-level `nodes[]` and every region (#16134), so sibling
+ * branches, `try` + `catch`, and a container nested in a container may not
+ * repeat `gate` / `write` / `loop`. These fixtures pin normalization, not id
+ * reuse, so they carry distinct ids rather than pin the collision.
+ */
+const gatedRegion = (suffix = '') => ({
+  nodes: [{ ...gate, id: `gate${suffix}` }, { ...write, id: `write${suffix}` }],
+  edges: [{ id: `b1${suffix}`, source: `gate${suffix}`, target: `write${suffix}`, type: 'conditional', condition: CONDITION }],
 });
 
 const flowWith = (containerNode: Record<string, unknown>) => FlowSchema.parse({
@@ -53,8 +61,8 @@ const flowWith = (containerNode: Record<string, unknown>) => FlowSchema.parse({
   ],
 });
 
-const loopWith = (body: unknown) => ({
-  id: 'loop', type: LOOP_NODE_TYPE, label: 'Loop', config: { collection: '{rows}', iteratorVariable: 'row', body },
+const loopWith = (body: unknown, id = 'loop') => ({
+  id, type: LOOP_NODE_TYPE, label: 'Loop', config: { collection: '{rows}', iteratorVariable: 'row', body },
 });
 
 describe('#4415 — FlowSchema.parse canonicalizes regions with no second call', () => {
@@ -99,7 +107,7 @@ describe('#4415 — FlowSchema.parse canonicalizes regions with no second call',
   it('normalizes every parallel branch and keeps the branch `name`', () => {
     const flow = flowWith({
       id: 'par', type: PARALLEL_NODE_TYPE, label: 'Fan',
-      config: { branches: [{ name: 'left', ...gatedRegion() }, { name: 'right', ...gatedRegion() }] },
+      config: { branches: [{ name: 'left', ...gatedRegion() }, { name: 'right', ...gatedRegion('_r') }] },
     });
 
     const branches = (flow.nodes[1]!.config as any).branches;
@@ -113,7 +121,7 @@ describe('#4415 — FlowSchema.parse canonicalizes regions with no second call',
   it('normalizes both try_catch regions', () => {
     const flow = flowWith({
       id: 'tc', type: TRY_CATCH_NODE_TYPE, label: 'Guard',
-      config: { try: gatedRegion(), catch: gatedRegion(), errorVariable: '$err' },
+      config: { try: gatedRegion(), catch: gatedRegion('_c'), errorVariable: '$err' },
     });
 
     const cfg = (flow.nodes[1]!.config as any);
@@ -127,7 +135,7 @@ describe('#4415 — FlowSchema.parse canonicalizes regions with no second call',
     const flow = flowWith(loopWith({
       nodes: [{
         id: 'tc', type: TRY_CATCH_NODE_TYPE, label: 'Guard',
-        config: { try: { nodes: [loopWith(gatedRegion())], edges: [] } },
+        config: { try: { nodes: [loopWith(gatedRegion(), 'inner')], edges: [] } },
       }],
       edges: [],
     }));
@@ -168,10 +176,25 @@ describe('#4415 — FlowSchema.parse canonicalizes regions with no second call',
       config: { collection: '{r}', iteratorVariable: 'r', body: selfRegion },
     });
 
-    expect(() => FlowSchema.parse({
-      name: 'cyclic', label: 'Cyclic', type: 'schedule',
-      nodes: selfRegion.nodes, edges: [],
-    })).not.toThrow();
+    // #16134 — a flow has one node-id space, and the self-reference makes `l`
+    // its own body node at every depth, so the parse now REFUSES it; the
+    // termination pin therefore reads "a bounded ZodError, never a RangeError":
+    // the walk reached the depth ceiling and stopped.
+    let caught: unknown;
+    try {
+      FlowSchema.parse({
+        name: 'cyclic', label: 'Cyclic', type: 'schedule',
+        nodes: selfRegion.nodes, edges: [],
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).not.toBeInstanceOf(RangeError);
+    const issues = (caught as { issues?: Array<{ code: string; message: string }> })?.issues;
+    expect(issues).toBeDefined();
+    expect(issues!.length).toBeGreaterThan(0);
+    expect(issues!.length).toBeLessThan(64);
+    expect(issues!.every(i => i.code === 'custom' && i.message.startsWith('Duplicate node id `l`'))).toBe(true);
   });
 
   it('is copy-on-write at the node level', () => {
@@ -207,12 +230,12 @@ describe('#4347 — collectFlowGraphs', () => {
   it('names each parallel branch and both try_catch regions', () => {
     expect(collectFlowGraphs(flowWith({
       id: 'par', type: PARALLEL_NODE_TYPE, label: 'Fan',
-      config: { branches: [gatedRegion(), gatedRegion()] },
+      config: { branches: [gatedRegion(), gatedRegion('_r')] },
     })).map(g => g.scope)).toEqual(['', "parallel 'par' branch 0", "parallel 'par' branch 1"]);
 
     expect(collectFlowGraphs(flowWith({
       id: 'tc', type: TRY_CATCH_NODE_TYPE, label: 'Guard',
-      config: { try: gatedRegion(), catch: gatedRegion() },
+      config: { try: gatedRegion(), catch: gatedRegion('_c') },
     })).map(g => g.scope)).toEqual(['', "try_catch 'tc' try", "try_catch 'tc' catch"]);
   });
 
@@ -228,6 +251,25 @@ describe('#4347 — collectFlowGraphs', () => {
       .toEqual(['', "loop 'loop' body", "loop 'loop' body → try_catch 'tc' catch"]);
   });
 
+  it('carries each graph\'s key path beside its scope, so a finding can be anchored where the author wrote it (#16134)', () => {
+    const flow = flowWith(loopWith({
+      nodes: [{
+        id: 'tc', type: TRY_CATCH_NODE_TYPE, label: 'Guard',
+        config: { catch: gatedRegion() },
+      }],
+      edges: [],
+    }));
+    expect(collectFlowGraphs(flow).map(g => g.path)).toEqual([
+      [],
+      ['nodes', 1, 'config', 'body'],
+      ['nodes', 1, 'config', 'body', 'nodes', 0, 'config', 'catch'],
+    ]);
+    expect(collectFlowGraphs(flowWith({
+      id: 'par', type: PARALLEL_NODE_TYPE, label: 'Fan',
+      config: { branches: [gatedRegion(), gatedRegion('_r')] },
+    })).map(g => g.path)).toEqual([[], ['nodes', 1, 'config', 'branches', 0], ['nodes', 1, 'config', 'branches', 1]]);
+  });
+
   it('terminates on a self-referential region instead of recursing forever', () => {
     // Hand-built flows are objects, not parsed JSON, so a cycle is reachable.
     const selfRegion: { nodes: unknown[]; edges: unknown[] } = { nodes: [], edges: [] };
@@ -236,5 +278,114 @@ describe('#4347 — collectFlowGraphs', () => {
     // It descended (so the walk is real) and it stopped (so the ceiling holds).
     expect(graphs.length).toBeGreaterThan(1);
     expect(graphs.length).toBeLessThan(64);
+  });
+
+  /**
+   * #16752 — what the walk HANDS OUT matches its declared
+   * `readonly FlowNodeParsed[]`.
+   *
+   * The list in question is one `collectFlowGraphs` picks up ITSELF, out of a
+   * container's open `z.record` config, and casts after an `Array.isArray` that
+   * proves the LIST and never its MEMBERS — the sentence #15552 / #15636 /
+   * #15742 / #15793 removed from four lint readers. No caller ever holds this
+   * array, so no coercion at a call site can reach it; the guard belongs here.
+   *
+   * #16134 already stopped the walk DEREFERENCING a non-record member (a
+   * `TypeError` thrown here escapes `FlowSchema.safeParse` rather than becoming
+   * an issue). It did not stop the walk HANDING IT OUT: `nodes` was pushed
+   * verbatim, so every graph over a junk-bearing list carried the junk — at
+   * every depth, not only at the `MAX_REGION_DEPTH` ceiling the filing found.
+   *
+   * ⛔ The repair is a drop, never a looser signature: widening the declared
+   * type to tolerate malformed members is the direction #15793 refused on the
+   * anti-AI-error axis. As with the four repairs above, a dropped member
+   * renumbers the ones behind it in `graph.nodes` — a difference in the index,
+   * never in whether a node was judged; `graph.path`, which anchors a Zod issue
+   * where the author wrote it, is pinned below to stay indexed over the RAW
+   * list.
+   */
+  describe('#16752 — a non-record member never reaches a returned graph', () => {
+    /**
+     * The five shapes a raw node list holds that are not a node. `null` is the
+     * one an author writes by accident (an empty YAML list item deserialises to
+     * it); `an array` is the one a bare `typeof x === 'object'` test admits, so
+     * it pins that the drop is a record test and not an object test.
+     */
+    const NON_NODES: readonly (readonly [string, unknown])[] = [
+      ['null', null],
+      ['undefined', undefined],
+      ['a string', 'x'],
+      ['a number', 42],
+      ['an array', []],
+    ];
+
+    const isRecord = (v: unknown): boolean => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+    /**
+     * `depth` nested loop bodies, the innermost holding `junk` beside two real
+     * nodes. Hand-built rather than parsed on purpose: a region its own schema
+     * refuses is left RAW by `parseFlowNodeRegions`, and raw is the state this
+     * walk has to survive.
+     */
+    const nestedJunk = (depth: number, junk: unknown) => {
+      let region: Record<string, unknown> = {
+        nodes: [junk, { ...gate, id: 'gate_in' }, { ...write, id: 'write_in' }],
+        edges: [],
+      };
+      for (let i = depth; i > 0; i--) {
+        region = { nodes: [loopWith(region, `lp${i}`)], edges: [] };
+      }
+      return { nodes: region.nodes as never, edges: [] };
+    };
+
+    describe.each(NON_NODES)('with %s in the innermost body', (_label, junk) => {
+      // 0 is the flow's own list, 1 the shape the card reproduced, and 32 the
+      // depth ceiling — where `visit` pushes a graph and returns without ever
+      // walking its members, so the junk was handed out with nothing having
+      // looked at it.
+      it.each([0, 1, 32])('hands out only records at nesting %i', (depth) => {
+        const graphs = collectFlowGraphs(nestedJunk(depth, junk));
+        expect(graphs.flatMap(g => g.nodes).filter(n => !isRecord(n))).toEqual([]);
+      });
+
+      it('still hands out the real nodes standing beside it', () => {
+        // Anti-vacuity: the drop takes what cannot be read, not the list. A
+        // guard that emptied every graph would pass the assertion above.
+        const graphs = collectFlowGraphs(nestedJunk(1, junk));
+        expect(graphs[graphs.length - 1]!.nodes.map(n => n.id)).toEqual(['gate_in', 'write_in']);
+      });
+
+      it('lets `FlowSchema.safeParse` return an envelope rather than throw (#16134)', () => {
+        // This walk runs inside the parse, so the repair has to stay a drop and
+        // a skip; a throw here escapes `safeParse` instead of becoming an issue.
+        const result = FlowSchema.safeParse({
+          name: 'repro', label: 'Repro', type: 'schedule',
+          nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            loopWith({ nodes: [junk], edges: [] }),
+          ],
+          edges: [],
+        });
+        expect(typeof result.success).toBe('boolean');
+      });
+    });
+
+    it('leaves `path` indexed over the RAW list, so a finding stays where the author wrote it', () => {
+      // The container is at authored index 1 whether or not a non-record
+      // precedes it: dropping a member must not renumber its siblings in the
+      // key path a Zod issue is anchored on (#16134).
+      const graphs = collectFlowGraphs({
+        nodes: [null, loopWith(gatedRegion())] as never,
+        edges: [],
+      });
+      expect(graphs.map(g => g.path)).toEqual([[], ['nodes', 1, 'config', 'body']]);
+    });
+
+    it('hands back the very same array when there is nothing to drop', () => {
+      // Copy-on-write, as `parseFlowNodeRegions` is: a well-formed flow pays
+      // nothing for the guard.
+      const nodes = [{ ...gate }, { ...write }];
+      expect(collectFlowGraphs({ nodes: nodes as never, edges: [] })[0]!.nodes).toBe(nodes);
+    });
   });
 });

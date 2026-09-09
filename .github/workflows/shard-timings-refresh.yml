@@ -57,15 +57,40 @@
 # no refresh because it stamps a fresh `measuredAt` on numbers nobody measured.
 # That script carries the argument and the self-test; this file only drives it.
 #
+# ⚠ WHICH RUNS: THE HOURLY `schedule` RUN OF ci.yml, NEVER A PUSH RUN (#16467).
+# Until #16467 a push to `main` re-ran the FULL Test Core battery, so "a green
+# push run on main" and "a measurement of the workspace" were the same thing.
+# They are not any more: a push run computes its package set with `--affected`
+# against `github.event.before`. Its six shards still conclude `success` and
+# still upload six run summaries, so NOTHING in the eligibility test would have
+# noticed — this lane would have kept regenerating the balancing dataset from
+# measurements of whatever the last merge happened to touch, and the coverage
+# check would not have caught it either (a package the affected set skipped is a
+# cache HIT, carried at its old weight, which is a pass). The selector names the
+# event, and `select-shard-timings-run.mjs --self-test` drives a schedule-shaped
+# and a push-shaped run through it to prove which one comes back.
+#
+# ⛔ Do NOT make ci.yml's `Save Turbo cache (main only)` step fire on `schedule`
+# as well. It is `github.event_name == 'push'` on purpose and that is now
+# load-bearing here: if the hourly run seeded the cache it restores, the next
+# hourly run would replay almost the whole workspace, the generator would refuse
+# every replayed task, and this lane would measure nothing — by construction,
+# every hour, forever. Affected-only pushes seeding a narrower cache is the
+# direction that HELPS: it leaves more real misses for the hourly run to time.
+#
 # ⚠ AND IT IS "RUNS", PLURAL, WHICH THE DOCUMENTED PROCEDURE DOES NOT SAY.
-# Measured on this lane's first live run (34083991141): of the seven retained
-# green push runs on main, the BEST measured 52 of the 71 packages the committed
-# dataset holds, and the others measured 2, 3, 13, 18, 22 and 49. All seven were
-# partial cache replays. That follows from the cache design rather than from luck
-# — turbo's key is namespaced per shard and only main pushes write it, so a
-# package whose inputs have not changed is a HIT, and the generator refuses hits
-# rather than recording a replayed ~0.1s window as a suite's cost. "Download six
-# artifacts from any green run" therefore measures a SLICE of the workspace.
+# Measured on this lane's first live run (34083991141), when the runs it read
+# were still push runs: of the seven retained green runs on main, the BEST
+# measured 52 of the 71 packages the committed dataset holds, and the others
+# measured 2, 3, 13, 18, 22 and 49. All seven were partial cache replays. That
+# follows from the cache design rather than from luck — turbo's key is
+# namespaced per shard and only main pushes write it, so a package whose inputs
+# have not changed is a HIT, and the generator refuses hits rather than
+# recording a replayed ~0.1s window as a suite's cost. "Download six artifacts
+# from any green run" therefore measures a SLICE of the workspace. That number
+# should IMPROVE under the hourly run, because a push no longer seeds the whole
+# workspace's entries — but it is quoted as it was measured, and the next live
+# run is what re-measures it.
 #
 # So the regeneration step accumulates runs, each under its own `--run <id>`
 # group — the grouping #16473 added, which sums a sliced package's slices within
@@ -235,8 +260,82 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          node scripts/ci/select-shard-timings-run.mjs --candidates --limit 15 \
-            > "$RUNNER_TEMP/candidates.json"
+          # 24, not 15 (#16467). The window that matters is the artifact
+          # retention window — 1 day — and the runs inside it are now the
+          # hourly scheduled ones, so 24 is "everything still downloadable"
+          # rather than an arbitrary depth. Coverage is ACCUMULATED across
+          # runs (see the next step), so examining fewer than the window holds
+          # is coverage left on the table; the cost is two API reads per run
+          # examined and the loop below still stops at the first accumulation
+          # that covers the workspace.
+          #
+          # ⭐ THREE EXITS, THREE READINGS (#16467). The selector answers 0, 1
+          # or 3, and this step must not flatten them:
+          #
+          #   0  eligible runs on stdout — carry on.
+          #   1  candidates existed and every one was censored, failed or lost
+          #      its artifacts. A FINDING. The job goes red, as it always did.
+          #   3  EXIT_PREREQUISITE_NOT_MET — the API held NO completed
+          #      `schedule` run of ci.yml at all. NOTHING was measured. The
+          #      dataset is untouched, which is the correct outcome, so the job
+          #      must not go red for it.
+          #
+          # Measured, which is why this branch exists: on the pull request that
+          # landed the hourly run, this lane ran with `event=schedule` before
+          # that trigger existed on main, printed "NO ELIGIBLE RUN among the 0"
+          # and named three causes none of which had occurred. It also does not
+          # clear at merge — there is a bootstrap window of at least an hour
+          # before the first hourly run finishes.
+          #
+          # `|| SELECT_EXIT=$?` and not a bare call: this step runs under
+          # `bash -e`, where the non-zero would kill it before the code could
+          # be read at all.
+          #
+          # stderr goes to a FILE and is echoed back immediately: the log keeps
+          # every line it had, and the refusal text becomes quotable into the
+          # step summary below, where somebody reading a green job will see it.
+          SELECT_EXIT=0
+          node scripts/ci/select-shard-timings-run.mjs --candidates --limit 24 \
+            > "$RUNNER_TEMP/candidates.json" 2> "$RUNNER_TEMP/select-stderr.txt" || SELECT_EXIT=$?
+          cat "$RUNNER_TEMP/select-stderr.txt"
+          echo "select_exit=$SELECT_EXIT" >> "$GITHUB_OUTPUT"
+          if [ "$SELECT_EXIT" -eq 3 ]; then
+            # ⛔ NEVER QUIET. A 3 that scrolls past in a green job is how this
+            # lane ends up passing because it never looked — the shape that has
+            # already cost this repo two cards. It is an annotation, a step
+            # summary section and a job-level notice, and every one of them says
+            # that a PERSISTENT 3 is a defect rather than a steady state.
+            echo "not_measured=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Shard timings NOT MEASURED: no completed \`schedule\` run of ci.yml exists on main yet. The dataset was left untouched. If this repeats once the hourly full run has been live for a few hours, the trigger is gone or every hourly run is being cancelled — file it."
+            {
+              echo "### Shard timings: NOT MEASURED (exit 3) — nothing was regenerated, and nothing failed"
+              echo
+              echo "\`select-shard-timings-run --candidates\` found **no completed \`schedule\` run of"
+              echo "\`ci.yml\` on \`main\` at all**. That is not \"every candidate was rejected\": there were"
+              echo "no candidates, so no run was censored, none failed and none lost its artifacts."
+              echo "\`scripts/test-shard-timings.json\` is untouched, which is the correct outcome for this"
+              echo "reading, and this job is green because nothing went wrong — not because anything passed."
+              echo
+              echo "Expected exactly once: while the hourly full run bootstraps. The trigger has to be on"
+              echo "\`main\` and one run has to finish, and run-summary artifacts live 1 day."
+              echo
+              echo "⛔ **A PERSISTENT NOT MEASURED IS A DEFECT, NOT A STEADY STATE.** If this section is"
+              echo "still here after the hourly run has been live for a few hours, the \`schedule\` trigger"
+              echo "has been removed from \`ci.yml\` or every hourly run is being cancelled — and the"
+              echo "balancing dataset is quietly ageing out while this job reports green. File a card."
+              echo
+              echo "The selector's own refusal text, verbatim:"
+              echo
+              echo '```'
+              cat "$RUNNER_TEMP/select-stderr.txt" 2>/dev/null || echo '(the refusal text is in this job log)'
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$SELECT_EXIT" -ne 0 ]; then
+            echo "::error::select-shard-timings-run refused with exit $SELECT_EXIT — candidates existed and none was eligible. Nothing was regenerated."
+            exit "$SELECT_EXIT"
+          fi
           echo "Eligible runs, newest first:"
           node -e '
             const runs = JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/candidates.json", "utf8"));
@@ -246,16 +345,19 @@ jobs:
       # ACCUMULATE runs until the workspace is covered — do not look for one run
       # that covers it, because there is no such run.
       #
-      # MEASURED on the first live run of this lane (run 34083991141), and it is
-      # the fact that shapes this step: of the seven retained green push runs on
-      # main, the BEST measured 52 of the 71 packages the committed dataset
-      # holds, and the rest measured 2, 3, 13, 18, 22 and 49. Every one of them
-      # was a partial cache replay. That is not bad luck, it is the cache design:
-      # turbo's key is namespaced per shard and only main pushes write it, so a
-      # package whose inputs have not changed is a HIT — and the generator
-      # refuses hits rather than recording a replayed ~0.1s window as a suite's
-      # cost. "Download six artifacts from any green run" therefore measures a
-      # SLICE of the workspace, never all of it.
+      # MEASURED on the first live run of this lane (run 34083991141), when the
+      # runs read were still push runs, and it is the fact that shapes this
+      # step: of the seven retained green runs on main, the BEST measured 52 of
+      # the 71 packages the committed dataset holds, and the rest measured 2, 3,
+      # 13, 18, 22 and 49. Every one of them was a partial cache replay. That is
+      # not bad luck, it is the cache design: turbo's key is namespaced per shard
+      # and only main pushes write it, so a package whose inputs have not changed
+      # is a HIT — and the generator refuses hits rather than recording a
+      # replayed ~0.1s window as a suite's cost. "Download six artifacts from any
+      # green run" therefore measures a SLICE of the workspace, never all of it.
+      # Since #16467 the runs read here are the HOURLY `schedule` runs, which are
+      # the full battery; the accumulation stays because the cache argument above
+      # is unchanged by which event ran the suite.
       #
       # So runs are accumulated. Each contributes its six summaries under its own
       # `--run <id>` group, which is exactly the grouping #16473 added: slices are
@@ -268,6 +370,11 @@ jobs:
       # quiet week costs one run's download and a busy one costs a few.
       - name: Regenerate the dataset, accumulating runs until the workspace is covered
         id: generate
+        # Skipped on the NOT MEASURED reading: there is nothing to download.
+        # Every step after `compare` is already gated on
+        # `steps.compare.outputs.changed`, which is the empty string when
+        # `compare` itself is skipped — so guarding these two guards the tail.
+        if: steps.select.outputs.not_measured != 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -375,6 +482,7 @@ jobs:
       # file is what has to differ for a PR to be worth anyone's attention.
       - name: Compare against the committed dataset
         id: compare
+        if: steps.select.outputs.not_measured != 'true'
         run: |
           if cmp -s scripts/test-shard-timings.json "$RUNNER_TEMP/refresh/refreshed.json"; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -456,8 +564,12 @@ jobs:
             echo
             echo "## Source"
             echo
-            echo "Measured across $RUN_COUNT accumulated run(s). No single green run measures the whole"
-            echo "workspace — turbo's cache is namespaced per shard and only main pushes write it, so a"
+            echo "Measured across $RUN_COUNT accumulated run(s) of the HOURLY \`schedule\` run of CI on"
+            echo "\`main\` — the full-battery run (#16467). A \`push\` run on \`main\` is affected-only and"
+            echo "is not a measurement of the workspace, so no push run feeds this file."
+            echo
+            echo "No single green run measures the whole workspace either — turbo's cache is namespaced"
+            echo "per shard and only main pushes write it, so a"
             echo "package whose inputs have not changed is a HIT and the generator refuses hits rather"
             echo "than recording a replay as a duration. Runs are therefore accumulated, each fenced by"
             echo "its own \`--run\` group, until every package the committed dataset holds is measured"
