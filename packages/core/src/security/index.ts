@@ -107,6 +107,17 @@ export {
   type TenancyPostureSource,
 } from './api-key.js';
 
+// [#16013] The ONE try/catch CLASSIFICATION every admission seam performs on
+// the `tenancy` read that feeds `effectiveTenancyPosture` above -- branded
+// "never registered" stays quiet, every other rejection is the ADR-0112 outage
+// (#13906 decision 1 option A). The RESOLUTION deliberately stays at each seam:
+// how the service is reached, and why a missing async accessor stays quiet
+// there, are per-seam facts a shared owner would have to erase or flag.
+export {
+  classifyAdmissionTenancyPosture,
+  type TenancyServiceResolver,
+} from './admission-tenancy-posture.js';
+
 // [#13279] The LOUD failure an unreachable permission store raises, and the
 // brand predicate a fail-closed `catch` uses to re-raise it instead of
 // degrading an outage into a capability denial. Ruled 2026-08-30.
