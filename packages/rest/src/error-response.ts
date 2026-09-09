@@ -733,6 +733,51 @@ function isSandboxOrigin(error: any): boolean {
 }
 
 /**
+ * [#15071] Did a sandboxed body CRASH — as opposed to reporting a refusal?
+ *
+ * The two reads {@link sandboxBusinessMessage} already makes, asked from the
+ * other side: a sandbox origin ({@link isSandboxOrigin}) whose unwrapped
+ * sentence names a JS runtime fault ({@link isScriptFaultMessage}). One
+ * predicate, so the question "is this a crash" has one answer in this file
+ * rather than a second open-coded read — the door-disagreement shape
+ * #7525/#8016/#11588 keep producing whenever a boundary re-derives a read this
+ * file already owns.
+ *
+ * ## Why {@link classifyDataError} asks it FIRST
+ *
+ * Maintainer ruling, 2026-09-04 (decision batch #27), on this card — option B,
+ * verbatim 「同意」: *"A declared code is the author's statement about the
+ * failure mode they **handled**. A crash (`isScriptFaultMessage`, #7543) is not
+ * that mode, so it is classified as a fault"* — and so the crash terminal that
+ * lived INSIDE the unwrap door now sits above the code-gated arms, which are
+ * asked before that door. It is the same terminal, moved, not a second one:
+ * ⛔ there is exactly one `isScriptFaultMessage` gate on this path.
+ *
+ * Before this card the answer depended on whether the crashing body happened to
+ * declare a code an arm recognises: a crash carrying `DELETE_RESTRICTED` was
+ * answered `409` with the QuickJS debug wrapper as its client-facing sentence,
+ * while the same crash carrying no declared code reached the sanitised
+ * {@link UNCLASSIFIED_FAULT}. The ruling on that: *"an internal stack-shaped
+ * sentence at a business status is both a leak and a lie to the client about
+ * what happened"*.
+ *
+ * ⛔ What this deliberately does NOT touch, in the ruling's own words: *"Ordinary
+ * declared refusals (a hook that throws a business error carrying a code, no
+ * crash) are **untouched** — only the crash branch moves."* A business refusal
+ * fails {@link isScriptFaultMessage}, and a non-sandbox producer fails
+ * {@link isSandboxOrigin}, so both keep every byte of the arm's answer —
+ * `error-response-sandbox-arm-message.test.ts` §1-§3 are the standing controls
+ * and §4 pins the negative control per arm.
+ *
+ * ⛔ Nor does it widen the `developerMessage` channel: #7543's existing rule for
+ * a fault is what {@link UNCLASSIFIED_FAULT} emits, unchanged — status, the
+ * catalog's `INTERNAL_ERROR`, and no prose from the crash.
+ */
+function isSandboxCrash(error: any): boolean {
+    return isSandboxOrigin(error) && isScriptFaultMessage(error.innerMessage);
+}
+
+/**
  * [#14541, contract-review condition 4] A structured arm answering a **5xx**
  * never displaces a status the producer declared in the **4xx** band — asked by
  * BOTH doors, so the answer cannot depend on which one caught the error.
@@ -1162,6 +1207,15 @@ function structuredCodeAnswer(
 }
 
 function classifyDataError(error: any, object?: string): { status: number; body: Record<string, unknown> } {
+    // [#15071] A sandboxed CRASH is a fault before it is anything else — above
+    // the arms, because the arms are asked before the unwrap door that used to
+    // hold this terminal. Maintainer ruling 2026-09-04 (batch #27), option B:
+    // a crash "reaches the unwrap door's sanitised 500 whatever code it
+    // declares". See {@link isSandboxCrash} for the ruling and its fence.
+    //
+    // ⛔ The terminal is not duplicated — it MOVED here from inside the unwrap
+    // door below, which is why that door now reads a body that REPORTED.
+    if (isSandboxCrash(error)) return UNCLASSIFIED_FAULT();
     // [#14541] The bespoke structured arms first, exactly as they were inline
     // here — same arms, same order, same position — now stated once so
     // {@link resolveErrorResponse} can ask them before ITS passthrough too.
@@ -1249,13 +1303,17 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     // a door-to-door pin (`rest-hook-refusal-message-parity.test.ts` §4) rather
     // than by this comment.
     if (typeof error?.innerMessage === 'string' && error.innerMessage) {
-        // [#7543] …but only when the body REPORTED something. A body that
-        // CRASHED arrives here too, and its `TypeError: not a function` is an
-        // internal fault, not a business message — see
-        // {@link isScriptFaultMessage}. Deliberately FIRST: a crash outranks
-        // everything else about the error, including a stray declared
-        // `status` — a `TypeError` carrying one stays the sanitised 500.
-        if (isScriptFaultMessage(error.innerMessage)) return UNCLASSIFIED_FAULT();
+        // [#7543] …and by the time control reaches here the body REPORTED
+        // something: a body that CRASHED arrives at this function too, and its
+        // `TypeError: not a function` is an internal fault rather than a
+        // business message — {@link isScriptFaultMessage}. "Deliberately FIRST:
+        // a crash outranks everything else about the error, including a stray
+        // declared `status`" is unchanged as a rule; [#15071] moved the gate
+        // that applies it to the TOP of this function ({@link isSandboxCrash}),
+        // because the code-gated arms above are asked before this door and were
+        // answering a crash with a business status and the wrapper prose. So
+        // this branch keeps its meaning and loses its guard — the guard did not
+        // disappear, it out-ranks more of the file than it used to.
         // [#9967] A body that NAMES its own HTTP status is asking to be served
         // with it — the same #7867 rule `domains/actions.ts` applies on the
         // custom-action route. The QuickJS side-channel carries a body-thrown
