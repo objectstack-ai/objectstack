@@ -646,7 +646,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 外部评审链降为可选事后审计,非放行前提。
 - `needs:contract-review`(恒英文)由 PR 创建者随可复审契约增量同笔挂:draft PR,或先到的报告。
 - `Clause-②: yes` 认领同笔在卡上挂标;PR 开出即读 `check-clause2-carriers --pair N` 为 0 再请审。
-- 挂标后复核完成前短暂停靠;⛔ 不前瞻预挂。
+- 挂标后复核完成前短暂停靠;档位实测不可用的改道见降档保险丝;⛔ 不前瞻预挂。
 - 席内复核的适用面、载体纪律、资格与归属、降档保险丝见 `references/contract-review.md`。
 - 碰生成物的 PR 入队前先同步 + 整体重生成:四步序 `bash scripts/pm/os-regen-merge.sh`。
 - os-regen 的陷阱与锚点禁令见 landing-operations A。

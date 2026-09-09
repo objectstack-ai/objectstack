@@ -24,7 +24,6 @@
 
 ## 复核归属与资格(席内)
 
-- 归属该卡派发席,交付后收集复核当轮席内完成。
 - 审的是低档实现者的契约增量,非自身产物。
 - 契约判断清单逐项落卡或 PR 评论,⛔ 不是散文自述。
 - ① derived judgments 逐项:diff 引出的接受集与公开面变化逐条点名判对错。
@@ -43,7 +42,6 @@
 - 该命令 0 = 双肢一致且无放宽 tell,4 = 任一不成立,3 = 环境答不了;⛔ 3 不作干净。
 - 放宽 tell 由 `scripts/pm/check-widening-tells.mjs` 判,`no` 撞新键/成员/导出/登记即拒,附 file:line。
 - ③ PR 全部 check 全绿,⛔ 非 required 子集;受管面不适用,draft-only 终局不变。
-- 外部评审链是可选事后审计:分诊定时轮与总监席召唤 ⛔ 不是放行必要条件。
 - 审计 FAIL 按状态机 label-flip 交回派发席补丁轮。
 
 ## 降档保险丝(机读)
@@ -51,6 +49,8 @@
 - 席内复核与审计每场前必读一次服役档,读法与陷阱见 `platform-readings.md`。
 - ⛔ 自述档位不是读数;读数 ≠ `CONTRACT_REVIEW_TIER` ⇒ 该席 ⛔ 不自判清标。
 - 改走转录核验的复核子代理;标签在复核完成前原样留置,卡在队列外等待是安全态。
+- 档位实测不可用 ⇒ 无 PASS 可产,命中闸门的卡成批停靠且不短暂:翻 `pm:on-hold`,⛔ 不干等。
+- 带 `Restart-when: 服役档 = CONTRACT_REVIEW_TIER` 与 `Unlock-action: re-check PR #M`,日频判据批扫捞回。
 - 保险丝只测座位自会话:`mode:subagent` 里 `get_session` 量的是派发会话,⛔ 不作互证。
 - 传参只是配置 ⛔ 不作达档读数;条款②的 `mode:subagent` 派发恒保留标至席内复核完成。
 - 转录档位核验:采信或清标前 grep 子代理 transcript 中 harness 逐消息盖章的 `model` 字段。
