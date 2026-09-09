@@ -46,4 +46,8 @@ A `beforeUpdate` handler that **reads a statically `readonly` field out of `ctx.
 - **reporting on what the caller sent** (a guard naming the offending key) — read `ctx.submitted`.
 - **a self-assignment** (`data.x = data.x`) on such a field — this used to promote the caller's forged value to hook-owned and commit it; it now writes `undefined`, because the key the hook reads is gone. That laundering route closing is intended, and it is re-pinned rather than removed.
 
+⚠️ **The sharpest edge is a sandboxed `body` hook, and it is a refusal rather than a quiet change.** A body that reaches *through* such a key — `ctx.input.locked_meta.who = 'hook'` — now dereferences `undefined` and throws, and a `body`'s default `onError` is `abort`, so the caller's **whole write is rejected** where it used to succeed. What that body used to do was persist a value derived from the caller's forgery, so refusing is the correct direction; but the message the author sees is a raw `TypeError` from their own dereference and names nothing actionable. Measured end to end through a real QuickJS sandbox and pinned in `packages/runtime/src/sandbox/hook-input-writeback-readonly-provenance.integration.test.ts`.
+
+A body hook cannot read `ctx.submitted`: it is deliberately not marshalled onto the sandbox face, for the reason `dispatch.scope` is not — that face is assembled key by key, and a key added there is a second published contract with its own compatibility story. A body deriving a column from a read-only field reads **`ctx.previous`**, the stored row, which is the correct source either way.
+
 An `isSystem` caller sees no change at all: the strip has never applied to one, and neither does the hide.
