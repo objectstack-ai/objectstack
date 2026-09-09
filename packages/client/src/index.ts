@@ -3453,8 +3453,10 @@ export class ObjectStackClient {
      *   - naming a NON-active organisation now answers THAT organisation's row
      *     instead of the active one's — the defect this method carried;
      *   - a caller who is not a member of `organizationId` is refused
-     *     `403 YOU_ARE_NOT_A_MEMBER_OF_THIS_ORGANIZATION` (it was
-     *     `400 MEMBER_NOT_FOUND`, and about the ACTIVE organisation at that);
+     *     `403 YOU_ARE_NOT_A_MEMBER_OF_THIS_ORGANIZATION`. Before, the named
+     *     organisation was never consulted, so the answer was about the
+     *     ACTIVE one: a 200 carrying the active organisation's row, or
+     *     `400 MEMBER_NOT_FOUND` when the caller had no row there either;
      *   - a caller with no active organisation gets their row rather than
      *     `400 NO_ACTIVE_ORGANIZATION` — `setActive` is no longer a
      *     precondition, which is the point of naming the organisation;
