@@ -83,6 +83,12 @@ export const ScheduleOrganizationSchema = z
   );
 
 /**
+ * The declared value's type — the alias the machine-readable surface needs
+ * beside the schema, and the name a reference page's import example carries.
+ */
+export type ScheduleOrganization = z.infer<typeof ScheduleOrganizationSchema>;
+
+/**
  * The trigger kinds this declaration is required on — the two that launch a run
  * from a clock rather than from a session.
  *

@@ -17,6 +17,7 @@
     "builtin-node-config",
     "flow-function",
     "io-node-config",
+    "misc",
     "schemaless-node-config"
   ]
 }
