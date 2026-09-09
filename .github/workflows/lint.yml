@@ -1103,6 +1103,28 @@ jobs:
       - name: Widening-tell gate self-test
         run: pnpm check:pm-widening-tells
 
+      # Changeset-deadline census self-test (#16850) — same family and the same
+      # split as every step around it. The LIVE census reads the shared board
+      # over the API and is REPORT-ONLY by ruling: #16850 takes option 1 (detect
+      # the consumption) under this lane's standing rule that a NEW scan
+      # population — here, issue BODIES — is censused before anything is
+      # enforced. So a card whose changeset window closed is a fact about the
+      # board, not about the PR that happens to run CI next, and failing that
+      # PR would punish the wrong actor.
+      #
+      # ⛔ Do not "promote" the live census into this step, and ⛔ do not give it
+      # a failing exit on findings. Whether the number justifies an exit
+      # contract at all is the question the census exists to answer, and the
+      # answer it produced on 2026-09-09 is in the PR that landed this file.
+      #
+      # What the self-test instruments is the MATCHING RULE and the CONTROLS —
+      # the two things a clean tree cannot exercise. Weakening either (counting
+      # the glob spelling as a target; accepting a zero without its positive
+      # control) leaves a production run just as green, which is the shape
+      # `check:self-test-wired` requires this step for.
+      - name: Changeset-deadline census self-test
+        run: pnpm check:pm-changeset-deadline-census
+
       # Governed-merges audit self-test (#9495) — same family, same split as
       # the half-state sweeper above: the live sweep enumerates the governed
       # merges since a date/ref for the PM round report — report-only by
