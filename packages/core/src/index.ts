@@ -85,6 +85,12 @@ export * from './utils/filter-tokens.js';
 // the two backends came to answer one bad input with opposite wrong answers.
 export * from './utils/analytics-date-range.js';
 
+// [#16322] The shared conformance kit for that lowering — the cases and rules
+// every analytics face is held to, so "memory and SQL agree" is measured in
+// each face's own package rather than asserted in prose. It ships beside the
+// lowering because the oracle IS the lowering.
+export * from './utils/analytics-date-range-conformance.js';
+
 // [#8690] Can a temporal column's storage rule read this comparand? The VALUE
 // half of the field-typed judgement behind the engine's temporal-comparand door
 // and the analytics raw-SQL decline — one rule, two packages that do not depend
