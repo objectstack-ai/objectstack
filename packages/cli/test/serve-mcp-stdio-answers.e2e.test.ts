@@ -105,7 +105,7 @@ export default {
   objects: [{
     name: 'stdioprobe_task',
     label: 'Task',
-    sharingModel: 'public',
+    sharingModel: 'private',
     fields: { title: { type: 'text', label: 'Title' } },
   }],
 };

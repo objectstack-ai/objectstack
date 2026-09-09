@@ -42,10 +42,12 @@
 //
 // The card's accept bar says `{"title": 12345}` must JOIN its neighbours —
 // `{}` → `400 VALIDATION_FAILED` with `fields[]`. It cannot, and asserting that
-// it does would pin a false statement. `record-validator.ts:503-504` accepts a
-// number in a `text` field:
+// it does would pin a false statement. `record-validator.ts`'s `validateOne`
+// accepts a number in a `text` field: its bounded-string branch is entered by
+// set membership (`BOUNDED_STRING_FIELD_TYPES.has(t)`, and `text` is a member),
+// and the first thing it does is coerce, verbatim:
 //
-//   if (t === 'text' || …) { const s = typeof value === 'string' ? value : String(value); … }
+//   const s = typeof value === 'string' ? value : String(value);
 //
 // — the value is COERCED, every length/format check runs against `"12345"`, and
 // the branch returns `null`. The shape guard above it (`invalid_value_shape`)
@@ -398,8 +400,8 @@ describe('[#7543] the control table from the report, guarded as one family', () 
         const r = mapDataError(REPORTED(), 'showcase_task');
 
         // It does NOT join the 400 VALIDATION_FAILED family, and pinning that it
-        // does not is the honest half: `record-validator.ts:503-504` COERCES a
-        // number in a `text` field via `String(value)`, so this request breaks
+        // does not is the honest half: `record-validator.ts`'s `validateOne`
+        // COERCES a number in a `text` field via `String(value)`, so this breaks
         // no declared contract and names no offending field. What was wrong was
         // the raw fault text and the missing `code`; both are fixed.
         expect(r.body.code).toBe('INTERNAL_ERROR');

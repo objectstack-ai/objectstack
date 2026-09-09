@@ -220,16 +220,24 @@ describe('os explain — every catalog entry swept against its spec schema (#148
 
   // Entries with one schema to parse against. `card` marks a known-broken one
   // and names where its errors are recorded; its absence means "must parse".
+  //
+  // ⭐ The xfail ledger is EMPTY: #15170–#15175 corrected the six entries that
+  // carried a card, and each xfail was promoted to the plain assertion below in
+  // that same change — which is the whole point of the sweep. Leaving a
+  // corrected entry as an `it.fails` would let the identical error return
+  // silently, because `it.fails` is green on ANY failure. The machinery stays
+  // for the next entry that arrives broken: give it a `card` and it becomes an
+  // xfail again, with a filed number attached rather than a quiet skip.
   const BOUND: Record<string, { schema: string; card?: number }> = {
-    object: { schema: 'ObjectSchema', card: 15170 },
+    object: { schema: 'ObjectSchema' },
     field: { schema: 'FieldSchema' },
-    view: { schema: 'ViewSchema', card: 15171 },
+    view: { schema: 'ViewSchema' },
     flow: { schema: 'FlowSchema' },
-    agent: { schema: 'AgentSchema', card: 15172 },
-    app: { schema: 'AppSchema', card: 15173 },
+    agent: { schema: 'AgentSchema' },
+    app: { schema: 'AppSchema' },
     query: { schema: 'QuerySchema' },
-    dashboard: { schema: 'DashboardSchema', card: 15174 },
-    action: { schema: 'ActionSchema', card: 15175 },
+    dashboard: { schema: 'DashboardSchema' },
+    action: { schema: 'ActionSchema' },
   };
 
   // Entries with NO single schema to parse against, and the reason each of the
@@ -239,7 +247,9 @@ describe('os explain — every catalog entry swept against its spec schema (#148
       'there is no standalone Workflow authoring type (ADR-0019) — the entry is a '
       + 'redirect and its example is commentary, not a literal',
     trigger:
-      'no `TriggerSchema` exists in the spec, and the sample is not a Hook either (#15176)',
+      'ADR-0088 retired the `trigger` metadata kind — no `TriggerSchema` exists and '
+      + 'none ever did, so the entry is a redirect to `hook` / a `record_change` flow '
+      + 'and its example is commentary, not a literal (#15176)',
   };
 
   it('classifies every entry in SCHEMAS — none is silently unswept', () => {
@@ -296,13 +306,21 @@ describe('os explain — every catalog entry swept against its spec schema (#148
 
   it(`os explain trigger — ${UNBOUND.trigger}`, () => {
     expect('TriggerSchema' in specSurface).toBe(false);
-    // …and it is not `HookSchema` under another name. Ruling the one real
-    // candidate out is what makes the unbound classification a measurement
-    // instead of an assumption: `event` is a strict-object ALIAS of `events`
-    // (the same alias-as-a-documented-key failure the `flow` entry had), and a
-    // hook's code slot is `handler`, so the entry's `flow` key is unrecognised.
+    expect(catalog.trigger.name).toContain('no standalone type');
+    // The redirect points at a mechanism that EXISTS — asserted, not assumed.
+    // Before #15176 this line ruled `HookSchema` out as a candidate for the old
+    // entry's literal (`event` is a strict-object ALIAS of `events`, and a
+    // hook's code slot is `body`/`handler`, so its `flow` key was unrecognised).
+    // The entry no longer offers a literal to rule out; what the assertion has
+    // to defend now is the other half — that the reader is being sent somewhere
+    // real. A redirect naming a schema the spec does not have would be the same
+    // defect one level up.
     const hook = specSurface.HookSchema as ZodLike | undefined;
-    expect(typeof hook?.safeParse, 'HookSchema — the candidate this rules out').toBe('function');
-    expect(hook!.safeParse(evaluate('trigger')).success).toBe(false);
+    expect(typeof hook?.safeParse, 'HookSchema — the mechanism this entry redirects to').toBe('function');
+    // Its example is commentary about the live mechanisms, not a literal —
+    // asserted for the same reason the `workflow` entry above asserts it, so
+    // "nothing was parsed here" is a property of this file rather than an
+    // omission a reader has to notice.
+    expect(() => evaluate('trigger')).toThrow();
   });
 });

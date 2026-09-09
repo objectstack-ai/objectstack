@@ -125,7 +125,9 @@
  * samples, exactly as its sibling does.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -136,6 +138,17 @@ import { isEntrypoint } from './invoked-as.mjs';
 // emitter from the walker is exactly the card that must see this gate named in
 // its brief, and that is the edge this import buys.
 import { CLI_BUILD_FIX, workspaceBuildFix } from './cli-build-prerequisite.mjs';
+// The exit-code contract, IMPORTED rather than re-picked. `import-prerequisite.mjs`
+// is where this repo answers "can this gate run at all?", and its header states the
+// reason in as many words: *"Exit 1 from an unmet prerequisite and exit 1 from a real
+// finding are the same reading — which is why the guarded refusal below does NOT keep
+// that number."* This gate spelled that same headline by hand and kept exit 1, so a
+// sweep, a runner script or a CI `if:` read its refusal as a FINDING against whatever
+// landed most recently — measured on one worktree where three gates refused for the
+// same reason and returned 3, 1, 3. ⛔ Never re-spell either number here: a literal is
+// what drifts, and the four sibling gates that answer these words (two of them in this
+// same i18n family) all take them from this one module.
+import { EXIT_FINDINGS, EXIT_PREREQUISITE_NOT_MET, importerCommandPath } from './import-prerequisite.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** This script lives in `scripts/`, so the repo root is one level up. */
@@ -310,18 +323,46 @@ export function emptyPopulationProblems(declared, walked) {
 
 // ── Reading the two sides ───────────────────────────────────────────────────
 
-/** A hard prerequisite failure: says what it did NOT measure, and exits. */
+/**
+ * A hard prerequisite failure: says what it did NOT measure, and exits
+ * `EXIT_PREREQUISITE_NOT_MET` — ⛔ never a finding's `EXIT_FINDINGS`.
+ *
+ * Nothing here was measured, so the number must not be the one a real finding
+ * returns. The refusal's WORDS were always right; the number was not, and the
+ * number is what a sweep, a runner script and a CI step condition read.
+ */
 function reportPrerequisiteNotMet(headline, lines) {
-  console.error(`❌  check:i18n-walk-parity — PREREQUISITE NOT MET: ${headline}\n`);
-  for (const line of lines) console.error(`  ${line}`);
-  console.error(
-    '\n  NOTHING was measured. This is not "no unwalked groups" — the comparison'
+  console.error(prerequisiteNotMetText(headline, lines));
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
+}
+
+/**
+ * The text `reportPrerequisiteNotMet` prints, as a value — so `--self-test` can
+ * assert on the advisory without spawning a process or stubbing `process.exit`.
+ * The extraction is the whole point: while the string was built inline inside
+ * `console.error(...)` and the code was typed into the `process.exit` on the next
+ * line, there was no VALUE to assert on and the number was pinned by nothing.
+ * Same shape as `import-prerequisite.mjs`'s own split, and as the two sibling
+ * gates in this family.
+ *
+ * ⛔ The advisory INTERPOLATES both codes rather than spelling either: a number
+ * typed in here would keep reading right long after the constant moved.
+ */
+function prerequisiteNotMetText(headline, lines) {
+  const command = importerCommandPath(import.meta.url);
+  return (
+    `❌  check:i18n-walk-parity — PREREQUISITE NOT MET: ${headline}\n`
+    + `\n${lines.map((line) => `  ${line}`).join('\n')}`
+    + '\n\n  NOTHING was measured. This is not "no unwalked groups" — the comparison'
     + '\n  never ran. Build the workspace and run it again:'
     + `\n\n    ${CLI_BUILD_FIX}`
     + `\n    ${workspaceBuildFix('@objectstack/spec')}`
-    + '\n',
+    + `\n\n  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:`
+    + `\n  \`node ${command} > /tmp/check-i18n-walk-parity.log 2>&1; echo "EXIT=$?"\`.`
+    + '\n  Piped, `$?` is the LAST command\'s status, and `head`/`tail` essentially never fail — that'
+    + '\n  is the false green, and no pipe shape repairs it.)'
+    + '\n'
   );
-  process.exit(1);
 }
 
 async function loadBuilt(rel, what) {
@@ -477,18 +518,18 @@ async function main(wantList) {
     for (const p of shape) console.error(`  ${p.group}  — ${p.why}`);
     for (const line of ratchet) console.error(`  ${line}`);
     console.error('');
-    return 1;
+    return EXIT_FINDINGS;
   }
 
   const { unwalked, staleUndeclared, staleWalked } = parityVerdict({ declared, walked, ledger });
   if (unwalked.length) {
     reportUnwalked(unwalked);
     if (staleUndeclared.length || staleWalked.length) reportStale(staleUndeclared, staleWalked);
-    return 1;
+    return EXIT_FINDINGS;
   }
   if (staleUndeclared.length || staleWalked.length) {
     reportStale(staleUndeclared, staleWalked);
-    return 1;
+    return EXIT_FINDINGS;
   }
 
   console.log(
@@ -545,11 +586,12 @@ const RECORDED_UNWALKED = ['messages', 'settings', 'settingsCommon'];
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   'check-i18n-walk-parity self-test': 23,
+  'the prerequisite refusal CLASS, driven end to end': 20,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 1;
+const SELF_TEST_BATTERY_FLOOR = 2;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -584,6 +626,14 @@ function selfTest() {
     const a = JSON.stringify(got);
     const b = JSON.stringify(want);
     if (a !== b) failures.push(`${what}: got ${a}, want ${b}`);
+  };
+  // The same sink for a case whose evidence is a STRING nobody wants compared —
+  // a function body, or what a spawned child actually printed. `eq` would report
+  // "got false, want true" and throw the only thing a reader could act on away.
+  const ok = (what, held, evidence) => {
+    registerCase();
+    cases += 1;
+    if (!held) failures.push(`${what} — ${String(evidence).slice(0, 400)}`);
   };
 
   // 1 — parity holds when every declared group is walked.
@@ -644,6 +694,144 @@ function selfTest() {
   eq('shipped ledger: size is exactly LEDGER_CEILING',
     ledgerRatchetProblems(KNOWN_NO_EXTRACTOR_FACE, LEDGER_CEILING).length, 0);
   eq('recorded sample: hints are live', DECLARED_WATCH_HINTS.length > 0, true);
+
+  // ── The prerequisite refusal CLASS, and the advisory that names it ───────
+  //
+  // The classifier cases above decide WHICH verdict fires. They stay green
+  // whatever number the printer beside them returns, which is exactly how this
+  // gate shipped a refusal that said "NOTHING was measured" and then handed back
+  // a finding's exit code. What is pinned here is the NUMBER — and, because a
+  // file that returned the prerequisite code for everything would be a worse
+  // defect than the one being fixed, the finding path is driven in the SAME
+  // harness and must still answer 1.
+  battery('the prerequisite refusal CLASS, driven end to end');
+
+  const advisory = prerequisiteNotMetText('the workspace spec package is not built', ['probe detail']);
+  // Pinned over the FUNCTION BODIES, not over the constant alone. The regression
+  // that costs something is not a mistyped constant: it is a `process.exit(1)`
+  // written back into the refusal by an author who never thought about exit
+  // codes, or a number typed into the advisory instead of interpolated. Either
+  // leaves the constant reading 3, every consumer green (they all treat any
+  // non-zero as failure) and a message that still reads perfectly right.
+  const hardcodesExitCall = (fn) => /process\.exit\(\s*\d/.test(fn.toString());
+  const spellsALiteralCode = (fn) => /Exit code \d/.test(fn.toString());
+  // The NEGATIVE CONTROLS, and the reason the two predicates above are
+  // measurements rather than tautologies: each is run against a function that
+  // does the forbidden thing and must SEE it. ⛔ Neither control is ever CALLED;
+  // they exist to be read by `toString()`.
+  const controlHardcodedExit = () => { process.exit(1); };
+  const controlLiteralAdvisory = () => '  (Exit code 1, distinct from a finding\'s 1 — capture it BEFORE any pipe:';
+
+  eq('refusal class: the code is the repo-wide 3', EXIT_PREREQUISITE_NOT_MET, 3);
+  eq('refusal class: distinct from a finding AND from a pass',
+    EXIT_PREREQUISITE_NOT_MET !== EXIT_FINDINGS && EXIT_PREREQUISITE_NOT_MET !== 0, true);
+  ok('refusal class: the refusal exits through the named constant, never a literal',
+    !hardcodesExitCall(reportPrerequisiteNotMet), reportPrerequisiteNotMet.toString());
+  ok('refusal class: the printer prints the pinned text function',
+    /console\.error\(\s*prerequisiteNotMetText\(/.test(reportPrerequisiteNotMet.toString()),
+    reportPrerequisiteNotMet.toString());
+  ok('refusal class: the advisory INTERPOLATES the codes rather than spelling them',
+    !spellsALiteralCode(prerequisiteNotMetText), prerequisiteNotMetText.toString());
+  ok('refusal class: the advisory names its own code AND the finding code it is distinct from',
+    advisory.includes(`Exit code ${EXIT_PREREQUISITE_NOT_MET}`) && advisory.includes(`a finding's ${EXIT_FINDINGS}`),
+    advisory);
+  ok('refusal class: no stale spelling of the code this refusal used to return',
+    !/Exit code 1\b/.test(advisory), advisory);
+  ok('refusal class: the advisory still states that NOTHING was measured',
+    advisory.includes('NOTHING was measured'), advisory);
+  ok('refusal class: the headline the reader already knows is byte-for-byte unchanged',
+    advisory.startsWith('❌  check:i18n-walk-parity — PREREQUISITE NOT MET: the workspace spec package is not built\n'),
+    advisory.slice(0, 120));
+  ok('NEGATIVE CONTROL: the literal-exit pin can still fail',
+    hardcodesExitCall(controlHardcodedExit), 'the predicate no longer sees a hard-coded exit');
+  ok('NEGATIVE CONTROL: the literal-advisory pin can still fail',
+    spellsALiteralCode(controlLiteralAdvisory), 'the predicate no longer sees a spelled-out code');
+  ok('NEGATIVE CONTROL: the stale-code pin can still fail',
+    /Exit code 1\b/.test(controlLiteralAdvisory()), 'the stale-spelling predicate no longer sees `Exit code 1`');
+
+  // ── …and end to end, through the exit code a shell actually sees ─────────
+  //
+  // A code assertion on the constant cannot see the thing that goes wrong: the
+  // gate is a process, and what a sweep reads is `process.exitCode`. So the
+  // three verdicts are DRIVEN — a throwaway root holding this gate, the modules
+  // it imports, and whichever built inputs the case wants it to see.
+  //
+  // ⛔ The child never spawns a child of its own: it is run in PRODUCTION mode
+  // (no `--self-test`), so it cannot reach this battery. A hang is the worst
+  // reading a gate can return, so the spawn is bounded by a timeout as well.
+  const CHILD_MODULE_GRAPH = [
+    'scripts/check-i18n-walk-parity.mjs',
+    'scripts/invoked-as.mjs',
+    'scripts/cli-build-prerequisite.mjs',
+    'scripts/import-prerequisite.mjs',
+  ];
+  // The ledger's own keys are declared into every readable fixture, so the only
+  // finding a fixture produces is the one it was built to produce — a stale
+  // ledger entry is a different verdict and would prove a different thing.
+  const LEDGERED = Object.keys(KNOWN_NO_EXTRACTOR_FACE);
+  const roots = [];
+  const fixtureRoot = ({ declared, walked }) => {
+    const root = mkdtempSync(join(tmpdir(), 'i18n-walk-parity-'));
+    roots.push(root);
+    mkdirSync(join(root, dirname(FIXTURE)), { recursive: true });
+    for (const rel of CHILD_MODULE_GRAPH) cpSync(join(REPO_ROOT, rel), join(root, rel));
+    // The marker `repoRootFrom` reads, so the child's advisory names a
+    // repo-relative command rather than falling back to an absolute path.
+    writeFileSync(join(root, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
+    // Read and parsed by the gate, handed to a stub walker that ignores it.
+    writeFileSync(join(root, FIXTURE), '{}\n');
+    if (declared) {
+      mkdirSync(join(root, dirname(SPEC_SYSTEM_DIST)), { recursive: true });
+      writeFileSync(
+        join(root, SPEC_SYSTEM_DIST),
+        `export const TranslationDataSchema = { shape: ${JSON.stringify(Object.fromEntries(declared.map((g) => [g, {}])))} };\n`,
+      );
+    }
+    if (walked) {
+      mkdirSync(join(root, dirname(CLI_WALKER_DIST)), { recursive: true });
+      // `packages/cli` is `type: module` in this repo, and a `.js` under a root
+      // with no manifest would be read as CommonJS — the stub would be a
+      // SyntaxError and the child would refuse for the wrong reason.
+      writeFileSync(join(root, 'packages/cli/package.json'), '{ "name": "@objectstack/cli", "type": "module" }\n');
+      writeFileSync(
+        join(root, CLI_WALKER_DIST),
+        `export function collectExpectedEntries() { return ${JSON.stringify(walked.map((g) => ({ path: [g, 'k'] })))}; }\n`,
+      );
+    }
+    return root;
+  };
+  const drive = (root) => spawnSync(process.execPath, [join(root, 'scripts/check-i18n-walk-parity.mjs')], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000,
+  });
+  const said = (r) => `${r.stderr ?? ''}${r.stdout ?? ''}`;
+
+  try {
+    // (a) THE CARD'S REPRO: built inputs are not there.
+    const refused = drive(fixtureRoot({}));
+    // (b) FIRING CONTROL: both sides readable, one declared group nothing emits.
+    const found = drive(fixtureRoot({ declared: ['apps', 'ghost', ...LEDGERED], walked: ['apps'] }));
+    // (c) NONSENSE CONTROL: the same harness with nothing to find.
+    const clean = drive(fixtureRoot({ declared: ['apps', ...LEDGERED], walked: ['apps'] }));
+
+    eq('end to end: an unbuilt tree refuses with the PREREQUISITE code', refused.status, EXIT_PREREQUISITE_NOT_MET);
+    ok('end to end: …in the same words it always said',
+      said(refused).includes('PREREQUISITE NOT MET: the workspace spec package is not built'), said(refused));
+    ok('end to end: …and states that nothing was measured',
+      said(refused).includes('NOTHING was measured'), said(refused));
+
+    eq('FIRING CONTROL: a REAL finding in the same harness still exits 1', found.status, EXIT_FINDINGS);
+    ok('FIRING CONTROL: …and it is the unwalked-group finding',
+      said(found).includes('declared translation group(s) that the extractor does not walk')
+      && said(found).includes('ghost'), said(found));
+    ok('FIRING CONTROL: …reached by MEASURING, never by refusing',
+      !said(found).includes('PREREQUISITE NOT MET'), said(found));
+
+    eq('NONSENSE CONTROL: the same harness with nothing to find exits 0', clean.status, 0);
+    ok('NONSENSE CONTROL: …and says every declared group has an extractor face',
+      said(clean).includes('every declared group has an extractor face'), said(clean));
+  } finally {
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
@@ -706,7 +894,10 @@ function selfTest() {
     + 'a stale entry (undeclared, or now walked) fails, the size ratchet refuses growth AND slack, '
     + 'an empty side is refused, the recorded sample of today\'s real group names reproduces its verdict, '
     + 'and the SHIPPED ledger is pinned to exactly that recorded unwalked set — every reason passing the '
-    + 'reason checks, its size exactly at the ceiling.',
+    + 'reason checks, its size exactly at the ceiling. Driven end to end through the exit code a shell '
+    + `sees: the prerequisite refusal exits ${EXIT_PREREQUISITE_NOT_MET} — distinct from a finding's `
+    + `${EXIT_FINDINGS}, with an advisory that names both numbers rather than spelling either — while a `
+    + `real finding in the same harness still exits ${EXIT_FINDINGS} and a clean tree still exits 0.`,
   );
   selfTestReachedVerdict = true;
   return 0;

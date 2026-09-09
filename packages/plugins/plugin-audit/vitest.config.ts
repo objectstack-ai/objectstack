@@ -34,6 +34,17 @@ export default defineConfig({
     // One rule for all namespaces cannot go stale that way.
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      // [#16829] The real driver `read-audit-view-instant-preservation.integration.test.ts`
+      // boots. That file exists to judge the ledger row AFTER the real
+      // `sys_stamp_audit_insert` hook and a real driver have both run, so
+      // resolving the driver through `exports` — i.e. `dist/` — would make it a
+      // verdict about build state instead (`pnpm check:test-source-alias`).
+      // Registering this package as an unaliased importer is explicitly NOT the
+      // fix: that registry is shrink-only.
+      {
+        find: /^@objectstack\/driver-sqlite-wasm$/,
+        replacement: path.resolve(__dirname, '../../drivers/driver-sqlite-wasm/src/index.ts'),
+      },
       // [#10101] The shared platform-row resolver's home — aliased to source
       // so the suite's verdict is about the checkout, not metadata-core's
       // dist build state (`pnpm check:test-source-alias`).

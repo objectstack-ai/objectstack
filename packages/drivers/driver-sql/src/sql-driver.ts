@@ -16645,9 +16645,21 @@ export class SqlDriver implements IDataDriver {
       // constraint, not from `required` — `required` is the write-time
       // contract enforced by the record validator at the engine seam, and
       // binding the DDL to it made every post-deploy tightening a
-      // destructive migration. Sources authored before protocol 17 carry
-      // `storage.notNull` explicitly via the `field-required-notnull-explicit`
-      // conversion, so their columns come out exactly as they always did.
+      // destructive migration.
+      //
+      // ⚠️ NOTHING supplies `storage.notNull` on an author's behalf. The
+      // sentence that used to close this block said the opposite — that
+      // pre-17 sources "carry `storage.notNull` explicitly via the
+      // `field-required-notnull-explicit` conversion, so their columns come
+      // out exactly as they always did" — and it was measured false from both
+      // ends (#16693): a real `^17.0.0` app logged that conversion and got
+      // NULLABLE columns anyway, and the conversion itself has since been
+      // WITHDRAWN (maintainer ruling 2026-09-08), because stamping the
+      // constraint wherever `required: true` appears is the implication
+      // ADR-0113 abolished. So a column reaches `notNullable()` here because
+      // its author wrote `storage: { notNull: true }`, and for no other
+      // reason; a `required: true` field with no `storage` block gets a
+      // nullable column, at every protocol floor, on every dialect.
       if ((field as { storage?: { notNull?: boolean } }).storage?.notNull) col.notNullable();
       this.applyDeclaredColumnDefault(col, field, type);
     }

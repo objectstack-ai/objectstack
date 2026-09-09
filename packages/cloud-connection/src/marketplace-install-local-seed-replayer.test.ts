@@ -13,7 +13,7 @@
 //
 // A runtime that declares no data of its own — `objects: []`, no `data`, which is
 // exactly what a marketplace-install target looks like and exactly what
-// `apps/objectos-ee` is — therefore ended up with `seed-datasets` POPULATED and
+// `apps/objectos-ee` (cloud repo) is — therefore ended up with `seed-datasets` POPULATED and
 // `seed-replayer` ABSENT. The org-scoping middleware reads both, finds the
 // datasets, finds no replayer, logs `datasets present but no replayer registered`
 // and does nothing. Every organization founded after the install boots EMPTY,
