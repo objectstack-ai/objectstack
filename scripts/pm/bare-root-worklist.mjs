@@ -1656,8 +1656,33 @@ export function populationSpans(maskedBody) {
     spans.push({ name, start: m.index, end: i });
   }
   // The property half. The key may be quoted — `'roots': [...]` is the same
-  // declaration — and the leading character class keeps `a ? roots : dirs` and
-  // a `foo.roots:` member expression from reading as one.
+  // declaration.
+  //
+  // ⚠️ The leading character class excludes ONE of the two shapes an earlier
+  // draft of this comment claimed it did: a `foo.roots:` member expression,
+  // whose `.` is not in the class. It does NOT exclude a ternary's
+  // `a ? roots : dirs` — the `?` is followed by a space and `\s` IS in the
+  // class, so the TIGHT `a?roots:dirs` is the one that gets excluded, the
+  // inversion of what a reader expects — and it does not exclude a `roots:`
+  // label statement. Both produce a span here. Measured, and stated as a
+  // measurement rather than as a guarantee the regex does not give.
+  //
+  // "Benign" is a claim about DIRECTION, so it is checked rather than assumed:
+  // `sweep` admits a literal only when a span CONTAINS it (`if (!span) continue`),
+  // which makes a span an INCLUSION filter. A spurious one can therefore only
+  // ADD a row — the loud direction, where the UNJUDGED coupling forces someone
+  // to judge it — and can never hide one. Measured three ways on 91f65c4ea: a
+  // bare root inside a spurious ternary span yields 1 row; the same root inside
+  // no span yields 0; a root inside BOTH a real `const` span and a spurious
+  // ternary span is still attributed to the `const`, because the constant half
+  // is pushed first and `find` returns the first match. The whole-tree bound is
+  // this widening's own row-set diff: 3 surfaced, 0 gone.
+  //
+  // ⛔ NOT tightened to exclude them. That is a second change to what this
+  // recogniser matches, and it would owe its own full row-set diff proving it
+  // surfaces nothing and hides nothing — the ride-along this file refuses by
+  // name one function up, for the `const` half. A ternary-only fix would leave
+  // the label form matching regardless, so it would not even retire the caveat.
   for (const m of maskedBody.matchAll(/(?:^|[\s,{[(])(?:(['"])([A-Za-z0-9_$]+)\1|([A-Za-z0-9_$]+))[ \t]*:/g)) {
     const name = m[2] ?? m[3];
     if (!POPULATION_PROPERTY.test(name)) continue;
@@ -2085,6 +2110,44 @@ function selfTest() {
       .every(({ index }) => !populationSpans(
         `const CFG = { roots: ['x/y'], label: [${JSON.stringify(someRoot)}] };`,
       ).some((s) => index > s.start && index < s.end)));
+  // What the leading character class DOES and does NOT keep out, pinned as
+  // three separate facts because the comment beside the regex once asserted all
+  // three and only one of them was true. ⛔ The two matches below are RECORDED,
+  // not accidents to be quietly tightened away: tightening is a second change to
+  // what this recogniser matches and owes its own full row-set diff.
+  const propSpans = (src) => populationSpans(src).length;
+  t('the leading class DOES keep a member expression out — `foo.roots:` is not a declaration, '
+    + 'and the `.` is not in the class', propSpans('const y = { a: cfg.roots };') === 0);
+  t('…and it does NOT keep a ternary out: `a ? roots : dirs` matches because the `?` is followed '
+    + 'by a space and `\\s` is in the class, while the TIGHT `a?roots:dirs` is excluded — the '
+    + 'inversion of what a reader expects, recorded rather than promised away',
+    propSpans('const x = a ? roots : dirs;') === 1 && propSpans('const x = a?roots:dirs;') === 0);
+  t('…nor a `roots:` LABEL statement, which is indistinguishable from a property key without '
+    + 'parsing', propSpans('roots: for (const a of b) { break roots; }') === 1);
+  // The DIRECTION those two benign matches are benign IN. `sweep` admits a
+  // literal only when a span contains it, so a span is an inclusion filter and a
+  // spurious one can only ADD a row. Pinned on the same predicates `sweep`
+  // composes, in both directions, so "benign" stays a measurement.
+  const spanless = `const q = ${JSON.stringify(someRoot)};`;
+  const inSpan = `const CFG = { roots: [${JSON.stringify(someRoot)}] };`;
+  t('a span ADMITS rather than excludes: a bare root with no span containing it is not swept in '
+    + 'at all, so a spurious span can only ever ADD a row and never hide one',
+    bareRootLiterals(spanless, dirs).length === 1
+    && !bareRootLiterals(spanless, dirs).some(({ index }) => populationSpans(spanless)
+      .some((s) => index > s.start && index < s.end)));
+  t('control: the same literal inside a recognised property span IS swept in, so the case above '
+    + 'measures the admission rule rather than a literal the extractor never found',
+    bareRootLiterals(inSpan, dirs).some(({ index }) => populationSpans(inSpan)
+      .some((s) => index > s.start && index < s.end)));
+  t('…and a literal inside BOTH a real `const` span and a spurious ternary span is attributed to '
+    + 'the CONSTANT, because the constant half is pushed first and `find` takes the first match — '
+    + 'so a spurious span cannot steal a row\'s key either',
+    (() => {
+      const both = `const SCAN_ROOTS = [${JSON.stringify(someRoot)}];\nconst y = c ? roots : SCAN_ROOTS;`;
+      const spans = populationSpans(both);
+      const lit = bareRootLiterals(both, dirs)[0];
+      return Boolean(lit) && spans.find((s) => lit.index > s.start && lit.index < s.end)?.name === 'SCAN_ROOTS';
+    })());
   t('control: the same literal one property EARLIER, under a recognised key, IS swept in — so '
     + 'the case above measures the span boundary rather than a recogniser that never fires',
     bareRootLiterals(`const CFG = { roots: [${JSON.stringify(someRoot)}], label: ['x/y'] };`, dirs)
