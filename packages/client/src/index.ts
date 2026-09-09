@@ -3842,10 +3842,47 @@ export class ObjectStackClient {
        *
        * Returns the freshly-issued `client_id` and `client_secret`.
        * The secret is only returned at creation time — store it securely.
+       *
+       * ## Why `name`, `scopes` and `metadata` are NOT declared here (#15447)
+       *
+       * They used to be, and the route silently dropped all three. Its body
+       * schema is `@better-auth/oauth-provider@1.7.2`'s, a zod object with no
+       * `catchall` — so zod's default `strip` — and none of the three is among
+       * its 21 members. A caller who set one got **HTTP 201 and a client that
+       * quietly did not have it**: no error, no receipt, nothing to notice.
+       * Driven end to end (real `betterAuth` + real `oauthProvider` over the
+       * real ObjectQL engine on a real socket, through this very client): each
+       * member came back absent from the response, absent from
+       * `applications.get`, absent from `applications.list`, and `null` in the
+       * `sys_oauth_application` row.
+       *
+       * A second, independent barrier stands behind the strip, so widening the
+       * SDK alone could never have made them arrive: the handler funnels the
+       * rest of the parsed body into the opaque-metadata envelope, and all
+       * three names are in `OPAQUE_METADATA_RESERVED_FIELDS`.
+       *
+       * ## ⚠️ They were the vendor's RECORD vocabulary, not typos
+       *
+       * The two near-misses look like misspellings of `client_name` and
+       * `scope` and are not — they are the names of the DB columns those two
+       * wire members write. Measured: `client_name: 'CTRL-…'` lands in the
+       * column literally named **`name`**, and `scope: 'openid profile email'`
+       * lands in the column literally named **`scopes`**, as a JSON array. So
+       * this type used to offer the record spelling and the wire spelling side
+       * by side, and only the wire one worked. The right prescription is the
+       * wire member, and for `scopes` it is not a rename: `scope` is a single
+       * space-delimited `string`, and posting an array is refused —
+       * `400 [body.scope] Invalid input: expected string, received array`.
+       *
+       * `metadata` has no reachable door at all: only the SERVER_ONLY
+       * `PATCH /admin/oauth2/update-client` honours it, and `better-call`'s
+       * router skips SERVER_ONLY endpoints, so over HTTP it answers 404 with a
+       * zero-byte body.
+       *
+       * Pinned by `oauth-applications-register-request-members.test.ts`.
        */
       register: async (req: {
         client_name?: string;
-        name?: string;
         redirect_uris: string[];
         token_endpoint_auth_method?: 'none' | 'client_secret_basic' | 'client_secret_post';
         grant_types?: string[];
@@ -3853,11 +3890,9 @@ export class ObjectStackClient {
         client_uri?: string;
         logo_uri?: string;
         scope?: string;
-        scopes?: string[];
         contacts?: string[];
         tos_uri?: string;
         policy_uri?: string;
-        metadata?: Record<string, unknown>;
       }): Promise<OAuthApplicationRegistration> => {
         const route = this.getRoute('auth');
         // The new oauth-provider package exposes `/oauth2/create-client`
