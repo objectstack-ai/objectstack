@@ -1426,6 +1426,18 @@ export interface OrganizationTeamMemberRemovedReceipt {
  */
 const DEFAULT_DATA_PREFIX = '/data';
 
+/**
+ * The conventional metadata prefix — `MetadataEndpointsConfigSchema.prefix`
+ * in `packages/spec` declares `.default('/meta')`, and REST mounts every
+ * metadata route under `${basePath}${metadata.prefix}`.
+ *
+ * The exact sibling of {@link DEFAULT_DATA_PREFIX}, and the same kind of
+ * value: what the SDK falls back to when discovery has not told it otherwise,
+ * NOT a competing source of truth. `_metaPrefix()` prefers the advertised
+ * value in every case where it can read one.
+ */
+const DEFAULT_META_PREFIX = '/meta';
+
 export class ObjectStackClient {
   private baseUrl: string;
   private token?: string;
@@ -3174,6 +3186,83 @@ export class ObjectStackClient {
 
     const derived = data.slice(boundary);
     return derived.length > 1 ? derived : DEFAULT_DATA_PREFIX;
+  }
+
+  /**
+   * @internal The metadata prefix this client's server actually mounts, read
+   * off the advertised routes (#16675).
+   *
+   * The same defect as #14879 one key over, so deliberately the same
+   * derivation shape as {@link ObjectStackClient._dataPrefix}, fallback
+   * discipline included. `metadata.prefix` moves the mounted metadata paths
+   * and the advertised discovery document TOGETHER — REST builds every
+   * metadata route as `${basePath}${metadata.prefix}` and then advertises the
+   * same value as `routes.metadata = ${realBase}${metadata.prefix}`. The SDK
+   * is the third surface that has to describe those same paths, so it must
+   * read the value rather than restate it: a deployment on a non-default
+   * prefix mounts nothing at `/meta`, and a client that assumes `/meta` calls
+   * paths that do not exist.
+   *
+   * The advertised `routes.metadata` is `{realBase}{metadata.prefix}` — ONE
+   * string carrying TWO unknowns, and no discovery key carries either half
+   * alone. The split is recovered in the order below, and where it cannot be
+   * recovered this DECLINES to the conventional `/meta` rather than guess. An
+   * SDK must not become unusable because a server's discovery document is
+   * missing a key:
+   *
+   *   1. If the advertised value already ends with the conventional `/meta`,
+   *      that IS the prefix. Taking this first is what makes the change
+   *      incapable of regressing a deployment that works today: every rule
+   *      below can only run in the branch where the current code — which
+   *      knows the single literal `/meta` — is ALREADY wrong. It is also what
+   *      keeps a DEFAULT deployment free of any new dependency: the answer is
+   *      reached from `routes.metadata` alone, and an unconnected client
+   *      never reaches a rule at all.
+   *   2. Otherwise `routes.data` supplies the missing equation. It is
+   *      `{realBase}{crud.dataPrefix}` over the SAME `realBase` (both are
+   *      substituted from one `realBase` in the same discovery handler), so
+   *      the two advertised routes share exactly `realBase` plus whatever
+   *      their two prefixes happen to share. Cutting their common run back to
+   *      its last `/` therefore lands on the `realBase` boundary, and the
+   *      remainder of `routes.metadata` is the prefix. This is also correct
+   *      when the document was served from the environment-scoped mount,
+   *      where both routes carry the same `/environments/{id}` segment and it
+   *      simply becomes part of the shared run.
+   *
+   * A derived prefix of `/` or empty is not a prefix this understands, so it
+   * declines too, as does the case where the two routes share nothing but the
+   * leading `/` and therefore share no base at all. The one shape that
+   * survives all of it — a deployment that moved `metadata.prefix` off
+   * `/meta` AND whose `routes.data` is not substituted from the same base
+   * (i.e. `api.enableCrud` is off) — is one the SDK cannot serve today
+   * either; it keeps today's answer.
+   */
+  _metaPrefix(): string {
+    const meta = this.discoveryInfo?.routes?.metadata;
+    if (typeof meta !== 'string' || !meta) return DEFAULT_META_PREFIX;
+
+    // (1) The conventional prefix — today's entire rule, kept first.
+    if (meta.endsWith(DEFAULT_META_PREFIX)) return DEFAULT_META_PREFIX;
+
+    // (2) `routes.data` as the second equation over the same `realBase`.
+    const data = this.discoveryInfo?.routes?.data;
+    if (typeof data !== 'string' || !data || data === meta) return DEFAULT_META_PREFIX;
+
+    let shared = 0;
+    while (shared < meta.length && shared < data.length
+           && meta.charCodeAt(shared) === data.charCodeAt(shared)) shared++;
+
+    // `boundary === 0` means the two advertised routes have nothing in common
+    // but the leading `/` — so they do NOT share a `realBase`, and the whole
+    // of `routes.metadata` would be mistaken for the prefix. That happens when
+    // `routes.data` was never substituted from this deployment's base (its
+    // endpoints are off, so it still carries the conventional literal) while
+    // `routes.metadata` was. Decline: a wrong prefix is worse than today's.
+    const boundary = meta.lastIndexOf('/', shared - 1);
+    if (boundary <= 0) return DEFAULT_META_PREFIX;
+
+    const derived = meta.slice(boundary);
+    return derived.length > 1 ? derived : DEFAULT_META_PREFIX;
   }
 
   /**
@@ -6870,18 +6959,44 @@ export class ScopedEnvironmentClient {
   }
 
   /**
+   * URL for a route mounted under the deployment's metadata prefix (#16675).
+   *
+   * The exact sibling of {@link ScopedEnvironmentClient.dataUrl}, for the
+   * other half of the same defect. Every route reached through here is
+   * mounted by REST as `${metaPath}/...` with
+   * `metaPath = ${basePath}${metadata.prefix}`, so the prefix is deployment
+   * state, not a constant. The unscoped twin of each of these methods already
+   * reads it — it builds `${baseUrl}${getRoute('metadata')}` and
+   * `routes.metadata` IS `{realBase}{metadata.prefix}`. This surface restated
+   * `/meta` as a literal instead, so on a deployment that moved
+   * `metadata.prefix` the scoped half of one SDK called paths the server does
+   * not mount while the unscoped half of the same SDK called the right ones.
+   *
+   * The scoped form cannot consume `routes.metadata` verbatim the way the
+   * unscoped form does: the environment segment goes BETWEEN the API base and
+   * the prefix (`{base}/environments/{id}{metadata.prefix}`), and the id is
+   * this client's, which need not be the one discovery resolved. So the two
+   * halves are taken separately — `_apiBase()` for the base, `_metaPrefix()`
+   * for the prefix — and both decline to today's conventions when the
+   * advertised document does not determine them.
+   */
+  private metaUrl(suffix: string): string {
+    return `${this.parent._baseUrl()}${this.scope()}${this.parent._metaPrefix()}${suffix}`;
+  }
+
+  /**
    * Metadata operations scoped to this project.
    */
   meta = {
     getTypes: async (): Promise<GetMetaTypesResponse> => {
-      const res = await this.parent._fetch(this.url('/meta'));
+      const res = await this.parent._fetch(this.metaUrl(''));
       return this.parent._unwrap<GetMetaTypesResponse>(res);
     },
     getItems: async (type: string, options?: { packageId?: string }): Promise<GetMetaItemsResponse> => {
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
       const qs = params.toString();
-      const res = await this.parent._fetch(this.url(`/meta/${type}${qs ? `?${qs}` : ''}`));
+      const res = await this.parent._fetch(this.metaUrl(`/${type}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemsResponse>(res);
     },
     /** Same `{ type, name, item }` envelope as the unscoped surface (#5563). */
@@ -6889,7 +7004,7 @@ export class ScopedEnvironmentClient {
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
       const qs = params.toString();
-      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`));
+      const res = await this.parent._fetch(this.metaUrl(`/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemResponse>(res);
     },
     /**
@@ -6916,7 +7031,7 @@ export class ScopedEnvironmentClient {
       // Header half of the same bag, through the same one builder the twin
       // calls — see {@link metaSaveHeaders}.
       const headers = metaSaveHeaders(options);
-      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
+      const res = await this.parent._fetch(this.metaUrl(`/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
         method: 'PUT',
         body: JSON.stringify(item),
         ...(headers ? { headers } : {}),
@@ -6951,7 +7066,7 @@ export class ScopedEnvironmentClient {
       // Header half of the same bag, through the same one builder the twin
       // calls — see {@link metaDeleteHeaders}.
       const headers = metaDeleteHeaders(options);
-      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
+      const res = await this.parent._fetch(this.metaUrl(`/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
         method: 'DELETE',
         ...(headers ? { headers } : {}),
       });
@@ -6983,7 +7098,7 @@ export class ScopedEnvironmentClient {
       if (options?.limit !== undefined) params.set('limit', String(options.limit));
       const qs = params.toString();
       const res = await this.parent._fetch(
-        this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history${qs ? `?${qs}` : ''}`),
+        this.metaUrl(`/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history${qs ? `?${qs}` : ''}`),
       );
       return this.parent._unwrap<HistoryMetaItemResponse>(res);
     },
