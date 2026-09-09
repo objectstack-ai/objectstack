@@ -119,7 +119,7 @@
  */
 
 import { describeAnchorForbiddenBits } from '@objectstack/spec/security';
-import { recordsOf } from './object-graph.js';
+import { indexObjectGraph, recordsOf, type ObjectGraph } from './object-graph.js';
 
 export const SECURITY_OWD_UNSET = 'security-owd-unset';
 export const SECURITY_OWD_ALIAS = 'security-owd-alias';
@@ -131,6 +131,7 @@ export const SECURITY_BOOK_AUDIENCE_UNKNOWN_SET = 'security-book-audience-unknow
 export const SECURITY_PRIVATE_NO_READSCOPE = 'security-private-no-readscope';
 export const SECURITY_MASTER_DETAIL_UNGRANTED = 'security-master-detail-ungranted';
 export const SECURITY_FLS_UNQUALIFIED_KEY = 'security-fls-unqualified-key';
+export const SECURITY_FLS_UNKNOWN_FIELD = 'security-fls-unknown-field';
 export const SECURITY_GRANT_EXPIRED_AT_AUTHORING = 'security-grant-expired-at-authoring';
 export const SECURITY_DELEGATION_MISSING_REASON = 'security-delegation-missing-reason';
 export const SECURITY_CBP_NO_RELATION = 'security-controlled-by-parent-no-relation';
@@ -592,6 +593,19 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     }
   }
 
+  // [#16108] The object graph, for the FLS field-existence rule below. Built
+  // ONCE here rather than per permission set: `indexObjectGraph` walks every
+  // object's whole field map, and a stack with N sets would otherwise pay for
+  // that walk N times to answer the same question.
+  //
+  // ⚠️ This is the SHARED index every field-existence rule in this package
+  // resolves through (`object-graph.ts`), not a second field-set reader written
+  // for this rule — the three skips it encodes (an object this stack does not
+  // define, an object with no readable field map, registry-injected system
+  // columns) are exactly the three this rule must take, and re-deriving them
+  // here would be the drift that module exists to prevent.
+  const flsGraph: ObjectGraph = indexObjectGraph(stack);
+
   // ── ADR-0066 / D5/D9: permission-set posture ─────────────────────────
   for (let i = 0; i < permissionSets.length; i++) {
     const ps = permissionSets[i];
@@ -618,6 +632,114 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           `field-permission key '${flsKey}' is not object-qualified — the runtime matches FLS keys ` +
           `by '<object>.<field>' prefix, so a bare key is silently IGNORED and the declared masking never enforces.`,
         hint: `Qualify the key with its object, e.g. 'crm_opportunity.${flsKey}': { readable: true, editable: false }.`,
+      });
+    }
+
+    // [#16108] …and the OTHER half of the same failure: a key that IS
+    // object-qualified but names a field the object does not have.
+    //
+    // Deliberately a SECOND rule beside `security-fls-unqualified-key` rather
+    // than a widening of it. That rule's own id says *unqualified*, and it is
+    // correct inside that scope; the two defects have different prescriptions
+    // (add the object prefix / fix the field name) and an author who suppresses
+    // one must not thereby suppress the other. Two ids, two messages, two
+    // loops over the same map, with disjoint guards.
+    //
+    // The runtime consequence is IDENTICAL, and it is the fail-OPEN direction.
+    // `PermissionEvaluator.getFieldPermissions` keeps a key only when
+    // `key.startsWith(`${objectName}.`)` and then reads the remainder as a
+    // column name (`key.substring(objectName.length + 1)`), so a remainder no
+    // column answers to contributes nothing to the merged map: the entry the
+    // author wrote to MASK a field masks nothing, and the field stays exactly
+    // as readable and as editable as the object-level grant leaves it. Silent
+    // at author time, silent at runtime, and — unlike the bare key — it LOOKS
+    // right in review. It is what a field rename leaves behind, which is why
+    // it accumulates rather than being caught once.
+    //
+    // Splitting on the FIRST dot mirrors that evaluator exactly, because an
+    // object name cannot contain one: `ObjectSchema.name` is
+    // `/^[a-z_][a-z0-9_]*$/`. So for any key the evaluator would attribute to
+    // object O, the head here IS O — and a key with more dots still
+    // (`crm_account.owner.name`) is judged on the whole remainder, which is
+    // also what the evaluator looks up: FLS keys address columns, never joins.
+    //
+    // `error`, on the inverse of the usual ADR-0049 argument and the same one
+    // `security-cbp-ambiguous-relation` above makes: there is no runtime
+    // refusal to mirror BECAUSE the runtime does not refuse — it silently
+    // ignores the key — so author time is the only place this can ever
+    // surface. It meets the same admissibility bar: decidable from the
+    // documents in front of the linter, no per-permission-set nuance to
+    // adjudicate, and no legitimate reading (a key that can never match is not
+    // an author saying which field they meant).
+    //
+    // The three skips are the graph's, not this rule's, and each is the
+    // difference between a finding and a false one (ADR-0072 D1): an object
+    // this stack does not define may be another installed package's; an object
+    // with no readable field map (ADR-0015 `external`, an introspected
+    // datasource) resolves its columns at runtime; and a registry-injected
+    // system column (`created_at`, `owner_id` where ownership provides one) is
+    // real and addressable while appearing in no authored `fields`.
+    for (const flsKey of Object.keys(flsMap)) {
+      const dot = flsKey.indexOf('.');
+      if (dot < 0) continue; // the bare-key shape — judged by the rule above
+      const flsObject = flsKey.slice(0, dot);
+      const flsField = flsKey.slice(dot + 1);
+      if (!flsGraph.has(flsObject)) continue; // skip 1: not this stack's object
+      const surface = flsGraph.get(flsObject);
+      if (!surface) continue; // skip 2: no readable field map
+      if (surface.names.has(flsField) || surface.injected.has(flsField)) continue; // resolves (skip 3 included)
+
+      // [#16108] The EMPTY remainder (`'crm_account.'`) is the same defect and
+      // is reported by this rule, not deferred to the schema.
+      //
+      // ⚠️ An earlier revision skipped it with the comment "a shape the schema
+      // owns". That was FALSE, and measured to be: `PermissionSetSchema.fields`
+      // is `z.record(z.string(), FieldPermissionSchema)`
+      // (`packages/spec/src/security/permission.zod.ts`) — a bare `z.string()`
+      // key with no `.regex`, and that file carries no `refine`/`superRefine`
+      // at all — and this loop is the only reader of permission-set `fields`
+      // keys in this package. So nothing anywhere reported it, while at runtime
+      // it passes `startsWith('crm_account.')` and resolves to the empty column
+      // name, matching no column: the same fail-open this rule exists to close.
+      // ⛔ A comment crediting coverage to a component that has none is how a
+      // real gap gets recorded as handled — the accounting trap this card's own
+      // downstream note is about, one level in.
+      //
+      // It is judged HERE, after the two object skips, and deliberately not
+      // before them. An empty field name is in fact unmatchable independently
+      // of the object — `FieldSchema.name` is `/^[a-z_][a-z0-9_]*$/`, so no
+      // object of any package can declare one — but hoisting the check above
+      // skip 1 would start this rule judging keys whose OBJECT half it cannot
+      // resolve, which is exactly the disposition `'.description'` (empty
+      // object name) and a mis-cased object name are deliberately left to. One
+      // story, one guard order: the object must be visible before the key is
+      // judged. `'no_such_object.'` therefore falls to skip 1, like every other
+      // key naming an object this stack does not define.
+      const emptyField = flsField.length === 0;
+
+      const declared = [...surface.names].sort();
+      const roster = declared.length <= 12 ? declared.join(', ') : `${declared.slice(0, 12).join(', ')}, …`;
+      const wrote = emptyField
+        ? `field-permission key '${flsKey}' names NO field — everything after the '${flsObject}.' prefix is empty`
+        : `field-permission key '${flsKey}' is object-qualified but "${flsObject}" declares no field '${flsField}'`;
+      const looksRight = emptyField
+        ? `A truncated key is what a half-finished edit leaves behind.`
+        : `Unlike an unqualified key this one looks correct in review, and it is exactly what a field rename leaves behind.`;
+      findings.push({
+        severity: 'error',
+        rule: SECURITY_FLS_UNKNOWN_FIELD,
+        where: `permission set "${psName}"`,
+        path: `${psPath}.fields["${flsKey}"]`,
+        message:
+          `${wrote}. The runtime resolves an FLS key by stripping the '${flsObject}.' prefix and ` +
+          `looking the remainder up as a column, so this key matches NOTHING: the masking it declares ` +
+          `NEVER ENFORCES, and the field it was meant to cover stays as readable and as editable as the ` +
+          `object-level grant leaves it — for every holder of this set. Nothing reports that at runtime. ` +
+          `${looksRight}`,
+        hint:
+          `Point the key at a field "${flsObject}" really declares (${roster}), or delete the entry if the ` +
+          `field is gone — an entry that cannot match is not protection. If the masking is still wanted, ` +
+          `renaming the key is the fix; if the field was renamed, the mask has been off since that rename.`,
       });
     }
 

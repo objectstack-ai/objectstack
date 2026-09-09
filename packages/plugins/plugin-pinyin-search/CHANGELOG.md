@@ -1,5 +1,65 @@
 # @objectstack/plugin-pinyin-search
 
+## 17.4.0
+
+### Patch Changes
+
+- be92d46: These fourteen packages now declare `repository.directory`, so their npm pages carry a working "source" deep link to their own directory in the monorepo.
+  
+  npm renders that field by concatenating it onto `repository.url`. None of these fourteen manifests carried a `repository` block at all, so every one of their npm pages offered no route from the package back to its code — not a broken link, no link. That is what this publishes: the block those pages read, naming each package's own directory.
+  
+  Nothing else about these packages changes. No export, no runtime behaviour, no dependency and no file in the tarball other than the manifest's own `repository` key. The version bump exists because the fix is only real once it is published: the field lives in the manifest npm serves, so a corrected manifest sitting in the repository leaves the package page exactly as wrong as it was.
+  
+  The rule behind it is now mechanical rather than remembered — `check:manifest-repository-directory` makes a publishable (non-private) workspace manifest declare the field naming its own directory, so a package added or moved after this cannot quietly go back to having no source link.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [7079694]
+- Updated dependencies [7783738]
+- Updated dependencies [a56baa2]
+- Updated dependencies [4b3955e]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [ddfbf04]
+- Updated dependencies [65846bc]
+- Updated dependencies [316a20f]
+- Updated dependencies [2025b1f]
+- Updated dependencies [33388f9]
+- Updated dependencies [fa125f3]
+- Updated dependencies [7778115]
+- Updated dependencies [088f761]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [51ae731]
+- Updated dependencies [25a3d91]
+- Updated dependencies [c78c918]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [3bd9b34]
+- Updated dependencies [d0ee598]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [1b6fe3f]
+- Updated dependencies [48b0fcf]
+- Updated dependencies [26144c2]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [11f848e]
+- Updated dependencies [4771bd9]
+- Updated dependencies [e6279dc]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [ec0a6e7]
+- Updated dependencies [b398ad2]
+- Updated dependencies [eddd612]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [f89812e]
+- Updated dependencies [6d7d740]
+- Updated dependencies [f7ffbd6]
+- Updated dependencies [d61d6e3]
+  - @objectstack/core@17.4.0
+  - @objectstack/objectql@17.4.0
+  - @objectstack/types@17.4.0
+
 ## 17.3.0
 
 ### Patch Changes

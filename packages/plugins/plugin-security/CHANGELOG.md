@@ -1,5 +1,298 @@
 # @objectstack/plugin-security
 
+## 17.4.0
+
+### Minor Changes
+
+- f9a3c32: feat(security): the Layer 0 tenant wall records its verdict on the operation, and the bulk data-event producer reads it instead of re-deriving the wall
+  
+  `BulkDataEventSchema.organizationId` is stamped on a `data.records.updated` / `data.records.deleted` event only when the Layer 0 tenant wall named exactly one organization for the whole predicate write. The producer (`publishBulkDataEvent`, `@objectstack/objectql`) used to decide that by re-deriving the wall's inputs — posture, context, and the object's own tenancy clauses. It could never see the third clause plugin-security folds into `tenancyDisabled`: the deployment-declared `platformGlobalObjects` carve-out (#12699). On such an object under an armed wall the producer stamped the caller's organization while Layer 0 had composed no wall at all — a wrong key asserting "every affected record belongs to this organization" over a batch that could span several, the #13566 leak shape reappearing on the bulk path (#15706).
+  
+  Ruled on #15706 (seam (i), ADR-0131 D8 「一道谓词，算一次」): the wall records what it decided, and the reader composes nothing.
+  
+  - **`@objectstack/spec`** — new export `TenantLayer0VerdictSchema` / `TenantLayer0Verdict` (`@objectstack/spec/security`): the four verdicts a Layer 0 wall can reach for one operation — `none`, `organization`, `organizations`, `deny`. Additive.
+  - **`@objectstack/objectql`** — `OperationContext` gains an optional member `tenantLayer0Verdict`, written by the enforcement layer at the moment it composes the wall onto the operation's predicate. Additive widening of a published surface, hence `minor`. `publishBulkDataEvent` now reads that member and nothing else: a recorded `organization` (or a one-member `organizations`) verdict stamps the key; `none`, `deny`, a multi-member set, a malformed value, or NO recorded verdict all omit it. The engine no longer consults the enforced posture, the execution context or the object schema to answer the question — the mirror is deleted, not moved.
+  - **`@objectstack/plugin-security`** — the engine middleware records `opCtx.tenantLayer0Verdict` on every operation whose predicate it composes the wall onto (reads and predicate writes); `computeTenantLayer0Filter` is now a projection of the new `computeTenantLayer0Verdict`, so the recorded verdict and the injected predicate come from one computation. An on-behalf-of write records the intersection of the caller's and the delegator's walls. System contexts and by-id writes record nothing (no wall is composed for them).
+  
+  What moves, and in which direction: a deployment-exempted object under an armed wall now publishes `organizationId` ABSENT (it was wrongly present); a `PLATFORM_ADMIN` rung on a PUBLIC tenant object now publishes it PRESENT (the wall stands there; it was conservatively absent); a hand-built context with no rung is answered by the plugin's capability probe rather than conservatively absent. Every population the previous producer answered correctly is unchanged.
+
+### Patch Changes
+
+- c677cda: Ship the multi-organization runtime as open source: `@objectstack/organizations` is now an
+  Apache-2.0 package in this repository (ADR-0132).
+  
+  Single-database, row-level organization isolation was already open — the tenant Layer 0 wall,
+  the three tenancy postures, the organization and invitation objects, better-auth's organization
+  plugin, and the `requiresService: 'org-scoping'` Setup gates. What was closed was the one
+  registrar of the `org-scoping` service, so an install that set `OS_TENANCY_POSTURE=isolated`
+  could not enforce it: `serve` refused the boot, and the only way past was
+  `OS_ALLOW_DEGRADED_TENANCY=1` — the wall configured but not enforced. This package is that
+  missing registrar.
+  
+  It provides:
+  
+  - **`organization_id` auto-stamp on insert**, from the caller's active organization. A supplied
+    — possibly forged — value is overwritten, never trusted.
+  - **Per-organization seed replay** on `sys_organization` insert, from the app's own seed
+    definitions. Never another organization's rows.
+  - **Default-organization bootstrap** for the platform admin, idempotent.
+  - **The walled-posture membership-policy gate**: a deployment that raises the wall must declare
+    what a new user joins, or the boot is refused.
+  
+  Only the commercial **entitlement** stays closed. The open class carries no licence check of any
+  kind and offers no hook for one; an enterprise deployment resolves the same package name to a
+  private, licence-gated subclass through its own `workspace:*` declaration, so which class is
+  mounted is decided by the manifest that declares the name.
+  
+  ⚠️ Shipping the registrar is not yet the same as an open install raising the wall: `objectstack
+  serve` still resolves the runtime from the served app's own declaration and is not yet wired to
+  mount this package off `OS_TENANCY_POSTURE`. That, and the isolation matrix run against a real
+  registrar rather than a posture stub, are tracked separately.
+- c64e65f: fix(plugin-security): the app default permission set resolves from the first level that NAMES one (#15298)
+  
+  `declaredPermissionSets` carried a docblock stating a short-circuit its code did
+  not have:
+  
+  > The `packages[]` pass only supplies a set where the top level had none — which
+  > is precisely the option-B artifact.
+  
+  The code pushed the flattened top level and then **every** package body
+  unconditionally, so on today's additive artifact (flattened level *and*
+  `packages[]` both present) every permission set was collected twice. Nothing
+  observable came of it — the sole caller is private and takes the first
+  `isDefault` set, which the flattened copy still supplied — so this corrects a
+  false written contract on a security-path reader, not a live defect. That
+  distinction is the point: the sentence was load-bearing, because it was the
+  stated reason the reader half was revertible on its own and safe to land before
+  the emitter half (#14512), and the next reader would have believed the mechanism
+  was there.
+  
+  ⚠️ Release-notes note: this supersedes one sentence of the #15226 entry in this same
+  unreleased batch — "The resolution now reads the flattened top level FIRST and then each
+  package body". That described #15226 accurately when it landed; after this change the
+  `packages[]` pass runs only where the top level named no default. The earlier entry is
+  left as written rather than retro-edited, so whoever compiles the notes collapses the two
+  deliberately instead of reading a contradiction.
+  
+  The reader now walks the discipline the docblock claims — start from the
+  expression this program replaced, `appDefaultPermissionSetName(config.permissions)`,
+  and consult `packages[]` only where it came back `undefined`.
+  
+  - **The condition is the resolved NAME, never the `permissions` container.**
+    Branching on the container re-creates the silent loss the reader program
+    exists to remove, one shape further along: a flattened level that carries
+    permission sets but marks none of them `isDefault` is legal today and
+    hand-authorable in any `objectstack.config.ts`, and a container-shaped
+    condition (`Array.isArray(flattened)`, with or without `&& length > 0`) shorts
+    it past the whole `packages[]` pass and answers `undefined` — nothing thrown,
+    nothing logged, every member of the app back down to the platform floor alone.
+    Reading the answer also retires the `[]`-is-truthy trap rather than patching
+    around it.
+  - **The package order is resolved BEFORE the top level is consulted.**
+    `resolveArtifactPackageOrder` refuses a malformed `packages` — not an array,
+    an entry inlined instead of wrapped under `manifest:`, a duplicate package id
+    — with an ADR-0112 envelope this reader does not catch, and that refusal must
+    not become conditional on whether the flattened level happened to name a
+    default first. An artifact is either loadable or refused; which level answered
+    is not part of that question.
+  - **No emitted artifact changes its answer.** Measured, not argued: 26 shapes —
+    the composed additive artifact, its option-B derivative, the collection-zoo
+    fixtures behind the #15004 acceptance pin, every config the unit suite drives,
+    the three malformed-`packages` refusals, and the hand-authored mixed shapes —
+    return byte-identical results before and after, with `@objectstack/plugin-security`
+    rebuilt and the change proven present in `dist/` on each leg.
+- ac6213e: Four server-side authorization sites stop deriving platform-operator authority from a NAME in `ExecutionContext.positions`, and read the ADR-0095 posture rung instead.
+  
+  `positions[]` is the security axis, so it carries ADR-0057 D4 `sys_user_position` names alongside the built-ins. `sys_user_position` is `apiEnabled` and its `position` values are unconstrained, so a tenant could mint a row spelling `platform_admin` for one of their own users: `resolveUserAuthzGrants` pushed that name straight onto `grants.positions`, while `grants.posture` — derived from the unscoped `admin_full_access` grant and nothing else — correctly stayed `MEMBER`. Every reader of the name therefore answered `true` for a principal enforcement treats as an ordinary member. `resolve-authz-context.ts` states the rule at `hasPlatformAdminStanding` ("read the RUNG — never `positions.includes(...)`"), but a comment is not a gate and these four had not followed it.
+  
+  Each site now tests `posture === 'PLATFORM_ADMIN'`, byte-for-byte what `hasPlatformAdminStanding` returns:
+  
+  - **`plugin-sharing`** — `hasPlatformAuthority`. The minted row satisfied `assertResolvableAdminScope`, so an org-less caller holding only the ORG-scoped `manage_sharing` capability was answered with **every tenant's** sharing rules, and could delete platform-global rules. The `manage_platform_settings` capability spelling is unchanged.
+  - **`plugin-approvals`** — `isOverrideActor`. This predicate already read the rung and then ORed the name onto it, which is no protection: an OR is only as strong as its weakest arm. Because the platform arm deliberately crosses the tenant wall, the minted row let a member of one organization approve, reject or recall a **different organization's** pending request while holding no slot in its slate. The `ADMIN_FULL_ACCESS` capability arm and both TENANT_ADMIN arms are unchanged.
+  - **`runtime`** — the ADR-0126 §5 activation gate. Under a `group` or `isolated` posture this gate is the only thing between a tenant org admin and the **install-wide** `sys_metadata_activation` row, so the minted row reopened #10243 with a durable row behind it.
+  - **`plugin-security`** — `derivePosture` in the explain engine. Narrower than the other three, and stated precisely rather than overclaimed: the name-read sat behind an early `ctx.posture` return that `buildContextForUser` always populates, so the shipping path was already gated and a D4 row never moved it. What the read did reach was a posture-less hand-built context, where it made the panel **report** `PLATFORM_ADMIN` for a principal enforcement treats as a MEMBER — a misreport rather than an admission, but in the one tool an administrator opens to check exactly this.
+  
+  No behaviour changes for a genuine platform operator: their resolved context carries the rung, and the built-in position is still projected onto `positions[]` for display and predicate use. What changes is that the name alone no longer answers the authorization question.
+  
+  Graded `patch` on the surface it moves: no exported type, signature or contract changes, and no authorable metadata is added, removed or renamed. The only observable difference is that a principal who never held the capability grant stops being admitted — which is the defect, not a feature anyone could have depended on.
+- 06c762e: Remove seven dead `{ records }` union-normalizer limbs on engine `find()` results, and repair the one that was silently dropping instead of gapping.
+  
+  Six seams in this plugin normalized an engine read as `Array.isArray(x) ? x : x.records`. The envelope limb was unreachable: `ObjectQL.find` resolves a bare array of row objects, measured by booting a real engine over a real `SqlDriver` and driving each seam through the shipped function that owns it, rather than inferred from `IDataEngine.find`'s declared `Promise<any[]>` (a declared type is not proof — this repo also has a `find()` that resolves an envelope). Each seam keeps its existing disposition for a non-array; only the dead limb is gone.
+  
+  The seventh is repaired in the opposite direction. `SecurityPlugin`'s `sys_permission_set` loader mapped three different facts onto one value: a read that succeeded on an empty catalog, a read that threw, and a read that resolved something it could not read all left as `[]`. On the enforcement plane that silently withdraws grants that exist while every request still looks normal, and it made `PermissionEvaluator`'s existing "db lookup failed" warning unreachable — so a transient database error and an empty catalog produced identical, undiagnosable 403s. The loader now lets the read fault propagate and refuses an unreadable result with `DATABASE_ERROR`. Enforcement is unchanged for every result the shipped engine produces; an envelope or a non-row element now refuses (fail-closed) where the old code read through it. An unanswered read still grants nothing; what changes is that it is now reported instead of silent.
+- 1d73d45: An RLS `check` clause that reads a membership-resolver key now resolves on a bare insert.
+  
+  An app that registers an `IRlsMembershipResolver` (ADR-0105 D11) and authors `using` + `check` twins reading its key — `record.employer_org in current_user.employer_org_ids` — saw reads resolve the key and every bare insert refused with `PERMISSION_DENIED` ("would violate a row-level CHECK"), whether or not the payload carried the value the policy wanted. The membership sets were staged onto the request context only inside the read-filter computation; `computeWriteCheckFilter` compiled the `check` clause against a context in which the key had never been staged, so the variable was unresolved, the policy dropped, and the write failed closed. The two write shapes that passed — a by-id update and an insert of a `controlled_by_parent` child — passed only because an earlier read on the same context (the pre-image, the master read) happened to stage it first.
+  
+  The write path now stages the resolver's sets itself, immediately before the `check` clause compiles, so a `check` resolves exactly the variables its `using` twin resolves regardless of whether the request read first. Staging is memoized per request context, so the read-first shapes still consult the resolver once. Nothing is relaxed: with no resolver registered, a resolver that throws, or a key the resolver does not publish, the policy still drops out and the write is still refused.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [159dbad]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [cbca47d]
+- Updated dependencies [acf4d38]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [098cbb7]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [86c75f4]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [51ae731]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [4ca358d]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [6acb37e]
+- Updated dependencies [7797102]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [0a038cc]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [97adce2]
+- Updated dependencies [a83482c]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [4771bd9]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [c930f85]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b3820c3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [4df2a98]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f89812e]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+- Updated dependencies [021a735]
+- Updated dependencies [7bdb163]
+  - @objectstack/spec@17.4.0
+  - @objectstack/core@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/formula@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/metadata-core@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

@@ -211,12 +211,12 @@ describe("runAs:'system' attribution contract — elevation decides authorizatio
     const controlRow = await taskByTitle('control');
 
     // (a) the elevated path: a `runAs:'system'` flow updates the row.
-    automation.registerFlow('elevated_touch', elevatedUpdateFlow('elevated_touch', String(elevatedRow.id)) as any);
+    automation.registerFlow('elevated_touch', elevatedUpdateFlow('elevated_touch', String(elevatedRow!.id)) as any);
     const res = await automation.execute('elevated_touch', { ...OPERATOR });
     expect(res.success, `run failed: ${JSON.stringify(res)}`).toBe(true);
 
     // (b) the control: the same write, plain user context, no elevation.
-    await ql.update('crm_task', { id: controlRow.id, status: 'done' }, { context: { ...OPERATOR } });
+    await ql.update('crm_task', { id: controlRow!.id, status: 'done' }, { context: { ...OPERATOR } });
 
     const afterElevated = await taskByTitle('elevated');
     const afterControl = await taskByTitle('control');
@@ -225,12 +225,12 @@ describe("runAs:'system' attribution contract — elevation decides authorizatio
     // its writes would land unattributed and lean on the actor label instead.
     // They do not: the operator is stamped, and byte-identically to the
     // unelevated write.
-    expect(afterElevated.updated_by, 'the elevated run must stamp the triggering operator').toBe('usr_operator');
-    expect(afterElevated.updated_by, 'elevated attribution must equal the plain user path').toBe(afterControl.updated_by);
+    expect(afterElevated!.updated_by, 'the elevated run must stamp the triggering operator').toBe('usr_operator');
+    expect(afterElevated!.updated_by, 'elevated attribution must equal the plain user path').toBe(afterControl!.updated_by);
     // The column MOVED off the creator — the assertion above is about this
     // update, not about the insert that seeded the row.
-    expect(afterElevated.created_by, 'the original creator is untouched').toBe('usr_creator');
-    expect(afterElevated.status, 'the run must actually have written').toBe('done');
+    expect(afterElevated!.created_by, 'the original creator is untouched').toBe('usr_creator');
+    expect(afterElevated!.status, 'the run must actually have written').toBe('done');
 
     // …and the envelope the audit writers read carries BOTH: elevation on
     // `isSystem` (authorization) and the operator on `userId` (attribution),
@@ -254,7 +254,7 @@ describe("runAs:'system' attribution contract — elevation decides authorizatio
 
     // There is no operator to carry, so the user column stays NULL — ADR-0118
     // D1 forbids a sentinel or pseudo-user standing in for one.
-    expect(row.created_by ?? null, 'a user-less run has no operator to stamp').toBeNull();
+    expect(row!.created_by ?? null, 'a user-less run has no operator to stamp').toBeNull();
 
     // …and the actor label is what keeps the write attributable anyway. This
     // is the half of the old prose that was TRUE — it was only ever true here.

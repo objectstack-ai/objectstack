@@ -870,6 +870,42 @@ export function zodIssuesToMetadataIssues(issues: unknown): MetadataIssueEntry[]
 export { recordNotFoundError };
 
 /**
+ * The RECORD limb of `IDataEngine.update`'s declared result, for the four
+ * ingresses in this file whose call is BY-ID by construction (#16231).
+ *
+ * `update()` used to declare `Promise<any>` and now declares the union its two
+ * dispatch paths actually answer: a record (or `null`) from the by-id exit
+ * (`driver.update`), or the affected-row COUNT from the predicate exit
+ * (`driver.updateMany`, #4639). Every call site below hands the engine a
+ * `where` naming exactly one primary key — or folds the row's id into the
+ * payload — with no `multi`, which `resolveEngineUpdateDispatch` resolves
+ * `by-id`. So the count limb is unreachable from here, and it is REFUSED
+ * loudly rather than cast away: a dispatch change that started routing these
+ * calls through `updateMany` would otherwise drop an affected count into a
+ * per-row receipt's `record` / `data` slot, where every consumer reads it as a
+ * row.
+ *
+ * The `null` limb is NOT refused and NOT narrowed away — it is passed through
+ * exactly as it was while the declaration said `any`. `update()`'s by-id exit
+ * answers `null` when the post-write readback leaves the caller's row scope
+ * (see `updateData`'s own note on that), while `DataProtocol`'s row receipts
+ * declare `record` / `data` non-null. That disagreement pre-dates this change,
+ * and this file preserves it rather than widening a shipped response shape as
+ * a rider; the assertion below is the one place it is written down.
+ */
+function byIdUpdateRecord(result: Record<string, any> | number | null): Record<string, any> {
+    if (typeof result === 'number') {
+        throw new Error(
+            `A by-id update resolved an affected-row count (${result}) instead of a record. ` +
+            `This ingress addresses exactly one row, so the engine's predicate dispatch ` +
+            `(driver.updateMany) is not reachable from it — the dispatch ladder or this ` +
+            `call site changed.`,
+        );
+    }
+    return result as Record<string, any>;
+}
+
+/**
  * A 400 for a `$filter` ARRAY that looks like a filter AST but is not one.
  *
  * The message has to be *actionable from the request*, which is the whole point
@@ -11096,7 +11132,7 @@ export class ObjectStackProtocolImplementation implements
         )
             ? { ...(request.data as Record<string, unknown>), id: request.id }
             : request.data;
-        const result = await this.engine.update(request.object, writeData, opts);
+        const result = byIdUpdateRecord(await this.engine.update(request.object, writeData, opts));
         // [#7823] The PATCH 200 body is the surface #7728's fourth measurement
         // caught: a client revoking a `sys_api_key` (apiMethods keeps `update`
         // open, #7727) got the stored hash back in this response. That closure
@@ -12132,7 +12168,7 @@ export class ObjectStackProtocolImplementation implements
                         await this.assertRecordExists(object, record.id);
                         // [#3455] Collect the engine's LEGAL write strips per row.
                         const dropped: DroppedFieldsEvent[] = [];
-                        const updated = await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any);
+                        const updated = byIdUpdateRecord(await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any));
                         omitInternalFieldsFromWriteResponse(batchSchema, updated); // [#7823]
                         results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                         succeeded++;
@@ -12164,7 +12200,7 @@ export class ObjectStackProtocolImplementation implements
                             const existing = await this.probeRecord(object, record.id);
                             if (existing) {
                                 const dropped: DroppedFieldsEvent[] = [];
-                                const updated = await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any);
+                                const updated = byIdUpdateRecord(await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any));
                                 omitInternalFieldsFromWriteResponse(batchSchema, updated); // [#7823]
                                 results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                             } else {
@@ -12547,7 +12583,7 @@ export class ObjectStackProtocolImplementation implements
                 const dropped: DroppedFieldsEvent[] = [];
                 const opts: any = { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
                 if (context !== undefined) opts.context = context;
-                const updated = await this.engine.update(object, record.data || {}, opts);
+                const updated = byIdUpdateRecord(await this.engine.update(object, record.data || {}, opts));
                 omitInternalFieldsFromWriteResponse(updateManySchema, updated); // [#7823]
                 results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                 succeeded++;

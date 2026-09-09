@@ -140,7 +140,13 @@ describe('[#8502] a REAL validation refusal keeps its sentence on a batch row', 
         expect(res.results[0].errors[0].message).toContain('Reason');
         expect(res.results[0].errors[0].message).not.toContain('The reason is in the server log');
         // The stored row is untouched: the refusal happened before the write.
-        expect((await engine.findOne('bf_leave_request', { where: { id: 'lr1' } })).reason).toBe('ok');
+        // [#16231] `findOne` declares record-or-null now, so the read is
+        // narrowed before the field is asserted — the row's presence IS half of
+        // what this case measures ("the stored row is untouched"), and reading
+        // it through `?.` would have let a vanished row pass as `undefined`.
+        const untouched = await engine.findOne('bf_leave_request', { where: { id: 'lr1' } });
+        expect(untouched).not.toBeNull();
+        expect(untouched!.reason).toBe('ok');
     });
 
     it('the refusal carries no `status`, so a status-only rule WOULD have blanked it', async () => {

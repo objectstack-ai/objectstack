@@ -439,9 +439,9 @@ verbatim and a bare one lands under it, leaving two. ⛔ A tail bare footer on a
 platform's, not your form downgraded. Which layer does this is unknown; don't go establishing
 it. **Commit message:** an agent commit ends with the model-free trailer pair
 `Claude-Session: https://claude.ai/code/session_<id>` and
-`Co-authored-by: Claude <noreply@anthropic.com>`; no model identifier lands in a PR title or
-body, a comment, a changeset, a doc or a code comment — the harness-written `Co-Authored-By`
-trailer (with its session link) is the one exemption.
+`Co-authored-by: Claude <noreply@anthropic.com>`; no model identifier lands in a PR title or body,
+a comment, a changeset, a doc or a code comment. The one exemption is a REPORTING one: a harness-written
+`Co-Authored-By` trailer is not declared a deviation; the pair stays model-free; landed history is not rewritten.
 
 **GitHub mutates body BYTES — spell poison-shaped tokens out in words, never literally.**
 Regex literals and script-tag-shaped tokens go in fenced code with the dangerous character

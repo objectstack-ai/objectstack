@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-security",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "Security Plugin for ObjectStack — RBAC, RLS, and Field-Level Security Runtime",
   "main": "dist/index.js",
@@ -28,6 +28,7 @@
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-sharing": "workspace:*",
@@ -35,7 +36,7 @@
     "@types/node": "^26.2.0",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "objectstack",
