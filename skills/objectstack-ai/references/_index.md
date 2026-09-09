@@ -13,7 +13,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/ai/knowledge-source.zod.ts` — Knowledge Source — declarative metadata describing what to index and
 - `node_modules/@objectstack/spec/src/ai/model-registry.zod.ts` — AI Model Registry Protocol
 - `node_modules/@objectstack/spec/src/ai/skill.zod.ts` — Skill Trigger Condition Schema
-- `node_modules/@objectstack/spec/src/ai/solution-blueprint.zod.ts` — Exports: BlueprintConditionSchema, BlueprintSummaryOperationsSchema, BlueprintFieldSchema, BlueprintObjectSchema, BlueprintViewSchema
+- `node_modules/@objectstack/spec/src/ai/solution-blueprint.zod.ts` — Solution Blueprint Schema (ADR-0033 §4 — plan-first authoring)
 - `node_modules/@objectstack/spec/src/ai/tool.zod.ts` — Exports: ToolSchema
 
 ## Transitive dependencies

@@ -652,13 +652,13 @@
       "title": "Job metadata schedules through every ScheduleSchema variant, executes with retry/timeout enforced, records sys_job/sys_job_run truth, and refuses the closed doors (id key, runtime create, missing handler)",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the shipped cron fixture: showcase_health_sweep (schedule cron '0 1 * * *' UTC, handler 'sweepProjectHealth' registered in defineStack({ functions }), retryPolicy { maxRetries: 2, backoffMs: 5000, backoffMultiplier: 2 }, timeout 300000 — examples/app-showcase/src/automation/jobs/index.ts; the handler-missing regression here was #4774/#4888)",
+          "the shipped cron fixture: showcase_health_sweep (schedule cron '0 1 * * *' UTC, handler 'sweepProjectHealth' registered in defineStack({ functions }), retryPolicy { maxRetries: 2, backoffMs: 5000, backoffMultiplier: 2 }, timeoutMs 300000 — examples/app-showcase/src/automation/jobs/index.ts; the handler-missing regression here was #4774/#4888)",
           "scratch jobs in a writable package for the interval / once / failing / timing-out probes (near-term schedules so the run observes real executions)"
         ]
       },
@@ -675,7 +675,7 @@
         "read sys_job over /api/v1/data: the row is keyed by NAME (the adapter mints its own row id) with the schedule persisted",
         "author three scratch jobs (interval ~5s, once at now+1min, and a cron) with observable side effects; boot; let each fire; read sys_job_run rows and sys_job.last_run_at/last_status/run_count",
         "author a deliberately-throwing job with retryPolicy { maxRetries: 2, backoffMs: 1000, backoffMultiplier: 2 }; let it exhaust; capture run rows + failure_count",
-        "author a job whose handler sleeps past a small `timeout`; capture the run's status",
+        "author a job whose handler sleeps past a small `timeoutMs`; capture the run's status",
         "author a job with enabled:false and one whose handler string names NO registered function; boot; capture how each is skipped",
         "author a job carrying `id: 'x'` and one with a stray key; build both; capture the errors",
         "attempt to create a job at runtime through the meta door and capture the refusal (allowRuntimeCreate:false, #4509)"
@@ -700,7 +700,7 @@
           "evidence": "run rows + timestamped log"
         },
         {
-          "clause": "an over-`timeout` run is recorded with execution status 'timeout' (the in-flight handler is abandoned, not force-cancelled — as documented), and timeouts COUNT as failures for the retry loop (#3494)",
+          "clause": "an over-`timeoutMs` run is recorded with execution status 'timeout' (the in-flight handler is abandoned, not force-cancelled — as documented), and timeouts COUNT as failures for the retry loop (#3494)",
           "oracle": "api",
           "verify": "the timeout probe's run row status",
           "evidence": "the run row"
@@ -727,7 +727,7 @@
         "seed-data-thin"
       ],
       "source": [
-        "packages/spec/src/system/job.zod.ts#ScheduleSchema (ScheduleSchema discriminated union; JOB_ID_RETIRED; retryPolicy/timeout docs incl. the 17.0.0 maxRetries default flip #4661; JobExecutionStatus)",
+        "packages/spec/src/system/job.zod.ts#ScheduleSchema (ScheduleSchema discriminated union; JOB_ID_RETIRED; retryPolicy/timeoutMs docs incl. the 17.0.0 maxRetries default flip #4661; JobExecutionStatus)",
         "packages/spec/liveness/job.json (per-prop verdicts + the #4509 closed-door rationale)",
         "packages/runtime/src/app-plugin.ts#handler (registration, enabled/handler skip lines)",
         "packages/services/service-job/src/cron-job-adapter.ts + db-job-adapter.ts (all three schedule shapes; sys_job/sys_job_run persistence) + run-with-policy.ts (retry/timeout enforcement, #3494)",
@@ -745,6 +745,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-09-09",
+          "change": "key spelling only, no clause moved — the same #14478 rename residue as records-forms.object-hook-lifecycle: `job.timeout` became `timeoutMs` (old spelling kept as a retiredKey tombstone), so the fixture citation, the timing step, the over-limit clause and the job.zod.ts citation all named a key the schema now refuses. What is exercised is unchanged; the execution STATUS is still 'timeout'.",
+          "ref": "#15839"
         }
       ]
     },
