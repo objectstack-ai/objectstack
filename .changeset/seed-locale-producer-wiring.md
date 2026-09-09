@@ -15,4 +15,6 @@ The locale filter axis landed complete on the consumer side: the loader reads `S
 
 The liveness ledger row `seed.locale` moves `experimental` → `live` with a `producer` pointer naming this wiring, and records which call sites supply the locale and which do not rather than claiming the frontier away.
 
+⚠️ **Release-note reconciliation, for whoever compiles this release.** The sibling changeset `seed-locale-axis.md` (from the PR that landed the consumer half) states in the present tense that no first-party call site supplies `config.locale`, that the axis is inert on the default boot path, and that the liveness ledger records `seed.locale` as `experimental`. All three sentences describe the state that changeset shipped into, and **this change ends all three**. If both land in one release, the notes must read them in order — or fold them into one entry — rather than publishing the earlier state as current. ⛔ That sibling changeset is deliberately not edited here: it accurately records what its own PR did, and release notes are compiled centrally.
+
 ⛔ Out of scope, unchanged: rows already written under a different locale stay resident. Every seed is an `upsert` and the loader only writes, so switching a stack's locale on a non-empty database does not remove the other market's rows.
