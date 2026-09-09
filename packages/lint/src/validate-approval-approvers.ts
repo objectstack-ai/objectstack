@@ -103,23 +103,62 @@ const GROUP_ROUTED_TYPES = new Set(['position', 'team', 'department']);
  * ⚠️ NOT "edit the user in the Console". The column has NO product write
  * surface today: `getManagedUpdateWhitelist('sys_user')` is exactly
  * `{name, image, locale}` (ADR-0092 platform-object write narrowing), the auth
- * admin endpoints do not accept it, and the Console renders no field for it. So
- * the only honest prescription is the provisioning path.
+ * admin endpoints do not accept it, and the Console renders no field for it.
+ *
+ * ⛔ AND a remedy naming a route that does not exist is worse than no remedy —
+ * an exact diagnosis whose prescription cannot be carried out (#17037). So the
+ * routes are GRADED here rather than listed, and each grade is a measurement
+ * against this tree with a discriminating control beside it:
+ *
+ *   - Seed, or any other system-context write — AVAILABLE HERE. Both write
+ *     guards gate on `isUserContextWrite`, spelled identically in each:
+ *     `Boolean(userId) && isSystem !== true` (plugin-security
+ *     `system-write-guard.ts`, plugin-auth `identity-write-guard.ts`). A
+ *     system-context write therefore bypasses the managed-update whitelist by
+ *     construction. This is the one route with a demonstrated writer in-repo.
+ *   - SCIM — NOT here. The Enterprise `manager` attribute IS declared
+ *     (`scim.zod.ts`), but no non-test file under `packages/plugins` or
+ *     `packages/runtime` projects it onto the column: measured 0, against a
+ *     control (`SysScimGroup`) the same scan does find, so the scan
+ *     discriminates.
+ *   - Admin bulk import — NOT here. `admin-import-users.ts` matches
+ *     `manager_id` 0 times against a control of `phone_number` 8, and
+ *     `SYS_USER_IMPORT_UPDATE_FIELDS` is `{name, image, locale}` plus
+ *     `phone_number` and `role`. `sys-user-writable-fields.ts` lists
+ *     `manager_id` among the admin-surface-only columns, so the omission is
+ *     deliberate and ⛔ not an oversight to route around.
+ *
+ * ⇒ SCIM and directory sync stay NAMED, because a deployment running a real
+ * one may well populate the column through it — but named as something the
+ * operator's own provisioning supplies, ⛔ never as something this repo gives
+ * them.
  *
  * ⛔ DEPENDENCY — #16678 holds the open question of whether `manager_id` should
- * GAIN a product write surface. If it ever does, this string is the line that
- * goes stale: it would then be wrong to tell an author their only route is
- * provisioning. Update it in the same change that opens the write surface.
+ * GAIN a product write surface. If it ever does, these strings are the lines
+ * that go stale: it would then be wrong to tell an author their only route is
+ * a system-context write. Update them in the same change that opens the write
+ * surface — and re-take the three grades above, which are readings of this
+ * tree, not standing facts.
  */
 // ⛔ The tracker ids stay in the comments above and never in this string:
 // `check:doc-authoring` Rule 3 — a runtime string reaches authors, operators and
 // generated surfaces, none of whom can resolve `#NNNN`. The reader who can
 // resolve it is reading this source.
 const MANAGER_ONLY_REMEDY =
-  `sys_user.manager_id has no product write surface today — the data API's managed-update ` +
-  `whitelist is {name, image, locale}, the auth admin endpoints do not accept the column and the ` +
-  `Console renders no field for it — so it is populated by SCIM provisioning, a seed / bulk import ` +
-  `or directory sync, NOT by editing the user in the Console.`;
+  `sys_user.manager_id has no product write surface — the data API's managed-update whitelist is ` +
+  `{name, image, locale}, the auth admin endpoints do not accept the column and the Console ` +
+  `renders no field for it, so it is never populated by editing the user in the Console.`;
+
+/**
+ * The routes an operator can actually take, GRADED — the measurement behind
+ * each grade is in {@link MANAGER_ONLY_REMEDY}'s docblock.
+ */
+const MANAGER_ONLY_ROUTES =
+  `On this platform the column is written by a seed, or by any other system-context write, which ` +
+  `bypasses the managed-update whitelist. SCIM provisioning and directory sync can populate it ` +
+  `too, but only through a provisioning path your own deployment supplies: this platform declares ` +
+  `the SCIM 'manager' attribute without projecting it onto the column, and its admin bulk import ` +
+  `does not write it either.`;
 
 export type ApprovalApproverSeverity = 'error' | 'warning' | 'info';
 
@@ -181,6 +220,18 @@ const TYPE_FIX: Record<string, string> = {
  * a correctly-seeded stack forever. Nor does a seeded chain prove anything
  * about users who arrive later by sign-up or SCIM — which is exactly why the
  * finding it suppresses is `info`, not an error.
+ *
+ * ⚠️ SURFACE ASYMMETRY, so nobody reads a correct suppressor as broken: this
+ * silences the advisory on the CLI only. The runtime publish gate hands rules a
+ * `RuntimeStackContext`, whose collections are fixed by
+ * `CONTEXT_STACK_KEY_ORDER` in `runtime-gate.ts` — `objects`, `permissions`,
+ * `books`, `datasets`, `pages`, and NO `data`. So a Studio publish of a
+ * manager-only flow carries no seeds to read, `stack.data` is absent, and the
+ * advisory is drawn no matter how the tenant's users are wired. That is
+ * acceptable rather than a bug: an `info` finding never blocks a publish, it
+ * rides the 2xx `advisories`. ⛔ Do not "fix" it by weakening the arm — the
+ * repair, if one is ever wanted, is a context collection the gate does not
+ * carry today, which is a runtime-gate decision and not this rule's.
  */
 function stackWiresManagerChain(stack: AnyRec): boolean {
   const seeds = Array.isArray(stack.data) ? (stack.data as AnyRec[]) : [];
@@ -476,10 +527,10 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             `request resolves to an empty slate and waits forever` +
             (locks ? `, and (lockRecord) the record stays locked with no in-product recovery.` : `.`),
           hint:
-            `${MANAGER_ONLY_REMEDY} Populate it for everyone who submits this request, or add a ` +
-            `fallback approver that cannot resolve empty, e.g. ` +
-            `{ type: 'org_membership_level', value: 'owner' }. A request that still lands empty is ` +
-            `recoverable only by a platform/tenant admin override.`,
+            `${MANAGER_ONLY_REMEDY} ${MANAGER_ONLY_ROUTES} Populate it for everyone who submits ` +
+            `this request, or take the escape that needs none of that: add a fallback approver ` +
+            `which cannot resolve empty, e.g. { type: 'org_membership_level', value: 'owner' }. A ` +
+            `request that still lands empty is recoverable only by a platform/tenant admin override.`,
         });
       }
 

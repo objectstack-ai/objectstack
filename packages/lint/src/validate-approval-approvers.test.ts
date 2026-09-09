@@ -269,10 +269,33 @@ describe('unset-manager dead-end (#16748)', () => {
     expect(finding.hint).toContain('no product write surface');
     // ⛔ And it must not send them to a surface that cannot write it. The word
     // "Console" appears only inside that denial, never as an instruction.
-    expect(finding.hint).toContain('NOT by editing the user in the Console');
+    expect(finding.hint).toContain('never populated by editing the user in the Console');
     expect(finding.hint).not.toMatch(/[Ee]dit .{0,40}in the Console\b(?!.*NOT)/);
     // It still offers the escape that does not depend on #16678 at all.
     expect(finding.hint).toContain("org_membership_level', value: 'owner'");
+  });
+
+  it('GRADES the routes — an exact diagnosis whose remedy cannot be carried out is worse than none', () => {
+    // A remedy that names a route with no writer is the #17037 shape. The three
+    // routes are measured against this tree, so the hint must SEPARATE the one
+    // that works here from the ones that need the deployment's own provisioning.
+    const [finding] = validateApprovalApprovers(managerOnly());
+
+    // The route with a demonstrated writer: a system-context write bypasses the
+    // managed-update whitelist (`isUserContextWrite` is `userId && !isSystem`).
+    expect(finding.hint).toContain('written by a seed, or by any other system-context write');
+    expect(finding.hint).toContain('bypasses the managed-update whitelist');
+
+    // ⛔ The two that are NOT this repo's to offer must be marked as the
+    // deployment's own, and the hint must say WHY rather than merely hedging.
+    expect(finding.hint).toContain('a provisioning path your own deployment supplies');
+    expect(finding.hint).toContain("declares the SCIM 'manager' attribute without projecting it");
+    expect(finding.hint).toContain('admin bulk import does not write it either');
+
+    // ⛔ And they must not be deleted: a deployment running a real directory
+    // sync may well populate the column, and the defect was presenting all
+    // three as equally available, never naming them at all.
+    expect(finding.hint).toContain('SCIM provisioning and directory sync can populate it');
   });
 
   it('does not claim a runtime fact it did not read', () => {
