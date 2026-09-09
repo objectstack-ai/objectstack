@@ -52,8 +52,13 @@ interface NormalizeOptions {
      * [#15840] The level the ruling names for a refused pass. Optional, unlike
      * its two siblings, so every caller that compiles today still compiles: it
      * is an input this module asks for, not a channel it publishes.
+     *
+     * ⚠️ Three parameters, not two: the platform `Logger` contract
+     * (`packages/spec/src/contracts/logger.ts`) takes the `Error` in its OWN
+     * second argument at this level and only this level. Declaring the sibling
+     * `(message, meta)` shape here makes the real `ctx.logger` unassignable.
      */
-    error?: (message: string, meta?: Record<string, any>) => void;
+    error?: (message: string, error?: Error, meta?: Record<string, any>) => void;
   };
 }
 
@@ -133,7 +138,7 @@ async function normalizeObject(
       // will NOT be returned is still known: rows healed before the refusal
       // stay healed, and saying so is the difference between a refusal and a
       // rollback. Reported once — the throw aborts the whole pass.
-      logger?.error?.((e as Error).message, {
+      logger?.error?.((e as Error).message, e instanceof Error ? e : undefined, {
         object,
         legacyValue: legacy,
         healedBeforeRefusal: updated,

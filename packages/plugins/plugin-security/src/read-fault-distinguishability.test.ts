@@ -135,9 +135,16 @@ function recordingLogger() {
   const lines: string[] = [];
   const at = (level: string) => (message: string, meta?: unknown) =>
     void lines.push(`${level}: ${message}${meta === undefined ? '' : ` ${JSON.stringify(meta)}`}`);
+  // [#15840] `error` alone takes the Error in its OWN second argument — the
+  // platform `Logger` contract's shape, not a convenience of this harness.
+  const atError = (message: string, error?: Error, meta?: unknown) =>
+    void lines.push(
+      `error: ${message}${error === undefined ? '' : ` ${error.message}`}` +
+        `${meta === undefined ? '' : ` ${JSON.stringify(meta)}`}`,
+    );
   return {
     lines,
-    logger: { info: at('info'), warn: at('warn'), debug: at('debug'), error: at('error') },
+    logger: { info: at('info'), warn: at('warn'), debug: at('debug'), error: atError },
   };
 }
 

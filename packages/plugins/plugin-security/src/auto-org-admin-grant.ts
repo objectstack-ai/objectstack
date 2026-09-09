@@ -105,8 +105,14 @@ interface MaybeLogger {
    * [#15840] The level the ruling names for the one read whose un-answered
    * value would otherwise DESTROY standing state. Optional like its siblings:
    * this is an input the caller supplies, not a channel this module publishes.
+   *
+   * ⚠️ Three parameters, not two: the platform `Logger` contract
+   * (`packages/spec/src/contracts/logger.ts`) takes the `Error` in its OWN
+   * second argument at this level and only this level. Declaring the sibling
+   * `(message, meta)` shape here would make the real `ctx.logger` unassignable
+   * — measured, as three TS2322s in `security-plugin.ts`.
    */
-  error?: (message: string, meta?: Record<string, any>) => void;
+  error?: (message: string, error?: Error, meta?: Record<string, any>) => void;
 }
 
 function genId(prefix: string): string {
@@ -677,13 +683,8 @@ export async function reconcileOrgAdminGrant(
       '[security] org-admin reconcile SKIPPED — the sys_member read did not answer, so this ' +
         'round cannot tell "not a member" from "could not ask"; NOTHING was granted or revoked ' +
         'for this pair, and any standing grant is left exactly as it was',
-      {
-        object: 'sys_member',
-        userId,
-        orgId,
-        why: membershipRead.why,
-        error: (membershipRead.error as Error)?.message,
-      },
+      membershipRead.error instanceof Error ? membershipRead.error : undefined,
+      { object: 'sys_member', userId, orgId, why: membershipRead.why },
     );
     return { action: 'skipped', reason: 'membership_unreadable' };
   }
