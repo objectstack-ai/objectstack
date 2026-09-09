@@ -52,19 +52,58 @@
  * has since been registered fails — which is how #8846 landing ratchets this
  * list down instead of leaving stale rows promising work already done.
  *
- * ## The spec face — `packages/spec/src/**` is a ledger member or a finding (#16449)
+ * ## The published face — every published package's `src/` (#16649, was #16449)
  *
  * The #16404 ruling (director seat, decision batch #62, 2026-09-07, option D)
  * settled what "the published contract face" means for an error code: the
  * ledger, door or no door — every code that ships in `dist` is registered
- * there, because a thrown value's `code` is what a consumer pins. This gate is
- * where that rule has teeth for the tree it was measured on: a stamp site under
- * `packages/spec/src/` may be classified `foreign-vocabulary` (not an ADR-0112
- * code at all) or `runtime-pinned` (a template whose pin parses every member
- * against the closed union), and NOTHING ELSE — a `boot-refusal` or
- * `pending-registration` row there is a `spec-face-unregistered` finding, and
- * the only way out is the ledger row (which makes the site disappear from the
- * scan, as any registration does). See `SPEC_SOURCE_FACE` below.
+ * there, because a thrown value's `code` is what a consumer pins. #16449 gave
+ * that rule teeth over the one package it had been measured on, `packages/spec`;
+ * #16649 (director seat, decision batch #95, 2026-09-08) widened it to the
+ * population the ruling actually names. A stamp site under ANY published
+ * package's `src/` may be classified `foreign-vocabulary` (not an ADR-0112 code
+ * at all) or `runtime-pinned` (a template whose pin parses every member against
+ * the closed union), and NOTHING ELSE — any other verdict there is a finding,
+ * and the only way out is the ledger row (which makes the site disappear from
+ * the scan, as any registration does).
+ *
+ * ⚠️ "Published" is read from each member's manifest, never from its path: a
+ * `private: true` member ships no `dist`, so the ruling's premise — the code a
+ * consumer pins arrives in a package they installed — does not hold there and
+ * the face does not reach it. Measured on the tree this landed on: 80 workspace
+ * members, 70 of them published, 69 of those with a `src/` on disk, all under
+ * `packages/`; the ten private members are five `examples/*`, `apps/docs` and
+ * four `packages/qa/*`, and only the last four are inside this scan at all. See
+ * `derivePublishedFaces`, `PUBLISHED_SOURCE_FACE_FLOOR` and `SPEC_SOURCE_FACE`
+ * below.
+ *
+ * ## The one exception, named and dated: `pending-registration` (#8846)
+ *
+ * The widened face refuses exactly what the spec face refuses, with ONE carve-out
+ * that is written down rather than silent, because a silent one cannot be dated
+ * and so can never be collected:
+ *
+ *   GRANTED  2026-09-08, with the #16649 widening (decision batch #95).
+ *   SCOPE    `pending-registration` rows OUTSIDE `packages/spec/src/`.
+ *   OWED TO  #8846 — the ledger batch that registers what those rows record.
+ *   WHY      The widening landed on a card that is not #8846's and not #9460's.
+ *            Applied without this, it would have reddened two rows whose
+ *            disposition is another card's to make: `AMBIGUOUS_METADATA_STEM`
+ *            (`packages/metadata`) and `owd_widening_forbidden`
+ *            (`packages/plugins/plugin-security`).
+ *   ENDS     When #8846 lands. Registration is already the ratchet: a
+ *            `pending-registration` row whose code is registered REDS as
+ *            `now-registered`, so the rows leave on their own and the allowance
+ *            is discharged when the count below reaches zero. Deleting it then
+ *            is the follow-up this paragraph exists to make collectable.
+ *
+ * ⛔ It is an allowance, NOT an allowlist. The distinction was ruled: an
+ * allowlist naming the two rows would have made this card the place where their
+ * dispositions get decided, and they belong to #8846 / #9460. The run's own
+ * report prints how many rows are standing on the allowance today, so a reader
+ * six months from now answers "is this still owed" from the output rather than
+ * from this comment. Inside `packages/spec/src/` there is NO allowance —
+ * `pending-registration` is refused there exactly as it was before the widening.
  *
  * ## Why textual, not AST
  *
@@ -250,6 +289,17 @@ import {
 import { findViolations } from './check-error-code-casing.mjs';
 import { join, relative, dirname, resolve } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
+// [#16649] The ONE parse of `pnpm-workspace.yaml`'s `packages:` block, so the
+// published face below enumerates members the same way the other nine callers
+// do. That module deliberately declares no path population of its own, so
+// importing it hands this gate no watch hints it did not already have — see its
+// header, which prices the alternative.
+import {
+  expandWorkspaceGlob,
+  isExclusionGlob,
+  readWorkspaceGlobs,
+  workspacePackageDirs,
+} from './workspace-enumerator.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -271,7 +321,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '[#14626] THE NESTED TEMPLATE, across all FOUR shared textual primitives.': 242,
   '[#13790] The INLINE literal EXPRESSION at an object-literal `code:`.': 40,
   '[#14742] THE REGEX LITERAL, across all FOUR shared textual primitives.': 39,
-  '[#16449] A packages/spec/src stamp site is a ledger member, never classified away.': 7,
+  "[#16649] Every published package's src/ is a ledger member, never classified away.": 25,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -292,21 +342,146 @@ const ERRORS_ZOD = 'packages/spec/src/api/errors.zod.ts';
 const DECLARATION = 'packages/runtime/src/dispatcher-error-vocabulary.ts';
 
 /**
- * [#16449] The SPEC FACE. `packages/spec/src/**` ships in `@objectstack/spec`'s
- * `dist`, and the #16404 ruling (director seat, decision batch #62, 2026-09-07,
- * option D) makes `ERROR_CODE_LEDGER` / `StandardErrorCode` the published
- * contract face: every code that ships in `dist` is registered there, door or
- * no door. So a stamp site under this prefix is a ledger member or it is a
- * finding — the verdicts that classify a site AWAY from registration
- * (`boot-refusal`, `pending-registration`, `sandbox-authored`) are refused
- * there, as `spec-face-unregistered`. Two verdicts survive: `foreign-vocabulary`
- * (a different vocabulary that merely spells itself `code` — a driver errno, a
- * conversion outcome, a conformance fixture) and `runtime-pinned` (a template
- * whose named pin parses every member against the closed union — the
- * registration proof, done where a scan cannot). Pinned by `--self-test`.
+ * [#16449] The SPEC FACE — now the STRICTEST sub-face of the published one
+ * (#16649). `packages/spec/src/**` ships in `@objectstack/spec`'s `dist`, and
+ * the #16404 ruling (director seat, decision batch #62, 2026-09-07, option D)
+ * makes `ERROR_CODE_LEDGER` / `StandardErrorCode` the published contract face:
+ * every code that ships in `dist` is registered there, door or no door. So a
+ * stamp site under this prefix is a ledger member or it is a finding — the
+ * verdicts that classify a site AWAY from registration (`pending-registration`,
+ * `sandbox-authored`) are refused there, as `spec-face-unregistered`. Two
+ * verdicts survive: `foreign-vocabulary` (a different vocabulary that merely
+ * spells itself `code` — a driver errno, a conversion outcome, a conformance
+ * fixture) and `runtime-pinned` (a template whose named pin parses every member
+ * against the closed union — the registration proof, done where a scan cannot).
+ * Pinned by `--self-test`.
+ *
+ * ⚠️ This prefix stays a LITERAL and stays separate from the enumeration below,
+ * because it is the one place `pending-registration` has no allowance. Folding
+ * it into the general face would delete that difference silently.
  */
 const SPEC_SOURCE_FACE = 'packages/spec/src/';
 const SPEC_FACE_VERDICTS = Object.freeze(new Set(['foreign-vocabulary', 'runtime-pinned']));
+
+/**
+ * [#16649] The PUBLISHED FACE's verdict set: the spec face's two, plus the
+ * dated `pending-registration` allowance the header records. ⛔ Read the
+ * allowance's paragraph before adding a third member — the header's exception
+ * is the reason this set differs from `SPEC_FACE_VERDICTS` at all, and a member
+ * added without one would be the silent carve-out that exception exists to
+ * refuse.
+ */
+const PUBLISHED_FACE_VERDICTS = Object.freeze(
+  new Set([...SPEC_FACE_VERDICTS, 'pending-registration']),
+);
+
+/**
+ * [#16649] The allowance itself, as data rather than only as prose, so the
+ * report can print whether it is still owed instead of asking a reader to date
+ * a comment. See the header's "The one exception, named and dated" paragraph —
+ * that is the authority, this is what the run prints from.
+ */
+const PENDING_REGISTRATION_ALLOWANCE = Object.freeze({
+  granted: '2026-09-08',
+  grantedBy: 'director seat, decision batch #95 (#16649)',
+  owedTo: '#8846',
+  scope: `'pending-registration' rows OUTSIDE ${SPEC_SOURCE_FACE}`,
+  // What stood on it the day it was granted. A COUNT, not a list: an allowlist
+  // would make this file the place the two rows' dispositions get decided, and
+  // #8846 / #9460 own those. The live count is derived on every run below, and
+  // the pair only has to move in one direction for the allowance to end.
+  grantedFor: 2,
+});
+
+/**
+ * [#16649] The published face's FLOOR. `derivePublishedFaces` reads manifests
+ * off disk, and every read is a way for the enumeration to come back short —
+ * a moved workspace glob, a manifest that stops parsing, a `src/` that moves.
+ * A face list that comes back short turns this refusal off for the packages it
+ * dropped, and a gate that guards part of a population reads exactly like one
+ * that guards all of it: green.
+ *
+ * A FLOOR, not an equality — publishing a new package is ordinary work and must
+ * not red — set well below the 70 measured when this landed.
+ *
+ * ⚠️ ⛔ THE FLOOR ALONE CANNOT CATCH A LOST GLOB, and saying otherwise would be
+ * the same false comfort this gate exists to refuse. Measured on this tree, per
+ * workspace glob: `packages/*` 31, `packages/services/*` 16,
+ * `packages/plugins/*` 15, `packages/drivers/*` 5, `examples/*` 5,
+ * `packages/qa/*` 4, `packages/connectors/*` 4, `packages/apps/*` 3,
+ * `packages/triggers/*` 3, `packages/adapters/*` 1, `apps/*` 1 — 88 members
+ * before the published filter. Losing the LARGEST glob entirely still leaves 57,
+ * comfortably over any floor low enough not to red on ordinary churn — and
+ * `expandWorkspaceGlob` returns `[]` for a glob whose parent directory is gone,
+ * SILENTLY. So `packages/*` could vanish, taking `packages/spec` with it, and a
+ * floor of 40 would not notice.
+ *
+ * That is what {@link emptyWorkspaceGlobs} is for: the floor catches a
+ * collapse, the per-glob presence pin catches a vanished parent, and neither is
+ * a completeness claim about the members inside a glob that still resolves.
+ */
+const PUBLISHED_SOURCE_FACE_FLOOR = 40;
+
+/**
+ * [#16649] Every non-exclusion workspace glob that expands to NOTHING.
+ *
+ * Zero on this tree, and that is the whole point: a glob expanding to nothing
+ * is either a directory that moved without `pnpm-workspace.yaml` following it,
+ * or a category deliberately emptied whose glob nobody deleted. The first turns
+ * this gate's refusal off for everything under it; the second is a one-line
+ * cleanup. Both are worth a red, and neither is visible in a member COUNT.
+ *
+ * `readGlobs` / `expand` are injected so `--self-test` can drive a workspace
+ * this repo does not have.
+ */
+export function emptyWorkspaceGlobs({ readGlobs, expand }) {
+  return readGlobs()
+    .filter((glob) => !isExclusionGlob(glob))
+    .filter((glob) => expand(glob).length === 0);
+}
+
+/**
+ * [#16649] Every published workspace member's `src/`, as repo-relative prefixes.
+ *
+ * "Published" is `name && private !== true` — the same test
+ * `check-published-files.mjs` applies, and the reason is the ruling's own: the
+ * face is about what a consumer INSTALLS, so a member that npm never publishes
+ * is outside it however its path is spelled.
+ *
+ * ⚠️ It emits one prefix per published MEMBER and does not probe the disk for
+ * `src/`. A member that has none (today exactly one, `packages/console`, which
+ * ships a built console) contributes a prefix that matches nothing — inert, and
+ * cheaper than the `existsSync` it would take to drop it. So the count below is
+ * published MEMBERS, not members-with-sources, and the report says so; on the
+ * tree this landed against the two numbers are 70 and 69.
+ *
+ * `readManifest` is injected so `--self-test` can drive this over a fixture
+ * workspace instead of the repo's own.
+ */
+export function derivePublishedFaces({ dirs, readManifest }) {
+  const faces = [];
+  for (const dir of dirs) {
+    let manifest;
+    try {
+      manifest = JSON.parse(readManifest(`${dir}/package.json`));
+    } catch {
+      continue;
+    }
+    if (!manifest?.name || manifest.private === true) continue;
+    faces.push(`${dir}/src/`);
+  }
+  return faces.sort();
+}
+
+/**
+ * [#16649] Which face a site sits in, and therefore which verdict set answers
+ * for it. `null` means no published face reaches the file at all — a private
+ * member's `src/`, or anything outside a `src/` — and no face finding is owed.
+ */
+export function faceFor(file, publishedFaces) {
+  if (file.startsWith(SPEC_SOURCE_FACE)) return 'spec';
+  return publishedFaces.some((prefix) => file.startsWith(prefix)) ? 'published' : null;
+}
 
 // ---------------------------------------------------------------------------
 // The registered vocabulary — read from spec SOURCE, never from a build
@@ -2931,7 +3106,19 @@ const key = (s) => `${s.code}@${s.file}#${s.shape}`;
  */
 const helperKey = (h) => `${h.helper ?? ''}(${h.param ?? h.value})@${h.file}#${h.shape}`;
 
-export function reconcile({ sites, declared, registered, unresolved, declaredHelpers = [] }) {
+export function reconcile({
+  sites,
+  declared,
+  registered,
+  unresolved,
+  declaredHelpers = [],
+  // [#16649] The published face, INJECTED rather than derived here, and
+  // defaulting to none. `reconcile` is a pure function over data the caller
+  // assembled; `main` passes the live enumeration (floor-checked before it gets
+  // here) and every `--self-test` case passes the population it means to test,
+  // so no case can be read as covering a face it never declared.
+  publishedFaces = [],
+}) {
   const findings = [];
   const declaredByKey = new Map(declared.map((d) => [key(d), d]));
   const siteKeys = new Set(sites.map(key));
@@ -2939,19 +3126,29 @@ export function reconcile({ sites, declared, registered, unresolved, declaredHel
   for (const site of sites) {
     const row = declaredByKey.get(key(site));
     if (row) {
-      // [#16449] A packages/spec/src site is a ledger member, a foreign
-      // vocabulary or a runtime-pinned template — no verdict may park it
-      // between (see SPEC_SOURCE_FACE).
-      if (site.file.startsWith(SPEC_SOURCE_FACE) && !SPEC_FACE_VERDICTS.has(row.verdict)) {
+      // [#16449, widened #16649] A site under a PUBLISHED package's src/ is a
+      // ledger member, a foreign vocabulary or a runtime-pinned template — no
+      // verdict may park it between (see the header's published-face section).
+      // `packages/spec/src/` keeps the stricter set: no `pending-registration`
+      // allowance there, which is the one difference between the two faces and
+      // the reason they are asked separately rather than merged.
+      const face = faceFor(site.file, publishedFaces);
+      const allowed = face === 'spec' ? SPEC_FACE_VERDICTS : PUBLISHED_FACE_VERDICTS;
+      if (face && !allowed.has(row.verdict)) {
         findings.push({
-          kind: 'spec-face-unregistered',
+          kind: face === 'spec' ? 'spec-face-unregistered' : 'published-face-unregistered',
           text:
             `${site.file} stamps unregistered code '${site.code}' (${site.shape}) and ${DECLARATION} ` +
-            `classifies it '${row.verdict}' — a verdict refused under ${SPEC_SOURCE_FACE}.\n` +
-            `      That tree ships in @objectstack/spec's dist, and the #16404 ruling makes ERROR_CODE_LEDGER ` +
+            `classifies it '${row.verdict}' — a verdict refused under ` +
+            `${face === 'spec' ? SPEC_SOURCE_FACE : "a published package's src/"}.\n` +
+            `      That tree ships in the package's dist, and the #16404 ruling makes ERROR_CODE_LEDGER ` +
             `the published face: every code shipped in dist is registered there, door or no door. Register ` +
             `'${site.code}' in ${LEDGER_ZOD} (this row then ratchets out as stale), or — only if it is not an ` +
-            `ADR-0112 error code at all — classify it 'foreign-vocabulary' with the evidence.`,
+            `ADR-0112 error code at all — classify it 'foreign-vocabulary' with the evidence.` +
+            (face === 'spec'
+              ? `\n      ⛔ Under ${SPEC_SOURCE_FACE} there is no 'pending-registration' allowance: the ` +
+                `#8846 carve-out the header dates is scoped OUTSIDE this prefix.`
+              : ''),
         });
       }
       continue;
@@ -2970,13 +3167,29 @@ export function reconcile({ sites, declared, registered, unresolved, declaredHel
       });
       continue;
     }
+    // [#16649] The remedy named here has to be a remedy the FACE will accept.
+    // Inside the published face the ways out are the ledger row,
+    // `foreign-vocabulary` with evidence, or `runtime-pinned` on a template —
+    // and outside `packages/spec/src/` also `pending-registration`, on the
+    // dated #8846 allowance. Naming `pending-registration` unconditionally, as
+    // this text did before the widening, would send a spec-tree author to write
+    // the one verdict that reds there.
+    const siteFace = faceFor(site.file, publishedFaces);
     findings.push({
       kind: 'unclassified-site',
       text:
         `${site.file} stamps unregistered code '${site.code}' (${site.shape}) and ` +
         `${DECLARATION} does not classify it.\n` +
-        `      Add a row with a verdict and its evidence. If it reaches a wire, the verdict is ` +
-        `'pending-registration' and the code belongs in #8846's ledger batch.`,
+        (siteFace
+          ? `      That file is inside the published face, so the way out is the LEDGER: register ` +
+            `'${site.code}' in ${LEDGER_ZOD} under its stamping package (#16404 — every code shipped in ` +
+            `dist is registered, door or no door), and the site leaves this scan. Failing that, a row here ` +
+            `carrying 'foreign-vocabulary' WITH the evidence that it is not an ADR-0112 code at all` +
+            (siteFace === 'published'
+              ? `, or 'pending-registration' if it reaches a wire and belongs in #8846's ledger batch.`
+              : `. ⛔ Not 'pending-registration' — ${SPEC_SOURCE_FACE} has no allowance for it.`)
+          : `      Add a row with a verdict and its evidence. If it reaches a wire, the verdict is ` +
+            `'pending-registration' and the code belongs in #8846's ledger batch.`),
     });
   }
 
@@ -5405,29 +5618,160 @@ function selfTest() {
     }
   }
 
-  // ── [#16449] The spec face: a packages/spec/src site is registered or foreign ──
-  battery('[#16449] A packages/spec/src stamp site is a ledger member, never classified away.');
+  // ── [#16649] The published face: any published package's src/ is registered ──
+  //
+  // ⚠️ Every case here passes its OWN `publishedFaces`, because `reconcile`
+  // defaults to none. That is deliberate: a case that inherited a live
+  // enumeration would pass for reasons it never states, and the last case in
+  // this battery is the one — and the only one — that holds the fixture
+  // population against the repo's real one.
+  battery("[#16649] Every published package's src/ is a ledger member, never classified away.");
   {
+    const FACES = ['packages/core/src/', 'packages/spec/src/'];
     const specSite = { code: 'SPEC_ONLY_ONE', file: 'packages/spec/src/x.zod.ts', shape: 'classfield', door: 'none' };
-    const otherSite = { ...specSite, file: 'packages/x/src/a.ts' };
+    // A published package that is NOT spec — the region the widening added.
+    const pubSite = { ...specSite, file: 'packages/core/src/a.ts' };
+    // A member the enumeration leaves out (`private: true` on this tree:
+    // packages/qa/*), and a published file that is not under `src/`.
+    const privateSite = { ...specSite, file: 'packages/qa/dogfood/src/a.ts' };
+    const nonSrcSite = { ...specSite, file: 'packages/core/scripts/a.ts' };
     const rowFor = (site, verdict, extra = {}) => ({ ...site, verdict, why: 'self-test', ...extra });
-    const specFace = (site, verdict, extra) =>
-      reconcile({ sites: [site], declared: [rowFor(site, verdict, extra)], registered: new Set(), unresolved: [] })
-        .filter((f) => f.kind === 'spec-face-unregistered');
-    ok(specFace(specSite, 'boot-refusal').length === 1,
-      "a 'boot-refusal' row for a packages/spec/src site is a spec-face finding");
-    ok(specFace(specSite, 'pending-registration').length === 1,
-      "a 'pending-registration' row for a packages/spec/src site is a spec-face finding");
-    ok(specFace(specSite, 'foreign-vocabulary').length === 0,
+    const faceFindings = (site, verdict, extra) =>
+      reconcile({
+        sites: [site],
+        declared: [rowFor(site, verdict, extra)],
+        registered: new Set(),
+        unresolved: [],
+        publishedFaces: FACES,
+      }).filter((f) => f.kind === 'spec-face-unregistered' || f.kind === 'published-face-unregistered');
+
+    // ── The spec face keeps exactly the refusal it had ───────────────────────
+    ok(faceFindings(specSite, 'pending-registration').length === 1,
+      "a 'pending-registration' row for a packages/spec/src site is a face finding — no allowance there");
+    ok(faceFindings(specSite, 'sandbox-authored').length === 1,
+      "a 'sandbox-authored' row for a packages/spec/src site is a face finding");
+    ok(faceFindings(specSite, 'foreign-vocabulary').length === 0,
       "a 'foreign-vocabulary' row for a packages/spec/src site is admitted");
-    ok(specFace(otherSite, 'boot-refusal').length === 0,
-      "the same 'boot-refusal' row OUTSIDE packages/spec/src is not a spec-face finding (control)");
     const tpl = { code: 'SPEC_*_FAILED', file: 'packages/spec/src/x.ts', shape: 'objlittemplate', door: 'none' };
-    ok(specFace(tpl, 'runtime-pinned', { pin: 'scripts/check-dispatcher-error-vocabulary.mjs' }).length === 0,
+    ok(faceFindings(tpl, 'runtime-pinned', { pin: 'scripts/check-dispatcher-error-vocabulary.mjs' }).length === 0,
       "a 'runtime-pinned' template under packages/spec/src is admitted — its pin is the registration proof");
-    const [finding] = specFace(specSite, 'boot-refusal');
+
+    // ── ⭐ THE WIDENING. Before #16649 every one of these was zero, because the
+    // refusal asked `file.startsWith('packages/spec/src/')` and nothing else.
+    // These four are the assertions that would go quiet if the face silently
+    // narrowed back to one package. ──────────────────────────────────────────
+    ok(faceFindings(pubSite, 'sandbox-authored').length === 1,
+      "a 'sandbox-authored' row OUTSIDE packages/spec/src but inside a published package's src/ is a finding — " +
+        'the #16649 widening. If this is 0 the face has narrowed back to spec alone');
+    ok(faceFindings(pubSite, 'sandbox-authored')[0].kind === 'published-face-unregistered',
+      'the widened region reports its own finding kind — the spec face keeps `spec-face-unregistered`, so ' +
+        "the ledger's prose about that kind stays true and the two regions stay distinguishable in output");
+    ok(faceFindings(pubSite, 'boot-refusal').length === 1,
+      "the RETIRED 'boot-refusal' verdict is refused inside the published face — a row reintroducing it reds " +
+        'here as well as failing to type-check against CodeVerdict');
+    ok(faceFindings(specSite, 'sandbox-authored')[0].kind === 'spec-face-unregistered',
+      'the spec face still reports the kind it always did (control for the pair above)');
+
+    // ── ⭐ Item 5's negative controls: the two surviving verdicts, and the
+    // dated allowance, must NOT be refused in the widened region. A rule that
+    // simply reddened everything unregistered would pass every assertion above
+    // and delete these three. ────────────────────────────────────────────────
+    ok(faceFindings(pubSite, 'foreign-vocabulary').length === 0,
+      "'foreign-vocabulary' survives the widening OUTSIDE spec — 49 of this tree's 52 rows carry it");
+    ok(faceFindings({ ...tpl, file: 'packages/core/src/t.ts' }, 'runtime-pinned',
+      { pin: 'scripts/check-dispatcher-error-vocabulary.mjs' }).length === 0,
+      "'runtime-pinned' survives the widening OUTSIDE spec");
+    ok(faceFindings(pubSite, 'pending-registration').length === 0,
+      "'pending-registration' OUTSIDE packages/spec/src is ALLOWED — the dated #8846 carve-out the header " +
+        'grants. If this reds, the widening has been applied verbatim and two cards that are not this one ' +
+        '(#8846, #9460) are being decided by it');
+
+    // ── The face's own boundary: published, and `src/` ───────────────────────
+    ok(faceFindings(privateSite, 'sandbox-authored').length === 0,
+      "a private member's src/ is outside the face — it ships no dist, so the ruling's premise does not reach it");
+    ok(faceFindings(nonSrcSite, 'sandbox-authored').length === 0,
+      'a published package file outside src/ is outside the face (control for the prefix, not the package)');
+
+    const [finding] = faceFindings(pubSite, 'sandbox-authored');
     ok(Boolean(finding) && finding.text.includes('#16404') && finding.text.includes(LEDGER_ZOD),
-      'the spec-face finding names the ruling and the ledger file — the remedy, not only the verdict');
+      'the face finding names the ruling and the ledger file — the remedy, not only the verdict');
+    ok(faceFindings(specSite, 'pending-registration')[0].text.includes('#8846'),
+      'the spec-face finding for a pending row says WHERE the allowance it is missing lives (#8846), so the ' +
+        'author is not left comparing two prefixes by hand');
+
+    // ── The allowance is the ONLY difference between the two verdict sets ────
+    ok([...SPEC_FACE_VERDICTS].every((v) => PUBLISHED_FACE_VERDICTS.has(v)),
+      'the published face admits everything the spec face admits');
+    ok(
+      [...PUBLISHED_FACE_VERDICTS].filter((v) => !SPEC_FACE_VERDICTS.has(v)).join(',') === 'pending-registration',
+      'the two verdict sets differ by EXACTLY the dated #8846 allowance. A third member added here without a ' +
+        'dated paragraph in the header is the silent carve-out the ruling refused',
+    );
+
+    // ── The enumeration ─────────────────────────────────────────────────────
+    const fixture = {
+      'a/package.json': '{"name":"@x/a"}',
+      'b/package.json': '{"name":"@x/b","private":true}',
+      'c/package.json': '{"version":"1.0.0"}',
+      'd/package.json': 'not json at all',
+      'e/package.json': '{"name":"@x/e","private":false}',
+    };
+    const derived = derivePublishedFaces({
+      dirs: ['e', 'd', 'c', 'b', 'a'],
+      readManifest: (rel) => fixture[rel],
+    });
+    ok(JSON.stringify(derived) === JSON.stringify(['a/src/', 'e/src/']),
+      'derivePublishedFaces keeps named non-private members, drops private/unnamed/unparseable ones, and sorts — ' +
+        `got ${JSON.stringify(derived)}`);
+
+    // ── ⭐ The fixture population, held against the LIVE one. Without this the
+    // whole battery could be green over a workspace the repo does not have. ──
+    const live = derivePublishedFaces({
+      dirs: workspacePackageDirs(ROOT),
+      readManifest: (rel) => readFileSync(join(ROOT, rel), 'utf8'),
+    });
+    ok(live.length >= PUBLISHED_SOURCE_FACE_FLOOR,
+      `the LIVE published face enumerates ${live.length} member(s), below the pinned floor of ` +
+        `${PUBLISHED_SOURCE_FACE_FLOOR} — the production run refuses on this too, and both readings are the ` +
+        'same enumeration');
+    ok(FACES.every((f) => live.includes(f)),
+      `this battery's fixture faces ${JSON.stringify(FACES)} are not all in the live enumeration — the cases ` +
+        'above would be testing a population the repo does not have');
+    ok(!live.some((f) => f.startsWith('packages/qa/dogfood/')),
+      'packages/qa/dogfood is private on this tree, so the "outside the face" control above is a real member ' +
+        'the enumeration really excludes, not an invented path');
+
+    // ── The per-glob presence pin: the half the FLOOR structurally cannot do ──
+    ok(emptyWorkspaceGlobs({
+      readGlobs: () => ['packages/*', 'packages/plugins/*', '!packages/x'],
+      expand: (g) => (g === 'packages/plugins/*' ? [] : ['a']),
+    }).join(',') === 'packages/plugins/*',
+      'a glob expanding to NOTHING is reported by name — losing a whole glob hides more members than ' +
+        'any survivable floor can detect, so the count cannot be the detector');
+    ok(emptyWorkspaceGlobs({
+      readGlobs: () => ['!packages/gone'],
+      expand: () => [],
+    }).length === 0,
+      'an EXCLUSION glob expands to nothing by definition and is not a finding (control)');
+    ok(emptyWorkspaceGlobs({
+      readGlobs: () => readWorkspaceGlobs(ROOT),
+      expand: (g) => expandWorkspaceGlob(ROOT, g),
+    }).length === 0,
+      'the LIVE workspace has a glob that expands to nothing — the production run refuses on this too');
+    // The measurement that says the floor alone is not enough, held against the
+    // live tree rather than left as a claim in a comment.
+    {
+      const perGlob = readWorkspaceGlobs(ROOT)
+        .filter((g) => !isExclusionGlob(g))
+        .map((g) => expandWorkspaceGlob(ROOT, g).length);
+      const total = perGlob.reduce((a, b) => a + b, 0);
+      ok(total - Math.max(...perGlob) > PUBLISHED_SOURCE_FACE_FLOOR,
+        `losing the largest workspace glob would leave ${total - Math.max(...perGlob)} member(s), which is ` +
+          `BELOW the floor of ${PUBLISHED_SOURCE_FACE_FLOOR} — if this ever flips, the floor really would ` +
+          'catch a lost glob and PUBLISHED_SOURCE_FACE_FLOOR\'s docblock is stale. It is asserted in the ' +
+          'direction that keeps the per-glob pin necessary, not in the direction that flatters the floor');
+    }
+
     // Registration is the way out: a registered code derives no site at all.
     const { sites: none } = deriveSites({
       registered: new Set(['SPEC_ONLY_ONE']),
@@ -5532,7 +5876,50 @@ function main() {
   const declarationSource = readFileSync(join(ROOT, DECLARATION), 'utf8');
   const declared = parseDeclaration(declarationSource);
   const declaredHelpers = parseUnresolvedHelpers(declarationSource);
-  const findings = reconcile({ sites, declared, registered, unresolved, declaredHelpers });
+
+  // [#16649] The published face, derived live and floor-checked BEFORE it is
+  // used. An enumeration that came back short would turn the refusal off for
+  // the packages it dropped and print the same green line as a complete one, so
+  // this refuses rather than reports: a population this gate cannot vouch for
+  // is not a population it will guard silently.
+  const publishedFaces = derivePublishedFaces({
+    dirs: workspacePackageDirs(ROOT),
+    readManifest: (rel) => readFile(join(ROOT, rel)),
+  });
+  if (publishedFaces.length < PUBLISHED_SOURCE_FACE_FLOOR) {
+    throw new Error(
+      `the published face enumerated ${publishedFaces.length} published member(s), below the pinned ` +
+        `floor of ${PUBLISHED_SOURCE_FACE_FLOOR}. Either pnpm-workspace.yaml's packages: block moved, a ` +
+        `manifest stopped parsing, or the members really did shrink — the first two turn this gate's ` +
+        `refusal off for whatever fell out, and the third is a repo change that should move the floor ` +
+        `deliberately. ⛔ Do not lower the floor to pass.`,
+    );
+  }
+  // The half the floor cannot do: a whole glob going empty hides far more
+  // members than any survivable floor can detect (see PUBLISHED_SOURCE_FACE_FLOOR).
+  const emptyGlobs = emptyWorkspaceGlobs({
+    readGlobs: () => readWorkspaceGlobs(ROOT),
+    expand: (glob) => expandWorkspaceGlob(ROOT, glob),
+  });
+  if (emptyGlobs.length > 0) {
+    throw new Error(
+      `pnpm-workspace.yaml declares ${emptyGlobs.length} glob(s) that expand to NO member: ` +
+        `${emptyGlobs.join(', ')}. Every member under such a glob is invisible to this gate's published ` +
+        `face, so its refusal is off for all of them — and the member COUNT cannot show it, because a ` +
+        `floor low enough to survive ordinary churn is lower than the largest glob. Either the directory ` +
+        `moved and the glob should follow it, or the category is empty and the glob should be deleted. ` +
+        `⛔ Do not silence this by lowering the floor — the floor never saw it.`,
+    );
+  }
+
+  const findings = reconcile({
+    sites,
+    declared,
+    registered,
+    unresolved,
+    declaredHelpers,
+    publishedFaces,
+  });
 
   // [#9098] The door-typing half. `walkSources` skips the door file only if it
   // is a test or the declaration — it is neither, so read it from the scanned
@@ -5543,14 +5930,31 @@ function main() {
   findings.push(...checkDoorTyping({ doorSource, files }));
 
   const pending = declared.filter((d) => d.verdict === 'pending-registration');
-  const specSites = sites.filter((s) => s.file.startsWith(SPEC_SOURCE_FACE));
+  const specSites = sites.filter((s) => faceFor(s.file, publishedFaces) === 'spec');
+  const publishedSites = sites.filter((s) => faceFor(s.file, publishedFaces) === 'published');
+  // What is standing on the dated allowance TODAY. Printed rather than
+  // ratcheted: the number is how a reader answers "is #8846 still owed" from a
+  // run instead of from a comment's date.
+  const onAllowance = declared.filter(
+    (d) => d.verdict === 'pending-registration' && faceFor(d.file, publishedFaces) === 'published',
+  );
   const bounds =
     `  scope: ${files.length} non-test source files under ${SCAN_ROOT}/; ` +
     `${registered.size} registered codes (${ledger.size} ledger + ${standard.size} standard); ` +
     `${sites.length} unregistered code-stamping site(s) found; ${declared.length} classified.\n` +
-    `  [#16449] the spec face: ${specSites.length} stamp site(s) under ${SPEC_SOURCE_FACE}, every one ` +
-    `'foreign-vocabulary' or 'runtime-pinned' — any other verdict there is a finding: that tree ships in ` +
-    `@objectstack/spec's dist, and the #16404 ruling makes the ledger the published face, door or no door.\n` +
+    `  [#16649] the published face: ${publishedFaces.length} published member(s), each contributing its ` +
+    `src/ (floor ${PUBLISHED_SOURCE_FACE_FLOOR}, and every workspace glob checked non-empty — the floor ` +
+    `alone cannot see a lost glob), holding ${publishedSites.length} stamp site(s); plus the stricter ` +
+    `spec face, ${specSites.length} site(s) under ${SPEC_SOURCE_FACE}. Every one of them is ` +
+    `'foreign-vocabulary' or 'runtime-pinned' — any other verdict there is a finding: those trees ship in ` +
+    `their package's dist, and the #16404 ruling makes the ledger the published face, door or no door.\n` +
+    `  [#16649] the ONE exception, granted ${PENDING_REGISTRATION_ALLOWANCE.granted} by ` +
+    `${PENDING_REGISTRATION_ALLOWANCE.grantedBy} and owed to ${PENDING_REGISTRATION_ALLOWANCE.owedTo}: ` +
+    `${PENDING_REGISTRATION_ALLOWANCE.scope}. ${onAllowance.length} row(s) stand on it today ` +
+    `(${PENDING_REGISTRATION_ALLOWANCE.grantedFor} the day it was granted)` +
+    `${onAllowance.length === 0
+      ? ' ⇒ NOTHING is using it: the allowance is discharged and the header paragraph granting it can come out.'
+      : `: ${onAllowance.map((d) => d.code).sort().join(', ')}.`}\n` +
     `  door typing (#9098): ${REST_DOOR_FILE} checked for the typed author-side responder, the ` +
     `absence of a second \`sendError\`, and decided refusals bypassing it.\n` +
     `  the sandbox limb (author-thrown codes from metadata-app action code) is outside this scan ` +
