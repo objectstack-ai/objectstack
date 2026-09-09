@@ -18,8 +18,13 @@
  * rather than blanking out. Date / number / plain-string dimensions are no-ops.
  *
  * The resolution LOGIC lives here (and is unit-tested); the low-level capabilities
- * — reading an object's field map and fetching id→label pairs — are injected via
- * {@link DimensionLabelDeps} so this module stays free of any engine dependency.
+ * — reading an object's field map, fetching id→label pairs, and translating a
+ * select option's label (#16773) — are injected via {@link DimensionLabelDeps}
+ * so this module stays free of any engine OR i18n dependency: a select option's
+ * label is looked up in a translation bundle by the SAME translator the
+ * object-metadata REST endpoint uses (`translateObject`, `@objectstack/spec/system`),
+ * called from the plugin bridge (`plugin.ts`) — not reimplemented here, so
+ * there stays exactly ONE copy of "translate a select option label".
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -64,6 +69,34 @@ export interface DimensionLabelDeps {
     scope?: Record<string, unknown>,
     context?: ExecutionContext,
   ): Promise<Map<unknown, string>>;
+  /**
+   * Translate a `select` field's authored `options[]` into `locale` (#16773).
+   *
+   * A select option's `label` (`SelectOptionSchema.label`, `packages/spec`) is
+   * a PLAIN string — never an inline `I18nLabel` map — so its translation, if
+   * any, lives in an i18n TRANSLATION BUNDLE keyed
+   * `objects.<object>.fields.<field>.options.<value>`, the same address
+   * `translateObject` (`@objectstack/spec/system`) resolves for
+   * `GET /meta/object/:name` (the object-metadata REST endpoint the console's
+   * list/kanban/grid renderers already read their translated option labels
+   * from). This hook is how that SAME translator reaches an analytics
+   * dimension's option labels too — implemented once, in the plugin bridge
+   * (`plugin.ts`), by calling `translateObject` itself; nothing here
+   * reimplements the lookup.
+   *
+   * Optional, and `undefined` (no i18n service registered, or nothing for
+   * this object/field/locale) means "no translation available" — the caller
+   * then falls back to the field's own authored `options[].label`, exactly
+   * the pre-existing (locale-blind) behaviour. `locale` is threaded PER CALL,
+   * never captured when `DimensionLabelDeps` is built, because one instance
+   * is reused across every request.
+   */
+  translateSelectOptions?(
+    objectName: string,
+    fieldName: string,
+    options: Array<{ value: unknown; label?: string }>,
+    locale: string | undefined,
+  ): Array<{ value: unknown; label?: string }> | undefined;
 }
 
 /**
@@ -201,6 +234,17 @@ export function withLabelFetchCache(deps: DimensionLabelDeps): DimensionLabelDep
       }
       return out;
     },
+    // #16773 — passed straight through: nothing here is id-keyed request
+    // state to cache, and dropping the capability at this wrapper (as an
+    // earlier version of this fix did) silently disabled it for every real
+    // `AnalyticsService.queryDataset` call, which always wraps `labelResolver`
+    // in this cache (`analytics-service.ts`) — only a hand-rolled `deps()` in
+    // a unit test bypasses it, which is exactly why that gap did not show up
+    // until the end-to-end test below was added.
+    translateSelectOptions: deps.translateSelectOptions
+      ? (objectName, fieldName, options, locale) =>
+          deps.translateSelectOptions!(objectName, fieldName, options, locale)
+      : undefined,
   };
 }
 
@@ -310,8 +354,16 @@ export async function resolveDimensionLabels(
 
     // ── select: value → option label ──────────────────────────────────
     if (Array.isArray(meta.options) && meta.options.length > 0) {
+      // #16773 — the field's own `options[].label` is the AUTHORED (usually
+      // English) text; consult the i18n translation bundle for this request's
+      // locale first, via the SAME translator `GET /meta/object/:name` uses,
+      // and fall back to the authored label when no translation is available
+      // (no i18n service configured, nothing for this locale, or the option's
+      // value carries no bundle entry at all).
+      const translated = deps.translateSelectOptions?.(baseObject, dim.field, meta.options, context?.locale);
+      const options = translated ?? meta.options;
       const labelByValue = new Map<unknown, string>();
-      for (const opt of meta.options) {
+      for (const opt of options) {
         if (opt && opt.label != null) labelByValue.set(opt.value, String(opt.label));
       }
       if (labelByValue.size === 0) continue;
