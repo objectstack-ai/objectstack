@@ -272,4 +272,31 @@ describe('[#16568] organizations.getActiveMember addresses the organisation the 
     expect(raw.status).toBe(200);
     expect(await raw.json()).toMatchObject({ organizationId: ORG_A, id: 'mem_a_self' });
   });
+
+  it('⑧ an EMPTY organizationId is refused before the wire, not answered with the ACTIVE row', async () => {
+    // The last input in the wrong-but-plausible class. better-auth resolves
+    // `ctx.query.organizationId || session.activeOrganizationId`, so an empty
+    // string reached `list-members` and came back 200 carrying ORG_A's row
+    // while the JSDoc said "the GIVEN organisation" — the same silent
+    // substitution this card is about, surviving on one argument.
+    const { client, urls } = betterAuthDouble({ activeOrganizationId: ORG_A });
+
+    await expect(client.organizations.getActiveMember('')).rejects.toThrow(
+      '[ObjectStack] organizations.getActiveMember: organizationId is required',
+    );
+    // Refused CLIENT-side: nothing was put on the wire at all, so this cannot
+    // pass because some server happened to say no.
+    expect(urls).toEqual([]);
+
+    // Guard the guard: the fallback the refusal prevents is real in this
+    // fixture, exactly as it is in the vendor. Drive `list-members` with an
+    // empty id through the same double and watch it answer the ACTIVE
+    // organisation at 200 — which is what case ⑧ would have returned.
+    const raw = await (client as unknown as {
+      fetchImpl: (input: string) => Promise<Response>;
+    }).fetchImpl(`${AUTH}/organization/list-members?organizationId=&filterField=userId&filterValue=${USER.id}&limit=1`);
+
+    expect(raw.status).toBe(200);
+    expect(await raw.json()).toMatchObject({ members: [{ organizationId: ORG_A, id: 'mem_a_self' }] });
+  });
 });

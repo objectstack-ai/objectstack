@@ -3460,9 +3460,29 @@ export class ObjectStackClient {
      *     precondition, which is the point of naming the organisation;
      *   - an anonymous caller still gets `401 UNAUTHORIZED`, thrown from the
      *     `list-members` request by the same session middleware that guarded
-     *     `get-active-member`.
+     *     `get-active-member`;
+     *   - a FALSY `organizationId` is refused here, before the wire. It used to
+     *     answer the ACTIVE organisation's row at 200: better-auth resolves
+     *     `ctx.query.organizationId || session.activeOrganizationId`, so an
+     *     empty string fell through to session state — the same
+     *     wrong-but-plausible answer this method was fixed to stop giving,
+     *     surviving on one input while the contract above says "the GIVEN
+     *     organisation". Naming the active organisation explicitly asks that
+     *     question honestly; `auth.me()` carries the id, on
+     *     `session.activeOrganizationId`.
+     *
+     * @param organizationId the organisation to ask about. Required and
+     *   non-empty; there is no "whichever one is active" spelling, deliberately.
+     * @throws if `organizationId` is falsy, or if the server answers 200 with no
+     *   membership row for the caller.
      */
     getActiveMember: async (organizationId: string): Promise<OrganizationMemberWithUserWire> => {
+      // A falsy id is not "the active organisation", it is a caller bug: the
+      // route would silently substitute session state for the question asked.
+      // Loud beats a plausible answer about the wrong organisation (#16568).
+      if (!organizationId) {
+        throw new Error('[ObjectStack] organizations.getActiveMember: organizationId is required');
+      }
       const route = this.getRoute('auth');
       // Step 1 — the caller's own user id. Typed to the shape the route really
       // serves rather than to `SessionResponse`, which declares the REST
