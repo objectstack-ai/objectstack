@@ -36,7 +36,24 @@
     // the last `pnpm build` of three other packages. Each publishes a single
     // `"."` entry point, so one bare-name rule each — no star, per the
     // paragraph above.
+    // [#16534] Same rule, same reason, for the two producers
+    // `src/auth-rotated-session-token.test.ts` drives: `@objectstack/plugin-auth`
+    // (the real `AuthManager`, whose three routes rotate the caller's session)
+    // and the identity object definitions that pipeline stores its rows in.
+    // That suite's claim is "the SDK keeps the session the SERVER just handed
+    // it", so its verdict has to be about the server's SOURCE; through
+    // `exports` it would be about the last `pnpm build` of two other packages,
+    // which `check:type-source-resolution` reports as a NEW dist-resolved type
+    // import.
+    //
+    // `@objectstack/platform-objects` is the one entry here spelled as a
+    // SUBPATH: that package publishes eleven of them and this suite imports one
+    // (`./identity`), so the rule names that subpath exactly. Still no star —
+    // per the paragraph above, a bare-name star would fold all eleven onto a
+    // single target and type-check green against the wrong module.
     "paths": {
+      "@objectstack/plugin-auth": ["../plugins/plugin-auth/src/index.ts"],
+      "@objectstack/platform-objects/identity": ["../platform-objects/src/identity/index.ts"],
       "@objectstack/metadata-core": ["../metadata-core/src/index.ts"],
       "@objectstack/metadata-protocol": ["../metadata-protocol/src/index.ts"],
       "@objectstack/rest": ["../rest/src/index.ts"],
