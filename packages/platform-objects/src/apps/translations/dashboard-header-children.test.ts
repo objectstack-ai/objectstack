@@ -89,3 +89,49 @@ describe('#16458 — dashboard header children and row properties in every catal
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// #16458 item ③, first half — the catalogs were ALREADY correct, and this pin
+// exists so the next reader cannot "repair" them backwards.
+//
+// The card and its triage both prescribe the opposite of the truth: "every
+// generated catalog names `refreshInterval`, not `refreshIntervalSeconds`".
+// That direction is inverted. `refreshInterval` was RENAMED to
+// `refreshIntervalSeconds` in @objectstack/spec 17 (#15680, ruling B on
+// #14478) and is now a `retiredKey` tombstone — authoring it is a parse error
+// (`packages/spec/src/ui/dashboard.test.ts` pins the refusal). The live
+// authorable key is `refreshIntervalSeconds`, which is what these catalogs and
+// `dashboard.form.ts` already name.
+//
+// The card's reading came from a substring: `refreshInterval` "occurs" in
+// `dashboard.zod.ts` only inside `refreshIntervalSeconds`, in the rename
+// comment and in the tombstone's own prose. Under `grep -P '\brefreshInterval\b'`
+// there is no live field by that name at all.
+//
+// So carrying out that acceptance literally would have written the tombstoned
+// key into all four catalogs and created exactly the never-matching entry the
+// card set out to remove.
+describe('#16458 item ③ — the catalogs name the LIVE refresh key, not the tombstone', () => {
+  for (const { name, forms } of LOCALES) {
+    it(`${name}: names \`refreshIntervalSeconds\` and never the retired \`refreshInterval\``, () => {
+      const fields = forms.dashboard?.fields ?? {};
+      expect(typeof fields.refreshIntervalSeconds?.label, `${name} names the live key`).toBe('string');
+      expect(
+        Object.keys(fields),
+        `${name} carries the tombstoned \`refreshInterval\` — it is a parse error in the spec, so the entry could never match`,
+      ).not.toContain('refreshInterval');
+    });
+  }
+
+  it('the key the catalogs name is the key the form declares — one source, not two', () => {
+    const declared = new Set<string>();
+    for (const section of (dashboardForm as any).sections ?? []) {
+      for (const field of section.fields ?? []) if (field?.field) declared.add(String(field.field));
+    }
+    // Control — the form really was walked, so an empty set cannot pass by vacuity.
+    expect(declared.has('columns'), 'dashboardForm declares the neighbouring `columns`').toBe(true);
+    expect(declared.has('refreshIntervalSeconds')).toBe(true);
+    expect(declared.has('refreshInterval')).toBe(false);
+    expect(Object.keys(enMetadataForms.dashboard?.fields ?? {})).toContain('refreshIntervalSeconds');
+  });
+});
