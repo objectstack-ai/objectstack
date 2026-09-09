@@ -722,9 +722,33 @@ jobs:
                OPPOSITE bumps for the same additive act. The commit type is not the
                discriminator it looked like: it correlates with the act, and when
                they disagree the act wins. The 64 historical `patch` precedents are
-               pre-rule and nothing is retro-fixed. This is prose, not a gate -- no
-               check computes it; `check-changeset-no-major.mjs` refuses `major` and
-               says why in its header, and the two remaining levels are yours.
+               pre-rule and nothing is retro-fixed.
+
+               PART OF THIS IS A GATE, and which part is the difference between
+               grading well and being refused. `check-changeset-no-major.mjs`
+               refuses `major` and says why in its header. Since #16055 the SAME
+               script also runs a LEVEL AXIS over the rule above, and that
+               script's header states its scope: "a PR that DECLARES clause ② (a
+               new key on a published payload) must grade AT LEAST ONE package
+               whose published source it moves `minor` or above". It mechanizes
+               this ruling "for exactly the PRs where the widening is already
+               DECLARED, and for no others", and its `judgeLevel` verdict table
+               spells both directions: `not-declared`, "the declaration reads
+               `no`", exits 0; `enforce`, "declared `yes`, moved packages graded
+               `patch` and NONE of them graded `minor` or above", exits 1. So on
+               a PR that declares clause ②, grading `patch` across the board is
+               refused; on every other PR the axis stands down and the two levels
+               below `major` are yours, as they always were.
+
+               WHAT THE AXIS DOES NOT JUDGE, in its own words: "WHICH of the
+               packages above received that widening is NOT something this gate
+               can read, and it does not claim to. Clause ② is declared ONCE, FOR
+               THE PR" -- neither the carrier label nor the declaration line in
+               the PR body names a package. The axis cross-checks a declaration
+               against the levels; it never reads the diff to find the act.
+               Judging the act is still yours, this paragraph is still where the
+               rule lives, and everything in it the axis does not reach is still
+               prose.
 
             2. It releases nothing (.github/, .claude/, skills/, docs/, content/,
                examples/, tests-only, and the like)
