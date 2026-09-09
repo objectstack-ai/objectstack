@@ -182,6 +182,76 @@ describe('resolveDimensionLabels', () => {
       expect(rows).toEqual([{ account: 'Acme Corp', n: 1 }]);
     });
   });
+
+  // ── #16773 — select option label i18n ───────────────────────────────────
+  describe('select option i18n (#16773)', () => {
+    it('routes a select dimension through translateSelectOptions when the plugin wires one, using the request locale', async () => {
+      const seen: Array<{ objectName: string; fieldName: string; locale: string | undefined }> = [];
+      const d = deps({
+        translateSelectOptions: (objectName, fieldName, options, locale) => {
+          seen.push({ objectName, fieldName, locale });
+          return options.map((o) => (o.value === 'backlog' ? { ...o, label: '待办' } : o));
+        },
+      });
+      const rows = [{ status: 'backlog', n: 1 }, { status: 'done', n: 2 }];
+      await resolveDimensionLabels(
+        'task',
+        [{ name: 'status', field: 'status' }],
+        rows,
+        d,
+        undefined,
+        { locale: 'zh-CN' } as any,
+      );
+      expect(seen).toEqual([{ objectName: 'task', fieldName: 'status', locale: 'zh-CN' }]);
+      // Only the translated option changed; an option the translator didn't
+      // touch (`done`) still renders its AUTHORED label ('Done') — from the
+      // returned array, not silently dropped.
+      expect(rows).toEqual([{ status: '待办', n: 1 }, { status: 'Done', n: 2 }]);
+    });
+
+    it('falls back to the field\'s own authored label when translateSelectOptions declines (no i18n / nothing for this locale)', async () => {
+      const d = deps({ translateSelectOptions: () => undefined });
+      const rows = [{ status: 'backlog', n: 1 }];
+      await resolveDimensionLabels(
+        'task',
+        [{ name: 'status', field: 'status' }],
+        rows,
+        d,
+        undefined,
+        { locale: 'fr-FR' } as any,
+      );
+      expect(rows).toEqual([{ status: 'Backlog', n: 1 }]);
+    });
+
+    it('behaves exactly as before when the plugin declares no translateSelectOptions capability at all', async () => {
+      const rows = [{ status: 'backlog', n: 1 }];
+      await resolveDimensionLabels('task', [{ name: 'status', field: 'status' }], rows, deps() /* no translator */);
+      expect(rows).toEqual([{ status: 'Backlog', n: 1 }]);
+    });
+
+    // The dotted/cross-object CONTROL (#16773): a relationship-path field name
+    // (`account.region`) never matches a key in the BASE object's own field
+    // map, so `resolveDimensionLabels` skips it entirely via `if (!meta)
+    // continue` — select-branch translation included. This is the measured
+    // reason the dotted arm needs no change: it never reaches this file's
+    // select branch in the first place, on EITHER strategy, regardless of
+    // `translateSelectOptions`.
+    it('a dotted cross-object field name never matches the base object field map — left untouched, translateSelectOptions never consulted', async () => {
+      let called = false;
+      const d = deps({ translateSelectOptions: () => { called = true; return undefined; } });
+      const rows = [{ region: 'backlog', n: 1 }]; // arbitrary raw value; must survive verbatim
+      await resolveDimensionLabels(
+        'task',
+        [{ name: 'region', field: 'account.region' }],
+        rows,
+        d,
+        undefined,
+        { locale: 'zh-CN' } as any,
+      );
+      expect(called).toBe(false);
+      expect(rows).toEqual([{ region: 'backlog', n: 1 }]);
+    });
+  });
 });
 
 describe('formatDateBucket', () => {
@@ -299,6 +369,41 @@ describe('AnalyticsService.queryDataset — label resolution (integration)', () 
         { account: 'Globex', task_count: 2 },
       ],
     }]);
+  });
+
+  it('#16773 — a same-object select dimension renders the LOCALIZED option label end to end when the plugin bridge wires translateSelectOptions', async () => {
+    const svc = new AnalyticsService({
+      queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
+      executeAggregate: async () => [
+        { status: 'backlog', task_count: 5 },
+        { status: 'done', task_count: 3 },
+      ],
+      labelResolver: {
+        getObjectFields: (obj) => (obj === 'task' ? TASK_FIELDS : undefined),
+        fetchRecordLabels: async () => new Map(),
+        translateSelectOptions: (objectName, fieldName, options, locale) => {
+          if (objectName !== 'task' || fieldName !== 'status' || locale !== 'zh-CN') return undefined;
+          const zh: Record<string, string> = { backlog: '待办', in_review: '审核中', done: '完成' };
+          return options.map((o) => (typeof o.value === 'string' && zh[o.value] ? { ...o, label: zh[o.value] } : o));
+        },
+      },
+    });
+    const statusOnly = DatasetSchema.parse({
+      name: 'task_status',
+      label: 'Task Status',
+      object: 'task',
+      dimensions: [{ name: 'status', field: 'status', type: 'string' }],
+      measures: [{ name: 'task_count', aggregate: 'count' }],
+    });
+    const res = await svc.queryDataset(
+      statusOnly,
+      { dimensions: ['status'], measures: ['task_count'] },
+      { tenantId: 'org_A', locale: 'zh-CN' } as any,
+    );
+    expect(res.rows).toEqual([
+      { status: '待办', task_count: 5 },
+      { status: '完成', task_count: 3 },
+    ]);
   });
 
   it('enriches measure fields with their display label + format', async () => {
