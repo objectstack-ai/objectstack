@@ -45,7 +45,7 @@ model: opus
    - (c) 元数据 = 由写它的人以外的人存储并再作者化的键:React prop 不是,存储视图配置是。
    - 把作者引向运行时会兑现却让事情更糟的元数据的警告不在 (c) 内,记为边界不扩类。
    - 其余 ⛔ 不立卡:观察、死代码、未演练漂移、抛光、风格、文档 nit、命名。
-   - 它们进 PR `## 验收备注`,报告 `out_of_scope_findings` 记 `noted, not filed: …`,席位 ACCEPT 时读。
+   - 它们进 PR `## Acceptance notes`,报告 `out_of_scope_findings` 记 `noted, not filed: …`,席位 ACCEPT 读。
    - 写 `noted, not filed` 前先答哪一个 PR 或人会碰到这个文件;答不出就写明「承接者:无」。
    - 先搜再立:关键词 + 文件路径扫 open issues;并行 dev 同一小时立的卡只有这一搜能看见。
    - 通道先探后选:同容器先测一条 repo-scoped REST 读;通 ⇒ 走 REST 列表端点 + 本地 grep。
