@@ -52,16 +52,24 @@ comparison on the other, at HTTP 200 on both.
 - **One refusal.** `analyticsDateRangeUnrecognizedError` stamps the ADR-0112
   envelope `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` with the spec's own
   `analyticsDateRangeRefusalMessage` wording — the same sentence the schema door
-  answers with. `driver-memory` and both SQL strategies call it, so "memory and
-  SQL refuse identically" is one function rather than an agreement.
+  answers with. `driver-memory`, both SQL strategies and the draft-preview evaluator call
+  it, so "memory and SQL refuse identically" is one function rather than an
+  agreement.
 - **The upper bound keeps #16179's separation.** A window a face RESOLVED is
   compared exclusively (`$lt` / `<`) for the ten calendar presets and
   inclusively for the three rolling `last_N_days`, whose bound is NOW; an
   explicit `[a, b]` a CALLER wrote is untouched and keeps `$lte`.
 - The fifteen `driver-memory` date-range pins #16041 retired are reinstated in
   preset form (DST cells re-measured under calendar semantics, not re-spelled),
-  and one cross-face conformance fixture holds all three faces to the same
+  and one cross-face conformance fixture holds all FOUR faces to the same
   windows and the same refusal.
+- **The draft-preview evaluator is the fourth face**, and it is in that fixture
+  for the same reason the other three are. `preview-evaluator.ts` (ADR-0037 P3 —
+  the Live Canvas preview over a pending seed draft) carried the identical
+  `[range, range]` fallback, so a valid `last_30_days` selected NOTHING there,
+  silently, while the published chart beside it answered a real window — across
+  a publish boundary the preview exists to make continuous, since publish
+  materialises the same seed.
 
 ## FROM → TO
 
