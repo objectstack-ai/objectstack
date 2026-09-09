@@ -254,6 +254,18 @@ const MODULES = {
   // (`runtime/src/domains/share-links.ts`) had always returned.
   'packages/plugins/plugin-sharing/src/share-link-routes.ts': { responses: 0, ok: 0, err: 0 },
 
+  // [#15169] The host door. `mountStorageRoutes` composes `/api/v1/storage/*`
+  // onto an HTTP surface the HOST owns, for a hosted kernel that registers no
+  // `http-server` service. It matches the `*-routes.ts` convention and so is
+  // discovered, but it answers nothing itself: it binds the three package-internal
+  // seams and hands the surface to `registerStorageRoutes`, so every body on that
+  // prefix is still written by `storage-routes.ts` above, through the shared pair.
+  // Zero is therefore structural rather than measured-and-hoped: a write site
+  // appearing here would mean the door started building bodies of its own, which is
+  // exactly the review this number exists to force. Declared in the same PR that
+  // created the module so the gap never exists.
+  'packages/services/service-storage/src/mount-storage-routes.ts': { responses: 0, ok: 0, err: 0 },
+
   // ── Exempt ──────────────────────────────────────────────────────────────
 
   // A dev-only SSE endpoint (`GET|POST /api/v1/dev/metadata-events`) that closes
@@ -757,6 +769,30 @@ const PLUGIN_ROUTE_MODULES = {
   // pre-auth exemption here: these bodies are read by SDKs and codegen, not by
   // our own shells, and the migration was one key.
   'packages/adapters/hono/src/index.ts': {},
+
+  // [#16569] FIRST AUDIT — swept in by the walk, verdict conformant. The module
+  // rebuilds better-auth's `/organization/list-user-invitations` endpoint in place
+  // so the DECLARED `requireEmailVerificationOnInvitation` is honoured, and it
+  // BUILDS exactly ONE body: `return ctx.json(pendingInvitations)`. The argument
+  // is an IDENTIFIER, so the counters read it as relayed — the same deliberate
+  // blindness `inbound-rate-limit.ts` sits behind on surface 4 — and what it names
+  // is better-auth's own rows: the vendor's exported
+  // `getOrgAdapter(ctx.context, options).listUserInvitations(email)` produces them
+  // and the vendor's `status === 'pending'` post-filter narrows them. No shape is
+  // minted here, so there is no literal for a counter to read and none to hoist.
+  // The three refusals are `throw APIError.*` — the vendor's flat
+  // `{ message, code }`, RAISED rather than written — which this surface does not
+  // count either; the single countable write is therefore the file's whole visible
+  // departure, not a sample of it.
+  //
+  // Worth keeping distinct from its twin: `admin-impersonate-endpoint.ts` below
+  // takes the SAME in-place-rebuild door in this same package and needed the
+  // `vendorWire` ruling, because reimplementing that handler turned a relay into a
+  // BUILT literal (`ctx.json({ session, user })`) and made a vendor-owned shape
+  // visible to the counters. Here the rebuild never re-shapes the body, so nothing
+  // became visible and no ruled state applies. Read this `{}` for what it is:
+  // nothing this file BUILDS departs from the envelope.
+  'packages/plugins/plugin-auth/src/list-user-invitations-verification.ts': {},
 
   // ── Ratchet: real, tracked, NOT blessed ─────────────────────────────────
   //

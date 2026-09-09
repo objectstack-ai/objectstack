@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 **[AGENTS.md](./AGENTS.md) is the source of truth for working in this repo — read it.**
-Its Prime Directives are binding: each of the four rules that must never be missed is
+Its Prime Directives are binding: each of the rules that must never be missed is
 inlined below as one sentence, its enforcing hook, and a pointer to the AGENTS.md heading.
 
 ## ⛔ Claim the issue before you write any code
@@ -24,12 +24,12 @@ Hooks in `.claude/hooks/`: `guard-main-checkout.sh` (Edit/Write/NotebookEdit) an
 `guard-main-checkout-bash.sh` (the same writes as Bash); override `OS_ALLOW_MAIN_EDITS=1`.
 Full rule: AGENTS.md → **Prime Directives**, directive 11.
 
-## ⛔ Never `git stash` — the stash stack is NOT covered by worktree isolation
+## ⛔ Never `git stash`, never kill by name — worktree isolation covers neither
 
-`refs/stash` lives in the common `.git` dir, so all worktrees share one LIFO stack: your
-`pop` takes another agent's entry and reports **success** — use a patch or a wip commit.
-Hook `guard-shared-stash.sh` enforces it (override `OS_ALLOW_STASH=1`; re-run its
-`.selftest.sh` if you change it). Full rule: AGENTS.md → **Multi-agent working discipline**.
+`refs/stash` lives in the common `.git` dir and the process table is one per container, neither isolated: your `pop`
+takes another agent's entry, a name-matched kill takes their run, and both report **success**. Use a patch or a wip
+commit; kill only a PID you recorded. Hooks `guard-shared-stash.sh` / `guard-process-kill.sh` (`OS_ALLOW_STASH=1`,
+`OS_ALLOW_PROCESS_KILL=1`; re-run each `.selftest.sh`). Full rule: AGENTS.md → **Multi-agent working discipline**.
 
 ## ⛔ Never edit `content/docs/releases/` in a code PR
 

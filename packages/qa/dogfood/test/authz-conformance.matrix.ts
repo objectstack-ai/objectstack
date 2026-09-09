@@ -25,7 +25,7 @@
 // dispatcher domain files.
 //
 // The population comes from `packages/rest/src/rest-route-ledger.ts` (94 rows
-// / 19 families) and `packages/runtime/src/route-ledger.ts` (80 rows / 21
+// / 19 families) and `packages/runtime/src/route-ledger.ts` (82 rows / 21
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
 // domain cannot be silently absent from them, and therefore cannot be silently

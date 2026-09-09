@@ -157,10 +157,14 @@
  * host boot matching is not wire vocabulary.
  * ⚠️ That SECOND ground is superseded by #16404 ("Door or no door" above): a
  * boot refusal that ships in `dist` is owed a row, so the codes left out or
- * retired on the "not wire vocabulary" reasoning — the remaining
- * `boot-refusal` rows of `dispatcher-error-vocabulary.ts` — are registrations
- * owed under the ruling, not re-argued per card. What still retires a row is
- * the FIRST ground only: no producer left anywhere in `packages/**` source.
+ * retired on the "not wire vocabulary" reasoning were registrations owed
+ * under the ruling, not re-argued per card — #16449 registered the nine
+ * measured on its tree, and #16649 the fourteen `boot-refusal` rows
+ * `dispatcher-error-vocabulary.ts` still carried, among them
+ * `MONGODB_MULTI_TENANT_UNSUPPORTED` itself, back under
+ * `@objectstack/driver-mongodb` with the #8035 removal reversed on the
+ * record. What still retires a row is the FIRST ground only: no producer
+ * left anywhere in `packages/**` source.
  * Before deleting a row, check that no producer remains repo-wide AND
  * that no consumer — including `objectui` and `cloud` — reads the literal;
  * tests that merely CONSTRUCT the code are not producers, and a test pinned to
@@ -478,6 +482,24 @@ export const ERROR_CODE_LEDGER = {
     // listed once per emitting package — provenance, not identity.
     'WRITABLE_PACKAGE_REQUIRED',
     'WRONG_PASSWORD',
+    // [#16649] ADR-0130 D4 — `resolveArtifactCollections`
+    // (`artifact-collections.ts`) refuses one collection key declared in the
+    // ARRAY form by one source and the RECORD form by another inside the same
+    // artifact; `refuse()` there stamps `code` + `status: 422`. Registered
+    // under the #16404 ruling (door or no door; see the header): the code
+    // ships in this package's `dist/index.js` (measured), so its spelling is
+    // the face a consumer's `catch (e) { switch (e.code) }` pins.
+    // `door: 'none'` on this tree — the reading its `boot-refusal` row in
+    // `dispatcher-error-vocabulary.ts` recorded and this row ratchets out,
+    // re-checked here: the function is not exported from `src/index.ts`, and
+    // its call sites all ship in this package on the artifact load path
+    // (`app-plugin.ts`, `load-artifact-bundle.ts`, `standalone-stack.ts`,
+    // `resolve-project-database.ts`), so no package outside this one can
+    // reach it. The `status: 422` is the ADR-0112 envelope shape this repo's
+    // rejection tests assert on, not evidence of a door. Not a synonym of any
+    // standard member (`ARTIFACT`, `COLLECTION`, `SHAPE` are tokens none
+    // carries).
+    'MIXED_ARTIFACT_COLLECTION_SHAPE',
   ],
   '@objectstack/service-storage': [
     'ATTACHMENT_DELETE_DENIED',
@@ -791,11 +813,95 @@ export const ERROR_CODE_LEDGER = {
     // QUERY_OBJECT_MISMATCH one layer up.
     'UPDATE_ID_MISMATCH',
     'VALIDATION_FAILED',
+    // [#16649] ADR-0130 D3 — two packages delivered by ONE release artifact
+    // both claiming the same object name, refused by
+    // `SchemaRegistry.installPackage` ahead of every mutation it makes and
+    // therefore ahead of all DDL (`registry.ts`; `status: 422`; the literal
+    // is the exported `DUPLICATE_ARTIFACT_OBJECT_NAME_CODE`). Registered
+    // under the #16404 ruling (door or no door; see the header): the code
+    // ships in this package's `dist` (measured), so its spelling is the face
+    // a consumer pins. `door: 'none'` on this tree — the reading its
+    // `boot-refusal` row in `dispatcher-error-vocabulary.ts` recorded and
+    // this row ratchets out, re-checked here: it can only fire when
+    // `installPackage` is handed an artifact install scope naming a SECOND
+    // package, and the two HTTP-facing install sites pass no scope at all —
+    // `packages/metadata-protocol/src/protocol.ts`
+    // `installPackage(manifest, request.settings)` and
+    // `packages/runtime/src/domains/packages.ts`
+    // `installPackage(manifest, body.settings)`; the one caller that builds a
+    // scope is the `manifest` service's `register()` in `plugin.ts`, the
+    // ADR-0130 D4/D5 load path. The `status: 422` is the ADR-0112 envelope
+    // shape this repo's rejection tests assert on, not evidence of a door.
+    // Not a synonym of any standard member (`ARTIFACT` is a token none
+    // carries; `DUPLICATE_RECORD` / `DUPLICATE_VALUE` name a different
+    // condition and share only the first token).
+    'DUPLICATE_ARTIFACT_OBJECT_NAME',
   ],
   '@objectstack/core': [
     'ERR_BULK_RESULT_MISMATCH',
     'FILTER_TOKEN_UNKNOWN',       // filter references an unknown context token
     'FILTER_TOKEN_UNRESOLVED',
+    // [#16649] The nine rows below are `door: 'none'` codes — raised while a
+    // process is still assembling itself, or by a runner the CLI drives —
+    // registered under the #16404 ruling (door or no door; see the header).
+    // Each ships in this package's `dist/index.js` (measured), so its
+    // spelling is the face a consumer's `catch (e) { switch (e.code) }` pins;
+    // none reaches an HTTP door on this tree, so registering them changes no
+    // HTTP body. The `boot-refusal` rows they carried in
+    // `dispatcher-error-vocabulary.ts` ratcheted out with this batch — the
+    // reachability reading each recorded now lives here, one comment per
+    // group. None re-spells a standard member (`ARTIFACT`, `RUN`, `PLAN`,
+    // `PREFLIGHT`, `COMPENSABLE`, `REGISTERED` and `CONTRACT` are tokens no
+    // member carries).
+    //
+    // ADR-0130 D4/D5 — `resolveArtifactPackageOrder` (`artifact-packages.ts`)
+    // refuses, in order: an artifact whose `packages` key is present but not
+    // an array; a `packages[]` element that is not a `{ manifest: … }`
+    // wrapper or whose manifest carries no usable package id; and one
+    // artifact declaring the same package id twice (raised rather than
+    // deduplicated, so a dropped body cannot go unnoticed). `refuse()` there
+    // stamps `code` + `status: 422`. Door reading carried from the vocabulary
+    // rows and re-checked at the sites they named: the `manifest` service's
+    // `register()` callers abort boot (`packages/runtime/src/app-plugin.ts`,
+    // inside plugin init) or catch — the marketplace rehydrate loop per
+    // entry, and the HTTP install route in
+    // `packages/cloud-connection/src/marketplace-install-local-plugin.ts`
+    // answers with its OWN registered `PLUGIN_REGISTER_FAILED` at 422,
+    // interpolating only the message. The `status: 422` is the ADR-0112
+    // envelope shape this repo's rejection tests assert on, not a door.
+    'INVALID_ARTIFACT_PACKAGES',
+    'INVALID_ARTIFACT_PACKAGE_ENTRY',
+    'DUPLICATE_ARTIFACT_PACKAGE',
+    // ADR-0119 D2 — the migration-journal runner's four refusals
+    // (`MigrationJournalRefusal`, `utils/migration-journal.ts`: a
+    // `(code, message)` constructor, `code` only, no `status`). Raised by
+    // `runMigrationJournal` when no journal rows exist for the requested run
+    // id, when the plan hash moved under a recorded run, when a step's
+    // preflight refuses to start, and when a plan declaring
+    // `onCrash: 'compensate'` has a step with no `compensate()`. Their only
+    // consumers on this tree are `packages/cli/src/commands/migrate/resume.ts`
+    // and `recorded-by.ts`, which catch with `instanceof` and print — no HTTP
+    // boundary exists on that path.
+    'NO_SUCH_RUN',
+    'PLAN_CHANGED',
+    'PREFLIGHT_FAILED',
+    'NOT_COMPENSABLE',
+    // The async service-resolution discriminator (#13905): the ONE rejection
+    // `PluginLoader.getService` raises for "nothing ever registered this
+    // service" (`serviceNotRegisteredError`, `service-not-registered.ts`),
+    // branded and `code`-bearing so the seam that catches it can tell an
+    // unwired embedder from a broken one. No `status`, by design: the
+    // consumer decides whether an unwired service degrades or refuses. Read
+    // in-process by that seam and never serialized on this tree.
+    'SERVICE_NOT_REGISTERED',
+    // The plugin-contract refusal (#16049): `assertPluginContract`
+    // (`plugin-contract.ts`, called by `LiteKernel.use()` directly and by
+    // `PluginLoader.validatePluginContract` for `ObjectKernel.use()`) refuses
+    // a plugin object that does not satisfy the declared `PluginSchema`, with
+    // this code on the error's `code` and at the head of its message; no
+    // `status`. Raised while the kernel is still registering plugins, before
+    // bootstrap and therefore before any HTTP boundary exists.
+    'PLUGIN_CONTRACT_VIOLATION',
   ],
   '@objectstack/hono': [
     'AUTH_CONFIG_ERROR',             // auth service threw while the adapter mounted it
@@ -968,6 +1074,26 @@ export const ERROR_CODE_LEDGER = {
     // was already registered by six other packages.
     'INVALID_REQUEST',
   ],
+  '@objectstack/organizations': [
+    // [#16649] The walled-posture membership-policy gate (#16130, ADR-0132):
+    // `assertWalledMembershipPolicyDeclared` (`membership-policy-gate.ts`)
+    // throws `WalledMembershipPolicyError` — this code as `code` via the
+    // exported `MEMBERSHIP_POLICY_ERROR_CODE`, no `status` — when a walled
+    // posture is requested and `auth.membership_policy` is undeclared (with
+    // no effective policy other than `auto`) or invalid. Registered under the
+    // #16404 ruling (door or no door; see the header): the code ships in this
+    // package's `dist/index.js` (measured), the package's first row.
+    // `door: 'none'` on this tree — the reading its `boot-refusal` row in
+    // `dispatcher-error-vocabulary.ts` recorded and this row ratchets out,
+    // re-checked here: the plugin runs the gate from its `kernel:bootstrapped`
+    // hook (`organizations-plugin.ts`), which fires before `kernel:listening`
+    // opens the socket, so no request is ever served by a deployment this
+    // refuses. The `code` exists so a multi-kernel host can discriminate this
+    // refusal from its neighbours structurally, across module instances. Not
+    // a synonym of any standard member (`WALLED`, `MEMBERSHIP`, `POLICY`,
+    // `UNDECLARED` are tokens none carries).
+    'WALLED_MEMBERSHIP_POLICY_UNDECLARED',
+  ],
   '@objectstack/driver-memory': [
     // [#13254] Provenance for the in-memory driver's uniqueness refusal, which
     // #13197 (field-level `unique`) and #13239 (declared `indexes[]` entries)
@@ -993,6 +1119,44 @@ export const ERROR_CODE_LEDGER = {
     // admission rule checks WHO emits, so an unlisted emitter is invisible to
     // every gate the repo has.
     'UNIQUE_VIOLATION',
+    // [#16649] The in-memory driver's tenancy refusal —
+    // `MemoryMultiTenantUnsupportedError` (`memory-tenancy-guard.ts`) carries
+    // this code as `code` via the exported `MULTI_TENANT_UNSUPPORTED_CODE`,
+    // no `status`; thrown by `assertSingleTenantPosture` and
+    // `assertObjectsNotTenantScoped`, which `memory-driver.ts` calls.
+    // Registered under the #16404 ruling (door or no door; see the header):
+    // the code ships in this package's `dist/index.js` (measured), so its
+    // spelling is the face a host's `code` match pins — "host boot matching
+    // is not wire vocabulary" (#8035) no longer exempts a shipped code.
+    // `door: 'none'` on this tree — the reading its `boot-refusal` row in
+    // `dispatcher-error-vocabulary.ts` recorded and this row ratchets out:
+    // the driver-memory twin of the `driver-mongodb` row below, same guard
+    // shape, same constant name, same pre-HTTP abort. Not a synonym of any
+    // standard member (`MEMORY`, `TENANT`, `UNSUPPORTED` are tokens none
+    // carries).
+    'MEMORY_MULTI_TENANT_UNSUPPORTED',
+  ],
+  '@objectstack/driver-mongodb': [
+    // [#16649] The MongoDB driver's tenancy refusal —
+    // `MongoDBMultiTenantUnsupportedError` (`mongodb-tenancy-guard.ts`)
+    // carries this code as `code` via the exported
+    // `MULTI_TENANT_UNSUPPORTED_CODE`, no `status`; thrown by
+    // `assertSingleTenantPosture` and `assertObjectsNotTenantScoped`, which
+    // `mongodb-driver.ts` calls. Registered by #3724, UNregistered by #8035
+    // on "host boot matching is not wire vocabulary" (this owner key came
+    // out with it, the package's only row), and re-registered here under the
+    // #16404 ruling, which supersedes exactly that ground — a deliberate
+    // reversal on the record, not drift; the header's "Retiring a code"
+    // section carries both halves. The code ships in this package's
+    // `dist/index.js` (measured). `door: 'none'` on this tree — the reading
+    // its `boot-refusal` row in `dispatcher-error-vocabulary.ts` recorded and
+    // this row ratchets out, re-checked at the host: `packages/cli/src/commands/serve.ts`
+    // matches `e?.code === 'MONGODB_MULTI_TENANT_UNSUPPORTED'` and RETHROWS,
+    // so `os serve` aborts pre-HTTP rather than booting with no driver.
+    // #8035's reading of the one request-reachable trigger (a documented
+    // best-effort catch that logs and continues) is that ruling's, not
+    // re-measured here. Not a synonym of any standard member.
+    'MONGODB_MULTI_TENANT_UNSUPPORTED',
   ],
   '@objectstack/driver-sql': [
     // [#11991] The #11756 ruling's refusal (maintainer, 2026-08-25, verbatim
@@ -1003,11 +1167,14 @@ export const ERROR_CODE_LEDGER = {
     // `HttpStatusErrorCodeMap` already names for "this server does not do
     // that": the request is well-formed and nothing faulted.
     //
-    // Registered — not left driver-local like `MULTI_TENANT_UNSUPPORTED_CODE`
-    // — because it IS wire-reachable: publishing a drafted object calls
+    // Registered from the start — not left driver-local, as
+    // `MULTI_TENANT_UNSUPPORTED_CODE` was until #16649 — because it IS
+    // wire-reachable: publishing a drafted object calls
     // `engine.syncObjectSchema` → `SqlDriver.syncSchema` → the DDL gate, on a
     // server already serving HTTP. That is the exact test #8035 applied when
-    // it UNregistered `MONGODB_MULTI_TENANT_UNSUPPORTED` for failing it.
+    // it UNregistered `MONGODB_MULTI_TENANT_UNSUPPORTED` for failing it — a
+    // removal #16649 reversed under #16404; the test now decides only what a
+    // door answers with, never whether a shipped code is registered.
     // Producer: `packages/drivers/driver-sql/src/dialect-emission-refusal.ts`.
     'SQL_DIALECT_EMISSION_UNSUPPORTED',
   ],

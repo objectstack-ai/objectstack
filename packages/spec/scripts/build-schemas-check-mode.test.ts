@@ -75,6 +75,11 @@ import {
   authorableDefaultsShardTexts,
   parseDefaultEntries,
 } from './lib/authorable-defaults';
+import {
+  UNEMITTED_BASELINE_FILE,
+  type UnemittedBaseline,
+  type UnemittedEntry,
+} from './lib/unemitted-schemas';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
@@ -357,6 +362,21 @@ function mountSandbox(dir: string): void {
 }
 
 /**
+ * Copy the committed never-published ledger (#16431) into a fixture tree.
+ *
+ * `build-schemas.ts` resolves it from its own `__dirname/..`, so any tree that
+ * copies `scripts/` without it fails the #16431 gate on a MISSING ledger,
+ * before reaching whatever that fixture is about — which is how all four
+ * sandbox builders in this file came to need one line each. Copied rather than
+ * symlinked so a fixture may mutate it without writing to the real file; `src/`
+ * is the fixture's own, so the population a run observes is the repo's and the
+ * copied ledger is green without any seeding.
+ */
+function mountUnemittedLedger(dir: string): void {
+  fs.cpSync(path.join(PKG, UNEMITTED_BASELINE_FILE), path.join(dir, UNEMITTED_BASELINE_FILE));
+}
+
+/**
  * Build a sandbox — a temp tree that COPIES `scripts/` (so `__dirname` lands
  * there) and symlinks the read-only inputs — mount it, and seed it to the state
  * every block starts from: canonical ratchets, a real git repo, and an
@@ -376,6 +396,7 @@ function createSandbox(prefix: string): string {
   for (const entry of ['src', 'node_modules', 'package.json']) {
     fs.symlinkSync(path.join(PKG, entry), path.join(dir, entry));
   }
+  mountUnemittedLedger(dir);
   mountSandbox(dir);
   // The authorable-surface ratchet runs after the manifest one; give it the
   // committed snapshot so a check that gets that far judges the same contract.
@@ -551,6 +572,202 @@ describe('build-schemas.ts --check — a check reports, it does not write (#4711
       expect(output).not.toContain('📒');
       expect(readManifest()).toBe(current);
       expect(status).toBe(0);
+    },
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #16431 — an export that was NEVER published.
+//
+// The block above pins the ratchet for a schema that STOPS being emitted. This
+// one pins its sibling, and the two are deliberately not the same instrument:
+// the disappearance ratchet's baseline is `json-schema.manifest/`, which an
+// export that never emitted has never been in, so it has nothing to miss. The
+// last case here is that separation, asserted rather than assumed.
+//
+// The population is the repo's own — `src/` is symlinked into the sandbox — so
+// every fixture works by mutating the LEDGER and letting the real build
+// adjudicate it. Each case restores the ledger afterwards, because the shared
+// sandbox outlives the block.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** An export this build emits a JSON Schema for — the negative control's subject. */
+const EMITTED_EXPORT = 'Data.QueryFilterSchema';
+/** A ledger entry naming no export at all. */
+const PHANTOM_EXPORT = 'Data.ZzzNeverExportedByAnyBuild';
+
+const unemittedPath = (): string => path.join(sandbox, UNEMITTED_BASELINE_FILE);
+const readUnemittedBytes = (): string => fs.readFileSync(unemittedPath(), 'utf8');
+
+/** Rewrite the sandbox ledger's `entries`, keeping `$comment`; returns the bytes. */
+function seedUnemitted(
+  mutate: (entries: Record<string, UnemittedEntry>) => Record<string, UnemittedEntry>,
+): string {
+  const doc = JSON.parse(readUnemittedBytes()) as UnemittedBaseline & { $comment?: unknown };
+  const text = JSON.stringify({ ...doc, entries: mutate({ ...doc.entries }) }, null, 2) + '\n';
+  fs.writeFileSync(unemittedPath(), text);
+  return text;
+}
+
+describe('build-schemas.ts — an export that never published must be declared (#16431)', () => {
+  let pristineUnemitted: string;
+  /** A real member of the committed population, whatever it is called today. */
+  let someUnemitted: string;
+
+  beforeAll(() => {
+    pristineUnemitted = fs.readFileSync(path.join(PKG, UNEMITTED_BASELINE_FILE), 'utf8');
+    const entries = (JSON.parse(pristineUnemitted) as UnemittedBaseline).entries;
+    const keys = Object.keys(entries);
+    expect(keys.length, `${UNEMITTED_BASELINE_FILE} is empty — it is a committed ledger (#16431)`)
+      .toBeGreaterThan(0);
+    someUnemitted = keys[0];
+  });
+
+  // The manifest is seeded per test everywhere in this file rather than by
+  // `createSandbox`, so a block run in isolation (`-t`) starts with none at all
+  // — and every case here would then fail on a stale manifest instead of on the
+  // thing it is testing. Seed before, restore after: the ledger has to go back
+  // too, because the shared sandbox outlives this block.
+  beforeEach(() => {
+    seedManifest((s) => s);
+  });
+
+  afterEach(() => {
+    fs.writeFileSync(unemittedPath(), pristineUnemitted);
+    seedManifest((s) => s);
+  });
+
+  it(
+    'refuses GROWTH: an un-emitted export missing from the ledger exits 1, and the ledger is untouched',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // Deleting the line is how a NEW un-emitted export looks to this gate:
+      // the build observes it, the ledger does not name it. That equivalence is
+      // what lets the fixture stay inside the sandbox instead of mutating `src/`.
+      const withoutOne = seedUnemitted((e) => {
+        delete e[someUnemitted];
+        return e;
+      });
+
+      const { status, output } = run(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toMatch(/exported schema\(s\) emit NO JSON Schema and are not declared/);
+      expect(output).toContain(`+ ${someUnemitted}`);
+      // A check reports and never writes — the same discipline as #4711 above.
+      expect(readUnemittedBytes()).toBe(withoutOne);
+    },
+  );
+
+  it(
+    'refuses a STALE entry: a ledger line whose export emits a JSON Schema exits 1',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      const withStale = seedUnemitted((e) => ({
+        ...e,
+        [EMITTED_EXPORT]: { cause: 'date', reason: 'fixture: this export emits and must not be listed' },
+      }));
+
+      const { status, output } = run(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toMatch(/ledger entry\(ies\) in .* now EMIT a JSON Schema/);
+      expect(output).toContain(`- ${EMITTED_EXPORT}`);
+      expect(readUnemittedBytes()).toBe(withStale);
+    },
+  );
+
+  it(
+    'refuses a ledger line that names no export at all',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedUnemitted((e) => ({
+        ...e,
+        [PHANTOM_EXPORT]: { cause: 'function', reason: 'fixture: no such export' },
+      }));
+
+      const { status, output } = run(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toMatch(/ledger entry\(ies\) in .* name no exported schema/);
+      expect(output).toContain(`- ${PHANTOM_EXPORT}`);
+    },
+  );
+
+  it(
+    'refuses a recorded cause this build does not observe',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The reason prose is written ABOUT the cause. Left unchecked, an entry
+      // explaining a `z.date()` would keep reading as current after the date
+      // became a function — a repair nobody made, recorded as one.
+      seedUnemitted((e) => ({
+        ...e,
+        [someUnemitted]: { ...e[someUnemitted], cause: 'map' },
+      }));
+
+      const { status, output } = run(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toMatch(/ledger entry\(ies\) record a cause this build does not observe/);
+      expect(output).toContain(`~ ${someUnemitted}: recorded "map"`);
+    },
+  );
+
+  it(
+    'refuses an entry whose reason is empty — a count is not a ledger',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      seedUnemitted((e) => ({
+        ...e,
+        [someUnemitted]: { ...e[someUnemitted], reason: '   ' },
+      }));
+
+      const { status, output } = run(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toMatch(/ledger entry\(ies\) carry an empty `reason`/);
+      expect(output).toContain(`- ${someUnemitted}`);
+    },
+  );
+
+  it(
+    'does not replace the disappearance ratchet: a schema that STOPS being emitted is still its case',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The two ratchets guard opposite directions and must not trade domains.
+      // A manifest key no build emits is #2978's case, and its remedy — delete
+      // the key and declare it in RETIRED_DEFS_BY_MAJOR — is the right one; the
+      // #16431 ledger's "declare it here" would be wrong advice for a schema
+      // that was published yesterday. So that red must still be the one that
+      // speaks, with the ledger untouched and unmentioned.
+      seedManifest((s) => [...s, PHANTOM_KEY].sort());
+
+      const { status, output } = run(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toMatch(/1 previously published schema\(s\) disappeared from this build/);
+      expect(output).toContain(`- json-schema/${PHANTOM_KEY}.json`);
+      expect(output).not.toMatch(/emit NO JSON Schema and are not declared/);
+    },
+  );
+
+  it(
+    'is green on the committed ledger, and names the population it accepted',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // Negative control, twice over. Without it, "always exit 1" would satisfy
+      // every assertion above; and because the sandbox reads the repo's own
+      // `src/`, a pass here re-proves that the COMMITTED ledger describes this
+      // tree — the same thing `check:authorable-surface` asserts in CI.
+      const current = seedUnemitted((e) => e);
+
+      const { status, output } = run(['--check']);
+
+      expect(status).toBe(0);
+      expect(output).toMatch(/exported schema\(s\) emit no JSON Schema — all declared in/);
+      expect(output).toContain(someUnemitted);
+      expect(readUnemittedBytes()).toBe(current);
     },
   );
 });
@@ -2482,6 +2699,7 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
+    mountUnemittedLedger(box);
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
@@ -2780,6 +2998,7 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
+    mountUnemittedLedger(box);
     boxScript = path.join(box, 'scripts', 'build-schemas.ts');
     boxManifestDir = path.join(box, SCHEMA_MANIFEST_DIR_NAME);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
@@ -3145,6 +3364,7 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
+    mountUnemittedLedger(box);
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);

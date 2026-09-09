@@ -605,7 +605,7 @@ A minimal but complete project from scratch:
   },
   "devDependencies": {
     "@objectstack/cli": "^17.0.0",
-    "typescript": "^6.0.0"
+    "typescript": "^5.3.0"
   }
 }
 ```

@@ -17,9 +17,15 @@
  * an Invalid `Date`, which has no canonical text and passes through as the
  * `Date` it is (pinned by `sql-driver-14078-invalid-date-materialisation.test.ts`;
  * never met here, because this fixture writes only valid instants).
- * `findWithWindowFunctions` is not one of those doors: it applies no read
- * presentation of any kind, D-F1 records it as not covered, and #16609 holds
- * it.
+ * `findWithWindowFunctions` used to be the one read door outside this list: it
+ * applied no read presentation of any kind. Since #16609 it routes each row
+ * through the SAME `formatOutput` pass `find()` runs (minus the window-alias
+ * columns), so it presents these two column classes exactly as the doors above
+ * do — pinned by `sql-driver-window-function-output.test.ts`, whose live cells
+ * assert the canonical instant on Postgres and MySQL for this door too.
+ * ⚠️ ADR-0053 D-F1 still RECORDS that door as not covered; the tree is ahead of
+ * the declaration there, and docs-only governed card #16782 carries the
+ * amendment. Do not read the ADR line as the current behaviour.
  *
  * §A1–§A3 measure the four row doors on the fixture table; §A5–§A7 the three
  * write doors whose return is a row, on a second table so their writes cannot

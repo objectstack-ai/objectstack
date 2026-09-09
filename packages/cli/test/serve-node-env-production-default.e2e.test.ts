@@ -270,7 +270,7 @@ export default {
   objects: [{
     name: 'nodeenvdefault_task',
     label: 'Task',
-    sharingModel: 'public',
+    sharingModel: 'private',
     fields: { title: { type: 'text', label: 'Title' } },
   }],
   // Constructed here, by the HOST — not left to os serve's own auto-inject.

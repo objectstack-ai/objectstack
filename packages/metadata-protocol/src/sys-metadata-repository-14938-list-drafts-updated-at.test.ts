@@ -17,20 +17,29 @@
  * declaration is an inline return type), and `rows` is cast `as any[]` one line
  * above the map, so tsc sees a `string` assignment that never happened.
  *
- * ## Why the value is a `Date` on the live dialects
+ * ## Why a `Date` reaches this projection at all
  *
  * `updated_at` / `created_at` are the BUILTIN audit columns on `sys_metadata`
  * (`Field.datetime`, `packages/metadata-core/src/objects/sys-metadata.object.ts`).
- * `SqlDriver#formatOutput` repairs the audit columns
- * (`repairNaiveUtcAuditTimestamp`) and folds the declared datetime columns
+ * When this landed, `SqlDriver#formatOutput` repaired the audit columns
+ * (`repairNaiveUtcAuditTimestamp`) and folded the declared datetime columns
  * (`normalizeSqliteDatetimeOutput`) ONLY inside its `if (this.isSqlite)` arm,
- * and `withPostgresCalendarDayAsText` leaves `timestamptz` / `timestamp`
- * deliberately untouched because those are instants. That dialect fact is
- * pinned live in
- * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`;
- * this file does not re-derive it and takes on no driver dependency
- * (`@objectstack/metadata-protocol` has none, and the layering runs the other
- * way) — the `Date` is hand-made here for exactly that reason.
+ * so both live dialects handed the column through as a JS `Date`. #13973
+ * ([ADR-0053 D-F1]) has since lifted both passes out of that gate — they run on
+ * every dialect — and the pin that recorded the asymmetry now records the
+ * canonical-text contract
+ * (`packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`
+ * §B, inverted on purpose).
+ *
+ * ⚠️ `withPostgresCalendarDayAsText` is untouched by that ruling and still
+ * leaves `timestamptz` / `timestamp` deliberately alone ([ADR-0053 D-F2]) —
+ * those are instants and the CLIENT still materialises them as a `Date`; what
+ * changed is that the driver folds it at its own read boundary. The `Date` this
+ * file plants therefore still reaches the projection in practice: an INVALID
+ * `Date` leaves `driver-sql` unchanged ([ADR-0053 D-F3]) and non-SQL drivers
+ * materialise their own. This file does not re-derive any of it and takes on no
+ * driver dependency (`@objectstack/metadata-protocol` has none, and the
+ * layering runs the other way) — the `Date` is hand-made here for that reason.
  *
  * ## What is asserted, and why it is not a hand-copied shape
  *

@@ -691,17 +691,25 @@ function importJobUndoable(row: any): boolean {
  * [#13994] The input domain is what a DRIVER materialises into such a column,
  * and it is dialect-dependent — measured, not guessed:
  *
- *  - **JS `Date`** — `driver-sql` on Postgres and MySQL. `timestamptz` /
- *    `DATETIME(3)` are instants and the driver materialises them as `Date` on
- *    purpose (`SqlDriver.withPostgresCalendarDayAsText` says so in as many
- *    words); `driver-mongodb` stamps `new Date()` and BSON round-trips it.
- *    `formatOutput`'s two timestamp repairs — the `AUDIT_TIMESTAMP_COLUMNS`
- *    pass and the `normalizeSqliteDatetimeOutput` pass over `datetimeFields` —
- *    both sit INSIDE its `if (this.isSqlite)` arm, so neither runs here. ⚠️ A
- *    declared `Field.datetime` is therefore NOT protected on Postgres/MySQL.
- *  - **`string`, already canonical ISO-8601 UTC** — `driver-sql` on SQLite and
- *    its `driver-turso` / `driver-sqlite-wasm` siblings, and `driver-memory`.
- *    Passed through unchanged, so a canonical row is a fixed point.
+ *  - **JS `Date`** — `driver-mongodb` stamps `new Date()` and BSON round-trips
+ *    it. On `driver-sql` the CLIENT layer still materialises `timestamptz` /
+ *    `DATETIME(3)` as a `Date` on purpose — those are instants, and
+ *    `SqlDriver.withPostgresCalendarDayAsText` still leaves the parser alone in
+ *    as many words ([ADR-0053 D-F2]) — but that is no longer what leaves the
+ *    read door. Since #13973 ([ADR-0053 D-F1]) `formatOutput`'s two timestamp
+ *    repairs — the `AUDIT_TIMESTAMP_COLUMNS` pass and the
+ *    `normalizeSqliteDatetimeOutput` pass over `datetimeFields` — both run on
+ *    EVERY dialect, so the driver folds that `Date` at its own read boundary.
+ *    ⚠️ Exactly one `Date` shape still arrives here from `driver-sql`: an
+ *    INVALID `Date`, which has no canonical text to fold to and is handed
+ *    through unchanged by design ([ADR-0053 D-F3], `isoFromValidDate`). That
+ *    residue is what keeps this arm live rather than dead — see the #14078
+ *    section below, which is the arm that absorbs it.
+ *  - **`string`, already canonical ISO-8601 UTC** — `driver-sql` on every
+ *    dialect (SQLite and its `driver-turso` / `driver-sqlite-wasm` siblings
+ *    have always stored the text; Postgres and MySQL are folded to it at the
+ *    read door), and `driver-memory`. Passed through unchanged, so a canonical
+ *    row is a fixed point.
  *  - **anything else** a host stamps into the column — rendered as before.
  *
  * Why this is not `String(v)`: on a `Date`, `String` runs
@@ -2053,7 +2061,7 @@ export class RestServer {
     }
 
     /**
-     * [#3939] Enforce the deployment's batch-size cap on a bulk write route.
+     * [#3939] Enforce the configured batch-size cap on a bulk write route.
      * Returns `true` when a response was sent (the caller must return).
      *
      * The cap was declared in three places in `batch.zod.ts` (`.max(200)` on
@@ -2068,10 +2076,34 @@ export class RestServer {
      * own result), which turns a 10k-id body into 10k sequential engine
      * round-trips inside one request instead of one statement.
      *
-     * The cap is deployment policy — `RestServerConfig.batch.maxBatchSize`
-     * (1..1000, default 200) — so it lives here and the schemas carry shape
-     * only. One place decides it, and it is the place that knows the
-     * deployment's configured value.
+     * The cap is `RestServerConfig.batch.maxBatchSize` (1..1000, default 200),
+     * so it lives here and the schemas carry shape only: one place decides it,
+     * and it is the place that holds the constructed config.
+     *
+     * Reachability: EMBEDDER-ONLY (#15543, #16801). ⛔ It is NOT deployment
+     * policy — this docblock said exactly that until #16801, and no shipped
+     * boot path makes it true. A `RestServerConfig` is the ARGUMENT a host
+     * passes when it constructs the server, and there is exactly ONE door:
+     * `createRestApiPlugin({ api })` (`packages/rest/src/rest-api-plugin.ts`),
+     * whose `start()` is the only non-test site that reaches
+     * `new RestServer(...)`. Neither shipped boot path opens it with a `batch`
+     * config — `os serve` (`packages/cli/src/commands/serve.ts`) forwards
+     * exactly two keys out of the stack config's `api:` block
+     * (`api.enableProjectScoping`, `api.projectResolution`), and the dev plugin
+     * (`packages/plugins/plugin-dev/src/dev-plugin.ts`) calls
+     * `createRestApiPlugin()` with no config at all. ⇒ A CLI-started
+     * deployment always gets the schema default of 200, and no flag, config
+     * file or CLI option moves it.
+     *
+     * This is the recorded posture, not a gap awaiting a fix, and it is written
+     * the same way on the spec side — the `BatchEndpointsConfigSchema` docblock
+     * and the WHO CAN WRITE THIS CONFIG header in
+     * `packages/spec/src/api/rest-server.zod.ts`, plus the per-key REACHABILITY
+     * row in `packages/spec/liveness/batch_endpoints.json`. Keep the two
+     * wordings together: threading a `batch` config through a boot path would
+     * be a NEW authorable key, which the spec-side siblings were denied for
+     * want of measured demand, so reversing that is its own decision and
+     * ⛔ not a docblock's to take.
      */
     private enforceBatchSize(res: any, count: number, max: number, object?: string): boolean {
         if (count <= max) return false;
@@ -4493,9 +4525,19 @@ export class RestServer {
 
                         // Align auth route with the versioned base path if present.
                         // Auth is a control-plane concern, so use the unscoped base.
+                        //
+                        // [#16538] The strip names BOTH spellings, exactly as the MCP
+                        // sibling above does. It used to name only the retired
+                        // `/projects/:environmentId`, while `isScoped` — the condition
+                        // guarding this very branch — keys on `/environments/:environmentId`
+                        // alone. So the replace could never match where it ran: it returned
+                        // `basePath` unchanged and a scoped `/discovery` advertised
+                        // `/api/v1/environments/:environmentId/auth`, keeping both the scope
+                        // this comment says to drop and a literal, unsubstituted route
+                        // parameter. Pinned in `discovery-per-request-protocol.test.ts`.
                         if (discovery.routes.auth) {
                             const unscopedBase = isScoped
-                                ? basePath.replace(/\/projects\/:environmentId$/, '')
+                                ? basePath.replace(/\/(environments|projects)\/:environmentId$/, '')
                                 : basePath;
                             discovery.routes.auth = `${unscopedBase}/auth`;
                         }
@@ -4513,12 +4555,21 @@ export class RestServer {
                         // That move landed with NO edit in this block, which is
                         // exactly the property #6633 was built to provide.
                         //
-                        // A boot that mounted nothing (no `package` service ⇒
-                        // the registrar was never called) advertises nothing:
-                        // the protocol's service-presence `packages` entry is
+                        // A boot that mounted nothing advertises nothing: the
+                        // protocol's service-presence `packages` entry is
                         // deleted rather than left to promise a 404 — this
                         // server knows the mount fact, which is strictly better
-                        // knowledge than service presence.
+                        // knowledge than service presence. [#14503] The package
+                        // registrar's ONE route (`POST {base}/packages/publish`)
+                        // mounts on every boot since #7563, so `routes.packages`
+                        // is advertised on every boot at THIS server's base; the
+                        // family's reads and delete are served by the runtime
+                        // dispatcher's `/packages` domain, the single
+                        // implementation. (While the base was keyed on the
+                        // registrar's own `GET {base}/packages` copy — never
+                        // mounted on a stock boot, where the `package` service
+                        // registers after this plugin starts — a stock boot
+                        // advertised no `routes.packages` at all.)
                         const direct = this.getDirectMountRouteBases(
                             isScoped ? (req.params?.environmentId ?? ':environmentId') : undefined,
                         );
@@ -13430,11 +13481,20 @@ export class RestServer {
         let packagesScoped: string | undefined;
         let datasources: string | undefined;
         for (const { method, path } of this.directMountedRoutes) {
-            // The package registrar's list route (`GET {base}/packages`) IS the
-            // surface base — recorded verbatim, recognised, never rebuilt.
-            if (method === 'GET' && path.endsWith('/packages')) {
-                if (path.includes(SCOPED_SEGMENT)) packagesScoped = path;
-                else packagesUnscoped = path;
+            // [#14503] The package registrar mounts ONE route,
+            // `POST {base}/packages/publish`, under the family base; the base
+            // is that recorded path minus its `/publish` segment — recognised,
+            // never rebuilt. (It used to be keyed on the registrar's own
+            // `GET {base}/packages` copy of the list route, removed by #14503:
+            // the dispatcher's `/packages` domain is the family's single
+            // implementation, and REST's contribution to the family is publish.)
+            const publishAt = path.endsWith('/packages/publish') && method === 'POST'
+                ? path.length - '/publish'.length
+                : -1;
+            if (publishAt > 0) {
+                const base = path.slice(0, publishAt);
+                if (path.includes(SCOPED_SEGMENT)) packagesScoped = base;
+                else packagesUnscoped = base;
             }
             // Every federation route sits under
             // `{base}/datasources/:name/external/…`; the advertised base is
