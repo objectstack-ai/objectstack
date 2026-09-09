@@ -244,8 +244,24 @@ const GROUP_CLOSE = /^(?:::endgroup::|##\[endgroup\])\s*$/;
 // above have had their turn, so a `::group::` header can never land here.
 const BARE_TASK_HEADER = /^(\S+):test(?::repo)?$/;
 
-export function parseSummaries(text) {
-  const rows = [];
+/**
+ * The three header shapes, walked ONCE, so every reader of a turbo test log
+ * shares one answer to "whose output is this line?".
+ *
+ * Yields `{ line, group }` for every line that is NOT itself a header: `group`
+ * is the package whose task header is currently open, or `null` when none is.
+ * It deliberately does NOT strip a stream-order `<pkg>:test:` prefix -- that
+ * prefix is part of the line each caller matches, and `parseSummaries` below
+ * reads it out of its own regex. What is centralised here is the part measured
+ * to be easy to get wrong and expensive when wrong: the `::group::` /
+ * `##[group]` header, its close, the BARE header turbo gives the run's failing
+ * task, and the end-of-run roster that closes that bare header.
+ *
+ * A second reader re-deriving this walk is the hazard: a prefix-only parser is
+ * blind exactly on the failing task, which is the one any grader cares about
+ * most. Extend it HERE, never in a copy.
+ */
+export function* attributedLines(text) {
   let group = null;
   for (const line of text.split('\n')) {
     if (GROUP_CLOSE.test(line)) {
@@ -277,6 +293,13 @@ export function parseSummaries(text) {
       group = null;
       continue;
     }
+    yield { line, group };
+  }
+}
+
+export function parseSummaries(text) {
+  const rows = [];
+  for (const { line, group } of attributedLines(text)) {
     const m = line.match(SUMMARY);
     if (!m) continue;
     const [, pkg, kind, tallies, declared] = m;
