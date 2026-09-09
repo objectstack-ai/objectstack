@@ -1,6 +1,6 @@
 {
   "name": "create-objectstack",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "description": "Create a new ObjectStack project — npx create-objectstack",
   "bin": {
     "create-objectstack": "./bin/create-objectstack.js"
@@ -34,7 +34,7 @@
     "@types/node": "^26.2.0",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10",
+    "vitest": "^4.1.11",
     "yaml": "^2.9.0"
   },
   "repository": {

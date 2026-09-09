@@ -40,7 +40,7 @@
 - CI 收敛读数只属于复核侧:dev 的契约是草稿 PR 时点交报,gate `in_progress` 是诚实读数。
 - 翻 ready、挂 auto-merge 或入队前,亲核 Lint & Repo Gates 与 TypeScript Type Check 两个 job。
 - 两个 job 的 `conclusion` 都须为 `success`,门禁族跑在其内;⛔ 不因报告写了本地绿跳过。
-- 两 job 只是 required 地板,入队资格另要求全部 check 全绿;真绿跑法见 `true-green.md`。
+- 两 job 只是 required 地板,入队另要求全 check 绿(第三种情形见 SKILL.md);跑法见 `true-green.md`。
 - 收敛期转红走补丁轮续派原 dev,⛔ 不作 REWORK 的理由;重量级卡可在派发令写本单等 CI。
 - 每个门禁读数先钉到 PR 当前 head:比对 run `head_sha` 与 `head.sha`,不一致的双向都不入账。
 - ⛔ 非当前 head 上的 `cancelled` 零动作、永不重跑:新推送自带全套 run。

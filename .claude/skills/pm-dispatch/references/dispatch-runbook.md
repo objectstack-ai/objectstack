@@ -27,7 +27,7 @@
 - 每批约定:≤5 张同族卡、同上下文逐张读;常设授权,⛔ 不逐次请示。
 - sweep 打包晋级五条:同类才打包(全部命中同一判据)。
 - 逐项清单(落点、before、after)是 PR 正文必备件。
-- N 项之外零改动且 PR 自证;范围外发现按立卡三类门槛分流,三类外进验收备注、不单开。
+- N 项之外零改动且 PR 自证;范围外按立卡三类门槛分流,三类外进 Acceptance notes、不单开。
 - sweep 卡是认领对象,成员单保持标签但不再是可派发候选。
 - 积压告警:连续 COMPLETED 清空 fire 后裸卡仍 >15 ⇒ 入流大于吞吐,报维护者。
 - 阈值落地一周后随机抽 20 条 `noted, not filed`,由席位逐条重判,量出误记率并记档。
@@ -213,7 +213,7 @@
 - ⛔ 不在消费者侧打补丁;只写一个路径名,是要求 dev 在守约与修对之间二选一。
 - 跨包常等于跨车道,PM 事后补跨座位声明。
 - 模型标识只禁内容工件:PR 标题与正文、代码注释、文档、changeset、评论。
-- 两条豁免同属规则,⛔ 不再申报为偏差:一是 commit 的 `Co-Authored-By` 尾注(含 session 链接)。
+- 豁免不再申报为偏差:一是 harness 的 `Co-Authored-By` 尾注,免的是申报,trailer pair 仍 model-free。
 - 另一条是 `.claude/agents/*` frontmatter 的 `model:`,`check:agent-model-declared` 要求。
 - same-day churn 行:派发时 `git log origin/main --oneline -20 -- <paths>` 见当天合并即加一行。
 - 该行原文:基于合并后的代码工作,issue 引用的片段可能已变,先核对当前 main。
