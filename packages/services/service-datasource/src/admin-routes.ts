@@ -12,15 +12,14 @@ import {
   ANONYMOUS_DENY_STATUS,
   ANONYMOUS_DENY_CODE,
   ANONYMOUS_DENY_MESSAGE,
-  // [#15350] The four symbols the admission posture read needs, and nothing
-  // more. `effectiveTenancyPosture` reads the posture IN FORCE off the
-  // `tenancy` service (ADR-0093 D4/D5: a deployment REQUESTING `isolated`
-  // without the enterprise organizations runtime is `single` in force), while
-  // `isServiceNotRegisteredError` / `AuthzStoreUnavailableError` are the two
-  // halves of #13906 decision 1 option A's classification.
-  effectiveTenancyPosture,
-  isServiceNotRegisteredError,
-  AuthzStoreUnavailableError,
+  // [#16013] The admission posture read is ONE call now. The shared
+  // classification owns #13906 decision 1 option A (branded "never registered"
+  // stays quiet, every other rejection is the ADR-0112 outage) and reads the
+  // posture IN FORCE off the `tenancy` service (ADR-0093 D4/D5: a deployment
+  // REQUESTING `isolated` without the enterprise organizations runtime is
+  // `single` in force). The WIRING fact stays here -- see
+  // `resolveAdmissionTenancyPosture` below.
+  classifyAdmissionTenancyPosture,
   type TenancyPostureSource,
 } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
@@ -397,17 +396,18 @@ export function registerDatasourceAdminRoutes(
    * membership manages this deployment's datasources — not a cross-organization
    * row read. Less severe than the REST data door (#15256); not correct.
    *
-   * ## The classification — #13906 decision 1 option A
+   * ## The classification — #13906 decision 1 option A, no longer written here
    *
-   * - **Never registered** ⇒ branded (`isServiceNotRegisteredError`), quiet
-   *   `undefined`. An embedding with no `plugin-auth` is a SUPPORTED
-   *   composition, and its behaviour here is exactly what it was.
-   * - **Registered and unable to answer** ⇒ `AuthzStoreUnavailableError`
-   *   (ADR-0112 `SERVICE_UNAVAILABLE`). The posture is an authorization INPUT,
-   *   so admission was never DECIDED and must not be answered. A
-   *   `try { … } catch { undefined }` here would re-introduce precisely the
-   *   permissive-on-failure defect #13906 exists to repair — a FAILURE reading
-   *   as "this check does not apply".
+   * [#16013] `classifyAdmissionTenancyPosture` (`@objectstack/core`) owns the
+   * branded/unbranded decision for every admission seam: never registered ⇒
+   * quiet `undefined` (an embedding with no `plugin-auth` is a SUPPORTED
+   * composition, and its behaviour here is exactly what it was); every other
+   * rejection ⇒ `AuthzStoreUnavailableError` (ADR-0112 `SERVICE_UNAVAILABLE`),
+   * because the posture is an authorization INPUT and admission was never
+   * DECIDED. ⛔ A `try { … } catch { undefined }` at any seam would re-introduce
+   * precisely the permissive-on-failure defect #13906 exists to repair — a
+   * FAILURE reading as "this check does not apply" — which is why the decision
+   * is one tested function rather than six hand-written copies.
    *
    * The throw is raised inside `requireDatasourceAdmin`'s own `try`, so it
    * takes the relay that block already runs for the identical fault one seam
@@ -431,26 +431,19 @@ export function registerDatasourceAdminRoutes(
    * (`registerServiceFactory` throws "not supported"), so absence is the only
    * fault it could report. It keeps the quiet answer, unchanged.
    *
-   * ⛔ Deliberately NOT extracted into a shared helper. Three sibling cards
-   * (#15349, #15351, #15352) are live on this same seam in other packages; a
-   * helper extracted by one of the four collides with the other three. The
-   * extraction is worth doing — once, as its own card, after they land.
+   * ⛔ And that reason is why the RESOLUTION above stays here while the
+   * classification moved (#16013): the shared helper is handed an already-
+   * decided way to reach the service, never the decision of whether this host
+   * shape can be asked at all.
    */
   const resolveAdmissionTenancyPosture = async (): Promise<TenancyPosture | undefined> => {
     const kernel = ctx.getKernel?.() as
       | { getServiceAsync?: <T>(name: string, scopeId?: string) => Promise<T> }
       | undefined;
     if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
-    try {
-      return effectiveTenancyPosture(
-        await kernel.getServiceAsync<TenancyPostureSource>('tenancy'),
-      );
-    } catch (err) {
-      if (!isServiceNotRegisteredError(err)) {
-        throw new AuthzStoreUnavailableError('tenancy', err);
-      }
-      return undefined;
-    }
+    return classifyAdmissionTenancyPosture(() =>
+      kernel.getServiceAsync!<TenancyPostureSource>('tenancy'),
+    );
   };
 
   const requireDatasourceAdmin = async (req: any, res: any): Promise<boolean> => {
