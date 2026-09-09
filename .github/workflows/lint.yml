@@ -3029,6 +3029,19 @@ jobs:
       - name: Changeset-family gate self-tests
         run: pnpm check:changeset-gate-self-tests
 
+      # Lockstep package-count guard (#17039). `.changeset/config.json`'s
+      # `fixed` array is the one true count of packages one stray `major`
+      # promotes; check-changeset-fixed.mjs (release/RC workflows) already
+      # gates that array against the real workspace. Nothing gated the THREE
+      # prose restatements of the array's length — two sentences in
+      # content/docs/protocol/backward-compatibility.mdx and one header
+      # comment in scripts/publish-smoke-pack.mjs — so all three drifted
+      # silently (69 written, 70 true) the day a package joined the group.
+      # Full-repo state, not diff-shaped, so — unlike the self-tests above —
+      # this runs its real check every time, unconditionally.
+      - name: Lockstep package-count guard
+        run: pnpm check:lockstep-package-count
+
       # Release-notes drift guard: the platform is one version-locked train, so
       # every released @objectstack/spec major must have a curated, navigable
       # release page at content/docs/releases/v<major>.mdx. Catches the gap that
