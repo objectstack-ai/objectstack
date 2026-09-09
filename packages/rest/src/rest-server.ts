@@ -8092,9 +8092,45 @@ export class RestServer {
                     // stringified pair and match no transition key.
                     if (refuseRepeatedQueryParams(req, res, ['from'])) return;
                     const from = req.query?.from !== undefined ? String(req.query.from) : undefined;
-                    const ql = this.objectQLProvider
-                        ? await this.objectQLProvider(environmentId).catch(() => undefined)
-                        : undefined;
+                    // [#15405] The engine seam, reached the way its SIBLING at
+                    // `computeExecCtx` already reaches it — `wiredEngineOrLoud`
+                    // — so "no engine is wired" and "the engine WAS wired and
+                    // could not be resolved" stay two facts instead of one
+                    // `undefined`. The retired spelling this replaces:
+                    //
+                    //     this.objectQLProvider(environmentId).catch(() => undefined)
+                    //
+                    // ⚠️ That `.catch` was DEAD CODE until #13904. The shipped
+                    // provider used to be `try { … } catch { return undefined; }`
+                    // and so could not reject at all; the collapse happened one
+                    // layer earlier. #13904 made the provider re-raise PRECISELY
+                    // so a consumer could see the outage — and this consumer, the
+                    // slot's second and the one nobody enumerated, caught it
+                    // straight back. A wired-and-failing engine and a
+                    // never-registered one therefore both answered the
+                    // `404 NOT_FOUND · "Object not found"` twelve lines below:
+                    // this route lying about the cause during exactly the
+                    // incident it would be consulted in.
+                    //
+                    // ⛔ NOT `seamOrUndefined`. That helper SWALLOWS, and
+                    // swallowing at this seam IS the defect #13476 repaired —
+                    // its own docblock forbids routing the data-engine seam
+                    // back through it "to make the seams uniform".
+                    //
+                    // The wiring fact is the provider's PRESENCE, asked once and
+                    // never inferred from what it returned, so an UNWIRED engine
+                    // still reaches the 404 below byte-for-byte as before — and
+                    // so does a provider that RESOLVES `undefined`, which is the
+                    // seam contract declaring absence rather than failing.
+                    // `wiredEngineOrLoud` also invokes the provider
+                    // SYNCHRONOUSLY, so a host wiring a non-`async` provider —
+                    // which the seam's declared type cannot prevent — reaches the
+                    // same answer as one that rejects (#13280) instead of
+                    // escaping past a `.catch` that never came into existence.
+                    const ql = await wiredEngineOrLoud(
+                        Boolean(this.objectQLProvider),
+                        () => this.objectQLProvider!(environmentId),
+                    );
                     const schema = (ql as any)?.registry?.getObject?.(name);
                     if (!schema) {
                         // `{ error: { code, message } }`, the envelope
@@ -9978,7 +10014,29 @@ export class RestServer {
                         });
                         return;
                     }
-                    const emailService = await this.emailServiceProvider(environmentId).catch(() => undefined);
+                    // [#15405] `seamOrUndefined`, not the retired
+                    // `.catch(() => undefined)`. That handler attaches to the
+                    // promise the call RETURNS, so it can only ever see a
+                    // REJECTION: a host wiring a non-`async` provider — which
+                    // the seam's declared type cannot prevent, and
+                    // `RestServer`'s constructor is the public wiring point —
+                    // throws while the expression is still being evaluated, so
+                    // there is no promise to attach to and the handler is never
+                    // reached (#13280).
+                    //
+                    // ⚠️ NOT reachable from the SHIPPED wiring: the provider
+                    // `rest-api-plugin.ts` hands over is declared `async`.
+                    // Repaired because it is the same retired spelling at an
+                    // embedder-reachable seam, ⛔ not on a claim of live impact.
+                    //
+                    // The ANSWER is deliberately unchanged — absorb to
+                    // `undefined` and take the 501 below. ⛔ Unlike the engine
+                    // seam, this one must NOT go loud: the
+                    // `if (!this.emailServiceProvider)` guard above has already
+                    // answered the wiring question, and "not configured" and
+                    // "configured and unusable" both mean this deployment cannot
+                    // send mail — one 501, no fact lost by folding them.
+                    const emailService = await seamOrUndefined(() => this.emailServiceProvider!(environmentId));
                     if (!emailService || typeof emailService.send !== 'function') {
                         res.status(501).json({
                             code: 'NOT_IMPLEMENTED',
