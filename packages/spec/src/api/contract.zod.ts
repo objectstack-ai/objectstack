@@ -193,7 +193,7 @@ export const ApiErrorSchema = lazySchema(() => z.object({
    *    not on it, so a sandboxed body's flag never leaves the VM and its 5xx
    *    stays withheld; of the `Object.assign` error-composition sites under
    *    `packages/**` (non-test), the ones that copy anything off a caught
-   *    error copy only `code` and `cause` (`drivers/driver-sql/src/sql-driver.ts`,
+   *    error copy only `code` and/or `cause` (`drivers/driver-sql/src/sql-driver.ts`,
    *    `objectql/src/engine.ts`'s autonumber-collision rewrap) and never
    *    `status`, so the withhold still applies to them; the two overlay-delete
    *    rewraps in `metadata-protocol/src/protocol.ts` DO copy `status` (with
