@@ -271,10 +271,26 @@ const MONOREPO_ONLY = [
   // `('in-repo')` yields `"../../../tsconfig.json"`; `template.files` and
   // `filesFor('standalone')` yield no `../` at all.
   //
-  // That is the condition to re-read if this ever reddens on correct text. If
-  // the population is ever widened to `in-repo`, this pattern reddens that
-  // `extends` target correctly-shaped but wrongly — and the fix then is the
-  // depth judgement, not an exemption and not a widened pattern.
+  // ⚠️ THAT IS THE POPULATION ARGUMENT, NOT A PROPERTY OF THE PATTERN, and the
+  // difference is worth stating plainly rather than leaving for someone to
+  // discover from a red: this matches ANY `../`, including a climb that stays
+  // INSIDE the project. `import { x } from '../config'` in a nested emitted
+  // source file, or a prose "see ../README.md in this project", are both legal
+  // in a scaffolded project and both redden here. Only the population keeps
+  // that from mattering.
+  //
+  // So there are TWO conditions to re-read this on, not one, and the second is
+  // the likelier:
+  //   1. the population widens to the `in-repo` placement, which emits
+  //      `rootTsconfigExtends`; or
+  //   2. a template grows an intra-project relative climb — an emitted source
+  //      file nested deeply enough to reach back up toward its own project
+  //      root. This needs NO placement change at all.
+  //
+  // In EITHER case the red lands on correctly-shaped, legal text, and the fix
+  // is the depth judgement (`check:cross-package-test-inputs`-style, "the
+  // shallowest point a path reaches") — never an exemption, and never a
+  // widened pattern.
   { label: 'a path that climbs out of the scaffolded project', re: /(?<![\w.])\.\.\/[\w./-]*/ },
 ];
 

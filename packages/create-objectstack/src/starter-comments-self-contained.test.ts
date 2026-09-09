@@ -148,9 +148,22 @@ const MONOREPO_ONLY = [
   // what keeps it that way: it refuses a `..` that is itself part of a longer
   // run of dots, so an ellipsis followed by a path is not a hit.
   //
-  // If a template ever legitimately needs to climb — a file deep enough to
-  // reach back up to its own project root — THAT is the signal to reach for
-  // depth. Widening this pattern instead would hand the escaping spelling its
+  // ⚠️ WHAT IT MATCHES IS WIDER THAN WHAT MOTIVATED IT, and that is worth
+  // stating plainly rather than leaving for someone to discover from a red:
+  // this matches ANY `../`, including a climb that stays INSIDE the project.
+  // `import { x } from '../config'` in a nested source file, or a prose
+  // "see ../README.md in this project", are both legal in a scaffolded project
+  // and both redden here. Nothing about the pattern distinguishes them; only
+  // the population does.
+  //
+  // So the trade is sound exactly while the swept tree carries no `../` at all
+  // — measured zero today — and the condition to re-read is: a template grows
+  // an intra-project relative climb, i.e. a source file nested deeply enough to
+  // reach back up toward its own project root. That needs no other change to
+  // happen. When it does, the red is on correctly-shaped, legal text, and the
+  // fix is the depth judgement (`check:cross-package-test-inputs`-style, "the
+  // shallowest point a path reaches") — never an exemption for the file, and
+  // never a widened pattern, which would hand the escaping spelling its
   // exemption back.
   { label: 'a path that climbs out of the scaffolded project', re: /(?<![\w.])\.\.\/[\w./-]*/ },
 ];
