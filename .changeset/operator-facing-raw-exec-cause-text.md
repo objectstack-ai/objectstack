@@ -30,7 +30,7 @@ whoever opens a customer install's backfill result a week on never had that line
 dialect's words were unrecoverable for them.
 
 `@objectstack/types` now exports `operatorFacingErrorText(error)` — a depth-bounded walk
-of the `cause` chain, shaped like the `matchesDriverError` beside it — and the eleven
+of the `cause` chain, shaped like the `matchesDriverError` beside it — and the thirteen
 stored-record sites plus `os db clean`'s console line read through it:
 
 - `runtime-index-preflight` — the per-probe `detail` and the seam-failure fan-out;
@@ -43,9 +43,15 @@ stored-record sites plus `os db clean`'s console line read through it:
 - `os db clean` — the `VACUUM failed` line.
 
 Two narrowings are part of the contract, not incidental: an UNDECLARED throw is returned
-byte-for-byte on its own message channel, and a declared envelope that is not the raw-path
-one — the typed read exits' terminal, which composes a different sentence — is left exactly
-as it arrived.
+on its own message channel, its `cause` never walked, and a declared envelope that is not
+the raw-path one — the typed read exits' terminal, which composes a different sentence —
+is left exactly as it arrived.
+
+That message channel is deliberately NOT byte-identical to what the replaced expressions
+computed. Two shapes read differently, and both read better: a thrown non-`Error` now
+yields prose where `(e as Error).message` yielded `undefined`, and an error whose message
+is EMPTY reads `Error` / `TypeError` — the `|| String(error)` last resort — where those
+expressions yielded `''`, or `unknown error` at the one site that ors in a default.
 
 ## The levels, and why they are not uniform
 
@@ -63,7 +69,8 @@ PR: no entry point reaches a test file, and `files` packs `dist` only.
 The only value that changes is the TEXT inside an operator-facing `detail` / `error` field, and
 only where the thrown error declares `DATABASE_ERROR` *and* its message is the raw path's
 composed sentence — the case where that text was the wrong text. Every other throw reaches
-these records byte-for-byte as before, the field names and types are unchanged, and the
-sentence being replaced is not a value any consumer can have been parsing: it is an opaque
-human diagnostic. A consumer reading these records gets the dialect's words back where it had
-been getting a placeholder.
+these records on its own message channel — as before, save for the two shapes named above,
+where the text gets better rather than different in kind. The field names and types are
+unchanged, and the sentence being replaced is not a value any consumer can have been
+parsing: it is an opaque human diagnostic. A consumer reading these records gets the
+dialect's words back where it had been getting a placeholder.

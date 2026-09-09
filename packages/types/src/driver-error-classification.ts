@@ -687,7 +687,8 @@ const DECLARED_DATABASE_FAULT_CODE = 'DATABASE_ERROR';
  * decision this helper deliberately does not take. An envelope that declares
  * the code but does not carry this sentence is returned exactly as it arrived.
  *
- * The producer is pinned: `driver-error-classification.raw-statement-pin.test.ts`
+ * The producer is pinned in the driver, where a real refusal can be raised:
+ * `packages/drivers/driver-sql/src/sql-driver-16657-operator-facing-cause-text.test.ts`
  * fails if `sql-driver.ts` stops composing a sentence this recognises.
  */
 const RAW_STATEMENT_FAULT_SENTENCE = /refused to run a raw statement/;
@@ -735,9 +736,14 @@ function messageChannelOf(node: unknown): string {
  * the raw-path composed sentence, and returns that. Both narrowings matter:
  *
  *  - **only a DECLARED fault is reinterpreted.** An undeclared throw — anything
- *    without `code: DATABASE_ERROR` — is returned on its own message channel,
- *    byte for byte what the call site used to compute. Reading a `cause` chain
- *    nobody declared would be sniffing, which is the mechanism #16019 removed;
+ *    without `code: DATABASE_ERROR` — is returned on its own message channel and
+ *    its `cause` is never walked. That channel is deliberately NOT byte-identical
+ *    to what the call site used to compute: a thrown non-`Error` yields prose
+ *    where `(e as Error).message` yielded `undefined`, and an error whose message
+ *    is EMPTY reads `Error` / `TypeError` through the `|| String(error)` last
+ *    resort where those expressions yielded `''` — or `unknown error`, at the one
+ *    site that ors in a default. Reading a `cause` chain nobody declared would be
+ *    sniffing, which is the mechanism #16019 removed;
  *  - **only the raw-path sentence is walked through.** See
  *    {@link RAW_STATEMENT_FAULT_SENTENCE}.
  *
