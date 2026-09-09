@@ -265,6 +265,27 @@ export async function findExistingCard({ identity, listPage, perPage = 100, maxP
   return found.sort((a, b) => a.number - b.number)[0] ?? null;
 }
 
+// The whole decision, so that "one red run files one card, the next refreshes
+// it" is a property something can DRIVE rather than a sentence in a workflow
+// comment. The caller supplies three thin callbacks over the API and nothing
+// else; every branch of the judgement is here.
+//
+// ⛔ `create` is reached ONLY through `findExistingCard`, which throws on a
+// scan it could not complete. An exception here therefore files nothing, which
+// is the correct direction: a missed refresh costs one stale body, and a
+// spurious create costs a duplicate card every hour until somebody notices.
+export async function fileOrRefreshCard({ identity, body, listPage, createIssue, updateIssue, perPage, maxPages }) {
+  const existing = await findExistingCard({ identity, listPage, perPage, maxPages });
+  if (existing) {
+    // Rewritten in place, never a comment per run. ⛔ Labels are NOT rewritten:
+    // grading is the devx seat's and a refresh must not undo it.
+    await updateIssue({ number: existing.number, body });
+    return { action: 'refreshed', number: existing.number };
+  }
+  const created = await createIssue({ title: identity.title, body, labels: identity.labels });
+  return { action: 'filed', number: created.number };
+}
+
 // The card body. The run link and the commit range are the whole product: a red
 // hourly run says "main broke somewhere in the last hour", and the commits
 // between the previous GREEN scheduled run and this one are that hour.
@@ -616,6 +637,62 @@ async function selfTest() {
     const pages = [Array.from({ length: 100 }, (_, i) => issue(i + 1)), [firstCard]];
     const found = await findExistingCard({ identity: ci, listPage: async (n) => pages[n - 1] ?? [], maxPages: 3 });
     if (found?.number !== 42) throw new Error('de-dup: a multi-page scan lost the card');
+  });
+
+  // -- THE ACCEPTANCE SHAPE, driven end to end against a mutable board: one red
+  //    run files exactly one card, and the NEXT red run refreshes that card and
+  //    files no second one. This is the property the filer exists for, and a
+  //    de-dup rule that is only ever exercised live gets its first test on the
+  //    night it files its duplicate.
+  const board = [];
+  let nextNumber = 500;
+  const drive = async (identityUnderTest, bodyText) =>
+    fileOrRefreshCard({
+      identity: identityUnderTest,
+      body: bodyText,
+      listPage: async (n) => (n === 1 ? board.slice() : []),
+      createIssue: async ({ title, body: b, labels }) => {
+        const made = { number: (nextNumber += 1), title, body: b, labels };
+        board.push(made);
+        return made;
+      },
+      updateIssue: async ({ number, body: b }) => {
+        const hit = board.find((i) => i.number === number);
+        hit.body = b;
+      },
+    });
+
+  const firstRun = await drive(ci, 'first body');
+  await check(() => {
+    if (firstRun.action !== 'filed') throw new Error(`sequence: the first red run did not file (${firstRun.action})`);
+    if (board.length !== 1) throw new Error(`sequence: the first red run left ${board.length} card(s)`);
+  });
+  const secondRun = await drive(ci, 'second body');
+  await check(() => {
+    if (secondRun.action !== 'refreshed') throw new Error(`sequence: the second red run did not refresh (${secondRun.action})`);
+    if (secondRun.number !== firstRun.number) throw new Error('sequence: the refresh went to a different card');
+    if (board.length !== 1) throw new Error(`sequence: a second card was filed (board holds ${board.length})`);
+    if (board[0].body !== 'second body') throw new Error('sequence: the refresh did not rewrite the body');
+  });
+  await check(() => {
+    if (!board[0].labels?.includes('domain:devx')) throw new Error('sequence: the create did not apply the labels');
+  });
+  // The OTHER workflow going red in the same hour files its OWN card, and does
+  // not overwrite the first. This is the one-card-per-workflow decision, driven.
+  const lintRun = await drive(lint, 'lint body');
+  await check(() => {
+    if (lintRun.action !== 'filed') throw new Error(`sequence: the second workflow refreshed CI's card (${lintRun.action})`);
+    if (board.length !== 2) throw new Error(`sequence: expected two cards, board holds ${board.length}`);
+    if (board[0].body !== 'second body') throw new Error("sequence: the Lint filer overwrote CI's body");
+  });
+  await check(() => {
+    // ...and a third CI red still refreshes CI's card, with the Lint card now
+    // on the board -- the case a title-prefix rule gets wrong if it is loose.
+    return drive(ci, 'third body').then((r) => {
+      if (r.action !== 'refreshed' || r.number !== firstRun.number || board.length !== 2) {
+        throw new Error(`sequence: with both cards open, CI's third red did not refresh its own (${r.action}, ${r.number}, ${board.length})`);
+      }
+    });
   });
 
   // -- The body. What is pinned is that the parts a reader needs survive.

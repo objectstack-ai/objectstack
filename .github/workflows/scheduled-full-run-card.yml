@@ -195,8 +195,13 @@ jobs:
               rangeNote,
             });
 
-            const existing = await mod.findExistingCard({
+            // The DECISION is the module's, driven offline by its self-test
+            // against a mutable board (one red run files one card; the next
+            // refreshes it and files no second). What is left here is three
+            // callbacks over the API.
+            const outcome = await mod.fileOrRefreshCard({
               identity,
+              body,
               perPage: 100,
               maxPages: 10,
               listPage: async (page) => {
@@ -205,29 +210,21 @@ jobs:
                 });
                 return res.data;
               },
+              updateIssue: async ({ number, body: b }) => {
+                await github.rest.issues.update({ owner, repo, issue_number: number, body: b });
+              },
+              createIssue: async ({ title, body: b, labels }) => {
+                // Additive on create; ⛔ nothing here ever replaces a whole
+                // label set (`check:whole-set-label-write` refuses that verb).
+                const res = await github.rest.issues.create({ owner, repo, title, body: b, labels });
+                return { number: res.data.number };
+              },
             });
 
-            if (existing) {
-              await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
-              core.info(`refreshed ${identity.marker} card #${existing.number} (${body.length} chars)`);
-              core.notice(`${run.name} is red on the hourly full run — card #${existing.number} refreshed.`);
-              core.setOutput('action', 'refreshed');
-              core.setOutput('number', String(existing.number));
-              return;
-            }
-
-            const created = await github.rest.issues.create({
-              owner, repo,
-              title: identity.title,
-              body,
-              // Additive on create; ⛔ nothing here ever replaces a whole label
-              // set (`check:whole-set-label-write` refuses that verb outright).
-              labels: identity.labels,
-            });
-            core.info(`filed ${identity.marker} card #${created.data.number} (${body.length} chars)`);
-            core.notice(`${run.name} is red on the hourly full run — card #${created.data.number} filed.`);
-            core.setOutput('action', 'filed');
-            core.setOutput('number', String(created.data.number));
+            core.info(`${outcome.action} ${identity.marker} card #${outcome.number} (${body.length} chars)`);
+            core.notice(`${run.name} is red on the hourly full run — card #${outcome.number} ${outcome.action}.`);
+            core.setOutput('action', outcome.action);
+            core.setOutput('number', String(outcome.number));
 
       - name: Publish the verdict to the run summary
         # always(): when the step above threw — a refused scan, a rate limit —
