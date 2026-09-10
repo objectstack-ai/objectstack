@@ -2394,12 +2394,12 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
-      '@objectstack/driver-memory':
-        specifier: workspace:*
-        version: link:../../drivers/driver-memory
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
+      '@objectstack/driver-sqlite-wasm':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sqlite-wasm
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql

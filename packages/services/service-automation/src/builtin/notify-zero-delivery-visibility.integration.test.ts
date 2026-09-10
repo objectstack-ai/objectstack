@@ -24,13 +24,22 @@
  * `unmeasured=0` on its own is unreadable: it is equally "this flow notified
  * nobody" and "this flow had nothing to notify about today". What separates
  * them is driving the SAME flow, with the SAME recipient configuration, over
- * the SAME data, through the two trigger families — and on both drivers. So
+ * the SAME data, through the two trigger families — and on both storage backends. So
  * every case below runs as a matrix:
  *
- *   trigger family  x  driver
+ *   trigger family  x  storage backend
  *   ─────────────────────────────────────────────────────────────────────────
- *   `type: 'schedule'` cron tick      x  memory  (@objectstack/driver-memory)
- *   `POST /api/v1/automation/:name/trigger`  x  sqlite (better-sqlite3)
+ *   `type: 'schedule'` cron tick             x  sqlite-wasm
+ *   `POST /api/v1/automation/:name/trigger`  x  sqlite native (better-sqlite3)
+ *
+ * ⚠️ The card asks for "memory and sqlite". The mingo `InMemoryDriver`
+ * (`@objectstack/driver-memory`) is investment-FROZEN and its consumer set is a
+ * maintainer ruling, enforced by `pnpm check:driver-memory-census` — which
+ * refuses a new binding and says in as many words that adding a ledger entry to
+ * silence it is not this author's call. So the second backend here is
+ * `@objectstack/driver-sqlite-wasm`: two genuinely different storage
+ * implementations (native C and wasm), taken by MIGRATING rather than by
+ * self-ledgering a frozen driver. Admitting the memory arm needs that ruling.
  *
  * Neither family is hand-rolled here. The schedule arm is handed the literal
  * `AutomationContext` the production `ScheduleTrigger` builds for a fired
@@ -77,7 +86,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysMember, SysNotification } from '@objectstack/platform-objects';
 import {
@@ -153,11 +162,11 @@ function apiTrigger(session: { userId: string; tenantId: string }): AutomationCo
 
 // ── The stack ───────────────────────────────────────────────────────────────
 
-type DriverKind = 'memory' | 'sqlite';
+type DriverKind = 'sqlite-wasm' | 'sqlite-native';
 
 function makeDriver(kind: DriverKind) {
-    return kind === 'memory'
-        ? new InMemoryDriver()
+    return kind === 'sqlite-wasm'
+        ? new SqliteWasmDriver({ filename: ':memory:' })
         : new SqlDriver({
               client: 'better-sqlite3',
               connection: { filename: ':memory:' },
@@ -281,7 +290,7 @@ function notifyNodeRow(s: FlowRunSummary) {
 
 const LINE = { flowName: 'nudge', runId: 'run_fixed', status: 'completed' };
 
-const DRIVERS: DriverKind[] = ['memory', 'sqlite'];
+const DRIVERS: DriverKind[] = ['sqlite-wasm', 'sqlite-native'];
 
 describe.each(DRIVERS)('#17123 zero-delivery is distinguishable [driver=%s]', (kind) => {
     let stack: Awaited<ReturnType<typeof boot>> | undefined;
