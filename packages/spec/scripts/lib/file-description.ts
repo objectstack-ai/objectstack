@@ -502,11 +502,11 @@ const SKILL_EXAMPLE_MARKER = '<!-- os:check -->';
  * may be DROPPED is decided by whether it has a payload, and the tags that
  * reach a page do not answer alike: `@module` and a bare `@example` are their
  * own entire content, while `@example CAPTION` is the caption of the fence
- * beneath it and `@see` is a cross-reference — both rewritten instead
- * (`EXAMPLE_CAPTION`, and `renderProse`'s `See also: …`). A blanket line filter
- * cannot express that difference; it would take the caption off the page and
- * orphan its fence, and "no page loses non-tag prose" is this fix's acceptance
- * criterion. `@category` is the one payload-carrying tag that still renders as
+ * beneath it — asserted by `assertCaptionedBlocksAreFenced`, not merely assumed
+ * — and `@see` is a cross-reference; both rewritten instead (`EXAMPLE_CAPTION`,
+ * and `renderProse`'s `See also: …`). A blanket line filter cannot express that
+ * difference; it would take the caption off the page and orphan its fence, and
+ * "no page loses non-tag prose" is this fix's acceptance criterion. `@category` is the one payload-carrying tag that still renders as
  * nothing, and `CATEGORY_MARKER` carries the measurement that says why.
  *
  * Judged with the same UNTRIMMED `^@module\b` test `hasModuleMarker` selects
@@ -795,8 +795,70 @@ function mapProse(text: string, kinds: ProseRun['kind'][], fn: (plain: string) =
  * `@example` in a list item — and only ever shown prose, so an `@example` inside
  * a fence stays as the author wrote it. Held global-safe by `String#replace`,
  * which resets `lastIndex` around the call.
+ *
+ * ⚠️ "the block it captions" is a PRECONDITION, not an observation, and
+ * `assertCaptionedBlocksAreFenced` is what makes it one. Until it existed this
+ * comment promised a fence that nothing checked for, and two module headers
+ * captioned a listing whose rows were bare prose: the promotion still fired,
+ * and the rows below collapsed into one run-on paragraph on two customer-facing
+ * reference pages. The rewrite is unconditional BY DESIGN — it may stay that
+ * way precisely because the assertion runs before it.
  */
 const EXAMPLE_CAPTION = /^@example[ \t]+(\S.*)$/gm;
+
+/**
+ * The same pattern, per line and stateless — one source, so the two can never
+ * drift.
+ *
+ * Dropping `g` is what makes it safe to `.test()` in a loop: a `g` regex
+ * carries `lastIndex` between calls and would answer for every second caption.
+ * Dropping `m` costs nothing, because `^` and `$` against a single line mean
+ * exactly what they meant against a line of the block.
+ */
+const EXAMPLE_CAPTION_LINE = new RegExp(EXAMPLE_CAPTION.source);
+
+/**
+ * Refuse a caption with no block beneath it, rather than publishing one.
+ *
+ * `EXAMPLE_CAPTION` promotes `@example CAPTION` to a bold lead-in on the stated
+ * assumption that a fence follows. This asserts the assumption instead of
+ * trusting it — the generator makes the wrong page impossible, which is the
+ * same move `findModuleDocBlock` makes for block selection and the reason
+ * neither needs a detector bolted on beside it.
+ *
+ * ⛔ It never asks whether a run of prose is "really" a table. That is the
+ * shape-sniffing this module's own header rejects, and the thing an author
+ * writes instead of a fence is not knowable from the text. The question here is
+ * only the one the contract already states: is the next block a block? An
+ * author who wants the words as ordinary prose writes them without the tag.
+ *
+ * Both code kinds count. `indented` reaches the page as a fence — the render
+ * loop re-emits it as one — so a caption above an indented block captions a
+ * fence by the time a reader sees it, and refusing it would reject a form that
+ * renders correctly today.
+ *
+ * Blank lines between the caption and its block are skipped: `withTagBlocksSeparated`
+ * inserts one before every tag, the sources write their own, and markdown puts
+ * the fence under the bold line either way.
+ */
+function assertCaptionedBlocksAreFenced(lines: readonly string[], kind: readonly LineKind[]): void {
+  for (let i = 0; i < lines.length; i++) {
+    if (kind[i] !== 'prose' || !EXAMPLE_CAPTION_LINE.test(lines[i])) continue;
+
+    let next = i + 1;
+    while (next < lines.length && lines[next].trim() === '') next++;
+    if (next < lines.length && (kind[next] === 'fenced' || kind[next] === 'indented')) continue;
+
+    const caption = EXAMPLE_CAPTION_LINE.exec(lines[i])![1];
+    throw new Error(
+      `file-description: this module description writes \`@example ${caption}\` with no code block ` +
+        `beneath it. An \`@example CAPTION\` line is the caption OF the block below it and is published ` +
+        `as a bold lead-in on that assumption; with no fence there, the lines under it are consecutive ` +
+        `prose and markdown renders them as ONE run-on paragraph. Fence the block in the source's own ` +
+        `file header, or drop the tag and write the caption as ordinary prose.`,
+    );
+  }
+}
 
 /** One run of consecutive prose lines, rendered to MDX. */
 function renderProse(text: string, ctx: FileDescriptionContext): string {
@@ -901,6 +963,13 @@ export function renderFileDescription(source: string, ctx: FileDescriptionContex
     gutterless.filter((line, i) => !(markerKind[i] === 'prose' && isMarkerLine(line))),
   );
   const kind = classifyLines(lines);
+
+  // Before anything is emitted, and against that same classification: a caption
+  // whose block is missing is refused here rather than published (see
+  // `assertCaptionedBlocksAreFenced`). Ordered before the renumbering because a
+  // source this rejects should be told what is wrong with it, not handed a
+  // heading-depth error it did not cause.
+  assertCaptionedBlocksAreFenced(lines, kind);
 
   // Renumbered against the SAME classification the render loop below uses, so
   // the shift and the "this line is code" verdict can never disagree. Adding

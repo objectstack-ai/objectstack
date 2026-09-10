@@ -851,6 +851,122 @@ describe('renderFileDescription — #14455: a tag WITH a payload is rewritten, n
 });
 
 /**
+ * #16962 — the caption's fence is a PRECONDITION, and the generator asserts it.
+ *
+ * `EXAMPLE_CAPTION` promotes `@example CAPTION` to a bold lead-in because the
+ * contract says a fence follows. Nothing checked, and #15440 is what that cost:
+ * two module headers captioned a listing, wrote its rows as bare prose, and the
+ * rows reached two customer-facing reference pages as one run-on paragraph —
+ * consecutive non-blank lines are one markdown paragraph, and the docs site
+ * loads no `remark-breaks`.
+ *
+ * ⛔ The refusal is NOT a detector for "prose that is really a table". This
+ * module's own header rejects that shape-sniffing and so does the card. The
+ * question asked here is only the one the contract already states: is there a
+ * block beneath the caption? An author who wants those words as prose writes
+ * them without the tag.
+ */
+describe('renderFileDescription — #16962: a caption with no block beneath it is refused, not published', () => {
+  const ctx = { fromCategory: 'api', sourcePathToDocsRoute: () => null, sectionLevel: PAGE_SECTION_LEVEL };
+
+  const moduleBlock = (...body: string[]): string =>
+    ['/**', ...body.map(l => (l === '' ? ' *' : ` * ${l}`)), ' */', '', "import { z } from 'zod';", ''].join('\n');
+
+  it('refuses the #15440 shape — a caption over rows written as bare prose', () => {
+    // `api/automation-api` and `api/package-api`, reduced to the shape they
+    // shipped. Before the assertion this rendered `**Endpoints**` followed by
+    // one paragraph reading `GET /api/automation … POST /api/automation …`.
+    expect(() =>
+      renderFileDescription(
+        moduleBlock(
+          'Automation API Protocol',
+          '',
+          '@example Endpoints',
+          'GET /api/automation - list',
+          'POST /api/automation - create',
+        ),
+        ctx,
+      ),
+    ).toThrow(/`@example Endpoints` with no code block beneath it/);
+  });
+
+  it('names the source fix, because the source is where the fix goes', () => {
+    // The renderer cannot repair this and must not try — the same reason the
+    // heading-depth refusal points at the file header rather than clamping.
+    expect(() => renderFileDescription(moduleBlock('@example Endpoints', 'GET /api/x'), ctx)).toThrow(
+      /Fence the block in the source's own file header/,
+    );
+  });
+
+  it('refuses a caption that ends the block, with nothing at all beneath it', () => {
+    // The other orphan shape, and the one a "next line is not a fence" test
+    // written with an off-by-one would sail past.
+    expect(() => renderFileDescription(moduleBlock('Automation API Protocol', '', '@example Endpoints'), ctx)).toThrow(
+      /no code block beneath it/,
+    );
+  });
+
+  it('refuses a caption whose next block is another tag rather than a fence', () => {
+    // A run of tags is the arrangement `withTagBlocksSeparated` exists for, so
+    // the caption is followed by a blank line here whatever the source wrote.
+    // Skipping blanks must not be mistaken for finding a block.
+    expect(() =>
+      renderFileDescription(
+        moduleBlock('Automation API Protocol', '', '@example Endpoints', '@see https://example.invalid/api'),
+        ctx,
+      ),
+    ).toThrow(/no code block beneath it/);
+  });
+
+  it('accepts the fenced form — the twelve captions in the corpus keep rendering', () => {
+    const out = renderFileDescription(
+      moduleBlock('Automation API Protocol', '', '@example Endpoints', '```', 'GET /api/automation', '```'),
+      ctx,
+    );
+    expect(out).toContain('**Endpoints**\n```');
+  });
+
+  it('accepts a blank line between the caption and its fence', () => {
+    // Markdown puts the fence under the bold line either way, and the sources
+    // write both spellings — refusing this one would reject correct pages.
+    const out = renderFileDescription(
+      moduleBlock('@example Endpoints', '', '```', 'GET /api/automation', '```'),
+      ctx,
+    );
+    expect(out).toContain('**Endpoints**');
+    expect(out).toContain('GET /api/automation');
+  });
+
+  it('accepts an INDENTED block, which reaches the page as a fence anyway', () => {
+    // `data/date-macros` and `data/context-tokens` write examples this way and
+    // the render loop re-emits them fenced. Judged by KIND, so a caption above
+    // one captions a fence by the time a reader sees it.
+    const out = renderFileDescription(moduleBlock('@example Macros', '', '    value: 1'), ctx);
+    expect(out).toContain('**Macros**');
+    expect(out).toContain('```\nvalue: 1\n```');
+  });
+
+  it('ignores an `@example CAPTION` shown INSIDE a fence — that is an author illustrating the tag', () => {
+    // Judged on the same classification the rewrite is, so a header teaching the
+    // convention is not refused for demonstrating the broken form. A refusal
+    // written over raw text instead of over `kind` would reject this file's own
+    // documentation.
+    const out = renderFileDescription(
+      moduleBlock('How a module header captions an example:', '', '```md', '@example Endpoints', 'GET /api/x', '```'),
+      ctx,
+    );
+    expect(out).toContain('@example Endpoints');
+  });
+
+  it('ignores a mid-sentence mention, the same UNTRIMMED test the rewrite uses', () => {
+    // `MODULE_MARKER`'s rule, and the reason the two can share one pattern: only
+    // a line that OPENS with the tag is a tag.
+    const out = renderFileDescription(moduleBlock('Write `@example Foo` above a fence to caption it.'), ctx);
+    expect(out).toContain('@example Foo');
+  });
+});
+
+/**
  * #5553 — the block is rendered as the markdown it was written as.
  *
  * The renderer used to drop blank lines and join what was left with `\n\n`,
