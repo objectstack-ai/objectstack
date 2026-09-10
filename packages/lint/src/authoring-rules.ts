@@ -930,6 +930,14 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // (the object may come from another installed package — a hedge this rule
   // cannot decide), as did `flow-draft-status-ambiguous` (draft flows DO fire;
   // that one is ambiguity of intent, not a dead flow).
+  //
+  // #16659 added a sixth id, `flow-schedule-organization-missing`, at
+  // `warning`: a time-triggered flow declaring no `config.organization` is
+  // refused at bind, so on the criterion above it belongs with the four — and
+  // it is held at `warning` because an `error` gates `objectstack build`, and
+  // the repo's own shipped example apps carry such flows with no authorable
+  // repair (the only legal value is a `sys_organization.id` minted per install
+  // at runtime). Its own docblock in the rule file records that.
   {
     name: 'validateFlowTriggerReadiness',
     tier: 'gating',
