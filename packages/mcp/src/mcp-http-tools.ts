@@ -40,6 +40,14 @@ import {
   MCP_OAUTH_SCOPE_DATA_WRITE,
   MCP_OAUTH_SCOPE_ACTIONS,
 } from '@objectstack/spec/ai';
+// [#15942 / #16293] The confirmation member the `run_action` door accepts and
+// forwards. Imported, never hand-spelled: the door that refuses (the runtime's
+// `actionConfirmationRefusal`) and the client that retries have to agree on the
+// spelling, and this door is the one that has to advertise it.
+import {
+  AI_ACTION_CONFIRMATION_MEMBER,
+  type AIActionConfirmation,
+} from '@objectstack/spec/contracts';
 import {
   validateExpression,
   introspectScope,
@@ -224,7 +232,7 @@ export interface McpActionBridge {
    */
   runAction(
     name: string,
-    input: { objectName?: string; recordId?: string; params?: Record<string, unknown> },
+    input: { objectName?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
   ): Promise<unknown>;
 }
 
@@ -252,6 +260,45 @@ function textResult(value: unknown) {
 
 function errorResult(message: string) {
   return { content: [{ type: 'text' as const, text: message }], isError: true as const };
+}
+
+/**
+ * A tool error that PRESERVES an ADR-0112 envelope when the thrown value
+ * carries one.
+ *
+ * [#15942] `errorResult` above flattens a throw to its message, which is right
+ * for the plain `Error`s most bridge failures are. It is wrong for a refusal
+ * whose whole point is machine-readability: the confirmation gate answers
+ * `ACTION_CONFIRMATION_REQUIRED` with `details` naming the action and the exact
+ * member to set, precisely so a refused agent can rebuild the retry WITHOUT
+ * re-parsing prose. Flattened to a sentence, that contract is delivered to
+ * nobody and the agent is back to guessing the member's spelling from
+ * documentation.
+ *
+ * Uncoded throws fall through to `errorResult` unchanged, so this widens what a
+ * caller can read and narrows nothing.
+ */
+function errorResultFromThrown(err: unknown) {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  if (typeof code !== 'string' || code.length === 0) return errorResult(messageOf(err));
+  const details = (err as { details?: unknown }).details;
+  const status = (err as { status?: unknown }).status;
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: jsonText({
+          error: {
+            code,
+            message: messageOf(err),
+            ...(typeof status === 'number' ? { status } : {}),
+            ...(details !== undefined ? { details } : {}),
+          },
+        }),
+      },
+    ],
+    isError: true as const,
+  };
 }
 
 /**
@@ -791,7 +838,9 @@ export function registerActionTools(
         'Invoke a business action by name (see list_actions). Runs the app\'s registered business logic — ' +
         'this can mutate data or trigger flows. Invocation is gated (author AI opt-in + your capabilities), ' +
         'but the action body itself runs as trusted application code with the app\'s full data authority. ' +
-        'Supply recordId for actions that operate on a specific record, and params for any declared inputs.',
+        'Supply recordId for actions that operate on a specific record, and params for any declared inputs. ' +
+        'An action the author gated (list_actions reports requiresConfirmation) is REFUSED unless you also ' +
+        'send confirm: true — ask the human first, then retry; nothing runs on a refused call.',
       inputSchema: {
         actionName: z.string().describe('The action name from list_actions, e.g. "complete_task"'),
         objectName: z
@@ -806,6 +855,31 @@ export function registerActionTools(
           .record(z.string(), z.unknown())
           .optional()
           .describe('Input parameters declared by the action.'),
+        // [#15942 / #16293] The confirmation member — a CLOSED boolean at the
+        // TOP LEVEL of the request, keyed off the contract's own constant so
+        // this door cannot spell it differently from the door that refuses.
+        //
+        // WHY IT IS DECLARED HERE AND NOT ONLY ENFORCED IN THE RUNTIME. Under
+        // zod an undeclared key is DROPPED, not rejected: before this member
+        // existed a client that sent `confirm: true` had it silently stripped
+        // by the SDK's shape wrap and then again by this handler's forward, so
+        // enforcing the gate alone would have made every action declaring
+        // `ai.requiresConfirmation: true` permanently un-invokable over MCP —
+        // refused, retried with the member, stripped, refused again. The door
+        // grows the member in the same change that enforces it.
+        //
+        // It is also how the model DISCOVERS the retry: an agent reads the tool
+        // schema, so a member that lives only in the refusal prose (or in a
+        // transport header) is one it cannot see.
+        [AI_ACTION_CONFIRMATION_MEMBER]: z
+          .boolean()
+          .optional()
+          .describe(
+            'Set to true to confirm a call the app author gated with ai.requiresConfirmation '
+            + '(list_actions reports requiresConfirmation for each action). Assert this only when '
+            + 'the human in the loop has approved THIS call; without it a gated action is refused '
+            + 'and nothing runs.',
+          ),
       },
       // Actions execute app-defined business logic with side effects (writes,
       // flows, outbound calls), so we mark the tool destructive + open-world:
@@ -813,7 +887,11 @@ export function registerActionTools(
       // is further surfaced via `requiresConfirmation` in list_actions.
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
-    async ({ actionName, objectName, recordId, params }) => {
+    async (args) => {
+      const { actionName, objectName, recordId, params } = args;
+      // Read off the constant, so the member's spelling has exactly one
+      // authority in this package (the schema key above is the same constant).
+      const confirm = args[AI_ACTION_CONFIRMATION_MEMBER];
       if (!actionName || typeof actionName !== 'string') {
         return errorResult('actionName is required');
       }
@@ -821,10 +899,18 @@ export function registerActionTools(
         return errorResult(`Object "${objectName}" is a system object and its actions are not exposed via MCP`);
       }
       try {
-        const result = await bridge.runAction(actionName, { objectName, recordId, params });
+        const result = await bridge.runAction(actionName, {
+          objectName,
+          recordId,
+          params,
+          // [#15942] Forwarded, not rebuilt-without. This line and the schema
+          // key above are the two halves of one change: dropping either one
+          // restores the strip that made the gate unsatisfiable.
+          [AI_ACTION_CONFIRMATION_MEMBER]: confirm,
+        });
         return textResult(result);
       } catch (err) {
-        return errorResult(messageOf(err));
+        return errorResultFromThrown(err);
       }
     },
   );

@@ -18,6 +18,15 @@
 import { validateActionParams, type ActionSession, type ResolvedActionParam } from '@objectstack/spec/ui';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
+// [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
+// is imported, never hand-spelled: the door that refuses and the client that
+// retries have to agree on it, and two doors each writing their own 'confirm'
+// is how one contract becomes two dialects (Prime Directive #12).
+import {
+    AI_ACTION_CONFIRMATION_MEMBER,
+    type AIActionConfirmation,
+    type ActionConfirmationRequiredDetails,
+} from '@objectstack/spec/contracts';
 import { checkApiExposure } from './api-exposure.js';
 // [#9446] The ONE #9378 status table. Imported rather than re-read here: this
 // door's blanket `FLOW_FAILED` was the second of three readings of one engine
@@ -981,6 +990,116 @@ export function actionLooksDestructive(_deps: ActionExecutionDeps, action: any):
     return Boolean(action?.mode === 'delete' || action?.variant === 'danger');
 }
 
+/**
+ * [#15942 / #16293 / ADR-0049] The action-confirmation GATE — the refusal an
+ * AI-facing action door answers when the author declared
+ * `ai.requiresConfirmation: true` and the request carries no confirmation.
+ *
+ * ## Why this exists at all
+ *
+ * `ai.requiresConfirmation` was a SAFETY-shaped flag with no execution path:
+ * read once, projected into the `list_actions` summary, and never consulted by
+ * `run_action`. That is the exact class ADR-0049 retired
+ * `tool.requiresConfirmation` for — "a SAFETY flag that is merely accepted is
+ * false compliance" — and the retirement's own prescription pointed authors at
+ * THIS key. Maintainer ruling, decision batch #54: enforce it, in the minimal
+ * shape — an explicit confirmation on the request, a loud registered refusal
+ * when it is absent, and NO approval queue. Nothing is parked, nothing is held
+ * for an operator to find later, and there is no resume path: a refused call
+ * simply did not run, and the caller confirms and retries.
+ *
+ * ## Which predicate gates the refusal — the DECLARED flag, never the heuristic
+ *
+ * This reads `action.ai.requiresConfirmation === true` and nothing else. It is
+ * deliberately NARROWER than {@link actionLooksDestructive} directly above,
+ * and the two MUST NOT be collapsed even though they share a name:
+ *
+ *  - {@link actionLooksDestructive} answers "should a client ASK the human
+ *    before calling?" for the LISTING, and falls back to the `mode: 'delete'` /
+ *    `variant: 'danger'` heuristic when the author declared nothing.
+ *  - this one answers "will the server REFUSE without an attestation?" — and an
+ *    author who declared nothing has asked for nothing. Gating on the heuristic
+ *    would start refusing calls that work today, on a guess the author never
+ *    made.
+ *
+ * So `ai.requiresConfirmation: false` never refuses whatever the action looks
+ * like, and an undeclared `mode: 'delete'` action is listed as
+ * `requiresConfirmation: true` while remaining invokable without the member.
+ * A client that confirms whenever the listing says `true` is always correct;
+ * the reverse inference is sound only because the listing predicate is wider.
+ *
+ * ## Only the boolean `true` is an attestation
+ *
+ * A truthy string is a transport artefact, not a decision (`AIActionConfirmation`).
+ * Absent, `false`, `'true'`, `1` — none of them confirm.
+ *
+ * ## What this gate is NOT
+ *
+ * `confirm: true` is an UNVERIFIABLE CALLER CLAIM. An agent that always sends
+ * it bypasses the gate entirely; the ruling accepted that model knowingly.
+ * ⇒ **The gate makes forgetting loud. It does not prove a human.**
+ *
+ * ## The enforced set is bounded by `ai.exposed`
+ *
+ * The doors that enforce this are the doors that enforce the author's AI opt-in
+ * — today {@link invokeBusinessAction}, reached from the MCP `run_action` tool.
+ * REST `/actions` (`domains/actions.ts`) is NOT `ai.exposed`-gated and sits
+ * OUTSIDE this gate: an API-key agent on REST is understood to be outside it
+ * rather than silently assumed inside it. Widening the set is its own decision,
+ * not a thing to infer from this comment.
+ *
+ * Returns `undefined` when the call may proceed.
+ */
+export const ACTION_CONFIRMATION_REQUIRED_CODE = 'ACTION_CONFIRMATION_REQUIRED';
+/**
+ * 428 Precondition Required — the request is well-formed and the caller is
+ * entitled; what is missing is a precondition the caller can add and retry
+ * with. The code is registered rather than borrowing the standard
+ * `PRECONDITION_REQUIRED` because this one says WHICH precondition, and the
+ * `details` below make the retry mechanical.
+ */
+export const ACTION_CONFIRMATION_REQUIRED_STATUS = 428;
+
+/** The shape the door serves — the ADR-0112 envelope plus its machine-readable `details`. */
+export interface ActionConfirmationRefusal {
+    code: typeof ACTION_CONFIRMATION_REQUIRED_CODE;
+    status: typeof ACTION_CONFIRMATION_REQUIRED_STATUS;
+    message: string;
+    details: ActionConfirmationRequiredDetails;
+}
+
+export function actionConfirmationRefusal(
+    _deps: ActionExecutionDeps,
+    action: any,
+    request: AIActionConfirmation | undefined,
+    objectName?: string,
+): ActionConfirmationRefusal | undefined {
+    // The DECLARED flag only — see the docblock. `!== true` on purpose: an
+    // author's `false`, and an absent key, both mean "no gate asked for".
+    if (action?.ai?.requiresConfirmation !== true) return undefined;
+    // Only the boolean `true` attests.
+    if (request?.[AI_ACTION_CONFIRMATION_MEMBER] === true) return undefined;
+
+    const actionName = String(action?.name ?? '');
+    const details: ActionConfirmationRequiredDetails = {
+        actionName,
+        ...(objectName ? { objectName } : {}),
+        // Echoed off the constant so a refused caller reads the member's
+        // spelling from the refusal instead of hard-coding it from docs.
+        confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
+    };
+    const on = objectName ? ` on '${objectName}'` : '';
+    return {
+        code: ACTION_CONFIRMATION_REQUIRED_CODE,
+        status: ACTION_CONFIRMATION_REQUIRED_STATUS,
+        message:
+            `Action '${actionName}'${on} declares ai.requiresConfirmation: true — nothing was run. `
+            + `Confirm with the human in the loop, then retry this call with `
+            + `'${AI_ACTION_CONFIRMATION_MEMBER}': true on the request.`,
+        details,
+    };
+}
+
 export function summarizeAction(deps: ActionExecutionDeps, action: any, obj: any, objectName: string, flow?: any): any {
     // [#15079] `operation` before `type`, on the LISTING face. A declarative
     // update always requires a current record — that is contract point 7, and
@@ -1774,7 +1893,14 @@ export async function executeDeclarativeUpdateAction(
 export async function invokeBusinessAction(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
     name: string,
-    input: { objectName?: string; recordId?: string; params?: Record<string, unknown> },
+    // [#15942] The confirmation member is MIXED IN from the contract rather
+    // than restated here, so this door and the MCP door cannot drift apart on
+    // its spelling or its type. It rides at the TOP LEVEL, never inside
+    // `params`: that bag is closed against the action author's own declared
+    // vocabulary, so a platform member riding there is refused as an unknown
+    // param on any action that declares params, and silently accepted on one
+    // that declares none — one placement, two opposite behaviours.
+    input: { objectName?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
     wiring: {
         driver: any;
         envId?: string;
@@ -1849,6 +1975,29 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // OS_ALLOW_LAX_ACTION_PARAMS=1 restores the pass-through.
     const paramError = enforceActionParams(deps, action, obj, params, { objectName, actionName: name });
     if (paramError) throw new Error(paramError);
+
+    // [#15942 / #16293] CONFIRMATION GATE — the last pre-dispatch check, and
+    // the first one that can refuse a well-formed, fully-entitled request.
+    //
+    // Placed HERE deliberately: AFTER the param contract, so a caller with a
+    // malformed bag still gets the located 400 that tells it how to fix the
+    // call; and BEFORE `loadActionSubjectRecord` below, so a refusal reads
+    // nothing and writes nothing — "the action body does not run, no record is
+    // read or written" is the contract's own sentence, and a gate that refuses
+    // after the subject read would only describe the defect instead of ending
+    // it. Nothing is queued and nothing is parked (ruling batch #54): the
+    // caller confirms with its human and retries the same call.
+    const confirmationRefusal = actionConfirmationRefusal(deps, action, input, objectName);
+    if (confirmationRefusal) {
+        // Thrown with `code` + `status` + `details` so the ADR-0112 envelope
+        // survives the bridge intact — the `details` are what let a refused
+        // agent rebuild the retry without re-parsing the prose it was handed.
+        throw Object.assign(new Error(confirmationRefusal.message), {
+            code: confirmationRefusal.code,
+            status: confirmationRefusal.status,
+            details: confirmationRefusal.details,
+        });
+    }
 
     // Load the subject record under RLS when row-context (engages the same
     // permission path as get_record — an unseen record reads as not-found).

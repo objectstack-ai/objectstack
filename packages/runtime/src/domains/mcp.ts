@@ -12,6 +12,7 @@ import { isMcpServerEnabled } from '@objectstack/types';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import type { MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
+import type { AIActionConfirmation } from '@objectstack/spec/contracts';
 import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
 import { isSystemObjectName } from '../action-execution.js';
@@ -715,9 +716,14 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
             }
             return out;
         },
+        // [#15942] `confirm` rides through UNTOUCHED. The bridge forwards the
+        // whole request object, so widening the type here is the whole change:
+        // the MCP door grew the member in the same change that enforces it, and
+        // a bridge that quietly rebuilt `{ objectName, recordId, params }` was
+        // the second of the two strip layers that made the member unreachable.
         runAction: async (
             name: string,
-            input: { objectName?: string; recordId?: string; params?: Record<string, unknown> },
+            input: { objectName?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
         ) => actionExec.invokeBusinessAction(deps, context, name, input ?? {}, { driver, envId, ec, getMeta, callData }),
     };
 }
