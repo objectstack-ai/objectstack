@@ -1066,7 +1066,24 @@ export const CEILINGS = new Map([
   // option A; recorded by the director on #16851 comment 5617189215, which also
   // rules the net budget of 6). AGENTS.md is not a CROSS_FILE_MOVES destination,
   // so no `ruledRaises` record applies. Landed count, headroom 0, same convention.
-  ['AGENTS.md', 1074],
+  //
+  // 1074 → 1075 (card #16973): the Post-Task Checklist's changeset rule gains the
+  // ruled exception — a bug fix in a released package takes `patch` UNLESS the PR
+  // declares `Clause-②: yes`, in which case at least `minor`. Until this line the
+  // two live authorities disagreed on the same PR — this item's sentence and the
+  // maintainer's own level ruling — and an author could satisfy either and cite it;
+  // the LEVEL axis of check-changeset-no-major.mjs has judged it the second way
+  // since #16055, so the text is being brought to the gate, not the gate to the
+  // text. +1 line against the ruled budget of 2, and forced: the item's paragraph
+  // measures 543 bytes of prose, which four lines cannot hold under the 120-byte
+  // rule above (4 × 120 = 480), so there is no lossless rewrap at any width.
+  // Maintainer ruling, verbatim and untranslated: 「其他同意」 (decision batch #111
+  // item 3, 2026-09-10, on analysis 5615846581 option A, forward-only; recorded by
+  // the director on #16973 comment 5617188486, which also rules the net budget of 2
+  // and holds the gate's LEVEL axis unchanged). AGENTS.md is not a CROSS_FILE_MOVES
+  // destination, so no `ruledRaises` record applies. Landed count, headroom 0, same
+  // convention.
+  ['AGENTS.md', 1075],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to
