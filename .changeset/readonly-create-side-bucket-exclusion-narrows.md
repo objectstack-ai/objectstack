@@ -16,14 +16,34 @@ under reason `readonly`, `strictReadonlyWrites` refusing before any driver dispa
 That is exactly what the same caller's UPDATE of the same column already did. Shipped
 as `minor` under the repo's launch-window convention.
 
-**Measured population: zero shipped objects.** A census of this tree finds 81 object
-declarations carrying `managedBy` and **none** of them named outside `sys_`, so every
-platform object stays exempt through the namespace test that is unchanged here — the
-21 of them in the three now-judged buckets included, holding 64 static `readonly`
-columns between them. `sys_metadata_history.recorded_by`, seeded by a direct
+## The census, both halves — neither one is the whole reading
+
+**(b) is greater than zero, so the affected objects are named.** 20 shipped objects sit
+in the three now-judged buckets and carry a static `readonly` column between them — 64
+columns in all:
+
+- `platform` (6 objects, 14 columns): `sys_attachment`, `sys_business_unit`,
+  `sys_business_unit_member`, `sys_comment`, `sys_report_schedule`, `sys_saved_report`
+- `config` (6 objects, 29 columns): `sys_capability`, `sys_email_template`,
+  `sys_permission_set`, `sys_position`, `sys_sharing_rule`, `sys_webhook`
+- `system-data` (8 objects, 21 columns): `sys_approval_delegation`,
+  `sys_notification_preference`, `sys_notification_subscription`,
+  `sys_notification_template`, `sys_position_permission_set`,
+  `sys_user_permission_set`, `sys_user_position`, `sys_user_preference`
+
+**And the shipped behaviour delta is ZERO.** Of the 81 object declarations in this tree
+carrying `managedBy`, **none** is named outside `sys_` — every one of the 20 above
+included — so the namespace test, which this change does not touch, keeps all of them
+exempt exactly as before. `sys_metadata_history.recorded_by`, seeded by a direct
 non-system `engine.insert` from the metadata repository, is doubly exempt
-(`engine-owned` bucket **and** `sys_`) and is pinned as such. The narrowing therefore
-reaches app-authored objects only, which is the population the ruling is about.
+(`engine-owned` bucket **and** `sys_`) and is pinned as such.
+
+⚠️ **Read both halves together.** "Behaviour-free" on its own overstates it — the
+population the narrowing reaches is real and named above, and an app that declares one
+of those buckets on its own object gets the strip. The population on its own
+understates it — not one shipped object changes behaviour on this release. What moves
+is the contract for **app-authored** objects, which is the population the ruling is
+about.
 
 ## What was wrong
 
