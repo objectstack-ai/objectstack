@@ -49,3 +49,5 @@ async findData(args) {
 ⛔ An implementor that keeps an explicit `args: any` annotation of its own opts back out: the annotation wins over the contextual type, and the contract reaches nothing. Leave the parameter unannotated, or name `ImportProtocolRequest<FindDataRequest>` explicitly.
 
 ⚠️ The `?? {}` shape in the "before" is the mechanism that made a dialect mismatch silent rather than loud: an unrecognised query does not throw, it degrades into a filter that constrains nothing, so a duplicate probe stops discriminating and an upsert updates the wrong record. Prefer a read that throws.
+
+<!-- adr-0087: not-required (type-surface-only packages/rest/src/import-runner.ts#ImportProtocolLike.findData) a TypeScript-only parameter narrowing off `any`; the compiler at the implementor's own call site is the whole delivery channel, and `objectstack migrate meta` has no stored metadata to rewrite -->
