@@ -301,19 +301,104 @@ export function tenantFieldOf(schema: UniqueAwareSchema | null | undefined): str
 }
 
 /**
+ * [#16729] One driver's record of the objects whose schema EXPLICITLY declared
+ * `tenancy.enabled === false` — this package's counterpart of `SqlDriver`'s
+ * `tenantOptOutByTable`.
+ *
+ * Owned by the DRIVER INSTANCE, never by this module. Two `InMemoryDriver`s in
+ * one process are two independent stores (this driver's whole shape is
+ * per-instance state), so a module-level record would let one store's
+ * declaration decide another store's uniqueness partition — a fresh
+ * cross-instance channel introduced by the fix for a cross-registration one.
+ * `SqlDriver` holds its own record per instance for the same reason.
+ */
+export type TenantOptOutRecord = Set<string>;
+
+/**
+ * [#16729] {@link tenantFieldOf} + maintenance of the sticky explicit-opt-out
+ * record. Mirrors `SqlDriver.computeAndRecordTenantField` arm for arm, and it
+ * is the arm this package was missing.
+ *
+ * ## Why the mirror needed a SECOND function, not a change to the first
+ *
+ * `driver-memory` already reproduced `SqlDriver.computeTenantField` faithfully
+ * as {@link tenantFieldOf}. The stickiness, though, does not live in that
+ * function on the SQL side either: it lives in the WRAPPER around it. So the
+ * inner half was mirrored and the outer half was not, and "this mirrors
+ * `computeTenantField` arm for arm" stayed literally true while the pair as a
+ * whole diverged. {@link tenantFieldOf} is therefore UNCHANGED and still
+ * answers from the passed schema alone — a pure function of its argument is
+ * what its own pins assert, and they remain correct.
+ *
+ * ## What the record buys
+ *
+ * A schema that carries a `tenancy` declaration is authoritative: it sets or
+ * clears the record and is computed normally. A schema WITHOUT one — a partial
+ * re-registration — preserves a previously declared opt-out instead of letting
+ * the implicit `organization_id` heuristic re-scope a platform-global object.
+ * Without it, a second `syncSchema` carrying only `{ name, fields }` silently
+ * moves a `unique` field from ONE row per install (`scopeField: null`, which is
+ * what `tenancy.enabled: false` declares) to one row per organization: a
+ * duplicate the declaration refuses then LANDS, and nothing announces the
+ * change — the declared-vs-enforced divergence Prime Directive #10 forbids,
+ * reached by a state change rather than by a missing check.
+ *
+ * ## Only the OPT-OUT is sticky, deliberately
+ *
+ * A declared `tenancy.tenantField` is NOT recorded, so a partial
+ * re-registration of a custom-tenant-column object still falls back to
+ * `organization_id`. That is not an oversight: it is what `SqlDriver` does, and
+ * this module's contract is to answer as `driver-sql` answers. Recording more
+ * here would be a second, easier answer to "what does `unique` mean" — the
+ * one-contract-two-numbers defect this module exists to close.
+ *
+ * A genuinely tenant-scoped object (no `tenancy` block, an `organization_id`
+ * column) never enters the record, so it keeps its `organization_id` partition
+ * across a partial re-registration exactly as before. An implementation that
+ * answered `null` more often than this one would not be stickier, it would be
+ * tenant isolation switched off.
+ */
+export function computeAndRecordTenantField(
+  record: TenantOptOutRecord,
+  key: string,
+  schema: UniqueAwareSchema | null | undefined,
+): string | null {
+  // A carried `tenancy` block is AUTHORITATIVE in both directions: it records a
+  // fresh opt-out, and it CLEARS a stale one. `!= null` is the SQL side's test
+  // — the declaration's PRESENCE is what makes it authoritative, so a
+  // `tenancy: {}` that declares no opt-out clears the record too.
+  if (schema?.tenancy != null) {
+    if (isTenancyDisabled(schema)) record.add(key);
+    else record.delete(key);
+    return tenantFieldOf(schema);
+  }
+  if (record.has(key)) return null;
+  return tenantFieldOf(schema);
+}
+
+/**
  * The constraints an object's field-level `unique` declarations ask for.
  *
  * The single place a `unique` declaration becomes a constraint in this package,
  * so the create, update and update-many paths cannot disagree about what one
  * means — the same reason `uniqueIndexesFromFields` is the single place on the
  * SQL side.
+ *
+ * [#16729] `tenantField` is the RESOLVED tenant column. It defaults to
+ * {@link tenantFieldOf} of this very schema, so the published one-argument call
+ * answers exactly as before; a caller holding a {@link TenantOptOutRecord}
+ * passes {@link computeAndRecordTenantField}'s answer instead, and a partial
+ * re-registration then cannot re-scope an object that declared itself
+ * platform-global. `driver-sql` threads the resolved column into
+ * `syncDeclaredIndexes` rather than letting that leaf recompute it, for this
+ * same reason.
  */
 export function uniqueConstraintsFromFields(
   schema: UniqueAwareSchema | null | undefined,
+  tenantField: string | null = tenantFieldOf(schema),
 ): MemoryUniqueConstraint[] {
   const fields = schema?.fields;
   if (!fields) return [];
-  const tenantField = tenantFieldOf(schema);
   const out: MemoryUniqueConstraint[] = [];
   for (const [name, field] of Object.entries(fields)) {
     const unique = (field as { unique?: unknown } | null | undefined)?.unique;
@@ -344,13 +429,22 @@ export function uniqueConstraintsFromFields(
  * `driver-memory` must not depend on `driver-sql`, so the arms are reproduced
  * and pinned here (`memory-declared-index-unique.test.ts`), the way
  * {@link tenantFieldOf} reproduces `SqlDriver.computeTenantField`.
+ *
+ * [#16729] `tenantField` is the RESOLVED tenant column. It defaults to
+ * {@link tenantFieldOf} of this very schema, so the published one-argument call
+ * answers exactly as before; a caller holding a {@link TenantOptOutRecord}
+ * passes {@link computeAndRecordTenantField}'s answer instead, and a partial
+ * re-registration then cannot re-scope an object that declared itself
+ * platform-global. `driver-sql` threads the resolved column into
+ * `syncDeclaredIndexes` rather than letting that leaf recompute it, for this
+ * same reason.
  */
 export function uniqueConstraintsFromDeclaredIndexes(
   schema: UniqueAwareSchema | null | undefined,
+  tenantField: string | null = tenantFieldOf(schema),
 ): MemoryDeclaredIndexConstraint[] {
   const declared = schema?.indexes;
   if (!Array.isArray(declared)) return [];
-  const tenantField = tenantFieldOf(schema);
   const out: MemoryDeclaredIndexConstraint[] = [];
   for (const idx of declared) {
     // The same filter the SQL side applies, and nothing more: a non-string or

@@ -140,6 +140,10 @@ export {
     type RateLimitKeyKind,
     type RateLimitLogger,
     type ActorUser,
+    carriedPackageIds,
+    resolveArtifactGrantBinding,
+    registerArtifactGrantedPermissions,
+    type ArtifactGrantBinding,
 } from './security/index.js';
 
 // ── Observability primitives ──────────────────────────────────────────
