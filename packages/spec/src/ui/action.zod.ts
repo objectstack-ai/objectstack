@@ -414,7 +414,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
   ),
   /**
    * Visibility predicate (CEL) — same scope as the action-level `visible`
-   * (`current_user` / `app` / `data` / `features`). When it evaluates false the
+   * (`current_user` / `data` / `features`). When it evaluates false the
    * dialog omits this param entirely. Use it to hide a param that the backend
    * only accepts under an opt-in capability, e.g. the create-user `phoneNumber`
    * param gated on `features.phoneNumber` so the form never offers a field the
@@ -1297,7 +1297,7 @@ const actionObject = () => strictObject({
   /**
    * Whether the action is offered at all. Three arms, one meaning — see
    * {@link ActionConditionInputSchema}: `false` parks the action, `true` is the
-   * explicit default, and a predicate gates it per record/user/app/features.
+   * explicit default, and a predicate gates it per record/user/features.
    *
    * ⚠️ Client-side hiding is UX, not authorization — the button is gone, the
    * route is not. An action gated for access-control reasons must also be
