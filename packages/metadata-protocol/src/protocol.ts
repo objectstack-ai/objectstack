@@ -1873,14 +1873,27 @@ const CLONE_STRIP_FIELDS: readonly string[] = [
  * `(object, reason)` with the UNION of dropped field names.
  *
  * Used by the bulk-create surface (`createManyData`), whose `{ object, records,
- * count }` response has no per-row slot to hang a `droppedFields` on. The
- * create-side static-`readonly` strip is schema-uniform — every row drops the
- * same set — which makes an aggregated view faithful rather than lossy. (Since
- * #14147 that strip is the ENGINE's, which reports one event per CALL for it,
- * so the aggregation is over the runtime-owned per-row events.) Returns `[]` when nothing was dropped so callers can spread
+ * count }` response has no per-row slot to hang a `droppedFields` on — a union
+ * is the only view that response can represent, which is the whole reason this
+ * collapse exists. (Since #14147 that strip is the ENGINE's, which reports one
+ * event per CALL for it, so the aggregation is over the runtime-owned per-row
+ * events.)
+ *
+ * ⚠️ So read a name in a merged event as "AT LEAST ONE row dropped this field",
+ * never "every row dropped the same set". Maintainer ruling C (#14147) put the
+ * static-`readonly` strip INSIDE `engine.insert`, AFTER the `beforeInsert`
+ * hooks, where it exempts keys a hook itself assigned — recorded PER ROW and
+ * indexed per row at the call: `packages/objectql/src/engine.ts` hands
+ * `stripReadonlyFields` the option `hookWrittenKeys: rowHookWrittenKeys[i]`,
+ * and that option's only power is to turn a STRIP into a KEEP. A hook that
+ * stamps a protected key on some rows and not others therefore makes those rows
+ * drop DIFFERENT sets, so the union is faithful to the BATCH without being
+ * faithful to any one row.
+ *
+ * Returns `[]` when nothing was dropped so callers can spread
  * `...(x.length ? { droppedFields: x } : {})` and keep the omit-when-empty shape.
- * The per-row `insertMany`/`batch` paths keep row precision instead (they have a
- * per-row result to carry it).
+ * The per-row `insertMany`/`batch` paths carry their own per-row `droppedFields`
+ * instead — they have a per-row result to hang one on.
  */
 function mergeDroppedFieldEvents(events: DroppedFieldsEvent[]): DroppedFieldsEvent[] {
     if (events.length === 0) return [];
@@ -4843,8 +4856,9 @@ export class ObjectStackProtocolImplementation implements
         };
         // [#15950] …and the STORED half folded on top of it. The registry is
         // only ONE of the two homes live metadata has; see
-        // {@link foldStoredCollection} for the measured disagreement and for
-        // why the fold is additive.
+        // {@link foldStoredCollection} for the measured disagreement, and
+        // [#16224] for why the fold is the read API's own merge rather than a
+        // second account of it.
         const listCollection = (singularType: string, pluralType: string): Promise<unknown[]> =>
             this.foldStoredCollection(
                 listRegisteredCollection(singularType, pluralType),
@@ -4928,20 +4942,42 @@ export class ObjectStackProtocolImplementation implements
      * same word, and the side that was wrong is this one: the lint contract
      * says "live", and the registry alone is not that.
      *
-     * ## The fold is ADDITIVE, deliberately
+     * ## The fold is the READ API's own merge — [#16224]
      *
-     * A stored row contributes a name the registry half does not already carry;
-     * it never displaces a registry entry. That is not caution for its own
-     * sake — the registry's copy of an `object` is the RESOLVED schema
-     * (ADR-0029 D9.2: a base layer with its `extend` contributors folded on),
-     * while a `sys_metadata` row is the base layer alone, which is exactly why
-     * {@link getMetaItems} runs {@link foldObjectExtendersFromRegistry} when its
-     * own merge lets an overlay win. Letting a raw row displace the resolved
-     * body here would trade this card's phantom for a subtler one — a field
-     * reference that resolves today reading as dangling — so the universe grows
-     * and nothing in it is rewritten. The residual is stated rather than
-     * hidden: where an org overlay REDEFINES a code-package item, the gate
-     * still judges that item's CONTENT from the registry's version.
+     * #15950's repair contributed store-only NAMES and never displaced a
+     * registry entry, and it wrote the residual that left into this docblock:
+     * where an overlay REDEFINES a code-package item, the gate still judged
+     * that item's CONTENT from the registry's version. #16224 measured that
+     * residual end to end and it is worse than one phantom. A code package
+     * ships `dataset/D` with measure `m`; an env-wide overlay redefines `D`
+     * without `m`. In ONE instant the gate ACCEPTED a widget bound to `m`,
+     * which the runtime cannot serve, and REFUSED a widget bound to the measure
+     * the overlay does declare, which it can — an acceptance that should have
+     * been a refusal and a refusal that should have been an acceptance, from
+     * one cause: a body nobody serves.
+     *
+     * So the additive merge is gone and {@link mergePackageAwareOverlay} — the
+     * merge {@link getMetaItems} performs, with the transform it performs it
+     * with — is what runs here. Two readers of the word "live" now read through
+     * one function.
+     *
+     * ⛔ That is NOT the reversal it can look like. The argument against
+     * additivity's alternative was never "an overlay must not win"; it was
+     * "an UNRESOLVED body must not win" — the registry's copy of an `object` is
+     * the RESOLVED schema (ADR-0029 D9.2: a base layer with its `extend`
+     * contributors folded on) while a `sys_metadata` row is the base layer
+     * alone, so a raw row displacing the resolved body would make a field
+     * reference that resolves today read as dangling. That argument names its
+     * own remedy in the same breath, and {@link getMetaItems} has always
+     * applied it: run {@link foldObjectExtendersFromRegistry} on the winner.
+     * The distinction is therefore kept by FOLDING rather than by declining,
+     * and it is pinned as such — `protocol.runtime-gate-stored-universe.test.ts`
+     * asserts that an `object` overlay wins on its own columns AND keeps the
+     * registry's `extend` contributors.
+     *
+     * The universe still only ever grows a NAME: for a name the registry does
+     * not carry, this is byte-for-byte #15950's additive contribution, and that
+     * arm is pinned alongside the redefinition arm in the same process.
      *
      * ## What the read is scoped to
      *
@@ -5019,15 +5055,14 @@ export class ObjectStackProtocolImplementation implements
         }
         if (rows.length === 0) return registered;
 
-        const seen = new Set<string>();
-        for (const item of registered) {
-            const name = (item as { name?: unknown } | null | undefined)?.name;
-            if (typeof name === 'string') seen.add(name);
-        }
-        const merged = [...registered];
+        // Every readable row, in the shape {@link mergePackageAwareOverlay}
+        // consumes: the converted body plus the row's own package provenance.
+        // Reading a row is the only thing that can fail here, so it is the only
+        // thing this loop does.
+        const overlays: Array<{ data: unknown; packageId: string | undefined }> = [];
         for (const row of rows) {
             const name = row.name;
-            if (typeof name !== 'string' || seen.has(name)) continue;
+            if (typeof name !== 'string') continue;
             let body: unknown;
             try {
                 const raw = row.metadata;
@@ -5049,14 +5084,39 @@ export class ObjectStackProtocolImplementation implements
                 continue;
             }
             if (!body || typeof body !== 'object') continue;
-            const packageId = row.package_id;
-            if (typeof packageId === 'string' && (body as { _packageId?: unknown })._packageId === undefined) {
-                (body as { _packageId?: unknown })._packageId = packageId;
-            }
-            seen.add(name);
-            merged.push(body);
+            overlays.push({
+                data: body,
+                packageId: typeof row.package_id === 'string' ? row.package_id : undefined,
+            });
         }
-        return merged;
+        if (overlays.length === 0) return registered;
+
+        // [#16224] The read API's OWN merge, with the read API's own transform
+        // — not a second implementation of it. `mergePackageAwareOverlay` keys
+        // by ADR-0048 package slot rather than by bare name, so an overlay
+        // shadows the entry it actually overrides and two installed packages
+        // shipping one `type/name` are still two entries; the transform is the
+        // #8027 fold that keeps a winning `object` body at its RESOLVED shape.
+        // Together they are the two lines {@link getMetaItems} runs, which is
+        // the point: the gate's universe is now the same universe the platform
+        // answers `GET /meta/:type` from, by construction rather than by
+        // agreement.
+        const merged = mergePackageAwareOverlay(singularType, registered, overlays, (data) =>
+            this.foldObjectExtendersFromRegistry(
+                singularType, (data as { name?: unknown } | null)?.name, data,
+            ),
+        );
+
+        // A registry entry with no `name` is not addressable by any reference,
+        // so the merge above has no slot for it and drops it. It is carried
+        // through anyway: the rules that judge a collection's own coherence
+        // (`measure-aggregate-incoherent` and its siblings) walk the list by
+        // index and would lose a finding, and this method's contract is that
+        // the universe GROWS. Empty in every ordinary deployment.
+        const unaddressable = registered.filter(
+            (item) => !(item && typeof item === 'object' && 'name' in item),
+        );
+        return unaddressable.length > 0 ? [...merged, ...unaddressable] : merged;
     }
 
     /**
@@ -11916,12 +11976,43 @@ export class ObjectStackProtocolImplementation implements
             // It is folded in anyway because that makes the scope a DECLARED
             // property of the validator instead of an emergent property of the
             // body. Two orgs whose documents are byte-identical today share a
-            // validator by coincidence, not by statement; and any future path
-            // that resolves an org row but falls back to the env-wide body
-            // would answer a 304 pinning the caller to a wrong-scope document
-            // with nothing in the validator to show it. Prepended, and ONLY
+            // validator by coincidence, not by statement. Prepended, and ONLY
             // when present, so an org-less caller's validator stays byte-for-
             // byte the one it is issued today.
+            //
+            // [#16525] ⚠️ The paragraph above used to argue from "any FUTURE
+            // path that resolves an org row but falls back to the env-wide
+            // body". THAT PATH IS PRESENT, and reading it as future is how a
+            // later author concludes the risk has not arrived yet:
+            // `getMetaItem` resolves `(orgId ? findOverlay(orgId) : undefined)
+            // ?? findOverlay(null)`, so an organization with no row of its own
+            // is served the env-wide document under an org-named validator.
+            //
+            // ⭐ AND `request.organizationId` IS THE SUPPLIED MEMBER, not the
+            // effective scope: {@link organizationIdForMetaRead} reduces it to
+            // `undefined` for a type declaring `allowOrgOverride: false`, and
+            // that reduction happens BELOW this line, inside `getMetaItem`. So
+            // a caller that hands this verb a raw organization gets a validator
+            // naming a scope its body was never resolved under.
+            //
+            // ⛔ Neither is a correctness fault, and the reason is the ONE
+            // invariant this block depends on: `content` — the bytes actually
+            // being sent — is inside the hash below. A 304 is therefore
+            // answered only on an exact match over those bytes, so a caller is
+            // only ever pinned to the representation IT received; the cost is
+            // validator FRAGMENTATION (N orgs, one env-wide document, N
+            // validators), which is waste, not error. ⇒ Hashing anything
+            // cheaper than the document — a version marker, the scope alone —
+            // destroys that argument silently. `get-meta-item-cached-etag-
+            // scope.test.ts` §3 is the pin; measured, removing `content` here
+            // reddens exactly one assertion and leaves the rest green.
+            //
+            // ⛔ Do NOT "repair" this by folding the effective value without
+            // reading #16525: it changes every published ETag that carries an
+            // organization, and buys nothing at the only production door —
+            // `@objectstack/rest` computes `organizationIdForMetaRead` BEFORE
+            // it calls (pinned by `rest-server-meta-cached-etag-door-scope.
+            // test.ts`), so supplied and effective already agree there.
             const content = JSON.stringify(item);
             const scope = [
                 request.organizationId ? `org:${request.organizationId}` : undefined,

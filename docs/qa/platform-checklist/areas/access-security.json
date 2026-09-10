@@ -2599,7 +2599,7 @@
       },
       "source": [
         "packages/plugins/plugin-hono-server/src/current-user-endpoints.ts#tabPermissions (/auth/me/permissions aggregation + most-permissive merge), (/auth/me/localization), (/me/apps requiredPermissions/tabPermissions filter), (the /api/v1 prefix)",
-        "packages/core/src/security/auth-gate.ts#ALLOW_SUFFIXES (ALLOW_SUFFIXES — /me/apps + /me/localization reachable to gated users)",
+        "packages/core/src/security/auth-gate.ts#ALLOW_ROUTES (ALLOW_ROUTES — /me/apps + /me/localization reachable to gated users. Was ALLOW_SUFFIXES, an endsWith test that also exempted any path merely ENDING in those two — /data/xyz/me/apps among them; the allow-list is anchored to a mount base now, so these are EXACT routes at a mount and a record id can no longer spell its way into the exemption)",
         "#7616 (delegated permission-set resolution — the enforcement path's own answer), #2752 (/me/apps registry sourcing), #3391 (effective apiOperations annotation), #4093 (guarded degraded branch), ADR-0090 D5 (additive baseline)",
         "cross-ref access-security.anonymous-deny-surfaces — the 401 floor this trio is the declared exception to",
         "cross-ref access-security.fls-mask-and-strip — owns the FLS enforcement this item's clause 2 cross-checks"
