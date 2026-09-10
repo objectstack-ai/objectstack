@@ -1611,10 +1611,10 @@ export class SecurityPlugin implements Plugin {
               statement: d10NarrowingStatement({
                 object,
                 delegatorId: String(delegatorId),
-                effectiveScope: folded.effective,
+                effectiveScope: folded.agentLegScope,
                 delegatorScope,
               }),
-              effectiveScope: folded.effective as DelegationNarrowing['effectiveScope'],
+              effectiveScope: folded.agentLegScope as DelegationNarrowing['effectiveScope'],
               delegatorScope,
             };
           } catch (e) {
@@ -2314,18 +2314,18 @@ export class SecurityPlugin implements Plugin {
         // its `allowTransfer` refusal (step 2.9), its managed-object write
         // denies and its private-object exclusion are all decided elsewhere and
         // are untouched — see the subtraction table on the ceiling sets.
-        const depthFor = (opClass: 'read' | 'write'): { effective: string; narrowedByCeiling: boolean; delegatorScope: string } | null => {
+        const depthFor = (opClass: 'read' | 'write'): { agentLegScope: string; delegatorScope: string } | null => {
           if (!delegatorSets) return null;
           const delegatorScope = this.permissionEvaluator.getEffectiveScope(opClass, opCtx.object, delegatorSets, { isPrivate: secMeta.isPrivate });
           const declared = this.permissionEvaluator.getDeclaredScope(opClass, opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
-          return { ...intersectDelegatedScope(declared, delegatorScope), delegatorScope };
+          return { agentLegScope: intersectDelegatedScope(declared, delegatorScope).agentLegScope, delegatorScope };
         };
         // The AGENT's own depth drives plugin-sharing's owner-match for the
         // agent identity (unchanged on the non-delegated path).
         if (['find', 'findOne', 'count', 'aggregate'].includes(opCtx.operation)) {
-          const folded = depthFor('read');
-          sc.__readScope = folded
-            ? folded.effective
+          const delegated = depthFor('read');
+          sc.__readScope = delegated
+            ? delegated.agentLegScope
             : this.permissionEvaluator.getEffectiveScope('read', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
           // [ADR-0090 D10] Stash the DELEGATOR's own read depth SEPARATELY (not a
           // min of the two). The OWD/sharing owner-match is identity-scoped:
@@ -2334,13 +2334,13 @@ export class SecurityPlugin implements Plugin {
           // intersection. Narrowing __readScope alone would wrongly scope the
           // AGENT's identity to the delegator's depth (owner_id = agentId),
           // hiding the very rows the delegator legitimately owns.
-          if (folded) sc.__delegatorReadScope = folded.delegatorScope;
+          if (delegated) sc.__delegatorReadScope = delegated.delegatorScope;
         } else if (['update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation)) {
-          const folded = depthFor('write');
-          sc.__writeScope = folded
-            ? folded.effective
+          const delegated = depthFor('write');
+          sc.__writeScope = delegated
+            ? delegated.agentLegScope
             : this.permissionEvaluator.getEffectiveScope('write', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
-          if (folded) sc.__delegatorWriteScope = folded.delegatorScope;
+          if (delegated) sc.__delegatorWriteScope = delegated.delegatorScope;
         }
       }
 

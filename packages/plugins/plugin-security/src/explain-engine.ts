@@ -664,44 +664,58 @@ export function narrowerScope(a: string, b: string): string {
 }
 
 /**
- * [ADR-0090 D10 — maintainer ruling 2026-09-08, option 1] The depth a DELEGATED
- * principal actually runs at, and whether its own ceiling is what narrowed it.
+ * [ADR-0090 D10 — maintainer ruling 2026-09-08, option 1] The depth the
+ * DELEGATED principal's own leg contributes, and whether that leg is what
+ * narrowed the read.
  *
  * **The rule: a ceiling that says nothing subtracts nothing.** `ceilingScope`
  * is `PermissionEvaluator.getDeclaredScope` — `undefined` when every set the
- * delegated principal holds is silent about depth. Silence is "no opinion", and
- * the delegator's own depth stands. A ceiling that DOES declare a depth is
- * intersected exactly as before ({@link narrowerScope}), so its subtractive
- * force is untouched.
+ * delegated principal holds is silent about depth. Silence is "no opinion", so
+ * this leg contributes NO owner narrowing (`'org'`) and every row bound comes
+ * from the delegator's leg, which plugin-sharing AND-s in beside it. A ceiling
+ * that DOES declare a depth contributes exactly that depth, unchanged.
+ *
+ * ⚠️ This is deliberately NOT `narrowerScope(ceiling, delegator)`. The
+ * OWD/sharing owner-match is IDENTITY-scoped: `__readScope` bounds the AGENT
+ * identity's owner-match and `__delegatorReadScope` bounds the DELEGATOR's, and
+ * the true intersection is the AND of the two filters (`sharing-plugin.ts`).
+ * Folding the minimum into this leg would scope the agent identity to the
+ * delegator's depth — `owner_id = agentId` at the delegator's depth — hiding
+ * the very rows the delegator legitimately owns.
  *
  * Why the rule exists, in one measurement: `mcp_agent_data_read` /
  * `mcp_agent_data_write` are pure CAPABILITY ceilings — `{'*': {allowRead:
  * true, …}}`, no `readScope`, no `viewAllRecords`, and their own doc comment
  * says "NO row-level security … all row/owner/tenant narrowing comes from the
  * delegating user". `getEffectiveScope` nonetheless answered `'own'` for them
- * (its owner-only default for a granting-but-silent set), so the OWD/sharing
- * owner-match ran at `own` and a `viewAllRecords` sales manager who reads 9
- * accounts / 23 opportunities / 45 tasks through the Console or a per-user API
- * key read 5 / 0 / 0 through an OAuth MCP client — silently, `total: 0`, with
- * the agent then reporting "there are no opportunities this quarter" as fact.
+ * (its owner-only default for a granting-but-silent set), so this leg imposed
+ * an owner-match nobody declared and a `viewAllRecords` sales manager who reads
+ * 9 accounts / 23 opportunities / 45 tasks through the Console or a per-user
+ * API key read 5 / 0 / 0 through an OAuth MCP client — silently, `total: 0`,
+ * with the agent then reporting "there are no opportunities this quarter" as
+ * fact.
  *
- * ⛔ This widens VISIBILITY DEPTH only. Everything else the ceiling subtracts is
- * decided elsewhere and is unchanged — see the subtraction table on
- * `MCP_AGENT_PERMISSION_SET_READ` in `objects/default-permission-sets.ts`.
+ * ⛔ This widens VISIBILITY DEPTH only, and only on the SILENT-ceiling input.
+ * Every other subtraction is decided elsewhere and is unchanged — see the
+ * subtraction table on `MCP_AGENT_PERMISSION_SET_READ` in
+ * `objects/default-permission-sets.ts`.
  *
- * `narrowedByCeiling` is the diagnostic half of the same ruling: when it is
- * true the delegated read is answering from a row set the ceiling shrank, and
- * the MCP `query_records` result must SAY so rather than serve a bare count.
+ * `narrowedByCeiling` is the diagnostic half of the same ruling: true iff the
+ * ceiling's OWN declared depth is strictly narrower than the delegator's, i.e.
+ * the delegated read is answering from a row set THIS leg shrank — and the MCP
+ * `query_records` result must then SAY so rather than serve a bare count.
  */
 export function intersectDelegatedScope(
   ceilingScope: string | undefined,
   delegatorScope: string,
-): { effective: string; narrowedByCeiling: boolean } {
+): { agentLegScope: string; narrowedByCeiling: boolean } {
   if (ceilingScope === undefined) {
-    return { effective: delegatorScope, narrowedByCeiling: false };
+    return { agentLegScope: 'org', narrowedByCeiling: false };
   }
-  const effective = narrowerScope(ceilingScope, delegatorScope);
-  return { effective, narrowedByCeiling: effective !== delegatorScope };
+  return {
+    agentLegScope: ceilingScope,
+    narrowedByCeiling: narrowerScope(ceilingScope, delegatorScope) !== delegatorScope,
+  };
 }
 
 /**
@@ -1346,22 +1360,24 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   // ── 6. depth ───────────────────────────────────────────────────────────
   const opClass = dataOp === 'find' ? 'read' : 'write';
   const agentScope = deps.evaluator.getEffectiveScope(opClass as 'read' | 'write', object, sets, { isPrivate: secMeta.isPrivate });
-  // [ADR-0090 D10 — ruling 2026-09-08] The delegated principal runs at the
-  // narrower of the two DECLARED depths, and a ceiling that declares none
-  // subtracts nothing. The SAME fold the middleware stashes as `__readScope`
-  // (`security-plugin.ts` step 2.6), through the same two evaluator calls —
-  // explain and enforcement resolve one question with one function, so a report
-  // saying "narrowed to 'own'" can never sit next to a query that was not.
+  // [ADR-0090 D10 — ruling 2026-09-08] The delegated row set is the AND of the
+  // two identity legs, so the depth a reader of this report cares about is the
+  // narrower of them — and a ceiling that DECLARES no depth contributes no
+  // narrowing at all (`intersectDelegatedScope`). The agent leg here is the
+  // SAME value the middleware stashes as `__readScope` (`security-plugin.ts`
+  // step 2.6), computed by the SAME function from the SAME two evaluator calls,
+  // so a report saying "narrowed to 'own'" can never sit beside a query that
+  // was not narrowed.
   const delegatorScope = delegatorSets
     ? deps.evaluator.getEffectiveScope(opClass as 'read' | 'write', object, delegatorSets, { isPrivate: secMeta.isPrivate })
     : null;
-  const folded = delegatorSets
+  const delegated = delegatorSets
     ? intersectDelegatedScope(
         deps.evaluator.getDeclaredScope(opClass as 'read' | 'write', object, sets, { isPrivate: secMeta.isPrivate }),
         delegatorScope!,
       )
     : null;
-  const scope = folded ? folded.effective : agentScope;
+  const scope = delegated ? narrowerScope(delegated.agentLegScope, delegatorScope!) : agentScope;
   const depthApplies = owd.effect !== 'public';
   layers.push({
     layer: 'depth',
@@ -1369,10 +1385,10 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
     detail: !depthApplies
       ? 'Depth axis does not apply (baseline already org-wide).'
       : `Effective ${opClass} depth: '${scope}' (ADR-0057 D1 — widest across granting sets; ` +
-        (folded
-          ? folded.narrowedByCeiling
-            ? `narrowed from the delegator's '${delegatorScope}' by the agent ceiling, D10 intersection; `
-            : `agent ceiling declares no depth, so the delegator's '${delegatorScope}' stands, D10 intersection; `
+        (delegated
+          ? delegated.narrowedByCeiling
+            ? `narrowed from the delegator's '${delegatorScope}' to the agent ceiling's '${delegated.agentLegScope}' by the D10 intersection; `
+            : `the agent ceiling declares no depth, so the delegator's '${delegatorScope}' stands under the D10 intersection; `
           : '') +
         `assignment BU anchors narrow which unit 'unit*' means, ADR-0090 Addendum).`,
     contributors: [],
