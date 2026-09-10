@@ -203,14 +203,111 @@ export { nextUtcCalendarDay, utcInstantMs } from '@objectstack/spec/data';
 export type BucketGranularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
 
 /**
- * ISO-8601 week label (Mon-start weeks, week 1 = the week of the first
- * Thursday) of a UTC calendar day. The forward-direction companion used to
- * *validate* a reconstructed week boundary; it mirrors the week branch of
- * `@objectstack/objectql`'s `bucketDateValue` (kept in lockstep by the
- * round-trip parity test in objectql).
+ * The granularities that HAVE a canonical bucket key — the accepted set of
+ * {@link bucketDateKey}, in ascending order.
+ *
+ * `@objectstack/spec`'s `TimeUpdateInterval` declares three more (`second`,
+ * `minute`, `hour`) for which the contract defines no canonical key vocabulary
+ * anywhere. Exported so a face that has to refuse one of those names the
+ * accepted set FROM HERE: a hand-listed copy in a refusal message agrees with
+ * this one on the day it is typed and never again.
  */
-function isoWeekLabelUtc(d: Date): string {
-  const target = new Date(d.getTime());
+export const BUCKET_GRANULARITIES: readonly BucketGranularity[] = [
+  'day',
+  'week',
+  'month',
+  'quarter',
+  'year',
+];
+
+/**
+ * Is `value` one of the five granularities {@link bucketDateKey} can label?
+ *
+ * The guard a caller holding a wider vocabulary (`TimeUpdateInterval`) uses to
+ * split "bucket it" from "refuse it" without restating either set.
+ */
+export function isBucketGranularity(value: unknown): value is BucketGranularity {
+  return typeof value === 'string' && (BUCKET_GRANULARITIES as readonly string[]).includes(value);
+}
+
+/**
+ * The canonical date-bucket KEY an instant falls in, as seen in a reference
+ * timezone — the FORWARD direction of {@link bucketKeyToCalendarRange}, and the
+ * one labeller the in-memory bucketing faces delegate to.
+ *
+ * ⚠️ **The label vocabulary is an output contract, not a display choice.** A
+ * driver that advertises `supports.queryDateGranularity[g]` buckets that
+ * granularity in SQL instead and `engine.aggregate` picks between the two per
+ * query, so a label produced here must equal the label that driver's SQL
+ * produces for the same instant, or a drill-down breaks when it crosses the
+ * seam. `2026`, `2026-Q2`, `2026-06`, `2026-06-15`, `2026-W23` — editing them
+ * means editing every driver's bucket expression too. The seam is enforced by
+ * `checkDateBucketParity` (`@objectstack/verify`).
+ *
+ * `timezone` (ADR-0053 Phase 2) resolves the calendar day in a reference zone so
+ * an instant near a tz day-boundary buckets where a user in that zone would
+ * expect. An unset / `'UTC'` / invalid zone keeps UTC bucketing. The y/m/d are
+ * taken in the reference zone and the ISO-week math then runs on a UTC date
+ * built from those parts — the parts already carry the zone shift, so the week
+ * boundary lands correctly without re-applying any offset.
+ *
+ * A finite NUMBER is read as epoch milliseconds — the form SQLite stores a
+ * `Field.datetime` in, and what any driver that hands back raw storage values
+ * yields. `new Date(String(1767225600000))` is an Invalid Date, so without this
+ * branch such a row lands in the empty bucket while the pushed-down SQL buckets
+ * it correctly (#3773) — the two paths must label the same instant identically
+ * or a drill-down built on one breaks against the other.
+ *
+ * Returns `null` for a null/absent or unparseable instant — the same key the
+ * pushed-down SQL yields, where the bucket expression propagates NULL (#3839).
+ * Null and unparseable deliberately share one bucket: SQL cannot tell them apart
+ * either (`strftime('%Y-%m', 'not-a-date')` is NULL), and splitting them here
+ * would re-open the seam this function exists to close.
+ */
+export function bucketDateKey(
+  value: unknown,
+  granularity: BucketGranularity,
+  timezone?: string,
+): string | null {
+  if (value == null) return null;
+  const d =
+    value instanceof Date
+      ? value
+      : typeof value === 'number'
+        ? new Date(value)
+        : new Date(String(value));
+  if (Number.isNaN(d.getTime())) return null;
+  const { year: y, month: m, day } = calendarPartsInTzOrUtc(d, timezone);
+  switch (granularity) {
+    case 'year':
+      return String(y);
+    case 'quarter':
+      return `${y}-Q${Math.floor((m - 1) / 3) + 1}`;
+    case 'month':
+      return `${y}-${String(m).padStart(2, '0')}`;
+    case 'day':
+      return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    case 'week':
+      return isoWeekLabelFromCalendarDay(y, m, day);
+    default:
+      // Unreachable through `BucketGranularity`. Kept as the same echo
+      // `@objectstack/objectql`'s `bucketDateValue` has always answered an
+      // off-type JS caller — this function is that one's delegate, so it must
+      // not change the answer for any input that already had one.
+      return String(value);
+  }
+}
+
+/**
+ * ISO-8601 week label (Mon-start weeks, week 1 = the week of the first
+ * Thursday) of a calendar day given that day's parts (`month` is 1-12).
+ *
+ * The ONE statement of the week rule in this package: {@link bucketDateKey}'s
+ * `week` branch and {@link isoWeekLabelUtc} both call it, so the forward label
+ * and the round-trip validator that checks it cannot drift apart.
+ */
+function isoWeekLabelFromCalendarDay(year: number, month: number, day: number): string {
+  const target = new Date(Date.UTC(year, month - 1, day));
   const dayNum = (target.getUTCDay() + 6) % 7; // Mon=0..Sun=6
   target.setUTCDate(target.getUTCDate() - dayNum + 3); // shift to that week's Thursday
   const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
@@ -223,6 +320,14 @@ function isoWeekLabelUtc(d: Date): string {
         7,
     );
   return `${target.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+/**
+ * ISO-8601 week label of a UTC calendar day — the forward-direction companion
+ * used to *validate* a reconstructed week boundary below.
+ */
+function isoWeekLabelUtc(d: Date): string {
+  return isoWeekLabelFromCalendarDay(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
 }
 
 /**
