@@ -75,7 +75,7 @@
 import { describe, it, expect } from 'vitest';
 import { DatasetSchema } from '@objectstack/spec/ui';
 import { FieldSchema } from '@objectstack/spec/data';
-import type { ExecutionContext } from '@objectstack/spec/data';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { AnalyticsService } from '../analytics-service.js';
 import {
   FORMULA_RETURN_TYPE_RESULT,
