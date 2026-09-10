@@ -8,9 +8,12 @@
  *
  *  - **select** — grouped by the stored option `value` (e.g. `backlog`), but the
  *    user-facing text is the option `label` (e.g. `Backlog`).
- *  - **lookup / master_detail** — grouped by the foreign-key `id` (e.g.
+ *  - **the reference class** (`REFERENCE_VALUE_TYPES`: `lookup`,
+ *    `master_detail`, `user`, `tree`) — grouped by the foreign-key `id` (e.g.
  *    `8eqtuKI4G9IhUsPS`), but the user-facing text is the related record's
- *    display field (its name/title).
+ *    display field (its name/title). All four store an id and all four resolve
+ *    the same way (#16390); a `user` dimension's target is `sys_user`, whether
+ *    the field spells `reference` out or leaves it to the type.
  *
  * `resolveDimensionLabels` post-processes the result rows IN PLACE, replacing the
  * raw value at `row[dimension.name]` with its display label when one is found.
@@ -28,11 +31,17 @@
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { referenceTargetOf } from '@objectstack/spec/data';
 
 /** The minimal field shape this resolver needs. */
 export interface FieldMetaLite {
   type?: string;
-  /** Lookup / master_detail target object name. */
+  /**
+   * The referenced object's name, for a member of the reference class
+   * (`lookup` / `master_detail` / `user` / `tree`). Optional even for one of
+   * those: a `user` field's target is fixed by the TYPE, so `referenceTargetOf`
+   * supplies `sys_user` when the field omits it.
+   */
   reference?: string;
   /** Select options — the value→label source. */
   options?: Array<{ value: unknown; label?: string }>;
@@ -110,14 +119,35 @@ export type LabelScopeResolver = (
   targetObject: string,
 ) => Promise<Record<string, unknown> | null | undefined> | Record<string, unknown> | null | undefined;
 
-const LOOKUP_TYPES = new Set(['lookup', 'master_detail']);
+/**
+ * The object a reference-typed dimension field points at, or `undefined` when
+ * the field is not one (#16390).
+ *
+ * Delegates to spec's `referenceTargetOf` — the declared SINGLE arbiter of
+ * "what does this field expand into" — so this module reads the reference class
+ * from the one place that defines it (`REFERENCE_VALUE_TYPES`: `lookup`,
+ * `master_detail`, `user`, `tree`) instead of restating a subset of it. Two
+ * things follow that a hand-written `type in {lookup, master_detail} &&
+ * field.reference` test got wrong:
+ *
+ *  - a `user` dimension (and a `tree` one) grouped by a stored FK id used to
+ *    render that raw id where every sibling member rendered a name — the axis
+ *    of any "by person" chart was a column of user ids;
+ *  - a `user` field authored WITHOUT `reference` still names a target, because
+ *    `sys_user` is a CONSTANT OF THE TYPE that `referenceTargetOf` materializes.
+ *    Requiring the author to restate it is precisely the disagreement between
+ *    two readers of one field that arbiter exists to end.
+ */
+function referenceLabelTarget(meta: FieldMetaLite | undefined): string | undefined {
+  return meta ? referenceTargetOf(meta) : undefined;
+}
 
 /**
  * Sort-key label resolution for `DatasetSelection.order` (#3680).
  *
  * The executor sorts the assembled grid BEFORE `queryDataset` rewrites stored
  * dimension values into display labels, so an order key naming a `select` or
- * `lookup`/`master_detail` dimension used to sort by the stored value / FK id —
+ * reference-class dimension used to sort by the stored value / FK id —
  * an order that presents as arbitrary once the labels render. This hook hands
  * the executor JUST the value→label mapping for such a dimension so it can sort
  * by what the user will actually read, while the rows keep their raw values
@@ -128,7 +158,8 @@ const LOOKUP_TYPES = new Set(['lookup', 'master_detail']);
 export interface OrderLabelResolver {
   /**
    * Whether the dimension's stored value differs from the label it renders as
-   * (`select` options, `lookup`/`master_detail` FK ids). Synchronous — the
+   * (`select` options, or a reference-class FK id — `lookup`/`master_detail`/
+   * `user`/`tree`). Synchronous — the
    * executor consults it when deciding whether the window may be pushed into
    * SQL, before any query runs.
    */
@@ -145,10 +176,10 @@ export interface OrderLabelResolver {
  * Build the executor's {@link OrderLabelResolver} from the dataset's dimension
  * list and the injected label capabilities. Mirrors the classification in
  * {@link resolveDimensionLabels}: a dimension is label-bearing when its field
- * carries select `options` or is a lookup/master_detail with a `reference`.
+ * carries select `options` or belongs to the reference class and names a target.
  *
  * - `select` resolves from field metadata — no query at all.
- * - `lookup`/`master_detail` costs ONE batched id→name read over the distinct
+ * - a reference dimension costs ONE batched id→name read over the distinct
  *   grouped values, scoped to the REFERENCED object's own RLS (#3602). Fail
  *   closed: an unresolvable scope degrades to sorting by the stored id rather
  *   than fetching unscoped — consistent with the display pass, which renders
@@ -171,7 +202,7 @@ export function createOrderLabelResolver(
       const meta = metaFor(dimension);
       if (!meta) return false;
       if (Array.isArray(meta.options) && meta.options.length > 0) return true;
-      return !!(meta.type && LOOKUP_TYPES.has(meta.type) && meta.reference);
+      return !!referenceLabelTarget(meta);
     },
     async resolveLabels(dimension, values) {
       const meta = metaFor(dimension);
@@ -183,16 +214,17 @@ export function createOrderLabelResolver(
         }
         return labelByValue;
       }
-      if (meta.type && LOOKUP_TYPES.has(meta.type) && meta.reference) {
+      const target = referenceLabelTarget(meta);
+      if (target) {
         let scope: Record<string, unknown> | null | undefined;
         if (resolveScope) {
           try {
-            scope = await resolveScope(meta.reference);
+            scope = await resolveScope(target);
           } catch {
             return undefined;
           }
         }
-        return deps.fetchRecordLabels(meta.reference, values, scope ?? undefined, context);
+        return deps.fetchRecordLabels(target, values, scope ?? undefined, context);
       }
       return undefined;
     },
@@ -315,7 +347,7 @@ export function formatDateBucket(value: unknown, granularity?: DateGranularity |
  * @param rows - result rows, mutated in place
  * @param deps - injected runtime capabilities
  * @param resolveScope - (ADR-0021 D-C, #3602) resolves the referenced object's
- *   own read scope for a lookup/master_detail dimension's label fetch. When it
+ *   own read scope for a reference-class dimension's label fetch. When it
  *   throws, that dimension's labels are SKIPPED (fail-closed — the raw id renders
  *   instead) rather than fetched unscoped. Omit when no read-scope provider is
  *   configured (labels then fetch unscoped, as before — no security in play).
@@ -375,8 +407,11 @@ export async function resolveDimensionLabels(
       continue;
     }
 
-    // ── lookup / master_detail: id → related record display name ───────
-    if (meta.type && LOOKUP_TYPES.has(meta.type) && meta.reference) {
+    // ── reference class: id → related record display name ──────────────
+    // lookup / master_detail / user / tree — one declared class, one reading
+    // (#16390). `referenceLabelTarget` names the referenced object.
+    const target = referenceLabelTarget(meta);
+    if (target) {
       const ids = Array.from(
         new Set(rows.map((r) => r[dim.name]).filter((v) => v != null)),
       );
@@ -386,15 +421,18 @@ export async function resolveDimensionLabels(
       // RLS would hide (leak fires when the referenced object is stricter than
       // the base). Fail closed: if the scope can't be resolved, skip this
       // dimension's labels (raw id renders) rather than fetch unscoped.
+      // #16390 — this is the belt that makes resolving a `user` dimension safe:
+      // turning a user id into a name IS a read of `sys_user`, and it travels
+      // the SAME scoped path every other member of the class travels.
       let scope: Record<string, unknown> | null | undefined;
       if (resolveScope) {
         try {
-          scope = await resolveScope(meta.reference);
+          scope = await resolveScope(target);
         } catch {
           continue;
         }
       }
-      const labelById = await deps.fetchRecordLabels(meta.reference, ids, scope ?? undefined, context);
+      const labelById = await deps.fetchRecordLabels(target, ids, scope ?? undefined, context);
       if (!labelById || labelById.size === 0) continue;
       for (const row of rows) {
         const label = labelById.get(row[dim.name]);
