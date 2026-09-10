@@ -366,10 +366,17 @@ export const TaskCompletedSlackFlow = defineFlow({
  * value matching no row is silently authoritative, which is strictly worse
  * than the refusal.
  *
- * ⇒ What a package-shipped scheduled flow should do instead is an open
- * maintainer decision, tracked in #17150. Until it is settled this flow is a
- * worked example of the SHAPE, and running it end-to-end means registering it
- * at runtime with an `organization` your install actually holds.
+ * ⇒ What a package-shipped time-triggered flow should do INSTEAD is an open
+ * maintainer decision. Its tracking card was destroyed along with a suspended
+ * account and is being re-filed; until that card carries a number, this
+ * paragraph is the record. Until it is settled this flow is a worked example of
+ * the SHAPE, and running it end-to-end means registering it at runtime with an
+ * `organization` your install actually holds.
+ *
+ * `os lint` / `os validate` / `objectstack build` say so too, as a `warning`
+ * (`flow-schedule-organization-missing`) — deliberately not an `error`, because
+ * an `error` would refuse this package's own build for a defect it has no
+ * authorable way to repair.
  *
  * Install `requires: ['automation', 'triggers', 'job', 'messaging']` for the
  * binding machinery this example demonstrates.
@@ -1671,6 +1678,21 @@ export const CommitteeQuorumFlow = defineFlow({
  * 3 and 1 days before its `due_date`, with the task on the flow context. Swap
  * `offsetDays` for `withinDays: 7` to nudge everything due within a week
  * (negative = overdue lookback).
+ *
+ * ⛔ AS SHIPPED, THIS SWEEP DOES NOT FIRE — same reason as
+ * {@link ScheduledDigestFlow}, and it is worth stating separately because a
+ * sweep is the case where the consequence is largest. Since #16659 a
+ * `time_relative` flow must declare `config.organization`, and a flow that
+ * declares none is REFUSED at bind. The declaration is not only the run's
+ * identity: it is the SWEEP QUERY's scope, so a sweep without one would select
+ * rows across every organization on the install. That is why there is no
+ * "fall back to something" path for it to take instead, and why a placeholder
+ * id ⛔ must not be invented here — a value matching no row is silently
+ * authoritative.
+ *
+ * ⇒ Package-shipped time-triggered flows are the open decision described on
+ * {@link ScheduledDigestFlow}. Register this sweep at runtime with an
+ * `organization` your install holds to see it work.
  */
 export const TaskDueReminderFlow = defineFlow({
   name: 'showcase_task_due_reminder',
