@@ -240,9 +240,13 @@ describe('[#16726] the gate and #16541`s parse check are DISTINCT layers', () =>
     expect(failures.length).toBeGreaterThan(0);
     expect(backstop.code).toBe(1);
     expect(backstop.stdout).toContain('does not parse');
-    // ⛔ The gate must not have shadowed it: the author gets the compiler's
-    // reason, which is the specific one.
-    expect(backstop.stdout).toContain("',' expected.");
+    // ⛔ The gate must not have shadowed it: the author gets the COMPILER's
+    // reason, and the compiler's reason for this name is specific to it —
+    // a hand-written "invalid name" line would satisfy every other
+    // assertion in this block.
+    expect(backstop.stdout).toContain("'class' is not allowed as a variable declaration name.");
+    // ⛔ And it is NOT the charset refusal: `class` is inside the charset.
+    expect(backstop.stdout).not.toContain('must match pattern');
   });
 
   it('⚠️ records what the pair actually does with `os generate view class`', () => {

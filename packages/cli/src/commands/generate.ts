@@ -760,7 +760,14 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
         '  write and the name that lands in the file are always the same string.',
       ));
       console.log(chalk.dim(
-        `  Nothing was written. Try \`${CLI_ALIAS} g ${type} order_line\` or \`${CLI_ALIAS} g ${type} customer\`.`,
+        // ⛔ The examples are deliberately NOT built from what the author
+        // typed. A suggestion derived from the refused name is option (B)
+        // wearing a prompt: the author accepts it, and the divergence this
+        // gate exists to prevent arrives one keystroke later.
+        `  Nothing was written. Names like \`${CLI_ALIAS} g ${type} customer\` or`,
+      ));
+      console.log(chalk.dim(
+        `  \`${CLI_ALIAS} g ${type} sales_order\` are accepted.`,
       ));
       console.log('');
       process.exit(1);
