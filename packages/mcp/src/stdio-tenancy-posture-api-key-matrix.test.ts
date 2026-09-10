@@ -543,7 +543,7 @@ describe('[#15348] §5 — the posture and the membership are both re-read per c
     const { bridge } = await h.start();
     expect((await readAll(bridge)).total).toBe(2);
 
-    // The enterprise multi-org runtime registers and the wall goes live.
+    // The multi-org runtime registers and the wall goes live.
     service.posture = 'isolated';
 
     await expect(bridge.query(OBJECT, {})).rejects.toThrow(/no longer valid/);

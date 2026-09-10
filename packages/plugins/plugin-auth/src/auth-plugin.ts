@@ -552,8 +552,8 @@ export class AuthPlugin implements Plugin {
     // the plugin's first service registration (consumers and tests rely on that
     // ordering). The `isolated` posture derives `isolationActive` from the
     // presence of the `org-scoping` service (registered by
-    // @objectstack/organizations when installed), so the enterprise package
-    // needs no change to light it up; `group` is enforced by the open engine and
+    // @objectstack/organizations when installed), so that package needs no
+    // change to light it up; `group` is enforced by the open engine and
     // never probes. `getService` is a cheap registry lookup and org-scoping
     // registers AFTER plugin-auth, so the probe is deferred to first read
     // (start()/request time).
@@ -1169,8 +1169,8 @@ export class AuthPlugin implements Plugin {
       // set — how a CONFIG-anchored admin comes into standing), and the
       // legacy `sys_user_permission_set` insert (how `single`-posture
       // first-user promotion lands standing, Choice 4A — retired with the
-      // legacy-grant removal leg). The enterprise organizations package's
-      // walled wiring should consume the same predicate.
+      // legacy-grant removal leg). The organizations package's walled
+      // wiring should consume the same predicate.
       try {
         const ql = ctx.getService<IObjectQLEngine>('objectql');
         if (ql && typeof ql.registerMiddleware === 'function') {

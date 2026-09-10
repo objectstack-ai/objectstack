@@ -430,7 +430,7 @@ describe('authz Layer-0 matrix gate — ADR-0095 D1 (post-extraction)', () => {
     });
     it('member inserting with NO organization_id passes the wall (auto-stamp territory)', async () => {
       // plugin-security validates SUPPLIED values; it never fills an absent one.
-      // Stamping belongs to the enterprise organizations runtime — which is also
+      // Stamping belongs to the organizations runtime — which is also
       // what activates a walled posture, so the two are never out of step
       // (ADR-0105 D5/D12). The Layer 0 check must NOT deny an absent value
       // (ordering-independent w.r.t. that middleware).

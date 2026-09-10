@@ -114,7 +114,22 @@
  * `NON_TEXT_STORED_VALUE_TYPES` (`field-value.zod.ts`) compile the positive
  * operators to a never-true predicate and `$notContains` to an always-true one,
  * which is what makes Postgres's runtime 500 the declared answer instead of a
- * dialect accident. `$like` / `$ilike` follow the same rule but are pinned on
+ * dialect accident.
+ *
+ * ⚠️ [#15683] That set is now WIDER than this table's rows: the maintainer
+ * added the temporal classes to it on 2026-09-05 (「a text operator over a
+ * column whose DECLARED type is temporal is type-gated exactly like the numeric
+ * and boolean classes; the SQLite ISO-text match is not a contract」). This
+ * table does NOT grow a temporal column for it, and the omission is the
+ * ruling's own shape rather than an oversight: every row here is keyed on the
+ * STORED value, which is why `score` is deliberately a number and not a date
+ * (see {@link FilterTextRow}). A temporal fixture column would assert one
+ * stored form across all five enrolled drivers — precisely the stored-form
+ * guarantee option (b) was refused for, since `driver-memory` stores whatever
+ * the caller wrote. The temporal half of the ruling is therefore pinned where
+ * it is decidable: on the DECLARED-type faces (`driver-sql`,
+ * `driver-turso`'s remote transport, `service-analytics`), each against its own
+ * registry. The value-keyed JS evaluators are unchanged and unmoved. `$like` / `$ilike` follow the same rule but are pinned on
  * the faces that answer them rather than here: this table is a driver's
  * enrolment (rule 2 above), and `driver-mongodb` refuses those two operators.
  *

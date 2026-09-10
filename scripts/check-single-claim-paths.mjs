@@ -119,8 +119,10 @@
  *
  *   0  judged, clean.
  *   1  judged, an earlier open PR already claims a listed path.
- *   2  NOT WIRED — no PR context. A usage/wiring failure, never a verdict
- *      about any PR, and never a statement that the board is clean.
+ *   2  NOT WIRED — no PR context, or an INCOMPLETE one (`PR_NUMBER` present
+ *      but `GITHUB_REPOSITORY` or `GITHUB_TOKEN` missing, #16329). A
+ *      usage/wiring failure, never a verdict about any PR, and never a
+ *      statement that the board is clean.
  *
  * A gate that cannot read its input has verified nothing, and exiting 0 there
  * reads as "no violations" — the anti-pattern this repo keeps paying for. The
@@ -178,7 +180,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'First come, first served. Both arms, because failing the wrong one is': 11,
   'The failure has to carry the remedy, not just the verdict.': 3,
   'UNDETERMINED is its own answer. It must never read as clean, and it': 5,
-  'Wiring absent: never clean, never an accusation.': 5,
+  'Wiring absent: never clean, never an accusation.': 16,
   'The short-circuit. This is the property that makes the gate affordable,': 22,
 });
 
@@ -298,20 +300,47 @@ export const SINGLE_CLAIM_PATHS = [
 export const declaredPaths = () => SINGLE_CLAIM_PATHS.map((entry) => entry.path);
 
 /**
- * The PR context, or null when this process was handed none.
+ * The PR context: `null` (nothing wired at all), `{ wired: false, missing,
+ * number }` (PR_NUMBER present but the run is still unusable), or the full
+ * context. Three-way, not two-way, because "no PR context at all" and
+ * "PR_NUMBER is set but GITHUB_REPOSITORY or GITHUB_TOKEN is not" are
+ * different failures with different remedies, yet `judge` (below) must route
+ * BOTH to the same EXIT_NOT_WIRED path — never the FINDING code, and never an
+ * unhandled rejection from a request built with an empty slug (#16329).
  *
- * Presence, not truthiness, for the same reason the sibling PR-scoped guard
- * uses it: the witness that the workflow really ran this step is the variable
- * existing, not it being non-empty.
+ * `PR_NUMBER`: `Object.hasOwn`, presence not truthiness, unchanged from
+ * before — the reasoning still holds. Its VALUE is never read to build a
+ * request; it only WITNESSES that the workflow ran this step, so an
+ * accidentally-empty string would still be a real witness.
+ *
+ * `GITHUB_REPOSITORY` and `GITHUB_TOKEN`: truthiness (trimmed, non-empty),
+ * deliberately a DIFFERENT convention from `PR_NUMBER`, spelled out here so
+ * the split reads as a decision and not a silent drift from that rule. Both
+ * values are consumed directly to build the request — the repo slug goes
+ * straight into the URL path, the token straight into the Authorization
+ * header (`githubApi`, below) — so for them an empty string is not a
+ * DIFFERENT failure from an absent variable, it is the SAME failure: the
+ * exact `/repos//pulls/…` URL from #16329 is built from a `GITHUB_REPOSITORY`
+ * that a presence check would call "wired" the moment it is merely set to
+ * `''` rather than left unset. Presence there would wave the defect straight
+ * back through. And the token is "genuinely required" here unconditionally,
+ * not just in some invocations: every real run of this script reads a PR's
+ * file list over the network, and the wiring workflow always supplies a
+ * token for that (pinned below: "the wiring passes a token, without which no
+ * file list can be read").
  */
 export function readPrContext(env) {
   const wired = Object.hasOwn(env, 'PR_NUMBER');
   if (!wired) return null;
-  return {
-    number: String(env.PR_NUMBER ?? '').trim(),
-    repo: String(env.GITHUB_REPOSITORY ?? '').trim(),
-    token: String(env.GITHUB_TOKEN ?? '').trim(),
-  };
+
+  const number = String(env.PR_NUMBER ?? '').trim();
+  const repo = String(env.GITHUB_REPOSITORY ?? '').trim();
+  if (!repo) return { wired: false, missing: 'GITHUB_REPOSITORY', number };
+
+  const token = String(env.GITHUB_TOKEN ?? '').trim();
+  if (!token) return { wired: false, missing: 'GITHUB_TOKEN', number };
+
+  return { number, repo, token };
 }
 
 /**
@@ -322,19 +351,40 @@ export function readPrContext(env) {
  * `undetermined` carries the ones whose file list could not be walked to the
  * end, so the two can never be confused with each other or with a clean board.
  */
+/**
+ * The NOT WIRED verdict, shared by "nothing at all was handed to this run"
+ * and "PR_NUMBER was handed but the run is still unusable" (#16329) — both
+ * routes exit the same EXIT_NOT_WIRED code and say, in the reader's own
+ * words, that NOTHING WAS MEASURED: neither green nor red, no accusation,
+ * and never the FINDING exit code.
+ */
+function notWiredVerdict(reasonText) {
+  return {
+    exit: EXIT_NOT_WIRED,
+    lines: [
+      `check:single-claim-paths: NOT WIRED — ${reasonText}, so this run was handed no usable pull`,
+      'request context and judged nothing. This is a wiring or usage failure, NOT a verdict: it says',
+      'nothing about whether any PR claims a single-claim path, and no author caused it.',
+      '',
+      `Fix:  run it from the workflow that supplies the context (${WIRING_WORKFLOW}), or locally with`,
+      '      PR_NUMBER=123 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=... node scripts/check-single-claim-paths.mjs',
+    ],
+  };
+}
+
+const NOT_WIRED_REASON = Object.freeze({
+  PR_NUMBER: 'PR_NUMBER is not set',
+  GITHUB_REPOSITORY: 'GITHUB_REPOSITORY is not set (or set to an empty string)',
+  GITHUB_TOKEN: 'GITHUB_TOKEN is not set (or set to an empty string)',
+});
+
 export function judge(ctx) {
   if (ctx === null) {
-    return {
-      exit: EXIT_NOT_WIRED,
-      lines: [
-        'check:single-claim-paths: NOT WIRED — PR_NUMBER is not set, so this run was handed no pull',
-        'request and judged nothing. This is a wiring or usage failure, NOT a verdict: it says nothing',
-        'about whether any PR claims a single-claim path, and no author caused it.',
-        '',
-        `Fix:  run it from the workflow that supplies the context (${WIRING_WORKFLOW}), or locally with`,
-        '      PR_NUMBER=123 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=... node scripts/check-single-claim-paths.mjs',
-      ],
-    };
+    return notWiredVerdict(NOT_WIRED_REASON.PR_NUMBER);
+  }
+
+  if (ctx.wired === false) {
+    return notWiredVerdict(NOT_WIRED_REASON[ctx.missing]);
   }
 
   const where = ctx.number ? `PR #${ctx.number}` : 'this PR';
@@ -589,8 +639,42 @@ function selfTest() {
   t('no PR context at all exits NOT WIRED', unwired.exit, EXIT_NOT_WIRED);
   t('NOT WIRED says it judged nothing', unwired.lines.join('\n').includes('judged nothing'), true);
   t('NOT WIRED does not read as a clean board', unwired.lines.join('\n').includes('✓'), false);
-  t('a present PR number is wired', readPrContext({ PR_NUMBER: '42' })?.number, '42');
+  t(
+    'a fully wired environment (all three variables) is wired',
+    readPrContext({ PR_NUMBER: '42', GITHUB_REPOSITORY: 'o/r', GITHUB_TOKEN: 't' })?.number,
+    '42',
+  );
   t('an unset environment is not wired', readPrContext({}), null);
+
+  // --- #16329: PR_NUMBER alone is not enough. GITHUB_REPOSITORY (and
+  // GITHUB_TOKEN) missing must take the SAME NOT WIRED path — never the
+  // FINDING exit code, and never a thrown request built from an empty slug.
+  const missingRepo = readPrContext({ PR_NUMBER: '16326' });
+  t('PR_NUMBER with no GITHUB_REPOSITORY is not fully wired', missingRepo?.wired, false);
+  t('...and it is attributed to the right missing variable', missingRepo?.missing, 'GITHUB_REPOSITORY');
+  const missingRepoVerdict = judge(missingRepo);
+  t('a missing GITHUB_REPOSITORY exits NOT WIRED, never the FINDING code', missingRepoVerdict.exit, EXIT_NOT_WIRED);
+  t('...and that exit code really is the number 2 (#16329, not just the named constant)', missingRepoVerdict.exit, 2);
+  t('the missing-repo verdict says it judged nothing', missingRepoVerdict.lines.join('\n').includes('judged nothing'), true);
+  t('the missing-repo verdict does not read as a clean board', missingRepoVerdict.lines.join('\n').includes('✓'), false);
+  t('the missing-repo verdict names the missing variable', missingRepoVerdict.lines.join('\n').includes('GITHUB_REPOSITORY'), true);
+
+  // GITHUB_TOKEN is checked the same way and for the same reason: it is
+  // consumed directly in the Authorization header, and the wiring always
+  // supplies one (pinned further down: "the wiring passes a token").
+  const missingToken = readPrContext({ PR_NUMBER: '16326', GITHUB_REPOSITORY: 'o/r' });
+  t('PR_NUMBER + repo but no GITHUB_TOKEN is not fully wired', missingToken?.wired, false);
+  t('...and it is attributed to GITHUB_TOKEN', missingToken?.missing, 'GITHUB_TOKEN');
+  t('a missing GITHUB_TOKEN exits NOT WIRED too', judge(missingToken).exit, EXIT_NOT_WIRED);
+
+  // Reverse control: all three variables present is UNCHANGED by this fix —
+  // it still resolves to a full, usable context, not the NOT WIRED shape.
+  const fullyWired = readPrContext({ PR_NUMBER: '16326', GITHUB_REPOSITORY: 'o/r', GITHUB_TOKEN: 't' });
+  t(
+    'all three variables present is fully wired (reverse control)',
+    fullyWired,
+    { number: '16326', repo: 'o/r', token: 't' },
+  );
 
   // --- The short-circuit. This is the property that makes the gate affordable,
   // and it is invisible in the verdict layer, so it is pinned here against a
@@ -693,7 +777,7 @@ if (isMain) {
     }
   } else {
     const ctx = readPrContext(process.env);
-    const resolved = ctx === null ? null : await collect(ctx, githubApi(ctx.token));
+    const resolved = ctx === null || ctx.wired === false ? ctx : await collect(ctx, githubApi(ctx.token));
     const result = judge(resolved);
     const emit = result.exit === EXIT_CLEAN ? console.log : console.error;
     for (const line of result.lines) emit(line);

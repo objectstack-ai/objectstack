@@ -53,9 +53,13 @@ import crmStack from '@objectstack/example-crm';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { runRlsProofs, formatRlsReport, type RlsReport } from '@objectstack/verify';
 
-// The multi-org runtime moved to the ENTERPRISE `@objectstack/organizations`
-// package (ADR-0105 D12) — not part of this open workspace. Skip (loudly) when
-// it isn't linked in; enterprise/cloud CI, which ships the package, runs this.
+// The multi-org runtime lives in `@objectstack/organizations` — ADR-0105 D12 as
+// amended by ADR-0132: open core since #16215 (Apache-2.0, no licence check of
+// any kind), while a commercial deployment resolves that same name to its own
+// private, licence-gated build. What this gate still needs is that runtime
+// RESOLVABLE FROM THE APP UNDER TEST, which is what `organizationsAvailable`
+// probes — skip (loudly) when it is not; cloud CI, which ships the package,
+// runs this.
 //
 // #4700: the probe used to be a bare `import()`, which Node ESM resolves against
 // this file's own realpath in the framework workspace — so it answered "not

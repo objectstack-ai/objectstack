@@ -4172,18 +4172,21 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  *
  * ## The census, re-derived on this tree
  *
- * 209 code-position matches over the tracked JS/TS corpus. 187 are the bare
- * `selfTest`; the remaining 22 carry compound names over 21 distinct spellings,
- * and they are the rows below. Fifteen are genuine self-test batteries — the
- * anchor firing on them is the anchor working. SEVEN are production code:
+ * 252 code-position matches over the tracked JS/TS corpus. 223 are the bare
+ * `selfTest`; the remaining 29 carry compound names over 26 distinct spellings,
+ * and they are the rows below. Nineteen are genuine self-test batteries — the
+ * anchor firing on them is the anchor working. TEN are production code:
  *
- *   scripts/check-self-test-wired.mjs            carriesSelfTest
+ *   scripts/check-self-test-wired.mjs             carriesSelfTest
  *   scripts/check-self-test-workflow-commands.mjs runSelfTest
- *   scripts/check-step-collectors.mjs            selfTestTargets
- *   scripts/check-step-collectors.mjs            selfTestDiscoveries
- *   scripts/measure-self-test-floor.mjs          selfTestDefs
- *   scripts/pm/dispatch-gates.mjs                selfTestOnlyCallables
- *   scripts/pm/dispatch-gates.mjs                maskSelfTests
+ *   scripts/check-step-collectors.mjs             selfTestTargets
+ *   scripts/check-step-collectors.mjs             selfTestDiscoveries
+ *   scripts/measure-durability-swallow-family.mjs selfTestMode
+ *   scripts/measure-self-test-floor.mjs           selfTestDefs
+ *   scripts/pm/dispatch-gates.mjs                 selfTestOnlyCallables
+ *   scripts/pm/dispatch-gates.mjs                 maskSelfTests
+ *   scripts/pm/dispatch-gates.mjs                 selfTestCaseLines
+ *   scripts/pm/dispatch-gates.mjs                 selfTestOnlyInvocation
  *
  * Every one of them is a gate that REASONS ABOUT self-tests, which is why they
  * cluster: a tool that finds, spawns, counts or masks other scripts' self-tests
@@ -4192,16 +4195,17 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  *
  * ## What it costs today: nothing, MEASURED, and that is the whole point
  *
- * Neutralising each of the seven one at a time and re-extracting moves no hint
- * in any of the four files. The claim is therefore live rather than recalled —
+ * Neutralising each of the ten one at a time and re-extracting moves no hint
+ * in any of the six files. The claim is therefore live rather than recalled —
  * and it is exactly the kind of claim that stops being true without anything
  * going red, which is what the pin in this module's self-test exists to catch.
  *
- * The same measurement over the fifteen genuine rows is NOT zero, and that
- * asymmetry is what makes the classification load-bearing rather than
- * decorative: `fixtureSelfTest` drops `packages/spec/spec-changes.json` and
- * `prePushIsArmedSelfTest` drops `.githooks/pre-push`, both fixture paths in
- * `scripts/check-regen-pending.mjs`, both correctly refused. So "no
+ * The same measurement, redone over the table's current nineteen genuine rows,
+ * is still NOT zero, and that asymmetry is what makes the classification
+ * load-bearing rather than decorative: `fixtureSelfTest` drops
+ * `packages/spec/spec-changes.json` and `prePushIsArmedSelfTest` drops
+ * `.githooks/pre-push`, both fixture paths in `scripts/check-regen-pending.mjs`,
+ * both correctly refused. So "no
  * compound-name match may contribute a hint" is FALSE as a blanket invariant;
  * the invariant holds only over the accidental half, and only a classification
  * can name that half.
@@ -4219,14 +4223,14 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  *     that excludes the accidental one also unmasks a real self-test battery and
  *     readmits its fixture paths as hints — the fabricated-lead family this
  *     whole masker exists to refuse, traded for a silence that costs nothing.
- *   - **Special-casing this module's own path fixes two rows of seven.** The
- *     other five live in three other files, so the objection that a rename
+ *   - **Special-casing this module's own path fixes four rows of ten.** The
+ *     other six live in five other files, so the objection that a rename
  *     "fixes one instance and leaves the class" applies to it too, one file
  *     wider — and it would make the tool's self-scan differ from every other
  *     scan, which is a hazard of its own.
  *
- * ⇒ What ships is neither. The anchor keeps firing on all 22, the mask keeps
- * blanking all 22, and the cost of the seven accidental ones is MEASURED on
+ * ⇒ What ships is neither. The anchor keeps firing on all 29, the mask keeps
+ * blanking all 29, and the cost of the ten accidental ones is MEASURED on
  * every run instead of asserted in prose. Silence was the defect; the remedy is
  * noise on the day it starts costing something.
  *
@@ -4239,6 +4243,13 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  * measures, and keeps measuring, that masking it costs no hint. ⛔ Do not
  * "repair" a red by renaming the function to dodge the anchor: the row is the
  * record, and the next accidental name is the one nobody will notice.
+ *
+ * The TOTAL / GENUINE / ACCIDENTAL counts stated above are pinned the same
+ * way (#15310): `--self-test` computes them fresh from this table and checks
+ * the docblock's own prose against that computation, never against a second
+ * hand-typed constant. Prose that drifts from the table reds there, instead
+ * of drifting further unnoticed the way it had — twice — by the time #15310
+ * measured it.
  */
 const COMPOUND_ANCHOR_LEDGER = [
   ['packages/lint/scripts/check-doc-formula-expressions.mjs', 'specSelfTest', false],
@@ -15506,6 +15517,86 @@ function selfTest() {
     const names = selfCensus.map((d) => d.name);
     t("this module's own masker is in the anchor's population", names.includes('maskSelfTests'));
     t('…and so is the reachability helper beside it', names.includes('selfTestOnlyCallables'));
+  }
+
+  // #15310 — the docblock above states this table's TOTAL / GENUINE /
+  // ACCIDENTAL composition in prose, and prose does not move when a row is
+  // added: three integers that agree with EACH OTHER while jointly
+  // disagreeing with the table is exactly the shape that let this drift twice
+  // without ever looking wrong. The declared numbers are read out of this
+  // module's own docblock text, never re-typed as a second constant here, and
+  // checked against a count taken fresh from COMPOUND_ANCHOR_LEDGER itself —
+  // so a row added without touching the docblock reds here, and an edit to
+  // any unrelated line changes neither side and stays green.
+  {
+    const ownSource = readFileSync(nodePath.join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8');
+    const ledgerAt = ownSource.indexOf('const COMPOUND_ANCHOR_LEDGER = [');
+    const before = ledgerAt < 0 ? '' : ownSource.slice(0, ledgerAt);
+    const blockStart = before.lastIndexOf('/**');
+    const blockEnd = before.lastIndexOf('*/');
+    // Line-wrapped JSDoc prose carries a `\n * ` between words that happen to
+    // fall on a line break — flattened to single spaces so a future rewrap of
+    // this paragraph cannot itself make a true reading look false.
+    const prose =
+      blockStart < 0 || blockEnd < 0
+        ? ''
+        : ownSource
+            .slice(blockStart, blockEnd)
+            .replace(/\n[ \t]*\*[ \t]?/g, ' ')
+            .replace(/[ \t]+/g, ' ');
+
+    const total = COMPOUND_ANCHOR_LEDGER.length;
+    const genuine = COMPOUND_ANCHOR_LEDGER.filter(([, , accidental]) => !accidental).length;
+    const accidental = COMPOUND_ANCHOR_LEDGER.length - genuine;
+    const distinctSpellings = new Set(COMPOUND_ANCHOR_LEDGER.map(([, name]) => name)).size;
+
+    // Only as wide as the words this docblock actually spells; extending it is
+    // a deliberate edit, not silent tolerance for a new spelling.
+    const NUMBER_WORDS = {
+      zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+      ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+      seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+    };
+    const asCount = (word) => (/^\d+$/.test(word) ? Number(word) : NUMBER_WORDS[String(word).toLowerCase()]);
+
+    const remaining = prose.match(/the remaining (\d+) carry compound names/);
+    const allFiring = prose.match(/keeps firing on all (\d+), the mask keeps blanking all (\d+)/);
+    const genuineLine = prose.match(/([A-Za-z]+) are genuine self-test batteries/);
+    const accidentalLine = prose.match(/([A-Za-z]+) are production code:/);
+    const spellingsLine = prose.match(/over (\d+) distinct spellings/);
+
+    t(
+      'the docblock\'s TOTAL row count — "the remaining N carry compound names" and both "all N" claims — ' +
+        `agrees with the table (table: ${total}; declared: ` +
+        `${remaining ? remaining[1] : '<not found>'}/${allFiring ? allFiring[1] : '<not found>'}/` +
+        `${allFiring ? allFiring[2] : '<not found>'})`,
+      remaining !== null
+        && allFiring !== null
+        && Number(remaining[1]) === total
+        && Number(allFiring[1]) === total
+        && Number(allFiring[2]) === total,
+    );
+    t(
+      "the docblock's GENUINE count (\"N are genuine self-test batteries\") agrees with the table " +
+        `(table: ${genuine}; declared: ${genuineLine ? genuineLine[1] : '<not found>'})`,
+      genuineLine !== null && asCount(genuineLine[1]) === genuine,
+    );
+    t(
+      "the docblock's ACCIDENTAL count (\"N are production code:\") agrees with the table " +
+        `(table: ${accidental}; declared: ${accidentalLine ? accidentalLine[1] : '<not found>'})`,
+      accidentalLine !== null && asCount(accidentalLine[1]) === accidental,
+    );
+    // Distinct NAMES, not rows: `runSelfTest` is a genuine entry point in one
+    // file and an accidental one in another, so it is one spelling occupying
+    // two rows — the same reason COMPOUND_ANCHOR_KEYS has to carry the file in
+    // its key. This is derivable from the table exactly like the three above,
+    // so it is pinned the same way rather than left as the one clause in this
+    // paragraph a future row could still drift without going red.
+    t(
+      "the docblock's distinct-spellings count (\"over N distinct spellings\") agrees with the table " +
+        `(table: ${distinctSpellings}; declared: ${spellingsLine ? spellingsLine[1] : '<not found>'})`,
+      spellingsLine !== null && Number(spellingsLine[1]) === distinctSpellings,
+    );
   }
 
   // A population DECLARED for this very scanner is referenced by no executing

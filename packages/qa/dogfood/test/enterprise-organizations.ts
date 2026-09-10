@@ -1,8 +1,17 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #4700 — availability of the enterprise `@objectstack/organizations` package
- * (ADR-0105 D12), for the dogfood gates that can only run multi-org.
+ * #4700 — availability of the `@objectstack/organizations` package (ADR-0105
+ * D12 as amended by ADR-0132), for the dogfood gates that can only run
+ * multi-org.
+ *
+ * ⚠️ The FILENAME still says "enterprise" and the package no longer is: since
+ * ADR-0132 the framework publishes an Apache-2.0 build of that name and a
+ * commercial deployment resolves the same name to a private licence-gated
+ * subclass. What this module probes is neither of those in particular — it asks
+ * only whether the HOST APP has a package of that name it can load, which is
+ * the one question the `describe.skipIf` gates below actually need. Renaming
+ * the file is a separate, mechanical change and deliberately not made here.
  *
  * ── The defect this replaces ─────────────────────────────────────────────────
  *
@@ -87,7 +96,7 @@
 import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
 
 /**
- * The enterprise multi-org package (ADR-0105 D12) these gates need.
+ * The multi-org package (ADR-0105 D12 as amended by ADR-0132) these gates need.
  *
  * ⚠️ #16539: no longer cloud-private — ADR-0132 / #16215 brought it back to open core as
  * `packages/plugins/organizations`. It stays the SUBJECT of this probe (the app

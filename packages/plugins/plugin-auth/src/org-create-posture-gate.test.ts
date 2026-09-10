@@ -33,7 +33,7 @@
 // #5233 corrected the KNOB and left the gate judging the operator's REQUEST,
 // which is what the demoted boolean also meant. That left exactly one shape
 // where the gate and the flag answered from different facts: ADR-0093 D5
-// degradation — a wall was requested, the enterprise `@objectstack/organizations`
+// degradation — a wall was requested, the `@objectstack/organizations`
 // runtime is absent, so the `tenancy` service resolves an effective posture of
 // `single` + `degraded`. The console hid the "Create organization" action while
 // the route happily minted organizations whose boundary NO engine enforces:

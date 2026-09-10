@@ -46,7 +46,7 @@
  *    binding. A load placed above it is not a compile error — the author writes
  *    a bare `import()`, which resolves from the CLI and is green in any dev
  *    checkout where everything is hoisted into one `node_modules`. The first
- *    time it cost the enterprise organizations load (cloud#1013); the second
+ *    time it cost the organizations load (cloud#1013); the second
  *    time it cost EE multi-node boot outright (#10645).
  *
  *    #10769 closed the class rather than hoisting a third time: the helper is

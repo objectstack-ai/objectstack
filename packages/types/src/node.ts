@@ -30,11 +30,11 @@
  * their realpath is inside the *framework* workspace — a bare import from any of
  * them can only ever see packages installed in the framework's own
  * `node_modules`. Every package that lives OUTSIDE that workspace and is supplied
- * by the app being served, verified or tested — a cloud-private package such as
- * `@objectstack/organizations` or `@objectstack/service-ai-studio`, or anything a
- * customer installs into their own project — is therefore invisible to a bare
- * import, no matter what the host app declares in its `package.json`
- * (cloud#1013: `objectstack serve` could never load the enterprise multi-org
+ * by the app being served, verified or tested — a HOST-SUPPLIED package such as
+ * `@objectstack/organizations` or the cloud-private `@objectstack/service-ai-studio`,
+ * or anything a customer installs into their own project — is therefore invisible
+ * to a bare import, no matter what the host app declares in its `package.json`
+ * (cloud#1013: `objectstack serve` could never load the multi-org
  * runtime, so every self-hosted walled-posture deployment hit the ADR-0093 D5
  * fail-fast and exited 1; framework#4700: `bootStack({ multiTenant: true })` told
  * apps to install a package they had already installed, and the dogfood

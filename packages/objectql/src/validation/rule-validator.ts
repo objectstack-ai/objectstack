@@ -1473,6 +1473,65 @@ export function stripRuntimeOwnedFields(
 }
 
 /**
+ * The `managedBy` buckets whose columns carry their own fail-closed refusal, and
+ * which {@link staticReadonlyInsertSubject} therefore leaves alone.
+ *
+ * ## Why a list and not "`managedBy` is set" (maintainer ruling 2026-09-05, #15719)
+ *
+ * The carve-over from the deleted ingress copy tested `managedBy` for mere
+ * PRESENCE, which is wider than the ADR-0086 argument it rests on. The enum's
+ * own docblock (`object.zod.ts`, "Enforcement happens in three places", item 3)
+ * splits the six buckets by whether an engine write guard fails closed on a
+ * user-context generic write, and that split is this list:
+ *
+ * | bucket         | its own refusal                              | this strip |
+ * | -------------- | -------------------------------------------- | ---------- |
+ * | `engine-owned` | ADR-0103 engine-owned write guard             | steps around |
+ * | `append-only`  | ADR-0103, same guard (locked default)         | steps around |
+ * | `better-auth`  | ADR-0092 identity write guard                 | steps around |
+ * | `platform`     | none — full user CRUD by default              | JUDGES     |
+ * | `config`       | none — admin-authored, writable by default    | JUDGES     |
+ * | `system-data`  | none — "admin/user-writable DATA" by its own definition | JUDGES |
+ *
+ * The three on the right are where the ruled asymmetry lived: their data is the
+ * user's, the UPDATE path has always stripped a static `readonly` write to them,
+ * and only CREATE let one through. On them "one semantics, one enforcement
+ * point" (#14147) is now literally true.
+ *
+ * ## The census the ruling made binding, measured on `origin/main`
+ *
+ * 81 object declarations in this tree carry `managedBy`; **0** of them carry a
+ * name outside the `sys_` namespace. So the `sys_` test below keeps every
+ * SHIPPED object exempt exactly as before — 20 of them in the three judging
+ * buckets, holding 64 static `readonly` columns between them — and this
+ * narrowing reaches only APP-AUTHORED objects, which is the population the
+ * ruling is about.
+ *
+ * Those 64 columns are also why the ruling's fallback ("leave it, if the
+ * user-writable buckets' readonly columns already carry their own 403") does
+ * not apply: 14 are the ADR-0086 package-provenance family (`package_id`,
+ * `managed_by`, `customized`, `drift_status`, `drift_detail`, `is_system`, all
+ * on `config` objects) and the other 50 are `id` / `created_at` / `updated_at`
+ * stamps, which that guard does not reach.
+ *
+ * ⚠️ An UNRECOGNISED value is deliberately NOT read as platform-internal. The
+ * one legacy value that can still arrive is `'system'`, retired in protocol 17
+ * (#3355) and converted to `'system-data'` — a judging bucket — so exempting
+ * unknowns would exempt precisely the rows that conversion targets. Over-strip
+ * is the safe direction here, as it is everywhere else in this file.
+ *
+ * ⛔ Not exported: the ruling narrows an exclusion, it does not add surface.
+ * `staticReadonlyInsertSubject`'s own tests pin this list against the spec
+ * enum, so a seventh bucket fails there rather than landing silently on the
+ * judging side.
+ */
+const PLATFORM_INTERNAL_MANAGED_BUCKETS: ReadonlySet<string> = new Set([
+  'engine-owned',
+  'append-only',
+  'better-auth',
+]);
+
+/**
  * The INSERT-side subject of {@link stripReadonlyFields}: the schema
  * VIEW an `engine.insert` static-`readonly` pass may judge, or `null` when the
  * object has nothing for it to judge (the common case, and the cheap exit).
@@ -1499,12 +1558,13 @@ export function stripRuntimeOwnedFields(
  *    `autonumber`, so `stripReadonlyFields` would report an author-declared lock
  *    where `runtimeOwnedStripWarning` states the true, actionable reason.
  *
- *  - **Platform objects** (`managedBy` set, or the reserved `sys_` namespace)
- *    carry their OWN field-write governance that a silent strip must not
- *    pre-empt (ADR-0086): a forged `managed_by: 'package'` or
- *    `package_id` on `sys_permission_set` is REFUSED with a 403, and several of
- *    those columns are `readonly`, so stripping them would silently swallow the
- *    payload the guard exists to reject. That boundary is the deleted copy's
+ *  - **Platform-internal objects** — the reserved `sys_` namespace, and the
+ *    {@link PLATFORM_INTERNAL_MANAGED_BUCKETS} half of `managedBy` — carry
+ *    their OWN field-write governance that a silent strip must not pre-empt
+ *    (ADR-0086): a forged `managed_by: 'package'` or `package_id` on
+ *    `sys_permission_set` is REFUSED with a 403, and several of those columns
+ *    are `readonly`, so stripping them would silently swallow the payload the
+ *    guard exists to reject. That boundary is the deleted copy's
  *    (`applySystemFields` draws the same platform-vs-authored line) and it was
  *    ruled on its own merits, NOT on the "INSERT is exempt" row that ruling C
  *    superseded — so it is carried over rather than dropped in passing. The
@@ -1513,15 +1573,18 @@ export function stripRuntimeOwnedFields(
  *
  * ⚠️ The UPDATE path applies NEITHER exclusion, deliberately: it has no
  * runtime-owned sibling pass, and its own platform-object posture predates both
- * rulings. This asymmetry is the create side's, and it is stated here rather
- * than re-derived at the call site.
+ * rulings. That remaining asymmetry is the create side's, and it is stated here
+ * rather than re-derived at the call site.
  */
 export function staticReadonlyInsertSubject(
   objectSchema: { name?: string; managedBy?: unknown; fields?: Record<string, ConditionalFieldDef> } | undefined | null,
 ): { name?: string; fields: Record<string, ConditionalFieldDef> } | null {
   const fields = objectSchema?.fields;
   if (!fields) return null;
-  if (objectSchema?.managedBy) return null;
+  // [#15719] The BUCKET, not the mere presence of the key — see
+  // {@link PLATFORM_INTERNAL_MANAGED_BUCKETS} for the split and the census.
+  if (typeof objectSchema?.managedBy === 'string'
+    && PLATFORM_INTERNAL_MANAGED_BUCKETS.has(objectSchema.managedBy)) return null;
   if (String(objectSchema?.name ?? '').startsWith('sys_')) return null;
   const subject: Record<string, ConditionalFieldDef> = {};
   let any = false;

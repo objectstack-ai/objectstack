@@ -182,15 +182,18 @@ User identity, organizations, and position management.
 | **[Position](/docs/references/identity/position)** | `position.zod.ts` | Position | Permission-set distribution (岗位, ADR-0090) |
 | **[SCIM](/docs/references/identity/scim)** | `scim.zod.ts` | SCIMUser, SCIMGroup | SCIM 2.0 provisioning |
 
-## Cloud Protocol (3 of 11 schemas)
+## Marketplace Protocol (2 of 4 schemas)
 
-Environments, marketplace, licensing, and multi-tenancy.
+The package & marketplace format — what a package author publishes and what the
+marketplace answers with. (The cloud control plane's own contracts — environments,
+tenants, the developer portal, marketplace administration — are not an open-source
+protocol; they left `@objectstack/spec` with the `./cloud` subpath and live in the
+cloud repo beside their producer.)
 
 | Protocol | Source File | Key Schemas | Purpose |
 |:---------|:-----------|:------------|:--------|
-| **[Environment](/docs/references/cloud/environment)** | `environment.zod.ts` | Environment, EnvironmentType | Deployment environments |
-| **[Marketplace](/docs/references/cloud/marketplace)** | `marketplace.zod.ts` | MarketplaceListing, PackageSubmission | Plugin marketplace |
-| **[Tenant](/docs/references/cloud/tenant)** | `tenant.zod.ts` | Tenant | Multi-tenancy isolation |
+| **[Package](/docs/references/marketplace/package)** | `package.zod.ts` | Package, CreatePackageRequest, PackageTranslations | Package identity and listing text |
+| **[Marketplace](/docs/references/marketplace/marketplace)** | `marketplace.zod.ts` | MarketplaceListing, PackageSubmission | Plugin marketplace |
 
 ## Integration Protocol (1 of 1 schema)
 

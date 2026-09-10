@@ -160,7 +160,7 @@ afterAll(() => {
   }
 });
 
-describe('enterprise multi-org probe (#4700)', () => {
+describe('multi-org runtime availability probe (#4700)', () => {
   it('reports AVAILABLE when the package is installed in the host app', async () => {
     // The verdict the old probe could never reach, no matter what any app or CI
     // had installed. This is what makes `describe.skipIf(!organizationsAvailable)`

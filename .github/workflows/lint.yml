@@ -743,7 +743,7 @@ jobs:
       # production zero could equally be a scanner that stopped matching.
       # Invoked as `node` rather than `pnpm check:*`: see the GATE INVOCATION
       # IDIOM note at the top of this file. ~1s, no spawns.
-      - name: The #13419 name-fold fixture has no non-test loader
+      - name: 'The #13419 name-fold fixture has no non-test loader'
         run: |
           node scripts/check-position-name-fold-loaders.mjs --self-test
           node scripts/check-position-name-fold-loaders.mjs
@@ -1122,6 +1122,27 @@ jobs:
       # patrol cannot come to disagree about what a stamp is.
       - name: Stamped-post helper self-test
         run: pnpm check:pm-post-stamped
+
+      # Board-snapshot archiver self-test (#17390) — same family and the same
+      # split as every step around it. The LIVE run reads the whole board over
+      # REST and commits the result to an orphan branch, so it is not a thing
+      # CI runs on a pull request; the offline half is what CI can hold, and
+      # `.github/workflows/board-snapshot.yml` is the only caller of the other.
+      #
+      # What the self-test instruments is the set of rules a clean tree cannot
+      # exercise: the page walk's value re-anchor (blind `page += 1` skips a row
+      # that shifted forward mid-walk, permanently and with no symptom), the
+      # resume cursor an interrupted run leaves, the idempotence that keeps a
+      # no-op run from committing, the count check's three verdicts — including
+      # `pending`, which exists so "could not check" never renders as "checked
+      # and clean" — and the provenance sentence a rebuilt record must carry.
+      # Two of its cases are STRUCTURAL and read this file's own source: that
+      # the archiver has no write path to GitHub in any mode (the one-board
+      # rule, mechanically) and that it carries no retry loop against a spent
+      # rate limit. Weakening any of them leaves every ordinary run just as
+      # green, which is the shape `check:self-test-wired` requires this step for.
+      - name: Board-snapshot archiver self-test
+        run: pnpm check:pm-board-snapshot
 
       # Changeset-deadline census self-test (#16850) — same family and the same
       # split as every step around it. The LIVE census reads the shared board
@@ -4397,6 +4418,25 @@ jobs:
         run: |
           node packages/lint/scripts/check-reference-carrier-shape.mjs --self-test
           node packages/lint/scripts/check-reference-carrier-shape.mjs
+
+      # #15149. Grep-level guard for the defect this very repo just shipped: an
+      # unquoted `- name:` step name containing ` #` is silently truncated by
+      # YAML at that point (a space + hash starts a comment inside a plain
+      # scalar), so the step's real parsed name is not the text an author
+      # wrote -- the CI log names the step something else entirely, and
+      # anything that resolves a step by its name text (scripts/pm/ci-failure.mjs)
+      # cannot find it. This repo names issue numbers in step names as a
+      # matter of style, so the shape is likely to recur. Deliberately NOT a
+      # YAML-parser-level name comparison -- see the header of
+      # scripts/check-workflow-step-name-quoting.mjs for why grep-level is
+      # sufficient (triage ruling, #15149). Reads .github/workflows/*.yml as
+      # plain text; no build, sub-second. Placed BEFORE the duration-unit-keys
+      # step below on purpose: that step's own comment says it is placed LAST
+      # so that nothing behind it is masked by its red -- appending after it
+      # would defeat exactly that, so this step goes immediately above it
+      # instead (#10572: no existing step's relative order moves).
+      - name: 'Unquoted workflow step names do not silently truncate at " #" (#15149)'
+        run: pnpm check:workflow-step-name-quoting
 
       # #14478 (maintainer ruling 2026-09-02, "ruled B"): a duration-shaped
       # `z.number()` key in packages/spec/src/** whose `.describe()` names a

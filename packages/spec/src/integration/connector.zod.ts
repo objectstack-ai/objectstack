@@ -1,7 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { CronExpressionInputSchema } from '../shared/expression.zod';
 import { WebhookSchema } from '../automation/webhook.zod';
 import { ConnectorAuthConfigSchema, ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
 import { FieldMappingSchema as BaseFieldMappingSchema } from '../shared/mapping.zod';
@@ -251,10 +250,18 @@ export const DataSyncConfigSchema = lazySchema(() => z.object({
     'bidirectional',  // Both ways
   ]).optional().default('import').describe('Sync direction'),
   
-  /**
-   * Sync frequency (cron expression)
+  /*
+   * `syncConfig.schedule` was DELETED here in @objectstack/spec 18 (ADR-0049
+   * enforce-or-remove, #16320). The cron slot on connector-attached sync was
+   * declared, parsed into the `{ dialect: 'cron', source }` envelope and read by
+   * nothing: `syncConfig` has no reader outside `packages/spec`, no engine schedules
+   * a connector sync, and `@objectstack/formula`'s cronEngine has zero consumers
+   * outside its own package. Deleted outright — no `retiredKey()` tombstone, no D2
+   * conversion, no D3 semantic entry (maintainer ruling 2026-09-10 on the retirement
+   * PR). `realtimeSync` is unchanged; sync on a cadence is a `job`
+   * (`Job.schedule.expression`, the one cron slot the platform evaluates) whose
+   * handler drives the connector.
    */
-  schedule: CronExpressionInputSchema.optional().describe('Cron expression for scheduled sync — cron`0 */15 * * *`'),
   
   /**
    * Enable real-time sync via webhooks

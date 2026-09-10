@@ -25,7 +25,8 @@
  *     reaches no page at all.
  *
  * #16431 measured the population for the first time: **23 exports**, across
- * `Automation` / `Cloud` / `Data` / `Kernel` / `System` / `UI`, in one build.
+ * `Automation` / `Cloud` (since #16325: `Marketplace`) / `Data` / `Kernel` /
+ * `System` / `UI`, in one build.
  * The card that found it saw four of them. Nobody was tracking the other 19,
  * and nothing would have reported the 24th.
  *

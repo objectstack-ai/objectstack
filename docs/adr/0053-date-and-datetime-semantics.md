@@ -314,9 +314,26 @@ determinism + computed fields can reference user/org), independent of timezone.
 | 3. tz-aware `today()`/`daysFromNow()`/`daysAgo()` + shared `partsInTz` util | `formula/stdlib.ts`, `cel-engine.ts`, `formula/types.ts` | compute | behind flag |
 | 4. Render-tz in template formatters + email path | `formula/template-engine.ts` (date/datetime formatters already take `locale` → add `timeZone`); `plugin-email` rendering currently bypasses the formatter pipeline and needs routing through it | render | low blast radius (one centralized formatter) + one outlier |
 | 5. Analytics bucket tz | `service-analytics` `preview-evaluator.ts`, `dimension-labels.ts`, `dataset-executor.ts` | compute | highest (dialect — see D2) |
+| 5. Analytics bucket tz — the in-memory face | `packages/drivers/driver-memory/src/memory-analytics.ts` | compute | follows D2's in-JS rule, so the dialect split cannot arise |
 | 6. Report schedule → croner+tz | `plugin-reports/report-service.ts` | compute | low; doubles as liveness cleanup |
 
 Cron day-boundaries (`sys_job`) need **no change** — already tz-wired via croner.
+
+Slice 5 has **two** analytics faces, and the second is `driver-memory`'s. `memory-analytics.ts`
+labels an `AnalyticsQuery.timeDimensions[].granularity` with
+`bucketDateKey(value, granularity, timezone)` from `@objectstack/core`, where `timezone` is
+`AnalyticsQuery.timezone` — the **same** reference zone `parseDateRangeString` resolves a
+`dateRange` **preset** against. So the window that selects the rows and the key that folds them
+agree on where a calendar day starts, and an unset reference timezone is UTC on both. It folds in
+JS rather than in the store, for D2's reason one layer down: mingo has no expression that produces
+a canonical `2026-Q2`/`2026-W23` key, and building one would be the second statement of the label
+rule that hoisting `bucketDateKey` into `@objectstack/core` exists to prevent.
+
+> **Scope of that agreement:** it is the `dateRange` **preset** arm. The explicit `[a, b]` arm is
+> discriminated at the call site and keeps its published instant reading (#16179), so it does not
+> share the bucket's calendar frame — a window written as one calendar day can answer under the
+> bucket labelled the day before. Both halves are separately decided; this row records the seam
+> rather than closing it.
 
 ### Open prerequisites
 

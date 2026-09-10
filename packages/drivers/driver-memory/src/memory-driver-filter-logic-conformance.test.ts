@@ -553,8 +553,46 @@ const OPERATOR_CASES: Array<[name: string, where: FilterCondition, expected: str
   // declared `datetime` column the PATTERN itself was rewritten into canonical
   // form and then matched — `find()`, which never rewrites a pattern, matched
   // nothing. The two-list `MongoPredicateInput` split is what stops this.
-  ['$contains does not rewrite its pattern into a datetime storage form', { made_at: { $contains: '2026-01-01T00:00:00Z' } } as FilterCondition, []],
-  ['$notContains does not rewrite its pattern either', { made_at: { $notContains: '2026-01-01T00:00:00Z' } } as FilterCondition, ['1', '2', '3']],
+  //
+  // ⚠️ [#15683] READ THE COMPARAND BEFORE READING THESE TWO ROWS. They answer
+  // `[]` and "every row" for a STRING reason, not because anything type-gates:
+  // the fixture stores `new Date('2026-01-01T00:00:00Z')`, the declared field
+  // kind canonicalises it on write (#4047) to `'2026-01-01T00:00:00.000Z'`, and
+  // the comparand here is spelled WITHOUT the milliseconds — so it is simply not
+  // a substring. Spell it `'2026'` and the same two rows answer every row and
+  // nothing (the characterisation pair below). What these two pin is the
+  // no-pattern-rewrite property they are named for, and nothing else; the name
+  // and this note now say so, because the card that ruled the temporal cell
+  // cited them as a type-gate pin and that citation was measured FALSE.
+  ['$contains does not rewrite its pattern into a datetime storage form (a MILLISECOND mismatch, not a type gate)', { made_at: { $contains: '2026-01-01T00:00:00Z' } } as FilterCondition, []],
+  ['$notContains does not rewrite its pattern either (the same millisecond mismatch)', { made_at: { $notContains: '2026-01-01T00:00:00Z' } } as FilterCondition, ['1', '2', '3']],
+
+  // ── The DECLARED-TYPE answer, and this face's measured divergence from it ──
+  //
+  // [#15683] The maintainer ruled (2026-09-05) that a text operator over a
+  // column whose DECLARED type is temporal is type-gated exactly like the
+  // numeric and boolean classes — 「the SQLite ISO-text match is not a
+  // contract」 — and that the answer is keyed on the declared field type «on
+  // every face — SQL family, memory driver, formula, having». The SQL faces
+  // implement it through `NON_TEXT_STORED_VALUE_TYPES`, which the temporal
+  // classes joined in that PR.
+  //
+  // ⛔ THIS FACE DOES NOT ANSWER THAT YET, and the two rows below are the
+  // measurement rather than the contract. `made_at` is a declared `datetime`,
+  // so the write canonicalises to ISO TEXT — `typeof` the stored value is
+  // `string`, for a `Date` input and a string input alike — and a substring
+  // predicate over text matches. The declared answer would be `[]` and
+  // `['1','2','3']`; what this face gives is the exact complement.
+  //
+  // These rows are CHARACTERISATION, not endorsement: they exist so the gap is
+  // named and counted instead of hiding behind the millisecond pair above, and
+  // so that the day this face is brought onto the declared answer they go RED
+  // and point at themselves. ⛔ Do not "fix" them into agreement by editing the
+  // expectations — the repair is in the driver, and it is #17348's, filed
+  // against #5499's investment freeze. Bringing the driver over flips these two
+  // to `[]` / `['1','2','3']` and deletes this note.
+  ['⚠️ DIVERGES from #15683: $contains MATCHES a declared datetime column, because the write canonicalised it to ISO text', { made_at: { $contains: '2026' } } as FilterCondition, ['1', '2', '3']],
+  ['⚠️ DIVERGES from #15683: $notContains therefore excludes every row, where the declared answer admits them all', { made_at: { $notContains: '2026' } } as FilterCondition, []],
 
   // A column holding nulls: the negation must not resurrect the rows it cannot
   // test, which is the other way a `$not` goes wrong.
