@@ -195,8 +195,8 @@ describe('resolveApiKeyAdmission — organization (#8287)', () => {
 
   /**
    * The posture must be the ENFORCED one, not the requested one. ADR-0093 D4/D5:
-   * a deployment that asks for `isolated` without the enterprise organizations
-   * runtime runs with NO wall, and `tenancy.isolationActive` is how the service
+   * a deployment that asks for `isolated` without any organizations runtime
+   * runs with NO wall, and `tenancy.isolationActive` is how the service
    * says so. Reading `OS_TENANCY_POSTURE` instead would refuse org-less keys on
    * a deployment that has no wall at all.
    */

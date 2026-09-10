@@ -625,7 +625,7 @@ describe('SecurityPlugin', () => {
       };
       await harness.run(opCtx); // must not throw — no cross-tenant check on an absent value
       // [ADR-0105 D5/D12] SecurityPlugin never stamps organization_id. That stays
-      // with the enterprise organizations runtime, which is also what activates a
+      // with the organizations runtime, which is also what activates a
       // walled posture — so a forged `org-scoping` registration yields NULL-org
       // rows the wall hides (a broken deployment), not a working unlicensed one.
       expect(opCtx.data.organization_id).toBeUndefined();

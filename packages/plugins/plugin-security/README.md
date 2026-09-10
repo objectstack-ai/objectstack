@@ -103,7 +103,7 @@ Compilation output is a filter AST merged into every query's `where` clause, so 
 ## When to use
 
 - ✅ Any multi-user deployment.
-- ✅ Enforcing tenant isolation — the wall itself comes from the enterprise organizations runtime described above, not from this package.
+- ✅ Enforcing tenant isolation — the wall itself comes from the `@objectstack/organizations` runtime described above, not from this package.
 
 ## When not to use
 

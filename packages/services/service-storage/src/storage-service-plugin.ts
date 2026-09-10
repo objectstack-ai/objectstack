@@ -6,7 +6,7 @@ import {
   isAuthzStoreUnavailableError,
   // [#16013] The download door's tenancy-posture read, in ONE call: the
   // posture IN FORCE (ADR-0093 D4/D5 - a deployment REQUESTING `isolated`
-  // without the enterprise organizations runtime is `single` in force), taken
+  // without the `@objectstack/organizations` runtime is `single` in force), taken
   // through the one shared classification #13906 decision 1 option A requires
   // - the registry's "never registered" brand stays quiet, and the loud outage
   // is what every other rejection becomes.

@@ -677,7 +677,7 @@ export class DevPlugin implements Plugin {
       }
     }
 
-    // [#5301] The enterprise organizations plugin, once constructed — held so
+    // [#5301] The organizations plugin, once constructed — held so
     // the child-`init()` loop below can tell ITS refusal apart from every other
     // child plugin's. That loop is best-effort by design (a dev stack survives
     // an absent service), but "the organization wall failed to come up" is the
@@ -685,17 +685,17 @@ export class DevPlugin implements Plugin {
     let organizationsPlugin: Plugin | undefined;
 
     // 5. Security Plugin (RBAC, RLS, field-level masking)
-    // OrganizationsPlugin (when multi-org; ENTERPRISE `@objectstack/organizations`,
-    // ADR-0105 D12) MUST register BEFORE SecurityPlugin because
+    // OrganizationsPlugin (when multi-org; `@objectstack/organizations`, ADR-0105
+    // D12 as amended by ADR-0132) MUST register BEFORE SecurityPlugin because
     // SecurityPlugin.start() probes the `org-scoping` service (the historical
-    // name the enterprise plugin keeps registering) and caches the result for
+    // name the organizations plugin keeps registering) and caches the result for
     // the lifetime of the plugin.
     if (enabled('security')) {
       // [ADR-0105 D1 / #5262] Key off the resolved POSTURE, exactly as
       // `serve.ts` does — ⛔ never `resolveMultiOrgEnabled()`. That boolean was
       // DEMOTED to a back-compat input of `resolveTenancyPosture()`, so a dev
       // stack configured the documented way (`OS_TENANCY_POSTURE=isolated|group`,
-      // legacy boolean unset) read `false` here and never loaded the enterprise
+      // legacy boolean unset) read `false` here and never loaded the multi-org
       // runtime at all — SecurityPlugin then probed an absent `org-scoping`,
       // stripped the wildcard `tenant_isolation` RLS, and the stack served
       // traffic in the ADR-0093 D5 degraded state while the `tenancy` service
@@ -745,7 +745,7 @@ export class DevPlugin implements Plugin {
           if (!resolveAllowDegradedTenancy()) {
             throw new Error(
               `tenancy posture '${tenancyPosture}' was requested but @objectstack/organizations `
-              + '(the enterprise multi-org runtime) could not be loaded, so the organization wall is '
+              + '(the multi-org runtime) could not be loaded, so the organization wall is '
               + 'INACTIVE. Refusing to initialize — a stack that requested multi-organization '
               + 'isolation must not serve traffic without it (ADR-0093 D5). Fix one of: '
               + 'install @objectstack/organizations; or set OS_TENANCY_POSTURE=single (and unset '
@@ -757,7 +757,7 @@ export class DevPlugin implements Plugin {
           // Names the posture that was actually requested, not one knob's
           // spelling of it: the old text asserted `OS_MULTI_ORG_ENABLED=true`
           // at an operator who may well have set only `OS_TENANCY_POSTURE`.
-          ctx.logger.warn(`  ✘ DEGRADED TENANCY (OS_ALLOW_DEGRADED_TENANCY=1): tenancy posture '${tenancyPosture}' requested but @objectstack/organizations (enterprise) not installed — running single-org, organization wall INACTIVE (ADR-0093 D5)`);
+          ctx.logger.warn(`  ✘ DEGRADED TENANCY (OS_ALLOW_DEGRADED_TENANCY=1): tenancy posture '${tenancyPosture}' requested but @objectstack/organizations not installed — running single-org, organization wall INACTIVE (ADR-0093 D5)`);
           // Degraded boot: `orgMod` stays undefined, so stage 2 is skipped.
           // Nothing was loaded, so nothing can be constructed.
         }
@@ -893,7 +893,7 @@ export class DevPlugin implements Plugin {
       try {
         await plugin.init(ctx);
       } catch (err: any) {
-        // [#5301] One child's init failure is NOT best-effort: the enterprise
+        // [#5301] One child's init failure is NOT best-effort: the
         // organizations plugin declining here means the organization wall a
         // walled posture asked for is INACTIVE, and ADR-0093 D5 forbids serving
         // traffic in that state. This is stage 2's other half — under
@@ -906,7 +906,7 @@ export class DevPlugin implements Plugin {
         // absent and I accept that", so it is deliberately not consulted here.
         if (organizationsPlugin !== undefined && plugin === organizationsPlugin) {
           throw new Error(
-            'the enterprise @objectstack/organizations runtime was loaded but its OrganizationsPlugin '
+            'the @objectstack/organizations runtime was loaded but its OrganizationsPlugin '
             + `failed to initialize, so the organization wall requested by tenancy posture `
             + `'${resolveTenancyPosture()}' is INACTIVE. Refusing to initialize — a stack that `
             + 'requested multi-organization isolation must not serve traffic without it (ADR-0093 D5). '
