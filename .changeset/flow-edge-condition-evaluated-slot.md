@@ -93,11 +93,13 @@ canonicalize at `registerFlow` instead, which parses through
 never registered, its trigger is never armed, and the only announcement is that
 one warn line — `[Automation] failed to register flow` at boot,
 `[Automation] cold-boot flow bind: failed to register flow` at the kernel:ready
-bind, `[Automation] flow re-sync: failed to register flow` on a re-sync. Run
-`objectstack validate` on the exported stack to locate the edge (it reports
-`edges.N.condition` with the sentence above), author the `source` — or remove
-the key, if the edge was meant to be unconditional — and republish. Registered
-as the ADR-0087 D3 semantic entry
+bind, `[Automation] flow re-sync: failed to register flow` on a re-sync. That
+warn line is also the locator: its `issues[].path` names the offending edge —
+`edges[N].condition` — beside the sentence above, so nothing has to be exported
+to find it. Author the `source` — or remove the key, if the edge was meant to
+be unconditional — and republish. A stack authored in config files has a second
+door, `objectstack validate`, which locates the same edge at
+`flows.N.edges.N.condition`. Registered as the ADR-0087 D3 semantic entry
 `flow-edge-condition-evaluated-slot-source-required`, which carries the same
 judgment for a consumer replaying the chain.
 
