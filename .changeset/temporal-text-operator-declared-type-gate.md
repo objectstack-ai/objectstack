@@ -11,11 +11,24 @@ feat(driver-sql)!: a text operator over a column whose DECLARED type is temporal
 <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed. No `packages/spec` key changes its name, its type or its optionality, no stored shape moves, and every object definition and filter body parses byte-identically to before — so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions. What changes is the ANSWER a published filter surface gives at request time: a text operator aimed at a `date` / `datetime` / `time` column returns the declared no-match instead of the ISO-substring match SQLite happened to give it. The remedy for a caller who was leaning on that match is a different FILTER — the range operators, which are data the caller holds rather than an authored artifact with a stored representation — and it is spelled in the banner below. The one spec change is the membership of an existing exported set (`NON_TEXT_STORED_VALUE_TYPES`), which adds no export and removes none. -->
 
 **BREAKING** in the answer sense, on every SQL face, landing in the launch
-window as `minor` under the lockstep convention this cluster's siblings use: a
-filter that used to return rows on the SQLite family returns none. Nothing that
-was refused becomes admitted, and no new error code is minted — the refusal
-reused is the one `NON_TEXT_STORED_VALUE_TYPES` already carried for the numeric
-and boolean classes.
+window as `minor` under the lockstep convention this cluster's siblings use.
+
+**The behaviour that GOES AWAY, by name: searching a date as a string.** On the
+SQLite family — `driver-sql` on any SQLite connection, `driver-sqlite-wasm`, and
+`driver-turso`'s local transport — a `Field.date` / `Field.datetime` /
+`Field.time` column stores canonical ISO TEXT (ADR-0053), and a text operator
+matched that text. `{ signed_on: { $contains: '2026' } }` returned every 2026
+row; `{ made_at: { $startsWith: '2026-01' } }` returned that January's rows;
+`{ shift_at: { $contains: ':30' } }` returned every half-past shift. **All three
+now return nothing**, and their `$notContains` mirrors now return every valued
+row. If you are relying on any of them, this is a row-set change and the
+replacement is a range filter — spelled out below. The behaviour was never
+declared by any contract row and it never worked outside SQLite: the same three
+filters were a `DATABASE_ERROR` 500 on live Postgres.
+
+Nothing that was refused becomes admitted, and no new error code is minted — the
+refusal reused is the one `NON_TEXT_STORED_VALUE_TYPES` already carried for the
+numeric and boolean classes.
 
 Maintainer ruling, 2026-09-05 on #15683, quoted rather than paraphrased:
 「a text operator over a column whose DECLARED type is temporal is type-gated
@@ -66,14 +79,20 @@ answered the same way:
 - **A MULTI-VALUED temporal field is untouched.** `multiple: true` stores a JSON
   TEXT array, where `$contains` is the MEMBERSHIP spelling #7398 left working on
   a JSON column — not a substring test. It keeps compiling exactly as before.
-- **The value-keyed JS evaluators do not move.** `driver-memory`'s matcher,
-  `formula` and `having` answer a temporal column by what was STORED, and none
-  of the three is handed a schema: `matchesFilterCondition(record, filter)`
-  takes a bare record ("this evaluator sees a bare record and has no schema to
-  consult", its own docblock), and `having` filters AGGREGATED rows whose
-  columns carry no field declaration at all. Keying them on the declared type is
-  not a thing this change could do quietly, so it does not pretend to; the
-  existing `driver-memory` pin over a `Date`-valued column is intact.
+- **The value-keyed JS evaluators do not move, and they DIVERGE — measured, not
+  caveated.** `driver-memory` canonicalises a declared temporal write to ISO
+  TEXT (#4047), for a `Date` input and a string input alike, so a positive text
+  operator MATCHES there — the exact complement of the answer this changeset
+  declares. That divergence is filed as #17348 and pinned by name in that
+  driver's conformance suite, alongside a correction: the two rows previously
+  read as pinning the no-match answer pass because their comparand omits the
+  milliseconds, not because anything type-gates. `formula` and `having` cannot
+  key on the declaration at all — `matchesFilterCondition(record, filter)` takes
+  a bare record ("this evaluator sees a bare record and has no schema to
+  consult", its own docblock), and `having` filters AGGREGATED rows whose columns
+  carry no field declaration. ⛔ So "on every face" is NOT delivered by this
+  change, and this changeset does not claim it: the SQL family answers the
+  declared rule, the JS faces do not yet.
 - **`FILTER_TEXT_CASES` grows no temporal column**, deliberately. Every row there
   is keyed on the STORED value — which is why its non-string column is a number
   and not a date — so a temporal fixture would assert one stored form across all

@@ -115,10 +115,18 @@ export const CLOCK_TIME_TYPES: ReadonlySet<string> = new Set([
  * in their drivers, as this section's header says.
  *
  * ⚠️ This set is keyed on the DECLARED type, which is why it can hold a class
- * whose stored value IS a string on one backend. The JS evaluators that read
- * the VALUE (`driver-memory`'s matcher, `formula`, `having`) answer a temporal
- * column by what was stored, and none of them is handed a schema — measured on
- * #15683 and recorded there; they are not consumers of this set.
+ * whose stored value IS a string on one backend — and on more than one. The JS
+ * evaluators answer off the VALUE and are NOT consumers of this set, so a
+ * temporal column diverges from the answer declared here on every one of them.
+ * Measured on #15683, so the gap is a number rather than a caveat:
+ * `driver-memory` canonicalises a declared temporal write to ISO TEXT (#4047),
+ * for a `Date` input and a string input alike, so a positive text operator
+ * MATCHES there — the exact complement of this set's answer (#17348, pinned as
+ * a named divergence in that driver's conformance suite). `formula`'s
+ * `matchesFilterCondition(record, filter)` takes a bare record and its own
+ * docblock says it "has no schema to consult"; `having` filters AGGREGATED rows
+ * whose columns carry no field declaration at all. Neither could key on the
+ * declaration without being handed one.
  */
 export const NON_TEXT_STORED_VALUE_TYPES: ReadonlySet<string> = new Set([
   ...NUMERIC_VALUE_TYPES,
