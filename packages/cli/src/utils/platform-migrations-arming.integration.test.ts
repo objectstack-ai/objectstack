@@ -12,7 +12,7 @@
  * plane and must NOT provision these tables locally."
  *
  * The gate deduced that from `environmentId === undefined`, and
- * `runtime/src/standalone-stack.ts` stamps `'proj_local'` on every boot. So the
+ * `runtime/src/standalone-stack.ts` stamps `'env_local'` on every boot. So the
  * block never ran on `os dev` / `os serve` / `os start` at all, and #8686's own
  * header — "repairs an install that is ALREADY in that state, which covers
  * every existing deployment" — covered no self-hosted deployment.
