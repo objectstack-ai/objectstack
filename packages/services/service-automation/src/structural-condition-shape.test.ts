@@ -130,9 +130,16 @@ describe('#15662 — a structural condition that is neither text nor an expressi
             expect(register(flowWith({ edgeCondition: '1 == 1' }))).not.toThrow();
         });
 
-        it('a whitespace-only STRING still registers and still evaluates false', () => {
-            // Ruled correct, stated so nobody "fixes" it.
-            expect(register(flowWith({ decisionCondition: '   ' }))).not.toThrow();
+        it('a whitespace-only STRING is refused at registration (#17322) and still evaluates false', () => {
+            // FLIPPED from "still registers and still evaluates false — ruled
+            // correct". #15662 ruled it correct because it was consistent on
+            // both sides; #15807 made the EDGE door refuse it at parse and
+            // #17322 rebound this door to that rule. It is NOT #15662's shape
+            // refusal that answers now — a string is still a well-shaped
+            // condition — but the evaluated-slot sentence, so this control also
+            // pins that the two refusals stayed distinct.
+            expect(register(flowWith({ decisionCondition: '   ' }))).toThrow(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+            expect(register(flowWith({ decisionCondition: '   ' }))).not.toThrow(STRUCTURAL_CONDITION_SHAPE_REFUSAL);
             expect(new AutomationEngine(silentLogger).evaluateCondition('   ', new Map())).toBe(false);
         });
 
@@ -324,8 +331,10 @@ describe('#16038 — evaluation refuses the same shapes registration does', () =
  *    `rec.ast !== undefined` admission is gone, and an `ast`-only envelope on
  *    a start node's trigger gate or a decision node's predicate is refused at
  *    `registerFlow` and at `evaluateCondition` with ONE
- *    `STRUCTURAL_CONDITION_SHAPE_REFUSAL`. The whitespace-only STRING ruling
- *    on that slot is untouched (it is #15662's, and consistent on both sides).
+ *    `STRUCTURAL_CONDITION_SHAPE_REFUSAL`. The whitespace-only STRING ruling on
+ *    that slot was left alone here and MOVED one card later — see #17322 below,
+ *    which rebound the node door to this same evaluated-slot rule at
+ *    registration; the EVALUATOR half of #15662's ruling still stands.
  */
 describe('#15807 — the edge condition is an evaluated slot; the ast-only admission is gone', () => {
     const AST_ONLY = { dialect: 'cel', ast: { kind: 'const', value: true } };
@@ -372,9 +381,123 @@ describe('#15807 — the edge condition is an evaluated slot; the ast-only admis
             expect(evaluate({ ast: { kind: 'const', value: true } })).toThrow(STRUCTURAL_CONDITION_SHAPE_REFUSAL);
         });
 
-        it('CONTROL — the whitespace-only STRING ruling on this slot is untouched (#15662)', () => {
-            expect(register(flowWith({ decisionCondition: '   ' }))).not.toThrow();
+        it('the whitespace-only STRING ruling on this slot MOVED at registration (#17322)', () => {
+            // FLIPPED from "…is untouched (#15662)". #15662 ruled the blank
+            // string correct on the ground that it was consistent on both
+            // sides; #15807 (the block above) removed that ground by making the
+            // EDGE door refuse it at parse, and #17322 rebound the node door to
+            // the same rule. The EVALUATOR half is deliberately unchanged — see
+            // the #17322 block for why.
+            expect(register(flowWith({ decisionCondition: '   ' }))).toThrow(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
             expect(evaluate('   ')()).toBe(false);
+        });
+    });
+});
+
+/**
+ * #17322 — a whitespace-only `config.condition` STRING is refused at the NODE
+ * door, by the rule the EDGE door has carried since #15807.
+ *
+ * Two doors, the same authored value `'   '`, two fates. On an edge,
+ * `FlowEdgeSchema.condition` is `EvaluatedExpressionInputSchema`, so
+ * `FlowSchema.parse` refuses it by name before it can be stored. On a node,
+ * `config` is an open `z.record` that passes it through verbatim, and it
+ * reached `evaluateCondition`'s empty-source arm — `exprStr.trim() === ''` —
+ * and answered a SILENT `false`, under a comment that names the arm as being
+ * for an UNAUTHORED condition. `'   '` was authored. A branch that never runs,
+ * forever, with nothing said at any layer; and on a `start` node that key is
+ * the TRIGGER GATE, so a whole flow could be gated shut in silence.
+ *
+ * The ruling: 一个操作两个实现且行为不一致 ⇒ 带治理的一侧胜出,另一侧改绑.
+ * The edge door refuses, so the edge door is the governed side and the node
+ * door aligns to it — at the PRODUCER (`registerFlow`), which is the only gate
+ * `config.condition` has, an open record having no schema in front of it.
+ *
+ * The refusal is IMPORTED, never re-spelled: `registerFlow` runs the source
+ * through `EvaluatedExpressionInputSchema` itself, so the two doors cannot
+ * drift into two notions of "blank" or two sentences for it. That is why every
+ * assertion below reads `EVALUATED_EXPRESSION_SOURCE_REQUIRED` off the spec's
+ * own export rather than matching prose.
+ *
+ * ## What deliberately did NOT move
+ *
+ * `evaluateCondition` still answers `false` for a blank string. It is the
+ * shared evaluator and a public method on an exported class, so its throw
+ * behaviour is itself a contract; and a flow STORED before this card is
+ * replayed through `applyConversionsToStoredItem`, which does not re-validate,
+ * so it reaches the evaluator whatever the producer now refuses. Turning that
+ * into a throw would convert a dead branch into a run-time fault for those
+ * deployments — a different question, and not the one this card was ruled on.
+ */
+describe('#17322 — a blank `config.condition` string is refused at the node door', () => {
+    const evaluate = (value: unknown) => () =>
+        new AutomationEngine(silentLogger).evaluateCondition(value as never, new Map<string, unknown>([['record', { rating: 5 }]]));
+
+    it('refuses a whitespace-only condition on the decision predicate and on the START trigger gate', () => {
+        for (const site of ['decisionCondition', 'startCondition'] as const) {
+            expect(register(flowWith({ [site]: '   ' })), site).toThrow(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+        }
+    });
+
+    it('refuses every spelling of blank on the same rule — tabs and newlines included', () => {
+        expect(register(flowWith({ decisionCondition: '\t\n ' }))).toThrow(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+        expect(register(flowWith({ decisionCondition: '' }))).toThrow(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+    });
+
+    it('refuses a blank `source` INSIDE an envelope too — one seam, two keys, one rule', () => {
+        // `structuralConditionRefusal` admits an envelope carrying a string
+        // `source`, with or without a `dialect`, so both spellings reach the
+        // evaluated-slot rule and both are refused by it.
+        expect(register(flowWith({ decisionCondition: { dialect: 'cel', source: '   ' } }))).toThrow(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+        expect(register(flowWith({ decisionCondition: { source: '   ' } }))).toThrow(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+    });
+
+    it('locates the refusal at the node the author wrote', () => {
+        expect(register(flowWith({ startCondition: '   ' }))).toThrow(/node 'start' \(start\) condition/);
+        expect(register(flowWith({ decisionCondition: '   ' }))).toThrow(/node 'branch' \(decision\) condition/);
+    });
+
+    it('answers the EDGE door\'s sentence, not a second one — the two doors do not drift', () => {
+        // The same value at the two slots earns the same published sentence.
+        // If this ever diverges, a private notion of "blank" has grown here.
+        expect(register(flowWith({ decisionCondition: '   ' }))).toThrow(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+        expect(register(flowWith({ edgeCondition: '   ' }))).toThrow(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+    });
+
+    describe('CONTROLS — what this must NOT refuse', () => {
+        it('an ABSENT condition is still not a malformed one', () => {
+            expect(register(flowWith({}))).not.toThrow();
+            expect(register(flowWith({ decisionCondition: null }))).not.toThrow();
+            expect(register(flowWith({ startCondition: undefined }))).not.toThrow();
+        });
+
+        it('a non-blank condition still registers — bare text and both envelope spellings', () => {
+            expect(register(flowWith({ decisionCondition: 'record.rating >= 4' }))).not.toThrow();
+            expect(register(flowWith({ decisionCondition: { source: 'record.rating >= 4' } }))).not.toThrow();
+            expect(register(flowWith({ decisionCondition: { dialect: 'cel', source: 'record.rating >= 4' } }))).not.toThrow();
+            expect(register(flowWith({ startCondition: 'record.rating >= 4' }))).not.toThrow();
+        });
+
+        it('a non-blank source earns its pre-existing verdict, never the blank one', () => {
+            // RED CONTROL — the new rule is about the SOURCE, so a non-blank
+            // one must never reach it whatever else is wrong with the value.
+            // `{ dialect: 'cron', … }` at a condition slot was already refused
+            // at registration by its own sentence; if that sentence is replaced
+            // by the evaluated-slot one, this gate has started shadowing the
+            // dialect check instead of sitting in front of it.
+            const cron = () => register(flowWith({ decisionCondition: { dialect: 'cron', source: '0 0 * * *' } }))();
+            expect(cron).toThrow(/expected a CEL expression but got a `cron` dialect/);
+            expect(cron).not.toThrow(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+            // Same for the #1491 brace trap on a bare string.
+            const brace = () => register(flowWith({ decisionCondition: '{record.rating} >= 4' }))();
+            expect(brace).toThrow(/template braces|failed to evaluate as CEL|bare CEL/);
+            expect(brace).not.toThrow(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+        });
+
+        it('the EVALUATOR is untouched: a stored blank condition still answers `false`', () => {
+            expect(evaluate('   ')()).toBe(false);
+            expect(evaluate('')()).toBe(false);
+            expect(evaluate(null)()).toBe(false);
         });
     });
 });
