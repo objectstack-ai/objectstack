@@ -1,22 +1,37 @@
 #!/usr/bin/env node
-// check-skill-frame-sync — isomorphism gate for the escalation decision frame,
-// which exists as TWO hand-written copies across two files (#5798, narrowed to
-// two by the 2026-09-03 batch-3 ruling, item 4 option B — see COPIES below).
+// check-skill-frame-sync — coherence and anti-dormancy gate for the escalation
+// decision frame, which is hand-written ONCE today (#5798 started at four copies;
+// the 2026-09-03 batch-3 ruling, item 4 option B, narrowed them to two, and the
+// 2026-09-10 ruling deleted the published PM skill whole — see COPIES below).
 //
 // The frame ("analyze every option on N fixed axes") is binding text for both
-// the PM agent and the dev agent, and it is written twice over: once for this
-// repo's internal agent protocol (`.claude/**`, never published) and once for
-// third-party projects (`skills/objectstack-pm-dispatch/SKILL.md`, which ships
-// verbatim via `npx skills add objectstack-ai/objectstack/skills`). Nothing
-// compared them.
+// the PM agent and the dev agent. It used to be written twice over: once for
+// this repo's internal agent protocol (`.claude/**`, never published) and once
+// for third-party projects (the published `skills/objectstack-pm-dispatch/SKILL.md`,
+// which shipped verbatim via `npx skills add objectstack-ai/objectstack/skills`).
+// Nothing compared them — and then the maintainer deleted the published skill
+// outright (2026-09-10, verbatim: 「发布版 skills/objectstack-pm-dispatch 删」),
+// so the surviving copy is the internal PM one and there is no pair left.
 //
-// Both surviving copies are PM-side. The two dev-side copies this gate used to
-// watch — the internal agent definition's block and the published skill's
-// embedded dev template — are gone: a dispatching PM now pastes its own copy
-// into the dev prompt's `{decision_frame}` slot, so the dev reads the frame the
-// PM is holding rather than a third and fourth transcription of it. That is a
-// REDUCTION IN COPIES, not a reduction in coverage — the anti-dormancy scan
-// below is what keeps a dev-side copy from quietly coming back.
+// The two dev-side copies went first: a dispatching PM pastes its own copy into
+// the dev prompt's `{decision_frame}` slot, so the dev reads the frame the PM is
+// holding rather than a transcription of it. Both reductions are REDUCTIONS IN
+// COPIES, not in coverage — the anti-dormancy scan below is what keeps a
+// dev-side copy, or the deleted published one, from quietly coming back.
+//
+// What the gate still judges with ONE declared copy, and why it stays wired:
+//   • the copy's own coherence — declared count = written entries, declaring and
+//     binding sentences agree, every axis maps to AXIS_MAP, no axis twice, every
+//     in-file count mention agrees;
+//   • the anti-dormancy scan — every markdown file under SCAN_ROOTS read for an
+//     UNDECLARED copy of the frame (the self-test pins the deleted published
+//     path among them).
+// The cross-copy isomorphism (count and axis order, copy against copy) is
+// DISCHARGED, not weakened: the ruling removed its whole comparison population,
+// and it re-arms by itself the moment a second COPIES entry is declared. What a
+// single copy loses in-tree is axis ORDER, which was only ever judged copy
+// against copy; `check:skill-frame-freshness` judges the sole copy's structure
+// against origin/main instead.
 //
 // The drift is not hypothetical. #5130 (2026-08-04) widened the internal frame
 // from two axes to three; the published mirror was untouched and stayed at two
@@ -61,8 +76,8 @@
 // like its two neighbours: those are generators (`gen:skill-refs` etc.) whose
 // source is packages/spec/src, which is why they live in the spec package and in
 // its check:generated ledger. This gate reads no spec source and generates no
-// artifact; it compares two hand-written documents, one of which (`.claude/**`)
-// the spec package has no business knowing about. Repo-wide policy gates over
+// artifact; it reads hand-written documents (the declared copy under `.claude/**`,
+// which the spec package has no business knowing about). Repo-wide policy gates over
 // prose live in root scripts/ (check:role-word, check:doc-authoring,
 // check:nul-bytes all scan skills/ from here).
 //
@@ -78,7 +93,7 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /**
  * Build a wrap-tolerant anchor regex from a literal template.
  *
- * Both SKILL.md copies hard-wrap prose mid-sentence, so an anchor written with
+ * SKILL.md copies hard-wrap prose mid-sentence, so an anchor written with
  * plain spaces would miss whenever a reflow moves a line break. Every run of
  * spaces becomes `\s+`.
  *
@@ -105,19 +120,21 @@ function soft(template) {
 }
 
 /**
- * The two copies. `start` is the sentence that declares the frame, `binding` is
- * the sentence that makes it binding; the axis entries are whatever lies between
- * them. Both anchors must match exactly once per file — an ambiguous anchor is
- * reported rather than silently resolved to the first hit.
+ * The copies — ONE today. `start` is the sentence that declares the frame,
+ * `binding` is the sentence that makes it binding; the axis entries are whatever
+ * lies between them. Both anchors must match exactly once per file — an
+ * ambiguous anchor is reported rather than silently resolved to the first hit.
  *
- * Why two and not four (2026-09-03 batch-3 ruling, item 4 option B): the frame
- * had a PM copy and a dev copy on each side of the publish boundary, and the two
- * dev copies were transcriptions of the PM copy beside them. They are now filled
- * in at dispatch time from the PM copy instead — the published dev template's
- * `{decision_frame}` line, and the dispatch prompt the internal PM writes — so
- * the text a dev reads is the text its dispatcher is holding, and cannot be a
- * copy that stopped being updated. Adding a copy back is a COPIES edit, which
- * the anti-dormancy scan below forces rather than merely invites.
+ * Why one and not four: the frame had a PM copy and a dev copy on each side of
+ * the publish boundary. The 2026-09-03 batch-3 ruling (item 4 option B) dropped
+ * the two dev copies — they were transcriptions of the PM copy beside them, and
+ * are filled in at dispatch time from it instead, so the text a dev reads is the
+ * text its dispatcher is holding and cannot be a copy that stopped being updated.
+ * The 2026-09-10 ruling then deleted the published PM skill whole (verbatim:
+ * 「发布版 skills/objectstack-pm-dispatch 删」), taking the published PM copy with
+ * it. Adding a copy back is a COPIES edit, which the anti-dormancy scan below
+ * forces rather than merely invites — and the cross-copy comparison in
+ * runAllChecks re-arms on the second entry without any other change.
  *
  * EXPORTED for scripts/check-skill-frame-freshness.mjs (#5866), which asks the
  * OTHER invariant about the same documents — "is this working tree's copy of the
@@ -136,24 +153,20 @@ export const COPIES = [
     start: soft('**每个方案必须沿%N%固定评估轴'),
     binding: soft('推荐意见必须基于这%N%轴给出理由'),
   },
-  {
-    id: 'published-pm',
-    file: 'skills/objectstack-pm-dispatch/SKILL.md',
-    lang: 'en',
-    what: 'published PM skill, the decision frame section',
-    start: soft('**and analyze every option on the %N% fixed axes below.**'),
-    binding: soft('recommendation must be justified on %Q% axes'),
-  },
 ];
 
 /**
  * The axis vocabulary map — the noun correspondence between the internal Chinese
- * copy and the English ones, written out here on purpose so that changing what
- * counts as "the same axis" is a deliberate, reviewable edit.
+ * copy and an English one, written out here on purpose so that changing what
+ * counts as "the same axis" is a deliberate, reviewable edit. The `en` column has
+ * been unread since the published English copy was deleted (2026-09-10): a copy
+ * is read through `axis[copy.lang]`, and every declared copy is `zh`.
  *
- * Order is the canonical axis order; a copy that lists them in another order
- * fails. A copy whose axis matches no entry fails too: renaming an axis is a
- * frame change, and the map is where that change gets recorded.
+ * Order is the canonical axis order; copies that disagree on it fail — a
+ * cross-copy check, so with one copy declared the order is judged only by the
+ * freshness gate against origin/main. A copy whose axis matches no entry fails
+ * in any population: renaming an axis is a frame change, and the map is where
+ * that change gets recorded.
  *
  * EXPORTED for the freshness gate (#5866) — see the note on COPIES above. The
  * #5866 triage named this map as the structural criterion to reuse, precisely
@@ -198,7 +211,8 @@ function toCount(word) {
 
 /**
  * An axis entry starts either at a list bullet (the internal PM copy) or at an
- * `**Axis ① — …**` paragraph (the published PM copy). Both shapes are accepted
+ * `**Axis ① — …**` paragraph (the shape the published PM copy used until its
+ * 2026-09-10 deletion). Both shapes are accepted
  * everywhere, so reformatting one copy into the other's shape does not blind the
  * gate. A blank line closes an entry; wrapped continuation lines belong to it.
  */
@@ -288,8 +302,8 @@ const MENTION_PATTERNS = [
 
 /**
  * Files that must be declared in COPIES if they carry the frame at all — the
- * anti-dormancy half. A fifth copy added tomorrow (a second published skill, a
- * new agent definition) would otherwise be unwatched, which is exactly how
+ * anti-dormancy half. A second copy added tomorrow (a published skill, a new
+ * agent definition) would otherwise be unwatched, which is exactly how
  * hand-kept input lists rot (#4291).
  */
 const FINGERPRINTS = [
@@ -578,8 +592,8 @@ export function runAllChecks(copies, axisMap = AXIS_MAP, scanFiles = null) {
     problems.push(
       `the ${results.length} copies do not agree on the NUMBER of axes — this is the #5130 drift:\n` +
       results.map((r) => `      ${r.declared} axes  ${r.copy.id}  (${r.copy.file})`).join('\n') +
-      `\n    Every copy of the frame must be updated in the same PR, including the ` +
-      `published mirror in skills/ that ships to third parties.`,
+      `\n    Every copy of the frame must be updated in the same PR, including any ` +
+      `published mirror under skills/ that ships to third parties.`,
     );
   }
   const sequences = new Map();
@@ -748,18 +762,19 @@ let selfTestReachedVerdict = false;
 // registrations must not red. 1 is the honest floor for a table row: the loop
 // reaches it exactly once per run.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'baseline: the two real copies are isomorphic': 1,
+  'baseline: the one real copy is internally coherent (the published copy was deleted 2026-09-10)': 1,
   'one copy loses an axis, its declared count unchanged → red (count vs entries)': 1,
-  'one copy coherently rewritten to three axes → red (cross-copy count)': 1,
-  'two-axis copy phrased "both axes" → red on the COUNT, not on extraction': 1,
+  'the sole copy coherently rewritten to three axes → stays GREEN (no second copy to disagree — the cross-copy comparison is discharged; the freshness gate judges it against origin/main)': 1,
+  'the declaring and binding sentences disagree on the count → red (self-contradiction, the half-finished axis edit)': 1,
   'an axis is renamed in one copy → red (unmapped axis name)': 1,
-  'axes reordered in one copy → red (name sequence)': 1,
+  'the same axis is listed twice → red (duplicate axis)': 1,
   'the binding sentence is removed → red (extraction failure, not a skip)': 1,
   'the declaring sentence is removed → red (extraction failure, not a skip)': 1,
   'a frame count mention drifts from the frame → red': 1,
-  'AXIS_MAP misaligned (zh patterns swapped) → red, proving the map is load-bearing': 1,
+  'AXIS_MAP loses an axis\'s zh spelling → red (unmapped axis), proving the map is load-bearing': 1,
   'an undeclared extra copy appears → red (anti-dormancy)': 1,
   'the dev-side copy returns to the now-undeclared agent definition → red (anti-dormancy)': 1,
+  'the published PM copy returns at its deleted path → red (anti-dormancy — the 2026-09-10 deletion stays deleted)': 1,
   'wording-only divergence (the #5451 generalization) → stays GREEN': 1,
 });
 
@@ -769,7 +784,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 14;
 
 function selfTest() {
   const base = readCopies();
@@ -781,7 +796,7 @@ function selfTest() {
 
   const cases = [
     {
-      label: 'baseline: the two real copies are isomorphic',
+      label: 'baseline: the one real copy is internally coherent (the published copy was deleted 2026-09-10)',
       copies: () => base,
       expect: 'green',
     },
@@ -797,8 +812,13 @@ function selfTest() {
       wants: [/internal-pm/, /declares 4 axes but 3 axis entries/],
     },
     {
-      // The #5130 shape, coherent: one side becomes a consistent three-axis frame.
-      label: 'one copy coherently rewritten to three axes → red (cross-copy count)',
+      // The #5130 shape, coherent: the copy becomes a consistent three-axis frame.
+      // With TWO copies this was the cross-copy count red; with one there is no
+      // second copy to disagree, and a coherent rewrite of the sole copy is a
+      // frame CHANGE, not drift — the freshness gate is what holds it against
+      // origin/main. Pinned GREEN so the discharge is a recorded fact: a PR that
+      // declares a second copy flips this case red again, and must say so.
+      label: 'the sole copy coherently rewritten to three axes → stays GREEN (no second copy to disagree — the cross-copy comparison is discharged; the freshness gate judges it against origin/main)',
       copies: () => {
         let c = mutate(
           base, 'internal-pm',
@@ -808,30 +828,16 @@ function selfTest() {
         c = mutate(c, 'internal-pm', '沿四条固定评估轴', '沿三条固定评估轴');
         return mutate(c, 'internal-pm', '基于这四条轴给出理由', '基于这三条轴给出理由');
       },
-      expect: 'red',
-      wants: [/do not agree on the NUMBER of axes/, /#5130/, /3 axes {2}internal-pm/],
+      expect: 'green',
     },
     {
-      // Regression pin for the draft defect described in soft(): the two-axis form
-      // of the binding sentence is "both axes", not "all two axes". The count
-      // disagreement must be what fires — NOT "the binding sentence is missing".
-      label: 'two-axis copy phrased "both axes" → red on the COUNT, not on extraction',
-      copies: () => {
-        let c = mutate(
-          base, 'published-pm',
-          '\n**Axis ③ — making AI-authored code',
-          '\n  **Axis ③ — making AI-authored code',
-        );
-        c = mutate(
-          c, 'published-pm',
-          '\n**Axis ④ — startup scope discipline.**',
-          '\n  **Axis ④ — startup scope discipline.**',
-        );
-        c = mutate(c, 'published-pm', 'every option on the four fixed axes below.', 'every option on the two fixed axes below.');
-        return mutate(c, 'published-pm', 'must be justified on **all four** axes.', 'must be justified on **both** axes.');
-      },
+      // The other half of the #5130 shape, and a check that never needed a pair:
+      // the declaring sentence still says four while the binding sentence says
+      // three. It must red as a self-contradiction, not as extraction failure.
+      label: 'the declaring and binding sentences disagree on the count → red (self-contradiction, the half-finished axis edit)',
+      copies: () => mutate(base, 'internal-pm', '基于这四条轴给出理由', '基于这三条轴给出理由'),
       expect: 'red',
-      wants: [/do not agree on the NUMBER of axes/, /2 axes {2}published-pm/],
+      wants: [/internal-pm/, /contradicts itself/, /declaring sentence says 4 axes, the binding sentence says 3/],
       unwanted: [/BINDING sentence is not in place/, /could not extract/],
     },
     {
@@ -841,36 +847,23 @@ function selfTest() {
       wants: [/internal-pm/, /matches no entry in AXIS_MAP/, /长期架构取向/],
     },
     {
-      label: 'axes reordered in one copy → red (name sequence)',
-      copies: () => {
-        let c = mutate(
-          base, 'published-pm',
-          '**Axis ① — real business need.**',
-          '**Axis ① — PLACEHOLDER.**',
-        );
-        c = mutate(
-          c, 'published-pm',
-          '**Axis ② — long-term architectural soundness for *this* project.**',
-          '**Axis ② — real business need.**',
-        );
-        return mutate(
-          c, 'published-pm',
-          '**Axis ① — PLACEHOLDER.**',
-          '**Axis ① — long-term architectural soundness for *this* project.**',
-        );
-      },
+      // Order was a cross-copy verdict and left with the pair; what a single copy
+      // can still get wrong by itself is naming one axis TWICE, which the map
+      // catches on its own.
+      label: 'the same axis is listed twice → red (duplicate axis)',
+      copies: () => mutate(base, 'internal-pm', '- **项目长远合理性**', '- **实际业务需求**'),
       expect: 'red',
-      wants: [/do not agree on the axis NAME SEQUENCE/, /long-term-soundness → business-need/],
+      wants: [/internal-pm/, /the same axis is listed twice \(business-need\)/],
     },
     {
       label: 'the binding sentence is removed → red (extraction failure, not a skip)',
       copies: () => mutate(
-        base, 'published-pm',
-        'Your recommendation must be justified on **all four** axes.',
-        'Your recommendation should be sensible.',
+        base, 'internal-pm',
+        '推荐意见必须基于这四条轴给出理由',
+        '推荐意见应当妥善说明理由',
       ),
       expect: 'red',
-      wants: [/published-pm/, /BINDING sentence is not in place/],
+      wants: [/internal-pm/, /BINDING sentence is not in place/],
     },
     {
       label: 'the declaring sentence is removed → red (extraction failure, not a skip)',
@@ -883,26 +876,35 @@ function selfTest() {
       wants: [/internal-pm/, /could not extract the decision frame/],
     },
     {
+      // The internal copy's only count mention IS its declaring sentence (which
+      // the self-contradiction case above already covers), so a drifted mention
+      // is injected beside the binding sentence — the anchor still matches once,
+      // and the mention check is what must fire.
       label: 'a frame count mention drifts from the frame → red',
       copies: () => mutate(
-        base, 'published-pm',
-        '#### The four-axis decision frame (binding)',
-        '#### The three-axis decision frame (binding)',
+        base, 'internal-pm',
+        '推荐意见必须基于这四条轴给出理由',
+        '推荐意见必须基于这四条轴给出理由(即三条评估轴的深度分析)',
       ),
       expect: 'red',
       wants: [/a mention of the frame states 3 axes while the frame itself has 4/],
+      unwanted: [/BINDING sentence is not in place/, /contradicts itself/],
     },
     {
-      label: 'AXIS_MAP misaligned (zh patterns swapped) → red, proving the map is load-bearing',
+      // Swapping two zh patterns used to red through the cross-copy sequence
+      // check; with one copy a swap re-labels consistently and nothing disagrees.
+      // The map is still load-bearing in the one direction a single copy keeps:
+      // an axis the map cannot name is refused.
+      label: 'AXIS_MAP loses an axis\'s zh spelling → red (unmapped axis), proving the map is load-bearing',
       copies: () => base,
       axisMap: [
-        { id: 'business-need', zh: AXIS_MAP[1].zh, en: AXIS_MAP[0].en },
-        { id: 'long-term-soundness', zh: AXIS_MAP[0].zh, en: AXIS_MAP[1].en },
+        { id: 'business-need', zh: /no such spelling/, en: AXIS_MAP[0].en },
+        AXIS_MAP[1],
         AXIS_MAP[2],
         AXIS_MAP[3],
       ],
       expect: 'red',
-      wants: [/do not agree on the axis NAME SEQUENCE/],
+      wants: [/axis entry #1 matches no entry in AXIS_MAP/],
     },
     {
       label: 'an undeclared extra copy appears → red (anti-dormancy)',
@@ -923,13 +925,12 @@ function selfTest() {
       //
       // ⚠️ MEASURED LIMIT, stated rather than implied: the scan's population is
       // per FILE (`declaredFiles.has(f.file)`). A second, undeclared copy pasted
-      // back into a file that IS declared — the published SKILL.md, which keeps
-      // the published-pm copy — is NOT refused by this scan, and was not refused
-      // before this change either. That gap is why the published copy is named by
-      // heading at the paste site rather than re-transcribed: the paste
-      // instruction is what keeps a second published copy from being written, and
-      // review is what enforces it. Closing the gap mechanically needs a
-      // per-occurrence criterion this gate does not have today.
+      // back into a file that IS declared — the internal SKILL.md, the one
+      // declared file — is NOT refused by this scan, and never was. That gap is
+      // why the frame is named by heading at the paste site rather than
+      // re-transcribed: the paste instruction is what keeps a second copy from
+      // being written, and review is what enforces it. Closing the gap
+      // mechanically needs a per-occurrence criterion this gate does not have.
       label: 'the dev-side copy returns to the now-undeclared agent definition → red (anti-dormancy)',
       copies: () => base,
       extraScan: [{
@@ -938,6 +939,21 @@ function selfTest() {
       }],
       expect: 'red',
       wants: [/looks like ANOTHER copy of the decision frame/, /os-dev\.md/],
+    },
+    {
+      // The regression pin for the 2026-09-10 deletion: the published PM skill is
+      // gone, and the thing that keeps it gone — or at least keeps a returning
+      // copy DECLARED — is this scan. The fixture uses the REAL deleted path, so
+      // a future PR that restores the skill with a frame in it is refused until
+      // it declares the copy and re-arms the cross-copy comparison with it.
+      label: 'the published PM copy returns at its deleted path → red (anti-dormancy — the 2026-09-10 deletion stays deleted)',
+      copies: () => base,
+      extraScan: [{
+        file: 'skills/objectstack-pm-dispatch/SKILL.md',
+        text: '**and analyze every option on the four fixed axes below.**\n',
+      }],
+      expect: 'red',
+      wants: [/looks like ANOTHER copy of the decision frame/, /skills\/objectstack-pm-dispatch\/SKILL\.md/],
     },
     {
       // The anti-false-positive direction. #5451 route B generalized the published
@@ -1172,11 +1188,19 @@ function main() {
 
   const axes = results[0].ids.join(' → ');
   const files = new Set(results.map((r) => r.copy.file)).size;
+  // One copy is a coherence verdict, not an isomorphism verdict: say which was
+  // judged, so the pass line cannot be read as a comparison that never ran.
+  const shape = results.length === 1
+    ? `the one declared copy of the decision frame is internally coherent ` +
+      `(${results[0].copy.file}; no second copy to compare — the cross-copy ` +
+      `comparison is discharged until a second COPIES entry is declared)`
+    : `${results.length} copies of the decision frame are structurally isomorphic ` +
+      `across ${files} files`;
   console.log(
-    `✓ check-skill-frame-sync: ${results.length} copies of the decision frame are ` +
-    `structurally isomorphic across ${files} files\n` +
+    `✓ check-skill-frame-sync: ${shape}\n` +
     `  ${results[0].declared} axes: ${axes}\n` +
-    `  binding sentence present in all ${results.length}; ${mentionCount} count mention(s) agree; ` +
+    `  binding sentence present in ${results.length === 1 ? 'it' : `all ${results.length}`}; ` +
+    `${mentionCount} count mention(s) agree; ` +
     `${scanFiles.length} markdown files scanned for undeclared copies.`,
   );
 }
