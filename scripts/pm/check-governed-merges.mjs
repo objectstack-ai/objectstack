@@ -727,7 +727,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -776,11 +776,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#11705 end to end, against the REAL generator': 7,
   "the live battery's prerequisite, and the floor it was misread as": 17,
   '⭐ #15406: the sweep row names the register it does not recompute': 10,
+  '⭐ #17003: the list is DERIVED three-dot, or refused': 43,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 24;
+const SELF_TEST_BATTERY_FLOOR = 25;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -4549,6 +4550,291 @@ async function selfTest() {
     plainHead,
   );
 
+  // ── ⭐ #17003: the list is DERIVED three-dot, or the run refuses ──────────
+  //
+  // The predicate was correct and its INPUT was undefined. Every case here is
+  // about the list ARRIVING right — the API reading, the local reading, the
+  // refusals that must never soften into a two-dot superset, and the identity
+  // that keeps ONE register answer in circulation however the list was got.
+  battery('⭐ #17003: the list is DERIVED three-dot, or refused');
+
+  // The page walk's terminator. Real headers, measured on PR #17076 (260
+  // files): the first two responses carry `rel="next"`, the third does not.
+  const linkPage1 =
+    '<https://api.github.com/repositories/1136691870/pulls/17076/files?per_page=100&page=2>; rel="next", ' +
+    '<https://api.github.com/repositories/1136691870/pulls/17076/files?per_page=100&page=3>; rel="last"';
+  const linkPage3 =
+    '<https://api.github.com/repositories/1136691870/pulls/17076/files?per_page=100&page=2>; rel="prev", ' +
+    '<https://api.github.com/repositories/1136691870/pulls/17076/files?per_page=100&page=1>; rel="first"';
+  assert('the-walk-follows-rel-next-while-one-is-offered',
+    linkNext(linkPage1) === 'https://api.github.com/repositories/1136691870/pulls/17076/files?per_page=100&page=2',
+    String(linkNext(linkPage1)));
+  assert('and-the-last-page-offers-none-so-the-walk-ends',
+    linkNext(linkPage3) === null && linkNext(null) === null && linkNext('') === null, String(linkNext(linkPage3)));
+  assert('a-rel-last-or-rel-prev-is-never-mistaken-for-a-rel-next',
+    linkNext('<https://x/?page=9>; rel="last"') === null && linkNext('<https://x/?page=1>; rel="prev"') === null);
+
+  // ⭐ A rename contributes BOTH paths. Reading only `filename` answers NOT
+  // governed for a diff that moves AGENTS.md off the governed surface — the
+  // one direction a governance predicate must never fail in.
+  const renamedOut = [{ status: 'renamed', filename: 'docs/AGENTS.md', previous_filename: 'AGENTS.md' }];
+  const renameRead = pullPathsFrom(renamedOut);
+  assert('a-rename-yields-the-new-path-AND-the-old-one',
+    renameRead.paths.join() === 'docs/AGENTS.md,AGENTS.md' && renameRead.entries === 1, JSON.stringify(renameRead));
+  assert('⭐ a-rename-OUT-of-a-governed-path-is-still-a-change-TO-that-path',
+    testVerdict(renameRead.paths).governed === true && testVerdict(['docs/AGENTS.md']).governed === false,
+    JSON.stringify(testVerdict(renameRead.paths).hitPaths));
+  assert('and-the-pair-is-reported-so-the-operator-sees-which-hit-came-from-a-rename',
+    renameRead.renames.length === 1 && renameRead.renames[0].from === 'AGENTS.md' && renameRead.renames[0].to === 'docs/AGENTS.md',
+    JSON.stringify(renameRead.renames));
+  assert('an-ordinary-page-set-carries-no-rename-and-no-duplicate-paths',
+    pullPathsFrom([{ filename: 'a.ts' }, { filename: 'a.ts' }, { filename: 'b.ts' }]).paths.join() === 'a.ts,b.ts');
+
+  // A short list is a SUBSET — the one direction that can hide a hit outright.
+  assert('a-walk-that-matches-the-PRs-own-count-is-proven-whole',
+    pullTruncationReason({ collected: 260, changedFiles: 260, pages: 3, pageCap: 40 }) === null);
+  assert('a-walk-that-does-not-match-that-count-refuses-and-names-both-numbers',
+    /collected 100 file\(s\) over 1 page\(s\) but the PR reports 260/.test(
+      String(pullTruncationReason({ collected: 100, changedFiles: 260, pages: 1, pageCap: 40 }))));
+  assert('a-PR-that-reports-no-count-cannot-prove-the-walk-so-it-refuses-too',
+    /cannot be proven whole/.test(String(pullTruncationReason({ collected: 5, changedFiles: null, pages: 1, pageCap: 40 }))));
+  assert('and-a-walk-still-pending-pages-at-the-cap-refuses-on-the-cap-itself',
+    /hit its 40-page cap/.test(String(pullTruncationReason({ collected: 4000, changedFiles: 4000, pages: 40, pageCap: 40, morePages: true }))));
+
+  // `--pr`'s argument. The qualified spelling exists because the register is
+  // repo-agnostic and the PM audits five repos from one checkout.
+  assert('a-bare-number-means-this-checkouts-own-repo',
+    JSON.stringify(parsePullTarget('16997', 'objectstack-ai/objectstack')) === JSON.stringify({ slug: 'objectstack-ai/objectstack', pull: 16997 }));
+  assert('a-qualified-spelling-names-any-governed-repo',
+    JSON.stringify(parsePullTarget('objectstack-ai/objectui#42', 'objectstack-ai/objectstack')) === JSON.stringify({ slug: 'objectstack-ai/objectui', pull: 42 }));
+  assert('a-bare-number-with-no-readable-origin-is-an-error-never-a-guessed-repo',
+    typeof parsePullTarget('42', null).error === 'string' && parsePullTarget('42', null).slug === undefined);
+  assert('and-nonsense-is-an-error-never-a-silent-zero',
+    typeof parsePullTarget('main', 'o/r').error === 'string' && typeof parsePullTarget('', 'o/r').error === 'string');
+
+  // `--branch`, every leg, on an injected git. Each refusal is asserted for the
+  // words a reader acts on — and for what it must NEVER say.
+  const gitScript = (answers) => (argv) => {
+    for (const [match, answer] of answers) if (argv.join(' ').includes(match)) return answer;
+    return { ok: false, out: '', error: 'unexpected git call: ' + argv.join(' ') };
+  };
+  const ok40 = (sha) => ({ ok: true, out: sha, error: '' });
+  const A = 'a'.repeat(40);
+  const B = 'b'.repeat(40);
+  const M = 'c'.repeat(40);
+  const noBase = deriveBranchPaths({ ref: 'feature', run: gitScript([['rev-parse --verify --quiet origin/main', { ok: false, out: '', error: '' }]]) });
+  assert('an-unfetched-origin-main-refuses-and-says-to-fetch-it',
+    noBase.ok === false && /does not resolve to a commit/.test(noBase.reason) && /git fetch origin main/.test(noBase.remedy), JSON.stringify(noBase));
+  const noRef = deriveBranchPaths({ ref: 'ghost', run: gitScript([
+    ['rev-parse --verify --quiet origin/main', ok40(A)],
+    ['rev-parse --verify --quiet ghost', { ok: false, out: '', error: '' }],
+  ]) });
+  assert('a-ref-this-checkout-does-not-have-refuses-rather-than-diffing-something-else',
+    noRef.ok === false && /`ghost` does not resolve/.test(noRef.reason), JSON.stringify(noRef));
+  // ⭐ The measured failure this whole mode exists for: `git merge-base` exits
+  // 1 with EMPTY output on a shallow clone, and the shell recipe that reads it
+  // inline then diffs against the WORKING TREE and exits 0 with a superset.
+  const noMergeBase = deriveBranchPaths({ ref: 'feature', run: gitScript([
+    ['rev-parse --verify --quiet origin/main', ok40(A)],
+    ['rev-parse --verify --quiet feature', ok40(B)],
+    ['merge-base', { ok: false, out: '', error: '' }],
+  ]) });
+  assert('⭐ an-uncomputable-merge-base-REFUSES-it-never-falls-back-to-two-dot',
+    noMergeBase.ok === false && /computed nothing/.test(noMergeBase.reason) && noMergeBase.paths === undefined &&
+      /deepen|unshallow/.test(noMergeBase.remedy), JSON.stringify(noMergeBase));
+  const refusalWords = renderDerivationRefusal({ mode: '--branch feature', reason: noMergeBase.reason, remedy: noMergeBase.remedy });
+  assert('and-the-refusal-tells-the-reader-why-a-fallback-would-be-worse-than-no-answer',
+    refusalWords.includes('cannot derive') && refusalWords.includes('two-dot') && refusalWords.includes('#17003') &&
+      refusalWords.includes('worse than none') && !refusalWords.includes('NOT governed'), refusalWords);
+  const derived = deriveBranchPaths({ ref: 'feature', run: gitScript([
+    ['rev-parse --verify --quiet origin/main', ok40(A)],
+    ['rev-parse --verify --quiet feature', ok40(B)],
+    ['merge-base', ok40(M)],
+    ['diff --name-only --no-renames', { ok: true, out: 'src/a.ts\nsrc/b.ts\n', error: '' }],
+  ]) });
+  assert('a-derivable-branch-answers-the-three-dot-list-from-the-merge-base',
+    derived.ok === true && derived.paths.join() === 'src/a.ts,src/b.ts' && derived.derivation.mergeBase === M, JSON.stringify(derived));
+  assert('⛔ the-diff-is-taken-with---no-renames-so-a-rename-out-of-a-governed-path-still-hits',
+    derived.derivation.command.includes('--no-renames'), derived.derivation.command);
+  const branchLine = renderDerivation(derived.derivation);
+  assert('the-branch-reading-names-its-command-its-base-and-its-merge-base',
+    branchLine.includes('three-dot') && branchLine.includes('--no-renames') && branchLine.includes(M.slice(0, 10)) &&
+      branchLine.includes('origin/main'), branchLine);
+  assert('and-an-unnamed-derivation-is-never-rendered-as-a-reading-to-act-on',
+    /do not act on this reading/.test(renderDerivation(null)));
+
+  // The caller-derived note `--test` prints: it must name the right form, the
+  // wrong one, and the two ways out.
+  assert('the---test-note-names-three-dot-forbids-two-dot-and-points-at-both-derivations',
+    CALLER_DERIVED_NOTE.includes('origin/main...HEAD') && CALLER_DERIVED_NOTE.includes('never two-dot') &&
+      CALLER_DERIVED_NOTE.includes('--pr') && CALLER_DERIVED_NOTE.includes('--branch'), CALLER_DERIVED_NOTE);
+
+  // `--pr`'s page walk, against an injected fetch. The shape is PR #17076's,
+  // measured: 100 + 100 + 60 = 260 over three pages.
+  {
+    const respond = (body, link) => ({
+      ok: true,
+      status: 200,
+      headers: { get: (k) => (String(k).toLowerCase() === 'link' ? link : null) },
+      json: async () => body,
+    });
+    const denied = { ok: false, status: 403, headers: { get: () => null }, json: async () => ({}) };
+    const rows = (from, n) => Array.from({ length: n }, (_, i) => ({ filename: `packages/p/f${from + i}.ts`, status: 'modified' }));
+    const filesUrl = (page) => `<https://api/repos/o/r/pulls/1/files?per_page=100&page=${page}>`;
+    const pageFor = (url) => (/page=3/.test(url) ? respond(rows(200, 60), `${filesUrl(2)}; rel="prev"`)
+      : /page=2/.test(url) ? respond(rows(100, 100), `${filesUrl(3)}; rel="next"`)
+        : respond(rows(0, 100), `${filesUrl(2)}; rel="next"`));
+    const one = [{ id: 'fixture', name: 'fixture channel', headers: {} }];
+    const walk = await fetchPullFiles({
+      apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: one,
+      fetchImpl: async (url) => (/\/files/.test(url) ? pageFor(url) : respond({ changed_files: 260 }, null)),
+    });
+    assert('⭐ the-walk-follows-Link-to-the-end-and-collects-every-page',
+      walk.ok === true && walk.paths.length === 260 && walk.derivation.pages === 3 && walk.derivation.entries === 260,
+      JSON.stringify({ ok: walk.ok, n: walk.paths?.length, reason: walk.reason }));
+    assert('and-the-reading-says-which-endpoint-and-how-many-pages-it-cost',
+      renderDerivation(walk.derivation).includes('three-dot by construction') &&
+        renderDerivation(walk.derivation).includes('/repos/o/r/pulls/1/files') &&
+        renderDerivation(walk.derivation).includes('3 page(s)'), renderDerivation(walk.derivation));
+    const short = await fetchPullFiles({
+      apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: one,
+      fetchImpl: async (url) => (/\/files/.test(url) ? respond(rows(0, 100), null) : respond({ changed_files: 260 }, null)),
+    });
+    assert('⭐ a-walk-the-PRs-own-count-contradicts-REFUSES-rather-than-answering-on-a-subset',
+      short.ok === false && /but the PR reports 260/.test(short.reason) && short.paths === undefined, JSON.stringify(short));
+    // The channel is chosen once and kept: a fall-through mid-walk would splice
+    // two readings, taken at two instants, into one list and call it the PR's.
+    const two = [{ id: 'first', name: 'first channel', headers: {} }, { id: 'second', name: 'second channel', headers: {} }];
+    let seen = 0;
+    const pickSecond = await fetchPullFiles({
+      apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: two,
+      fetchImpl: async (url, init) => {
+        if (!/\/files/.test(url)) { seen += 1; return seen === 1 ? denied : respond({ changed_files: 1 }, null); }
+        return respond([{ filename: 'a.ts' }], null);
+      },
+    });
+    assert('a-denied-channel-falls-through-to-the-next-one-on-the-first-read',
+      pickSecond.ok === true && pickSecond.derivation.channel === 'second', JSON.stringify(pickSecond));
+    const dropMidWalk = await fetchPullFiles({
+      apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: two,
+      fetchImpl: async (url) => {
+        if (!/\/files/.test(url)) return respond({ changed_files: 200 }, null);
+        if (/page=2/.test(url)) return denied; // the SECOND page, on the channel that served the first
+        return respond(rows(0, 100), `${filesUrl(2)}; rel="next"`);
+      },
+    });
+    assert('⛔ but-a-page-that-fails-mid-walk-refuses-it-never-switches-channel-and-splices',
+      dropMidWalk.ok === false && /did not read/.test(dropMidWalk.reason), JSON.stringify(dropMidWalk));
+    const renamedPr = await fetchPullFiles({
+      apiUrl: 'https://api', slug: 'o/r', pull: 1, channels: one,
+      fetchImpl: async (url) => (/\/files/.test(url) ? respond(renamedOut, null) : respond({ changed_files: 1 }, null)),
+    });
+    assert('and-a-renamed-governed-file-reaches-the-predicate-as-BOTH-of-its-paths',
+      renamedPr.ok === true && testVerdict(renamedPr.paths).governed === true &&
+        renderDerivation(renamedPr.derivation).includes('AGENTS.md → docs/AGENTS.md'), JSON.stringify(renamedPr.paths));
+  }
+
+  // ── the card's own shape, on a REAL repo, end to end ─────────────────────
+  //
+  // ⭐ Every pure case above stays green if `main()` simply stops CONSULTING
+  // these derivations — the precedent this file already sets for its #13307
+  // wiring. So the reproduction is RUN: a branch behind a `main` that has since
+  // touched a governed path, two-dot against three-dot, through the real CLI.
+  const derFx = mkdtempSync(join(tmpdir(), 'governed-merges-derive-'));
+  try {
+    const g2 = (cwd, ...rest) =>
+      execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest],
+        { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const repo = join(derFx, 'repo');
+    g2(derFx, 'init', '-q', repo);
+    const put = (rel, text) => {
+      mkdirSync(dirname(join(repo, rel)), { recursive: true });
+      writeFileSync(join(repo, rel), text, 'utf8');
+    };
+    put('README.md', 'seed\n');
+    put('AGENTS.md', 'the governed root instruction file\n');
+    g2(repo, 'add', '-A');
+    g2(repo, 'commit', '-qm', 'chore: seed');
+    const forkPoint = g2(repo, 'rev-parse', 'HEAD').trim();
+    // `main` moves on and touches a GOVERNED path this branch never will —
+    // exactly what `gen:skill-refs` does to `skills/**` on ordinary landings.
+    put('.claude/hooks/guard.sh', '# main only\n');
+    g2(repo, 'add', '-A');
+    g2(repo, 'commit', '-qm', 'chore: main touches the governed tree');
+    g2(repo, 'update-ref', 'refs/remotes/origin/main', g2(repo, 'rev-parse', 'main').trim());
+    // The branch forks BEFORE that and changes one ordinary file.
+    g2(repo, 'checkout', '-q', '-b', 'feature', forkPoint);
+    put('src/a.ts', 'export const a = 1;\n');
+    g2(repo, 'add', '-A');
+    g2(repo, 'commit', '-qm', 'feat: an ordinary change');
+    // A second branch, also behind main, that renames the governed root file.
+    g2(repo, 'checkout', '-q', '-b', 'rename-out', forkPoint);
+    g2(repo, 'mv', 'AGENTS.md', 'docs-AGENTS.md');
+    g2(repo, 'commit', '-qm', 'chore: move the root instruction file');
+    // And one with no shared history at all — the merge-base refusal, for real.
+    g2(repo, 'checkout', '-q', '--orphan', 'lonely');
+    g2(repo, 'rm', '-rq', '--cached', '.');
+    put('unrelated.txt', 'no shared history\n');
+    g2(repo, 'add', '-A');
+    g2(repo, 'commit', '-qm', 'chore: unrelated history');
+    g2(repo, 'checkout', '-q', 'main');
+
+    const run = (...argv) => {
+      const r = spawnSync(process.execPath, [scriptPath, ...argv], { encoding: 'utf8', env: { ...process.env, [PROXY_REARM_GUARD]: '1' } });
+      return { status: r.status, out: r.stdout ?? '', err: r.stderr ?? '' };
+    };
+    const twoDot = g2(repo, 'diff', '--name-only', 'origin/main', 'feature').trim().split('\n').filter(Boolean);
+    const threeDot = deriveBranchPaths({ ref: 'feature', run: (argv) => tryGit(repo, argv) });
+    assert('⭐ the-cards-reproduction-two-dot-really-does-carry-mains-own-governed-path',
+      twoDot.includes('.claude/hooks/guard.sh') && testVerdict(twoDot).governed === true, JSON.stringify(twoDot));
+    assert('⭐ and-the-three-dot-derivation-of-the-same-branch-is-NOT-governed',
+      threeDot.ok === true && threeDot.paths.join() === 'src/a.ts' && testVerdict(threeDot.paths).governed === false,
+      JSON.stringify(threeDot.paths ?? threeDot));
+    const branchRun = run('--branch', 'feature', '--root', repo);
+    assert('⭐ and-the-CLI-itself-answers-NOT-governed-and-says-how-it-derived-the-list',
+      branchRun.status === EXIT_TEST_NOT_GOVERNED && branchRun.out.includes('derived from') && branchRun.out.includes('NOT governed'),
+      `status=${branchRun.status} out=${branchRun.out.slice(0, 400)}`);
+    const twoDotRun = run('--test', ...twoDot);
+    assert('while-the-two-dot-list-through---test-still-answers-GOVERNED-the-defect-is-the-INPUT',
+      twoDotRun.status === EXIT_TEST_GOVERNED, `status=${twoDotRun.status} out=${twoDotRun.out.slice(0, 300)}`);
+    // Zone (e)'s identity: one register, one answer, however the list was got.
+    const sameListRun = run('--test', ...threeDot.paths);
+    assert('⭐ the-verdict-is-BYTE-IDENTICAL-through---branch-and-through---test-on-the-same-list',
+      branchRun.out.endsWith(sameListRun.out) && sameListRun.out !== '', JSON.stringify({ b: branchRun.out.slice(-120), t: sameListRun.out.slice(-120) }));
+    assert('and---test-keeps-its-stdout-to-itself-the-three-dot-note-travels-on-stderr',
+      !sameListRun.out.includes('#17003') && sameListRun.err.includes('never two-dot'), sameListRun.out);
+    // ⭐ The rename, end to end. Default rename detection prints only the NEW
+    // path, so the same branch reads as ungoverned through the obvious command.
+    const renameDefault = g2(repo, 'diff', '--name-only', `${forkPoint}`, 'rename-out').trim().split('\n').filter(Boolean);
+    assert('⭐ gits-own-rename-detection-hides-the-old-path-so-the-obvious-command-under-reports',
+      renameDefault.join() === 'docs-AGENTS.md' && testVerdict(renameDefault).governed === false, JSON.stringify(renameDefault));
+    const renameRun = run('--branch', 'rename-out', '--root', repo);
+    assert('⭐ while---branch-reads-both-paths-and-answers-GOVERNED',
+      renameRun.status === EXIT_TEST_GOVERNED && renameRun.out.includes('AGENTS.md'),
+      `status=${renameRun.status} out=${renameRun.out.slice(0, 400)}`);
+    // ⭐ The refusal, end to end — and the superset it refuses to become.
+    const collapsed = g2(repo, 'diff', '--name-only', 'lonely').trim().split('\n').filter(Boolean);
+    const lonelyRun = run('--branch', 'lonely', '--root', repo);
+    assert('⭐ an-uncomputable-merge-base-exits-1-with-a-refusal-and-NO-verdict-at-all',
+      lonelyRun.status === EXIT_CANNOT_SWEEP && lonelyRun.err.includes('cannot derive') &&
+        !lonelyRun.out.includes('governed-surface predicate'),
+      `status=${lonelyRun.status} out=${lonelyRun.out.slice(0, 300)} err=${lonelyRun.err.slice(0, 300)}`);
+    assert('⭐ and-the-collapsed-shell-recipe-it-refuses-to-imitate-really-is-a-superset',
+      collapsed.length > 0 && testVerdict(collapsed).governed === true, JSON.stringify(collapsed));
+    // Silence is not a verdict, in this mode either.
+    const emptyRun = run('--branch', 'main', '--root', repo);
+    assert('a-branch-that-changes-nothing-is-a-failure-never-a-not-governed-answer',
+      emptyRun.status === EXIT_CANNOT_SWEEP && emptyRun.err.includes('ZERO paths'), `status=${emptyRun.status} err=${emptyRun.err.slice(0, 200)}`);
+    const bothRun = run('--test', 'AGENTS.md', '--branch', 'feature', '--root', repo);
+    assert('two-mode-flags-name-two-lists-and-one-verdict-cannot-be-about-both',
+      bothRun.status === EXIT_CANNOT_SWEEP && bothRun.err.includes('DIFFERENT file list'), `status=${bothRun.status} err=${bothRun.err.slice(0, 200)}`);
+    const noRefRun = run('--branch', '--root', repo);
+    assert('and---branch-with-no-ref-is-bad-args-never-a-sweep',
+      noRefRun.status === EXIT_CANNOT_SWEEP && noRefRun.err.includes('--branch wants a git ref'), noRefRun.err.slice(0, 200));
+  } finally {
+    rmSync(derFx, { recursive: true, force: true });
+  }
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -4562,7 +4848,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register.\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list.\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
 }
