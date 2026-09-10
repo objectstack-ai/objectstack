@@ -14118,7 +14118,42 @@ export class ObjectQL implements IObjectQLEngine {
         // drivers that have no native aggregation support (driver-rest,
         // driver-memory, partial SQL drivers), and is the path that honours a
         // non-UTC reference timezone.
-        const raw = await driver.find(object, ast, this.buildDriverOptions(object, opCtx.context));
+        //
+        // [#16642] The `find` call asks for ROWS, so the aggregation keys this
+        // path is about to evaluate ITSELF are stripped from the AST it sends
+        // down. `find()`'s contract says nothing about `groupBy` /
+        // `aggregations`, and the drivers disagree about them: `driver-sql`
+        // and `driver-rest` ignore both and return rows (which is the only
+        // reason this path has ever worked), while `driver-memory` honours
+        // them — its `find()` funnels straight into the same
+        // `performAggregation` its `aggregate(AST)` door uses, and
+        // `driver-mongodb` / `driver-turso` carry the same refusal on their
+        // own aggregation faces. Sending the keys to a driver of that kind
+        // made this ONE seam answer two different wrong things:
+        //
+        //   * a per-aggregation `filter` (the key that ROUTED the call here)
+        //     was refused NOT_IMPLEMENTED/501 by the driver's own #10413
+        //     guard — a refusal aimed at direct callers, raised against the
+        //     engine's own lowering, so `service-analytics` answered 501 for
+        //     a measure `filter` on the memory driver while sqlite answered
+        //     the number (#16642);
+        //   * a date-bucketed `groupBy` came back ALREADY grouped, on the raw
+        //     timestamp, and `applyInMemoryAggregation` then aggregated those
+        //     GROUP rows a second time — a count of buckets reported under
+        //     the author's own measure name, i.e. a plausible wrong number
+        //     rather than a refusal.
+        //
+        // Both driver refusals document themselves as "unreachable through
+        // `engine.aggregate`, which lowers in memory for every driver"
+        // (`driver-memory`'s `refusePerAggregationFilter`, `driver-sql`'s
+        // `unsupportedAggregationFilterError`); this is the line that makes
+        // that true. `having` goes with them: `applyHaving` below is the
+        // authority on it and no driver evaluates it in `find`.
+        const rowsAst: QueryAST = { ...ast };
+        delete rowsAst.groupBy;
+        delete rowsAst.aggregations;
+        delete rowsAst.having;
+        const raw = await driver.find(object, rowsAst, this.buildDriverOptions(object, opCtx.context));
         return applyHaving(applyInMemoryAggregation(raw, ast, tz), ast.having);
       });
 

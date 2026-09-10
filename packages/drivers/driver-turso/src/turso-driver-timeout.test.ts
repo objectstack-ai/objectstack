@@ -19,6 +19,31 @@
  *    the awaited `sync()` itself. A stub client whose `sync()` never settles is
  *    the stalled remote.
  *
+ * "The remote was reached" is an AWAITED LATCH here, never a sampled counter.
+ * The sample instant would be chosen by the very timer under test, and libuv
+ * runs the TIMERS phase before the POLL phase: a stall that spans the window
+ * delivers the abort — and every assertion that follows it — before the
+ * server's already-arrived bytes are parsed into a `request` event. A counter
+ * read there says 0 about a request that is demonstrably on the wire. Measured
+ * on this fixture, with the loop frozen 300 ms from the moment undici publishes
+ * `undici:client:sendHeaders`: the counter reads 0 in 6/6 runs while the
+ * handler dispatches ~2 ms after the assertion would have run, every time.
+ *
+ * The positive case takes that one step further and proves reachability with an
+ * UNBOUNDED driver BEFORE the timed one runs. A window may legitimately close
+ * before its own request is issued — under a long enough stall the deadline is
+ * already spent when the transport gets its turn, and no implementation could
+ * have put bytes on the wire — so "this timed request reached the remote" is
+ * not something the timed operation can be made to promise. "This fixture is a
+ * remote the transport reaches" is, off the timed path, and that is the
+ * anti-vacuity guard the case actually needs.
+ *
+ * Both latch assertions carry a failure message naming their bound, so a red
+ * says in words that a DURATION went unmet. Merge-queue triage classifies a red
+ * by asking whether the assertion names a duration; a bare `expected 0 to be
+ * greater than 0` from a sampled counter answers no and is read as a behaviour
+ * regression, which is exactly how this file's flake was first read.
+ *
  * Each arm carries a NEGATIVE control — the same stalled remote with no
  * `timeout` (and, on the replica arm, `timeout: 0`, the documented "no bound")
  * is still pending well past the window — so the failure the positive case
@@ -38,6 +63,14 @@ import { TursoDriver } from './turso-driver';
 const WINDOW_MS = 100;
 const CONTROL_WAIT_MS = 1000;
 const ELAPSED_BOUND_MS = 5000;
+/**
+ * The bound on the AWAITED "the transport reached the fixture" latch. It is not
+ * a budget any assertion measures — the condition holds in ~2 ms on an idle box
+ * and in at most ~38 ms measured under six CPU hogs on four cores — it is the
+ * point past which "nothing is reaching this server at all" is the only reading
+ * left. vitest's own 5 s per-test timeout is the backstop behind it.
+ */
+const REACH_BOUND_MS = 2000;
 
 const PENDING = Symbol('still pending');
 
@@ -48,6 +81,11 @@ function stillPendingAfter<T>(operation: Promise<T>, ms: number): Promise<T | ty
     timer = setTimeout(() => resolve(PENDING), ms);
   });
   return Promise.race([operation, window]).finally(() => clearTimeout(timer));
+}
+
+/** Whether `signal` has settled within `ms` — an AWAITED condition, never a sampled one. */
+async function settlesWithin(signal: Promise<unknown>, ms: number): Promise<boolean> {
+  return (await stillPendingAfter(signal, ms)) !== PENDING;
 }
 
 /** The rejection an operation produced, or `null` when it resolved. */
@@ -61,18 +99,26 @@ function failureOf<T>(operation: Promise<T>): Promise<(Error & { code?: string; 
 /**
  * A remote that accepts every TCP connection and never writes a byte back —
  * the shape of a stalled Turso endpoint as the driver's HTTP transport sees it.
+ *
+ * `firstRequest` LATCHES: it resolves the moment this server has dispatched a
+ * request handler — whenever that is — and stays resolved. A counter read at
+ * one instant cannot make that statement, because the instant is chosen by the
+ * very timer under test; see the header note on phase ordering.
  */
-async function stalledHttpServer(): Promise<{ url: string; requests: () => number; close: () => Promise<void> }> {
-  let requests = 0;
+async function stalledHttpServer(): Promise<{ url: string; firstRequest: Promise<void>; close: () => Promise<void> }> {
+  let reached!: () => void;
+  const firstRequest = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
   const server: Server = createServer(() => {
-    requests += 1;
+    reached();
     // Deliberately no response: the request hangs until the socket is torn down.
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
   return {
     url: `http://127.0.0.1:${port}`,
-    requests: () => requests,
+    firstRequest,
     close: () =>
       new Promise<void>((resolve) => {
         server.closeAllConnections();
@@ -102,6 +148,23 @@ describe('TursoDriverConfig.timeout — remote mode over HTTP', () => {
     const remote = await stalledHttpServer();
     cleanups.push(remote.close);
 
+    // PREMISE, established OFF the timed path: this fixture really is a remote
+    // that the driver's HTTP transport reaches, so the refusal measured below
+    // is a window closing on a live conversation and not a green run against a
+    // server nobody ever dialled. It is proved with an UNBOUNDED driver —
+    // nothing can preempt its request — which is what makes the latch an
+    // awaited condition rather than a race. A fixture nothing reaches still
+    // fails here, loudly, which is the whole job of this line.
+    const reachable = new TursoDriver({ url: remote.url });
+    await reachable.connect();
+    cleanups.push(() => reachable.disconnect());
+    // Settles only when the fixture tears the socket down; nobody reads that.
+    reachable.find('probe', {}).catch(() => {});
+    expect(
+      await settlesWithin(remote.firstRequest, REACH_BOUND_MS),
+      `the HTTP transport did not reach the stalled fixture within ${REACH_BOUND_MS} ms`,
+    ).toBe(true);
+
     const driver = new TursoDriver({ url: remote.url, timeout: WINDOW_MS });
     expect(driver.transportMode).toBe('remote');
     await driver.connect();
@@ -117,9 +180,6 @@ describe('TursoDriverConfig.timeout — remote mode over HTTP', () => {
     expect(failure!.message).toContain(`${WINDOW_MS} ms`);
     expect(failure!.message).toContain('TursoDriverConfig.timeout');
     expect(elapsed).toBeLessThan(ELAPSED_BOUND_MS);
-    // The remote really was reached — the window closed a live request, not a
-    // connection that never happened.
-    expect(remote.requests()).toBeGreaterThan(0);
   });
 
   it('NEGATIVE CONTROL: with no timeout the same stalled remote leaves the operation pending', async () => {
@@ -135,7 +195,12 @@ describe('TursoDriverConfig.timeout — remote mode over HTTP', () => {
     operation.catch(() => {});
 
     expect(await stillPendingAfter(operation, CONTROL_WAIT_MS)).toBe(PENDING);
-    expect(remote.requests()).toBeGreaterThan(0);
+    // Same latch, same reason: nothing bounds this operation, so the request is
+    // reached and the condition is awaited, never sampled at a chosen instant.
+    expect(
+      await settlesWithin(remote.firstRequest, REACH_BOUND_MS),
+      `the HTTP transport did not reach the stalled fixture within ${REACH_BOUND_MS} ms`,
+    ).toBe(true);
   });
 });
 

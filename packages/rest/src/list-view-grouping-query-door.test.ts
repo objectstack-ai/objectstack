@@ -37,7 +37,9 @@
  * if (typeof drv.aggregate === 'function' && allStructuredSupported && …) {
  *     const aggregated = await drv.aggregate(object, ast, …);   // ① pushed down
  * }
- * const raw = await driver.find(object, ast, …);                // ② in-memory
+ * const rowsAst = { ...ast };                                   // ② in-memory
+ * delete rowsAst.groupBy; delete rowsAst.aggregations; delete rowsAst.having;
+ * const raw = await driver.find(object, rowsAst, …);
  * return applyHaving(applyInMemoryAggregation(raw, ast, tz), …);
  * ```
  *
@@ -51,9 +53,10 @@
  * of a tier, over the SAME driver instance and the SAME stored rows. Nothing
  * else moves: not the database, not the seed, not the compiled body. And the
  * fork is not taken on trust — {@link calls} counts the native call and counts
- * `driver.find` receiving an aggregation-bearing AST, and every tiered case
- * asserts which one moved. A test that silently ran tier ① twice would report
- * perfect agreement while measuring one face.
+ * the driver DATA reads, and every tiered case asserts which one moved across
+ * the ONE aggregation-bearing query it posts: tier ① is (aggregate +1, find +0)
+ * and tier ② is exactly the reverse. A test that silently ran tier ① twice
+ * would report perfect agreement while measuring one face.
  *
  * ## Anti-vacuity
  *
@@ -278,8 +281,59 @@ function makeRes(): CapturedResponse {
 type Tier = 'driver-sql' | 'in-memory';
 const TIERS: readonly Tier[] = ['driver-sql', 'in-memory'];
 
-/** Which face answered, counted rather than assumed. See the module note. */
-const calls = { nativeAggregate: 0, findWithAggregations: 0 };
+/**
+ * Which face answered, counted rather than assumed. See the module note.
+ *
+ * `dataFind` is the TIER DISCRIMINATOR and `findWithAggregations` is an
+ * INVARIANT. They are not two spellings of one thing, and #16642 is why they
+ * had to be split apart:
+ *
+ *   - `dataFind` counts `driver.find` against one of the three
+ *     {@link DATA_OBJECTS} — the row stores this file seeds. It is scoped that
+ *     way because a door POST also drives the engine's own internal reads
+ *     (system objects such as `sys_metadata`), which land on the same driver
+ *     face and move an unscoped counter on BOTH tiers by the same amount;
+ *     counting those would make the driver-sql arm's negative control
+ *     unsatisfiable rather than merely coarse. An {@link onTier} body posts
+ *     exactly one aggregation-bearing query and `findData`'s aggregate branch
+ *     makes no other DATA read, so the tiers are told apart by which face
+ *     served it: tier ① is (aggregate +1, dataFind +0) and tier ② is
+ *     (aggregate +0, dataFind +1). That stays a real observable whatever the
+ *     AST handed to `find` looks like, which is precisely what the previous
+ *     spelling could not promise.
+ *   - `findWithAggregations` counts `driver.find` receiving an
+ *     aggregation-bearing AST, and #16642 made that PERMANENTLY ZERO: tier ②
+ *     strips `groupBy` / `aggregations` / `having` before asking the driver
+ *     for rows, because drivers disagree about those keys on `find` —
+ *     driver-sql and driver-rest ignore them, driver-memory honours them in
+ *     `find()` itself and refuses a per-aggregation filter outright. Zero here
+ *     is not a vacuous assertion, it is the fix: revert that seam and this
+ *     counter climbs.
+ *
+ * ⛔ Do not fold the two back together. Counting only aggregation-bearing
+ * finds cannot discriminate the tiers once the engine stops sending those
+ * keys — that reading is how the in-memory arm went structurally false and the
+ * driver-sql arm went vacuously true in the same change.
+ */
+const calls = { nativeAggregate: 0, driverFind: 0, dataFind: 0, findWithAggregations: 0 };
+
+/** The row stores this file seeds — a `find` on one of these is a DATA read. */
+const DATA_OBJECTS: readonly string[] = [OBJECT_CONTIGUOUS, OBJECT_INTERLEAVED, OBJECT_WITH_EMPTY];
+
+/**
+ * Every `driver.find` the shim saw, in order — object plus the AST's top-level
+ * key set. Kept so a tier assertion that fails names WHICH reads actually
+ * happened rather than only reporting that a number moved.
+ */
+const findLog: Array<{ readonly object: string; readonly keys: readonly string[] }> = [];
+
+/**
+ * A shallow copy of the AST of the most recent DATA `find`, so tier ②'s read is
+ * identified by SHAPE rather than merely counted. Copied, not held by
+ * reference: the driver is free to normalise the object it was handed.
+ * {@link onTier} clears it per body, so `toBeDefined()` means "this body read".
+ */
+let lastDataFindAst: Record<string, unknown> | undefined;
 
 let engine: ObjectQL;
 let driver: SqlDriver;
@@ -300,11 +354,21 @@ beforeAll(async () => {
   nativeAggregate = asFaces.aggregate.bind(driver);
   const nativeFind = asFaces.find.bind(driver);
   // Permanent: `find` is the tier-② executor, and it is also the ordinary read
-  // path, so it is counted only when it receives an aggregation-bearing AST.
+  // path — for the door's data reads AND for the engine's own internal system
+  // reads. So a raw call count never attributes a call: `calls.dataFind` scopes
+  // it to the row stores this file seeds, the tiered assertions read that as a
+  // DELTA across the one query a body posts, and {@link lastDataFindAst}
+  // carries the shape that says which read it was.
   Object.defineProperty(driver, 'find', {
     configurable: true,
     writable: true,
     value: (object: string, ast: Record<string, unknown>, options?: unknown) => {
+      calls.driverFind += 1;
+      findLog.push({ object, keys: Object.keys(ast ?? {}) });
+      if (DATA_OBJECTS.includes(object)) {
+        calls.dataFind += 1;
+        lastDataFindAst = { ...ast };
+      }
       const aggregations = ast?.aggregations;
       if (Array.isArray(aggregations) && aggregations.length > 0) calls.findWithAggregations += 1;
       return nativeFind(object, ast, options);
@@ -362,6 +426,10 @@ async function records(object: string, body: unknown): Promise<Array<Record<stri
  */
 async function onTier<T>(tier: Tier, fn: () => Promise<T>): Promise<T> {
   const before = { ...calls };
+  const beforeFinds = findLog.length;
+  lastDataFindAst = undefined;
+  /** The reads this body actually made — quoted into every tier assertion. */
+  const reads = () => JSON.stringify(findLog.slice(beforeFinds));
   Object.defineProperty(driver, 'aggregate', {
     configurable: true,
     writable: true,
@@ -379,14 +447,28 @@ async function onTier<T>(tier: Tier, fn: () => Promise<T>): Promise<T> {
     if (tier === 'driver-sql') {
       expect(calls.nativeAggregate, 'tier driver-sql must push down to driver.aggregate')
         .toBeGreaterThan(before.nativeAggregate);
-      expect(calls.findWithAggregations, 'tier driver-sql must NOT reach the in-memory fallback')
-        .toBe(before.findWithAggregations);
+      expect(calls.dataFind, 'tier driver-sql must NOT reach the in-memory fallback; reads: ' + reads())
+        .toBe(before.dataFind);
     } else {
-      expect(calls.findWithAggregations, 'tier in-memory must reach applyInMemoryAggregation via driver.find')
-        .toBeGreaterThan(before.findWithAggregations);
+      expect(calls.dataFind, 'tier in-memory must reach applyInMemoryAggregation via driver.find; reads: ' + reads())
+        .toBeGreaterThan(before.dataFind);
       expect(calls.nativeAggregate, 'tier in-memory must NOT push down')
         .toBe(before.nativeAggregate);
+      // …and the read it made is the LOWERING's read, identified by shape. The
+      // three aggregate nodes are what tier ② is about to evaluate ITSELF, so
+      // none of them may ride down to the driver (#16642).
+      expect(lastDataFindAst, 'tier in-memory recorded no data read; reads: ' + reads()).toBeDefined();
+      for (const node of ['aggregations', 'groupBy', 'having'] as const) {
+        expect(lastDataFindAst, 'tier in-memory must ask the driver for ROWS, but ' + node + ' reached driver.find')
+          .not.toHaveProperty(node);
+      }
     }
+    // Both arms, every case: the engine never hands the aggregation nodes to
+    // `find`. Asserted outside the fork because it is a property of the ENGINE
+    // rather than of a tier — tier ① must not send them either, and a tier ①
+    // that did would be a silent second lowering behind the pushed-down answer.
+    expect(calls.findWithAggregations, 'driver.find must never receive an aggregation-bearing AST (#16642)')
+      .toBe(0);
     return out;
   } finally {
     delete (driver as unknown as Record<string, unknown>).aggregate;

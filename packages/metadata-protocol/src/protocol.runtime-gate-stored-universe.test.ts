@@ -61,6 +61,10 @@ import {
     assertEngineFindOnePredicate,
     assertEngineUpdateDispatch,
 } from '@objectstack/metadata-core';
+import {
+    DASHBOARD_FILTER_FIELD_UNKNOWN,
+    WIDGET_MEASURE_UNKNOWN,
+} from '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const WIDGET_DATASET_UNKNOWN = 'widget-dataset-unknown';
@@ -77,6 +81,25 @@ const CODE_DATASET_NAMES = [
     'sys_package_installation_metrics',
     'sys_audit_log_metrics',
 ] as const;
+
+/**
+ * [#16224] The `orders` columns the code package's own declaration carries —
+ * the BASE layer, the shape a `sys_metadata` row written by an author has
+ * (ADR-0029 D9.2).
+ */
+const ORDERS_BASE_FIELDS = [
+    { name: 'amount', type: 'number' },
+    { name: 'status', type: 'text' },
+    { name: 'region', type: 'text' },
+];
+
+/**
+ * [#16224] What an `extend` contributor adds. Present in the registry's
+ * RESOLVED copy and in nothing an author writes — so a reference to it is
+ * exactly the "resolves today, reads as dangling tomorrow" phantom #16223
+ * declined to trade for.
+ */
+const ORDERS_EXTENDED_FIELDS = [{ name: 'priority', type: 'text' }];
 
 const datasetBody = (name: string) => ({
     name,
@@ -106,6 +129,22 @@ const threeWidgetBoard = (dataset: string) => ({
             chartConfig: { type: 'donut', series: [{ name: 'order_count' }] },
         },
     ],
+});
+
+/**
+ * [#16224] A board whose DASHBOARD FILTER targets one column of the dataset's
+ * object — the position `validateWidgetBindings` resolves against the object
+ * graph, and therefore the one that reads the `object` collection this gate
+ * gathers.
+ */
+const filterBoard = (boardName: string, field: string) => ({
+    name: boardName,
+    label: 'Object-graph smoke dashboard',
+    globalFilters: [{ name: 'scope', field, type: 'select' }],
+    widgets: [{
+        id: 'kpi', type: 'metric', title: 'Total',
+        dataset: 'sys_user_metrics', values: ['order_count'],
+    }],
 });
 
 interface Row {
@@ -197,15 +236,30 @@ function makeHarness() {
             // author writes. That is not a simplification of the harness — it
             // is the product behaviour this card is about, and the assertions
             // below prove it still holds while they run.
+            // [#16224] The registry's copy of an object is its RESOLVED
+            // schema (ADR-0029 D9.2) — the owner's base layer with its
+            // `extend` contributors already folded on. Modelled rather than
+            // flattened, because the whole of #16223's additivity argument
+            // turns on the two being different bodies.
+            // Shape-preserving on purpose: a code package declares `fields`
+            // as an array and `ObjectSchema` accepts the keyed record an
+            // author writes, and the real `foldObjectExtendersOnto` folds onto
+            // whichever it is handed.
+            foldObjectExtendersOnto: (name: string, body: any) => {
+                if (name !== 'orders' || !body || typeof body !== 'object') return body;
+                if (Array.isArray(body.fields)) {
+                    return { ...body, fields: [...body.fields, ...ORDERS_EXTENDED_FIELDS] };
+                }
+                const keyed = Object.fromEntries(
+                    ORDERS_EXTENDED_FIELDS.map((f) => [f.name, { type: f.type }]),
+                );
+                return { ...body, fields: { ...(body.fields ?? {}), ...keyed } };
+            },
             listItems: (type: string) => {
                 if (type === 'object') {
                     return [{
                         name: 'orders',
-                        fields: [
-                            { name: 'amount', type: 'number' },
-                            { name: 'status', type: 'text' },
-                            { name: 'region', type: 'text' },
-                        ],
+                        fields: [...ORDERS_BASE_FIELDS, ...ORDERS_EXTENDED_FIELDS],
                     }];
                 }
                 if (type === 'dataset') return CODE_DATASET_NAMES.map((n) => datasetBody(n));
@@ -332,4 +386,258 @@ describe('#15950 — the authoring gate resolves against runtime-authored metada
     // `datasets` arm above is unchanged and still measures the helper — the
     // fold is one helper serving the surviving collections, which is what made
     // this a single repair in the first place.
+});
+
+/**
+ * #16224 — the residual #16223 wrote down: where an overlay REDEFINES an item a
+ * code package already declares, the gate judged that item's CONTENT from the
+ * registry copy.
+ *
+ * ## Reproduced end to end before anything was changed
+ *
+ * Driving the real write path over the same harness, in one process:
+ *
+ *   1. `registry.listItems('dataset')` carries the code package's
+ *      `sys_user_metrics`, whose only measure is `order_count`.
+ *   2. `saveMetaItem({ type: 'dataset', name: 'sys_user_metrics' })` writes an
+ *      env-wide overlay that REDEFINES it: the measure is now `row_count`, and
+ *      `order_count` is gone. `success: true`, one row in `sys_metadata`.
+ *   3. `getMetaItems({ type: 'dataset' })` — the read API behind
+ *      `GET /meta/dataset`, and the body the runtime serves — answers with the
+ *      OVERLAY: measures `['row_count']`.
+ *   4. `saveMetaItem({ type: 'dashboard' })`, one widget bound to
+ *      `values: ['order_count']` → **`success: true`**. The measure exists in
+ *      neither the overlay nor anything the runtime will serve, and the gate
+ *      accepted the board.
+ *   5. The same board bound to `values: ['row_count']` — the measure the
+ *      overlay DOES declare → **422, `widget-measure-unknown`**.
+ *
+ * Steps 4 and 5 are the residual in two lines, and they are the SAME instant:
+ * the gate accepted a binding to a measure that does not exist and refused a
+ * binding to the one that does, because both were judged against a body the
+ * runtime had already stopped serving. That is #15950's phantom in both
+ * directions at once — an acceptance that should have been a refusal, and a
+ * refusal that should have been an acceptance.
+ *
+ * ## The repair, and why it is not a reversal of #16223
+ *
+ * #16223's fold contributed store-only NAMES and never displaced a registry
+ * entry, because a `sys_metadata` row is an object's BASE layer while the
+ * registry copy is its RESOLVED schema (ADR-0029 D9.2). That argument does not
+ * say "never let an overlay win" — it says "never let an UNRESOLVED body win",
+ * and it names the remedy in the same breath: {@link getMetaItems} lets its
+ * overlay win and runs `foldObjectExtendersFromRegistry` on the winner.
+ *
+ * So the gate now performs the read API's own merge — `mergePackageAwareOverlay`
+ * with that same transform — and the resolved-vs-base distinction is kept by
+ * folding, not by declining. The last two tests below are that distinction's
+ * pins: an `object` overlay wins on its own fields AND keeps the registry's
+ * `extend` contributors, which is exactly the "field reference that resolves
+ * today reading as dangling" #16223 refused to trade for.
+ */
+describe('#16224 — an overlay that REDEFINES a code-package item is judged from the overlay', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+    afterEach(() => { warn.mockRestore(); });
+
+    /** The code-package dataset this tenant redefines. */
+    const OVERRIDDEN = 'sys_user_metrics';
+
+    /**
+     * The overlay: same name, same object, same dimensions — one measure
+     * REMOVED and one added. `dataset` is `allowOrgOverride: false`
+     * (`DEFAULT_METADATA_TYPE_REGISTRY`), so the reachable redefinition is the
+     * env-wide one, which is the other limb the card names.
+     */
+    const overlayBody = () => ({
+        ...datasetBody(OVERRIDDEN),
+        measures: [{ name: 'row_count', aggregate: 'count' }],
+    });
+
+    /** One metric widget, so the count of findings IS the count of bindings. */
+    const oneWidgetBoard = (dataset: string, value: string) => ({
+        name: 'p16224_dash',
+        label: 'Overlay smoke dashboard',
+        widgets: [{ id: 'kpi', type: 'metric', title: 'Total', dataset, values: [value] }],
+    });
+
+    it('refuses a widget bound to a measure the overlay REMOVED', async () => {
+        const { protocol, engine, rows } = makeHarness();
+
+        // ── The firing control ───────────────────────────────────────────────
+        //
+        // The code package's own body must be in this same read and must carry
+        // `order_count`, or the refusal below is measuring a dataset that was
+        // never there rather than a redefinition.
+        const declared = [...engine.registry.listItems('dataset')]
+            .find((d: any) => d.name === OVERRIDDEN);
+        expect(declared, 'the code package must declare the name being redefined').toBeDefined();
+        expect(
+            (declared as any).measures.map((m: any) => m.name),
+            'the firing control: the registry copy still carries the measure the overlay removes',
+        ).toEqual(['order_count']);
+
+        // ── The redefinition ─────────────────────────────────────────────────
+        const saved = await protocol.saveMetaItem({
+            type: 'dataset', name: OVERRIDDEN, item: overlayBody(),
+        });
+        expect(saved.success).toBe(true);
+        expect(saved.state).toBe('active');
+        expect(rows.filter((r) => r.type === 'dataset' && r.name === OVERRIDDEN).length).toBe(1);
+
+        // ── What the runtime will actually serve ─────────────────────────────
+        const listed = await protocol.getMetaItems({ type: 'dataset' });
+        const served = (listed.items as any[]).filter((d) => d.name === OVERRIDDEN);
+        expect(served.length, 'the two homes must not both answer for one name').toBe(1);
+        expect(
+            served[0].measures.map((m: any) => m.name),
+            'the read API behind `GET /meta/dataset` answers with the overlay',
+        ).toEqual(['row_count']);
+
+        // ── The residual ─────────────────────────────────────────────────────
+        const err = await protocol.saveMetaItem({
+            type: 'dashboard', name: 'p16224_dash', item: oneWidgetBoard(OVERRIDDEN, 'order_count'),
+        }).catch((e: unknown) => e);
+
+        expect(
+            err,
+            'the gate accepted a binding to a measure the runtime will not serve, because it '
+            + 'judged the dataset from the registry copy the overlay had already replaced',
+        ).toBeInstanceOf(Error);
+        expect((err as any).status).toBe(422);
+        expect((err as any).code).toBe('INVALID_METADATA');
+        const found = issuesOf(err, WIDGET_MEASURE_UNKNOWN);
+        expect(found.length).toBe(1);
+        expect((found[0] as any).message).toMatch(/order_count/);
+        expect(rows.filter((r) => r.type === 'dashboard')).toEqual([]);
+    });
+
+    it('accepts a widget bound to a measure only the overlay declares', async () => {
+        // The same instant, the other direction: judging from the registry copy
+        // ALSO refused the measure that does exist. A repair that only stopped
+        // the false acceptance would leave this one refused.
+        const { protocol } = makeHarness();
+
+        await protocol.saveMetaItem({ type: 'dataset', name: OVERRIDDEN, item: overlayBody() });
+
+        const result = await protocol.saveMetaItem({
+            type: 'dashboard', name: 'p16224_dash', item: oneWidgetBoard(OVERRIDDEN, 'row_count'),
+        });
+        expect(
+            result.success,
+            '`row_count` is the measure the runtime serves for this dataset at this instant',
+        ).toBe(true);
+        expect(
+            (result.advisories ?? []).map((a: any) => a.rule),
+            'and not demoted to an advisory either',
+        ).not.toContain(WIDGET_MEASURE_UNKNOWN);
+    });
+
+    it('still refuses a measure that exists in NEITHER the overlay nor the registry', async () => {
+        // The negative control. Letting the overlay win must not be a way of
+        // switching the rule off.
+        const { protocol, rows } = makeHarness();
+
+        await protocol.saveMetaItem({ type: 'dataset', name: OVERRIDDEN, item: overlayBody() });
+
+        const err = await protocol.saveMetaItem({
+            type: 'dashboard', name: 'p16224_dash', item: oneWidgetBoard(OVERRIDDEN, 'no_such_measure_xyz'),
+        }).catch((e: unknown) => e);
+
+        expect((err as any)?.status).toBe(422);
+        expect((err as any)?.code).toBe('INVALID_METADATA');
+        expect(issuesOf(err, WIDGET_MEASURE_UNKNOWN).length).toBe(1);
+        expect(rows.filter((r) => r.type === 'dashboard')).toEqual([]);
+    });
+
+    it('leaves #16223 intact: a store-only NAME is still contributed additively', async () => {
+        // The control that must not move. #16223's arm is a name the registry
+        // does not carry; this card only changes what happens at a name it
+        // DOES. Asserted in the same process as the redefinition above so the
+        // two arms of one merge are measured together.
+        const { protocol, engine } = makeHarness();
+
+        await protocol.saveMetaItem({ type: 'dataset', name: OVERRIDDEN, item: overlayBody() });
+        await protocol.saveMetaItem({
+            type: 'dataset', name: 'p2008_users', item: datasetBody('p2008_users'),
+        });
+
+        expect(
+            [...engine.registry.listItems('dataset')].map((d: any) => d.name),
+            'the registry is still the boot-time universe — neither row reached it',
+        ).toEqual([...CODE_DATASET_NAMES]);
+
+        // The store-only name resolves, with its own measure…
+        const additive = await protocol.saveMetaItem({
+            type: 'dashboard', name: 'p2008_dash', item: oneWidgetBoard('p2008_users', 'order_count'),
+        });
+        expect(additive.success, '#16223: a store-only name is contributed to the universe').toBe(true);
+
+        // …and the redefined name is judged from the overlay in the same gather.
+        const err = await protocol.saveMetaItem({
+            type: 'dashboard', name: 'p16224_dash', item: oneWidgetBoard(OVERRIDDEN, 'order_count'),
+        }).catch((e: unknown) => e);
+        expect((err as any)?.status).toBe(422);
+        expect(issuesOf(err, WIDGET_MEASURE_UNKNOWN).length).toBe(1);
+    });
+
+    it('keeps the RESOLVED-vs-BASE distinction: an object overlay wins WITH its registry extenders folded on', async () => {
+        // #16223's argument, pinned rather than repeated. The registry's copy of
+        // `orders` is the resolved schema — the code package's base layer plus
+        // the `extend` contributor's `priority` — while the `sys_metadata` row
+        // an author writes is the base layer alone. Letting the raw row displace
+        // the resolved body would make `priority` read as dangling, which is the
+        // subtler phantom #16223 declined to trade for.
+        //
+        // Both halves are asserted here: the overlay's own new field resolves
+        // (the overlay won) AND the extender's field still resolves (the fold
+        // ran on the winner, the way `getMetaItems` runs it).
+        const { protocol } = makeHarness();
+
+        // The base layer as an author writes it: the code package's own columns
+        // plus one of the tenant's, and NO `priority` — that field exists only
+        // as an `extend` contributor in the registry.
+        await protocol.saveMetaItem({
+            type: 'object', name: 'orders', item: {
+                name: 'orders',
+                label: 'Orders',
+                // An authored OWD is REQUIRED at the runtime object door
+                // (`security-owd-unset`) — absence is not a decision.
+                sharingModel: 'private',
+                fields: {
+                    ...Object.fromEntries(ORDERS_BASE_FIELDS.map((f) => [f.name, { type: f.type }])),
+                    channel: { type: 'text' },
+                },
+            },
+        });
+
+        const onOverlayField = await protocol.saveMetaItem({
+            type: 'dashboard', name: 'p16224_obj', item: filterBoard('p16224_obj', 'channel'),
+        });
+        expect(
+            (onOverlayField.advisories ?? []).map((a: any) => a.rule),
+            'the overlay won: a column only the overlay declares resolves',
+        ).not.toContain(DASHBOARD_FILTER_FIELD_UNKNOWN);
+        expect(onOverlayField.success).toBe(true);
+
+        const onExtenderField = await protocol.saveMetaItem({
+            type: 'dashboard', name: 'p16224_ext', item: filterBoard('p16224_ext', 'priority'),
+        });
+        expect(
+            (onExtenderField.advisories ?? []).map((a: any) => a.rule),
+            'and the fold ran on the winner: the registry `extend` contributor survives '
+            + '(ADR-0029 D9.2 — this is the phantom #16223 refused to trade for)',
+        ).not.toContain(DASHBOARD_FILTER_FIELD_UNKNOWN);
+        expect(onExtenderField.success).toBe(true);
+
+        // The firing control: a column on NEITHER layer is still reported, so
+        // the two readings above are not a rule that stopped running.
+        const err = await protocol.saveMetaItem({
+            type: 'dashboard', name: 'p16224_bad', item: filterBoard('p16224_bad', 'no_such_column_xyz'),
+        }).catch((e: unknown) => e);
+        const reported = (err instanceof Error)
+            ? issuesOf(err, DASHBOARD_FILTER_FIELD_UNKNOWN).length
+            : ((err as any).advisories ?? []).filter((a: any) => a.rule === DASHBOARD_FILTER_FIELD_UNKNOWN).length;
+        expect(reported, 'the firing control for both readings above').toBeGreaterThan(0);
+    });
 });

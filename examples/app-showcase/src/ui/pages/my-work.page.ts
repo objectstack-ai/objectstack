@@ -36,9 +36,9 @@ export const MyWorkPage = definePage({
             columns: 3,
             gap: 4,
             children: [
-              { type: 'object-metric', properties: { objectName: 'showcase_task', label: 'Open Tasks', icon: 'list-checks', colorVariant: 'blue', description: 'not done', aggregate: { field: 'id', function: 'count' }, filter: { status: { $ne: 'done' } } } },
-              { type: 'object-metric', properties: { objectName: 'showcase_task', label: 'In Review', icon: 'eye', colorVariant: 'warning', description: 'awaiting review', aggregate: { field: 'id', function: 'count' }, filter: { status: 'in_review' } } },
-              { type: 'object-metric', properties: { objectName: 'showcase_project', label: 'At-Risk Projects', icon: 'alert-triangle', colorVariant: 'danger', description: 'health red', aggregate: { field: 'id', function: 'count' }, filter: { health: 'red' } } },
+              { type: 'object-metric', properties: { objectName: 'showcase_task', label: 'Open Tasks', icon: 'list-checks', colorVariant: 'blue', description: 'not done', aggregate: { field: 'id', function: 'count' }, filter: [{ field: 'status', operator: 'not_equals', value: 'done' }] } },
+              { type: 'object-metric', properties: { objectName: 'showcase_task', label: 'In Review', icon: 'eye', colorVariant: 'warning', description: 'awaiting review', aggregate: { field: 'id', function: 'count' }, filter: [{ field: 'status', operator: 'equals', value: 'in_review' }] } },
+              { type: 'object-metric', properties: { objectName: 'showcase_project', label: 'At-Risk Projects', icon: 'alert-triangle', colorVariant: 'danger', description: 'health red', aggregate: { field: 'id', function: 'count' }, filter: [{ field: 'health', operator: 'equals', value: 'red' }] } },
             ],
           },
         },
@@ -51,12 +51,19 @@ export const MyWorkPage = definePage({
         // this line used to carry has ZERO read points in the renderer, so it
         // was accepted and then dropped — the queue silently listed every row
         // (objectstack#7750).
+        //
+        // And the `ViewFilterRule` ARRAY form, `[{ field, operator, value }]`:
+        // the one filter orthography every `filter` door declares since
+        // #15442 / #15449 (ui#6206-B). The ObjectQL AST tuple this line used
+        // to carry (`[['owner_id', '=', '{current_user_id}']]`) is refused at
+        // `filter.0` now; `toFilterNode` lowers the rule to the same AST node
+        // before the wire, and `{current_user_id}` resolves exactly as before.
         {
           type: 'object-grid',
           properties: {
             objectName: 'showcase_task',
             columns: ['title', 'project', 'status', 'priority', 'due_date'],
-            filter: [['owner_id', '=', '{current_user_id}']],
+            filter: [{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }],
           },
         },
       ],

@@ -6051,8 +6051,15 @@ export class SqlDriver implements IDataDriver {
    * (field selection, temporal coercion, unknown-column recovery, and the
    * `singleRowLookup` ORDER BY decision).
    * Spell an id lookup as what it is: `{ object, where: { id } }`.
+   *
+   * [#15267] Declared as `IDataDriver.findOne()` declares it: the row, or
+   * `null` when nothing matches — `results[0] || null`, and `null` outright for
+   * a non-object query. The annotation used to be an explicit `Promise<any>`,
+   * which an un-narrowed caller could read fields off with no compiler
+   * complaint; it is the contract's type now, pinned by
+   * `sql-driver-doors-declared-types.test.ts`.
    */
-  async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
+  async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     if (!query || typeof query !== 'object') return null;
     const results = await this.findRows(object, { ...query, limit: 1 }, options, true);
     return results[0] || null;
@@ -6064,7 +6071,14 @@ export class SqlDriver implements IDataDriver {
   // `find()` with `limit`/`offset` until a real Knex `.stream()` read is built to a
   // caller's requirement.
 
-  async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<any> {
+  /**
+   * [#15267] Declared as `IDataDriver.create()` declares it: the inserted
+   * record, `formatOutput(...)` over the `returning('*')` row. The annotation
+   * used to be an explicit `Promise<any>`, so the published `.d.ts` let a
+   * caller read any member off the result; it is the contract's type now,
+   * pinned by `sql-driver-doors-declared-types.test.ts`.
+   */
+  async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
     const { _id, ...rest } = data;
     const toInsert = { ...rest };
 
@@ -7885,7 +7899,14 @@ export class SqlDriver implements IDataDriver {
   // Bulk & Batch Operations
   // ===================================
 
-  async bulkCreate(object: string, data: any[], options?: DriverOptions): Promise<any> {
+  /**
+   * [#15267] Declared as `IDataDriver.bulkCreate()` declares it: the inserted
+   * rows, each through `formatOutput()` for read-back parity with
+   * {@link create}. The annotation used to be an explicit `Promise<any>`, which
+   * erased both the array and the row shape on the published `.d.ts`; it is the
+   * contract's type now, pinned by `sql-driver-doors-declared-types.test.ts`.
+   */
+  async bulkCreate(object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
     this.auditMissingTenant(object, 'bulkCreate', options);
     // Same client-side id assignment as create() (id/_id normalization,
     // nanoid fallback when neither is supplied) — a row missing an id must
@@ -8429,8 +8450,15 @@ export class SqlDriver implements IDataDriver {
    * through them — they handle tenancy, soft-delete, and audit warnings
    * automatically. See `README.md > Tenant Isolation` for the full bypass
    * matrix.
+   *
+   * [#15267] Declared as `IDataDriver.execute()` declares it: `unknown` — a raw
+   * statement's result is whatever the dialect returned, and the contract's own
+   * `unknown` says exactly that. The annotation used to be an explicit
+   * `Promise<any>`, which erased the contract's `unknown` on the class and let
+   * a caller dereference the result unchecked; pinned by
+   * `sql-driver-doors-declared-types.test.ts`.
    */
-  async execute(command: any, params?: any[], options?: DriverOptions): Promise<any> {
+  async execute(command: any, params?: any[], options?: DriverOptions): Promise<unknown> {
     if (typeof command !== 'string') {
       return command;
     }
@@ -9237,8 +9265,18 @@ export class SqlDriver implements IDataDriver {
   // Query Plan Analysis
   // ===================================
 
-  /** IDataDriver standard: analyze query performance */
-  async explain(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
+  /**
+   * IDataDriver standard: analyze query performance.
+   *
+   * [#15267] Declared as `IDataDriver.explain()` declares it: `unknown` — a
+   * query plan's shape is the dialect's, and the contract's own `unknown` says
+   * so. The annotation used to be an explicit `Promise<any>`, which erased that
+   * `unknown` on the class; pinned by
+   * `sql-driver-doors-declared-types.test.ts`. {@link analyzeQuery}, the
+   * off-contract helper it forwards to, keeps its own annotation — it is not an
+   * `IDataDriver` door and is out of that card's scope.
+   */
+  async explain(object: string, query: DriverQuery, options?: DriverOptions): Promise<unknown> {
     return this.analyzeQuery(object, query, options);
   }
 
