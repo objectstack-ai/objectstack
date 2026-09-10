@@ -50,7 +50,7 @@ const sysMetadataObject = {
         // it always was. (`sys_metadata_history` genuinely carries none, so its
         // sibling stub below is left alone.)
         package_id: { name: 'package_id', label: 'Package', type: 'text' as const },
-        metadata: { name: 'metadata', label: 'Body', type: 'longtext' as const },
+        metadata: { name: 'metadata', label: 'Body', type: 'textarea' as const },
         checksum: { name: 'checksum', label: 'Checksum', type: 'text' as const, maxLength: 71 },
         state: { name: 'state', label: 'State', type: 'text' as const },
         version: { name: 'version', label: 'Version', type: 'number' as const },
@@ -69,10 +69,10 @@ const sysMetadataHistoryObject = {
         name: { name: 'name', label: 'Name', type: 'text' as const, required: true },
         version: { name: 'version', label: 'Version', type: 'number' as const, required: true },
         operation_type: { name: 'operation_type', label: 'Op', type: 'text' as const, required: true },
-        metadata: { name: 'metadata', label: 'Body', type: 'longtext' as const },
+        metadata: { name: 'metadata', label: 'Body', type: 'textarea' as const },
         checksum: { name: 'checksum', label: 'Checksum', type: 'text' as const, maxLength: 71 },
         previous_checksum: { name: 'previous_checksum', label: 'Prev', type: 'text' as const, maxLength: 71 },
-        change_note: { name: 'change_note', label: 'Note', type: 'longtext' as const },
+        change_note: { name: 'change_note', label: 'Note', type: 'textarea' as const },
         source: { name: 'source', label: 'Source', type: 'text' as const },
         organization_id: { name: 'organization_id', label: 'Org', type: 'text' as const },
         recorded_by: { name: 'recorded_by', label: 'By', type: 'text' as const },
