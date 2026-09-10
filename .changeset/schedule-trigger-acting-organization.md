@@ -7,7 +7,30 @@
 
 fix(triggers,spec,service-automation,lint)!: a time-triggered flow declares its acting organization, and both its query and its run are confined to it (#16659)
 
-<!-- adr-0087: registered schedule-flow-acting-organization-required Nothing authorable is renamed, retired or re-typed: no `packages/spec` key changes its name, its type or its optionality, no stored shape moves, and every flow, node and start-node `config` that parses today parses byte-identically after this change — the start node's `config` is an OPEN record (ADR-0018), so the new `organization` key is an addition to a slot that already accepts anything. What narrows is behaviour, in two places, and neither is an authorable shape: the BIND-TIME accept set (a `schedule` or `time_relative` flow that declares no `organization` is no longer armed) and the RUN-TIME data plane (a time-triggered run, and a `time_relative` sweep's own query, are confined to the declared organization). So `objectstack migrate meta` has nothing MECHANICAL to prescribe — the remedy is a value only the deployment holds, a `sys_organization.id` minted at runtime, with no authored artifact and no stored representation a rewrite could act on, and inventing one is precisely what the ruling forbids. ⚠️ That is the argument for "no CONVERSION", and it is NOT the argument for silence: ADR-0087 D3 says a migration that cannot be expressed declaratively gets a structured TODO (surface, reason, acceptance criteria) rather than nothing, and this banner is a prescription in exactly that sense — "declare `config.organization` once per organization, no fan-out", plus three consequences of the split a deployment must act on. Registered as a semantic TODO under protocol 18, on the direct precedent of `rest-requireauth-default-flip` (protocol 12): behaviour-only, no shape moved, a deployment judgement no transform can make, registered anyway. ⚠️ 18 and not 17 because v17.0.0 was cut before this narrowing landed — the enforcement rides the 17.x line by the launch-window convention while the prescription belongs to the major boundary where `migrate meta` users look (`registry.ts`, `step18`: "accumulating, uncut"). -->
+<!-- adr-0087: registered schedule-flow-acting-organization-required -->
+
+**Registered as an ADR-0087 semantic migration**
+(`schedule-flow-acting-organization-required`, protocol 18). Nothing authorable
+is renamed, retired or re-typed — no `packages/spec` key changes its name, its
+type or its optionality, no stored shape moves, and every flow, node and
+start-node `config` that parses today parses byte-identically afterwards,
+because the start node's `config` is an OPEN record (ADR-0018) and the new
+`organization` key is an addition to a slot that already accepted anything. So
+`objectstack migrate meta` has nothing MECHANICAL to prescribe: the remedy is a
+value only the deployment holds, a `sys_organization.id` minted at runtime, with
+no authored artifact and no stored representation a rewrite could act on — and
+inventing one is precisely what the ruling forbids. ⚠️ That is the argument
+against a CONVERSION, and it is not an argument for silence: ADR-0087 D3 says a
+migration that cannot be expressed declaratively gets a structured TODO
+(surface, reason, acceptance criteria) rather than nothing, and what follows IS
+a prescription in that sense — declare `config.organization` once per
+organization, no fan-out, then act on the three consequences of the split named
+below. Direct precedent: `rest-requireauth-default-flip` (protocol 12) —
+behaviour-only, no shape moved, a deployment judgement no transform can make,
+registered anyway. Filed under protocol **18**, not 17: v17.0.0 was cut before
+this narrowing landed, so the enforcement rides the 17.x line by the
+launch-window convention while the prescription belongs at the major boundary
+where `migrate meta` users look.
 
 **BREAKING** in the accept-set sense, and in TWO places rather than one —
 landing in the launch window as `minor` on all four packages (the lockstep
