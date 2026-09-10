@@ -36,7 +36,7 @@
  *    swept underneath them — the card's own end-to-end table, executed.
  */
 
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, assert } from 'vitest';
 import { SqlDriver } from './sql-driver.js';
 import {
   MYSQL_CELL,
@@ -335,6 +335,7 @@ describe('#11389 — the write and filter paths keep reading a Date on the UTC c
           await driver.create('deal', { id: 'd1', close_date: new Date(iso) }, { bypassTenantAudit: true });
 
           const row = await driver.findOne('deal', { where: { id: 'd1' } }, { bypassTenantAudit: true });
+          assert(row !== null, 'findOne answered the not-found arm for a seeded id');
           expect(row.close_date).toBe(expected);
 
           // The filter path takes the same helper, so it has to agree — a
@@ -396,7 +397,9 @@ function declareZoneSweep(cell: DialectCell): void {
         const d = await connect();
         await underProcessZone(tz, async () => {
           const day = await d.findOne(TABLE, { where: { id: 'r1' } }, { bypassTenantAudit: true });
+          assert(day !== null, 'findOne answered the not-found arm for a seeded id');
           const ny = await d.findOne(TABLE, { where: { id: 'r2' } }, { bypassTenantAudit: true });
+          assert(ny !== null, 'findOne answered the not-found arm for a seeded id');
 
           expect(day.close_date, `${cell.label} read the wrong calendar day under TZ=${tz}`).toBe(DAY);
           // A one-day skew here changes the YEAR, which is the most legible

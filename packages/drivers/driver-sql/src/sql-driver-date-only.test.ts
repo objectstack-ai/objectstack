@@ -13,7 +13,7 @@
  * behaviour and guard that `Field.datetime` keeps its full-instant meaning.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, assert } from 'vitest';
 import { SqlDriver } from '../src/index.js';
 
 describe('SqlDriver Field.date is a tz-naive calendar day (ADR-0053 Phase 1)', () => {
@@ -50,6 +50,7 @@ describe('SqlDriver Field.date is a tz-naive calendar day (ADR-0053 Phase 1)', (
       { bypassTenantAudit: true },
     );
     const row = await driver.findOne('deal', { where: { id: 'd1' } }, { bypassTenantAudit: true });
+    assert(row !== null, 'findOne answered the not-found arm for a seeded id');
     expect(row.close_date).toBe('2026-07-15');
   });
 
@@ -60,6 +61,7 @@ describe('SqlDriver Field.date is a tz-naive calendar day (ADR-0053 Phase 1)', (
       { bypassTenantAudit: true },
     );
     const row = await driver.findOne('deal', { where: { id: 'd2' } }, { bypassTenantAudit: true });
+    assert(row !== null, 'findOne answered the not-found arm for a seeded id');
     expect(row.close_date).toBe('2026-07-15');
   });
 
@@ -70,6 +72,7 @@ describe('SqlDriver Field.date is a tz-naive calendar day (ADR-0053 Phase 1)', (
       { bypassTenantAudit: true },
     );
     const row = await driver.findOne('deal', { where: { id: 'd3' } }, { bypassTenantAudit: true });
+    assert(row !== null, 'findOne answered the not-found arm for a seeded id');
     expect(row.close_date).toBe('2026-07-15');
   });
 
@@ -80,8 +83,12 @@ describe('SqlDriver Field.date is a tz-naive calendar day (ADR-0053 Phase 1)', (
       { bypassTenantAudit: true },
     );
     const row = await driver.findOne('deal', { where: { id: 'd4' } }, { bypassTenantAudit: true });
+    assert(row !== null, 'findOne answered the not-found arm for a seeded id');
     // datetime must retain its wall-clock time — never sliced to YYYY-MM-DD.
-    expect(new Date(row.signed_at).toISOString()).toBe('2026-03-20T12:34:56.000Z');
+    // [#15267] `findOne()` resolves to `Record<string, unknown>` now — the
+    // stored instant comes back as a `Date` on some clients and an ISO string
+    // on others, which is exactly the union `Date` accepts.
+    expect(new Date(row.signed_at as string | number | Date).toISOString()).toBe('2026-03-20T12:34:56.000Z');
   });
 
   it('matches a date-only equality filter against a timestamped write (the silent-miss regression)', async () => {
@@ -120,6 +127,7 @@ describe('SqlDriver Field.date is a tz-naive calendar day (ADR-0053 Phase 1)', (
 
     // Read-side repair: the returned value is date-only with no migration.
     const row = await driver.findOne('deal', { where: { id: 'legacy' } }, { bypassTenantAudit: true });
+    assert(row !== null, 'findOne answered the not-found arm for a seeded id');
     expect(row.close_date).toBe('2026-08-15');
 
     // …but the value still stored in SQL keeps its time, so a SQL equality

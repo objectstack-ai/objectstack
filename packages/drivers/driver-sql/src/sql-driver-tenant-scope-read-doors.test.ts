@@ -300,7 +300,14 @@ describe('driver-sql — every read door routes through applyTenantScope (#6792)
     });
 
     it('reaches the same statement through `explain()`, which forwards here', async () => {
-      const explained = await driver.explain(TABLE, {} as any, { tenantId: 'org_a' } as any);
+      // [#15267] `explain()` declares the contract's `unknown` now, so this
+      // caller names the slice of the plan it reads instead of reaching through
+      // an `any`. The two members below are `analyzeQuery()`'s on every arm it
+      // can return (statement, bindings, and then the client-specific plan).
+      const explained = (await driver.explain(TABLE, {} as any, { tenantId: 'org_a' } as any)) as {
+        sql: string;
+        bindings: unknown[];
+      };
       expect(explained.sql).toContain('organization_id');
       expect(explained.bindings).toContain('org_a');
     });
