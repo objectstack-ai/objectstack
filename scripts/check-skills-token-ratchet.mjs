@@ -329,37 +329,12 @@ export const CEILINGS = new Map([
   // re-implementing a platform rule, and no landing of the half that fits.
   // Nothing in this file said any of it. +280 tokens, 1 absorbed, ceiling +279.
   ['skills/objectstack-platform/SKILL.md', 12984],
-  // 14239 -> 14391: the pull-directed split-resolution order joined the decision
-  // frame (maintainer ruling 2026-08-27, verbatim and untranslated: 「tong y 4」 —
-  // accepting the four-rule set), and this file carries one enforced frame copy
-  // (check:skill-frame-sync COPIES), so the rule ships to third-party installers
-  // with the frame it amends — the #5130 drift is exactly a frame-semantics change
-  // that skipped this mirror. +152 tokens across both copies, compressed to the
-  // minimal anchor form; the raising PR's body carries the arithmetic.
-  // 14391 -> 14549: the axis WEIGHTING joined the decision frame — long-term
-  // soundness carries the highest weight, at least 50%. Maintainer ruling
-  // 2026-09-01, verbatim and untranslated (kept on ONE line, #11106: a governed
-  // quotation that soft-breaks stops being findable by the things that grep it):
-  // 「四维分析中，长期合理应该权重最高，至少50%」
-  // Same shape and same reason as the +152 row above it: this file carries one
-  // enforced frame copy (check:skill-frame-sync COPIES), and a rule that
-  // changes WHICH RECOMMENDATION the frame yields is exactly the #5130 drift
-  // class if it ships to third-party installers with only the old tie-break —
-  // the customer's agent would weigh the axes co-equally while this repo weighs
-  // long-term ≥50%, and no report would reveal it. +158 tokens across both
-  // copies, against +152 for the comparable 2026-08-27 rule. Compressed twice
-  // before landing: the first cut measured +242, and the provenance was then
-  // removed on the #5451 route-B convention — the published copy carries the
-  // RULE without this repo's dates or quoted rulings (verified: the file holds
-  // zero of each), so the verbatim ruling lives in the internal copies and in
-  // the raising PR's body. No genuine deletion was available: the rule makes no
-  // existing sentence redundant, and a re-wrap moves no tokens and pays nothing.
-  // 14549 -> 9708: re-locked at the landed count after the #14296 item-4 split —
-  // the developer-agent operating template moved to `rules/dev-template.md`
-  // (its own row below); the one gate-pinned copy of the decision frame stays
-  // in this file (check:skill-frame-sync reads its copies by path). Lowered,
-  // not raised: shrink-only, no ruling needed for this direction.
-  ['skills/objectstack-pm-dispatch/SKILL.md', 9708],
+  // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
+  // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
+  // the maintainer deleted the published PM skill whole (verbatim:
+  // 「发布版 skills/objectstack-pm-dispatch 删」). A row for a file the walk cannot
+  // read is red, not a skip (#4690), so the rows go with the files; the bundle
+  // total drops by the two ceilings, which is the ratchet's ordinary direction.
   ['skills/objectstack-query/SKILL.md', 5552], //       -17 (was 5569)
   // 25125 -> 25143: the CRM UI Blueprint — the catalog's module-completeness
   // list, and the only place an agent is told what a finished module contains —
@@ -450,12 +425,6 @@ export const CEILINGS = new Map([
 
   // objectstack-automation
   ['skills/objectstack-automation/evals/approvals/test-revise-loop.md', 1329],
-
-  // objectstack-pm-dispatch — the #14296 item-1/item-4 split (2026-09-02, maintainer
-  // ruling 「其他同意」 adopting 1A/4A): the developer-agent operating template
-  // moved out of SKILL.md verbatim, minus the decision-frame block the frame
-  // gate pins to the entry. Pinned AT its landed count, zero headroom.
-  ['skills/objectstack-pm-dispatch/rules/dev-template.md', 1838],
 
   // objectstack-ui — the two authored eval files; its `references/react-blocks.md`
   // is generator-owned and carries no row here on purpose (see the boundary

@@ -45,7 +45,10 @@
 // copies in three files until the 2026-09-03 batch-3 ruling, item 4 option B,
 // dropped the two dev-side copies; nothing in this file had to move for that
 // except the self-test fixtures below, which used to SPELL one of the dropped
-// files instead of deriving it.)
+// files instead of deriving it. It has been ONE copy in one file since the
+// 2026-09-10 ruling deleted the published PM skill; the only thing that had to
+// move here was the one fixture whose ref side was "every frame file but the
+// sample" — an empty set with one file, and an empty tree cannot be committed.)
 //
 // STRUCTURE, NEVER BYTES
 // ----------------------
@@ -483,7 +486,7 @@ function render(verdict, { root = REPO_ROOT } = {}) {
     out.push(
       `✓ check-skill-frame-freshness: the decision frame in this tree is current with ` +
       `${reference.label}.\n` +
-      `  ${COPIES.length} copies across ${FRAME_FILES.length} files; ` +
+      `  ${COPIES.length} cop${COPIES.length === 1 ? 'y' : 'ies'} across ${FRAME_FILES.length} file${FRAME_FILES.length === 1 ? '' : 's'}; ` +
       `${signature([...verdict.tree.byCopy.values()][0])}\n` +
       (behind ? `  HEAD is ${behind} commit(s) behind, but the frame itself is unchanged — that is fine.\n` : '') +
       (bytes ? `  ${bytes.identical}/${bytes.total} framework files are byte-identical to the ref (wording differences are not drift).\n` : ''),
@@ -988,8 +991,16 @@ function selfTest() {
     const dir = makeRepo('missing-there');
     temps.push(dir);
     const partial = new Map([...real].filter(([f]) => f !== SAMPLE_FRAME_FILE));
+    // With ONE frame file declared (since the 2026-09-10 deletion of the
+    // published copy) `partial` is EMPTY, and git cannot commit an empty tree:
+    // the ref side would have no commit, `refSha` would read as '', and the
+    // case would judge against nothing — measured as "expected warn, got ok".
+    // A sentinel that is never a frame file keeps the ref commit real whatever
+    // COPIES holds, and the guard below refuses a ref that did not land.
+    partial.set('README.md', 'the ref side carries something that is never a frame file\n');
     writeFiles(dir, partial);
     const refSha = commitAll(dir, 'main without one framework file');
+    if (!refSha) throw fixtureError('case 7 (missing-there)', 'the ref-side commit did not land, so there is nothing to judge against');
     writeFiles(dir, real);
     commitAll(dir, 'tree adds it');
     setOriginMain(dir, refSha);

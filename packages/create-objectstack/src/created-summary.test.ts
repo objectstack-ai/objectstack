@@ -46,7 +46,11 @@ import {
 
 let root: string;
 
-/** The published catalog as measured — `Found 11 skills` in the real run. */
+/**
+ * The published catalog — one entry per `skills/*\/SKILL.md` on this tree; the
+ * real run reports the same count as `Found N skills`. Ten since the published
+ * PM Dispatch skill was deleted (2026-09-10); it was eleven before.
+ */
 const SKILLS = [
   'objectstack-ai',
   'objectstack-api',
@@ -55,7 +59,6 @@ const SKILLS = [
   'objectstack-formula',
   'objectstack-i18n',
   'objectstack-platform',
-  'objectstack-pm-dispatch',
   'objectstack-query',
   'objectstack-ui',
   'objectstack-upgrade',
@@ -109,8 +112,8 @@ beforeAll(() => {
   }
 
   // Phase 3 — the skills installer: two real trees plus a symlink farm, the
-  // layout measured from `npx skills add … --all` (11 skills, 49 real files
-  // per tree, `.claude/skills/*` symlinked into `.agents/skills/`). The COUNT
+  // layout measured from `npx skills add … --all` (one directory per catalog
+  // skill, `.claude/skills/*` symlinked into `.agents/skills/`). The COUNT
   // is faithful on purpose — a 3-skill fixture sits under COLLAPSE_AT and
   // would exercise the enumerate path while the real tree takes the collapse
   // path, testing the branch the product does not use.
@@ -191,7 +194,7 @@ describe('created-summary — reachability', () => {
 describe('created-summary — readability', () => {
   it('collapses big trees instead of enumerating them', () => {
     const entries = summarizeTree(root);
-    // 11 skills x 2 files x 2 trees plus a 2050-entry node_modules: an
+    // 10 skills x 2 files x 2 trees plus a 2050-entry node_modules: an
     // enumeration would be thousands of lines. The bar is reachability AND a
     // summary a human reads, so bulk arrives as directory lines.
     expect(entries.length).toBeLessThan(60);

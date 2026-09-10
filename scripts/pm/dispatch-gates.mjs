@@ -10589,7 +10589,11 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  * (1023 of that is the suspect glob's contract surface). The `skills/**`
  * entry (2026-09-10) adds one hint and the 47 tracked files under `skills/`
  * (`git ls-files skills` on ebf9a489), one of which — the published PM
- * skill — the table already covered.
+ * skill — the table already covered. That skill was deleted on 2026-09-10
+ * (maintainer, verbatim: 「发布版 skills/objectstack-pm-dispatch 删」) and its
+ * own entry left with it — a dead glob is refused by the self-test — so the
+ * catalog is covered by `skills/**` alone and a catalog file hits exactly ONE
+ * entry; the frame-copy half of clause ① now names the internal copy only.
  *
  * They stay inert against a gate that RESOLVES to this file, because no check
  * family does — `check:pm-dispatch-gates` resolves to `check-dispatch-gates.mjs`
@@ -10628,11 +10632,6 @@ export const MANDATORY_TIER_GLOBS = [
     glob: '.claude/agents/os-dev.md',
     tier: CONTRACT_REVIEW_TIER,
     why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and receives the decision frame the PM pastes into its prompt at dispatch time rather than carrying a copy of its own',
-  },
-  {
-    glob: 'skills/objectstack-pm-dispatch/SKILL.md',
-    tier: CONTRACT_REVIEW_TIER,
-    why: 'clause ① (2026-08-20 narrowing): the published PM skill carries one enforced copy of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
   },
   {
     glob: 'skills/**',
@@ -19179,7 +19178,7 @@ function selfTest() {
     'and the tier-table file globs are not inheritable either',
     ownPopulation.length > 0
       && !ownPopulation.includes('.claude/agents/os-dev.md')
-      && !ownPopulation.includes('skills/objectstack-pm-dispatch/SKILL.md'),
+      && !ownPopulation.includes('skills/**'),
   );
   // Cost of the mechanism on this tree, pinned so it cannot grow unnoticed: the
   // marker is an opt-out, and an opt-out that spreads is how a real population
@@ -20999,7 +20998,6 @@ function selfTest() {
   const fableOf = (paths) => deriveTier(paths);
   t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === CONTRACT_REVIEW_TIER);
-  t('the published PM skill (one enforced frame copy) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).mandatory === false);
   const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/agents/os-dev.md']);
   t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === CONTRACT_REVIEW_TIER);
@@ -21019,8 +21017,13 @@ function selfTest() {
   t('a published catalog SKILL.md is mandated, by the skills/** entry', catalogHit.tier === CONTRACT_REVIEW_TIER && catalogHit.hits.some((h) => h.glob === 'skills/**'));
   t('a second published catalog file is mandated the same way', fableOf(['skills/objectstack-ai/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('a generated references file under a published skill is mandated too — the mandate is the ROOT, not the SKILL.md files', fableOf(['skills/objectstack-data/references/_index.md']).mandatory === true);
-  const pmCopyHit = fableOf(['skills/objectstack-pm-dispatch/SKILL.md']);
-  t('the published PM skill is covered by its own entry AND skills/**, at ONE tier — no ambiguity refusal', pmCopyHit.hits.length === 2 && pmCopyHit.tier === CONTRACT_REVIEW_TIER);
+  // The published PM skill's own entry left with the file (2026-09-10 ruling,
+  // 「发布版 skills/objectstack-pm-dispatch 删」): the "own entry AND skills/**"
+  // shape has no subject any more, and what is pinned instead is that a
+  // catalog file is covered by exactly ONE entry — the root — so no second
+  // per-file entry under `skills/` has quietly returned.
+  t('a catalog file is covered by exactly ONE entry — skills/** — now that the published PM skill and its own entry are gone', catalogHit.hits.length === 1 && catalogHit.hits[0].glob === 'skills/**');
+  t('no per-file entry for the deleted published PM skill survives it, and its old path carries the root mandate only', !MANDATORY_TIER_GLOBS.some((g) => g.glob.includes('objectstack-pm-dispatch')) && fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).hits.every((h) => h.glob === 'skills/**'));
   t('skills/** does NOT reach the internal .claude/skills tree — a pm-dispatch references file still carries no mandate', fableOf(['.claude/skills/pm-dispatch/references/core-rules.md']).mandatory === false);
   t('the skills/** entry is declared with its one-line exit switched off, as data', MANDATORY_TIER_GLOBS.some((g) => g.glob === 'skills/**' && g.oneLineExit === false && g.tier === CONTRACT_REVIEW_TIER));
   t('every other mandatory entry keeps the one-line exit open (the flag is an opt-out, absent by default)', MANDATORY_TIER_GLOBS.filter((g) => g.glob !== 'skills/**').every((g) => g.oneLineExit === undefined) && catalogHit.hits.every((h) => h.glob !== 'skills/**' || h.oneLineExit === false));
