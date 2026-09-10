@@ -482,10 +482,14 @@ export default defineStack({
  * this build's major it is the only place the operator is told where the
  * runtime actually stands, which is why the third case drives exactly that.
  *
- * The `--json` `runtime` key is pinned UNCHANGED here on purpose. It is a
- * machine-readable key on a published payload, so moving it is a contract
- * change owing a reader census and a deprecation window of its own. This pin is
- * what makes that move loud instead of silent.
+ * The `--json` half is pinned by the last case, and that pin was RE-POINTED
+ * rather than deleted when the key moved: it used to hold `runtime` unchanged,
+ * and it now holds `protocolVersion` carrying the value AND `runtime` being
+ * absent. Both halves are asserted for the same reason the human line asserts
+ * two: a pin that only checked the new key would stay green if the old spelling
+ * were quietly re-added alongside, which is precisely the dual-key state this
+ * rename was ruled against. Keeping the pin pointed at the live key is what
+ * makes the NEXT rename of this published payload loud instead of silent.
  */
 describe('os migrate meta — the chain line names the protocol, not a package version', () => {
   const LABEL_CONFIG = `
@@ -527,8 +531,12 @@ export default {
     expect(stdout).not.toContain(PROTOCOL_VERSION);
   }, 120_000);
 
-  it('leaves the --json `runtime` key exactly as published', async () => {
+  it('emits the protocol version under `protocolVersion`, with no `runtime` key left', async () => {
     const parsed = JSON.parse(await runMeta(['--from', String(PROTOCOL_MAJOR), '--json'], labelDir));
-    expect(parsed.runtime).toBe(PROTOCOL_VERSION);
+    expect(parsed.protocolVersion).toBe(PROTOCOL_VERSION);
+    // Removed OUTRIGHT -- no alias, no dual-key grace window. `in` rather than
+    // a truthiness check: an explicit `runtime: undefined` would satisfy the
+    // latter while still shipping the key through `JSON.stringify`'s omission.
+    expect(Object.keys(parsed)).not.toContain('runtime');
   }, 120_000);
 });

@@ -140,7 +140,12 @@ describe('checkProtocolCompat', () => {
     expect(r.diagnostic.packageId).toBe('com.acme.crm');
     expect(r.diagnostic.requiredRange).toBe('^10');
     expect(r.diagnostic.rangeSource).toBe('engines.protocol');
-    expect(r.diagnostic.runtimeVersion).toBe(RT);
+    // The protocol version the manifest was judged against. Spelled
+    // `runtimeVersion` until this release, where the machine face read as the
+    // installed package version; removed OUTRIGHT, so the absence is pinned
+    // beside the new key rather than only the new key being pinned.
+    expect(r.diagnostic.protocolVersion).toBe(RT);
+    expect(Object.keys(r.diagnostic)).not.toContain('runtimeVersion');
     expect(r.diagnostic.targetMajor).toBe(10);
     expect(r.diagnostic.migrateCommand).toBe('objectstack migrate meta --from 10');
     // The message names both versions and the command — the whole point of D1.
