@@ -12,6 +12,18 @@ import { describe, it, expect, vi } from 'vitest';
 import { runImport, type ImportProtocolLike } from './import-runner';
 import type { ExportFieldMeta } from './export-format.js';
 
+/**
+ * [#16952] The doubles below are annotated FROM the exported declaration
+ * (`ImportProtocolLike`), never from a hand-written restatement of the shape
+ * the runner happens to send. A local parameter annotation was one of the
+ * three non-authoritative places this card converged: it froze a dialect no
+ * compiler held anyone to, so it kept compiling — and kept passing — after the
+ * runner moved to another one. ⛔ Never widen these back to an inline object
+ * type; that re-opens the seam.
+ */
+type FindArgs = Parameters<ImportProtocolLike['findData']>[0];
+type CreateArgs = Parameters<ImportProtocolLike['createData']>[0];
+
 const metaMap = new Map<string, ExportFieldMeta>([['name', { name: 'name', type: 'text' }]]);
 
 const baseOpts = {
@@ -44,7 +56,7 @@ function makeProtocol(opts: { firstCall?: 'throw' | 'shortReturn' } = {}) {
     if (calls === 1 && opts.firstCall === 'shortReturn') return { records: [] };     // committed, bad count
     return { records: recs };
   });
-  const createData = vi.fn(async (args: { data: { name: string } }) => {
+  const createData = vi.fn(async (args: CreateArgs) => {
     const rec = { id: `id-${++idc}`, ...args.data };
     store.push(rec);
     return rec;
@@ -61,8 +73,11 @@ function makeProtocol(opts: { firstCall?: 'throw' | 'shortReturn' } = {}) {
    * to `{}` — which is the vacuity being closed here, so both are recorded.
    */
   const appliedFilters: Array<Record<string, any>> = [];
-  const findData = vi.fn(async (args: { query: { where: Record<string, any>; limit?: number } }) => {
-    const filter = args.query.where;
+  const findData = vi.fn(async (args: FindArgs) => {
+    // Both slots are OPTIONAL on the declared contract, and the `!`s say so
+    // while keeping the refusal: an absent one throws here exactly as it did
+    // before, rather than degrading into a match-everything probe.
+    const filter = args.query!.where!;
     appliedFilters.push(filter);
     // Supports equality and { $in: [...] } — the id recheck (framework#3173)
     // queries by pre-assigned id $in, like the real SQL driver does.
@@ -75,8 +90,11 @@ function makeProtocol(opts: { firstCall?: 'throw' | 'shortReturn' } = {}) {
   return { p, store, createManyData, createData, findData, appliedFilters };
 }
 
-/** One recorded `findData` probe, as the double above receives it. */
-type FindProbe = { query: { where: Record<string, any>; limit?: number } };
+/**
+ * One recorded `findData` probe — the DECLARED parameter type, not a
+ * restatement of it. [#16952]
+ */
+type FindProbe = FindArgs;
 
 /**
  * ⭐ [#16638] Every probe the runner sends must NARROW — the assertion this
@@ -99,12 +117,12 @@ function expectEveryProbeNarrowed(
 ): void {
   expect(calls.length).toBeGreaterThan(0);
   for (const [args] of calls) {
-    expect(Object.keys(args.query.where)).not.toHaveLength(0);
+    expect(Object.keys(args.query!.where!)).not.toHaveLength(0);
   }
   // The payload half is the drift alarm; this is the vacuity half. The filter
   // the double APPLIED must be the one it was handed — an equality a `?? {}`
   // default breaks even while the runner's payload stays perfectly canonical.
-  expect(appliedFilters).toEqual(calls.map(([args]) => args.query.where));
+  expect(appliedFilters).toEqual(calls.map(([args]) => args.query!.where!));
   for (const filter of appliedFilters) expect(Object.keys(filter)).not.toHaveLength(0);
 }
 
@@ -167,10 +185,10 @@ describe('runImport — idempotent retry with natural keys (framework#3149)', ()
     // Read `where` / `limit`, the keys `FindDataRequest` declares — a drift
     // back to `$filter` / `$top` reddens here before it reaches an implementor.
     expectEveryProbeNarrowed(findData.mock.calls, appliedFilters);
-    const probes = findData.mock.calls.map(([a]) => a.query);
+    const probes = findData.mock.calls.map(([a]) => a.query!);
     expect(probes).toHaveLength(1);
-    expect(Object.keys(probes[0].where)).toEqual(['id']);
-    expect([...probes[0].where.id.$in].sort()).toEqual(store.map((r) => r.id).sort());
+    expect(Object.keys(probes[0].where!)).toEqual(['id']);
+    expect([...(probes[0].where!.id as { $in: string[] }).$in].sort()).toEqual(store.map((r) => r.id).sort());
     expect(probes[0].limit).toBe(store.length);
   });
 
