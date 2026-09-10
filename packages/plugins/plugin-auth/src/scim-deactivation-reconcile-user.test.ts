@@ -75,7 +75,6 @@ import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-
 import { registerIdentityWriteGuard, registerManagedUpdateWhitelist } from './identity-write-guard.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { SCIM_DEACTIVATION_BAN_REASON } from './user-ban-write.js';
-import { CREDENTIAL_ISSUER } from './backfill-account-issuer.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -304,7 +303,6 @@ async function attachPassword(h: Harness, user: Provisioned): Promise<void> {
   await ctx.internalAdapter.createAccount({
     userId: user.userId,
     providerId: 'credential',
-    issuer: CREDENTIAL_ISSUER,
     accountId: user.userId,
     password: hashed,
   });

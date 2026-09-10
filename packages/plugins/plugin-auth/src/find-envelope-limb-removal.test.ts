@@ -58,7 +58,7 @@ import { probeHumanUsersPresence, probeSignInAccountsPresence } from './boot-sig
 import { decideDevAdminSeedGate } from './dev-admin-seed-gate.js';
 import { loadPhoneSmsTemplateBody, seedPhoneSmsTemplates } from './phone-sms-texts.js';
 import { resolveDefaultOrgId } from './tenancy-service.js';
-import { backfillAccountIssuer } from './backfill-account-issuer.js';
+import { probeAccountIdentityCollisions } from './account-identity-preflight.js';
 import { canonicalizeStoredMemberRoles } from './member-role-canonical.js';
 
 const SECRET = 'test-secret-at-least-32-chars-long-15597';
@@ -230,8 +230,13 @@ const BLOCKS: Array<{
     empty: (e) => (e as never as { find: Function }).find('sys_member', { where: { user_id: 'ghost' }, limit: 1 }, { context: SYSTEM_CTX }),
   },
   {
-    id: 'B9  backfillAccountIssuer.tryFind',
-    site: 'backfill-account-issuer.ts',
+    // [#17440] `backfill-account-issuer.ts` retired with the issuer column it
+    // stamped. The `sys_account` read it measured did not: the successor site
+    // is the retirement preflight, which reads the same object and — being the
+    // answer that authorises an irreversible drop — REFUSES a non-array rather
+    // than absorbing it. Same measurement, higher stakes.
+    id: 'B9  probeAccountIdentityCollisions',
+    site: 'account-identity-preflight.ts',
     populated: (e) => (e as never as { find: Function }).find('sys_account', { where: { provider_id: 'credential' }, limit: 5000 }, { context: SYSTEM_CTX }),
     empty: (e) => (e as never as { find: Function }).find('sys_account', { where: { provider_id: 'ghost' }, limit: 5000 }, { context: SYSTEM_CTX }),
   },
@@ -418,11 +423,11 @@ describe('#15597 — the blocks driven through their real production entry point
     expect(await resolveDefaultOrgId(engine)).toBe('org_1');
   });
 
-  it('backfillAccountIssuer and canonicalizeStoredMemberRoles scan the bare array (B9, B10)', async () => {
+  it('probeAccountIdentityCollisions and canonicalizeStoredMemberRoles scan the bare array (B9, B10)', async () => {
     const engine = await bootEngine();
     await seedAll(engine);
-    const backfill = await backfillAccountIssuer(engine);
-    expect(backfill.scanned).toBeGreaterThan(0);
+    const probe = await probeAccountIdentityCollisions(engine as never);
+    expect(probe.scanned).toBeGreaterThan(0);
     const canon = await canonicalizeStoredMemberRoles(engine);
     // One membership row was seeded, and the scan saw it — the count comes
     // straight off the array the removed limb used to normalise.
