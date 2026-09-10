@@ -327,6 +327,8 @@
     "EnhancedApiError": "src/api/errors.zod.ts#EnhancedApiError (type)",
     "EnhancedApiErrorParsed": "src/api/errors.zod.ts#EnhancedApiErrorParsed (type)",
     "EnhancedApiErrorSchema": "src/api/errors.zod.ts#EnhancedApiErrorSchema (const)",
+    "EnvironmentType": "src/api/discovery.zod.ts#EnvironmentType (type)",
+    "EnvironmentTypeSchema": "src/api/discovery.zod.ts#EnvironmentTypeSchema (const)",
     "ErrorCategory": "src/api/errors.zod.ts#ErrorCategory (type)",
     "ErrorCode": "src/api/error-code-ledger.zod.ts#ErrorCode (type)",
     "ErrorHandlingConfig": "src/api/plugin-rest-api.zod.ts#ErrorHandlingConfig (type)",

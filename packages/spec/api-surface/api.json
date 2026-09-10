@@ -344,6 +344,8 @@
     "EnhancedApiError (type)",
     "EnhancedApiErrorParsed (type)",
     "EnhancedApiErrorSchema (const)",
+    "EnvironmentType (type)",
+    "EnvironmentTypeSchema (const)",
     "ErrorCategory (const)",
     "ErrorCategory (type)",
     "ErrorCode (const)",

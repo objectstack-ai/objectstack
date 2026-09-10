@@ -47,16 +47,17 @@ is left open deliberately rather than hidden — see
 
 ## Which `isSystem` this page is about
 
-Four unrelated declarations share the identifier. **This page documents only the
+Three unrelated declarations share the identifier. **This page documents only the
 first.** The others are ordinary metadata fields on a stored document and have
-nothing to do with elevation.
+nothing to do with elevation. (A fourth, `Environment.isSystem` — a
+platform-infrastructure environment, not user data — left this repo with the
+`@objectstack/spec/cloud` subpath in #16325 and is declared in the cloud repo.)
 
 | Declaration | What it is | This page? |
 |:---|:---|:---:|
 | `ExecutionContext.isSystem` — `packages/spec/src/kernel/execution-context.zod.ts#isSystem` | The elevation flag on an operation's context | ✅ |
 | `Object.isSystem` — `packages/spec/src/data/object.zod.ts#isSystem` | Marks a **system object** (protected from deletion; defaults its org-wide sharing to `public` when no `sharingModel` is set) | ❌ |
 | `EmailTemplate.isSystem` — `packages/spec/src/system/email-template.zod.ts#isSystem` | Built-in template; tenants may override but should not delete | ❌ |
-| `Environment.isSystem` — `packages/spec/src/cloud/environment.zod.ts#isSystem` | Platform-infrastructure environment, not user data | ❌ |
 
 The collision is a genuine hazard rather than a naming nit: `Object.isSystem`
 changes an object's **default sharing**, and `ExecutionContext.isSystem` changes
@@ -382,10 +383,10 @@ test files certifies nothing. ⛔ Do not re-add them to `DECLARED_COUNTS` — a
 self-test case in the gate refuses that by name. Re-measure them with
 `node scripts/isystem-census.mjs` when you want them current, and move the date.
 
-**What the enforced declarations row counts.** Not the four field declarations
-above — those are four *distinct fields* that happen to share a name, and only
+**What the enforced declarations row counts.** Not the three field declarations
+above — those are three *distinct fields* that happen to share a name, and only
 the first is elevation. This row counts every position where the parser puts the
-identifier in a **declaring** slot: those four, plus the structural type literals
+identifier in a **declaring** slot: those three, plus the structural type literals
 that restate `ExecutionContext.isSystem`'s shape inline rather than importing it
 (`{ isSystem: true; tenantId?: string }`, `context?: { isSystem?: boolean }`, and
 the `get isSystem()` accessor on the engine's context wrapper). A restatement is

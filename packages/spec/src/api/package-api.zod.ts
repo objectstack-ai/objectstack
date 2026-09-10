@@ -7,7 +7,7 @@ import { DependencyResolutionResultSchema } from '../kernel/dependency-resolutio
 import { UpgradePlanSchema } from '../kernel/package-upgrade.zod';
 import { PackageArtifactSchema } from '../kernel/package-artifact.zod';
 import { ManifestSchema } from '../kernel/manifest.zod';
-import { ArtifactReferenceSchema } from '../cloud/marketplace.zod';
+import { ArtifactReferenceSchema } from '../marketplace/marketplace.zod';
 
 /**
  * # Package API Protocol
