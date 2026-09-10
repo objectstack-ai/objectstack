@@ -307,16 +307,22 @@ export function sandboxBusinessMessage(error: any): string | undefined {
  *
  * ## ⛔ What this deliberately does NOT decide
  *
- * A sandboxed **CRASH** (#7543). {@link sandboxBusinessMessage} declines one by
- * contract, so the fallback hands the arm `error.message` — the wrapper — and
- * the arm answers with its own declared status, where the unwrap door's
- * terminal for the same crash is the sanitised 500. That divergence is
- * UNCHANGED by this rule, on purpose: choosing between those two answers is
- * fault classification rather than message sourcing (triage on #14704, verbatim:
- * "leave today's behaviour exactly as it is, implement the business-message
- * read only, and name the site and the divergence"). It is pinned in
- * `error-response-sandbox-arm-message.test.ts` §4 so that deciding it is a
- * visible edit rather than a drift, and it carries its own decision card.
+ * Fault classification. A sandboxed **CRASH** (#7543) no longer reaches this
+ * function at all: #15071 put {@link isSandboxCrash} ABOVE the code-gated arms
+ * in {@link classifyDataError}, so a crashed body is answered by
+ * {@link UNCLASSIFIED_FAULT} whatever code it declared, and the other door
+ * declines the consult for a sandbox producer outright (the section above).
+ * ⛔ The ruling that decided it, its fence and its negative control are stated
+ * ONCE, on {@link isSandboxCrash} — read them there rather than a second time
+ * here. `error-response-sandbox-arm-message.test.ts` §4 records the verdict,
+ * now CONVERGED. {@link sandboxBusinessMessage} still declines a crash by
+ * contract, so this function keeps no opinion of its own about one.
+ *
+ * ⚠️ CONVERGED is the no-declared-status case, not the whole question: a crash
+ * that DECLARED a 4xx still leaves {@link resolveErrorResponse} at that status,
+ * wrapper and all, through a passthrough this card did not touch — pinned as an
+ * ACCEPTED DIVERGENCE, widened by #15071, in
+ * `error-response-structured-arm-door-parity.test.ts` §4.
  *
  * ⛔ Deliberately a READ of the field the sandbox populated, never a
  * pattern-strip of the wrapper off `.message` — {@link sandboxBusinessMessage}
