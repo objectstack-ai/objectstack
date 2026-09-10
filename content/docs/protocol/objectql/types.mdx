@@ -508,6 +508,15 @@ directly. `datetime` on PostgreSQL/MySQL keeps the native `now()`, which is
 already UTC — the driver pins every MySQL connection with
 `SET time_zone = '+00:00'`.
 
+Both `os generate migration` formats reproduce the PostgreSQL arm of this
+translation, so a table built from a generated migration carries the same
+default as one the driver creates. That holds for a plain literal
+`defaultValue` too — and for the two shapes that deliberately get **no** column
+default on either producer, because the engine resolves them per insert:
+`defaultValue: 'current_user'` (which must stay unset when there is no
+authenticated user) and an Expression envelope (`{ dialect, source }`). An
+option-level `default: true` on a `select` is likewise engine-only.
+
 <Callout type="warn">
 A DDL default only governs **newly created** columns. A column created before
 this convention keeps its legacy default and can still emit a zone-naive value on

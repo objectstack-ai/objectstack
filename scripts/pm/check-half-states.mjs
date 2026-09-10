@@ -543,10 +543,14 @@
  *       ⛔ Not a judgement that the block is wrong — waiting on a deferred card
  *       is sometimes right; the row says the wait has no releasing mechanism,
  *       which is a fact a human should be handed rather than discover.
- *       Deliberately NOT reported: a target labelled `pm:queue` while titled
- *       `[Decision]` (one of the six). That is a mislabelling, not a fact in
- *       the labels, and a title heuristic would make this sweeper guess at
- *       intent.
+ *       NOT reported BY THIS ROW: a target labelled `pm:queue` while titled
+ *       `[Decision]` (one of the six). The reason is unchanged and this row is
+ *       ⛔ NOT widened to chase it — H26 reads LABELS, and inferring a BLOCK's
+ *       fate from its target's title would make this sweeper guess at intent.
+ *       What changed is that the shape has a row of its own since #16688:
+ *       H54 reports the title/label disagreement itself, on the card that
+ *       carries it, and hands it to the triage seat — ⛔ still never reading a
+ *       prefix as a state.
  *
  * ## H27 — the claim is perfect and the claimant is dead
  *
@@ -5213,11 +5217,15 @@ export function h31ContractReviewCarrierSplit(issue, openPrs) {
 //   objectos#75, #135      -> objectos#68    (`needs-user-decision`)
 //   cloud#1332             -> cloud#1331     (`pm:queue`, titled `[Decision]`)
 //
-// The last row is deliberately NOT reported by this predicate: a decision card
-// wearing a work label is a mislabelling to fix, not a fact readable from the
-// labels this row reads, and inventing a title heuristic would make the sweeper
-// guess at intent. Two of the rows are one repo's ENTIRE blocked inventory
-// waiting on its one unanswered decision card — one ruling clears the repo.
+// The last row is not reported by THIS predicate, and the reason has not moved:
+// this row reads LABELS, and inferring a BLOCK's fate from its target's title
+// would make the sweeper guess at intent — so it is ⛔ not widened to chase it.
+// The shape is no longer unread, though, and this note would otherwise say the
+// file leaves it to nobody: since #16688 it has a row of its own —
+// H54 reports the title/label disagreement on the card that carries it and
+// hands it to the triage seat, ⛔ never reading a prefix as a state. Two of the
+// rows are one repo's ENTIRE blocked inventory waiting on its one unanswered
+// decision card — one ruling clears the repo.
 //
 // ## The second leg: the stale chain
 //
@@ -10467,6 +10475,148 @@ export function h53CarrierWithoutIncrement(issue, commentRows, openPrs, mergedPr
 }
 
 // ---------------------------------------------------------------------------
+// H54 — a `[Decision]`-titled card sitting in the DISPATCH pool (#16688).
+//
+// ## The shape, and the acceptance criterion that names it
+//
+// `pm:queue` is the dispatch pool: a PM seat reads it as CAPACITY and picks
+// from it. A card whose title opens `[Decision]` declares that its deliverable
+// is a RULING — and 「⛔ PM 席不得裁决契约或产品决定」, so the one act the pool
+// invites is the one act forbidden on this card. The filing card measured the
+// cost on one lane, twice: 8 cards read as dispatchable and 1 was (2026-09-07),
+// then 21 read and at most 3 were (2026-09-09) — the ratio did not improve, the
+// set grew and the over-read grew with it. Each of the others cost a full read,
+// body AND comments, to establish that it could not be picked up, and the next
+// seat pays it again because nothing writes the reading back.
+//
+// Triage's acceptance criterion asks for exactly this shape and no more (its
+// §验收口径 2 on the filing card): 「一张标题以 `[Decision]` 开头的卡带着
+// `pm:queue`」 — 「这是今天唯一一个"约束只由标题前缀表达、而无查询会读"的地方,
+// 也是最便宜的一道网」.
+//
+// ## ⛔ The prefix is NOT the state, and this row never treats it as one
+//
+// The same ruling fences the row in the same breath: 「⛔ 不要把闸门做成"标题前缀
+// 即状态":前缀是作者写的,状态是分诊判的,让前者决定后者就是把分诊席的职责交给了
+// 立卡人」. So this row reports a DISAGREEMENT between two carriers and hands it
+// to the seat that owns the second one. It does not say the card is
+// mislabelled, does not say the prefix is right, and — like every row in this
+// file — writes nothing. Which carrier is wrong is triage's judgement, and the
+// remedy sentence says so rather than prescribing a relabel.
+//
+// ⛔ And no new label, by the same ruling: 「不要新增标签。你已经证明词汇表够用」.
+// `needs-user-decision` is live on cards and PRs and `pm:awaiting-maintainer`
+// is live on cards, so the state the remedy points at already exists and the
+// deliverable triage ruled for is 逐卡改判, not a new state.
+//
+// ## Why the row is worth its line, given that a reader can see the title
+//
+// A seat sizing a round reads a LISTING. The over-read is not that the title is
+// unreadable — it is that nothing QUERIES it: the constraint 「this card needs a
+// decision, not a developer」 lives only in a prefix the state machine never
+// consults, which is the filing card's own thesis (「A constraint that lives
+// only in prose is invisible to a seat reading labels」). This row is that
+// query, and it is the whole of what a title can honestly buy.
+//
+// ⚠️ Deliberately the CHEAP net and not the complete one. The filing thread
+// records three further readings this row does NOT attempt, every one of them
+// true: a ruled card and a never-ruled card look identical from the body, so a
+// `[Decision]` title outlives its own ruling and this row will fire on a card
+// whose question was answered days ago; the same lane's largest bucket turned
+// out to be contract-review-TIER starvation rather than rulings (8 cards
+// against 2); and a hot-file hold releases on MERGE, so its answer changes
+// under the reader on a timescale of hours. None of those is readable from a
+// title or a label, ⛔ so none of them is claimed here. This row answers one
+// question — do the title and the state label disagree — and its remedy names
+// the reader who can answer the rest.
+//
+// ## Quota
+//
+// Free, and the population is covered BY CONSTRUCTION for H45's reason: the
+// carrier holds `pm:queue`, which is a label page this sweep's loop already
+// consumes, and the title rides in on that same payload. Nothing here adds a
+// request, and no card outside the listing can reach the row.
+// ---------------------------------------------------------------------------
+
+/**
+ * The title prefix by which a card declares its deliverable is a RULING.
+ *
+ * Anchored at the START, after optional leading whitespace, and never a
+ * substring: `[Decision]` occurring later in a title is an ordinary mention
+ * (「rename the [Decision] prefix convention」), and reporting that would be the
+ * intent-guessing the ruling forbids. All nine live carriers measured on
+ * 2026-09-09 open with it, so the anchor costs no coverage.
+ *
+ * Case-insensitive on the WORD and exact on the brackets. `[decision]` and
+ * `[Decision]` are one author's one intent, and this file's standing doctrine
+ * is that an unknown reading must never present as a clean one (#4690) — a
+ * carrier missed on its capitalisation would read as a clean queue. The closing
+ * bracket is required immediately after the word, so `[Decisions log]` and
+ * `[Decision-log]` are NOT this prefix; and `[finding]` — the 80-strong prefix
+ * that must never be caught — differs in the word itself, not in its case.
+ */
+export const DECISION_TITLE_PREFIX = /^\s*\[decision\]/iu;
+
+/**
+ * Does H54 speak about this card at all?
+ *
+ * ⛔ ISSUES only, never a PR. Every listing feeding this sweep already filters
+ * `!i.pull_request`, so the guard is defence in depth rather than a live
+ * filter — but the row's subject is the DISPATCH POOL and a PR is not in it, so
+ * a predicate that COULD fire on one would have a population that is an
+ * accident of its caller rather than a property of the row.
+ *
+ * A CLOSED card is out, on H24's gate in mirror image: `pm:queue` on a closed
+ * card is residue, counted into the closed census since #14072, and a card
+ * nobody can dispatch is a card nothing over-reads as capacity.
+ *
+ * An unreadable `labels` is out and is never read as "unlabelled" — the
+ * three-input-states discipline (#4690) applied to the one field that decides
+ * membership.
+ */
+export function h54SpeaksAbout(issue) {
+  if (issue?.pull_request) return false;
+  if (issue?.state === 'closed') return false;
+  if (!Array.isArray(issue?.labels)) return false;
+  return labelNames(issue).includes('pm:queue');
+}
+
+/**
+ * H54 — null when clean, else the finding sentence.
+ *
+ * @param {object} issue — a card from a listing this sweep already holds.
+ */
+export function h54DecisionTitledQueueCard(issue) {
+  if (!h54SpeaksAbout(issue)) return null;
+  if (!DECISION_TITLE_PREFIX.test(String(issue?.title ?? ''))) return null;
+  return (
+    '`pm:queue` while the TITLE opens `[Decision]` — the two carriers disagree about what this ' +
+    'card is for. The label puts it in the DISPATCH pool, which a PM seat reads as capacity and ' +
+    'picks from; the prefix declares the deliverable is a RULING, and 「⛔ PM 席不得裁决契约或产品' +
+    '决定」 — so the one act the pool invites is the one act forbidden here. Measured on one lane, ' +
+    'twice: 8 cards read as dispatchable and 1 was, then 21 read and at most 3 were. The others ' +
+    'each cost a full read — body AND comments — to establish they could not be picked up, and ' +
+    'the next seat pays it again, because nothing writes the reading back. ' +
+    '⛔ This row does NOT say which carrier is wrong: 「前缀是作者写的,状态是分诊判的,让前者决定' +
+    '后者就是把分诊席的职责交给了立卡人」, so it reports the disagreement and names the reader. ' +
+    'Remedy, and it belongs to the TRIAGE seat, who re-judges the card: if the decision has ' +
+    'already been RULED, the title is the last thing still advertising an open question — drop ' +
+    'the prefix, or point the body at the ruling comment, and `pm:queue` stands as it is (a ruled ' +
+    'card and a never-ruled card look identical from the body, which is exactly why the title ' +
+    'must stop saying otherwise); if it is genuinely UNRULED it belongs in the decision inbox — ' +
+    '`needs-user-decision`, carrying its four-facet analysis at the moment the label lands, ⛔ not ' +
+    'left for the maintainer to fill in on arrival. ⛔ No new label is needed or wanted: the ' +
+    'vocabulary already carries the state (`needs-user-decision` on cards and PRs, ' +
+    '`pm:awaiting-maintainer` on cards), and the ruled deliverable is 逐卡改判 rather than a new ' +
+    'state. Report-only: this row writes no label, relabels nothing, and its verdict is a ' +
+    'disagreement between two carriers — ⛔ never a finding that the card is mislabelled. ' +
+    '⚠️ It is the cheapest net and not the complete one: a hot-file hold releases on MERGE, a ' +
+    'contract-review-tier wait shows in no carrier at all, and a ruled card keeps its prefix ' +
+    'until someone edits the title. ⛔ None of those is readable here, and none is claimed.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -11593,6 +11743,20 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // ⛔ Not `inventory` either: it alarms about one card, not a population, even
   // though the first census found fourteen at once.
   H53: 'state',
+
+  // H54 is a `state`, and each of the other three bands is refused for its own
+  // stated criterion. ⛔ Not `gate`: that band exists for the row that can tell
+  // a STRIPPED gate from an ungated card — an ABSENCE reading as a green light
+  // — and here both carriers are present and legible; nothing was removed.
+  // ⛔ Not `stall`: whether any of these cards is actually STOPPED is UNMEASURED
+  // by this row, and the filing thread's own correction found the lane's binding
+  // constraint to be contract-review-tier headroom rather than rulings — so the
+  // row claims no card is halted. ⛔ Not `inventory`: it alarms about one card,
+  // not a population, even though the first census found nine at once. What is
+  // left is `state`'s definition exactly — two carriers on one LIVE card
+  // contradicting each other, the whole repair on the board, in one seat's
+  // judgement.
+  H54: 'state',
 
   // H52 is a `stall` and not a `state` (#16662): the board is not contradicting
   // itself — every label on the card is correct — and no later sweep frees the
@@ -14561,6 +14725,13 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
           "still the epic's.",
       ]);
     }
+    // H54 — the same free read one field further: a label AND a title, both of
+    // them fields of a payload this loop already paid for. Its population is
+    // covered BY CONSTRUCTION for H45's reason — the carrier holds `pm:queue`,
+    // which is a page this loop consumes, so the row can never be about a card
+    // the sweep did not list.
+    const decisionInQueue = h54DecisionTitledQueueCard(issue);
+    if (decisionInQueue) findings.push([issue, 'H54', decisionInQueue]);
     // H24 + H25 — two field/label intersections over cards this loop already
     // holds, so neither costs a request. H24's population is the `pm:queue`
     // listing; H25's carriers are all listed too, either by the awaiting label
@@ -22571,6 +22742,94 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H53 summary: …and names the merged-window bound on its PR leg', saidBy('h53Carrier', summaryLine({}, 0)).includes('a landing older than that window is as invisible here as it is to H8'), true);
   t('H53 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h53Carrier', summaryLine({}, 0)).includes('0 of 0'), true);
   t('H53 summary: a bare line renders numbers, never `undefined`', saidBy('h53Carrier', summaryLine({}, 0)).includes('undefined'), false);
+
+  // -- H54 — a `[Decision]`-titled card sitting in the DISPATCH pool (#16688) -
+  // The fixtures are SYNTHETIC (⛔ the self-test never touches GitHub); their
+  // shapes come from the nine live carriers measured 2026-09-09 and from the
+  // two prefixes that must stay apart on this board — `[Decision]` (9 live) and
+  // `[finding]` (80 live), which is the one that must NOT be caught.
+  const card54 = (extra = {}) => ({
+    number: 15071,
+    state: 'open',
+    labels: [{ name: 'pm:queue' }],
+    assignees: [],
+    body: '',
+    title: '[Decision] sandboxed CRASH vs the unwrap door',
+    ...extra,
+  });
+  const h54 = (extra = {}) => h54DecisionTitledQueueCard(card54(extra));
+
+  // ⭐ The positive control, then SIX negatives — each differing from the
+  // positive in exactly ONE feature, so a case can only be answered by the
+  // feature its name claims. The table is length-pinned and then driven whole:
+  // a fixture that stops being exercised fails here rather than going quiet.
+  t('H54 fires: a `[Decision]`-titled open card carrying `pm:queue`', typeof h54(), 'string');
+  const NEGATIVES54 = [
+    ['`pm:queue` with no prefix — the ordinary dispatchable card', { title: 'client SDK `organizations.invite` accepts no `role?`' }],
+    ['a `[finding]` prefix — the 80-strong prefix that must NOT be caught', { title: '[finding] `domain:cli`\'s `pm:queue` reads as 8 dispatchable cards and is 1' }],
+    ['`[Decision]` carrying `needs-user-decision` and NOT `pm:queue` — already in the inbox', { labels: [{ name: 'needs-user-decision' }] }],
+    ['a CLOSED card — nothing over-reads it as capacity', { state: 'closed' }],
+    ['a PULL REQUEST — the dispatch pool is cards, ⛔ never PRs', { pull_request: { url: 'x' } }],
+    ['`[Decision]` LATER in the title — a mention, not the prefix', { title: 'rename the [Decision] title convention' }],
+  ];
+  t('H54 controls: the negative table is exercised WHOLE — six fixtures, none quietly dropped', NEGATIVES54.length, 6);
+  for (const [why, extra] of NEGATIVES54) t(`H54 silent: ${why}`, h54(extra), null);
+
+  // The anchor, read from both sides.
+  t('H54 anchor: leading whitespace still opens the title', typeof h54({ title: '  [Decision] rename `specVersionGap` to `protocolVersionGap`' }), 'string');
+  t('H54 anchor: a lowercase spelling is one author\'s one intent, not a clean queue', typeof h54({ title: '[decision] does a declared 5xx on a polled route log per request' }), 'string');
+  t('H54 anchor: ⛔ `[Decisions log]` is not this prefix — the bracket closes on the word', h54({ title: '[Decisions log] the batch' }), null);
+  t('H54 anchor: ⛔ nor `[Decision-log]`', h54({ title: '[Decision-log] the batch' }), null);
+  t('H54 anchor: ⛔ nor the bare word without brackets', h54({ title: 'Decision: rename the field' }), null);
+  t('H54 anchor: a card with no title at all is clean, never a crash', h54({ title: undefined }), null);
+
+  // Population — the same three-input-states care every row here takes.
+  t('H54 population: an open `pm:queue` card is in', h54SpeaksAbout(card54()), true);
+  t('H54 population: a closed one is out', h54SpeaksAbout(card54({ state: 'closed' })), false);
+  t('H54 population: a PR is out', h54SpeaksAbout(card54({ pull_request: { url: 'x' } })), false);
+  t('H54 population: an unreadable `labels` is out, never read as unlabelled', h54SpeaksAbout(card54({ labels: undefined })), false);
+  t('H54 population: a missing card is out, never a crash', h54SpeaksAbout(undefined), false);
+  t('H54: …and the predicate itself does not crash on one either', h54DecisionTitledQueueCard(undefined), null);
+
+  // Adjacency — ⛔ this row restates no neighbour's verdict on its own specimen.
+  t('H54 adjacency: H24 is silent — the card is UNASSIGNED, which is correct for `pm:queue`', h24QueuedWithAssignee(card54()), null);
+  t('H54 adjacency: H3 is silent — one pm state label, not two', h3QueueAndDispatched(card54()), false);
+  t('H54 adjacency: H45 is silent — `pm:epic` is not in play', h45EpicAndQueued(card54()), false);
+
+  // The row's own sentence — the halves triage's acceptance criterion requires.
+  t('H54 row: it reports a DISAGREEMENT rather than a verdict', h54().includes('the two carriers disagree'), true);
+  t('H54 row: …and quotes the prohibition that makes the pool dangerous here', h54().includes('⛔ PM 席不得裁决契约或产品决定'), true);
+  t('H54 row: ⛔ the prefix is NOT the state, in the ruling\'s own words', h54().includes('让前者决定后者就是把分诊席的职责交给了立卡人'), true);
+  t('H54 row: the remedy names the reader — the TRIAGE seat, who re-judges the card', h54().includes('belongs to the TRIAGE seat, who re-judges the card'), true);
+  t('H54 row: …the RULED branch drops the prefix and leaves `pm:queue` standing', h54().includes('`pm:queue` stands as it is'), true);
+  t('H54 row: …the UNRULED branch names the inbox AND its four-facet block', h54().includes('`needs-user-decision`, carrying its four-facet analysis'), true);
+  t('H54 row: ⛔ no new label — the vocabulary already carries the state', h54().includes('⛔ No new label is needed or wanted'), true);
+  t('H54 row: report-only — it writes nothing and relabels nothing', h54().includes('writes no label, relabels nothing'), true);
+  t('H54 row: it declares what it CANNOT see, so a reader does not over-trust it', h54().includes('the cheapest net and not the complete one'), true);
+  t('H54 row: not a loud finding', isLoudFinding(h54()), false);
+
+  // Band + registry.
+  t('H54 band: registered as a STATE row — the repair is on the board', familyBand('H54'), 'state');
+  t('H54 band: ⛔ NOT `stall` — this row claims no card is stopped', familyBand('H54') === 'stall', false);
+  t('H54 band: ⛔ NOT `gate` — both carriers are PRESENT, so no absence reads as a green light', familyBand('H54') === 'gate', false);
+  t('H54 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H54'), true);
+  t('H54 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H54 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H54 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H54 band: a gate row still outranks it, so H31/H35 survive the trim longer', familyRank('H31') < familyRank('H54'), true);
+
+  // ⚖️ The reconciliation half. H26's deferred-target note said this shape was
+  // 「deliberately NOT reported … a title heuristic would make this sweeper guess
+  // at intent」. That stance was about H26 inferring a BLOCK's fate from its
+  // TARGET's title and it stands — ⛔ H26 is not widened, and both sites still
+  // carry its criterion. What changed is that both now point at the row that
+  // does read the shape, so the file no longer contradicts itself. Pinned on the
+  // source, because a pointer nobody checks is the declared-not-enforced shape
+  // this file spends its length refusing. The needles are ASSEMBLED at runtime
+  // so these two cases cannot satisfy themselves out of their own source text.
+  const SELF54 = readFileSync(SELF_PATH, 'utf8');
+  t('H54 reconciliation: BOTH deferred-target prose sites point at this row', SELF54.split(['H54 reports the title', 'label disagreement'].join('/')).length - 1, 2);
+  t('H54 reconciliation: ⛔ and both keep H26\'s own criterion — the row is NOT widened', SELF54.split(['guess at', 'intent'].join(' ')).length - 1, 2);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.

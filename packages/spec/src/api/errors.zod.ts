@@ -387,6 +387,23 @@ export const EnhancedApiErrorSchema = lazySchema(() => z.object({
     + 'Present only when the producer opted in at throw time; unmarked errors keep the generic '
     + 'consumer substitution.',
   ),
+  /**
+   * The producer's refusal declaration — the same field, with the same
+   * semantics and the same three-case table, as `ApiErrorSchema.refusal`
+   * (`contract.zod.ts`, which carries the full rationale and the
+   * reconciliation with `userMessage`'s "not a boolean beside `message`"
+   * note): present exactly when the producer declared, at throw time, that
+   * the 5xx it named is a deliberate refusal whose `message` is authored for
+   * the caller, so the boundary keeps it verbatim (#16335; director ruling,
+   * decision batch #58, option C). Absent means the default — a declared 5xx
+   * is a fault and its `message` is withheld. `true` is the only value.
+   */
+  refusal: z.literal(true).optional().describe(
+    'Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the '
+    + 'producer declared it at throw time; a declared 5xx without it is a fault whose `message` '
+    + 'is withheld. Until the withhold arms read the declaration, a declared refusal is still '
+    + 'withheld.',
+  ),
   category: ErrorCategory.optional().describe('Error category'),
   httpStatus: z.number().optional().describe('HTTP status code'),
   retryable: z.boolean().default(false).describe('Whether the request can be retried'),
