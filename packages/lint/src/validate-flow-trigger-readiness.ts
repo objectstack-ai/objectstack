@@ -51,6 +51,18 @@
 //      silence — every named runtime channel skips it because they all key off
 //      the same resolution that already gave up.
 //
+//   6. A `schedule` or `time_relative` flow that declares no acting
+//      organization (`config.organization`, #16659). Both triggers REFUSE to
+//      bind one — thrown, so the engine records the flow as not bound — and
+//      until this rule the refusal existed only at BOOT: `defineStack`, `os
+//      lint` and `verify_build` all passed a flow the trigger then refused, and
+//      an author's first signal was a production stderr line. That is exactly
+//      the authoring/runtime drift `engine.ts`'s trigger-kind resolver says
+//      must not exist, which is why the rule reads the SAME resolver and the
+//      SAME `resolveScheduleOrganization` helper the triggers refuse with.
+//      Severity is `warning` and the reason is the shipped corpus, not the
+//      strength of the verdict — see the id's own docblock.
+//
 // The spec import is deliberate and is what makes rule 3 possible without a
 // second copy of the descriptor's shape living in this file. It stays inside the
 // package's stated dependency direction — lint → `@objectstack/spec`, never onto
@@ -81,6 +93,15 @@
 //     authored-token → resolved-type map is a private chain of literal
 //     `startsWith` / `typeof` tests with no registry lookup anywhere in it. No
 //     package can teach the engine a new authored token.
+//   - `warning` — `flow-schedule-organization-missing` (#16659). On this
+//     paragraph's own criterion it belongs in the family above: the verdict is
+//     `resolveScheduleOrganization`'s and nothing installable changes it. It is
+//     held at `warning` by the CORPUS — an `error` gates `objectstack build`,
+//     and the repo's own shipped example apps carry time-triggered flows that
+//     cannot be repaired by authoring, because the only legal value is minted
+//     per install at runtime. Promoting it is a consequence of the open
+//     maintainer decision about package-shipped time-triggered flows, not a
+//     lint choice.
 //   - `warning` — `flow-trigger-unknown-object`, both halves. An object name
 //     this stack does not define may be defined by another installed package,
 //     and this rule cannot see that package's objects. The hedge is real, so the
@@ -103,7 +124,14 @@
 // flows keep being served. What IS refused is the dead flow's own publish — and,
 // on the CLI surface, a package build whose stack contains one.
 
-import { TimeRelativeTriggerSchema, resolveFlowTriggerKind } from '@objectstack/spec/automation';
+import {
+  TimeRelativeTriggerSchema,
+  resolveFlowTriggerKind,
+  SCHEDULE_ORGANIZATION_KEY,
+  resolveScheduleOrganization,
+  findScheduleOrganizationNearMissInConfig,
+  describeMissingScheduleOrganization,
+} from '@objectstack/spec/automation';
 import { recordsOf } from './object-graph.js';
 
 export type FlowTriggerReadinessSeverity = 'error' | 'warning';
@@ -173,6 +201,42 @@ export const FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE = 'flow-time-relative-desc
  *     call sites that each skip it.
  */
 export const FLOW_TRIGGER_UNROUTABLE = 'flow-trigger-unroutable';
+/**
+ * #16659 — a `schedule` or `time_relative` flow that declares no acting
+ * organization (`config.organization`). The trigger REFUSES to bind it, so the
+ * flow never fires; before this rule the author's first signal was a production
+ * stderr line at boot.
+ *
+ * It exists because `engine.ts`'s trigger-kind resolver states the invariant
+ * this rule keeps: the resolver is shared with `defineStack`'s
+ * trigger-capability refusal and this file, *"so the runtime cannot drift from
+ * what authoring accepted"*. A key required at bind and unknown to authoring is
+ * exactly that drift.
+ *
+ * ## Why `warning` and not `error`, when the never-fire family gates
+ *
+ * On the family's own criterion (#5762 — *is THIS STACK enough to know the flow
+ * is dead?*) this id belongs at `error`: the verdict is
+ * `resolveScheduleOrganization`'s, the same helper the two triggers refuse
+ * with, and no installed package changes it.
+ *
+ * What holds it at `warning` is the CORPUS, and it was measured rather than
+ * assumed. An `error` here is gating on the CLI surface too, so it refuses
+ * `objectstack build` — and the repo's own shipped example apps contain
+ * time-triggered flows that CANNOT be repaired by authoring: the only legal
+ * value is a `sys_organization.id`, minted per install at runtime, so a
+ * package-shipped flow has nothing to write there and ⛔ inventing a
+ * placeholder is worse than the omission (a value matching no row is silently
+ * authoritative). What a package-shipped time-triggered flow should do instead
+ * is an open maintainer decision, and promoting this id is that decision's
+ * consequence, not a lint choice: ⛔ do not raise it until the shipped corpus
+ * has an answer.
+ *
+ * The `warning` still discharges the invariant the rule exists for — the author
+ * learns at authoring time instead of at boot — and it is the same hedge
+ * `flow-trigger-unknown-object` carries, stated in the hint.
+ */
+export const FLOW_SCHEDULE_ORGANIZATION_MISSING = 'flow-schedule-organization-missing';
 
 type AnyRec = Record<string, unknown>;
 
@@ -626,6 +690,55 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
           `#3427; create/insert are synonyms). If the flow really is launched by hand or from a screen, ` +
           `declare type: 'autolaunched' or 'screen' instead of 'record_change' — those types have no trigger ` +
           `to be missing.`,
+      });
+    }
+
+    // 1g. #16659 — a time-triggered flow that declares no acting organization.
+    //
+    //     `ScheduleTrigger` and `TimeRelativeTrigger` refuse to bind one: the
+    //     refusal is THROWN from `start()`, so the engine's catch records the
+    //     flow as not bound, `getFlowRuntimeStates()` reports `bound: false`
+    //     and `getTriggerBindingAudit()` lists it. That is a good runtime
+    //     channel — and it is a BOOT-time one. Authoring said nothing at all:
+    //     `defineStack`, `os lint` and `verify_build` all passed a flow the
+    //     trigger then refused, which is precisely the drift `engine.ts`'s
+    //     trigger-kind resolver says must not exist.
+    //
+    //     ⛔ The judgement is NOT re-implemented here. `resolveFlowTriggerKind`
+    //     answers WHICH flows owe the key (the engine's own precedence, the
+    //     same resolver `isAutoTriggered` above already uses),
+    //     `resolveScheduleOrganization` answers whether one was declared (the
+    //     same helper both triggers refuse with, so a present-but-unusable
+    //     value — `''`, a number — is judged identically here and there), and
+    //     `describeMissingScheduleOrganization` writes the sentence, so this
+    //     rule and the bind-time refusal cannot say different things about the
+    //     same flow.
+    //
+    //     `record_change` and `api` flows are outside it by construction: they
+    //     are fired by a caller who already carries an organization, and the
+    //     engine leaves `organization` undefined on their bindings.
+    const triggerKind = resolveFlowTriggerKind(flow);
+    if (
+      start &&
+      (triggerKind === 'schedule' || triggerKind === 'time_relative') &&
+      resolveScheduleOrganization(flow) === undefined
+    ) {
+      const nearMiss = findScheduleOrganizationNearMissInConfig(config);
+      findings.push({
+        // `warning`, and the reason is the shipped corpus rather than the
+        // strength of the verdict — see FLOW_SCHEDULE_ORGANIZATION_MISSING's
+        // own docblock, which is where that decision is recorded.
+        severity: 'warning',
+        rule: FLOW_SCHEDULE_ORGANIZATION_MISSING,
+        where: `flow "${flowName}" › start node`,
+        path: `flows[${flowIndex}].nodes[${start.index}].config.${SCHEDULE_ORGANIZATION_KEY}`,
+        message: describeMissingScheduleOrganization(flowName, { kind: triggerKind, nearMiss }),
+        hint:
+          `Add config.${SCHEDULE_ORGANIZATION_KEY}: '<sys_organization.id>' to the start node. The id is minted ` +
+          `by the running install, so a flow shipped INSIDE a package cannot carry one — register such a flow ` +
+          `at runtime with an organization that install actually holds, and ⛔ never write a placeholder id: a ` +
+          `value matching no row is silently authoritative to every report, export and cleanup that filters by ` +
+          `organization, which is strictly worse than the refusal.`,
       });
     }
 
