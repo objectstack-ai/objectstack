@@ -916,6 +916,56 @@ describe('TimeRelativeTrigger — the acting-organization refusal (#16659)', () 
         expect(calls[0].context?.tenantId, 'the scope must reach the engine, not be applied afterwards').toBe(TEST_ORG);
     });
 
+    it('NEGATIVE CONTROL: a single-organization install selects exactly what it selected before', async () => {
+        // The narrowing must remove NOTHING where there is nothing to remove.
+        // Two legs over ONE fixture:
+        //   A — the sweep as it ships, scoped to the declared organization;
+        //   B — the SAME query with `context: { isSystem: true }` and no scope,
+        //       which is the pre-fix sweep byte for byte.
+        // Equal answers is the claim; ⛔ the pair is what makes it a measurement
+        // rather than an argument, and the DIFFERENTIAL above is its opposite
+        // limb — add a second organization and these two legs must diverge.
+        //
+        // The NULL-organization row is in the fixture on purpose: the driver's
+        // scope is `org = :tenant OR org IS NULL`, so a platform row stays
+        // visible to a scoped read. That is part of "identical", not an
+        // exception to it.
+        const DESC = { object: 'contracts', dateField: 'end_date', withinDays: 60 };
+        const rows: Row[] = [
+            { id: 'c1', end_date: '2026-07-25T00:00:00.000Z', organization_id: TEST_ORG },
+            { id: 'c2', end_date: '2026-08-01T00:00:00.000Z', organization_id: TEST_ORG },
+            { id: 'c3', end_date: '2026-07-20T00:00:00.000Z', organization_id: null },
+        ];
+        const job = fakeJobService();
+        const { engine, calls } = tenantScopedDataEngine(rows);
+        const trigger = new TimeRelativeTrigger(() => job.service, () => engine, silentLogger(), NOW);
+        const seen: AutomationContext[] = [];
+
+        trigger.start(binding(DESC), async (ctx) => void seen.push(ctx));
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+        const scoped = seen.map((c) => (c.record as Row).id);
+
+        // Leg B, through the same double: the query the sweep used to send.
+        const window = computeDateWindows(DESC, NOW())[0];
+        const before =
+            (await engine.find('contracts', {
+                where: buildWindowWhere(DESC, window),
+                limit: 1000,
+                context: { isSystem: true },
+            })) ?? [];
+        const unscoped = before.map((r) => r.id);
+
+        expect(
+            scoped,
+            'a single-organization install must see the same rows it saw before — the scope removes nothing there',
+        ).toEqual(unscoped);
+        // Non-vacuity, both directions: the set is not empty, and the scope was
+        // genuinely applied rather than quietly absent.
+        expect(scoped, 'an empty answer would make the equality above pass with everything broken').toEqual(['c1', 'c2', 'c3']);
+        expect(calls[0].context?.tenantId, 'leg A must really have asked for a scope').toBe(TEST_ORG);
+    });
+
     it('a store that CANNOT honour the scope is reported at `error`, never answered unscoped', async () => {
         // `driver-memory` refuses any call handed a tenant scope (#16589). A
         // sweep required to stay inside one organization, talking to a store
