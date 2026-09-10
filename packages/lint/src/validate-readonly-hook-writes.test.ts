@@ -696,3 +696,48 @@ describe('READONLY_HOOK_WRITE_PATTERN_IDS - ledger partition', () => {
     }
   });
 });
+
+// [#16546] `hooks[i].body.source` names a key the author never wrote when the
+// body was minted by `lowerCallables` from an inline `handler` function — this
+// rule redirects `path` (plus a message suffix) to `hooks[i].handler`, the key
+// that replaced it, when `ctx.loweredHookRefs` names this hook's ref.
+describe('validateReadonlyHookWrites - #16546: path redirect for a lowered hook', () => {
+  const loweredStack = () =>
+    crmStack("await ctx.api.object('crm_account').update({ id: accountId, last_activity_date: now });");
+
+  it('reports `hooks[i].handler` plus the suffix when this hook’s ref is in ctx.loweredHookRefs', () => {
+    const stack = loweredStack();
+    // The lowered shape: `handler` is the ref string `lowerCallables` minted,
+    // beside the `body` it extracted from the function it replaced.
+    (stack.hooks[0] as Record<string, unknown>).handler = 'touch_account';
+    const findings = validateReadonlyHookWrites(stack, { loweredHookRefs: new Set(['touch_account']) });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('hooks[0].handler');
+    expect(findings[0].message).toContain('(judged on the metadata body lowered from the inline handler)');
+    // [3] Only the location and the wording move — the verdict does not.
+    expect(findings[0].rule).toBe(HOOK_API_UPDATE_READONLY_FIELD);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].where).toBe('hook "touch_account" > body');
+  });
+
+  it('CONTROL — the identical hook keeps `hooks[i].body.source` when ctx is absent (author-written body)', () => {
+    // [4] Non-regression control: same stack, no `ctx` at all — the standing
+    // shape every OTHER test in this file exercises. Path must not move.
+    const findings = validateReadonlyHookWrites(loweredStack());
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('hooks[0].body.source');
+    expect(findings[0].message).not.toContain('lowered from the inline handler');
+  });
+
+  it('CONTROL — a `handler` ref NOT named in ctx.loweredHookRefs keeps `hooks[i].body.source`', () => {
+    // A hook can carry a string `handler` (a bundle reference, #16095) without
+    // its `body` having been minted from a function THIS run lowered — e.g. a
+    // second `runAuthoringRules` call over an already-lowered stack. Only
+    // membership in the set redirects the path, never `handler`'s mere presence.
+    const stack = loweredStack();
+    (stack.hooks[0] as Record<string, unknown>).handler = 'touch_account';
+    const findings = validateReadonlyHookWrites(stack, { loweredHookRefs: new Set(['some_other_hook']) });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('hooks[0].body.source');
+  });
+});
