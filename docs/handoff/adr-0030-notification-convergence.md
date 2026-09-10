@@ -62,16 +62,33 @@ a per-user inbox row directly.
   a `dedupKey`. No more direct `sys_notification` writes. The plugin resolves the
   `messaging` service lazily at hook time (`audit-plugin.ts`).
 
-### Data migration (not auto-run)
+### ⚰️ Data migration — RETIRED, there is none
+
+This section used to describe
 `packages/metadata/src/migrations/migrate-sys-notification-to-event.ts`
-(exported from `@objectstack/metadata/migrations`). Splits each legacy
-`sys_notification` inbox row into `sys_inbox_message` + a receipt, rewrites the
-row to the event shape, and clears the legacy columns. **Idempotent**; reports
-`not_applicable` on fresh installs.
+(exported from `@objectstack/metadata/migrations`), which split each legacy
+`sys_notification` inbox row into `sys_inbox_message` + a receipt, rewrote the
+row to the event shape and cleared the legacy columns.
+
+**That runner is gone (#16194).** It had zero production callers and no
+`os migrate` sub-command, and both ways of giving it one were refused: an
+operator door is a permanent surface for a migration with no measured demand,
+and a boot-time invoker is an unattended data rewrite. ⇒ **Pre-ADR-0030
+`sys_notification` rows are not carried by the platform on this line.** After
+the cut-over the bell shows rows emitted from the new pipeline onward; older
+per-user inbox rows stay where they are, unread by the new UI.
+
+⚠️ Nobody has measured whether any live deployment still holds pre-ADR-0030
+`sys_notification` rows. If **your named deployment** does and needs them, ⛔ do
+not re-add the call — the migration returns as an operator-runnable `os migrate`
+sub-command shaped exactly like `files-to-references` / `value-shapes` (dry-run
+default, `--apply` gate, documented consequence), under its own card. Say so on
+#16194.
 
 ### Tests
-`messaging-service`, `inbox-channel`, `messaging-service-plugin`, `notify-node`,
-and the migration all have updated/added coverage. All green.
+`messaging-service`, `inbox-channel`, `messaging-service-plugin` and
+`notify-node` all have updated/added coverage. All green. (The migration's own
+suites went with the runner.)
 
 ---
 
@@ -79,7 +96,9 @@ and the migration all have updated/added coverage. All green.
 
 The bell read `sys_notification.{recipient_id, is_read, title, body, …}`. Those
 fields **no longer exist**. Until objectui is updated, the bell will be empty /
-error. **Do the objectui cut-over and the data migration together.**
+error. ⚰️ There is **no data migration to pair it with** any more (see above):
+do the objectui cut-over on its own, and expect the bell to start from the
+rows the new pipeline emits.
 
 ### objectui changes required (`app-shell`)
 1. **`AppHeader.tsx` / `InboxPopover.tsx`**: poll **`sys_inbox_message`** filtered
@@ -98,12 +117,18 @@ error. **Do the objectui cut-over and the data migration together.**
 ### Cut-over sequence (avoid a blank bell)
 1. Deploy this framework change (objects + emit + producers). New notifications
    now land in `sys_inbox_message` + receipts.
-2. Run `migrateSysNotificationToEvent({ driver, data })` to carry existing
-   notifications into `sys_inbox_message` + receipts.
-3. Deploy the objectui bell repoint.
+2. Deploy the objectui bell repoint.
 
 (Step order tolerates a brief window where new rows exist but the UI hasn't
 flipped — the inbox is being populated the whole time.)
+
+> ⚰️ **This sequence used to have three steps.** The middle one was
+> `migrateSysNotificationToEvent({ driver, data })`, carrying pre-cut-over
+> `sys_notification` rows into `sys_inbox_message` + receipts. That runner is
+> retired (#16194) and **pre-ADR-0030 rows are not carried by the platform on
+> this line** — the reasoning, the unmeasured-deployment caveat and the reversal
+> path are in [Data migration — RETIRED](#-data-migration--retired-there-is-none)
+> above. ⛔ Do not re-add the call here.
 
 ---
 
