@@ -1412,9 +1412,12 @@ const AUTHORSHIP_KEY_LINES = new Map(
  *
  * ⛔ `Reviewed-by:` is NOT widened for the isolated review subagent, and that is
  * the 2026-09-02 ruling held rather than a gap (#17346). Every 2026-09-09
- * specimen writes the value as prose — "isolated `claude-fable-5-1` subagent,
- * transcript-verified …" — because an isolated reviewer has no session of its
- * own. Admitting that prose would retire the reading: a value that names no
+ * specimen writes the value as prose naming the reviewing MODEL and its
+ * transcript-verification count, because an isolated reviewer has no session of
+ * its own. ⛔ The fixtures below carry the SHAPE and not the model id: the tier
+ * constant has exactly one spelling in this tree (`dispatch-gates.mjs`), and a
+ * review label or fixture that names a model is the thing the maintainer ruled
+ * against — 「needs:fable-review 这个标签不好,下次模型升级怎么办」. Admitting that prose would retire the reading: a value that names no
  * identity compares to nothing, so the equality test that IS the independence
  * clause would answer about every pair the way it answers about none. The
  * remedy is on the WRITING side, and the identity it needs already exists —
@@ -1455,7 +1458,7 @@ const BRANCH_TOKEN = /^(claude\/[A-Za-z0-9._/-]*[A-Za-z0-9])/;
  *
  * ⛔ It strips DECORATION only — spaces, `**`, backticks — never a word. The
  * near misses the ruling turns on are untouched: `branch \`claude/…\``,
- * `the dev on claude/…` and `isolated \`claude-fable-5-1\` subagent` all stop
+ * `the dev on claude/…` and the corpus's `isolated <model> subagent` all stop
  * the strip at their first letter, so the token is still required to be the
  * FIRST thing after the colon and its decoration.
  */
@@ -3243,7 +3246,7 @@ export function selfTest() {
       `## Contract review (clause ②) — **PASS WITH FINDINGS**, no blocking item · head \`${LIVE_HEAD_73}\``,
       '',
       '- **Implemented-by:** branch `claude/issue-16657-raw-exec-operator-detail-cause` @ `de0bd50469`',
-      '- **Reviewed-by:** isolated `claude-fable-5-1` subagent, **transcript-verified**: 105 harness-stamped model fields, one distinct value.',
+      '- **Reviewed-by:** isolated review subagent, **transcript-verified**: 105 harness-stamped model fields, one distinct value.',
     ].join('\n'),
   };
   // Dialect ③ — comment 5600627944 (PR #17116): the verdict word bolded INSIDE
@@ -3256,7 +3259,7 @@ export function selfTest() {
       `## Contract review at \`CONTRACT_REVIEW_TIER\` — **Verdict: PASS WITH FINDINGS** (audit reading; director seat, \`session_017Js5kTpTtxieBjPyScgxJ3\`)`,
       '',
       `PR #17116 · verdict pinned to head \`${LIVE_HEAD_16}\` · reviewed 10:36Z–10:46Z.`,
-      '- **Reviewed-by:** isolated `claude-fable-5-1` subagent, transcript-verified (89 harness stamps), adopted **verbatim** below.',
+      '- **Reviewed-by:** isolated review subagent, transcript-verified (89 harness stamps), adopted **verbatim** below.',
       `- **Implemented-by:** the \`domain:services\` seat's dev \`${DEV_16861}\` (\`mode:subagent\`), branch \`claude/issue-16861-already-have-admin-unordered-cap\`.`,
     ].join('\n'),
   };
@@ -3294,7 +3297,7 @@ export function selfTest() {
   const proseRow = c4VerdictSelfReview(live([LIVE_BOLD]));
   t('⭐ a PROSE `Reviewed-by:` value with no session token reads MALFORMED — the ruling is held, not widened', typeof proseRow === 'string' && says(proseRow, 'HALF'));
   t('…naming the missing token by what the key admits', says(proseRow, '`Reviewed-by:` carries no readable session ID'));
-  t('…and quoting the offending line back, so the repair is located', says(proseRow, 'claude-fable-5-1'));
+  t('…and quoting the offending line back, so the repair is located', says(proseRow, 'isolated review subagent'));
   t('…and naming the WRITING-side remedy: the rendering or adopting seat writes its OWN session', says(proseRow, '渲染或采纳裁决的席位写自己的 session') && says(proseRow, 'ADOPTS'));
   t('…and refusing the model name as an identity in as many words', says(proseRow, 'Prose naming the reviewing MODEL is not an identity'));
   t('…and pointing at the comment, not merely the timestamp', says(proseRow, 'comment 5600239551'));
