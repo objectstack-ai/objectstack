@@ -101,6 +101,24 @@ objects: {
 > now a loud publish-time error carrying this prescription. The keys return
 > with the M2 lifecycle initiative (feature + RBAC in one batch, #1883);
 > until then a dispatched `restore` / `purge` is denied unconditionally.
+>
+> **Exactly one value is still accepted, and it is not an author's to write:**
+> the literal `false` that the published 17.x toolchain materialized into every
+> permission entry of every artifact it built. That emitted default parses as
+> inert residue and is silently **stripped** (#12840, so upgrading a runtime
+> does not kill artifacts nobody re-published) — a source that still writes
+> `allowRestore: false` therefore gets **no error and no key**. Every other
+> value is refused: `"false"`, `0`, `1`, `"true"` and `null` all fail exactly
+> like `true`, with the same message. **This is not a truthy/falsy split** —
+> only the boolean literal `false` is tolerated.
+>
+> **Consumers of validated data never see either key**, so a post-parse guard
+> is dead code: `permissions.allowRestore` is always `undefined`, which makes
+> `'allowRestore' in permissions`, `if (permissions.allowRestore)` and
+> `permissions.allowRestore === true` all unable to fire. Only **pre-parse**
+> tooling reading raw source (a linter or migration tool over
+> `objectstack.json`) can tell legacy `false` residue from an ADR-0049
+> violation — and it should say something different about each.
 
 ## Field Permissions
 

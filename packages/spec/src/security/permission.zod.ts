@@ -217,6 +217,15 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * and is STRIPPED by the residue stage on {@link ObjectPermissionSchema}
    * (`OBJECT_PERMISSION_RETIRED_KEY_RESIDUE`); the tombstones below never see
    * it. Every other value still lands here, prescription intact.
+   *
+   * [#17425] The accept set that leaves behind, stated exactly — the residue
+   * stage tolerates ONE value, the boolean literal `false`, compared by
+   * identity against the captured literal. **This is not a truthy/falsy
+   * split**: `"false"`, `0`, `''` and `null` are refused exactly like `true`
+   * is, with the same `code: 'invalid_type'` / `expected: 'never'` issue at
+   * the key's own path and the same guidance string. Anything that is not the
+   * captured literal is an authored claim, and authored claims are what the
+   * tombstone exists to refuse. The matrix is pinned in `permission.test.ts`.
    */
   allowRestore: retiredKey(
     '`objects.<object>.allowRestore` was removed in @objectstack/spec 17 (ADR-0049) — ' +
@@ -293,6 +302,32 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
  * tombstone with its prescription. Maintainer ruling 2026-08-28 (recorded on
  * objectstack-ai/cloud#1685): a retired key that had a schema default is
  * refused only when it carries a non-default value.
+ *
+ * ## [#17425] What a consumer of PARSED output can observe: effectively nothing
+ *
+ * Every spelling reachable from JSON is gone by the time you hold parsed data:
+ * `false` is stripped, and every other JSON-expressible value (`true`,
+ * `"true"`, `"false"`, `0`, `1`, `null`) throws before a parsed object exists.
+ * So on validated data `permissions.allowRestore` is always `undefined`, which
+ * makes `if (permissions.allowRestore)` and `permissions.allowRestore === true`
+ * dead code — a post-parse guard against either bit can never fire, and
+ * `=== true` is no fix for a truthiness check because a raw `true` never
+ * survives the parse either.
+ *
+ * ONE observation survives, and it is not reachable from JSON: an in-memory
+ * TS/JS input carrying an EXPLICIT `undefined` (`{ allowRestore: undefined }`
+ * — the shape a spread of an object that once carried the key produces) parses,
+ * and the key survives as an OWN property whose value is `undefined`. So
+ * `'allowRestore' in parsed` can be `true` while the value is still undefined;
+ * `JSON.parse(JSON.stringify(parsed))` drops it again. Measured and pinned in
+ * `permission.test.ts`.
+ *
+ * ⇒ A `false`-versus-other distinction has a live consumer only in PRE-PARSE /
+ * raw-source tooling — a linter or migration tool reading `objectstack.json`
+ * (or a `.ts` source) before validation, where `false` is inert legacy residue
+ * and any other value is a hard ADR-0049 violation. Those two facts deserve
+ * different messages; a presence or truthiness check on raw input conflates
+ * them, and the same check on parsed output measures nothing at all.
  */
 export const ObjectPermissionSchema = lazySchema(() =>
   acceptRetiredDefaultResidue(ObjectPermissionBaseSchema, OBJECT_PERMISSION_RETIRED_KEY_RESIDUE),
