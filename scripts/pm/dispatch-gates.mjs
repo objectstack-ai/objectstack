@@ -15548,6 +15548,7 @@ function selfTest() {
     const total = COMPOUND_ANCHOR_LEDGER.length;
     const genuine = COMPOUND_ANCHOR_LEDGER.filter(([, , accidental]) => !accidental).length;
     const accidental = COMPOUND_ANCHOR_LEDGER.length - genuine;
+    const distinctSpellings = new Set(COMPOUND_ANCHOR_LEDGER.map(([, name]) => name)).size;
 
     // Only as wide as the words this docblock actually spells; extending it is
     // a deliberate edit, not silent tolerance for a new spelling.
@@ -15562,6 +15563,7 @@ function selfTest() {
     const allFiring = prose.match(/keeps firing on all (\d+), the mask keeps blanking all (\d+)/);
     const genuineLine = prose.match(/([A-Za-z]+) are genuine self-test batteries/);
     const accidentalLine = prose.match(/([A-Za-z]+) are production code:/);
+    const spellingsLine = prose.match(/over (\d+) distinct spellings/);
 
     t(
       'the docblock\'s TOTAL row count — "the remaining N carry compound names" and both "all N" claims — ' +
@@ -15583,6 +15585,17 @@ function selfTest() {
       "the docblock's ACCIDENTAL count (\"N are production code:\") agrees with the table " +
         `(table: ${accidental}; declared: ${accidentalLine ? accidentalLine[1] : '<not found>'})`,
       accidentalLine !== null && asCount(accidentalLine[1]) === accidental,
+    );
+    // Distinct NAMES, not rows: `runSelfTest` is a genuine entry point in one
+    // file and an accidental one in another, so it is one spelling occupying
+    // two rows — the same reason COMPOUND_ANCHOR_KEYS has to carry the file in
+    // its key. This is derivable from the table exactly like the three above,
+    // so it is pinned the same way rather than left as the one clause in this
+    // paragraph a future row could still drift without going red.
+    t(
+      "the docblock's distinct-spellings count (\"over N distinct spellings\") agrees with the table " +
+        `(table: ${distinctSpellings}; declared: ${spellingsLine ? spellingsLine[1] : '<not found>'})`,
+      spellingsLine !== null && Number(spellingsLine[1]) === distinctSpellings,
     );
   }
 
