@@ -30,12 +30,106 @@ DELETE /api/v1/packages/:packageId           — Uninstall a package
 ## TypeScript Usage
 
 ```typescript
-import { GetInstalledPackageRequestSchema, GetInstalledPackageResponseSchema, ListInstalledPackagesRequestSchema, ListInstalledPackagesResponseSchema, PackageApiErrorCode, PackageInstallRequestSchema, PackageInstallResponseSchema, PackagePathParamsSchema, PackageRollbackRequestSchema, PackageUpgradeRequestSchema, PackageUpgradeResponseSchema, ResolveDependenciesRequestSchema, ResolveDependenciesResponseSchema, UninstallPackageApiRequestSchema, UninstallPackageApiResponseSchema, UploadArtifactRequestSchema, UploadArtifactResponseSchema } from '@objectstack/spec/api';
-import type { GetInstalledPackageRequest, GetInstalledPackageResponse, ListInstalledPackagesRequest, ListInstalledPackagesResponse, PackageApiErrorCode, PackageInstallRequest, PackageInstallResponse, PackagePathParams, PackageRollbackRequest, PackageUpgradeRequest, PackageUpgradeResponse, ResolveDependenciesRequest, ResolveDependenciesResponse, UninstallPackageApiRequest, UninstallPackageApiResponse, UploadArtifactRequest, UploadArtifactResponse } from '@objectstack/spec/api';
+import { AssembledInstalledPackageSchema, GetInstalledPackageRequestSchema, GetInstalledPackageResponseSchema, InstalledPackageAtEitherStageSchema, ListInstalledPackagesRequestSchema, ListInstalledPackagesResponseSchema, PackageApiErrorCode, PackageInstallRequestSchema, PackageInstallResponseSchema, PackagePathParamsSchema, PackageRollbackRequestSchema, PackageUpgradeRequestSchema, PackageUpgradeResponseSchema, ResolveDependenciesRequestSchema, ResolveDependenciesResponseSchema, UninstallPackageApiRequestSchema, UninstallPackageApiResponseSchema, UploadArtifactRequestSchema, UploadArtifactResponseSchema } from '@objectstack/spec/api';
+import type { AssembledInstalledPackage, GetInstalledPackageRequest, GetInstalledPackageResponse, InstalledPackageAtEitherStage, ListInstalledPackagesRequest, ListInstalledPackagesResponse, PackageApiErrorCode, PackageInstallRequest, PackageInstallResponse, PackagePathParams, PackageRollbackRequest, PackageUpgradeRequest, PackageUpgradeResponse, ResolveDependenciesRequest, ResolveDependenciesResponse, UninstallPackageApiRequest, UninstallPackageApiResponse, UploadArtifactRequest, UploadArtifactResponse } from '@objectstack/spec/api';
 
 // Validate data
-const result = GetInstalledPackageRequestSchema.parse(data);
+const result = AssembledInstalledPackageSchema.parse(data);
 ```
+
+---
+
+## AssembledInstalledPackage
+
+Installed package row whose manifest is the assembled package body
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries |
+| **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
+| **installedAt** | `string` | optional | Installation timestamp |
+| **updatedAt** | `string` | optional | Last update timestamp |
+| **installedVersion** | `string` | optional | Currently installed version for quick access |
+| **previousVersion** | `string` | optional | Version before the last upgrade |
+| **statusChangedAt** | `string` | optional | Status change timestamp |
+| **errorMessage** | `string` | optional | Error message when status is error |
+| **settings** | `Record<string, any>` | optional | User-provided configuration settings |
+| **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
+| **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
+
+### Nested Shape: `AssembledInstalledPackage.manifest`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
+| **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
+| **version** | `string` | ✅ | Package version (semantic versioning) |
+| **type** | `Enum<'plugin' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql' \| …>` | ✅ | Type of package |
+| **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
+| **name** | `string` | ✅ | Human-readable package name |
+| **description** | `string` | optional | Package description |
+| **permissions** | `{ name: string; label?: string; description?: string; packageId?: string; … }[]` | optional | Permission Sets |
+| **objects** | `{ name: string; label?: string; pluralLabel?: string; description?: string; … }[]` | optional | Business Objects definition (owned by this package) |
+| **datasources** | `{ name: string; label?: string; driver: string; config: Record<string, any>; … }[]` | optional | External Data Connections |
+| **dependencies** | `Record<string, string>` | optional | Package dependencies |
+| **configuration** | `never` | optional | [REMOVED] `manifest.configuration` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read the block: no settings UI rendered it and no loader resolved a setting from it, so authoring it configured nothing. Worse, `properties.*.secret` promised "value is encrypted/masked (e.g. API Keys)" while nothing encrypted, masked or even parsed the flag — a false assurance about credential handling. Delete the key. A plugin is configured by the host that composes it: pass options to its constructor in `defineStack({ plugins: [new MyPlugin({ … })] })`, which is the enforced channel. A declarative settings surface must be designed with an enforcing reader first, not revived here. |
+| **contributes** | `{ kinds?: object[] }` | optional | Platform contributions |
+| **data** | `{ object: string; externalId?: string \| string[]; mode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env?: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | optional | Seed Data / Fixtures for bootstrapping |
+| **capabilities** | `{ name: string; label?: string; description?: string; scope?: Enum<'platform' \| 'org'>; … }[]` | optional | [ADR-0066 D1] Authorization capabilities this package defines (seeded with package provenance) |
+| **extensions** | `never` | optional | [REMOVED] `manifest.extensions` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — an untyped map with zero readers: whatever was parked here was stored and never consulted. Delete the key. Extend the platform through the enforced channels instead: `contributes.kinds` registers metadata kinds, `navigationContributions` injects navigation into other packages' apps, and code-level extension happens in the plugin itself (`init`/`start`). |
+| **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: (object \| … +8 more)[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
+| **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — and the plugin trust tier (`manifest.runtime`) does not give it back: that tier is enforced at the cloud marketplace PUBLISH gate only (an unverified publisher requesting the `node` tier is rejected with HTTP 422 and forced to manual review), while load-side enforcement is NOT implemented, so a locally installed plugin is not isolated by the tier it declares. Use the permission declarations, which are enforced. |
+| **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
+| **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
+| **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual review); load-side enforcement is NOT implemented, so a locally installed plugin is not isolated by the tier it declares |
+| **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
+| **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
+| **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
+| **functions** | `any` | optional | Named handler functions, as they survived the record JSON projection |
+| **datasourceMapping** | `{ namespace?: string; package?: string; objectPattern?: string; default?: boolean; … }[]` | optional | Centralized datasource routing rules for packages/namespaces/objects |
+| **translations** | `Record<string, { objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }>[]` | optional | I18n Translation Bundles |
+| **objectExtensions** | `{ extend: string; fields?: Record<string, object>; label?: string; pluralLabel?: string; … }[]` | optional | Extensions to objects owned by other packages |
+| **apps** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; icon?: string; … }[]` | optional | Applications |
+| **views** | `{ name?: string; label?: string \| Record<string, string>; object?: string; list?: object; … }[]` | optional | List Views |
+| **viewItems** | `never` | optional | [MACHINE-ASSEMBLED] Non-container view artifacts of a runtime-assembled manifest (standalone ViewItems, flattened overlays) — written by package export and artifact factories, refused in authored stack sources. |
+| **pages** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; icon?: string; … }[]` | optional | Custom Pages |
+| **dashboards** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; header?: object; … }[]` | optional | Dashboards |
+| **reports** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; type?: Enum<'tabular' \| 'summary' \| 'matrix' \| 'joined'>; … }[]` | optional | Analytics Reports |
+| **datasets** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; object: string; … }[]` | optional | Analytics semantic-layer datasets (ADR-0021) |
+| **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; objectName?: string; … }[]` | optional | Global and Object Actions. Unique per scope, not per stack: the runtime keys every action by its owning object's name (or 'global' when object-less), a colon, then the action name, and defineStack refuses two declarations that resolve to one key — both here, both on one object's actions, or one in each position, identical twins included (an embedded action is keyed by the object it is written on, not by its own objectName). One global and one object-bound action may share a name; on that object's route the object's own actions take precedence for by-name readers. composeStacks runs the same key rule across its input stacks (counting distinct stacks, not sites) and names both source stacks on a collision. |
+| **flows** | `{ name: string; label: string; description?: string; successMessage?: string; … }[]` | optional | Screen Flows |
+| **jobs** | `{ name: string; label?: string; description?: string; schedule: object \| object \| object; … }[]` | optional | Background / Scheduled Jobs (run by IJobService on cron/interval/once schedules) |
+| **emailTemplates** | `{ name: string; label: string; category?: Enum<'auth' \| 'notification' \| 'workflow' \| 'marketing' \| 'custom'>; locale?: string; … }[]` | optional | Email Templates resolved by IEmailService.sendTemplate(`{ template, locale }`) |
+| **docs** | `{ name: string; label?: string; description?: string; content: string; … }[]` | optional | Package documentation — flat Markdown items compiled from src/docs/*.md (ADR-0046) |
+| **books** | `{ name: string; label?: string; description?: string; slug?: string; … }[]` | optional | Documentation navigation spines — ordered groups with derived membership (ADR-0046 §6) |
+| **positions** | `{ name: string; label: string; description?: string; delegatable?: boolean; … }[]` | optional | Positions — flat capability-distribution groups (ADR-0090 D3) |
+| **sharingRules** | `{ name: string; label?: string; description?: string; object: string; … }[]` | optional | Record Sharing Rules |
+| **apis** | `{ name: string; path: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; summary?: string; … }[]` | optional | API Endpoints — declared endpoints are live from protocol 17; each is gated at publish (ADR-0121) |
+| **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]; … }[]` | optional | Outbound Webhooks |
+| **agents** | `{ name: string; label: string; avatar?: string; role: string; … }[]` | optional | AI Agents — platform-internal (ADR-0063 §2): the kernel ships exactly two (ask/build); third parties extend via skills, not agents |
+| **tools** | `{ name: string; label: string; description: string; parameters: Record<string, any>; … }[]` | optional | AI Tool metadata records — optional refinement layer, never required: the default path is skills referencing platform tools or materialised action_`<name>` tools (ADR-0109) |
+| **skills** | `{ name: string; label: string; description?: string; surface?: Enum<'ask' \| 'build' \| 'both'>; … }[]` | optional | AI Skills (reusable capability bundles — the third-party AI extension primitive, ADR-0063) |
+| **hooks** | `any` | optional | Object lifecycle hooks, as they survived the record JSON projection |
+| **mappings** | `{ name: string; label?: string; sourceFormat?: Enum<'csv' \| 'json' \| 'xml' \| 'sql'>; targetObject: string; … }[]` | optional | Data Import/Export Mappings |
+| **analyticsCubes** | `{ name: string; title?: string; description?: string; sql: string; … }[]` | optional | Analytics Semantic Layer Cubes |
+| **connectors** | `{ name: string; label: string; type: Enum<'saas' \| 'database' \| 'file_storage' \| 'message_queue' \| 'api' \| 'custom'>; description?: string; … }[]` | optional | External System Connectors. A provider-bound entry (has `provider`: openapi/mcp/rest) is materialized into a live, dispatchable connector at boot and referenced by flows via `connector_action`; credentials are `auth.credentialRef` references, never inline secrets. An entry with no `provider` is a catalog descriptor only (NOT dispatchable) — set `enabled: false` on deliberate descriptors. Unknown provider / unresolvable credentialRef / name conflict ⇒ hard boot error (ADR-0097). |
+| **requires** | `string[]` | optional | Capability names this stack requires from the platform (canonical kebab-case tokens from PLATFORM_CAPABILITY_TOKENS; an unknown token is a defineStack error, declared-but-missing ⇒ fail-fast at startup) |
+| **tiers** | `string[]` | optional | Plugin tier presets to enable; overrides --preset |
+
+### Nested Shape: `AssembledInstalledPackage.upgradeHistory[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **fromVersion** | `string` | ✅ | Version before upgrade |
+| **toVersion** | `string` | ✅ | Version after upgrade |
+| **upgradedAt** | `string` | ✅ | Upgrade timestamp |
+| **status** | `Enum<'success' \| 'failed' \| 'rolled_back'>` | ✅ | Upgrade outcome |
+| **migrationLog** | `string[]` | optional | Migration step logs |
+
 
 ---
 
@@ -61,7 +155,7 @@ Get installed package response
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Installed package details |
+| **data** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … } \| … +1 more` | ✅ | Installed package details |
 
 ### Nested Shape: `GetInstalledPackageResponse.error`
 
@@ -77,7 +171,9 @@ Get installed package response
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
 
-### Nested Shape: `GetInstalledPackageResponse.data`
+### Nested Shape: `GetInstalledPackageResponse.data[option 1]`
+
+Installed package with runtime lifecycle state
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -93,6 +189,192 @@ Get installed package response
 | **settings** | `Record<string, any>` | optional | User-provided configuration settings |
 | **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
 | **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
+
+### Nested Shape: `GetInstalledPackageResponse.data[option 2]`
+
+Installed package row whose manifest is the assembled package body
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries |
+| **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
+| **installedAt** | `string` | optional | Installation timestamp |
+| **updatedAt** | `string` | optional | Last update timestamp |
+| **installedVersion** | `string` | optional | Currently installed version for quick access |
+| **previousVersion** | `string` | optional | Version before the last upgrade |
+| **statusChangedAt** | `string` | optional | Status change timestamp |
+| **errorMessage** | `string` | optional | Error message when status is error |
+| **settings** | `Record<string, any>` | optional | User-provided configuration settings |
+| **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
+| **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
+
+
+---
+
+## InstalledPackageAtEitherStage
+
+Installed package row at whichever manifest stage it was installed at
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+Installed package with runtime lifecycle state
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Full package manifest |
+| **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
+| **installedAt** | `string` | optional | Installation timestamp |
+| **updatedAt** | `string` | optional | Last update timestamp |
+| **installedVersion** | `string` | optional | Currently installed version for quick access |
+| **previousVersion** | `string` | optional | Version before the last upgrade |
+| **statusChangedAt** | `string` | optional | Status change timestamp |
+| **errorMessage** | `string` | optional | Error message when status is error |
+| **settings** | `Record<string, any>` | optional | User-provided configuration settings |
+| **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
+| **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
+
+### Nested Shape: `InstalledPackageAtEitherStage[option 1].manifest`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
+| **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
+| **version** | `string` | ✅ | Package version (semantic versioning) |
+| **type** | `Enum<'plugin' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql' \| …>` | ✅ | Type of package |
+| **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
+| **name** | `string` | ✅ | Human-readable package name |
+| **description** | `string` | optional | Package description |
+| **permissions** | `string[] \| { services?: string[]; hooks?: string[]; network?: string[]; fs?: string[] }` | optional | Required permissions: legacy string[] or structured plugin block (ADR-0025 §3.2) |
+| **objects** | `string[]` | optional | Glob patterns for ObjectQL schemas files |
+| **datasources** | `string[]` | optional | Glob patterns for Datasource definitions |
+| **dependencies** | `Record<string, string>` | optional | Package dependencies |
+| **configuration** | `never` | optional | [REMOVED] `manifest.configuration` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read the block: no settings UI rendered it and no loader resolved a setting from it, so authoring it configured nothing. Worse, `properties.*.secret` promised "value is encrypted/masked (e.g. API Keys)" while nothing encrypted, masked or even parsed the flag — a false assurance about credential handling. Delete the key. A plugin is configured by the host that composes it: pass options to its constructor in `defineStack({ plugins: [new MyPlugin({ … })] })`, which is the enforced channel. A declarative settings surface must be designed with an enforcing reader first, not revived here. |
+| **contributes** | `{ kinds?: object[] }` | optional | Platform contributions |
+| **data** | `{ object: string; externalId?: string \| string[]; mode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env?: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | optional | Initial seed data (prefer top-level data field) |
+| **capabilities** | `never` | optional | [REMOVED] `manifest.capabilities` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no discovery path ever consulted the block: nothing read `implements`, `provides`, `requires`, `extensionPoints` or `extensions`, so the declared "interoperability and automatic discovery" never happened. Delete the key. Real dependency resolution runs off top-level `manifest.dependencies`, which stays. Capability-based discovery must be designed with an enforcing reader first, not revived here. |
+| **extensions** | `never` | optional | [REMOVED] `manifest.extensions` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — an untyped map with zero readers: whatever was parked here was stored and never consulted. Delete the key. Extend the platform through the enforced channels instead: `contributes.kinds` registers metadata kinds, `navigationContributions` injects navigation into other packages' apps, and code-level extension happens in the plugin itself (`init`/`start`). |
+| **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: (object \| … +8 more)[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
+| **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — and the plugin trust tier (`manifest.runtime`) does not give it back: that tier is enforced at the cloud marketplace PUBLISH gate only (an unverified publisher requesting the `node` tier is rejected with HTTP 422 and forced to manual review), while load-side enforcement is NOT implemented, so a locally installed plugin is not isolated by the tier it declares. Use the permission declarations, which are enforced. |
+| **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
+| **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
+| **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual review); load-side enforcement is NOT implemented, so a locally installed plugin is not isolated by the tier it declares |
+| **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
+| **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
+| **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
+
+### Nested Shape: `InstalledPackageAtEitherStage[option 1].upgradeHistory[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **fromVersion** | `string` | ✅ | Version before upgrade |
+| **toVersion** | `string` | ✅ | Version after upgrade |
+| **upgradedAt** | `string` | ✅ | Upgrade timestamp |
+| **status** | `Enum<'success' \| 'failed' \| 'rolled_back'>` | ✅ | Upgrade outcome |
+| **migrationLog** | `string[]` | optional | Migration step logs |
+
+---
+
+#### Option 2
+
+Installed package row whose manifest is the assembled package body
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries |
+| **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
+| **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
+| **installedAt** | `string` | optional | Installation timestamp |
+| **updatedAt** | `string` | optional | Last update timestamp |
+| **installedVersion** | `string` | optional | Currently installed version for quick access |
+| **previousVersion** | `string` | optional | Version before the last upgrade |
+| **statusChangedAt** | `string` | optional | Status change timestamp |
+| **errorMessage** | `string` | optional | Error message when status is error |
+| **settings** | `Record<string, any>` | optional | User-provided configuration settings |
+| **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
+| **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
+
+### Nested Shape: `InstalledPackageAtEitherStage[option 2].manifest`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Unique package identifier (reverse domain style) |
+| **namespace** | `string` | optional | Short namespace identifier; also the mandatory prefix of every object name (e.g. "todo" → object names "todo_task", "todo_project") |
+| **defaultDatasource** | `string` | optional (default: `"default"`) | Default datasource for all objects in this package |
+| **version** | `string` | ✅ | Package version (semantic versioning) |
+| **type** | `Enum<'plugin' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql' \| …>` | ✅ | Type of package |
+| **scope** | `Enum<'cloud' \| 'system' \| 'project'>` | optional (default: `"project"`) | Deployment scope: cloud \| system \| project |
+| **name** | `string` | ✅ | Human-readable package name |
+| **description** | `string` | optional | Package description |
+| **permissions** | `{ name: string; label?: string; description?: string; packageId?: string; … }[]` | optional | Permission Sets |
+| **objects** | `{ name: string; label?: string; pluralLabel?: string; description?: string; … }[]` | optional | Business Objects definition (owned by this package) |
+| **datasources** | `{ name: string; label?: string; driver: string; config: Record<string, any>; … }[]` | optional | External Data Connections |
+| **dependencies** | `Record<string, string>` | optional | Package dependencies |
+| **configuration** | `never` | optional | [REMOVED] `manifest.configuration` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read the block: no settings UI rendered it and no loader resolved a setting from it, so authoring it configured nothing. Worse, `properties.*.secret` promised "value is encrypted/masked (e.g. API Keys)" while nothing encrypted, masked or even parsed the flag — a false assurance about credential handling. Delete the key. A plugin is configured by the host that composes it: pass options to its constructor in `defineStack({ plugins: [new MyPlugin({ … })] })`, which is the enforced channel. A declarative settings surface must be designed with an enforcing reader first, not revived here. |
+| **contributes** | `{ kinds?: object[] }` | optional | Platform contributions |
+| **data** | `{ object: string; externalId?: string \| string[]; mode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; env?: Enum<'prod' \| 'dev' \| 'test'>[]; … }[]` | optional | Seed Data / Fixtures for bootstrapping |
+| **capabilities** | `{ name: string; label?: string; description?: string; scope?: Enum<'platform' \| 'org'>; … }[]` | optional | [ADR-0066 D1] Authorization capabilities this package defines (seeded with package provenance) |
+| **extensions** | `never` | optional | [REMOVED] `manifest.extensions` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — an untyped map with zero readers: whatever was parked here was stored and never consulted. Delete the key. Extend the platform through the enforced channels instead: `contributes.kinds` registers metadata kinds, `navigationContributions` injects navigation into other packages' apps, and code-level extension happens in the plugin itself (`init`/`start`). |
+| **navigationContributions** | `{ app: string; group?: string; priority?: integer; items: (object \| … +8 more)[] }[]` | optional | Navigation items this package contributes into apps owned by other packages |
+| **loading** | `never` | optional | [REMOVED] `manifest.loading` was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — the entire block (`strategy`, `preload`, `codeSplitting`, `dynamicImport`, `initialization`, `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`) had no runtime reader in any repo, so authoring it configured nothing. Delete the key. Plugins are composed at boot — `defineStack` registers them and the kernel runs `init` then `start` in an order topologically resolved from each composed plugin's own `dependencies` / `optionalDependencies` (`resolvePluginOrder`); the set is fixed until the process restarts. ⚠️ `loading.sandboxing` in particular never isolated anything: it did not run plugins in a process, vm, iframe or web-worker, and `allowedServices` gated no call. If you were relying on it for isolation, you had none — and the plugin trust tier (`manifest.runtime`) does not give it back: that tier is enforced at the cloud marketplace PUBLISH gate only (an unverified publisher requesting the `node` tier is rejected with HTTP 422 and forced to manual review), while load-side enforcement is NOT implemented, so a locally installed plugin is not isolated by the tier it declares. Use the permission declarations, which are enforced. |
+| **engine** | `{ objectstack: string }` | optional | Platform compatibility requirements (legacy; superseded by `engines`) |
+| **engines** | `{ platform?: string; protocol?: string }` | optional | Plugin compatibility ranges (ADR-0025 §3.2; supersedes `engine`) |
+| **runtime** | `Enum<'node' \| 'sandbox' \| 'worker'>` | optional | Plugin trust tier the plugin declares (ADR-0025 §3.6) — enforced at the cloud marketplace publish gate (unverified publisher requesting `node` → HTTP 422 + manual review); load-side enforcement is NOT implemented, so a locally installed plugin is not isolated by the tier it declares |
+| **packaging** | `Enum<'bundled' \| 'manifest-deps'>` | optional | Dependency packaging strategy (ADR-0025 §3.3) |
+| **main** | `string` | optional | Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4) |
+| **integrity** | `Record<string, string>` | optional | Per-file content digests of the plugin artifact (ADR-0025 §3.2) |
+| **functions** | `any` | optional | Named handler functions, as they survived the record JSON projection |
+| **datasourceMapping** | `{ namespace?: string; package?: string; objectPattern?: string; default?: boolean; … }[]` | optional | Centralized datasource routing rules for packages/namespaces/objects |
+| **translations** | `Record<string, { objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }>[]` | optional | I18n Translation Bundles |
+| **objectExtensions** | `{ extend: string; fields?: Record<string, object>; label?: string; pluralLabel?: string; … }[]` | optional | Extensions to objects owned by other packages |
+| **apps** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; icon?: string; … }[]` | optional | Applications |
+| **views** | `{ name?: string; label?: string \| Record<string, string>; object?: string; list?: object; … }[]` | optional | List Views |
+| **viewItems** | `never` | optional | [MACHINE-ASSEMBLED] Non-container view artifacts of a runtime-assembled manifest (standalone ViewItems, flattened overlays) — written by package export and artifact factories, refused in authored stack sources. |
+| **pages** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; icon?: string; … }[]` | optional | Custom Pages |
+| **dashboards** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; header?: object; … }[]` | optional | Dashboards |
+| **reports** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; type?: Enum<'tabular' \| 'summary' \| 'matrix' \| 'joined'>; … }[]` | optional | Analytics Reports |
+| **datasets** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; object: string; … }[]` | optional | Analytics semantic-layer datasets (ADR-0021) |
+| **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; objectName?: string; … }[]` | optional | Global and Object Actions. Unique per scope, not per stack: the runtime keys every action by its owning object's name (or 'global' when object-less), a colon, then the action name, and defineStack refuses two declarations that resolve to one key — both here, both on one object's actions, or one in each position, identical twins included (an embedded action is keyed by the object it is written on, not by its own objectName). One global and one object-bound action may share a name; on that object's route the object's own actions take precedence for by-name readers. composeStacks runs the same key rule across its input stacks (counting distinct stacks, not sites) and names both source stacks on a collision. |
+| **flows** | `{ name: string; label: string; description?: string; successMessage?: string; … }[]` | optional | Screen Flows |
+| **jobs** | `{ name: string; label?: string; description?: string; schedule: object \| object \| object; … }[]` | optional | Background / Scheduled Jobs (run by IJobService on cron/interval/once schedules) |
+| **emailTemplates** | `{ name: string; label: string; category?: Enum<'auth' \| 'notification' \| 'workflow' \| 'marketing' \| 'custom'>; locale?: string; … }[]` | optional | Email Templates resolved by IEmailService.sendTemplate(`{ template, locale }`) |
+| **docs** | `{ name: string; label?: string; description?: string; content: string; … }[]` | optional | Package documentation — flat Markdown items compiled from src/docs/*.md (ADR-0046) |
+| **books** | `{ name: string; label?: string; description?: string; slug?: string; … }[]` | optional | Documentation navigation spines — ordered groups with derived membership (ADR-0046 §6) |
+| **positions** | `{ name: string; label: string; description?: string; delegatable?: boolean; … }[]` | optional | Positions — flat capability-distribution groups (ADR-0090 D3) |
+| **sharingRules** | `{ name: string; label?: string; description?: string; object: string; … }[]` | optional | Record Sharing Rules |
+| **apis** | `{ name: string; path: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>; summary?: string; … }[]` | optional | API Endpoints — declared endpoints are live from protocol 17; each is gated at publish (ADR-0121) |
+| **webhooks** | `{ name: string; label?: string; object?: string; triggers?: Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]; … }[]` | optional | Outbound Webhooks |
+| **agents** | `{ name: string; label: string; avatar?: string; role: string; … }[]` | optional | AI Agents — platform-internal (ADR-0063 §2): the kernel ships exactly two (ask/build); third parties extend via skills, not agents |
+| **tools** | `{ name: string; label: string; description: string; parameters: Record<string, any>; … }[]` | optional | AI Tool metadata records — optional refinement layer, never required: the default path is skills referencing platform tools or materialised action_`<name>` tools (ADR-0109) |
+| **skills** | `{ name: string; label: string; description?: string; surface?: Enum<'ask' \| 'build' \| 'both'>; … }[]` | optional | AI Skills (reusable capability bundles — the third-party AI extension primitive, ADR-0063) |
+| **hooks** | `any` | optional | Object lifecycle hooks, as they survived the record JSON projection |
+| **mappings** | `{ name: string; label?: string; sourceFormat?: Enum<'csv' \| 'json' \| 'xml' \| 'sql'>; targetObject: string; … }[]` | optional | Data Import/Export Mappings |
+| **analyticsCubes** | `{ name: string; title?: string; description?: string; sql: string; … }[]` | optional | Analytics Semantic Layer Cubes |
+| **connectors** | `{ name: string; label: string; type: Enum<'saas' \| 'database' \| 'file_storage' \| 'message_queue' \| 'api' \| 'custom'>; description?: string; … }[]` | optional | External System Connectors. A provider-bound entry (has `provider`: openapi/mcp/rest) is materialized into a live, dispatchable connector at boot and referenced by flows via `connector_action`; credentials are `auth.credentialRef` references, never inline secrets. An entry with no `provider` is a catalog descriptor only (NOT dispatchable) — set `enabled: false` on deliberate descriptors. Unknown provider / unresolvable credentialRef / name conflict ⇒ hard boot error (ADR-0097). |
+| **requires** | `string[]` | optional | Capability names this stack requires from the platform (canonical kebab-case tokens from PLATFORM_CAPABILITY_TOKENS; an unknown token is a defineStack error, declared-but-missing ⇒ fail-fast at startup) |
+| **tiers** | `string[]` | optional | Plugin tier presets to enable; overrides --preset |
+
+### Nested Shape: `InstalledPackageAtEitherStage[option 2].upgradeHistory[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **fromVersion** | `string` | ✅ | Version before upgrade |
+| **toVersion** | `string` | ✅ | Version after upgrade |
+| **upgradedAt** | `string` | ✅ | Upgrade timestamp |
+| **status** | `Enum<'success' \| 'failed' \| 'rolled_back'>` | ✅ | Upgrade outcome |
+| **migrationLog** | `string[]` | optional | Migration step logs |
+
+---
 
 
 ---
@@ -124,7 +406,7 @@ List installed packages response
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ packages: object[]; total?: integer; nextCursor?: string; hasMore: boolean }` | ✅ |  |
+| **data** | `{ packages: (object \| object)[]; total?: integer; nextCursor?: string; hasMore: boolean }` | ✅ |  |
 
 ### Nested Shape: `ListInstalledPackagesResponse.error`
 
@@ -144,7 +426,7 @@ List installed packages response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **packages** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }[]` | ✅ | Installed packages |
+| **packages** | `({ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … } \| … +1 more)[]` | ✅ | Installed packages |
 | **total** | `integer` | optional | Total matching packages |
 | **nextCursor** | `string` | optional | Cursor for the next page |
 | **hasMore** | `boolean` | ✅ | Whether more packages are available |
