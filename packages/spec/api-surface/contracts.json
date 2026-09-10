@@ -75,7 +75,7 @@
     "DefineSharingRuleInput (interface)",
     "DelegableAdminScope (interface)",
     "DelegableScope (interface)",
-    "DelegationNarrowing (interface)",
+    "DelegationNarrowing (type)",
     "DeployExecutionResult (interface)",
     "DriverQuery (type)",
     "EMBEDDER_SERVICE (const)",

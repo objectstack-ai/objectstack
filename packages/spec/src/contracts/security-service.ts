@@ -56,7 +56,7 @@
 import type { FilterCondition } from '../data/filter.zod.js';
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 import type { ExplainDecision, ExplainOperation } from '../security/explain.zod.js';
-import type { PermissionSet } from '../security/permission.zod.js';
+import type { ObjectAccessScope, PermissionSet } from '../security/permission.zod.js';
 
 /**
  * The context shape these methods accept.
@@ -202,21 +202,36 @@ export type AuthoredRowWriteOperation = 'update' | 'delete';
  * transport must not manufacture a warning from the absence of an answer: not
  * knowing and knowing there is nothing to say are the same *rendered* outcome
  * here on purpose, because the alternative is warning-fatigue on every read.
+ *
+ * A DISCRIMINATED UNION, not one shape with three optional fields, and the
+ * reason is `statement` itself: it is the sentence an AI consumer RENDERS, so
+ * left optional a consumer that forgets the `narrowed` check renders
+ * `undefined` — the same silence-by-omission this method exists to remove. The
+ * union makes the compiler enforce the invariant the prose above only asserts.
+ * The two shapes are also not symmetric under permanence: shipping this one and
+ * later LOOSENING it (a third member, or an optional field on the `true` arm)
+ * is non-breaking, while shipping optional fields and later TIGHTENING them to
+ * required is breaking — so the loose shape buys nothing and forecloses the
+ * tightening.
  */
-export interface DelegationNarrowing {
-  /** True iff the delegated principal's own ceiling narrowed the readable depth. */
-  narrowed: boolean;
-  /**
-   * The sentence to surface, present only when `narrowed`. Written for an AI
-   * consumer: it states that the result is a SUBSET and that the count is not a
-   * fact about the object.
-   */
-  statement?: string;
-  /** The depth actually enforced for the delegated read (present when `narrowed`). */
-  effectiveScope?: 'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org';
-  /** The depth the delegator reaches alone (present when `narrowed`). */
-  delegatorScope?: 'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org';
-}
+export type DelegationNarrowing =
+  | {
+      /** No narrowing to describe. Carries nothing: there is nothing to say. */
+      narrowed: false;
+    }
+  | {
+      /** The delegated principal's own ceiling narrowed the readable depth. */
+      narrowed: true;
+      /**
+       * The sentence to surface. Written for an AI consumer: it states that the
+       * result is a SUBSET and that the count is not a fact about the object.
+       */
+      statement: string;
+      /** The depth actually enforced for the delegated read. */
+      effectiveScope: ObjectAccessScope;
+      /** The depth the delegator reaches alone. */
+      delegatorScope: ObjectAccessScope;
+    };
 
 /**
  * Public contract for the `security` service.
@@ -492,7 +507,7 @@ export interface ISecurityService {
   resolveWriteScope(
     object: string,
     context?: SecurityContext,
-  ): Promise<'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org'>;
+  ): Promise<ObjectAccessScope>;
 
   /**
    * [ADR-0090 D10 — maintainer ruling 2026-09-08] Did the D10 intersection

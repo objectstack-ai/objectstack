@@ -75,7 +75,7 @@
     "DefineSharingRuleInput": "src/contracts/sharing-service.ts#DefineSharingRuleInput (interface)",
     "DelegableAdminScope": "src/contracts/security-service.ts#DelegableAdminScope (interface)",
     "DelegableScope": "src/contracts/security-service.ts#DelegableScope (interface)",
-    "DelegationNarrowing": "src/contracts/security-service.ts#DelegationNarrowing (interface)",
+    "DelegationNarrowing": "src/contracts/security-service.ts#DelegationNarrowing (type)",
     "DeployExecutionResult": "src/contracts/deploy-pipeline-service.ts#DeployExecutionResult (interface)",
     "DriverQuery": "src/contracts/data-driver.ts#DriverQuery (type)",
     "EMBEDDER_SERVICE": "src/contracts/embedder.ts#EMBEDDER_SERVICE (const)",

@@ -96,6 +96,7 @@ import {
   normalizeTenancyPosture,
   postureEnforcesWall,
   postureUsesUnionScope,
+  type ObjectAccessScope,
   type TenancyPosture,
 } from '@objectstack/spec/security';
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
@@ -1614,7 +1615,7 @@ export class SecurityPlugin implements Plugin {
                 effectiveScope: folded.agentLegScope,
                 delegatorScope,
               }),
-              effectiveScope: folded.agentLegScope as DelegationNarrowing['effectiveScope'],
+              effectiveScope: folded.agentLegScope as ObjectAccessScope,
               delegatorScope,
             };
           } catch (e) {
