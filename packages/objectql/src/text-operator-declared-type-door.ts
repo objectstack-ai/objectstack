@@ -262,7 +262,9 @@ export function assertTextOperatorTargetsAreStringCapable(
     + `${hit.operator} at a declared ${declared} at ${hit.path}. A ${hit.declaredType} value is `
     + 'never a string on any backend, so no record can be matched by reading one as text — the '
     + 'operator can only be aimed at this field by mistake. The filter was NOT applied: beneath '
-    + 'this door the predicate is answered by the declared no-match rule (#14079) — a positive '
+    // The stored-value row is #14079's; the id stays in this comment rather than in
+    // the message, which reaches authors and operators who cannot resolve a tracker id.
+    + 'this door the predicate is answered by the declared no-match rule — a positive '
     + 'text operator matches NO row and $notContains matches EVERY row — an answer no caller can '
     + `tell apart from a real result set. Compare '${hit.field}' with an operator its declared `
     + 'type can answer ($eq / $ne / $in / $gt / $gte / $lt / $lte, a range for a temporal or '
