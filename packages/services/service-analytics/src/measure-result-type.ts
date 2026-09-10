@@ -50,16 +50,20 @@ import {
  * operands were — it is answered here as "no correction", which leaves the
  * `number` its producer minted.
  *
- * **`sum`/`avg` over a temporal field is NOT a case a type is invented for.**
- * Nothing in the shipped stack refuses the pair: `dataset-compiler`'s
- * `aggregateToMetricType` checks only membership of the vocabulary, the three
- * source-field gates check only that the column EXISTS, and no lint rule pairs
- * an aggregate with a field type. It therefore reaches the driver, where what
- * comes back is decided by the backend and the storage form — a mean of epoch
- * integers on SQLite, a refusal from Postgres, which has no `avg(timestamptz)`.
- * There is no one value for a type to describe, so this rule leaves both alone
- * and the missing refusal is reported as its own finding rather than papered
- * over with a type that would be wrong on at least one backend.
+ * **`sum`/`avg` over a temporal field is NOT a case a type is invented for —
+ * and since #16737 it is not a case that reaches a type at all.** This rule
+ * left the pair alone because what came back was decided by the backend and the
+ * storage form (SQLite coerces the column's canonical UTC text and answers the
+ * average YEAR; Postgres has no `avg(timestamptz)` and refuses at 42883), so
+ * there was no one value for a type to describe. The missing refusal was
+ * reported as its own finding rather than papered over with a type that would
+ * be wrong on at least one backend — and that finding is now closed:
+ * `dataset-compiler` refuses the pair at COMPILE time against
+ * `AGGREGATE_FIELD_TYPE_COMPATIBILITY` (`@objectstack/spec`, #16353; the
+ * compile leg of #16099), so no such measure can be queried and no column
+ * descriptor is ever minted for one. The rows below are unchanged: `sum`/`avg`
+ * still keep the `number` their producer minted, which is correct for the
+ * numeric fields they may now be applied to.
  *
  * ## The field-type axis: every `FieldType` member, by MEASURED value class
  *
@@ -122,9 +126,16 @@ import {
  * `DimensionType` does carry a `boolean` word, so a correction is SPELLABLE
  * here — which is exactly why it is not made: spelling it would ship one of
  * three disagreeing readings as a published declaration. The column keeps the
- * `number` it has (the accurate word for the raw SQLite value), and the
- * missing refusal is owned by the `needs-user-decision` card for "no layer
- * refuses an incoherent aggregate / field-type pair".
+ * `number` it has (the accurate word for the raw SQLite value).
+ *
+ * ⚠️ ⛔ This is NOT a missing refusal, and it is no longer referred onward.
+ * `AGGREGATE_FIELD_TYPE_COMPATIBILITY` ACCEPTS `sum` / `avg` / `min` / `max`
+ * over `boolean` / `toggle` — #16685 ruled A, landed as #16750, on the
+ * authority of maintainer ruling #11152 — so the pair is deliberately allowed
+ * and the compile leg (#16737) never judges it. What stays open here is only
+ * the RESULT-TYPE question above: three readings that disagree about what the
+ * one answering backend reports. A refusal would not settle it, and none is
+ * owed.
  *
  * ### The JSON-column classes: array- and object-valued types
  *
