@@ -1,0 +1,31 @@
+{
+  "number": 16206,
+  "kind": "issue",
+  "title": "service-analytics: `normalizeSqlDialect` accepts only the three canonical names, so a host answering knex's own `'sqlite3'` / `'pg'` / `'mysql2'` on the public `sqlDialect` hook is read as `unknown` — #11550's shape, one layer up",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T05:57:41Z",
+  "updated_at": "2026-09-10T03:13:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16206",
+  "body": "Filed by the `os-dev` seat while working #16028 (PR #16204). ⛔ Filed bare — `domain:*`, type and priority are triage's; this seat does not produce them. ⛔ **Not fixed in #16204**, deliberately: the remedy is a contract question, not a code change this seat may pick (reasoning below).\n\n## The gap\n\n`packages/services/service-analytics/src/text-match-sql.ts` (measured on `bdc02182b`, unchanged by PR #16204):\n\n```ts\nconst KNOWN_DIALECTS = new Set<string>(['sqlite', 'postgres', 'mysql']);\n\nexport function normalizeSqlDialect(name: string | undefined | null): AnalyticsSqlDialect {\n  return typeof name === 'string' && KNOWN_DIALECTS.has(name) ? (name as AnalyticsSqlDialect) : 'unknown';\n}\n```\n\nThat set is `driver-sql`'s `SqlDialectName` vocabulary, and it is the right one when the answer comes from `SqlDriver.dialectName`. But the reader is `sqlDialectFor`, which calls a **host-supplied hook** typed as free text — `AnalyticsServiceConfig.sqlDialect?: (object: string) => string | undefined` (`analytics-service.ts:606`). A host that owns a SQLite datasource and answers the spelling its own stack uses — knex's canonical `'sqlite3'`, or `'better-sqlite3'`, both of which `driver-sql` itself lists in `SQLITE_EMIT_CLIENTS` — is silently read as `unknown`.\n\nNothing tells the host. `sqlDialectFor` is tiered \"cannot answer, do not block\" by design, so a **wrong** answer and **no** answer are the same answer, and the host that tried hardest to help gets the residue arm.\n\n## Why it is not a one-line widening, and why this seat did not do it\n\nAdding the knex spellings to `KNOWN_DIALECTS` is the lenient-alias shape AGENTS.md rules out at the consumer: the defect would be that the hook's accepted vocabulary is **undeclared**, and the fix belongs where the vocabulary is declared, not in a `Set` the compiler happens to read. The real question is which of these the platform means:\n\n- **A.** The hook's contract is `SqlDialectName` — the three canonical names. Then the gap is that nothing says so and nothing tells a host it answered out of contract: the remedy is a declared vocabulary (type or schema) plus a diagnostic on an unrecognised non-empty answer, not a wider `Set`.\n- **B.** The hook's contract is \"whatever your driver calls itself\" — knex client spellings included. Then `normalizeSqlDialect` needs the mapping table `driver-sql` already owns, and the two must be held together by a test rather than by hand.\n- **C.** Leave it. The population is embedder compositions, and after PR #16204 the `unknown` arm is portable rather than broken, so the cost is a slower predicate, not a wrong or unparseable one.\n\n⇒ Which of the three is a **policy choice about a public extension point**, so it is triage's and the maintainer's, not a dev seat's.\n\n## Severity context, so triage is not guessing\n\n⚠️ **Materially reduced by PR #16204**, which is why this is filed as a separate card rather than folded into it. Before that PR, this spelling gap sent `$icontains` down an arm that emitted `translate()` and **failed to parse** on SQLite — a 500. After it, the `unknown` arm is portable and answers correct rows, so what remains is:\n\n- the predicate is the 1,014-character `REPLACE` chain instead of the 168-character `GLOB` construct the `sqlite` arm would have picked — measured on the read scope in #16204;\n- the case-EXACT family (`$contains` and friends) still gets the `unknown` arm's plain `LIKE`, which on SQLite **folds ASCII case** — the #15684 defect, still live for exactly this population. ⚠️ **NOT MEASURED here**: this seat did not execute the case-exact family through a host answering `'sqlite3'`, so that second bullet is read off #15684's own measurement of the same arm, not re-driven.\n\n⛔ Also NOT MEASURED, and inherited from #16028: whether any shipped application answers this hook at all.\n\n## Prior art, same shape one layer down\n\n#11550 — *\"the isSqlite/isPostgres/isMysql getters recognise fewer knex client spellings than knex accepts, so a valid `client: 'postgres'` silently loses every dialect-specific behaviour\"* — is this exact failure inside `driver-sql`, and it was ruled a defect there. Whether the ruling travels up to a host-supplied hook is precisely the question above: the driver reads a config **it defined**, while this reads a string **an embedder wrote**.\n\n## Related\n\n#16028 (the `unknown` arm's fold) · PR #16204 · #11550 (the driver-side sibling, closed) · #15684 (the case-exact family on this same arm) · #11756 (the ruling that leaves `mariadb` unrecognised on purpose — evidence that \"unrecognised\" is sometimes deliberate, and part of why option C is real)"
+}

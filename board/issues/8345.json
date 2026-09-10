@@ -1,0 +1,31 @@
+{
+  "number": 8345,
+  "kind": "issue",
+  "title": "currency: no exchange-rate / home-currency conversion — dynamic multi-currency amounts cannot be reconciled or aggregated across currencies",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:on-hold",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-13T06:48:34Z",
+  "updated_at": "2026-09-04T04:10:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8345",
+  "body": "## Status\n\n**Maintainer decision (2026-08-13): scheduled for v18.**\n\n## Context\n\nSurfaced while scoping a solution for an overseas port/terminal customer (2026-08): billing / reconciliation / invoicing must run in multiple currencies, with consolidated reporting in one home currency.\n\n## What the platform has today\n\n- `currency` field type with `currencyConfig` — `currencyMode: 'dynamic'` (per-record currency) or `'fixed'`, `defaultCurrency`, `precision` (`packages/spec/src/data/field.zod.ts`).\n- ISO 4217 fraction-digit consistency validation at publish time (`packages/spec/src/data/currency-fraction-digits.ts` — JPY 0, KWD 3, CLDR 48.0 snapshot).\n- Tenant default currency in Localization settings (`packages/services/service-settings/src/manifests/localization.manifest.ts`, `valueDomain: 'iso_4217_currency'`).\n- Analytics currency **labeling** resolution chain (ADR-0053): measure `currency` → field `currencyConfig.defaultCurrency` → `ctx.currency` (`packages/services/service-analytics/src/analytics-service.ts`).\n\n## What is missing\n\n- No exchange-rate table / object, no dated-rate history.\n- No conversion engine: `formula` / `summary` roll-ups and analytics aggregations over a `dynamic`-currency field combine nominal values as if they were one currency — a `sum` across USD + EUR rows is numerically meaningless.\n- No \"record currency + home-currency shadow amount\" projection (Salesforce ACM-style) for consolidated reporting.\n\nGrep evidence: `exchange rate` / `fx_rate` / `currency_conversion` have zero implementation hits under `packages/`. The one prose mention (\"Money with exchange rates\", `content/docs/protocol/objectql/index.mdx`) does not match the shipped `field.zod.ts` behavior and reads as a doc leftover.\n\n## Possible scope sketch (for discussion)\n\n1. **M1** — `sys_exchange_rate` platform object (base currency, quote currency, rate, effective date) + settings for the org home currency (already exists in Localization).\n2. **M2** — CEL stdlib conversion function(s) (e.g. `convertCurrency(amount, from, to, date?)`) usable in `formula` fields.\n3. **M3** — opt-in converted projection for `summary` roll-ups and analytics measures over `dynamic` currency fields (aggregate in home currency; keep per-currency breakdown available).\n4. Guard rails: refuse (or warn on) cross-currency `sum`/`avg` over a `dynamic` currency field when no conversion is configured — today it fails silently into wrong numbers.\n\n## Workaround today\n\nApp-level customization: model an exchange-rate object, snapshot the rate onto each billing record via hook, and compute home-currency amounts with `formula`. Works, but every implementation reinvents it and the naive-aggregation foot-gun above remains for anyone who doesn't."
+}

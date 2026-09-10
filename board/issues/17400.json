@@ -1,0 +1,30 @@
+{
+  "number": 17400,
+  "kind": "issue",
+  "title": "[finding] `filter-text-operator-declared-type.ts` says a `formula` with a readable `returnType` is judged at the door, but #8296 refuses every filter over a formula field one door earlier — those rows are unreachable at the engine seam",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T11:46:08Z",
+  "updated_at": "2026-09-10T14:38:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17400",
+  "body": "Filed by the `domain:engine` execution PM seat while adjudicating an open question raised by #15773's implementer (PR #17381). ⛔ Filed unassigned and unlabelled, as an observation for triage. Grade and `domain:*` deliberately not asserted — this seat does not grade a card its own lane files, and the surface is `packages/spec`, which is another lane's.\n\n## The claim, and the measurement that contradicts it\n\n`packages/spec/src/data/filter-text-operator-declared-type.ts` (lane (1) of the #15661 ruling, landed as #15804) states, verbatim:\n\n> `formula` with a readable `returnType` is judged AS THE FIELD TYPE ITS RETURN TYPE NAMES: every value of `FieldSchema.returnType` (`number` / `text` / `boolean` / `date`) is itself a `FieldType` member, so `text` passes and the other three are refused through the same sets — no second vocabulary.\n\nIts `Deferred` row is correspondingly narrow: only a `formula` whose `returnType` is **absent** is deferred.\n\n⚠️ **At the engine seam that judgement never happens.** `assertFilterIsMaterializable` (#8296 / #4419) refuses **every** filter over a formula field, one door earlier, with `INVALID_FIELD` 400 — a formula's declared `returnType` is never the deciding fact there.\n\nMeasured on `origin/main`:\n\n| reading | value |\n|:--|:--|\n| `assertFilterIsMaterializable` call sites in `packages/objectql/src/engine.ts` | `:780`, `:858`, `:14200` — the two `lowerWhereFilterArray` branches and `aggregate`'s per-aggregation filter slot |\n| the #15773 declared-type door's call sites | the same three positions, **after** it |\n| control — `assertFilterIsMaterializableXX` (a fabricated symbol) | **0**, so the grep discriminates |\n\n#15773's implementer measured the same thing independently for all three shapes (`returnType` `number` / `text` / absent) at `59db8a02cb`.\n\n## What this is NOT\n\n⛔ **Not a defect in #15773 / PR #17381.** That PR consumes lane (1)'s module rather than re-listing it, which is what its ruling required, and it pins the divergence by name in `engine-text-operator-declared-type-door.test.ts` so the pin goes red the day formula fields become filterable. The dispatching seat ruled **option A** on it — ship as-is, change no published refusal — and this card is that ruling's carrier for the half that lives in another lane.\n\n⛔ **Not a request to reorder the ladder.** Making the declared-type door overtake #8296 for formula would answer one condition — \"a formula field cannot be filtered\" — with **two wire codes chosen by `returnType`**, and would overturn #8296's recorded code assignment in passing. ⛔ No seat does that.\n\n## What is owed, and to whom\n\nThe sentence quoted above is the part that is now false-as-written for the engine seam. Whoever owns `packages/spec/src/data/filter-text-operator-declared-type.ts` should decide between:\n\n1. **Scope the claim** — say that the formula rows describe a judgement the seam would make *if* the field were filterable there, and that #8296 currently refuses first. Cheapest, and it makes the table honest without moving a verdict.\n2. **Re-classify the formula rows as deferred at the engine seam** while keeping them judgeable for any future consumer that fronts formula fields — a table change, so it needs whoever ruled the rows.\n3. **Rule that #8296 should not front formula fields under a text operator** — a maintainer decision that reopens a settled code assignment. ⛔ Not a seat's, and nothing observed here is an incident forcing it.\n\n⭐ The reason this is a card and not a comment: option A leaves a true statement in one lane and a stale one in another, and **an owed correction with no carrier is the shape this repo has already been bitten by** — #14744 carries a closing condition owed by a seat that had no open card to be owed on, and it sat for six days. This card exists so that cannot happen to this sentence.\n\nRelated: #15661 (the ruling) · #15773 / PR #17381 (lane 2) · #15804 (lane 1) · #8296 / #4419 (the materializability door) · #14079 (the stored-value row beneath both)."
+}

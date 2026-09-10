@@ -1,0 +1,32 @@
+{
+  "number": 16175,
+  "kind": "issue",
+  "title": "`schemaTreeIsStale` and `bundlesAreStale` carry the same mtime false refusal #14985 fixed for `distIsStale` — measured, both refuse on a tree whose bytes never moved",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T04:28:28Z",
+  "updated_at": "2026-09-07T14:09:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16175",
+  "body": "Found while implementing #14985 (branch `claude/issue-14985-dist-freshness-false-refusal`). Out of scope there and deliberately not fixed in that PR: the two sibling rules need different evidence from the one that card supplies, and one of them has no evidence to read at all.\n\n## What #14985 fixed, and what it did not\n\n`scripts/check-regen-pending.mjs` exports three freshness predicates, all built on the same `newestMtime(artifact) < newestMtime(src)` comparison:\n\n| predicate | artifact it measures | fixed by #14985 |\n|:--|:--|:--|\n| `distIsStale` | `packages/spec/dist/**/*.d.ts` | yes |\n| `schemaTreeIsStale` | `packages/spec/json-schema/**/*.json` | no |\n| `bundlesAreStale` | `packages/spec/dist/**/*.mjs`, `*.js` | no |\n\nAll three share the blind spot #14985 measured: a `git merge`, `git checkout` or `git worktree add` re-checks-out a source file with **identical bytes** and bumps its mtime; the build that follows correctly does not run, because turbo's cache hashes content (measured on that card: `Cached: 1 cached, 1 total`, `>>> FULL TURBO`, 56ms, and every `dist/` mtime unmoved); the rule then reports stale for an artifact that is exactly current.\n\n## Measured, not inferred\n\nOn the #14985 branch, after a single `touch packages/spec/src/data/query.zod.ts` with no content change (`git status` empty), running the derived gate set:\n\n```\npnpm --filter @objectstack/spec run check:docs                       exit 1\n  packages/spec/json-schema is older than packages/spec/src.          (schemaTreeIsStale)\n\npnpm --filter @objectstack/spec run check:browser-reachable-entries  exit 1\n  packages/spec/dist's .mjs/.js bundles are OLDER than packages/spec/src   (bundlesAreStale)\n```\n\nBoth cleared only by a full `pnpm --filter @objectstack/spec build`. Same cost as the card: minutes under the shared verify lock, for an artifact that needed nothing.\n\n## Why it was not fixed alongside\n\n#14985's remedy is a stamp recording the digest of the build inputs a **declaration-emitting** build consumed, read as an acquittal the mtime rule can be answered with. The two siblings do not inherit it, and not for the same reason:\n\n- **`bundlesAreStale`** is the cheap one. The existing `dist/.build-input-hash` is written by every build, `OS_SKIP_DTS=1` included — and that flag is exactly the one that *does* emit fresh bundles, so the hole that ruled that stamp out for the declarations is not a hole here at all. The evidence already exists and is already correct for this axis; what is missing is the wiring and its pins. One caveat to measure rather than assume: this rule also counts `tsup.config.ts`, which is in the digest's input set, so that half looks covered — worth confirming.\n- **`schemaTreeIsStale`** has no evidence to read. Nothing records which sources `json-schema/` was generated from. `gen:schema` runs as the build's first step, so a matching `dist/.build-input-hash` does imply the tree was regenerated from these inputs — but `gen:schema` is also run standalone, and it writes no stamp of its own, so the common case would degrade to \"no evidence\" and change nothing. Making this axis work means giving `gen:schema` a stamp, which is a new artifact and a new decision.\n\nSo this is two changes with two different soundness arguments and two sets of pins, not a mechanical extension of the one that just landed — which is why it is filed rather than ridden in.\n\n## The direction that must be preserved\n\nWhatever is done here, the property #14985 protects is the one to keep: the digest may only ever **acquit** a tree the mtime rule has already accused. A missing, unreadable or mismatched stamp must leave the refusal standing, so nothing that passes today can start failing and no rule can be talked into believing an artifact it never measured (#4690). Read `distIsStale`'s docblock in `scripts/check-regen-pending.mjs` and `inspectDeclarationStamp` in `scripts/build-input-hash.mjs` before touching either sibling.\n\n## Dedupe\n\n`search_issues`, repo-scoped, with a positive control run first in the same session: the control `gate refuses because dist is older than src mtime false staleness` returned #14985 and #7122, so the instrument was answering. The query for this finding returned #14985, #15822, #13560, #9068, #7681, #7181 — no twin. #15822 is a different script (`newestSourceMtime` walking gitignored paths); #7181 is the already-landed adoption of the `.d.ts` precondition by three more gates.\n\nNot labelled: this is a concrete defect, left for the triage seat to rank."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 14488,
+  "kind": "issue",
+  "title": "按包组合授权：module 把自己对象的 permission 授权贡献进 app 拥有的角色（类比 `navigationContributions`）—— ADR-0130 分拆第二阶段，不挡发版",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T09:06:49Z",
+  "updated_at": "2026-09-04T19:20:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14488",
+  "body": "来源：hotcrm 分拆方案 objectstack-ai/hotcrm#1449 §上游缺口 第 3 条；决定记录见 #14454（维护者 2026-09-02：本次发版按 B「权限集整体留在 app 包」，本卡是 A 的第二阶段）。**不挡本次发版**，不属 #14122 的发版清单。\n\n## 业务需求\n\nADR-0130 让一个产品拆成 `type: app` + N 个 `type: module`。今天权限集只能整体住在 app 包（4/6 套横跨 5–6 个模块）。一旦某个 module 要**单独发布或单独启用**（ADR-0130 §1.3(c) 点名的 CPQ 场景），它的对象没有任何授权随它一起到达，装了没人能用。需要一种\"模块声明自己对象的授权、app 拥有角色\"的组合机制。\n\n## 形状（待设计，给 dev 提方案，不在此拍板）\n\n- 类比已实测接受的 `navigationContributions`（ADR-0029 D7）：module 声明 `permissionContributions[]`（命名由 dev 提）→ 目标是 app 包里的某个 permission set 名 → 只允许贡献**自己包拥有的对象**的授权。\n- 合并语义要先定并 pin：同一 (set, object) 被两个包贡献 → **拒绝**而不是取并集；目标 set 不存在 → 可见地失败而不是静默丢弃；贡献的顺序不影响结果。\n- Studio Access 分区按包分组时，module 下能看到它贡献的那部分。\n\n## 前置\n\n- #14439（编译路径）落地；#14454 第 1 项（9 类命名对象元数据的跨包矩阵，含 permission set 的 `objects`）测完——本卡的边界依赖那张矩阵。\n- ADR-0130 补记卡（B 的记录）先合；本卡落地时再补 ADR。\n\n## 边界\n\n⛔ 不改现有 permission set 的语义与存储；⛔ 不做跨发布物的授权组合（D8）；⛔ Clause-② 预期 YES（新 authorable 键 + 新拒绝）。"
+}

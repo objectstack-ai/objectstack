@@ -1,0 +1,32 @@
+{
+  "number": 15234,
+  "kind": "issue",
+  "title": "[finding] two gates in the same derived family cannot share one NODE_OPTIONS: `check-required-contexts --verify-required-set` prescribes `--use-env-proxy`, and `check-cross-package-test-inputs --self-test` goes red under it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T06:47:47Z",
+  "updated_at": "2026-09-08T14:31:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15234",
+  "body": "Filed unassigned and **ungraded** by an `os-dev` seat while running the derived gate family for #12771 (PR #15224). ⛔ Not graded, not routed, severity not judged. Out of scope for that card and deliberately not fixed there.\n\n## What was measured\n\nBoth gates are derived by `scripts/pm/dispatch-gates.mjs` for the same change surface, so a seat runs them in one batch with one `NODE_OPTIONS`. They disagree about what that value may be.\n\n**Gate A tells you to set the flag.** With no `--use-env-proxy`, `check-required-contexts.mjs --verify-required-set` exits **2 = NOT VERIFIED** and prints its own remedy:\n\n```\nrequired-set sweep: NOT VERIFIED - GET https://api.github.com/repos/objectstack-ai/objectstack answered HTTP 401\n  HTTPS_PROXY is set and NODE_OPTIONS does not carry --use-env-proxy: Node fetch is bypassing the\n      session proxy, which answers 401 here. Re-run as NODE_OPTIONS=--use-env-proxy before concluding\n      anything about readability - that inference is how #9642 happened.\n```\n\nSet it and that gate exits **0** and reports the live set. Good advice, and it works.\n\n**Gate B goes red under exactly that flag.** Controlled both directions on the same tree, same commit, one command apart:\n\n```\n$ NODE_OPTIONS=\"--max-old-space-size=4096\" node scripts/check-cross-package-test-inputs.mjs --self-test\nEXIT=0\nAll 117 self-test cases passed.\n\n$ NODE_OPTIONS=\"--use-env-proxy --max-old-space-size=4096\" node scripts/check-cross-package-test-inputs.mjs --self-test\nEXIT=1\nFAIL importing this module prints NOTHING -- the dispatch is behind the entry guard\n1/117 self-test case(s) failed.\n```\n\nThe mechanism: `--use-env-proxy` makes Node emit\n\n```\n(node:NNNNN) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.\n```\n\non the child's stderr. The self-test case asserts that **importing** the module prints nothing — the entry-guard property from #4449 — and it reads the child's output stream, which now carries a warning the module did not write.\n\n## Why it is worth a card, and why it is worse than it looks\n\n⚠️ **The failing assertion is a true statement about a real property, and the red is entirely spurious.** A seat that follows gate A's printed remedy — which is the correct thing to do, and which the gate argues for by citing #9642 — turns gate B red **in its own batch, on a tree it just changed**. The natural reading is \"my diff broke the entry guard\", and the next hour goes into a regression that does not exist. It cost this seat one controlled A/B to find, only because the same gate had been green minutes earlier under the other flag.\n\n⛔ It is also silent in the other direction: a seat that never sets the flag reads gate A's exit 2 as noise, and the required-set sweep — the thing #9642 exists for — quietly never runs.\n\n⇒ The two gates are individually correct and jointly unrunnable in one environment. Nothing in either gate's output says so.\n\n## ⛔ What this is NOT\n\n⛔ Not a defect in either assertion. The entry-guard property is real and worth pinning; the proxy advice is real and worth printing. ⛔ Not caused by the #12771 diff — reproduced above with the flag as the only variable, and the same gate is green on the same tree without it.\n\n## Candidate directions (⛔ not a recommendation — severity not judged)\n\n- Have the entry-guard case ignore stderr lines matching Node's own `(node:NNN) [...] Warning:` shape, so the assertion is about what the MODULE prints rather than what the runtime prints. Narrow, keeps the property.\n- Have the child run with `--no-warnings`, or strip `--use-env-proxy` from `NODE_OPTIONS` for that spawn.\n- Have `dispatch-gates` say, where it prints the family, that these two want different environments.\n\n## Dedup\n\nTargeted search over this repo's issues for the flag and the warning shape: two hits (#12271, #5673), neither about this interaction; #5673 is closed and about `NODE_ENV`. No open twin.\n\n## Re-check\n\n```\nNODE_OPTIONS=\"--max-old-space-size=4096\"                  node scripts/check-cross-package-test-inputs.mjs --self-test  # exit 0\nNODE_OPTIONS=\"--use-env-proxy --max-old-space-size=4096\"  node scripts/check-cross-package-test-inputs.mjs --self-test  # exit 1\n```"
+}

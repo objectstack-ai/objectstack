@@ -1,0 +1,32 @@
+{
+  "number": 16274,
+  "kind": "issue",
+  "title": "service-automation: the two INITIAL-execution completion paths still call `recordLog({ status: 'completed' })` inside the node-failure `try` — a history-write throw reports a finished run as `failed`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T09:17:51Z",
+  "updated_at": "2026-09-08T05:31:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16274",
+  "body": "Found while implementing #15944 (PR #16273). ⛔ Deliberately **not** fixed there: that card and its dispatch scope the repair to `resumeInternal`'s completion path, and these are the initial-execution paths with a different consequence. Filed bare — `domain:*`, type and priority are triage's.\n\n⚠️ **Structure is measured; the consequence is NOT.** I read the shape on `origin/main` and did not drive it. That distinction is the point of filing rather than asserting.\n\n## The shape\n\n#15944 was the `resumeInternal` instance of one pattern: a completion-path `recordLog({ status: 'completed' })` called from **inside** the `try` whose `catch` exists for **node** failures, so a throw out of a history write on a run that already finished is handled as though a node had thrown. PR #16273 guards that one site.\n\nThe same structural shape survives at two more completion sites in `packages/services/service-automation/src/engine.ts`, both on the **initial-execution** path (line numbers on `48427620a`, which includes #16273's guard — re-locate before trusting them):\n\n| site | completion `recordLog` | its enclosing `catch` | path |\n|---|---|---|---|\n| `execute()` | `:4466`, `status: 'completed'` at `:4470` | `:4510` `} catch (err: unknown) {` | first execution of a flow |\n| the retry path | `:9100`, `status: 'completed'` at `:9104` | `:9122` `} catch (err: unknown) {` | a RETRY attempt (#9510) |\n\nThe two statements that reach those `catch` arms are the same ones #15944 names, and neither is an in-repo surface:\n\n- `store.recordTerminal(record)` when it throws **synchronously** — the `void write.catch(...)` beneath the call only ever sees a returned promise's rejection. (A store returning a non-thenable escapes identically: `write.catch` is then a synchronous `TypeError`.) Both stores shipped in this package are `async` methods and cannot; `SuspendedRunStore` is an exported interface with an optional `recordTerminal`, so a host store is unconstrained.\n- The run-summary line `logger.info(line, meta)`, on by default (`runSummaryLog: 'info'`) and calling a **host-injected** `Logger`. This one needs no store at all.\n\n## Why this is NOT a duplicate of #15944, and why it is milder\n\nNeither of these paths has consumed a suspension, so none of #15944's sharp consequences are reachable here: no `journalConsumedSuspension`, no `status: 'stranded'` stamp, no `restoreConsumedSuspension` re-arm, and therefore **no double run**. What appears reachable instead is the narrower half of the same invariant violation — a run whose nodes all succeeded being answered `failed`, carrying the history driver's own text as the run's error, and being recorded `failed` in a history row (if that write is the one that landed).\n\n`recordLog`'s own doc comment states the invariant in the file: *\"Best-effort + fire-and-forget: a history write must NEVER block or break the run that produced it.\"* On these two paths it can still break the run that produced it.\n\n## What is NOT measured, and would move a priority\n\n- Whether a throw at either site actually reaches the generic failure arm rather than an earlier branch — the arms test `isSuspendSignal(err)` first, and the retry path has its own additional structure (#9510).\n- What the caller is finally told in each case, and whether anything downstream distinguishes it from a genuine node failure.\n- Whether the retry path can then re-attempt a run that already completed. **This is the one worth driving first** — if it can, the consequence is closer to #15944's than the paragraph above assumes.\n\nDriving it needs no new instrument: the doubles in `completed-run-history-throw.test.ts` (added by PR #16273) are a sync-throwing store and a throwing-`info` logger, and the flow only has to complete without pausing.\n\n## Suggested direction (advisory — the disposition is the lane's)\n\nIf it measures as described, the repair is the same shape PR #16273 already landed and #15555 landed before it: guard the completion-path `recordLog` at its own site, recompute the summary with the same pure function, and report the swallowed failure once at `error` with its consequence and fix. ⛔ Nothing here argues for widening any `catch` arm's meaning, and ⛔ nothing here bears on `restoreConsumedSuspension` or on `inspectStrandedRequests` (#15358).\n\nRefs: #15944 (the `resumeInternal` instance, guarded in PR #16273) · #15555 (the failure-side guard on the same window) · #9510 (the retry path's own pause arm).\n"
+}

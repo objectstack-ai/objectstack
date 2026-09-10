@@ -1,0 +1,29 @@
+{
+  "number": 8607,
+  "kind": "issue",
+  "title": "No gate requires a breaking-behavior changeset to carry the breaking annotation at all — the ADR-0087 disposition gate only fires once one already does",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-14T01:16:07Z",
+  "updated_at": "2026-08-31T17:14:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8607",
+  "body": "Restart-when: the ADR-0087 changeset-gate family is reworked (scripts/check-adr-0087-registration.mjs and siblings, e.g. out of #8299), or a second breaking-behavior changeset lands unmarked\n\nFiled unassigned, surfaced while implementing #8411 (docs-only: annotating `.changeset/filter-formula-field-refusal.md` as breaking). Cross-references #8410 and #8411, which this card is deliberately kept distinct from — see \"Not a duplicate\" below.\n\n## The gap\n\n`scripts/check-adr-0087-registration.mjs`'s `breakingDeclaration()` requires an `adr-0087:` disposition marker only for a changeset that **already** self-declares breaking, via one of three signals: a `major` bump, a `**BREAKING` marker in the body, or a conventional-commit `!` on the summary line. `scripts/check-changeset-no-major.mjs` and `scripts/check-empty-changeset.mjs` (the other two gates in the same family) don't reason about breakingness at all — one blocks `major`, the other blocks empty frontmatter.\n\n**Nothing in the gate family asks \"should this changeset have declared itself breaking, but didn't.\"** An author who writes a changeset for a genuinely breaking behavior change and simply omits the `**BREAKING**` annotation (or the `!`, or a `major` bump) sails through every one of these gates with zero objection, because every one of them only judges changesets that already self-declare — never the prose describing the actual behavior change.\n\n## Measured\n\nThis is exactly what happened. `.changeset/filter-formula-field-refusal.md` (landed `edff010c`, PR #8369) describes a `where` on a virtual `formula` field going from `200`/zero-rows to `400 INVALID_FIELD` at the engine seam — a previously-succeeding call to `engine.find` / `findOne` / `count` / `aggregate` / `update` / `delete` now throws. #8411's own analysis found this the same shape as #7095, which shipped `major`. Before #8411's fix, running `node scripts/check-adr-0087-registration.mjs` against that changeset reported:\n\n```\n✓ check-adr-0087-registration: this PR adds no declared-breaking changeset (0 non-breaking changeset(s) seen).\n```\n\nNo gate anywhere flagged it. It merged, unmarked, and stayed that way until a human (the PM seat, from #8296's dev's closing report) noticed and filed #8411 by hand.\n\n## Not a duplicate of #8410\n\n#8410 (closed, fixed by PR #8465) was about **derivation** — which gates `scripts/pm/dispatch-gates.mjs` surfaces for a `.changeset/` path, so a dev's local loop matches what CI actually runs. This card is about **enforcement** — whether any gate, run by anyone, ever asks the question at all. They compound (a derivation gap hides a gate that does exist; this gap means there is no gate to hide), but fixing #8410 does nothing for this: `dispatch-gates.mjs` now correctly surfaces `check:adr-0087-registration` for a `.changeset/` path (verified live on #8411's PR), and that gate still would not have caught the original unmarked changeset, because it never fires on a changeset that doesn't already claim to be breaking.\n\n## Why this is likely NOT a small mechanical fix\n\nDetecting \"is this changeset breaking\" from prose alone is a semantic judgment call, not a pattern match — the same reason #6148's ADR-0087 gate deliberately asks the author in writing rather than inferring. A mechanical detector here would need to read the *code* diff (not just the changeset body) and decide whether a described behavior change is actually contract-breaking, which is a different and much harder problem than anything the current gate family attempts. Leaving this open rather than prescribing a fix:\n\n- Option A — accept no mechanical gate is feasible; rely on PR review / domain-owner sign-off for changes touching known engine/ingress seams.\n- Option B — a narrower lint that flags changesets whose diff touches specific known-sensitive call sites (validation seams, engine filter/sort/search lowering, etc.) for mandatory human confirmation, without claiming general breaking-change detection.\n- Option C — do nothing mechanical; treat this as inherent to the \"declare it yourself\" convention and rely on the same kind of after-the-fact catch #8411 exercised.\n\nWhoever picks this up should weigh these on the three axes (real business need / long-term soundness / hard-to-get-wrong for AI-authored changesets) rather than default to building a detector — a false-negative-prone semantic gate that gives false confidence may be worse than the current honestly-absent one.\n\nRefs: #8410 (derivation, fixed), #8411 (the specific unmarked changeset this card generalizes from), #6148 (the ADR-0087 disposition gate's origin and \"ask, don't infer\" design), #7095 (the sibling engine-seam precedent that shipped `major`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

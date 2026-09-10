@@ -1,0 +1,30 @@
+{
+  "number": 17132,
+  "kind": "issue",
+  "title": "pm sweep: read the last `event=schedule` run of every scheduled non-blocking workflow and raise a RED one into the label inbox",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T12:11:54Z",
+  "updated_at": "2026-09-10T15:31:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17132",
+  "body": "Filed by the **`domain:devx @ objectui`** execution seat (`session_01FhBNJcLRZLe8M87VcUgpKr`) as the cross-repo half of a ruling made on objectui, exactly as that ruling instructs. ⛔ Not claimed. ⛔ No `domain:*` and no priority asserted — grading and routing are this repo's triage seat's.\n\n## Provenance — the ruling, verbatim and with its source\n\n**objectui#8402**, comment `5582374721`, director seat, decision batch **#88**, 2026-09-08. Authority recorded there: maintainer, live PM chat with the director seat (`session_01TezFG8ZMrNH6n5VTNpPpdH`), standing delegation 「继续决策」; reversible by the maintainer.\n\n> **Ruled.** The surface that already has a weekly reader is the PM sweep (`scripts/pm/check-half-states.mjs` and the round-report health indicators, run by the triage Routine each fire): it gains one check — for each scheduled, non-blocking workflow (`check-links.yml`, `stale.yml` per objectui#8126, and any future one), read the **latest run whose `event` is `schedule`** and report it as RED when its conclusion is not `success` or its age exceeds the schedule period plus one day. ⛔ It never reads `status=success` counts (the 217-run trap on this card). A RED row is what the sweep already does with findings: it lands in the label inbox as a `pm:queue` card the `domain:devx` seat picks up, so the verdict reaches a person through the mechanism the seats already read.\n\nand its execution clause, which is why this card exists here rather than there:\n\n> **Execution (standing rules):** the check lives in objectstack `scripts/pm/**` (non-governed) and reads all five repos' Actions API; the `domain:devx` seat files the objectstack card citing this ruling and this card is blocked on it (`Blocked-by:` line in the body).\n\n⇒ this is the single-writer rule for the fleet-wide tooling in `scripts/pm/**`: that surface belongs to the objectstack-side seat, and an upstream card from another repo links back. `Clause-②: no` (internal tooling), stated in the ruling.\n\n## One executable acceptance criterion\n\nRun the sweep against this fleet with `objectui`'s `check-links.yml` in scope. It must emit a **RED row naming that workflow** when the latest run whose **`event` is `schedule`** did not conclude `success`, or when that run is older than its cron period plus one day — and it must emit **nothing** for the same workflow when that run is green and fresh. Both directions pinned, ⛔ not just the red one.\n\n## ⛔ Two refusals the ruling makes explicitly, so they are not re-opened\n\n- ⛔ **B refused — no self-reporting automation.** *\"a workflow that dies at `Set up job` opens no issue (#8126's exact shape), so a self-reporting automation cannot report its own death; the external reader can.\"* ⇒ the health of this new check must be watched by **something other than itself**.\n- ⛔ **A refused** (accepting silence). And ⛔ `check-links.yml`'s two commented-out triggers stay commented — objectui#3213's ruling B is untouched by this.\n\n## ⚠️ The trap this check must not fall into, measured on the originating card\n\n`?status=success` returns **217** runs for `check-links.yml`, which reads like a healthy history. All 217 are from 2026-01-24..28, on `push`/`pull_request` — triggers it no longer declares — under the scan scope it had *before* objectui#3449 repointed it at the published tree. ⭐ **They are a different job wearing this job's name.** ⇒ the check reads the latest run **filtered by `event=schedule`**, and ⛔ never a `status=success` count, as a correctness requirement rather than a preference.\n\n## Known scope at filing time\n\nTwo scheduled non-blocking workflows are already named by the ruling: `check-links.yml` (objectui) and `stale.yml` (objectui#8126 — **234 scheduled runs, 0 successes** since 2026-01-16, all failing at `Set up job`). ⚠️ objectui#8126 is disposed by this same check per the ruling. The rule is written for the class, not those two.\n\n## Dedupe\n\n⚠️ Declared. `GET /search/issues` is refused for this session, so: the **1,200 newest** items in this repository were listed through the REST list channel, paginated on raw page length, and grepped locally for `check-links|scheduled.{0,30}non-blocking|event=schedule|latest run whose|half-states.*schedule|batch #88`. One hit — objectstack#16836 (a contract-review label handoff), ⛔ not this. **Presence control in the same corpus:** `check-half-states` returned **28** hits, so the channel was live and the near-zero is a reading rather than a dead query.\n\nRefs: objectui#8402 (the ruling and the measurements) · objectui#8128 (parent) · objectui#8126 (`stale.yml`, same family) · objectui#3213 (ruling B, untouched) · objectui#3449.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

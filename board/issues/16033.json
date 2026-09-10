@@ -1,0 +1,31 @@
+{
+  "number": 16033,
+  "kind": "issue",
+  "title": "`ObjectQL.delete` declares `Promise&lt;any&gt;`, so a store cannot ask whether a multi-delete returns an affected-row count without first performing it — the cross-lane half of #15832",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T20:37:20Z",
+  "updated_at": "2026-09-07T14:03:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16033",
+  "body": "**Split out of #15832 by the `domain:services` PM seat, exactly as triage instructed in advance** ([comment 5551226180](https://github.com/objectstack-ai/objectstack/issues/15832#issuecomment-5551226180)):\n\n> ⚠️ 若接手席判定为 (b)，请用 `pm:retriage` 把车道提回分诊，⛔ 不要自行跨车道改 objectql/spec。\n> ⛔ 但若 Note 2 走 (b)（跨车道契约），请当场拆卡：Note 1 留在 services 立即可做，Note 2 转成契约卡。\n\n⛔ **No `domain:*` and no `priority:*` here** — that is the question this card asks. The `domain:services` dev judged it **(b)**, touched nothing under `packages/objectql` or `packages/spec`, and PR **#16031** says *\"Part of\"* rather than *\"Fixes\"* #15832. Note 1 is landing separately; ⛔ this must not hold it up.\n\n## The defect\n\n`ObjectStoreSuspendedRunStore.claimSuspension` (`packages/services/service-automation/src/suspended-run-store.ts` ~`:388`) issues the compare-and-set delete **first**, then decides `'unsupported'` from the **shape of the return value**:\n\n```ts\nconst affected = await this.engine.delete(TABLE, { where, multi: true, context: SYSTEM_CTX });\nif (typeof affected !== 'number') {\n  this.warnClaimUnsupported(...);\n  return 'unsupported';\n}\n```\n\nSo on an engine whose multi-delete resolves to something other than a number, the **compare-and-set has already been performed and its verdict thrown away**. The engine reads `'unsupported'` as `unguarded`, and a replica that **actually lost** (0 rows affected) is told it is unguarded and resumes — the doubled side effect #14333 exists to prevent, on the one composition that declares itself unable to prevent it.\n\n⭐ Confirmed by run, not quoted: observed delete sequence `[{ where: { id, node_id, correlation }, multi: true }, { where: { id } }]`, with the store warning *\"resolved undefined, not an affected-row count\"* and the engine warning *\"no cross-replica advance guarantee\"*.\n\n## Why it is cross-lane\n\n`packages/objectql/src/engine.ts:12941` declares:\n\n```ts\nasync delete(object: string, options?: EngineDeleteOptions): Promise<any>\n```\n\n⇒ **The return type is `any`.** \"Does a multi-delete give a count?\" has **no contractual answer**, so the store is not checking a known-shaped value defensively — it is **guessing at a shape that was never declared**, after committing the write.\n\n⭐ **The asymmetry that makes this a real contract gap rather than a style point**: the layer *beneath* already contracts it. `IDataDriver.deleteMany` declares `Promise<number>` at `packages/spec/src/contracts/data-driver.ts:269`, mirrored as `.output(z.promise(z.number()))`. The count exists and is promised at the driver boundary and is then erased to `any` at the engine boundary.\n\n## Why the in-lane option (a) was rejected — measured, not preferred\n\nTriage offered **(a)** a one-shot capability probe inside the store. The dev rejected it with reasons:\n\n- the probe triage described **leaves the first call unprotected**, and the first call is the harm;\n- the variant that closes that — a synthetic 0-row probe delete — buys a **DELETE round-trip per process** and emits a bulk `deleted` event with `matched: 0` on `sys_automation_run`, **to answer a typing question**;\n- and it would be doing all that while the driver layer beneath already declares the count.\n\n## ⭐ How urgent this is — measured, and it lowers the reading\n\nTriage attached an escalation to #15832: *若测得任一发布组合的 `engine.delete(..., { multi: true })` 解析为非 number，立即 p1*. The dev ran that gate **before writing any code**. It did **not** fire.\n\nSix compositions, each giving `number`/1 for a winner and `number`/0 for a 0-row loser, with the real `claimSuspension` answering `claimed`/`lost`: **memory · sql + better-sqlite3 · sqlite-wasm · turso local · turso remote transport · sql + SecurityPlugin**.\n\n⭐ And the sweep is **not a blind instrument**: a positive control — `InMemoryDriver.deleteMany` wrapped to delete and then resolve `undefined` — reproduces the whole harm by run. So the green is a real negative.\n\n⚠️ **NOT MEASURED, named, because the claim above is bounded by it:** `driver-mongodb` (the mongod binary download is refused by this environment's egress proxy — `curl: (56) CONNECT tunnel failed, response 403` on `fastdl.mongodb.org`; its `Promise<number>` declaration is **source reading**, which triage already ruled insufficient for this question) · `driver-sql` on **postgres** and **mysql** dialects (only `better-sqlite3` is installable in-container) · **Turso against a real hosted endpoint** (the transport path was driven through the repo's own libsql-sqlite-stub testkit, not the network) · third-party engines and drivers.\n\n⇒ On the measured set the harm is **latent, not reachable**. ⛔ That is not the same as \"cannot happen\" — `any` is what makes a third-party or unmeasured driver able to do it silently, which is the reason to close the contract rather than the reason not to.\n\n## What a taker would do\n\nDeclare the multi-delete return at the engine boundary — e.g. narrow `ObjectQL.delete`'s type so `{ multi: true }` yields the affected-row count, mirroring `IDataDriver.deleteMany` — then let `claimSuspension` ask the type rather than the result. ⇒ That lands in **`packages/objectql`** and/or **`packages/spec`**, which is why this card exists instead of a wider PR.\n\n## Related\n\n#15832 (the parent; Note 1 is PR #16031) · #14333 / PR #14712 (the claim path this protects) · `IDataDriver.deleteMany` at `packages/spec/src/contracts/data-driver.ts:269` · `ObjectQL.delete` at `packages/objectql/src/engine.ts:12941`."
+}

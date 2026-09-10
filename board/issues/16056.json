@@ -1,0 +1,31 @@
+{
+  "number": 16056,
+  "kind": "issue",
+  "title": "docs(releases): the v17 page's upgrade bullet asserts `os migrate meta` \"also prints `runtime 17.0.0` on a 17.3.0 install\" — a sentence the CLI repair invalidates, in a file a code PR may not touch",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T22:29:46Z",
+  "updated_at": "2026-09-07T03:05:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16056",
+  "body": "Filed unassigned for triage, out of scope for the card that found it (#15585). Not addressed there and that card is not addressed here.\n\n## Measurement\n\n`content/docs/releases/v17.mdx:5363`, closing an upgrade-guidance bullet:\n\n```\n- **Expect `os migrate meta --from 17` to report `Nothing to migrate`, and do not\n  read that as completion.** *Measured:* it exited 0 with exactly that line while\n  **nine** of the items on this page were live and unaddressed on that stack. Its\n  scope is the protocol chain; everything else on this list is outside it. (It\n  also prints `runtime 17.0.0` on a 17.3.0 install.)\n```\n\nThe parenthetical is the defect #15585 reports. Its repair changes the line the sentence describes, so once that lands the CLI prints:\n\n```\nChain:  protocol 17 → 17 (this runtime implements protocol 17)\n```\n\nand no build prints `runtime 17.0.0` any more.\n\n## Why this is a separate card and not a rider\n\n`content/docs/releases/` is written centrally at release time and is off-limits to a code PR — AGENTS.md, Documentation Guardrails: a factual error there is a dedicated docs-only PR or an issue, never a rider on code changes. A code PR's only input to release notes is its changeset, and the #15585 changeset carries the corrected line.\n\n## The judgement this needs, which is why it is triage and not a mechanical edit\n\nIt is genuinely unclear whether the sentence is **stale** or **historical**, and the two want opposite edits:\n\n- **Historical** — the bullet documents what a reader upgrading *to* v17 measured on 17.3.0. Read that way the sentence is still true of 17.3.0 and should stay, perhaps with the version it was measured on made explicit.\n- **Stale** — the bullet is live upgrade guidance on the page a reader lands on today. Read that way it tells a reader on a later 17.x to expect output that build does not produce, which is the same class of \"the page describes a build that is not yours\" defect as #15332 (the index's v17 entry still saying \"current series: 17.2.0\"; different sentence, different file, already dispatched).\n\nNeither reading is safe to pick from a code card, and the file's owner is the release process.\n\n## Scope fence\n\nOne parenthetical in one bullet. Not a correctness, data or security defect. No package code is implicated: the CLI half is fixed under #15585, and nothing else in the tree quotes the old line (grep over `skills/`, `content/`, `docs/`, `packages/*/README.md`; the one `Chain:` hit in `skills/objectstack-upgrade/SKILL.md` is a report template an author fills in, not a quote of the command's output)."
+}

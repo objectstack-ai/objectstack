@@ -1,0 +1,32 @@
+{
+  "number": 11663,
+  "kind": "issue",
+  "title": "[Design] Re-anchor platform-admin: `admin_full_access` becomes a kernel metadata declaration; WHO holds it comes from env-configured verified emails — retiring the org-less row anchor",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:epic",
+    "priority:p0",
+    "security",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-24T10:58:08Z",
+  "updated_at": "2026-09-03T05:52:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11663",
+  "body": "Chartered by maintainer ruling, 2026-08-24, live PM chat, verbatim: 「立卡，优先处理，并评估有没有相关任务要一起处理」 — with the design direction proposed by the maintainer in the same session: 「admin_full_access 能否在内核中用元数据约定，然后具体谁是超级管理员通过环境变量配置邮箱？」. **Direction is ruled; this card designs the details and sequences the implementation. Design-first: no implementation dispatch until the design is accepted.**\n\n## The problem (business form, from the #2734 → #10103 → #11532 lineage)\n\nThe platform's own super-admin right is anchored on a data row inside the tenant data model: an org-less `admin_full_access` row in `sys_permission_set`, referenced **by row id** from an unscoped `sys_user_permission_set` grant (`resolve-authz-context.ts` §6b), seeded ~1.3s before the first organization exists. It is the last structural exception to the ruled walled-tenancy doctrine (\"every row belongs to exactly one organization\"; #10103 Option C). Costs: single-point fragility (touch the row → platform lockout or silent re-mint), a recurring tax on every sweep/gate/diagnostic (three ruling rounds spent on this family already), and an asterisk in the security story.\n\n## Ruled direction\n\n1. **The permission set's CONTENT is a kernel metadata declaration** — code-declared, versioned, spec-validated, PR-reviewed. No runtime row holds the super-admin capability set; nothing can delete or mutate it at runtime. (Mainstream precedent: Keycloak `KEYCLOAK_ADMIN`, GitLab root bootstrap, Grafana `GF_SECURITY_ADMIN_*`, Kubernetes deployment-credential superuser — operator-level admin comes from deployment config, never from business data.)\n2. **The HOLDER comes from deployment config**: an env variable listing admin email(s). Platform-admin derivation becomes: caller's **verified** email ∈ configured list → `PLATFORM_ADMIN` with the declared capability set.\n\n## Five security pins the design must nail (from the chartering discussion)\n\n1. **Verified-email match only** — the env entry confers nothing until an account holding that email has passed verification; normalize (lowercase) and match exactly. Otherwise registering the configured address is a privilege escalation.\n2. **Empty config = fail closed** — no platform admin exists; the development-mode dev-admin seed stays development-only.\n3. **Auditability** — the resolved admin list is surfaced read-only (Setup / discovery / health) since there is no grant row left to query.\n4. **Revocation = config change + reload** — acceptable for this role; cloud's control plane injects per-deployment env, which fits.\n5. **Loud migration** — existing deployments carrying the row-id grant: derivation prefers env; a detected legacy grant logs a deprecation pointing at the config path; removal of the legacy path is a sequenced follow-up, never a silent dual-track.\n\n## Related tasks assessed for joint handling (maintainer asked; triage's reading)\n\n| card | relation | sequencing |\n|---|---|---|\n| **#10348** (ruled C today, `pm:queue`) | Consolidates the two stray plugin-auth judges onto `resolve-authz-context.ts` — the very function this design rewires | **Land #10348 first**: then the derivation changes in exactly one place. The design card's implementation must not start before it. |\n| **#10949** (`pm:blocked`, live authz defects in those judges) | May be partially absorbed by #10348-C | Re-priced there (already noted on #10348). |\n| **objectstack#11211** (merged: walled owner-email elevation) + the #10103 \"env-door projection\" | **An email/env elevation mechanism already partially exists.** | ⚠️ Premise-first for the designer: measure the landed mechanism and **unify onto it — one email door, not two parallel ones**. |\n| **cloud#1509** (P0: first self-registrant becomes platform_admin, bypassing invite-only) | The env-email anchor is the structural fix for this class: self-registration must never confer platform admin; only configured emails do | Design must state the walled bootstrap flow end-to-end; a cloud-side leg follows the design (coordinate with the cloud seat's #1614→#1509 train — do not collide with its in-flight acceptance). |\n| **#11532** (closed today: honest diagnostic) | The 8 org-less rows' retirement becomes possible once nothing references `admin_full_access` by row id | Seeders stop minting + reap of the 8 rows is the implementation's final leg (the other 7 rows have per-org copies already; verify zero readers before reaping). |\n\nNot related despite proximity: #11579 (auth settings pre-bind), #11627 (MySQL hash keys), #10556 (sinks).\n\n## Discipline\n\nPriority: maintainer-ordered front-of-queue (`priority:p0` per the verbatim above — jump authorization recorded; ⛔ does not exempt claim protocol or serial constraints). Clause-②: **yes** (changes authorization derivation — the widest contract there is); contract-review tier mandatory on the implementation. Deliverable of THIS card: the design document (options where real choices remain — e.g. env spelling, multi-admin, reload semantics — with a four-axis pass), then split implementation cards per surface (`packages/core` derivation · kernel declaration · plugin-security seeders/reap · migration · cloud leg).\n\nRefs: #10103 (ruling + fork analysis) · #11532 (measured constraints: row-id derivation, bootstrap-before-first-org) · #10348 (consolidation prerequisite) · cloud#1406/#1509 · #2734 · ADR-0068 · ADR-0120 D3."
+}

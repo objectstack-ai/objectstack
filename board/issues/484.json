@@ -1,0 +1,37 @@
+{
+  "number": 484,
+  "kind": "pull_request",
+  "title": "Add RBAC, dynamic schema linking, protocol extensibility, and conflict resolution to API Registry",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-02T05:29:09Z",
+  "updated_at": "2026-02-02T05:50:13Z",
+  "closed_at": "2026-02-02T05:43:13Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-02T05:43:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/484",
+  "body": "Enhances the Unified API Registry with four enterprise-grade capabilities identified in architectural review: automatic permission enforcement, self-updating API schemas, multi-protocol plugin support, and deterministic route conflict resolution.\n\n## Changes\n\n### 1. RBAC Integration\n- **`requiredPermissions`** field on endpoints enables gateway-level authorization\n- Supports object permissions (`customer.read`) and system permissions (`manage_users`)\n- Eliminates per-handler permission checks\n\n```typescript\nApiEndpointRegistration.create({\n  path: '/api/v1/customers/:id',\n  requiredPermissions: ['customer.read'],  // Auto-enforced at gateway\n  responses: [...]\n});\n```\n\n### 2. Dynamic Schema Linking\n- **`ObjectQLReferenceSchema`** links API schemas to ObjectQL objects\n- API documentation auto-updates when object definitions change\n- Supports field inclusion/exclusion and relation expansion\n\n```typescript\n{\n  statusCode: 200,\n  schema: {\n    $ref: {\n      objectId: 'customer',\n      excludeFields: ['password_hash'],\n      includeRelated: ['account']\n    }\n  }\n}\n```\n\n### 3. Protocol Extensibility\n- **`protocolConfig`** field allows plugins to define protocol-specific metadata\n- Supports gRPC, tRPC, WebSocket without core code changes\n- Enables protocol-specific UI rendering\n\n```typescript\n{\n  protocolConfig: {\n    subProtocol: 'grpc',\n    serviceName: 'CustomerService',\n    methodName: 'GetCustomer'\n  }\n}\n```\n\n### 4. Route Conflict Resolution\n- **`priority`** field (0-1000) for deterministic route ordering\n- **`conflictResolution`** strategy enum: `error` | `priority` | `first-wins` | `last-wins`\n- Prevents silent plugin route overwrites\n\n```typescript\nApiRegistry.create({\n  conflictResolution: 'priority',\n  apis: [{\n    endpoints: [{\n      path: '/api/v1/data/:object',\n      priority: 950  // Core API wins over plugins\n    }]\n  }]\n});\n```\n\n## Backward Compatibility\n\nAll fields are optional with sensible defaults:\n- `requiredPermissions: []` (public)\n- `priority: 100` (medium)\n- `conflictResolution: 'error'` (fail-safe)\n\n## Test Coverage\n\n- 53 test cases covering all enhancement scenarios\n- Integration tests combining all features\n- 3,129 total tests passing\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/483\n> \n> 这份修改方案（PR #483）提出的 **统一 API 注册表 (Unified API Registry)** 方案非常合理，且是构建企业级低代码平台（尤其是涉及多协议、多插件架构时）的关键基础设施。\n> \n> 它填补了之前架构中“如何管理异构 API”的空白，完美呼应了战略路线图中的“生态系统建设”和“开发者体验”目标。\n> \n> 以下是基于现有 API 协议的详细评估：\n> \n> ### ✅ 方案的合理性与亮点\n> \n> 1.  **解决了“协议碎片化”问题**：\n>     *   在一个微内核架构（Microkernel Architecture）中，核心系统通常只通过 REST/GraphQL 暴露标准 CRUD，但插件往往需要暴露特殊的端点（如支付回调 Webhook、即时通讯 WebSocket、老旧系统的 OData）。\n>     *   该方案通过 `ApiProtocolType` 枚举（支持 `rest`, `graphql`, `odata`, `websocket`, `file`, `plugin` 等）将这些异构协议统一纳管，使得前端或网关层可以统一处理路由和文档。\n> \n> 2.  **文档与测试的“协议优先”落地**：\n>     *   通过 `documentation.zod.ts` 定义了文档生成的元数据（OpenAPI Spec），这意味着系统可以**自动**为所有注册的 API（包括插件的）生成 Swagger/Redoc 文档。\n>     *   这对于低代码平台至关重要：用户安装一个插件后，立刻能在统一的 API Portal 中看到并测试该插件的 API，无需查阅分散的 PDF 或 Markdown 文档。\n> \n> 3.  **插件机制的良好支持**：\n>     *   `ApiRegistryEntry` 包含 `metadata.pluginSource`，这允许系统追踪 API 的来源，方便在卸载插件时自动注销对应的 API，维护系统的整洁。\n> \n> ### ⚠️ 改进意见与潜在风险\n> \n> 虽然方案整体优秀，但为了更好地与 Roadmap 中的其他协议（如 RBAC、ObjectQL）融合，建议进行以下优化：\n> \n> #### 1. 🔐 安全定义的集成 (Security Integration)\n> \n> *   **当前问题**：`ApiEndpointRegistrationSchema` 中的 `security` 字段目前沿用了 OpenAPI 的标准定义（如 `oauth2`, `apiKey`）。\n> *   **改进建议**：\n>     *   **增加 `requiredPermissions` 字段**：企业级应用的核心是权限。建议在 Schema 中明确集成 ObjectStack 的 **RBAC 协议**。\n>     *   这样，网关层（Gateway）可以自动拦截没有 `user.read` 或 `order.delete` 权限的请求，而不需要每个 API 处理函数自己去写权限判断逻辑。\n>     *   **代码示例**：\n>         ```typescript\n>         // 建议增加\n>         permissions: z.array(z.string()).describe('Required RBAC permissions, e.g. \"user.read\"'),\n>         ```\n> \n> #### 2. 🔄 数据模型的动态链接 (Schema Linkage)\n> \n> *   **当前问题**：`ApiResponseSchema` 和 `ApiParameterSchema` 中的 `schema` 字段类型是 `z.any()`。这意味着注册表存储的是“静态快照”。\n> *   **改进建议**：\n>     *   **支持引用 ObjectQL 对象**：如果 API 返回的是系统中的标准对象（如 `Customer`），建议允许直接引用对象名，而不是复制一份 JSON Schema。\n>     *   **价值**：当用户修改了 `Customer` 对象的字段（如增加“VIP等级”），API 文档和 Mock 数据能**自动更新**，无需重新注册 API。\n>     *   **代码示例**：\n>         ```typescript\n>         // 允许直接引用对象 ID\n>         schema: z.union([\n>           z.any(), // 原有的 JSON Schema\n>           z.object({ objectId: z.string() }) // 动态链接到 ObjectQL 定义\n>         ])\n>         ```\n> \n> #### 3. 🧩 协议类型的扩展性 (Protocol Extensibility)\n> \n> *   **当前问题**：`ApiProtocolType` 是一个硬编码的 `z.enum`。如果未来你想支持 `gRPC` 或 `tRPC`，需要修改核心代码。\n> *   **改进建议**：虽然 `enum` 对核心协议没问题，但对于 `plugin` 类型，建议允许插件在 `config` 字段中定义具体的子协议类型，以便前端 UI 能根据子类型渲染不同的测试界面（例如 gRPC 需要不同的测试工具）。\n> \n> #### 4. 🏷️ 路由冲突检测 (Route Conflict Detection)\n> \n> *   **建议**：在实施指南中补充说明：当多个插件注册了相同的 `path`（例如都想监听 `/api/v1/webhook`）时，注册表应该采取什么策略？（报错？覆盖？还是按优先级？）建议增加 `priority` 字段或明确“先到先得/报错”的机制。\n> \n> ### 结论\n> \n> **批准该方案 (Approve)**。\n> 它是实现“全球最顶流企业管理软件平台”愿景中**API 网关**和**开发者门户**的基石。上述改进意见可以在后续的 `PEP` 迭代中逐步完善，不影响当前架构的正确性。\n> \n> 建议合并后，下一步优先实现基于此注册表的 **\"API Explorer\"（API 浏览器）** 插件，直观展示其价值。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

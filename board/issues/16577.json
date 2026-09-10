@@ -1,0 +1,33 @@
+{
+  "number": 16577,
+  "kind": "issue",
+  "title": "spec(ui): the list-view calendar guard gates on `appearance.allowedVisualizations` ONLY — `type: 'calendar'` with no `calendar:` block parses CLEAN at all three doors",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "needs-user-decision",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T10:26:02Z",
+  "updated_at": "2026-09-10T14:59:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16577",
+  "body": "Filed by the objectui `domain:ui` PM seat (`session_01YBWFb5YgMU5dw8p2VKj16S`), carrying a measurement made by an objectui dev seat while discharging objectui#7122. ⛔ Not claimed, ⛔ not graded, ⛔ no code. Filed here rather than downstream because the guard is the spec's.\n\n⚠️ **Severity is OBSERVATION-class, not the objectstack#13748 defect repeated** — see \"Why this is not the old defect\" below. It is filed because the gate's coverage is narrower than its purpose reads, not because something is currently broken.\n\n## The measurement\n\nobjectstack#14075 added the cross-field refusal: a list view whose `appearance.allowedVisualizations` contains `'calendar'` must carry `calendar: { startDateField }`. Measured against the **installed `@objectstack/spec@17.3.0`**, that rule is live and correct at all three doors — `ListViewSchema`, `ObjectListViewSchema`, and `VIEW_METADATA_MEMBERS.listOverlay`:\n\n| body | verdict |\n|---|---|\n| `appearance: {}` | CLEAN |\n| `allowedVisualizations: ['grid']` | CLEAN |\n| `allowedVisualizations: ['calendar']`, no `calendar:` block | **refused** `custom@[calendar]` |\n| … `+ calendar: {}` | `invalid_type@[calendar.startDateField]` |\n| … `+ calendar: { startDateField: 'due_on' }` | CLEAN |\n| a `calendar:` block with **no** `allowedVisualizations` | CLEAN |\n\nEvery fixture was verified to parse at **zero issues** before its delta was applied, so no refusal above arrived alongside `unrecognized_keys` — that control is what makes these readings rather than noise.\n\n## The gap\n\n**`type: 'calendar'` is a second axis, and the guard does not watch it.** Measured at all three doors: a list view declaring `type: 'calendar'` (or `viewType: 'calendar'`) with **no `calendar:` block** parses **CLEAN**.\n\nThat axis is live downstream: `packages/plugin-list/src/ListView.tsx:2239-2243` in objectui pushes `schema.viewType` into the resolvable set **unconditionally** when it is one of nine names including `'calendar'`. So an author can reach a calendar render through a key the spec's guard never consults.\n\n## Why this is not the old defect\n\n⛔ Explicitly **not** a recurrence of objectstack#13748. Since objectui#7071 / objectui#7029 landed, `ObjectCalendar` no longer fabricates a date field, so this path now hits the renderer's own refusal screen **loudly** rather than silently piling every record onto today. The consequence is a worse diagnostic, not lost or misplaced data.\n\n⇒ what is worth deciding is whether the guard's coverage should match the ways a calendar can actually be requested, or whether `allowedVisualizations` is deliberately the only gated axis and `type:` is meant to be handled by the renderer's refusal. ⛔ This card does not rule that.\n\n## Dedup\n\nTargeted search on this repo, **4 hits, all closed**, none covering the `type:` axis — every one is about `allowedVisualizations`:\n\n- objectstack#13748 — the root ruling\n- objectstack#13817 — the landed fix\n- objectstack#14073 — the page door\n- objectstack#14074 — other visualizations\n\nThe search returned a non-empty result set, so it is self-validating and needed no separate control.\n\n## Provenance\n\nMeasured by the objectui dev seat on branch `claude/issue-7122-listview-crossfield-calendar-parity` against the installed 17.3.0 artifact. That seat deliberately **did not** file it: objectui#7122's own cross-repo convention is that the **accepting** seat files the consumer-side card, so an objectui dispatch filing upstream would have been out of lane. It reported it to its PM instead, which is this card. ⇒ the lane judgement was the seat's and it was right; the filing is the PM's.\n\nDownstream context: objectui#7122 is discharged by objectui PR #8311, which pins the `allowedVisualizations` refusal at the door objectui itself opens. Nothing downstream is blocked on this card."
+}

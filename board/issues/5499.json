@@ -1,0 +1,29 @@
+{
+  "number": 5499,
+  "kind": "issue",
+  "title": "[裁决] driver-memory / driver-mongodb 投入冻结 —— 维护者 2026-08-05 口径（跨单锚点）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:23:15Z",
+  "updated_at": "2026-09-10T05:18:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 17,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5499",
+  "body": "维护者 2026-08-05 口径（要点转述）：\n\n- **driver-memory** 是早期为测试便利设计的组件，方向已定为 **sqlite 内存模式**替代；\n- **driver-mongodb** 暂无客户；创业团队集中精力，不铺大。\n\n本单是该裁决的跨单锚点（SKILL step 8：跨多单的决策立一处、各单引用），受影响单的 `pm:on-hold` hold 评论一律指回这里。\n\n## 冻结的含义\n\n- 冻结的是**缺陷修复与语义补齐的开发投入**，不是运行。事实核查（`origin/main` @ `0285f7f`）：driver-memory 今天仍是 `packages/objectql` 单测的主力后端，并且是 cli / runtime / plugin-dev / service-datasource / qa-dogfood 的依赖；sqlite `:memory:` 已在 examples（app-crm / app-showcase 的 datasource 配置）与 `cli db clean` 采用——替代已开始但测试面未完成。两族组件照常在树内运行。\n- 存量缺陷单转 `pm:on-hold`（清单见下），不派发、不催。\n- **新单分诊规则（常设）**：driver-memory / driver-mongodb 族新单照常按落点打 `domain:engine`，但直接挂 `pm:on-hold` 引用本单，不入 `pm:queue`。已写入 #4604 座位表 engine 行说明与分诊 Routine（#5474）prompt。\n\n## 边界（明确不冻结）\n\n- `driver-sql`、`formula`、`driver-turso`（cloud 仓）不在冻结范围；\n- 跨面分歧单只冻 driver-memory 半边：#5298、#5299、#5369 保留 `finding`，下次发现分诊轮按 formula / driver-sql 侧重新框定范围；\n- **例外升级通道**：若 driver-memory 的缺陷影响 CI 判绿的正确性（单测后端语义错造成测试假绿/假红），按 restore-invariant 处理，由分诊轮点名升级，不受本冻结约束；\n- 未分诊存量中疑似同族的（如 #5332 / #5333 的 analytics SQL 回显，落点尚未锚定），由分诊轮按「修复落点的包」判定归属后再适用本裁决——落 driver-memory 则冻，落 driver-sql / service-analytics 则照常入队。\n\n## 重启条件\n\n- **driver-mongodb**：出现真实客户需求时由维护者解冻；\n- **driver-memory**：sqlite `:memory:` 替代在测试面完成后，本单下挂起的缺陷单整批关闭（not planned）；替代迁移若立项，在本单登记排期。\n\n## 受影响单（2026-08-05 转 `pm:on-hold`）\n\ndriver-memory：#5433、#5440、#5442、#5444、#5354\ndriver-mongodb：#5376、#5346\n保留 `finding`（混合面）：#5298、#5299、#5369"
+}

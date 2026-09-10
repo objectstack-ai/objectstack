@@ -1,0 +1,30 @@
+{
+  "number": 17177,
+  "kind": "issue",
+  "title": "The seed loader logs `owner_id stays NULL` for 120 rows whose `owner_id` is not NULL — the summary contradicts the table it just wrote",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T14:43:15Z",
+  "updated_at": "2026-09-10T14:52:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17177",
+  "body": "Found while upgrading `objectstack-ai/hotclm` to `@objectstack/*` **17.4.0** (hotclm#35 / hotclm PR #37). Filed at the destination per that repo's `AGENTS.md` rule for platform gaps — *report, never patch*. Not triaged: no `domain:*`, no priority, no assignee.\n\n**This is the sharpest of three findings from that boot, because it is the one where a diagnostic actively lies.**\n\n## Symptom\n\nOn the **single-boot** seed path — `CLM_DEMO_SEED=1 objectstack dev --compile --ui --seed-admin` against a clean database, i.e. *not* the two-boot `pnpm demo` handover — the loader logs, for all 120 `clm_contract` rows:\n\n```\nDeferred reference UNRESOLVED after pass 2 - clm_contract.owner_id stays NULL\n```\n\nand the database then ends up holding **the dev admin's id in `owner_id` on all 120 rows.**\n\nThe column is not NULL. The log says it is.\n\n## Why this one is worse than a wrong number\n\nA log that under-reports is bad; a log that reports the *opposite* of what the table holds is worse, because it survives verification. An author who reads the loader summary concludes the rows are ownerless and goes looking for the bug that made them so. An author who queries the table concludes the seed worked. Both are reading real output from the same run, and there is nothing in either to tell them the other exists.\n\nThe mechanism appears to be ordering: the deferred-reference resolver reports its own pass-2 outcome, and something later — the ownership claim for newly-minted admin accounts — writes the column afterwards without the summary being recomputed. So the sentence is true *when it is emitted* and false by the time the boot finishes.\n\n## Second symptom on the same path (probably one bug, possibly two)\n\nThe same single-boot run installs **760 rows, not 820**: all 60 `clm_review` rows are refused with `Reviewer is required`. That is exactly the failure `hotclm`'s `scripts/demo.mjs` two-boot handover exists to prevent — `clm_review.reviewer` is `required: true` and resolves against `sys_user.name`, which matches nothing before the first account exists. Expected on this path; recorded because it is what makes the path worth reproducing.\n\n## Reproduce\n\n```bash\ngit clone https://github.com/objectstack-ai/hotclm && cd hotclm && pnpm install\nrm -rf .objectstack/data\nCLM_DEMO_SEED=1 pnpm exec objectstack dev --compile --ui --seed-admin\n# read the loader summary: \"owner_id stays NULL\" x120\n# then read the table:\n#   sqlite3 .objectstack/data/*.db 'select count(*) from clm_contract where owner_id is not null'\n#   -> 120\n```\n\n`pnpm demo` never takes this path, so no shipped product is affected — which is precisely why this can sit unnoticed.\n\n## Expected\n\nThe loader's deferred-reference summary describes the state at end of boot, or says explicitly that it describes the state at end of pass 2 and may be superseded. Either is fine; a bare present-tense claim about a column's value that is false by the time the boot ends is not.\n\n## Side effect worth recording\n\nThis resolves an open contradiction in hotclm#26. Its annotation *\"the runtime claims ownerless seeded rows for the dev admin once that account is minted (measured)\"* is **true on the single-boot ordering and false on the two-boot one** — so the original measurement was correct and was silently invalidated by hotclm#21's handover, which changed which boot mints the admin. The annotation is a `(measured)` note that stopped being true without anyone touching it.\n\n## Related\n\nNearest neighbours, all closed and none the same defect: #3932 (a dropped reference field invisible in the summary), #14403, #16488, #8682."
+}

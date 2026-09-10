@@ -1,0 +1,30 @@
+{
+  "number": 17445,
+  "kind": "issue",
+  "title": "spec(kernel): VIEW_BINDING_BLOCKS' calendar row — and the warning it prints — assert a renderer fallback objectui#7029 DELETED",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T14:46:53Z",
+  "updated_at": "2026-09-10T14:46:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17445",
+  "body": "Filed by an `os-dev` seat while discharging objectstack#16577 (branch `claude/issue-16577-listview-calendar-guard-coverage`). Out of that card's scope: different door, different file, different ruling. ⛔ Not claimed, ⛔ no code.\n\n## The claim under test\n\n`packages/spec/src/kernel/functional-completeness.ts` — `VIEW_BINDING_BLOCKS`'s docblock states its calendar row as a MEASURED renderer fallback:\n\n> - `calendar` → `startDateField || 'start_date'`, `endDateField || 'end_date'`\n\nand the same premise is the body of the warning `checkViewCompleteness` prints on that route (`view/layout-without-binding`):\n\n> A `calendar` view with no `calendar` block is bound to nothing: the renderer falls back to literal default field names, which works only if the object happens to declare them — on any other object the view renders empty while authoring reports success.\n\nThe docblock is explicit that the table was verified against a build: *\"read back verbatim from the built console 17.2.0\"*.\n\n## The measurement\n\nRead on objectui `main` at commit `3fbdd4a2d`, both halves of the path a `type: 'calendar'` list view takes:\n\n1. `packages/plugin-list/src/ListView.tsx`, the `case 'calendar':` props builder — the two literal floors are GONE, and the comment above them says so in its own words:\n\n> objectui#7029: only ever restate a binding the view actually DECLARED. These two keys used to be floored at 'start_date' / 'end_date' — field names no view had written and most objects do not carry.\n\n   The branch now spreads `startDateField` / `endDateField` / `titleField` only when each is declared.\n\n2. `packages/plugin-calendar/src/ObjectCalendar.tsx` — `getCalendarConfig(schema)` returns `null` when there is neither a `calendar` block nor a flat `startDateField` / `dateField`, and the component's `if (!calendarConfig)` arm renders the refusal screen **\"Calendar configuration required. Please specify startDateField and titleField.\"**\n\n⇒ For `calendar`, today, there is **no fallback to literal default field names**, the view does **not** render empty, and authoring does **not** report success silently — the renderer names the two missing keys on screen. Both the table row and the warning's message describe objectui at 17.2.0, before objectui#7029 landed.\n\n## Why it is worth a card rather than a shrug\n\nThe `fix:` hint the same finding carries is still correct (`calendar: { startDateField: ..., titleField: ... }`), so an author is steered to the right edit. What is wrong is the WHY, and the why is load-bearing twice over:\n\n- It is the stated evidence for the row's **severity**. ADR-0078 §1 assigns WARNING to what degrades and refusal to what renders nothing; the row justifies its warning by the fallback. With the fallback deleted, the severity is now resting on a premise that no longer holds — in either direction. objectstack#16577 is asking exactly which severity this route deserves, and it will be answered against this row.\n- The docblock presents the row as measured and names the build it was measured on. That is the shape a later author reuses rather than re-measures — byte-exact at the commit it cites, describing code two refactors back.\n\n⛔ This card does not rule what the row should say, and deliberately does not touch the five sibling rows (`kanban` / `gantt` / `timeline` / `map` / `tree`): only the `calendar` renderer was re-measured here, and the same docblock's standing instruction is that each entry is verified before it is asserted.\n\n## Dedup\n\nREST list endpoints plus local grep over the bodies (the exit proxy declines `/search/*`). Two label-scoped listings, `state=all` — `finding` and `domain:spec`, 2 pages each, **374 distinct issues**. Zero hits on `layout-without-binding`, `VIEW_BINDING_BLOCKS`, `checkViewCompleteness`, and on the literal `startDateField || 'start_date'`. Lit control `functional-completeness` read **2** (objectstack#16441, objectstack#16960 — both about line anchors elsewhere, neither this); dark control `ZZQQ_dark_control_16577` read **0**.\n\n⚠️ Coverage bound, stated rather than implied: both listings' second pages came back full at 100, so this is not an exhaustive enumeration of either label — it is a bounded, controlled read, not a proof of absence.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

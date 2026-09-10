@@ -1,0 +1,32 @@
+{
+  "number": 15932,
+  "kind": "issue",
+  "title": "spec: the `plugin-security-advanced` scan-result surface has ZERO consumers after #14919 — 22 published authorable rows with no author and no parser",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T14:58:41Z",
+  "updated_at": "2026-09-07T03:05:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15932",
+  "body": "Found while retiring `PluginSecurityScanner` (#14919, PR #15930). Filed rather than fixed: retiring a `packages/spec` surface is a maintainer ruling plus the `spec-property-retirement` playbook, not a rider on a `packages/core` removal.\n\n## What moved\n\n`docs/qa/platform-checklist/FOLLOW-UPS.md` §7a already carried this row, and its evidence column read:\n\n> `KernelSecurityScanResult` / `KernelSecurityVulnerability` / `PluginSecurityManifest.scanResults` — no `.parse`/`.safeParse` site anywhere; **only consumer is the dead scanner (type-only import)**\n\n#14919 deletes that scanner. So the row's stated consumer is gone and the count moves from **one type-only importer** to **zero consumers of any kind**. PR #15930 corrects the row's text; this issue is the disposition the corrected row now needs.\n\n## The reading, measured at `9f6baaafd` (before the retirement lands)\n\nThe two type names were imported in exactly one place in the whole tree:\n\n```\npackages/core/src/security/security-scanner.ts:3   import type { KernelSecurityVulnerability, KernelSecurityScanResult } from '@objectstack/spec/kernel';\n```\n\nThat file is deleted by #14919. Their declaring module is `packages/spec/src/kernel/plugin-security-advanced.zod.ts`; outside that module and its own self-test (`plugin-security.test.ts`) nothing in `packages/**` names either type, and there is no `.parse` or `.safeParse` call against either schema anywhere. The FOLLOW-UPS row records 22 rows published to `packages/spec/authorable-surface/kernel.json` from this family.\n\nThe neighbouring rows in the same §7a table are the same shape and should be triaged together rather than one at a time:\n\n- `PluginQualityMetrics.securityScan` (`plugin-registry.zod.ts`) — spec self-test only\n- marketplace / incident scan vocabulary (`marketplace.zod.ts` `'scanning'`, `marketplace-admin.zod.ts`, `incident-response.zod.ts` `'malware'`) — declared-only enum members with no producer in this repo\n\n## Why this is ADR-0049 territory\n\nNothing writes these keys, nothing parses them, and after #14919 nothing so much as imports their types — while they are published as authorable rows, so an author can write them, have them accepted, and get no behaviour. That is the declared-not-enforced shape Prime Directive #10 names, one layer out from the class #14919 removed for the same reason.\n\nNote this is a *narrower* claim than \"retire the module\": `plugin-security-advanced.zod.ts` is a large file and other keys in it are live subjects of open work — #15811 (evaluated expression slots: its `condition` key) and #15678 (duration key naming: `timeout`, `tokenExpiration`, `retention`, `responseTime`). Neither of those touches the scan-result family, and a retirement here must not collide with them. Sequence with those two, and scope the removal to the scan-result surface rather than the module.\n\n## What is NOT being asserted\n\nThe out-of-repo consumer population is **not measured**. `@objectstack/spec` is published, so removing these types is breaking for an unmeasured population, exactly as #14919's changeset says of its own three exports. That is an input to the ruling, not a reason to skip it.\n\n## Ask\n\nA maintainer disposition under ADR-0049 enforce-or-remove: retire the scan-result surface (then the `spec-property-retirement` playbook applies to the authorable-surface rows and the ADR-0087 conversion), or declare an owner that will enforce it."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 469,
+  "kind": "pull_request",
+  "title": "Hub Protocol: Add API contracts, federation, and security protocols",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-02T01:23:16Z",
+  "updated_at": "2026-02-02T03:35:12Z",
+  "closed_at": "2026-02-02T03:35:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-02T03:35:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/469",
+  "body": "The Hub protocol lacked REST API contracts, multi-region federation support, and plugin security infrastructure. This adds complete specifications for managing tenants, plugins, and workspaces at scale.\n\n## Changes\n\n### API Contracts (`api/hub.zod.ts` - 960 lines)\nComplete HTTP API specifications with request/response schemas:\n- **Space Management**: CRUD + pagination/filtering/sorting\n- **Tenant Management**: Multi-tenancy with isolation levels\n- **Plugin Registry**: Publishing, versioning, search\n- **License Management**: Issuance, validation, revocation\n- **Composer Service**: BOM compilation, build status\n- **Health Monitoring**: System metrics, service status\n\n```typescript\n// Example: Create space with runtime quotas\nconst request: CreateSpaceRequest = {\n  name: 'Sales Team',\n  slug: 'sales-team',\n  ownerId: 'user_123',\n  runtime: {\n    isolation: 'shared_schema',\n    quotas: { maxUsers: 50, maxStorage: 107374182400, apiRateLimit: 10000 }\n  }\n};\n```\n\n### Federation Protocol (`hub/hub-federation.zod.ts` - 500 lines)\nMulti-region deployment infrastructure:\n- **Region Modeling**: Geographic regions with compliance metadata (GDPR, HIPAA, SOC2)\n- **Hub Instances**: Primary/Secondary/Edge roles with replication configs\n- **Tenant Placement**: Data residency policies with continent/region restrictions\n- **Replication Jobs**: Cross-region sync with conflict resolution strategies\n- **Edge Locations**: CDN integration for plugin/asset distribution\n\n```typescript\n// Example: EU data residency compliance\nconst placement: TenantPlacementPolicy = {\n  tenantId: 'tenant_eu',\n  primaryRegion: 'eu-west-1',\n  dataResidency: {\n    continent: 'EU',\n    prohibitedRegions: ['us-east-1'] // No US data\n  }\n};\n```\n\n### Security Protocol (`hub/plugin-security.zod.ts` - 650 lines)\nSupply chain security and dependency management:\n- **Vulnerability Scanning**: CVE/GHSA tracking with severity classification\n- **Dependency Resolution**: Semantic versioning with conflict detection + topological sorting\n- **SBOM**: CycloneDX/SPDX format with hash verification\n- **Provenance**: Build environment, source verification, digital signatures\n- **Trust Scoring**: Multi-dimensional metrics (vendor reputation, security, code quality, community engagement)\n\n```typescript\n// Example: Security scan with zero vulnerabilities\nconst scan: SecurityScanResult = {\n  plugin: { id: 'com.acme.crm', version: '2.0.0' },\n  status: 'passed',\n  summary: { critical: 0, high: 0, medium: 0, low: 0 }\n};\n\n// Trust scoring\nconst trust: PluginTrustScore = {\n  score: 88,\n  components: { vendorReputation: 95, securityScore: 90, codeQuality: 85 },\n  level: 'trusted',\n  badges: ['verified-vendor', 'security-scanned', 'code-signed']\n};\n```\n\n## Test Coverage\n- 30 new tests across 3 test files\n- All 3,013 tests passing\n- 100% Zod runtime validation + TypeScript type safety\n\n## Documentation\n- `hub-management-example.ts`: 900+ lines of working examples\n- `HUB_PROTOCOL_DEVELOPMENT_PLAN.md`: Implementation roadmap (bilingual)\n- `HUB_PROTOCOL_SUMMARY.md`: Executive summary (bilingual)\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 扫描SPEC中的hub协议，作为objectstack所有租户，插件的统一的云端管理中心，提出具体的改进方案和实开发计划\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

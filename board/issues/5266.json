@@ -1,0 +1,29 @@
+{
+  "number": 5266,
+  "kind": "issue",
+  "title": "service-storage: `IStorageService.list(prefix)` means two different things on the two shipped adapters (local: one level, directories as files; S3: recursive, silently capped at 1000)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T13:22:00Z",
+  "updated_at": "2026-08-08T07:32:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5266",
+  "body": "发现于 #5172(邮件大附件走 storage)的实现过程中 —— 本单**不修**,只记录。#5172 因为这条差异**放弃了**「列举 storage 前缀来回收内容」的方案,改为队列延迟任务驱动,所以本单不阻塞任何东西。\n\n## 事实\n\n`IStorageService.list(prefix)` 的契约文字是 \"List files in a directory/prefix\"(`packages/spec/src/contracts/storage-service.ts`)。两个自带适配器对同一个调用给出的答案在**语义上不同**:\n\n**`LocalStorageAdapter.list`** (`packages/services/service-storage/src/local-storage-adapter.ts:192`) 是**单层** `readdir`:\n\n```ts\nconst entries = await fs.readdir(dirPath);\nfor (const entry of entries) {\n  const fullKey = prefix ? `${prefix}/${entry}` : entry;\n  const stat = await fs.stat(this.resolvePath(fullKey));\n  results.push({ key: fullKey, size: stat.size, lastModified: stat.mtime });\n}\n```\n\n- 嵌套的 key(`a/b/c`)在 `list('a')` 下**看不到** —— 只会看到 `a/b`;\n- 子目录被 `stat` 成功后**当成文件推进结果**,于是 `StorageFileInfo` 里出现一个 `size` 是目录 inode 大小、根本 `download` 不了的条目。\n\n**`S3StorageAdapter.list`** (`s3-storage-adapter.ts:214`) 是**递归**的(`ListObjectsV2` 按 `Prefix` 匹配整串 key),而且**没有翻页**:\n\n```ts\nconst cmd = new s3.ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix });\nconst res = await client.send(cmd);\nreturn (res.Contents ?? []).map(...);\n```\n\n`IsTruncated` / `ContinuationToken` 都没读,所以超过 1000 个对象时**静默截断**,调用方拿到的\"全部文件\"其实是前 1000 个,没有任何信号。\n\n## 为什么标 `finding` 而不是缺陷\n\n今天**没有生产消费方**:仓库里唯一的调用点是 `SwappableStorageService.list` 的透传(它自己还会在适配器没有 `list` 时 reject)。`storage-routes.ts`、REST、CLI 都不调。所以这是\"声明了但没人走\"的漂移,不是用户今天会撞到的 bug —— 严重性交给 PM 分诊,不由我判。\n\n不过它的形状是仓库反复点名的那一类:**一个契约方法,N 个方言**。第一个真正需要\"枚举一个前缀下所有对象\"的功能(备份、孤儿清理、迁移校验)会在两种部署上得到两种结果,而且两边都不报错。#5172 就是差点成为那个功能的:原本想用 `list(EMAIL_ATTACHMENT_KEY_PREFIX)` 驱动回收,发现在本地适配器上连 `sys_email/attachments/<rowId>/<NNN>` 都看不见(层级差一级),遂改道。\n\n## 可能的处置(留给维护者)\n\n1. **让两边对齐到递归 + 翻页**:本地适配器改 `readdir(..., { recursive: true })` 并跳过目录项,S3 适配器补 `ContinuationToken` 循环;`list` 从 optional 收紧,并给 `packages/spec/src/data/*-conformance.ts` 那样的适配器一致性用例(嵌套 key、目录项、>1000 个对象各一例)。\n2. **或者按 ADR-0049 enforce-or-remove 把 `list` 摘掉**:没有消费方、没有一致性用例、两种实现 —— 这正是\"声明面大于实现面\"的候选。摘掉后如果哪天真的需要枚举,再按需求把它设计成带分页游标的形状(`list(prefix, { cursor, limit })`),而不是继承一个不能翻页的签名。\n\n倾向 1 还是 2 取决于是否已经有需要枚举 storage 的路线图;两者都比现状好,现状是\"声明了一个在两种部署上行为不同、且都会静默给出不完整答案的方法\"。"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 16787,
+  "kind": "issue",
+  "title": "[finding] `check-adr-0087-registration`'s `type-surface-only` category is unclaimable by the class it was built for: TWO predicates refuse it whenever the narrowed declaration lives in `packages/spec/src/contracts/**`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T05:23:22Z",
+  "updated_at": "2026-09-08T06:08:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16787",
+  "body": "Filed by the `domain:engine` execution PM seat, from the #16231 round (PR #16783). The implementer reported it; the measurement below is the seat's own, re-taken on `origin/main`.\n\n⛔ Filed unassigned and unlabelled, as an observation for triage. Grade deliberately not asserted. ⚠️ This is a **tension**, not an obvious bug — the gate's refusals each carry a stated reason and both reasons are defensible. What is offered here is that the category and its own most likely subject may not fit each other.\n\n## The shape\n\n`type-surface-only` (the sixth ADR-0087 category, from **#13080**) exists for the case where a published **declaration** narrows off `any` and the **compiler is the only channel** that carries the change — so no migration can be prescribed and the ledger has nothing to register.\n\nMeasured on `origin/main` `ed7243d52b`, `scripts/check-adr-0087-registration.mjs` refuses that claim through **two** predicates when the diff touches `packages/spec`:\n\n- **predicate 2 — `no-spec-diff`**: any changed path under `SPEC_PACKAGE_DIR` makes it false. The gate's own words: *\"`packages/spec` **IS** the contract between metadata producers and the runtime, and both ADR-0087 registries live inside it. A diff that moves it is not a change the compiler alone carries.\"*\n- **predicate 3 — `no-metadata-surface-diff`**: a *\"spec `contracts/**` entry\"* is one of the surfaces it counts. Its words: *\"A Zod schema, a spec `contracts/**` entry or an object definition is exactly what `objectstack migrate meta` reaches.\"*\n\n⇒ **the implementer's report understated it: it is two predicates, not one.**\n\n## Why that is worth a card rather than a shrug\n\nThe most likely shape of a published **type-surface** narrowing in this repository is a **TypeScript interface member in `packages/spec/src/contracts/**`** — which is precisely where ruling A on **#16231** put its three (`data-engine.ts:276-279`, `scoped-context.ts:148/164`). ⇒ the category built for that class cannot be claimed by that class.\n\n⚠️ And predicate 3's stated reason does not obviously reach it: `objectstack migrate meta` reaches **metadata shapes**. A `Promise<any>` → `Promise<Record<string, unknown> | null>` change on a TS **interface member** emits no runtime metadata and is not something `migrate meta` can act on — that is the whole basis on which the category calls the compiler \"the only channel\". Predicate 3 counts the **file's location**, ⛔ not whether the changed member is a metadata surface.\n\n⭐ **The failure mode this creates is named by the gate's own header**: when the category is unclaimable, *\"the move an author then reaches for is dropping the `**BREAKING**` token\"* — which is exactly what **#13080** exists to prevent. ⇒ a gate that makes the honest disposition unavailable pushes authors toward the dishonest one.\n\n## What PR #16783 actually did, as the worked example\n\nIt carried the `**BREAKING**` token and used **`not-required (no-migration-prescription)`** instead. ⇒ the outcome was honest, and the category that would have described the change precisely was not available to it. ⛔ Nothing is broken in that PR; it is the evidence, not the defect.\n\n## Not asserted — three shapes, and the counter-argument\n\n1. **Narrow predicate 3** to ask whether the changed *member* is a metadata surface, ⛔ not whether the *file* sits under `contracts/**`.\n2. **Carve `packages/spec/src/contracts/**` out of predicate 2** for a diff whose spec change is type-only (no Zod, no object definition, no registry row).\n3. **Leave both, and say so in the category's header** — that a spec-owned contract narrowing takes `no-migration-prescription`, so an author stops reaching for a category that cannot apply.\n\n⚠️ **The counter-argument deserves equal weight**: predicate 2's reason is that both ADR-0087 registries live in `packages/spec`, so a diff that moves that package genuinely might be more than a compiler-carried change — and a gate that starts inspecting *which member* moved is a gate that can be wrong about it. Option 3 costs nothing and forecloses nothing; options 1 and 2 buy precision at the price of a harder predicate. ⛔ That trade is triage's and the maintainer's, not this seat's.\n\n## Boundaries\n\n- ⛔ Do not fold into PR #16783 — it is under contract review and its disposition is already honest.\n- ⚠️ Adjacent, distinct, already carded: **#16713** (`check-changeset-no-major`'s LEVEL axis is blind to nested package dirs). Same file family, different gate, different mechanism — ⛔ not a duplicate.\n- ⚠️ Line and category numbers are `origin/main` `ed7243d52b` and will drift — ⛔ 按符号重新推导."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 15417,
+  "kind": "issue",
+  "title": "A nonexistent /api/v1/auth/admin/* path answers 200 with an empty body — and three real admin endpoints are indistinguishable from it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:on-hold",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T14:58:48Z",
+  "updated_at": "2026-09-05T15:52:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15417",
+  "body": "Measured in passing while driving `sys_user` write doors for cloud#1989, on a real\nwalled boot of the cloud control plane (`OS_MODE=cloud`, posture `isolated`,\n`Organizations` mounted) at framework pin `5b2ad1b41`.\n\n## The measurement, with the control that gives it meaning\n\nRequests below are a rank-and-file member's session cookie unless stated.\nEverything was read back from the sqlite file with the server stopped.\n\n```\nPOST /api/v1/auth/admin/definitely-not-a-route-1989   -> 200  {}     <-- CONTROL: this path does not exist\nPOST /api/v1/auth/admin/update-user  (member)          -> 200  {}     nothing landed\nPOST /api/v1/auth/admin/update-user  (PLATFORM ADMIN)  -> 200  {}     nothing landed either\nGET  /api/v1/auth/admin/list-users   (member)          -> 200  {}\nGET  /api/v1/auth/admin/list-users   (PLATFORM ADMIN)  -> 200  {}\nPOST /api/v1/auth/admin/set-role     (member)          -> 200  {}     role stayed null\n\nPOST /api/v1/auth/admin/ban-user     (member)          -> 403  {\"success\":false,\"error\":{\"code\":\"PERMISSION_DENIED\",\"message\":\"Admin role required\"}}\nPOST /api/v1/auth/admin/set-user-password (member)     -> 403  same envelope\n```\n\nThe positive control that the auth surface itself is live:\n`POST /api/v1/auth/update-user` as the member returned `200 {\"status\":true}` and\nthe new `name` was present in the sqlite file afterwards.\n\n## The finding\n\nTwo things, and the first is the one that matters:\n\n1. **A path that does not exist answers `200` with an empty body.** A caller\n   cannot tell \"your write was accepted\" from \"there is no such route\". Every\n   client-side success check — `res.ok`, `status === 200`, \"no error thrown\" —\n   reads a nonexistent admin endpoint as a completed admin action. This is the\n   silent-success shape; it should be a 404.\n\n2. `update-user`, `list-users` and `set-role` under `/api/v1/auth/admin/` are\n   indistinguishable from that nonexistent path on this composition, while\n   `ban-user` and `set-user-password` answer a real guarded 403. So part of the\n   better-auth admin family is reachable and part resolves to nothing, with no\n   way to tell from the wire which is which.\n\n## What this is NOT\n\nNot a privilege leak. Nothing an ordinary member sent through these paths changed\nany row — the store was read from the sqlite file with the server stopped and\nevery target row was byte-unchanged. The platform admin got the same vacuous 200,\nwhich is what proves the endpoints are absent rather than silently permissive.\n\n## Why it still deserves a card\n\nA vacuous 200 is exactly the answer that makes a future security probe conclude\n\"admitted\" and file a false p0, or conclude \"refused\" and miss a real one — the\ncloud#1989 measurement had to add a nonexistent-route control specifically to\ntell them apart, which is a control no ordinary caller can run.\n\nFiled with no assignee by the cloud#1989 measurement seat, which is\nmeasurement-only. Step 1 for whoever takes it: reproduce on a framework-side boot\nto confirm the mounting rather than the cloud composition is what decides it.\n"
+}

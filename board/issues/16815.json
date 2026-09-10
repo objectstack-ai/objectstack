@@ -1,0 +1,33 @@
+{
+  "number": 16815,
+  "kind": "issue",
+  "title": "Setup → Connect an Agent: the \"Claude (claude.ai / Desktop)\" card claims desktop reaches intranet deployments and shows an http URL the connector dialog rejects",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "mcp",
+    "pm:queue",
+    "priority:p2",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T07:45:52Z",
+  "updated_at": "2026-09-08T08:33:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16815",
+  "body": "## Summary\n\nThe **Claude (claude.ai / Desktop)** card on Setup → Connect an Agent (`/_console/apps/com.objectstack.setup/page/connect_agent`) sends users down a path that cannot work for a local or intranet deployment, and says the opposite. Three concrete problems, measured 2026-09-08 on objectstack 17.3.0 with Claude for Mac 1.46388.x:\n\n1. **The reachability sentence is wrong for custom connectors.** The card reads: *\"claude.ai (web) connects from Anthropic's servers — the deployment must be reachable over public HTTPS. Claude Desktop and local clients also reach intranet deployments.\"* The desktop app's Customize → Connectors → Add → **Add custom connector** dialog runs its \"Checking server\" step from Anthropic's side, exactly like the web app. Against `https://localhost:4443/api/v1/mcp` (a working, TLS-terminated local instance that Claude Code on the same machine connects to fine) it reports, verbatim: *\"Connect to the server — Couldn't reach this address … Nothing answered at this URL. Check it for typos before continuing.\"* Anthropic's own doc says the same: *\"your MCP server must be reachable over the public internet from Anthropic's IP ranges. Servers hosted on a private corporate network, behind a VPN, or blocked by a firewall won't connect.\"* So \"Claude Desktop … also reach intranet deployments\" does not hold for the flow the card describes.\n\n2. **The URL the card shows is rejected by the dialog it points to.** The card prints the endpoint from the request origin — on a dev server that is `http://localhost:4001/api/v1/mcp`. The Add custom connector dialog refuses it outright: *\"URL must start with 'https'\"*. Pasting what the card tells you to paste fails before any check runs.\n\n3. **The card gives no hint that a local reverse proxy will not help.** A developer who already fronted the dev server with https (as we did to satisfy Claude Code's own OAuth requirement) will reasonably try the connector next and spend time on the proxy, when the blocker is public reachability.\n\n## Suggested card text\n\n> **Claude (claude.ai / Desktop)** — Customize → Connectors → Add → Add custom connector, paste this URL, then sign in through the browser.\n> Requires a deployment reachable from the public internet over https (Anthropic's servers make the connection — localhost, intranet and VPN-only hosts will not work, whether or not you front them with a local proxy). For a local dev server use the **Claude Code** card instead.\n> In the connector's manual setup, choose \"No client ID — register one automatically\" (this server uses dynamic client registration); an API key can be supplied as an `x-api-key` request header with Authentication set to None.\n\nAnd: when the environment is not https, either hide the https-only URL on this card or render the canonical https origin (`OS_AUTH_URL`) rather than the request origin.\n\n## Why it matters\n\nThis card is the one path on the page with no terminal step — the natural choice for business users and for a product video. Today it points a local evaluator at a dead end with a sentence that says it should work.\n\nRelated: #16804 (`objectstack dev` has no https mode), #16530 (resource registration behind a canonical https origin), #16746 (page is admin-only).\n"
+}

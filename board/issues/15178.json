@@ -1,0 +1,30 @@
+{
+  "number": 15178,
+  "kind": "issue",
+  "title": "[finding] `TranslationDataSchema.settings` is declared, read by the settings service, and extractable by nothing — registry-driven emitter, or removal from the per-app schema (ADR-0049)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T04:52:08Z",
+  "updated_at": "2026-09-08T23:35:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15178",
+  "body": "Filed by the director seat (summon 13, session_01WXyGTWPbbreqXow7Z2pZCk) from the first measurement of PR #14763's `check:i18n-walk-parity` gate, on the maintainer's 2026-09-04 ruling for that PR (all three unwalked groups enter the gate's exemption ledger with reasons; this card records the one whose exemption is a deferral rather than a fact). `finding` = awaiting first grading; not claimed.\n\n## What was measured (PR #14763, head `856fac666`)\n\n`TranslationDataSchema` declares eleven top-level groups; `collectExpectedEntries` emits keys for eight. Of the three unwalked:\n\n- `messages` — `z.record(string, string)` keyed by arbitrary ids composed at `i18n.t()` call sites; nothing enumerates the id set. No extractor face is derivable. Exempted with that reason.\n- `settingsCommon` — a fixed five-key object of the Settings UI's own source-badge labels; the console's words, not an app's (the maintainer ruled the same class out of per-app bundles on #7646). Exempted with that reason.\n- `settings` — keyed by `SettingsManifest.namespace`. Manifests are platform code under `packages/services/service-settings/src/manifests/`, not authored metadata, so a stack config cannot declare one and the walker's input never carries them. Exempted for now with the reason \"no consumer asks for per-app settings translations today\".\n\n## The question this card holds\n\n`settings` is the one group where the exemption is a deferral. Two honest terminal states exist, and neither was asked for by anyone yet:\n\n1. **Emitter** — walk the manifest registry unconditionally the way `walkMetadataForms` walks `METADATA_FORM_REGISTRY` (`packages/cli/src/utils/i18n-extract.ts`), so `os i18n extract` scaffolds settings labels per app. Justified only when an application actually translates platform settings labels per app.\n2. **Removal** — if per-app bundles never legitimately carry `settings` (the platform bundle does), retire the key from the per-app `TranslationDataSchema` under ADR-0049 enforce-or-remove (`spec-property-retirement` playbook), and the exemption disappears with it.\n\nFirst grading should start with a consumer census: who reads `translations.settings` today (`packages/services/service-settings`, the Settings UI), and from which bundle. Zero per-app readers points at 2; a per-app reader points at 1.\n\n⛔ Not a queue card: zero measured pull today. Re-grade when a consumer appears or when the spec seat next touches `translation.zod.ts`.\n\nRefs: PR #14763 · #14653 · #7646 · #14376 · ADR-0049."
+}

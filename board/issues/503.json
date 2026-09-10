@@ -1,0 +1,37 @@
+{
+  "number": 503,
+  "kind": "pull_request",
+  "title": "Add enterprise-grade plugin lifecycle, versioning, security, and AI development protocols",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-03T06:56:55Z",
+  "updated_at": "2026-02-03T08:53:39Z",
+  "closed_at": "2026-02-03T08:53:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-03T08:53:07Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/503",
+  "body": "Extends the plugin ecosystem with production-ready protocols for health monitoring, dependency resolution, security isolation, marketplace distribution, and AI-assisted development.\n\n## Protocol Additions\n\n### Plugin Lifecycle (`system/plugin-lifecycle-advanced.zod.ts`)\n- Health monitoring with configurable checks, thresholds, and auto-recovery\n- Hot reload with state preservation strategies (memory/disk/none)\n- Graceful degradation with fallback modes when dependencies fail\n- Rolling update strategies with automatic rollback on failure\n- Resource limits (memory, CPU, connections) with enforcement hooks\n\n### Versioning & Compatibility (`system/plugin-versioning.zod.ts`)\n- SemVer-based dependency resolution with constraint solving\n- Compatibility matrices tracking breaking changes between versions\n- Circular dependency detection with topological sorting\n- Multi-version support with routing rules for gradual rollout\n- Automated migration path generation\n\n### Security & Sandboxing (`system/plugin-security-advanced.zod.ts`)\n- Fine-grained permissions (resource × action × scope)\n- Sandbox isolation levels (filesystem, network, process, memory)\n- CVE vulnerability scanning integration\n- Code signing and certificate validation\n- Trust levels: verified → trusted → community → untrusted → blocked\n\n### Marketplace (`hub/marketplace-enhanced.zod.ts`)\n- Discovery with full-text search, categories, quality scoring\n- Certification tiers (verified, tested, certified, enterprise, partner)\n- License management (SPDX, pricing, commercial terms)\n- Revenue sharing with payment scheduling and tax handling\n- Installation pipeline: download → verify → resolve deps → install → health check\n\n### AI Development (`ai/plugin-development.zod.ts`)\n- Natural language → code generation with framework preferences\n- AI code review with auto-fix suggestions\n- Plugin composition recommendations with data flow analysis\n- Scaffolding templates with variable substitution\n\n## Usage Example\n\n```typescript\n// Define plugin with advanced lifecycle\nconst config: AdvancedPluginLifecycleConfig = {\n  health: {\n    interval: 30000,\n    autoRestart: true,\n    failureThreshold: 3\n  },\n  hotReload: {\n    enabled: true,\n    preserveState: true,\n    stateStrategy: 'memory'\n  },\n  degradation: {\n    fallbackMode: 'readonly',\n    criticalDependencies: ['database'],\n    optionalDependencies: ['cache']\n  }\n};\n\n// Declare security requirements\nconst security: PluginSecurityManifest = {\n  trustLevel: 'verified',\n  permissions: {\n    permissions: [{\n      resource: 'data.object',\n      actions: ['read', 'create'],\n      scope: 'tenant'\n    }]\n  },\n  sandbox: {\n    level: 'strict',\n    network: { mode: 'restricted', allowedHosts: ['api.example.com'] }\n  }\n};\n\n// AI-assisted generation\nconst request: CodeGenerationRequest = {\n  description: 'Create a CRM contact sync plugin for Salesforce',\n  pluginType: 'integration',\n  capabilities: ['com.objectstack.protocol.sync.v1']\n};\n```\n\n## Test Coverage\n\n- `plugin-lifecycle-advanced.test.ts`: 20 tests (health checks, hot reload, degradation)\n- `plugin-versioning.test.ts`: 25 tests (SemVer, conflicts, compatibility matrix)\n\nAll schemas follow Zod-first design with full TypeScript inference and JSDoc.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 你是全球顶级企业管理软件和低代码专家,扫描现有的代码和文档，我要打造全球最新最顶流最受欢迎的企业管理软件平台框架，并推进基于这个框架的AI自动化开发，针对现有微内核和插件设计，提出具体的改进方案和开发计划\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

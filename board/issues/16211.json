@@ -1,0 +1,32 @@
+{
+  "number": 16211,
+  "kind": "issue",
+  "title": "Two source docblocks still say `/ai/*` 404s \"AI service is not configured\" — the dispatcher has answered 501 since the shared `capabilityUnavailable` exit landed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T06:00:13Z",
+  "updated_at": "2026-09-08T05:47:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16211",
+  "body": "Found while working #16142: the card's replacement text needed the real behaviour of `/api/v1/ai/**` when no AI service is mounted, and the two docblocks a reader would reach for disagree with the code. Recorded only — not claimed, no assignee. Out of scope for #16142, which is a README-only content fix.\n\n## What the code does\n\n`packages/runtime/src/domains/ai.ts`, the unserveable-slot branch:\n\n```ts\nif (!isServiceServeable(aiService)) {\n    if (denyAnonymous) return anonymousRefusal();\n    if (method === 'GET' && subPath === '/ai/agents') {\n        return { handled: true, response: deps.success({ agents: [] }) };\n    }\n    // 501, not 404: `/ai/*` IS mounted, so the request reached a handler\n    // with nothing behind it — see ./unavailable.ts.\n    return capabilityUnavailable(deps, 'ai');\n}\n```\n\nand `packages/runtime/src/domains/unavailable.ts` returns `deps.error(serviceUnavailableMessage(slot), 501)`, with a docblock that draws the 404-vs-501 distinction deliberately (\"The route is not there\" = 404, handled by the host router; \"The route is there; the implementation is not\" = 501).\n\nSo: every `/ai/*` route answers **501** with the same remedy sentence discovery reports under `services.ai`, except `GET /ai/agents`, which answers 200 with an empty list.\n\n## What two docblocks say\n\nBoth still describe the pre-`capabilityUnavailable` behaviour:\n\n- `packages/client/src/index.ts:5129-5133` — \"This repo's dispatcher only proxies `/api/v1/ai/**` to whatever `buildAIRoutes()` mounted, and **404s** `AI service is not configured` when the service is absent (the open-source default)\".\n- `packages/runtime/src/route-ledger.ts:401` — \"the dispatcher only proxies (**or 404s \"AI service is not configured\"**)\".\n\n`packages/spec/src/api/protocol.zod.ts:2736` carries the same sentence in a comment. The docs site is already correct: `content/docs/api/client-sdk.mdx` says \"the route is mounted but unimplemented, so it answers 501 and discovery reports the slot unavailable with the same sentence\".\n\nTwo further details the stale text loses: the message is no longer a local string at all (it comes from `serviceUnavailableMessage`, so the 501 body and the discovery entry cannot drift), and the `GET /ai/agents` empty-list courtesy is not mentioned anywhere in the client docblock, which is the one an SDK reader actually opens.\n\n## Why it matters\n\n`packages/client/src/index.ts` is a published package's source, and its `ai` docblock is the SDK's own account of what a caller sees without the Cloud/EE service. A caller who codes `if (res.status === 404)` off that docblock does not handle the answer they will actually get — and 404-vs-501 is exactly the distinction `unavailable.ts` exists to make: 404 now means the path does not exist, which for `/ai/*` is false.\n\n## Executable criterion\n\n`grep -rn '404s' packages/client/src/index.ts packages/runtime/src/route-ledger.ts` returns the two claims above; the branch they describe returns `capabilityUnavailable(deps, 'ai')` → 501. After the fix both read 501, and the `GET /ai/agents` exception is stated in the client docblock."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 17231,
+  "kind": "issue",
+  "title": "Both migration generators emit NOT NULL on a `multiple: true` column, which `SqlDriver.createColumn` returns before ever constraining — and the pin asserts the generator side",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T19:56:18Z",
+  "updated_at": "2026-09-09T20:06:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17231",
+  "body": "Found while implementing #16294 cause 3 (PR #17230), which repaired the column DEFAULT divergence between `os generate migration` and `driver-sql`. This is the same producer pair and the same \"the generator should reproduce the platform\" question, one property over — **nullability on a multi-value column** — and it is deliberately out of that PR's diff because repairing it contradicts a landed pin (see below).\n\n⛔ Not graded or prioritised here. No labels applied, no assignee — this is for triage.\n\n## Driven, not read\n\nMeasured on a private PostgreSQL **16.13** cluster with the same harness #16294 used: all three producers run from ONE object and their columns read back out of `information_schema.columns` — `driver-sql` through its own `initObjects`, `os generate migration --format sql` through `db.raw` of the emitted DDL, and `--format ts` by importing the emitted module and calling `up(db)`.\n\n```\n{ d_multi_notnull: { type: 'lookup', referenceTo: 'sys_user', multiple: true, storage: { notNull: true } } }\n\nfield              driver              sqlgen              tsgen               verdict\nd_multi_notnull    null=YES default=-  null=NO  default=-  null=NO  default=-  DIVERGED\n```\n\nThis was the ONE row still diverging in a 23-column `defaultValue` / nullability probe after #17230 — before it as well as after, i.e. #17230 neither caused nor repaired it.\n\n## Why\n\n`SqlDriver.createColumn` short-circuits on the flag and returns before it reaches either the nullability line or the column DEFAULT:\n\n```\n    if (field.multiple) {\n      this.jsonColumn(table, name);\n      return;\n    }\n```\n\nSo the driver's multi-value column is nullable, always, whatever `storage.notNull` says. Both generators instead apply `declaredNotNull(fieldDef)` to their JSON column: the sql format emits `\"tags_nn\" JSONB NOT NULL` and the ts format `table.jsonb('tags_nn').notNullable()`.\n\nConsequence, in the same direction #16294's cause 2 named one property over: a table created from a generated migration **constrains a column the platform's own table leaves open**. An INSERT that omits the field is accepted by the platform's table and refused by both generated ones.\n\n## ⚠️ Why it was NOT repaired under #16294\n\nThe current generator behaviour is **pinned as intended** — `packages/cli/src/commands/generate-multiple-json-column.pin.test.ts`:\n\n```\n  it('nullability comes from `storage.notNull`, not from the flag and not from `required`', () => {\n    const constrained = { type: 'lookup', multiple: true, storage: { notNull: true } };\n    ...\n    expect(out).toContain('\"tags_nn\" JSONB NOT NULL');\n    expect(ts).toContain(\"table.jsonb('tags_nn').notNullable();\");\n  });\n```\n\nThat pin's stated subject (#14829) is \"`multiple` does not decide nullability\", and it was rewritten under #16318 when the vehicle moved from `required` to `storage.notNull` — but neither card measured the assertion against the DRIVER, which returns before the question is asked. So the pin encodes a rule the platform does not follow. Moving it is therefore a deliberate change to a landed pin, not a rider on an unrelated diff, and the direction is not free to pick by an executor: it is the same \"which side moves\" question #16318 answered for column TYPE and #17218 still carries for `required`.\n\n## The two sides\n\n- **A — the generator follows the driver**: drop the `notNullable()` / `NOT NULL` from the multi-value arm, and rewrite the pin to assert that a multi-value column is nullable on all three producers. Consistent with #15521's ruling (\"the generator follows the driver\") as applied by #16091, #16318 and #17208 to this same producer pair.\n- **B — the driver is the one that is wrong**: `createColumn`'s early return means `storage: { notNull: true }` on a multi-value field is silently inert on the platform — a declared-but-unenforced key, which is the ADR-0049 enforce-or-remove shape. On this reading the repair belongs in `driver-sql` (honour the constraint on the JSON column) or in `packages/spec` (refuse the combination at authoring time), not in the generators.\n\n⛔ Not answered here. Note the two sides land in different repos' worth of surface — A is `domain:cli`, B is `domain:engine` plus possibly a spec refusal — so the routing depends on the ruling.\n\n## Reproducing\n\nOne object with the field above, driven through all three producers into a live PostgreSQL 16.13 and read back from `information_schema.columns`. A `postgresql-16` server package is present in the standard dev container, so a private cluster is `initdb` plus `pg_ctl` with no external service. The same divergence is visible without a server: `PRAGMA table_info` on three in-memory better-sqlite3 databases, the harness `packages/cli/src/commands/generate-declared-column-default.pin.test.ts` already uses.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

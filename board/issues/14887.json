@@ -1,0 +1,31 @@
+{
+  "number": 14887,
+  "kind": "issue",
+  "title": "[repo:objectui] Pure `date` fields shift one day for viewers west of UTC — '2026-08-01' renders 7月31日 in PDT; the display formatter parses the date-only string via `new Date('YYYY-MM-DD')` (UTC midnight) then reads local getters",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p2",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-03T07:38:08Z",
+  "updated_at": "2026-09-10T00:19:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14887",
+  "body": "## Summary\n\nA pure `date` field stored as `2026-08-01` is displayed as **7月31日** in a browser whose local timezone is west of UTC (observed: macOS in `PDT`, UTC-7). The date-only ISO string is parsed with `new Date('2026-08-01')` (UTC midnight) and then read back with local getters, so every date-only value shifts one calendar day for any user west of UTC — and the relative branch in the same formatter (#14885) is off by one for the same reason (`2026-08-31` reads `4天前` on `2026-09-03`).\n\nThe stored value is correct; only the display is wrong. Same formatter as #14885, different defect (value correctness vs. presentation choice).\n\n## Minimal reproduction\n\nPlatform 17.2.0 console. Machine timezone `America/Los_Angeles` (PDT, UTC-7); `date` → `Thu Sep 3 03:35 PDT 2026`.\n\nObject `kpi_plan` with `period_start: Field.date({ label: '周期开始' })`, seeded `period_start: '2026-08-01'`, `period_end: '2026-08-31'`.\n\n```\nGET /api/v1/data/kpi_plan → \"period_start\":\"2026-08-01\",\"period_end\":\"2026-08-31\"\n\nList cell 周期开始 → 7月31日     ← expected 8月1日\nList cell 周期结束 → 4天前       ← expected 3天前 (or, per #14885, 8月31日)\n```\n\nSame page opened from a UTC+8 browser earlier the same day shows `8月1日` / `3天前` — the display depends on the viewer's timezone although the value has no time component.\n\n## Where\n\n`ui-components` chunk, date display formatter:\n\n```js\nfunction Ltt(e, t) {\n  ...\n  let n = e instanceof Date ? e : new Date(e);     // '2026-08-01' → 2026-08-01T00:00:00Z\n  let r = new Date(),\n      i = new Date(r.getFullYear(), r.getMonth(), r.getDate()),\n      a = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime() - i.getTime();  // local getters → Jul 31 in UTC-7\n  let o = Math.round(a / 864e5);\n  if (o < -7 || o > 7) return k9(n, void 0, t);   // k9 → toLocaleDateString(...) on the shifted Date\n  ...\n```\n\nPer ECMAScript, a date-only ISO form is parsed as UTC while date-time forms without offset are parsed as local — so `new Date('YYYY-MM-DD')` is exactly the wrong constructor for a calendar date.\n\n## Expected\n\n- A `date` value (no time component) renders the same calendar date for every viewer, in every timezone. Parse `YYYY-MM-DD` into local components (`new Date(y, m - 1, d)`) or format the string directly; never through a UTC-midnight `Date`.\n- Same care in the date input/editor and in export, if they share the helper (not checked).\n- `datetime` fields keep timezone conversion — that is the case where it is wanted.\n\n## Environment\n\n`@objectstack/console` 17.2.0 · `objectstack dev` · Chrome on macOS, tz PDT. App: objectstack-ai/kpi, object `kpi_plan`. Related: #14885 (relative rendering of the same field).\n"
+}

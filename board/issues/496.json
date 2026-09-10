@@ -1,0 +1,33 @@
+{
+  "number": 496,
+  "kind": "pull_request",
+  "title": "docs: Audit and correct protocol implementation status across documentation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-03T02:28:43Z",
+  "updated_at": "2026-02-03T06:54:24Z",
+  "closed_at": "2026-02-03T06:54:23Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-02-03T06:54:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/496",
+  "body": "Documentation contained outdated protocol counts (109 vs actual 123) and package counts (12 vs actual 10), with no visibility into implementation status.\n\n## Changes\n\n**Protocol Count Corrections**\n- Updated from 109 to 123 across all reference docs (found 14 additional AI/integration schemas)\n- Corrected AI protocol count: 9 → 12 (added feedback-loop, devops-agent)\n\n**Package Inventory Correction**  \n- Removed non-existent packages (@objectstack/ai-bridge, @objectstack/types)\n- Corrected total: 12 → 10 packages (7 core + 3 plugins)\n\n**Package Documentation Enhancements**\n- Added implementation details for each package with actual exported APIs\n- Marked production-ready vs reference implementations\n- Updated dependency graph to reflect actual structure\n- Added feature matrices showing capability gaps (e.g., memory driver: CRUD ✅, transactions ❌)\n\n**New Implementation Status Matrix** (`implementation-status.mdx`)\n- Protocol-by-package implementation coverage (26 fully implemented, 6 partial, 91 spec-only)\n- Production readiness indicators per functional area\n- REST endpoint inventory with implementation status\n- Field type support matrix\n- Roadmap phases mapped to actual completion\n\n**Cross-Reference Updates**\n- Added navigation cards linking to new status matrix\n- Inserted callouts directing users to implementation status before diving into protocols\n\n## Coverage Statistics\n\n| Category | Fully Implemented | Partial | Not Implemented |\n|----------|-------------------|---------|-----------------|\n| Core Infrastructure | 8/9 | 1/9 | 0/9 |\n| Data Layer | 6/16 | 3/16 | 7/16 |\n| API Layer | 10/13 | 1/13 | 2/13 |\n| System Services | 8/39 | 1/39 | 30/39 |\n| All Others | 0/46 | 0/46 | 46/46 |\n\nUsers can now quickly determine which protocols are production-ready vs design artifacts.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 扫描所有的协议和已经实现的软件包的代码细节，评估已实现的功能，对官网文档进行必要的更新。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

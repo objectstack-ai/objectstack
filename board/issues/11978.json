@@ -1,0 +1,30 @@
+{
+  "number": 11978,
+  "kind": "issue",
+  "title": "platform-admin re-anchor L6 (reap): reader census on a walled rig; organization-scope auto-org-admin-grant's resolver; stop minting org-less rows; only then reap",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:blocking",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:32:12Z",
+  "updated_at": "2026-09-07T09:45:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11978",
+  "body": "Leg **L6** of the accepted #11663 platform-admin re-anchor design. Provenance: design document = #11663 comment 5394453215 (§4 Choice 5, §6 row L6, migration step 7); maintainer acceptance = #11663 comment 5404675670 (2026-08-25, verbatim 「接受你的建议，继续」, Choice **5A now, 5C once the census is in**). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\nBlocked-by: #11975\n\n⛔ **`Blocked-by: #11670` was struck 2026-09-01 — that leg is SPENT.** #11670 closed `completed` 2026-08-31T16:28Z via merged PR #13818 (\"resolve the org-admin permission set per organization\"). ⭐ **That merge delivered this card's step 2**: the 2026-08-31T12:46Z re-derivation comment predicted exactly this — 「它一合并,本卡的 step 2 就同时完成」 — and it has happened. So the ordered content below now begins at step 1 with step 2 already green, and the only remaining dependency is #11975.\n\n⚠️ #11975 is itself one half of a mutual `Blocked-by` deadlock with #13515 (each named the other, so neither unlock predicate could ever fire). The false edge was repaired on #13515 on 2026-09-01; #11975 → #13515 is the sound edge and remains. Re-derive this card's blocker once that chain clears.\n\n**Ordered content (⛔ order is the safety mechanism)**:\n1. **Reader census, per name**, over `sys_user_permission_set`, `sys_position_permission_set` and `sys_user_position`, on a **real walled rig** — the design's H3 measurement contradicts the parent card's parenthetical, so \"only `admin_full_access` is pointed at\" must be proven, never assumed. ⚠️ **NOT MEASURED and not measurable from this repository** — no in-repo command reaches deployment data. The `repo:cloud` seat or a deployment operator must run it.\n2. ~~**Organization-scope `auto-org-admin-grant.ts`'s unscoped name→id resolver BEFORE anything is deleted**~~ — ✅ **DELIVERED by PR #13818 (#11670), merged 2026-08-31.** The resolver now takes `organizationId`, reads `limit 5` when scoped (a scoped read still returns org-less rows through the driver's compatibility arm), and routes through `resolveOwnOrganizationRow`. The hazard this step existed to prevent — a reap past an unscoped resolver silently revoking org admins with no signal at the moment of loss — is closed.\n3. Stop minting the org-less `sys_permission_set` bucket under **walled** posture (`single` keeps its rows under Choice 4A).\n4. Reap the 8 org-less rows (5C) only after 1–3 are green.\n\n⚠️ Interaction named by the #11633 designer: `auto-org-admin-grant.ts`'s process-lifetime `permissionSetIdCache` — a reap while a process holds that cache is exactly when it bites; sequence or invalidate before step 4. **This concern is materially reduced but not formally retired by PR #13818**: the cache is no longer keyed on name alone, so the specific cross-organization collision is gone — but a process-lifetime cache across a reap still wants an explicit answer at step 4. ⚠️ The old line citation `:209` has rotted (`:227` / `:229` as of 2026-08-31, and moved again by #13818). **Locate by symbol, never by line.**\n\n**Acceptance criterion**: census results posted on this card per name/table before any delete lands; after the reap, a walled rig boots with zero org-less `sys_permission_set` rows and every org admin's access is unchanged (spot-checked via the census's named readers)."
+}

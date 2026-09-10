@@ -1,0 +1,30 @@
+{
+  "number": 17147,
+  "kind": "issue",
+  "title": "Phase 1b of #11333: make the registered granted-permission set actually REFUSE — the ADR-0025 materialize seam that gives each plugin its own SecurePluginContext",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T13:05:13Z",
+  "updated_at": "2026-09-10T14:26:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17147",
+  "body": "Filed by the `domain:engine` execution PM seat, splitting **#13457** after its round measured that Phase 1 as scoped cannot enforce. ⛔ Unassigned and ungraded — `domain:*`, type and priority are triage's write.\n\n## Why this card exists\n\n#13457 (now **Phase 1a**) binds an artifact's `grantedPermissions` to its plugins and hands each entry to `PluginPermissionEnforcer.registerGrantedPermissions`. That is a real deliverable — it creates the key-to-plugin binding that did not exist, and it is the enforcer's **first production caller ever**.\n\n**But nothing queries the registry.** Measured on the round's own head: every enforcement surface the enforcer exposes (`enforceServiceAccess`, `enforceHookTrigger`, `enforceNetworkRequest`, `enforceFileRead`, `enforceFileWrite`) is reached only through `SecurePluginContext`, and `SecurePluginContext` has **zero production construction sites** — 11 hits total, all definition, barrel, tests and one docs line.\n\n⇒ After 1a lands, the platform **registers a consented permission set that no code reads**. That window is deliberate and bounded, and this card closes it.\n\n## ⛔ Why 1a could not just do it\n\nPer-plugin `SecurePluginContext` construction **is** the ADR-0025 materialize seam, which maintainer comment `5486840233` (2026-09-01) put **out of bounds for either half** of #11333. A dev round that built it would have reversed a standing ruling mid-dispatch and designed a missing install pipeline inside a patch round. The previous seat on #13457 was right to refuse it, and so was this one.\n\n⇒ **This card is where that seam gets designed, with its own review.** It is materially larger than a dev dispatch and should be sized as such.\n\n## ⚠️ The reason this is not merely tidy-up — read this before deprioritising\n\n**#13458** (`domain:spec`, *\"Phase 2: retire the legacy `string[]` arm of `manifest.permissions`\"*) currently declares `Blocked-by: #13457`. If 1a lands and closes #13457, **#13458 unblocks and retires the legacy arm while the structured replacement refuses nothing.** That is the \"declare a capability the runtime does not honour\" shape, arrived at by correct steps.\n\n⇒ **#13458 should wait on THIS card, not on #13457.** Its own seat owns that edit; a pointer comment is going onto #13458.\n\n## Scope\n\n1. Design and build the ADR-0025 materialize seam: per-plugin `SecurePluginContext` construction at install/materialize time, so `getService` / `replaceService` and the hook, network and fs surfaces run against the plugin's own registered bag.\n2. ⚠️ **The hooks class cannot be enforced until a vocabulary gap is closed**, measured by the 1a round and carried here: the grant vocabulary spells a hook `record.beforeInsert`, a string that appears **nowhere in this repo** outside permission examples and tests, while the declarative hook registry spells the same thing as an object carrying `object` plus `events: [beforeInsert]`. There is **no mapping between them**. ⛔ Bridging them is inventing contract semantics — this card has to answer it deliberately, or scope the hooks class out and say so.\n3. ⚠️ **Query the enforcer with the bare manifest id.** `AppPlugin` registers itself under `plugin.app.<MANIFEST_ID>` while the artifact contract keys `grantedPermissions` on the bare `<MANIFEST_ID>`. Both are correct for their own surface; 1a registers under the contract's. The divergence is pinned in `app-plugin.granted-permissions.test.ts` so it cannot drift — ⛔ do not query with `AppPlugin.name`.\n\n## An open fork carried from 1a, ⛔ not decided\n\nAn **unbindable** consent record — an entry naming a package the artifact does not carry — is currently reported at **warn** and recorded on `grantBinding.unbound`. A consented set that binds to nothing is a security control silently absent, so refusing may be right. But refusing needs an ADR-0112 envelope with a **new error code**, and under the #16404 ruling every code shipping in `dist` is registered in `packages/spec`'s `ERROR_CODE_LEDGER` — a spec edit, i.e. another lane, and one that would re-open the boot-refusal verdict #16649 ratcheted to zero rows.\n\n⇒ The seat ruled **warn for 1a** because refusing was not available within that round's constraints, ⛔ not because warn is the right end state. Decide it here, with the spec card it needs.\n\n## Refs\n\n#11333 (parent) · #13457 (Phase 1a — the binding) · PR #17137 · #13458 (Phase 2, the retirement that must not unblock early) · `5486840233` (the ruling that fenced the seam) · #16404 (error codes ship registered) · #16649 (boot-refusal ratcheted to zero) · ADR-0025 (materialize) · ADR-0130 D4/D5 (`resolveArtifactPackageOrder`)\n\n<sub>Filed by the PM dispatch seat · `domain:engine` · session `session_01XTBcV7zZHmokdyQgXjbyEU` · R1 · 2026-09-09T13:0xZ</sub>"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 5058,
+  "kind": "issue",
+  "title": "AriaProps 与 WAI-ARIA 1.2 的两处缺口:`aria.live` 只活在 objectui 的扩展里,`aria-labelledby` 全无对应",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:on-hold",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:13:48Z",
+  "updated_at": "2026-08-31T17:10:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5058",
+  "body": "批 16(#4001)把 `packages/spec/src/ui/i18n.zod.ts` 的 `AriaPropsSchema` 按真门收紧时测出来的两条协议缺口。**批 16 没有改声明面**(只把静默剥离换成响亮拒绝 + 处方),这两条是加声明,属 additive,按 2026-08-04 切线规则应进 **v18 地图**,不抢 v17 窗口。\n\n`AriaPropsSchema` 的 JSDoc 自称 “Aligned with WAI-ARIA 1.2 specification”,实际只声明三个键:`ariaLabel` / `ariaDescribedBy` / `role`。\n\n## 缺口一:`aria.live` —— 渲染器真读,协议没声明\n\nobjectui 的列表渲染器**逐字读这个键并落到 DOM 上**:\n\n```\npackages/plugin-list/src/ListView.tsx:1984\n  {...(schema.aria?.live ? { 'aria-live': schema.aria.live } : {})}\n```\n\n而 objectui 自己的类型是**扩展 spec 的形状**得到的:\n\n```\npackages/types/src/zod/objectql.zod.ts:463\n  aria: SpecAriaPropsSchema.extend({\n    live: z.enum(['polite','assertive','off']).optional()\n      .describe('aria-live politeness for the list region (objectui-only — promote rather than grow this extension)'),\n  })\n```\n\n注意那句 describe 是 objectui 自己写的:**“promote rather than grow this extension”** —— 它在等这边收编。\n\n现状的三层不一致:\n\n| 通道 | 今天的行为 |\n|---|---|\n| spec 类型(`defineView` 等 TS 授权路径) | `tsc` 直接报错 —— 写不进去 |\n| spec parse(`objectstack validate` / 保存校验) | 收紧前**静默剥离**;批 16 后**响亮拒绝**并指明它只在 objectui 列表面有效 |\n| objectui 渲染路径 | 不过 zod,`aria-live` 真的渲染出来 |\n\n所以没有「今天能用、批 16 打断了」的路径 —— TS 早就拦着,parse 早就在扔。批 16 只是把扔改成说清楚。要不要收编是**产品/协议决定**,不是清扫决定,故单开此件。\n\n**要决定的是两问**:\n\n1. 收编吗?收编就等于**在共享形状上声明它**,而共享形状挂在约 30 个 `aria:` 载体上(view / page / page component / dashboard widget / chart / action / 20 个 SDUI component / widget manifest),其中**只有列表渲染器实现了 aria-live**。在共享形状上加 = 对另外 29 个载体宣告一个运行时不兑现的能力,正是 Prime Directive #10 与本战役要杀的 declared ≠ enforced。\n   - **A1**:只在 `ListViewSchema.aria` 上扩展(`AriaPropsSchema.extend({ live })`),声明面与实现面严格对齐。\n   - **A2**:加到共享 `AriaPropsSchema`,并同批把 aria-live 落到其余渲染器 —— 成本在 objectui,收益存疑。\n   - **A3**:不收编,保持 objectui 扩展。批 16 的 `guidance` 已经把这条说清楚了,作者不会再撞第二次。\n2. 若收编,**拼法**:`live` 还是 `ariaLive`?本文件三个键有两个带 `aria` 前缀(`ariaLabel` / `ariaDescribedBy`),`role` 不带 —— 前缀约定本身就不齐。但 `live` 是**唯一活读者**用的拼法(`schema.aria?.live`),改成 `ariaLive` 需要 objectui 同步改渲染器或走 ADR-0087 转换层。\n\n倾向 **A1 + 保持 `live`**:声明=实现,且不动唯一活读者。\n\n## 缺口二:`aria-labelledby` 全无对应\n\n`aria-labelledby`(引用另一元素的 id 作为无障碍名)是 WAI-ARIA 1.2 里与 `aria-label`(字面字符串)并列的核心属性,本 schema 一个都没声明。作者写 `ariaLabelledBy` / `labelledBy`:\n\n- 收紧前:静默剥离;\n- 收紧后:响亮拒绝。批 16 特意给了 `guidance` 而**不是** alias —— 把它重命名到 `ariaLabel` 语义是错的(一个指 id,一个是字面串),而本战役自己的 finding 7 记过「错误的指示比没有指示更坏」。\n\n要不要声明 `ariaDescribedBy` 的姊妹键 `ariaLabelledBy`,同样是 additive 的协议决定。\n\n## 参考\n\n- #4001 批 16(测量来源)· objectui `normalize-list-view.ts` 的 `ARIA_KEY_ALIASES`(`label`/`describedBy` 旧拼法,批 16 已收为 alias)\n- Prime Directive #10(declared ≠ enforced)· ADR-0078\n- https://www.w3.org/TR/wai-aria-1.2/\n"
+}

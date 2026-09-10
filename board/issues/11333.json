@@ -1,0 +1,29 @@
+{
+  "number": 11333,
+  "kind": "issue",
+  "title": "`manifest.permissions` is live on its LEGACY `string[]` arm only — the structured `PluginPermissionsSchema` (services / hooks / network / fs) has zero readers, and new code is told to prefer it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:blocked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T11:59:38Z",
+  "updated_at": "2026-09-01T00:27:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11333",
+  "body": "Measured while seeding the plugin-manifest liveness ledger for #10728. The ledger row is `live` (the key is read) with the split recorded in its note; this card carries the half that a one-level ledger row cannot fail on. Filed, not fixed.\n\nMeasured on `origin/main` (`b9e9227e3`).\n\n## What is declared\n\n`packages/spec/src/kernel/manifest.zod.ts:54-57` — `ManifestPermissionsSchema` is a **union of two arms**:\n\n```ts\nexport const ManifestPermissionsSchema = z.union([\n  z.array(z.string()),        // legacy flat list\n  PluginPermissionsSchema,    // structured (ADR-0025 §3.2)\n]);\n```\n\nand the doc above it says, in the schema itself:\n\n> Backward-compatible manifest `permissions` value … **New code should prefer the structured form.**\n\nThe structured arm (`:33-45`, `.strict()`) declares `services` / `hooks` / `network` / `fs`, and its TSDoc states the install-time consent flow (ADR-0025 §3.5 step 2) \"turns this declaration into the persisted `granted_permissions` set enforced at load by the PluginPermissionEnforcer.\"\n\n## What is measured\n\n**One reader, on the legacy arm only.**\n\n```\npackages/plugins/plugin-security/src/suggested-audience-bindings.ts:252\n    const declared = Array.isArray(manifest?.permissions) ? manifest.permissions : [];\n```\n\nThe `Array.isArray` guard is the whole finding: an author who follows the schema's own \"prefer the structured form\" advice produces an object, the guard is false, `declared` is `[]`, and the declaration contributes nothing. The recommended spelling is the one nothing reads.\n\nNo other reader exists in `objectstack` or `objectui`.\n\n### `PluginPermissionEnforcer` is not the missing consumer\n\n`packages/core/src/security/plugin-permission-enforcer.ts:94-104` registers the set the **install-time consent flow** persisted to `sys_package_installation.granted_permissions`, and its own comment says that set is \"independent of whatever the manifest *requested*\". Nothing in this repo feeds `manifest.permissions` into it. Cf. the closed **#7500**, which recorded that `PluginPermissionEnforcer` has no production caller at all and that the plugin-distribution task doc's ✅ on F4 overstated — this is the producer-side half of that same gap.\n\n### Controls\n\n- The probe finds real reads of sibling manifest keys: `.packaging` (`cli/src/commands/plugin/build.ts:126`), `.data` (`runtime/src/app-plugin.ts:946`), `.contributes` (`objectql/src/engine.ts:4504`).\n- `objectui`: `manifest.(id|name|namespace|version)` → 46 hits, so manifest reads are findable there; zero for either permissions arm.\n\n## Why file it separately from the ledger row\n\nThe liveness gate classifies at one level. `manifest.permissions` is one key, it **is** read, so the honest one-level verdict is `live` — and that verdict, correct as it is, cannot express \"live on the arm we tell authors not to use\". A union whose recommended member is inert is invisible to the ratchet by construction, which is the same class of blind spot #10728 just closed one level up. Recording it as a card is the only place it can be seen.\n\n## ⚠️ Scope limit\n\n`cloud` is **unmeasured** (carried from #10627: `add_repo` → \"you don't have access to objectstack-ai/cloud\"), and the install-time consent flow of ADR-0025 §3.5 is a control-plane path — so the structured arm plausibly has its consumer there. **Measure the cloud leg with a control probe before acting**, the same precondition #10724 carries. If cloud does consume it, this card becomes a documentation/scope correction (the arm is live cross-repo, and the ledger note should say so) rather than an enforce-or-remove.\n\n## Related\n\nDirectly related to #11330 (`manifest.runtime`): the `loading` tombstone's migrate string redirects upgrading authors to \"the plugin trust tier (`manifest.runtime`) **and the permission declarations**, which are enforced\". This card measures the second half of that sentence; #11330 measures the first.\n\nFiled unassigned for triage.\n\nBlocked-by: #13457\nBlocked-by: #13458"
+}

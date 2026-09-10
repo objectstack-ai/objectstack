@@ -1,0 +1,31 @@
+{
+  "number": 16712,
+  "kind": "issue",
+  "title": "plugin-security: the write path accepts a `sys_user_position` row whose `position` names no `sys_position` catalog row — 201 with nothing resolvable (RE-CUT: the originally reported resolution-path defect is disproved, see the 2026-09-09 measurement)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T00:34:24Z",
+  "updated_at": "2026-09-10T03:13:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16712",
+  "body": "Filed from an app repo (`objectstack-ai/hotclm`, `@objectstack/*` 17.3.0, `better-sqlite3`, single-org dev posture) while provisioning audience accounts to verify dashboard gating — `objectstack-ai/hotclm#29`, PR `objectstack-ai/hotclm#30`. ⛔ Unassigned, ungraded; routing is triage's.\n\n**Provenance.** Measured by the card-10 implementation run while building its audience matrix; I reviewed the evidence and separately provisioned an account the working way (a direct permission-set grant) in the same session, which is the control half. I did not myself re-drive the failing half, and I say so rather than implying otherwise.\n\n**Dedup:** searched `sys_user_position` and position-grant resolution. Nothing open or closed covers this.\n\n## What happens\n\nFor a `sys_user` created **after** the deployment has bootstrapped — i.e. any account an operator makes in Setup — inserting a `sys_user_position` row does not give that user the position's permission sets:\n\n- the insert returns **201**, with `user_id`, `position` and `organization_id` all set;\n- the account still reads **nothing** — the objects the position's sets grant come back empty;\n- `GET /api/v1/meta/app/<app>` serves it an **empty navigation**;\n- and it stays that way **across a server restart**, so this is not a cache that a bounce clears.\n\nA direct `sys_user_permission_set` grant to the same account works **immediately**. That is the control, and it is what says the account, the org and the sets are all fine — the position edge specifically is what does not materialise.\n\nThe inference is that whatever materialises position→permission-set grants runs at bootstrap and has no path for a user added later. Naming the mechanism is yours; what is measured here is the outcome.\n\n## Why this is worth a card rather than a workaround note\n\n**It makes a documented, first-class operator action silently ineffective.** Assigning a position in Setup is *the* way an admin is meant to staff a deployment — ADR-0090 puts positions at the centre of distribution, and our own `DESIGN.md` §10 instructs the operator to create accounts and assign the seven positions. Following that instruction produces an account that can sign in, sees an empty app, and reads nothing, with a 201 and no error anywhere to say why.\n\nNote the failure shape: **a correctly-staffed account and a silently-unstaffed one are the same observation from outside** — both render an empty app. There is no signal that separates them, which is why this cost a verification round to find and why it will not be found by whoever hits it in production; they will conclude the permission set is wrong and go re-author security metadata that was never the problem.\n\n## What would resolve it\n\nAny one of these closes it; the first is smallest:\n\n1. **Materialise the grant on insert** — a `sys_user_position` write for an existing user resolves that position's sets there and then.\n2. **Refuse or warn** if the row cannot take effect, so the 201 is not a false success.\n3. **Re-materialise on boot**, so a restart is at least a recovery path (it currently is not).\n\n## Reproduce\n\n```\n# as an admin, on a bootstrapped deployment\nPOST /api/v1/auth/admin/create-user      -> 201   (any new account)\nPOST /api/v1/data/sys_user_position      -> 201   {user_id, position, organization_id}\n# sign in as that account\nGET  /api/v1/data/<an object the position's set grants>   -> empty\nGET  /api/v1/meta/app/<app>                               -> navigation: []\n# restart the server, repeat the two reads          -> unchanged\n\n# control, same account, same session:\nPOST /api/v1/data/sys_user_permission_set -> 201\nGET  /api/v1/data/<the same object>                       -> rows\n```\n\nThe control is the part that matters: without it, \"the account reads nothing\" is indistinguishable from a misconfigured permission set, which is exactly the wrong place to go looking.\n\n## Boundaries\n\n- One app, one dialect, single-org dev posture, accounts created through the admin endpoint. Re-confirm on a walled/multi-org posture before acting — the promotion path differs there, and this may or may not.\n- ⛔ Nothing was patched in the platform; the app provisions its verification accounts by direct permission-set grant and records why at the site.\n- A related consequence worth knowing when reading app-side row counts: an account provisioned by direct grant does **not** get the sharing rules that grant by position, so its row counts are legitimately lower than a position-staffed account's. That is not this defect; it is what makes the two easy to confuse."
+}

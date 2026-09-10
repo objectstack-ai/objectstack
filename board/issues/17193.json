@@ -1,0 +1,32 @@
+{
+  "number": 17193,
+  "kind": "issue",
+  "title": "ADR-0030 still prescribes `migrateSysNotificationToEvent`, a call the #16194 retirement removed — an operator copying step 2 gets an unresolvable import",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "finding",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T15:44:26Z",
+  "updated_at": "2026-09-10T02:41:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17193",
+  "body": "## What is wrong\n\n`docs/adr/0030-notification-platform-convergence.md` carries a live operator prescription for a function that no longer exists:\n\n```\ndocs/adr/0030-notification-platform-convergence.md:105\n- Run `migrateSysNotificationToEvent` during the cut-over so historical bell rows\n  carry over. **Sequence:** ship back-end → run migration → flip UI (runbook in the\n  handoff doc).\n```\n\n`migrateSysNotificationToEvent` was removed from `@objectstack/metadata/migrations` by the #16194 retirement (director-seat ruling, decision batch #88, 2026-09-08). An operator following that line writes an import that does not resolve — a copy-the-example-and-it-fails defect, not a stylistic one.\n\nA second occurrence, `:80`, is a **historical record** and is fine as it stands — the `P0 — Seams` table describes what was built under #1434, and it was built. Only `:105` is addressed to someone about to act.\n\n## Why it is not fixed in the #16194 PR\n\nTwo independent reasons, both structural:\n\n1. **`docs/adr/**` is a governed surface** (Prime Directive #14). One path hit makes a whole diff governed, and the directive's own remedy for that is to *split the governed files into their own PR* rather than drag an otherwise-ordinary change into hand-merge-only territory. The #16194 PR is already parked outside the queue awaiting a `CONTRACT_REVIEW_TIER` pass; adding a second, unrelated landing constraint to it helps nobody.\n2. **Amending an ADR is a decision, not a tidy-up** (Prime Directive #13). The retirement ruling withdrew the migration; it did not say anything about ADR-0030's own status line. Whether `:105` is struck, rewritten to say the step is gone, or left under an amended status line pointing at the retirement is a call for whoever owns that record.\n\nThe **operator-facing half was fixed** in the #16194 PR, because it is not governed: `docs/handoff/adr-0030-notification-convergence.md` — the runbook ADR-0030 itself defers to (\"runbook in the handoff doc\") — now carries a tombstone where its step 2 was, stating that pre-ADR-0030 `sys_notification` rows are not carried by the platform on this line, and naming the reversal path. So the doc an operator is actually sent to is correct today; this card is about the record that points at it.\n\n## Suggested shape of the fix\n\nA docs-only PR touching `docs/adr/0030-notification-platform-convergence.md` alone, merged by hand:\n\n- rewrite `:105` so it records that the migration step existed and was later withdrawn (retirement under #16194), pointing at the handoff doc's tombstone for what a deployment gets instead;\n- leave `:80` as the historical seams record;\n- decide whether ADR-0030 wants an amended status line naming the retirement, per Prime Directive #13.\n\n## Evidence\n\nMeasured on `origin/main` at `fd5cff209f` plus the #16194 branch head `bb65e0f298`:\n\n- `git grep -n migrateSysNotificationToEvent -- docs/` returns `docs/adr/0030-notification-platform-convergence.md:80`, `:105`, and the handoff doc's tombstone line.\n- After the retirement, `git grep -nE 'export [^;]*migrateSysNotificationToEvent'` over the tree (excluding CHANGELOGs and release notes) returns **zero** — nothing re-exports it under any spelling. The same expression at the merge base returns the four declarations, so the probe fires.\n\nRelated: #16194 (the retirement) · #15710 (the receipt contract it withdrew) · #14025 (the id's registration).\n"
+}

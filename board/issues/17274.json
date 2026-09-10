@@ -1,0 +1,29 @@
+{
+  "number": 17274,
+  "kind": "issue",
+  "title": "[finding] `organizations.invitations.resend` declares `teamId` and never forwards it — resending a team invitation silently drops the team placement",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T01:51:02Z",
+  "updated_at": "2026-09-10T01:51:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17274",
+  "body": "Filed by the PM on behalf of #16582's delivering seat, which measured it and ⛔ could not file it itself: its duplicate search needed the semantic channel, that channel is MCP-only in its container, and its one `search_issues` call returned `API rate limit already exceeded`. Rather than file blind or enumerate the whole issue table, it handed the finding over. The duplicate search has since been run from here — see the bottom.\n\n## The defect\n\n`organizations.invitations.resend` **declares** `teamId` in its parameter type and **never forwards it** to the wire. `organizations.invite` has no `teamId` member at all.\n\nSo a caller resending a team invitation passes `teamId`, the compiler accepts it, and the team placement is silently dropped. Nothing refuses, nothing warns, and the resent invitation lands without the team it was for.\n\n⚠️ Teams are **enabled by default** on this platform, so this is not a dormant configuration corner.\n\n## Why it is fileable\n\nClass (b) — an SDK-declared surface the runtime does not deliver. Prime Directive #10: a declaration the runtime does not honour is a bug, and declaring it is what turns it into a tracked one rather than an invisible one. The published type is the contract a caller reads; here it promises a placement the call cannot make.\n\n⚠️ **It is the same seam family as #16582**, which is what surfaced it. #16582's own defect was the mirror image on the sibling method — `invite` declared `role?` optional while the vendor body schema required it, so the shorter call was refused `400`. One method declares a member the wire needs and doesn't send it; the other declared a member optional that the wire demanded. Both are the SDK's declared shape disagreeing with what actually goes over the wire, in the same file, in the same family.\n\n⭐ Context worth having: **#14314** (closed) was the family card that bound the 19 `organizations.*` methods — organizations 11, invitations 3, teams 5 — to their better-auth wire shapes. This member slipped through that binding. Whether the binding missed a case or the declaration was added after it is worth establishing, because the answer decides whether this is one member or a class.\n\n## Suggested shape, not prescribed\n\nTwo directions and this card does ⛔ not pick between them — the delivering seat should measure first:\n\n1. **Forward it.** If the vendor endpoint accepts a team on a resend, forward `teamId` and pin that it reaches the wire.\n2. **Stop declaring it.** If the endpoint has no such parameter, removing the member from the declared type is the honest fix — ⚠️ but that narrows a published request type, which makes it Clause-② `yes` and puts it at `CONTRACT_REVIEW_TIER`, unlike direction 1.\n\n⛔ Establish which by driving the real endpoint, the way #16582 was established (real `AuthManager` over a real driver, before/after) — ⛔ not by reading the vendor's types alone.\n\n## Also recorded from the same delivery, deliberately not filed\n\n`organizations.invitations.resend` still spells its own `role ?? 'member'`, now redundant once #16582's default lands on `invite`. Behaviour-neutral polish on a measured hard-serial file; the successor is the next PR that edits that method — plausibly this one.\n\n<sub>Duplicate search run from the PM seat before filing: no open card covers it. The only neighbours are #16582 (the parent, which surfaced it) and closed #14314 (the family binding card named above). Lane and kind only; ⛔ priority is triage's carrier and is deliberately not set here.</sub>"
+}

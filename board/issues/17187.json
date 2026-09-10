@@ -1,0 +1,31 @@
+{
+  "number": 17187,
+  "kind": "issue",
+  "title": "[finding] error-handling.mdx teaches a QUOTA_EXCEEDED wire fence for a registered error code that NO producer emits",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T15:30:42Z",
+  "updated_at": "2026-09-10T14:29:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17187",
+  "body": "Found while fixing #16937 (the two 429 `details` fences on the same page). That card's ruling scoped the fix to fences whose producer shape is known; this one has no producer at all, so it was deliberately left untouched there and is filed here.\n\nMeasured on `origin/main` at `fd5cff209f`.\n\n## `QUOTA_EXCEEDED` is registered, but nothing emits it\n\n`content/docs/protocol/kernel/error-handling.mdx` carries a full copyable fence under `#### QUOTA_EXCEEDED` teaching a five-member `details` bag:\n\n```\n\"details\": { \"quota\": 10000, \"used\": 10000, \"period\": \"monthly\", \"reset\": \"...\", \"upgrade_url\": \"...\" }\n```\n\nThe code itself is real — it is a member of the `StandardErrorCode` catalog at `packages/spec/src/api/errors.zod.ts:106`. But no producer emits it, so none of those five members has any backing, and the `code` a client branches on never arrives.\n\nReadings, each with a positive control on the same corpus so a zero is a reading:\n\n| reading | result | positive control on the same corpus |\n|:--|:--|:--|\n| bare `QUOTA_EXCEEDED` (word-boundary, excluding `SMS_QUOTA_EXCEEDED_*`) tree-wide outside `content/` | 3 hits, none a producer | `RATE_LIMIT_EXCEEDED` same form: 28 hits |\n| `code: 'QUOTA_EXCEEDED'` construction sites | 0 | `code: 'RATE_LIMIT_EXCEEDED'`: 14 |\n\nThe three non-producer hits are: the catalog declaration itself; a deliberately-wrong waiver fixture in `packages/spec/src/api/error-code-ledger.test.ts:132`; and — the load-bearing one — `scripts/error-status-unpinned-baseline.json`, whose own note reads:\n\n> StandardErrorCode members documented with an HTTP status that NO producer this gate can read declares a status for — nothing pins the doc claim on either side.\n\n`QUOTA_EXCEEDED` is listed there. `SERVICE_UNAVAILABLE`, by contrast, is absent from that list (it has 72 producer sites) — that asymmetry is the machine-maintained control confirming the reading.\n\n## Why this is a separate card, not part of #16937\n\nThat card's route was \"reduce each fence to the members the producer actually emits\". That route has no answer here: there is no emitted shape to reduce to. The defect is one level up, and it admits at least three different resolutions:\n\n- **A** — retire `QUOTA_EXCEEDED` under ADR-0049 enforce-or-remove, the way `BATCH_PARTIAL_FAILURE` and friends were retired in the same catalog, and delete the docs section with it.\n- **B** — a producer is genuinely intended (quota enforcement is a real product surface); then the fence needs the shape that producer will emit, and the card is a feature, not a docs fix.\n- **C** — keep the code and mark the section as illustrative rather than as the wire shape.\n\nPicking between these is a contract decision, not a docs edit, which is why #16937 did not guess at it.\n\n## Why nothing catches it\n\nSame gap #16937 records: `details` is `z.unknown()` on the ADR-0112 envelope, so no schema constrains its members, and no gate compares a documented `details` key against what any producer emits. `check:error-status-conformance` does track the unpinned code, but it grades the code's HTTP status, not the docs fence hanging off it."
+}

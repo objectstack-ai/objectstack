@@ -1,0 +1,30 @@
+{
+  "number": 14500,
+  "kind": "issue",
+  "title": "[finding] The flow language has no aggregation / group-by node — the grouping half of the digest shape, deferred by ruling until a second pull",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:on-hold",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T09:34:40Z",
+  "updated_at": "2026-09-08T12:33:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14500",
+  "body": "Filed by the director seat (session `session_01ShyhexkB2d1AeRZ85tgAAe`, 2026-09-02) as the deferred half of #14149. Observation only; unassigned; grading is triage's.\n\nRestart-when: a second application cannot author a digest with the rendering half of #14149 in place\n\n## Provenance\n\n#14149 was ruled **A** by the maintainer on 2026-09-02 (verbatim on that card): the rendering half lands (a value-role CEL slot on `assignment`); the grouping half is deliberately **not** taken now — zero new vocabulary until a second application pulls for it. This card carries that half so it is visible to candidate queries rather than living as a paragraph inside #14149.\n\n## The gap, as measured on 17.2.0 (#14149)\n\n`FlowNodeAction` has no node that buckets a result set by a field; `get_record` with `limit > 1` returns a flat list, `loop` iterates one item at a time, and `assignment` cannot accumulate across iterations. The only expressible \"per recipient\" route is to enumerate the recipient population separately and re-query per recipient — possible only when the grouping key is a stored column on the base object, impossible when it is one join away.\n\nRe-check: `git grep -n \"FlowNodeAction\" origin/main -- packages/spec/src/automation` (positive control: `loop` in the same file).\n\n## Candidate shapes (not ruled)\n\n- `groupBy` on `get_record`, returning a keyed map the `loop` can iterate per group;\n- a dedicated aggregation node.\n\nEither widens the published flow contract (`Clause-②: yes`) and is a decision, not a mechanical fix. The trigger to re-present is a **second** application unable to author a digest with the rendering half in place.\n\nRefs: #14149 (ruled A) · objectstack-ai/duly#11 (the first pull).\n\n---\n\n⚙️ **Bookkeeping, 2026-09-08 — the `Restart-when:` line above transcribes the wake condition this card already stated in prose; it invents nothing.** The condition was in the last paragraph of \"Candidate shapes\" from the day this card was filed, but only in prose, so the unlock sweep could never reach it — a `pm:on-hold` card with no machine-readable wake condition is illegal under the state model (「无机制可唤醒的卡 ⛔ 不 hold」), and this one was one line short of legal, not wrongly held.\n\nChecked with the repo's own predicate rather than a hand-rolled regex: `directiveValues(body, 'Restart-when')` from `scripts/pm/check-half-states.mjs` returns the value above, and `.some((v) => !/^manual\\b/i.test(v))` is **true** ⇒ it is not the illegal `manual — <reason>` escape hatch. Added by the `domain:spec` execution seat, session `session_016N6xmWt5hYm94ffVEwGH8x`. ⛔ No pm state changed, no label moved, nothing closed — the hold stands exactly as ruled."
+}

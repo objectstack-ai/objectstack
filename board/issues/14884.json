@@ -1,0 +1,32 @@
+{
+  "number": 14884,
+  "kind": "issue",
+  "title": "[repo:objectui] Line-items sub-grid hard-codes `Add line` / `Total` as English literals — a zh-CN console shows them untranslated",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "i18n",
+    "pm:queue",
+    "priority:p3",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-03T07:24:03Z",
+  "updated_at": "2026-09-10T00:19:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14884",
+  "body": "## Summary\n\nThe line-items sub-grid (the inline child table rendered inside a record form, `data-testid=\"line-items-add\"`) hard-codes its chrome strings in English. On a zh-CN console every other button on the page is Chinese, while the sub-grid shows `Add line` under the table and `Total` in its footer row. The related-list column picker on record pages likewise showed `Columns` in the same session (not traced to source).\n\n## Minimal reproduction\n\nPlatform 17.2.0 console, workspace `i18n.defaultLocale: 'zh-CN'`.\n\n1. Any form view with a child line-items table (here: 到人分工 form with its 个人承接项 lines; also the indicator form's 阶梯区间 lines).\n2. Open \"新建\" → scroll to the child table.\n\nObserved: footer cell `Total`, button `+ Add line`; the surrounding dialog (`新建到人分工`, `取消`, `保存`, field labels) is Chinese.\n\n## Where\n\n`ui-components` chunk — literals, not dictionary keys:\n\n```js\n// footer\nchildren: `Total`\n// add button\nchildren: [ <PlusIcon/>, d.add_label || `Add line` ]\n```\n\n`add_label` is a per-view override, so an app can paper over the button, but there is no override for `Total`, and neither string goes through the console's i18n dictionary (which already has zh-CN entries for everything else on the page).\n\n## Expected\n\n- Route both through the dictionary (`lineItems.addLine`, `lineItems.total` or similar) with `zh-CN` entries (新增行 / 合计), so the platform default is localized and `add_label` remains an optional per-view override.\n- Sweep the same component for other literals (empty-state text, remove-row tooltip) while there.\n- If `Columns` on the related-list toolbar is a separate component, same treatment.\n\n## Environment\n\n`@objectstack/console` 17.2.0 · `objectstack dev` · Chrome. App: objectstack-ai/kpi.\n"
+}

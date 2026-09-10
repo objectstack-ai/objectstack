@@ -1,0 +1,30 @@
+{
+  "number": 17265,
+  "kind": "issue",
+  "title": "A hook's business refusal on a script action answers `500 INTERNAL_ERROR` and renders no toast — the user is told nothing, and the same class was already fixed on `/data` and `/analytics`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T01:17:05Z",
+  "updated_at": "2026-09-10T14:59:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17265",
+  "body": "Found in a browser dogfood pass on `objectstack-ai/hotclm` (hotclm#45), on `@objectstack/*` **17.4.0**. Filed at the destination per that repo's `AGENTS.md` — *Platform gaps: report, never patch*. ⛔ Not triaged: no `domain:*`, no priority, no assignee.\n\n## Symptom — two defects stacked, and the second is the worse one\n\nA `beforeUpdate` hook refuses a state transition for a **business** reason, with a written, user-facing sentence. What the user gets:\n\n```\nPOST /api/v1/actions/clm_contract/submit_contract\n→ 500 INTERNAL_ERROR      ← the body carries the hook's correct business sentence\n```\n\nand on screen: **zero toast elements.** Measured by counting toast nodes in the DOM after the response landed — not inferred from \"I didn't see one\".\n\nSo:\n\n1. **A deliberate refusal is served as a server fault.** `500 INTERNAL_ERROR` says *the platform broke*. Nothing broke: a guard evaluated and said no. Any client that branches on 5xx will retry, alert, or page someone.\n2. **The user is told nothing at all.** The refusal text exists in the response and never reaches a human. The user presses Submit, nothing visibly happens, and the contract stays where it was. There is no failure state to recover from because there is no failure state shown.\n\n⚠️ **Flow failures DO toast in the same build.** Only the script-action path is silent — so this is a gap between two sibling paths, not a missing feature.\n\n## This class has already been fixed once, on a different route\n\n**#11684** (closed): *\"rest: an UNDECLARED hook refusal answers 500 on `/analytics/dataset/query` where the same refusal answers 400 on `/data` — the route's fallback arm treats a business refusal as a server fault.\"*\n\nThat is this defect, on a different route. `/data` was right, `/analytics/dataset/query` was wrong and got fixed. **`/actions/…` is still wrong.** Whatever discrimination the fallback arm learned there has not reached the action route.\n\n⇒ Worth checking whether this is a per-route fallback arm that must be taught three times, or whether one shared place can answer it once. A defect fixed route-by-route will reappear on the fourth route.\n\n## Reproduce\n\n```bash\ngit clone https://github.com/objectstack-ai/hotclm && cd hotclm && pnpm install && pnpm demo\n# sign in at /_console/, open a seeded draft contract whose guard will refuse\n# (hotclm refuses draft -> submitted without a version file or a template-bearing type)\n# press Submit; watch the network response and count toast nodes\n```\n\nThe consuming app's guard is a legitimate business rule with a written message — the kind of refusal a product is *supposed* to show its user.\n\n## Expected\n\n1. A hook's business refusal answers a **4xx** on the action route, as it already does on `/data` — a refusal is a successful evaluation that says no.\n2. The console renders the refusal message for a failed **script** action, as it already does for a failed flow.\n\n⛔ Not claimed here: which status code is right for this route (`400` / `422` / something else) — `/data`'s existing answer should settle it rather than a fresh choice. ⛔ Also not claimed: that the console half and the status half belong to the same seat; they plausibly split across repos.\n\n## Related\n\nhotclm#45 (the dogfood pass) · #11684 (closed — the same class, `/analytics` route) · #4431 (closed — sandbox capability denial answering 400 deliberately, the behaviour this route should match)"
+}

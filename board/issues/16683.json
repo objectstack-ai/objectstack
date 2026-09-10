@@ -1,0 +1,34 @@
+{
+  "number": 16683,
+  "kind": "issue",
+  "title": "plugin-auth: `admin/create-user` is a third membership-writing path that ADR-0093 D1's accounting does not include — it hard-codes `policy: 'auto'` and binds under `invite-only`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "auth",
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T20:04:35Z",
+  "updated_at": "2026-09-10T15:32:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16683",
+  "body": "Found while an app built on the platform declared `membershipPolicy: 'invite-only'` at author time ([objectstack-ai/ats#38](https://github.com/objectstack-ai/ats/issues/38)). Measured on `@objectstack/cli` 17.3.0 and verified against `src` here.\n\n**Filing this as a contract question, not as a confirmed bug** — the behaviour may well be intended. What is not defensible either way is that it is undocumented, so a reader of `getMembershipPolicy()`'s own docblock would conclude the opposite of what the code does.\n\n## The accounting\n\n`packages/plugins/plugin-auth/src/auth-manager.ts:3840-3855`:\n\n> ADR-0093 D1 — the deployment's membership policy **as it stands right now**.\n>\n> **The ONE source both membership paths read (#5152):**\n>   - sign-up: the reconciler composed into `user.create.after` (below);\n>   - backfill: `AuthPlugin`'s ADR-0093 D6 pass over pre-existing member-less users …\n>\n> Read the policy through here, **never off a captured option**, so a settings change reaches both without a restart.\n\nTwo paths are enumerated. There are **three** production call sites' worth of membership writing, and the third is not in the list.\n\n## The third path\n\n`packages/plugins/plugin-auth/src/admin-user-endpoints.ts:330-332`, inside `bindUserToSoleOrganization()`:\n\n```ts\nconst result = await reconcileMembership(engine, userId, {\n  policy: 'auto',\n  resolveTargetOrg: () => (tenancy ? tenancy.defaultOrgId() : resolveDefaultOrgId(engine)),\n```\n\n`getMembershipPolicy()` is never consulted. Grepping the package, the only two non-test callers of `reconcileMembership` are `auth-manager.ts:3890` — which reads the accessor, with `:3895` noting *\"the single source the backfill path reads too\"* — and this one, which does not.\n\n## Measured\n\nOn an app declaring `invite-only` (and with the declaration verified in effect: the ADR-0093 D6 backfill bound nobody, `sys_member` held only genuinely-seeded rows):\n\n```\nPOST /api/v1/auth/admin/create-user  →  HTTP 200, \"membershipCreated\": true\n```\n\nand the new account's session carries the Default Organization.\n\n## Why it may be correct, and why it should say so\n\nAn operator explicitly creating an account through an admin endpoint arguably **is** the invitation that `invite-only` is named for. That reading is reasonable — arguably more reasonable than the alternative.\n\nBut nothing records it. There is no comment at the call site and no test in the package mentioning `invite-only` alongside the admin endpoint, in a function whose *immediately preceding* comment cites \"ADR-0093 D3 — mode-aware target resolution\" and explains a `null` return in multi mode. Against that density, an undocumented literal `'auto'` reads as an oversight rather than a decision — and an operator who set the policy specifically to keep a shared organization identity off their users will not expect an admin-created account to acquire one.\n\nThe failure direction matters too: this path **grants** a membership the policy was set to withhold, so it fails open rather than closed.\n\n## Either resolution closes it\n\n1. **If it is deliberate** — one comment at `admin-user-endpoints.ts:330` saying so, and a line in `getMembershipPolicy()`'s docblock making the accounting three paths (two read the source; admin-create is the invitation and binds unconditionally). A test pinning \"admin-create binds under `invite-only`\" would keep it that way.\n2. **If it is not** — read `getMembershipPolicy()` here like the other caller, and keep whatever override the endpoint needs explicit at its own layer rather than as a literal.\n\nEither is small. The present state is the only one that cannot be right, because the docblock and the code disagree about how many paths there are."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 4311,
+  "kind": "issue",
+  "title": "[P2] framework: 66 个包用 tsup 构建、无人做类型检查 —— 实测 18 个包共 380 处 code-tier 错误(#4118 的 framework 侧对应)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "priority:p2",
+    "tech-debt",
+    "tracking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T05:26:06Z",
+  "updated_at": "2026-08-10T02:56:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4311",
+  "body": "framework 侧对应 #4118（那一个针对 objectui）。同一形状的缺口，成因不同、量级已实测。\n\n## 机制:三层都不做类型检查\n\n| 层 | 工具 | 是否类型检查 |\n|:---|:---|:---|\n| build | `tsup`(esbuild) — **66/77 个包** | ❌ 只转译 |\n| test | `vitest run` | ❌ 不做类型检查 |\n| CI | `lint.yml` typecheck 作业 | ⚠️ 只覆盖 4 个目标 |\n\nCI 的 `typecheck` 作业实际只跑这四条:\n\n- `pnpm --filter @objectstack/spec exec tsc --noEmit`(lint.yml:240)\n- `pnpm --filter './examples/*' run typecheck`(:355)\n- `pnpm --filter @objectstack/downstream-contract run typecheck`(:362)\n- 文档代码块抽取后 `tsc --noEmit`(:391)\n\n全仓只有 **2 个包**(`downstream-contract`、`service-datasource`)声明了 `typecheck` script。其余包的 `src/` **和**测试都不经过任何 `tsc`。\n\n这与 objectui 的成因不同,值得注意:objectui 的问题是 tsconfig 正确地排除了测试、而没有第二个 `tsc` 去读它们(#4118);framework 这边**连 src 都没人查**——因为 tsup 根本不调用 tsc。\n\n## 实测范围(2026-07-31,`main` @ 2e836deba)\n\n方法:逐包 `cd <pkg> && npx tsc --noEmit`,按错误码分三层——**code-tier**(真缺陷)、**config-tier**(检查本身没配好:`TS2591/TS2584` 缺 `types:[\"node\"]`、`TS2835/TS2307` 模块解析、`TS2550/TS6059/TS2347/TS7016`)、**noise**(`TS7006` 隐式 any 参数、`TS6133` 未用变量——未配置检查下的严格度噪音,两边都不计)。\n\n77 个包:**48 个干净**,29 个失败;其中 **18 个含 code-tier 错误**。\n\n| package | code-tier | config | noise | 总 |\n|:---|---:|---:|---:|---:|\n| `driver-sql` | **241** | 0 | 0 | 241 |\n| `metadata` | **31** | 22 | 34 | 87 |\n| `driver-sqlite-wasm` | **27** | 0 | 0 | 27 |\n| `driver-memory` | **23** | 0 | 0 | 23 |\n| `cloud-connection` | **11** | 2 | 0 | 13 |\n| `observability` | **11** | 0 | 0 | 11 |\n| `dogfood` | **8** | 3 | 1 | 12 |\n| `service-storage` | **5** | 23 | 14 | 42 |\n| `core` | **3** | 38 | 50 | 91 |\n| `hono` / `knowledge-ragflow` / `service-knowledge` | 3 各 | — | — | — |\n| `spec-monorepo` / `metadata-protocol` / `rest` / `service-analytics` / `service-automation` | 2 各 | — | — | — |\n| `service-cluster` | 1 | 0 | 0 | 1 |\n\n**合计:code-tier 380 / config-tier 288 / noise 184。**\n\n注意 `core`(91 总数但仅 3 真错)和 `service-storage`(42 → 5)——不分层就会把这两个包报成重灾区,实际它们几乎全是 tsconfig 没配好。反过来 `driver-sql` 的 241 **全部**是真错。\n\n## 主导模式:input-vs-output 混淆,正好压在刚收窄的 `QueryAST` 上\n\n`driver-sql` 的 241 处集中在 `TS2345`(123)/`TS2353`(118),散布 8+ 个测试文件(非单一助手重复):\n\n```\nsrc/sql-driver-advanced.test.ts(142,50): error TS2345:\n  Argument of type '{}' is not assignable to parameter of type 'QueryAST'.\nsrc/sql-driver-advanced.test.ts(151,51): error TS2345:\n  Argument of type '{ where: { status: string; }; }' is not assignable to parameter of type 'QueryAST'.\n```\n\n测试把**作者态**字面量传给要求 `object` 等 `.default()` 填充字段的**解析后**类型。这正是 #4118 指认的 TS2741/TS2739 playbook,只因这里传的是整个对象、报成了 TS2345/TS2353。\n\n时机上值得警惕:#4196 和 #4286 刚刚收窄 `QueryAST`(移除 `FieldNode` 对象形态、`joins`、`windowFunctions`)。**这类收窄本应让传旧形状的测试编译失败**——而它们至今全绿,因为没有任何 tsc 读过这些文件。#4118 说的「未检查的测试会被当成证据」在这里是字面意义上的:一个 agent 引用 driver-sql 绿色测试套件来论证 `QueryAST` 契约,引用的是一份从未被类型系统读过的文件。\n\n## 发现路径\n\n#4198(退役 `waitEventConfig.timeoutMs`/`.onTimeout`)合并 main 后扩跑 `tsc --noEmit`,`service-automation` 报 `engine.test.ts` 缺 `resumeAuthority`(该属性由 #3822 引入)。核实后确认与那个 PR 无关、且 CI 从不检查该包,遂按 Prime Directive #10 单独立项而非扩大该 PR 范围。\n\n## 建议\n\n1. **覆盖率棘轮**,沿用仓库已有的最佳治理形态(声明式、带理由、只减不增),对齐 objectui 的 `check-type-check-coverage.mjs`:每个包要么有 `typecheck` script 并进 CI,要么带一条 DEBT 条目,记录实测 code-tier 数与 issue 链接。**先接入 48 个已干净的包**——纯管线改动、零修复成本,且立刻锁死回归。\n2. **config-tier 模板**:统一的 `tsconfig.test.json`(`noEmit`、`types:[\"node\"]`、显式 `lib`、模块解析对齐),288 处 config-tier 应当被模板一次性消掉,而不是逐包手改。\n3. **按表烧 code-tier**:`driver-sql`(241)独占 63%,且是单一 playbook(QueryAST 作者态 vs 解析态),适合一次性集中修。\n\n## 需要拍板的\n\n`TS7006`(隐式 any 参数,160 处)我按 noise 计,未计入 380。若棘轮打算在测试上启用 `noImplicitAny`,这 160 处会变成真实工作量——建议单独决策,不要混进本 issue 的基线数字。\n"
+}

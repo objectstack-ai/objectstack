@@ -1,0 +1,33 @@
+{
+  "number": 15207,
+  "kind": "issue",
+  "title": "feat(spec,services): deployment-level state has no organization column — settings global rung, plumbing objects, the audit ledger, #12699 made total (ADR-0131 D7)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p1",
+    "security",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:05:25Z",
+  "updated_at": "2026-09-04T06:05:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15207",
+  "body": "**⛔ BLOCKED — the v18 development line is not open.**\n\n`Blocked-by: #15193`\n\nPart of #15194 (ADR-0131 execution tree). ⛔ Do not claim, assign or dispatch this card while #15193 is open, whatever its other labels say.\n\n---\n\n**In one sentence.** Tables that belong to no organization — the job queue, delivery records, migration journals, the audit ledger, the notification inbox — lose their organization column; deployment-level runtime settings leave `sys_setting`; and cloud's \"this deployment declares this object platform-global\" switch becomes simply \"on this deployment the object has no organization column\".\n\n**Scope.** (1) `systemFields.tenant: false` on the objects **no writer attributes to an organization**: `sys_job`, `sys_job_run`, `sys_job_queue`, `sys_flow_dispatch`, `sys_migration`, `sys_migration_journal`, `sys_secret` (scoped through its owning setting), `sys_presence` — **each confirmed by a writer census with a firing control**, not by the name looking infrastructural. ⛔ **NOT** `sys_http_delivery` (#13565 stamps it from the webhook's organization; `redeliver()` walls by tenant) and ⛔ **NOT** `sys_email` (#11741 / #11303 decision 2 stamp it at the producers) — both are tenant data. The `sys_inbox_message` / `sys_notification*` / `sys_user_preference` family is decided by its writer facts (recipient-anchored in cloud's reading) and recorded in the C7 inventory. ADR-0087 entry per removed column. (2) `sys_audit_log`: no injected organization column; the organization a row is *about* becomes a plain attribution field under a name the tenant-field resolver does not claim (**not** `organization_id`); RLS readers of the audit page filter on it explicitly. (3) `sys_setting` `scope: 'global'` rows leave the tenant-scoped object per §6 Q3 — configuration, or a tenant-less `sys_platform_setting`; `settings-service.ts`'s user → tenant → deployment cascade reads the new source. (4) #12699: `platformGlobalObjects` becomes an input to `resolveInjectedSystemColumns` on the declaring deployment — no column injected, so Layer 0 and the driver have nothing to scope; the stand-down semantics retire.\n\n**Absorbs**: #13433 (`sys_activity.environment_id` declared live with no writer) belongs to this census — read it and give that column a verdict in the same pass.\n\n**Acceptance.** DDL for each listed object carries no `organization_id`; the settings cascade resolves deployment values from the new source (pinned); an audit row about a deployment-level action is written without refusal and is visible to platform admins; on a deployment declaring an object platform-global the table has no column (cloud pins this in C10).\n\nRefs: ADR-0131 D7 · ADR-0007 · ADR-0057 · #12699 · #13565 · #11741 · #13636 (`sys_audit_log` specimen) · #13433 · #13564 read-side ledger U-A.\n"
+}

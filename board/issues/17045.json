@@ -1,0 +1,30 @@
+{
+  "number": 17045,
+  "kind": "issue",
+  "title": "[seam → cloud] Census the cloud repo for readers that treat a `positions[]` / `sys_user_position` NAME as authority (the out-of-reach half of #15972's first deliverable)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:cloud",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T04:21:30Z",
+  "updated_at": "2026-09-09T04:21:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17045",
+  "body": "**Named reader: the `repo:cloud` execution seat (#6026), at its queue-scan step.** Seam card: the work lands in `objectstack-ai/cloud`, which is not reachable from the filing session, so per the cross-repo rule it lives here with `repo:cloud`. Filed by the director seat (summon #20, `session_01Tep4AYXZvyBA7jsvne5KZV`, `os-bill`) executing the maintainer's ruling A on #15972 (decision batch #105 item 4, 2026-09-09T04:3xZ; ruling comment on #15972: \"Ruling recorded — A: refuse the built-in identity names on `sys_position.name` at write time\").\n\n## What is asked (one deliverable, measurement only)\n\nA census over the `cloud` repository of every reader that turns a **name** found in `positions[]` (session payload) or in a `sys_user_position` row into **authority** — `positions.includes(<built-in name>)`, string comparison against `platform_admin` / `org_owner` / `org_admin`, or any equivalent — instead of reading the capability rung. The objectstack/objectui half of this census is delivered in the PR that implements #15972 (its `## 验收备注`); this card is the cloud half.\n\nAcceptance, one line per item:\n1. The grep set and its **firing control** are stated (a zero-hit census across an unfamiliar repository proves nothing — #15972: \"with a control that fires\"). Suggested control: the same pattern over a file known to read the rung, or a deliberately planted fixture, so the instrument is shown to fire.\n2. Every hit is listed with `file:line` and classified: reads the rung (fine) · reads the name as authority (defect) · other.\n3. Each name-as-authority hit becomes its own card in `cloud` (dedupe first), linked back here; zero hits closes this card with the control on record.\n4. ⛔ No fix is written from this card; it is a measurement.\n\n## Why it exists\n\n#15972 (ruled A): the platform will refuse built-in identity names on `sys_position.name` at write time, so the row can no longer be minted. Readers outside this repository that already trust such a name would keep a live hole until the write-side refusal is deployed everywhere and existing rows are reported; the card's first deliverable was this fleet census, and the cloud repo was out of reach for every seat that has held it (#15972 body §\"Out-of-repo readers are unmeasured\"; 5555586823).\n\nGoverning text: ADR-0068 (built-in identity roles); `packages/core` `resolve-authz-context.ts:1125-1129` (「Read the RUNG — never `positions.includes(...)`」); #15136 / PR #15948 ruling A.\n\nBlocked-by: none — this census does not depend on the platform-side refusal landing."
+}

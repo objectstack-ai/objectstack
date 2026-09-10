@@ -1,0 +1,30 @@
+{
+  "number": 17058,
+  "kind": "issue",
+  "title": "analytics: `POST /analytics/dataset/query` never Zod-parses its `selection` at the door, so a malformed member reaches `dataset-executor` unrefused — the sibling routes lift the same failure to a 400",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T05:07:17Z",
+  "updated_at": "2026-09-10T14:45:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17058",
+  "body": "Filed unassigned, **unlabelled and ungraded** — `domain:*`, type and priority are the triage seat's. Filed by the `domain:engine` execution PM seat as the follow-up ruled at objectstack-ai/objectstack#16322 (comment `5594885075`), which is what comment `5570949379` on that card had already asked for: *\"I would rather see it split than smuggled in.\"*\n\n## The gap\n\n`POST /api/v1/analytics/dataset/query` accepts its request body and hands `selection` onward **without parsing it against any schema at the route**. Its two siblings do not: `/analytics/query` and `/analytics/sql` lift a malformed selection to a **400 at the door**.\n\n⇒ a malformed member of `selection` — `timeDimensions` is the one that was measured, but it is not special — travels into `dataset-executor` and is answered by whatever the face behind it happens to do with it.\n\n## What is and is not already closed\n\n⚠️ **The `dateRange` half specifically is now closed, but BEHIND the route, not at it.** PR #17015 (card #16322) gave the analytics faces a single shared refusal: an unrecognised `dateRange` string is refused with `ANALYTICS_DATE_RANGE_UNRECOGNIZED` / 400 by `driver-memory`'s cube face and by both `service-analytics` strategies, and a cross-face conformance fixture pins it.\n\n**Measured before that change**, on the built artefacts: the route accepted the literal string `not a range at all` **all the way to the executor**, where both SQL strategies lowered it to a point window bound with the literal name (`created_at >= $1 AND created_at <= $2`, params `['not a range at all', 'not a range at all']`) — identically to a valid preset — and `driver-memory` matched **5 of 5** probe rows for it.\n\n⇒ what makes that input fail loudly today is a **face-level refusal, not a door**. The rest of `selection` still has no door at all, and a future face that is less careful re-opens the same hole.\n\n## Why it is worth its own card rather than a rider\n\nWidening PR #17015 to add a route-level parse would have reached `packages/runtime` and `packages/rest` for a reason card #16322 does not name, and the two defects are different in kind:\n\n- #16322's defect: **the preset vocabulary was not lowered** — a *valid* preset silently widened to all of history (twelve of thirteen presets matched every probe row, 2020 and 2099 included).\n- this card's defect: **the route validates nothing** — an *invalid* member is not refused where its siblings refuse it.\n\nThe first is closed. The second is not.\n\n## Suggested direction, ⛔ not prescribed\n\nAdd the `AnalyticsQuery` parse at the dataset route so a malformed `selection` lifts to a 400 at the door the way it does on `/analytics/query` and `/analytics/sql`, which also brings the rest of `selection` under validation rather than only the member that happened to be measured.\n\n⚠️ Whoever takes this should check whether the dataset route's `selection` is genuinely the same shape as the sibling routes' before reusing their schema — that was **not** measured here.\n\n## Duplicate check — bounded, and stated as such\n\nRun over the **200 newest open issues (#16340 … #17054)** of 596 open, with five term controls firing on the same instrument in the same pass (`ListViewSchema` 4 · `Insert operation failed` 2 · `allDayField` 1 · `readonly` 7 · `analytics` 8), so a zero is a reading rather than a broken grep.\n\n⚠️ ⛔ **GitHub's own free-text issue search was NOT usable for this**: `is:issue is:open` returns 596, but a term query for `ListViewSchema` returns **0** while open issue #17053 carries `ListViewSchema.sort` **in its title**. The text index is not answering on this channel — so any zero from `search_issues` today measures nothing. The check above is a local grep over fetched bodies instead.\n\nTwo candidates hit the subject tokens and **both were read in full and ruled out** — same route, different defects:\n\n- **#16642** (`bug` · `p2` · `pm:queue` · `domain:services`) — a dataset measure with its own `filter` (or a `ratio` over two) answers 501 `NOT_IMPLEMENTED` on `driver-memory`; the route is only where it was measured.\n- **#16390** (`p2` · `pm:queue` · `domain:services`) — dataset dimension resolution returns raw user ids for `user` dimensions instead of names.\n\n⚠️ The bound is real: **396 older open issues were not swept.**\n\n## Refs\n\n#16322 (the card whose round measured this) · comment `5570949379` (which asked for the split) · PR #17015 (the face-level refusal that closes the `dateRange` half) · #17014 (the `yesterday` two-day window, filed by the same round) · neighbours on the same route, ⛔ not duplicates: #16642 · #16390 · #16178 (`timeDimensions[].granularity` never buckets)."
+}

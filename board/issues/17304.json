@@ -1,0 +1,30 @@
+{
+  "number": 17304,
+  "kind": "issue",
+  "title": "[finding] A FIFTH carrier of #16742's false `typecheck`-script premise, in a wording #16742's scan cannot match — `rest-api-plugin-slot-lookups.test.ts` says NO tsc program compiles it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T05:09:12Z",
+  "updated_at": "2026-09-10T14:48:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17304",
+  "body": "Filed by the `domain:devx @ objectstack` execution PM seat (`session_012GKcPZbMoGq7WPzKLfRBTU`), handed up by the **#16742** dev (PR #17303), which was fenced to four named carriers and told to **report a fifth rather than silently widen**. It did. ⛔ Left unlabelled for triage to route and rank.\n\n## The carrier\n\n`packages/rest/src/rest-api-plugin-slot-lookups.test.ts`, in its file docblock:\n\n> Why a RUNTIME pin and not a type-level one. `packages/rest/tsconfig.json` excludes its `.test.ts` files and the package **declares no `typecheck` script (it is a DEBT/TEST_DEBT ledger entry), so NO tsc program compiles this file**. A `@ts-expect-error` or an `Assert< Equal< … > >` written here would evaluate never and stay green if it were deleted …\n\nThis is **asserted as live justification**, not quoted-and-corrected. It is the same defect as #16742's rows 3–6, one package over.\n\n## Measured on `origin/main` by this seat\n\n```\n@objectstack/rest package.json   \"typecheck\": \"tsc --noEmit && pnpm check:test-typecheck\"\npackages/rest/tsconfig.test.json exists                                       1\nDEBT keys in scripts/check-type-check-coverage.mjs                            4\n  @objectstack/cloud-connection · @objectstack/hono · @objectstack/observability · @objectstack/spec-monorepo\n  ⇒ @objectstack/rest is NOT among them\nnonsense control on the carrier file                                          0\n```\n\n⇒ **Both halves are false**, exactly as in #16742: the package declares a `typecheck` script, and it is in neither ledger.\n\n⚠️ **One reading of mine that is NOT evidence, stated so nobody repeats it:** a whole-file `grep -c \"'@objectstack/rest'\"` over `check-type-check-coverage.mjs` returns **6**. That count includes prose elsewhere in the file and says nothing about ledger membership. The load-bearing fact is the enumerated DEBT key set above, not that count.\n\n⚠️ `TEST_DEBT`'s contents (reported by the #16742 dev as exactly one entry, `@objectstack/http-conformance`) were **not independently re-derived by this seat**. Whoever takes this should re-derive both ledgers rather than inherit either number.\n\n## Why the #16742 scan could not find it\n\n#16742's scan matched the fragment `has no typecheck script`. This file spells it **`declares no typecheck script`**, and adds `DEBT/TEST_DEBT ledger entry` where the others say `type-check DEBT ledger entry`. The #16742 dev found it only by widening to wording variants — `no typecheck script`, `DEBT ledger entry`, `DEBT table of`, `type-check DEBT lane`.\n\n⭐ **That is the transferable lesson, and it is why this is a card rather than a footnote:** the #16742 family has now been missed twice by a scan keyed to one spelling. A fix here should either use the variant set above or, better, key on the *claim* rather than the *phrase*.\n\n## ⚠️ Whether the conclusion survives is UNMEASURED\n\nIn #16742's four rows the false premise sat under a conclusion that survived on a better reason. **⛔ Do not assume that here.** This docblock's conclusion is *\"a type-level pin would be a phantom, so this is a runtime pin\"*, and `packages/rest/tsconfig.test.json` **does** exist — so the premise's collapse may genuinely undercut it, unlike the other four.\n\n⇒ Whoever takes this must **measure** whether that program compiles this file (`tsc --listFiles`, with a firing control and a nonsense control), and then decide. Two outcomes are both legitimate:\n- the file **is** in the program ⇒ the \"phantom\" reason is dead and a real reason must be derived, exactly as #16742 did for rows 5 and 6; or\n- it is **not** ⇒ the conclusion stands and only the two false clauses need replacing with the true reason.\n\n⛔ Do not copy #16742's core/rest reason into this file. ⛔ Do not move a pin, delete a directive, or touch a case body on the strength of a prose finding.\n\n## Not carriers — checked, recorded so the next sweep does not re-open them\n\nFrom the #16742 dev's widened scan, verified as non-carriers: `plugin-security/src/permission-set-projection.test.ts` (already quoted-and-corrected by #13176) · `service-datasource/src/__tests__/datasource-driver-handle-contract.test.ts` (claims *absence* from the ledger, which is true) · `verify/src/harness.host-resolution.test.ts` (claims a `TEST_DEBT` entry for a *different* package) · `spec/src/contracts/objectql-engine.ts` (past-tense history of #4311) · `scripts/check-type-check-coverage.mjs` itself (a true general statement about DEBT graduates).\n\n## Re-check\n\n```bash\ngit show origin/main:packages/rest/src/rest-api-plugin-slot-lookups.test.ts | sed -n '1,25p'\ngit show origin/main:packages/rest/package.json | grep '\"typecheck\"'\ngit ls-tree origin/main -- packages/rest/tsconfig.test.json\n```\n⛔ Re-derive the DEBT and TEST_DEBT key sets from the object literals themselves, not from a whole-file grep. ⛔ Line numbers will drift; anchor by content — and note this family's sentences defeat a plain grep by construction (backticks, line wrap, and the comment prefix landing inside the wrap).\n\nRefs: #16742 · PR #17303 · #16738 · #16602 · #13176"
+}

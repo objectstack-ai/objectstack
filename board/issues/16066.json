@@ -1,0 +1,31 @@
+{
+  "number": 16066,
+  "kind": "issue",
+  "title": "[finding] `FindDataRequest.query` declares the QueryAST, but the shipped `findData` ingress also accepts an undeclared wire dialect — so that one slot cannot be compiled",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T23:17:28Z",
+  "updated_at": "2026-09-06T14:39:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16066",
+  "body": "Measured while implementing #15866 (restoring the compile-time check on the REST layer's protocol dispatch sites). Handed back rather than acted on: closing it is a contract decision, not a door fix. ⛔ No severity asserted, no domain routing — that is triage's.\n\n## What was measured\n\n#15866 retired the `as any` casts on 22 protocol-dispatch sites in `packages/rest/src/rest-server.ts`, typing each request literal against its declared spec contract. 19 of them compiled clean on the first try. **Three did not**, and all three failed on the same slot:\n\n```\nsrc/rest-server.ts(8992,34): error TS2353: Object literal may only specify known properties,\n    and '$filter' does not exist in type 'QueryInput'.\nsrc/rest-server.ts(9302,33): error TS2561: Object literal may only specify known properties,\n    but '$top' does not exist in type 'QueryInput'. Did you mean to write 'top'?\nsrc/rest-server.ts(10167,29): error TS2353: Object literal may only specify known properties,\n    and 'filters' does not exist in type 'QueryInput'.\n```\n\nThe three doors are the import-job listing, the export chunk loop, and the public reference picker.\n\n## The gap, stated from both ends\n\n- **Declared.** `FindDataRequestSchema.query` is `QuerySchema`, i.e. the QueryAST (`packages/spec/src/api/protocol.zod.ts`). That is the whole declared vocabulary for the slot.\n- **Shipped.** `@objectstack/metadata-protocol`'s `findData` accepts a **second** dialect through the same slot and folds it: `WIRE_QUERY_ALIAS_SLOTS` and `WIRE_DOLLAR_ALIASES` in `packages/metadata-protocol/src/protocol.ts` map `$top` to `top` to `limit`, `$orderby` to `orderBy`, `filter` / `filters` / `$filter` to `where`, `$expand` to `expand`, and so on.\n\nThe normalizer's own comment names the situation exactly, which is why this is a gap and not a discovery:\n\n> The spec's alias table extended with **the wire-only spellings no schema declares**: `filters` (documented plural alias of the `filter` transport param) and the OData `$filter` / `$expand`.\n\n⇒ Two dialects, one slot, one of them declared. Every caller of `findData` that speaks the wire dialect is unverifiable at build time, and there is no runtime rejection either — the fold accepts it.\n\n## ⚠️ Why the two obvious repairs are both wrong\n\n- **Widening `QuerySchema` to admit the `$` forms** would make the second de-facto contract official, which is what Prime Directive #12 forbids and what the normalizer's sibling hint table is explicitly documented as avoiding (\"*This is a HINT table, not an alias table: nothing here is accepted as input … so it does not create the second de-facto contract Prime Directive #12 warns about*\").\n- **A runtime `safeParse` on the slot** is closed by the same reasoning that closed it on #15866's parent thread: a newly-required member would `400` live traffic rather than gate a drift.\n\nSo the question this card actually asks is: **does the wire dialect belong in the declared contract as its own named input type, or should these three server-built literals be rewritten to speak the canonical AST?** Both are defensible and neither is a door's call to make.\n\n## What #15866 did in the meantime\n\nIt did not widen anything and did not rewrite the doors. It confined the erasure from **one call wide to one slot wide**, behind a named, greppable `wireDialectQuery` helper that carries this card's reasoning. At those three sites the method name, the arity and every other request member are now compiled; only the `query` value is not.\n\n## Not claimed\n\nNot swept: whether callers of `findData` **outside** `packages/rest` speak the wire dialect too, and whether `getData` / the `*Many` siblings have an equivalent split. This was scoped to what restoring the check in `rest-server.ts` surfaced."
+}

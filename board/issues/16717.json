@@ -1,0 +1,29 @@
+{
+  "number": 16717,
+  "kind": "issue",
+  "title": "check:merge-driver is permanently red on macOS — the runner-missing classifier misses BOTH its legs there, and the field consequence is the false `stale` claim #15722 removed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-08T00:41:27Z",
+  "updated_at": "2026-09-08T00:48:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16717",
+  "body": "Found while running the derived gate family for #16137 (a test-only diff that touches no `scripts/` file). `pnpm check:merge-driver` fails, and it fails identically on a checkout that does not contain that diff — so it is a standing host fact, not a card's regression.\n\n## Measured\n\nTwo cases of `node scripts/check-regen-pending.mjs --self-test` fail on macOS 25.5.0 (Darwin), pnpm 10.31.0:\n\n```\n  x a gate whose RUNNER is not installed refuses the same way\n  x   ...naming the command the shell could not find, in the diagnosis\nx self-test failed -- 1 failure(s) (cases and floor).\n```\n\nControl, same command in the shared checkout at `d5d8d50db`, which does not carry the #16137 branch: **exit 1, the same two cases**. So the diff is not the cause.\n\n## Why it misses, both legs, measured on this host\n\n`classify()` in `scripts/check-regen-pending.mjs` recognises a missing runner two ways. On macOS neither fires.\n\n**Leg 1 — the shell line.** The matcher is anchored on a line-numbered spelling:\n\n```js\nconst runner = text.match(/^(?:sh|bash|dash|zsh): (?:line )?\\d+: ([^:\\n]+): (?:command )?not found$/m);\n```\n\nThe `\\d+:` segment is required. macOS `/bin/sh` omits it entirely — measured, `sh -c 'os-regen-fixture-absent-runner --check'`:\n\n```\nsh: os-regen-fixture-absent-runner: command not found\n```\n\nThe comment above the regex names the two spellings it was written from (`sh: 1: tsx: not found` from dash, `bash: line 1: tsx: command not found`); the bare macOS spelling is a third one.\n\n**Leg 2 — the exit-code fallback.** `|| exitCode === 127` is meant to catch exactly that. It does not fire either, because the code the gate sees comes from `pnpm -s run`, not from the shell. Measured with a throwaway package whose only script is the absent command:\n\n```\n$ pnpm -s run g\nsh: os-regen-fixture-absent-runner: command not found\npnpm exit=1\n```\n\n**exit 1, not 127.** On Linux the same path yields 127 and the fallback carries the case, which is why CI is green.\n\n## Two consequences, and the second is the one that matters\n\n1. `pnpm check:merge-driver` cannot be run green by any agent or contributor on macOS. Every such run reports a red the runner did not cause, and there is nothing in the output that says so.\n2. **The field direction is worse than the self-test.** With both legs missing, a real missing-runner case classifies as `stale` — the ordinary refusal — so a macOS checkout whose gate runner is genuinely absent is told *the artifact is stale*. That is precisely the false claim the `PREREQUISITE NOT MET` grading exists to prevent: nothing was measured, and the operator is sent to regenerate an artifact that may be perfectly current.\n\n## Shape of the repair, not a prescription\n\nBoth legs need widening and each needs its own fixture, because either one alone would keep the other's blind spot: make the line-number segment optional in the regex (macOS `/bin/sh` writes none), and stop reading the runner-missing signal off a raw 127 alone when the immediate child is `pnpm`, which does not propagate it on every platform. The self-test's own fixture (`GATE_STUBS['runner-missing']`) already reproduces the case, so the controls exist; what it lacks is a spelling from a shell that writes no line number.\n\nRefs: #15722 (the card that introduced the `PREREQUISITE NOT MET` grading these cases pin), #16007 (a different residue in the same self-test), #16137 (where this was found)."
+}

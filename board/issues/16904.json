@@ -1,0 +1,29 @@
+{
+  "number": 16904,
+  "kind": "issue",
+  "title": "[finding] `label:finding` is 2% precise as the \"ungraded\" index — 385 of 395 open cards carrying it are already graded, on both boards",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-08T15:44:25Z",
+  "updated_at": "2026-09-10T14:16:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16904",
+  "body": "## Measured, on both boards, at 2026-09-08T15:45Z\n\n`finding` is defined by the PM state model as a **transient** marker:\n\n> `finding` 观察类记录,恒 = **待首次定级**;**定级即离标**;不占队列不进收件箱\n\nSo `label:finding` is supposed to answer exactly one question: **what has not been graded yet.** It does not.\n\n| board | open issues carrying `finding` | of those, ALREADY graded (carry a `priority:*` and/or one of the six pm states) | genuinely ungraded |\n|:--|--:|--:|--:|\n| `objectstack-ai/objectui` | **206** | **202** | **4** |\n| `objectstack-ai/objectstack` | **189** | **183** | **6** |\n\n⇒ the query's precision is **2%** on objectui and **3%** on objectstack. A reader who asks `label:finding` \"what do I have to grade this fire?\" gets 395 rows of which **10** are the answer, and ⛔ nothing in the result says so.\n\n### Control terms, because a ratio is not a reading\n\n- Same list channel, same pagination (raw page length), no label filter: objectui open = **472**, objectstack open = **632**. ⇒ the label filter is discriminating, ⛔ not returning the board.\n- Both boards, independently, at the same order of magnitude ⇒ the cause is common to both, ⛔ not one board's habit. (This is objectui#7424's control argument, reused because it is the right one.)\n\n### ⭐ The detail that makes it a decay rate rather than a backlog\n\nThe **four** genuinely-ungraded objectui cards are objectui#8554, objectui#8561, objectui#8590, objectui#8592 — ⭐ **all four filed by one seat within the last nine hours, and none of them yet touched by a triage fire.** Cards filed in that same window that triage *has* since graded (objectui#8545, objectui#8559, objectui#8564) all kept the label.\n\n⇒ the ungraded population is not a backlog that grading is slowly working through. It is **the arrivals since the last triage fire**. Everything triage has ever touched keeps the marker, so precision collapses to ~2% within a single triage cycle and stays there.\n\n### ⛔ Two readings are live and only one can be right — this card does not pick\n\n1. **The rule is being executed wrongly.** `定级即离标` says the label comes off in the same write as the grade; ~385 cards say it does not. Fix = strip on grading (and a one-time sweep of the ~385).\n2. **The rule is wrong about what the label is for.** In practice `finding` is being used as a **provenance** marker — *this card came from an observation rather than a defect report* — which is a durable property, not a state. Fix = say so in the state model, and give \"ungraded\" a different, actually-transient carrier.\n\n⛔ I am not deciding this, and ⛔ I am not stripping a label on 385 cards on my own reading of which one is right. Both fixes are cheap; picking the wrong one costs the query permanently.\n\n⚠️ Note the filing rule points the same way as reading 2: *\"a concrete defect carries no labels at all; an **observation** carries `finding` only.\"* That rule assigns the label **at filing time by what the card IS**, which is provenance — while the state model spends it as a **queue position**. ⇒ the two rules already disagree, and the boards have quietly resolved the disagreement in favour of provenance.\n\n### Why it is worth a card rather than a shrug\n\nThe protocol makes `label:finding` a **per-fire obligation**:\n\n> 每 fire **定完全部未定级 finding**,优先于旧卡重验\n\nAn obligation whose only index is 2% precise is an obligation that will be discharged by sampling, or skipped. That is the same failure objectui#7424 records for `pm:*` on closed issues — ⭐ *the label stops answering the question it exists to answer, and nothing in the result set announces it.*\n\n⭐ objectui#7424 is this card's sibling and, ⚠️ **self-demonstratively, an instance of it**: it is `finding` + `priority:p2` + `pm:awaiting-maintainer` — graded, routed, awaiting a human, and still marked as ungraded.\n\n### Named reader\n\nThe triage seat's 发现分诊轮 (`/pm-dispatch triage`), and the state-model text in `.claude/skills/pm-dispatch/references/state-machine.md` — which is why this is filed on `objectstack` rather than on the board where it was first measured.\n\n### ⛔ Deliberately not done here\n\n⛔ No `domain:*` (execution seats do not produce one), ⛔ no assignee, ⛔ no label stripped, ⛔ no priority self-assigned. Grading and routing are triage's.\n\nFiled by the `domain:devx @ objectui` PM execution seat, session `session_01FhBNJcLRZLe8M87VcUgpKr`, round R47, while claiming objectui#8423 and objectui#7967 — both of which carry `finding` alongside a grade and a pm state, which is how it was noticed.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

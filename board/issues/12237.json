@@ -1,0 +1,35 @@
+{
+  "number": 12237,
+  "kind": "issue",
+  "title": "docs content: page titles carry no search intent — median 14 characters, 325 of 403 under 20",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:blocking",
+    "pm:queue",
+    "priority:p1",
+    "size/l"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T14:48:05Z",
+  "updated_at": "2026-09-08T20:12:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 16,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12237",
+  "body": "## One-liner\nDoc titles are bare feature nouns — `Objects`, `Fields`, `Actions`, `Documentation`. Median length is **14 characters**; **325 of 403** are 20 characters or less. With ` | ObjectStack` appended a typical SERP title is ~30 characters against a ~60-character budget, and the half that is ours carries no term anyone searches for.\n\n## Measured\n```\ntitle length:  n=403  median=14  max=50   <=20 chars: 325\ne.g.  \"Objects\" · \"Fields\" · \"Actions as Tools\" · \"Documentation\" · \"AI Overview\"\n```\n\n## Expected\nAdopt one rule and apply it: **`<primary keyword> — <qualifier>`**, 50–60 characters including the ` | ObjectStack` suffix. The primary keyword is the phrase a developer would type, not our internal noun:\n\n| now | shape to aim for |\n|---|---|\n| `Object Metadata` | `Object metadata: define objects, fields and relationships` |\n| `Actions as Tools` | `Expose actions as MCP tools for AI agents` |\n| `Documentation` | `ObjectStack documentation: metadata-driven app framework` |\n\n⚠️ This is maintainer-voice territory. The PR must open with the **rule plus the full 403-row before/after table** so the pattern can be judged in one read, and it stays open for maintainer review — do not self-merge it. If the rule is rejected, only the table is thrown away, not per-file work.\n\nNote the `Sidebar` title and the SEO title do not have to be the same string — check whether `content/docs/**/meta.json` or the frontmatter can carry a separate short label for navigation before lengthening every sidebar entry.\n\n## Acceptance\n- [ ] one written rule, in the PR body, with the before/after table\n- [ ] sidebar navigation still reads cleanly (short labels preserved, by whatever mechanism)\n- [ ] no title exceeds 60 characters including the site suffix\n- [ ] `pnpm check:doc-anchors` and the link checker stay green\n\n## Source\nFound in an SEO review of the docs site (`apps/docs`) run on 2026-08-25, measured against the local dev server and against production. The canonical origin is `https://objectstack.ai` — maintainer ruling recorded in #10659:\n\n> 这个仓的文档站规范 URL 是 https://objectstack.ai\n"
+}

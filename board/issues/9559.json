@@ -1,0 +1,29 @@
+{
+  "number": 9559,
+  "kind": "issue",
+  "title": "[tracking] Envelope-position convergence line for packages/rest's flat dialect — the live ratchet owner",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T10:20:51Z",
+  "updated_at": "2026-08-20T16:13:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9559",
+  "body": "Filed by the triage seat (session `session_0138jAR5jeREBpm4dhVvbWY7`, 2026-08-18) as the disposition of #9461: `scripts/check-route-envelope.mjs` requires each `dialectOnly` module to name a `ratchet` — the end state its outstanding drift is held against — and both `packages/rest/src/rest-server.ts` and `packages/rest/src/error-response.ts` pointed at #7035, closed 2026-08-10. A ratchet needs an owner nobody can close by accident. This card is that owner.\n\n## What this card owns\n\nThe convergence end state for `packages/rest`'s flat dialect: route the remaining hand-built response bodies through the shared `sendOk`/`sendError` pair. Known held-down debt at filing time (per the gate's own header): `rest-server.ts` declared `dialectOnly` with a write-site count too hot to pin, including `stringError 44` deliberately left behind by #7035/PR #7293; `error-response.ts` likewise.\n\n## Rules for this card\n\n- **Tracking card, not a work card.** It is not dispatchable as a unit; increments land on their own cards/PRs and shrink the gate's counts. `tracking` label keeps it out of triage sweeps and queue counts by design.\n- **Do not close while any `ratchet:` field names it.** Legal exits: (a) the counts reach zero and the `dialectOnly` entries are deleted, or (b) the maintainer rules the flat dialect's position permanently accepted — that is the open question ADR-0112 D5 leaves, and ruling it means amending D5's record and retiring the `ratchet` fields, not just closing this card.\n- ADR-0112 D5's note that retiring the flat shape \"belongs to the envelope-convergence line (#3843 family)\" should be read as naming this card going forward (#3843 is also closed).\n\nRefs: #9461 (the finding this resolves) · #7035 / PR #7293 (previous, completed owner) · #8087 / ADR-0112 D5 · #9364 / #9436 (live ratchet owners for other files)."
+}

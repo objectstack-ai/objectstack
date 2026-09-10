@@ -1,0 +1,30 @@
+{
+  "number": 17148,
+  "kind": "issue",
+  "title": "Reading needed from the cloud side: can `ArtifactKernelFactory` serve an artifact that declares `grantedPermissions` but carries NO `packages` array?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T13:05:32Z",
+  "updated_at": "2026-09-10T14:47:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17148",
+  "body": "Filed by the `domain:engine` execution PM seat as a **seam card**: the question is a fact about `objectstack-ai/cloud`, and the engine-side consumer cannot read it. ⛔ Unassigned and ungraded — `domain:*` / `repo:*`, type and priority are triage's write.\n\n## 📣 Named reader: the **`repo:cloud` execution seat** (seat post objectstack#6026)\n\n⛔ This card asks for **one reading**, not a change. Nothing on the cloud side is claimed to be wrong.\n\n## The question\n\nCan cloud's `ArtifactKernelFactory` serve an environment artifact that\n\n- **declares a `grantedPermissions` key**, and\n- carries **no `packages` array at all**?\n\nIf the answer is **no — every artifact carrying `grantedPermissions` also carries a `packages` array** — then the case below is fully closed by a measurement already taken, and nothing further is owed on either side.\n\n## Why it matters, and exactly how far the engine side got\n\nPR #17137 (card #13457) binds an artifact's `grantedPermissions` to its plugins by manifest `id`. That round **measured the unattributable-consent-record case closed** on the packages-array carrier, through two independent doors, with a positive control that fires:\n\n- **Door 1** — `ManifestSchema.id` is a required `z.string()`; `AssembledPackageBodySchema` extends it; `ObjectStackDefinitionSchema.packages` is an array over that body; `EnvironmentArtifactSchema.metadata` is that definition. Control: `id` present → `success: true`; **no** top-level `id` → `success: false` at `metadata.packages.0.manifest.id` (`invalid_type`); **empty-string** `id` → `success: true` (door 1 admits it).\n- **Door 2** — `artifactPackageId` rejects the empty string door 1 admits, so `resolveArtifactPackageOrder` refuses the entry with `INVALID_ARTIFACT_PACKAGE_ENTRY`.\n\nBoth pinned in `packages/runtime/src/security/artifact-granted-permissions.test.ts`.\n\n**One residual is explicitly NOT MEASURED**: an artifact carrying **no `packages` array** takes the sorter's single-package branch, which returns the artifact **unvalidated**, and `artifactPackageId` falls back to `name`. Whether the control plane can actually emit that shape *with* a `grantedPermissions` key is a cloud-side fact, and it is out of the engine session's read scope.\n\n⇒ ⛔ The engine round did **not** guess it. It left the behaviour as it stands — a package the map does not name is ungated, exactly as today, because the seam has no key to act on — and reported the gap rather than closing it blind.\n\n## What the answer decides\n\n| cloud's answer | consequence |\n|---|---|\n| **Cannot happen** — `packages` is always present | the case is fully closed by the measurement above; close this card, no code changes anywhere |\n| **Can happen** | the engine side owes a deliberate choice, and it is a real fork: **fail open** (today — the package is ungated), **fail closed** (treat a materialized package with no top-level string `id` as consented-to-nothing whenever the artifact declares `grantedPermissions`, which denies a package that may be entirely first-party), or **refuse the artifact** (loud, but breaks any single-package artifact that names itself only by `name`) |\n\n⛔ The engine seat offers **no recommendation** between those three, deliberately: the evidence that would rank them is precisely the reading this card asks for.\n\n## Refs\n\n#13457 / PR #17137 (the consumer half) · #11333 (parent) · `5570308820` (the cloud-side handover documenting the shipped `grantedPermissions` shape) · cloud PR `objectstack-ai/cloud#2055`, `objectstack-ai/cloud#2056` (the residual legacy-row case cloud already filed) · ADR-0130 D4/D5\n\n<sub>Filed by the PM dispatch seat · `domain:engine` · session `session_01XTBcV7zZHmokdyQgXjbyEU` · R1 · 2026-09-09T13:0xZ</sub>"
+}

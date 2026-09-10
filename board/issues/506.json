@@ -1,0 +1,33 @@
+{
+  "number": 506,
+  "kind": "pull_request",
+  "title": "Add API Explorer UI protocol for browsing, testing, and documenting APIs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-03T13:23:15Z",
+  "updated_at": "2026-02-03T16:55:22Z",
+  "closed_at": "2026-02-03T16:55:22Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/506",
+  "body": "## Problem\n\nObjectStack has API Registry and Documentation schemas but no UI specifications for building API management interfaces. Need comprehensive UI protocol for browsing, testing, and managing APIs.\n\n## Solution\n\nAdded `api-explorer.zod.ts` with 6 component schemas that compose into complete API management UIs:\n\n### Component Schemas\n\n- **`ApiBrowserComponent`** - Sidebar navigation with grouping (type/status/tag/owner), filtering, search\n- **`ApiEndpointViewerComponent`** - Main content with 5 modes (documentation/testing/code/schema/combined)\n- **`ApiTestingPlaygroundComponent`** - Postman-style testing with request/response editors, environments, collections\n- **`ApiDocumentationViewerComponent`** - Multiple doc styles (swagger/redoc/slate/stoplight)\n- **`ApiHealthMonitorComponent`** - Real-time metrics, alerts, performance tracking\n- **`ApiExplorerPageSchema`** - Complete page configuration with flexible layouts\n\n### Architecture\n\nAligns with industry patterns: Swagger UI (interactive docs), Postman (testing), ReDoc (documentation), Kong Manager (gateway UI).\n\nIntegrates with existing protocols:\n- `api/registry.zod.ts` - Data source\n- `api/documentation.zod.ts` - Doc generation\n- `permission/*.zod.ts` - Access control\n\n### Usage\n\n```typescript\nimport { ApiExplorer } from '@objectstack/spec/ui';\n\nconst page = ApiExplorer.createPage({\n  name: 'api_explorer',\n  label: 'API Explorer',\n  layout: 'sidebar-main',\n  sidebar: {\n    type: 'api-browser',\n    groupBy: 'type',\n    showSearch: true\n  },\n  main: {\n    type: 'api-endpoint-viewer',\n    defaultMode: 'combined',\n    enableTesting: true,\n    codeLanguages: ['typescript', 'python', 'curl']\n  },\n  enableHealthMonitor: true\n});\n```\n\n### Files\n\n- `api-explorer.zod.ts` (666 lines) - Schemas and factory helpers\n- `api-explorer.test.ts` (808 lines) - 49 tests, full coverage\n- `api-explorer.example.ts` (632 lines) - 10 production examples\n- `API_EXPLORER.md` (496 lines) - Complete guide\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 目前有API没有界面，设计一个好的方案\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

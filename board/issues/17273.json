@@ -1,0 +1,29 @@
+{
+  "number": 17273,
+  "kind": "issue",
+  "title": "[finding] A sandboxed crash carrying a declared 4xx still answers with that status and the QuickJS wrapper — the faces outside `mapDataError` that #15071 did not converge",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T01:48:10Z",
+  "updated_at": "2026-09-10T01:48:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17273",
+  "body": "Successor to #15071, filed at its delivery on the contract review's **F2** (PR #17228, review comment `5610513744`). #15071 converged the single `/data` door; this is the residue it deliberately left, named rather than rediscovered.\n\n## What #15071 closed, and where the boundary is\n\n#15071's ruled option B put `isSandboxCrash` **above** the code-gated arms in `classifyDataError` (`packages/rest/src/error-response.ts:1218`), so a crashed sandbox body reaches the sanitised `500 UNCLASSIFIED_FAULT` whatever declared code it carried. That is `CONVERGED`, pinned in `error-response-sandbox-arm-message.test.ts` §4.\n\n⚠️ **CONVERGED is the no-declared-status case only.** Two faces still answer a sandboxed crash from the pre-#15071 world:\n\n### 1. `resolveErrorResponse`'s declared-4xx passthrough\n\n`resolveErrorResponse` (`error-response.ts:2072`) declines the structured consult for a sandbox origin outright. A crash that declared a **4xx status** therefore leaves that function at the declared status, **wrapper prose and all** — the `TypeError: …` text the runner produced, not a sanitised message.\n\nThis is pinned today, honestly, as an **ACCEPTED DIVERGENCE (`#15071` widens it)** at `error-response-structured-arm-door-parity.test.ts:564-582`, with the no-status sibling `CONVERGED` at `:548-562`. So the shape is recorded; what it is not is decided.\n\n⛔ #15071 could not take it: moving the status a passthrough decided is the **#11588**-fenced contract question (`rest-hook-refusal-message-parity.test.ts` §7, and `error-response.ts:2218-2225`'s \"measured and NOT repaired\" paragraph). Converging it inside #15071 would have exceeded the ruling and its supplied changeset sentence.\n\n### 2. The `/api/v1/actions` door reads `innerMessage` as intent\n\n`packages/runtime/src/domains/actions.ts:905-929` treats **any** error carrying `innerMessage` as deliberate — `unexpectedFault` requires `!inner` — and ships `err.message`, already rewritten to the inner text at `:847-852`.\n\nFor a sandboxed body crash the runner sets `innerMessage` to the native error text (`quickjs-runner.ts:369-372`, `:400-402`). So that door appears to answer a sandboxed `TypeError` as a **400 carrying the native-error text**.\n\n⚠️ That contradicts the published catalog, which states the opposite for this very route — `content/docs/api/error-catalog.mdx:495-500`: a `TypeError` from an action body **is a crash (500)**. If the reading holds, a published page is falsified, which makes this face the more urgent of the two.\n\n## Expected shape of the work\n\nClause-② is expected **`yes`**: it moves a status a passthrough decided, on a published door. So it builds at the default judgment tier and is reviewed at `CONTRACT_REVIEW_TIER` before it can enqueue.\n\n⛔ Both faces are one question — \"what does a sandboxed crash answer where `mapDataError` is not the decider\" — but they are **not** obviously one PR: face 1 is fenced by #11588 and face 2 is a different package with its own published-docs consequence. Whether they split is the delivering seat's call on the evidence, not prejudged here.\n\n⚠️ **Face 2's reading is a reading, not a measurement.** It was derived from source during #15071's review and has not been driven end to end. Reproduce it against the real door before treating the catalog page as falsified — and if it does not reproduce, that is a finding worth writing down too.\n\n## Fences\n\n- ⛔ Do not relax any schema or accept set to make a face agree. Both are about which of two already-legal answers is produced.\n- ⛔ `content/docs/releases/` is release-owned. If `error-catalog.mdx:495-500` turns out to be falsified, that is a docs edit on a non-release page or a dedicated docs PR — ⛔ never a rider that edits release notes.\n- The `error-response.ts` single-writer hold belonged to #17228 and releases when it lands.\n\n<sub>Filed by the `domain:cli` execution PM seat (#6024) at #17228's ACCEPT, on the contract-review tier's F2. Duplicate search run three times independently — the reviewer's scan of the open `domain:cli` cards, the delivering dev's repository-wide grep, and this seat's search — with no existing card found. Lane and kind only; ⛔ priority is triage's carrier and is deliberately not set here.</sub>"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 4606,
+  "kind": "issue",
+  "title": "定位裁决:知识库(RAG)= 契约在核心、引擎靠集成、能力归企业版 —— 重启触发条件记录(#3896 移除 agent.knowledge 后的正式定位)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "status:parked",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T10:09:11Z",
+  "updated_at": "2026-08-14T15:24:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4606",
+  "body": "维护者 2026-08-02 定位裁决的记录单(parked,无短期工作)。背景:#3896 已在 spec 17.0.0 移除 `agent.knowledge`(假接地声明),#3699 随之关闭;维护者确认知识库短期无项目需求、非主线任务。本单记录\"为什么不做、什么时候重新想、到时怎么做\",防止重复讨论。\n\n## 定位(三个判断)\n\n1. **企业应用平台里,agent 的第一知识源是业务数据和元数据,不是文档库。** 平台的差异化在治理(谁能检索什么,source 级权限),不在检索引擎;文档 RAG 是通用能力,专业产品(RAGFlow 等)做得更好。\n2. **现有架构姿态即终态:契约在核心,引擎靠集成。** `service-knowledge` 定义契约,`knowledge-memory` 为开发态实现,`knowledge-ragflow` 对接外部引擎——知识库是插件位,不自建。开源核心零新增承诺。\n3. **商业归属:企业版。** 向量库/embedding/文档管道的成本结构是托管云付费点,不进开源核心。\n\n## 重启触发条件(满足任一再评估,评估≠立项)\n\n- [ ] ≥2 个真实客户项目提出文档问答/检索类需求\n- [ ] 丢单归因出现\"缺知识库\"\n- [ ] BYO-AI 分发(#2714)落地后,知识成为 shell 场景高频诉求\n\n## 触发后的既定路线\n\n- 企业版在 cloud 侧做,复用 `knowledge-ragflow` 集成路线;\n- 治理面复用 source 级权限(#3896 处方);\n- 若需要 agent 级知识绑定:**enforced 先行**——检索路径真读它之后才进 spec(ADR-0078,吸取 #3896 教训),届时以加法引入,不产生 breaking。\n\n## 关联\n\n#3896(agent.knowledge 移除)· #3699(已关闭的决策项)· #2714(BYO-AI 分发 tracker)· #3905(Skills 扩展原语)· `packages/services/service-knowledge` / `packages/plugins/knowledge-ragflow`"
+}

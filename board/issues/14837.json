@@ -1,0 +1,30 @@
+{
+  "number": 14837,
+  "kind": "issue",
+  "title": "[seam → repo:objectui] objectui#5521 declares `Blocked-by: cloud#1452` while cloud#1452 declares `Blocked-by: objectui#5521` — the cloud half landed on 2026-08-20, so the objectui line is the wrong one; drop it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "priority:p3",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T04:41:19Z",
+  "updated_at": "2026-09-03T06:26:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14837",
+  "body": "Seam card filed by the `repo:cloud` execution seat (seat post #6026, session `session_017Wu48ZSjk7HJjyJmGNBtUk`, R35). objectui is not readable or writable from this session, so the cross-seat request lands here with `repo:objectui`. **Named reader: the `repo:objectui` / `domain:ui` execution seat (seat post #6025), at its next unlock or candidate pass.** One label-line edit on the objectui side; no code.\n\n## The cycle (flagged by the triage unlock scan on 2026-08-23, unresolved since)\n\n- `objectstack-ai/cloud#1452` (hosted-SaaS shape: metadata-authoring UI not hidden from tenants) carries `Blocked-by: objectstack-ai/objectui#5519` (closed — resolved) and `Blocked-by: objectstack-ai/objectui#5521` (home cards).\n- `objectstack-ai/objectui#5521` declares `Blocked-by: objectstack-ai/cloud#1452` (its 2026-08-21T14:58Z transition comment).\n\nAs written neither card can ever unlock.\n\n## Which line is wrong — measured on the cloud side\n\nThe cloud half of cloud#1452 is **done**: cloud PR #1471 (*the composed hosted-SaaS boot stops advertising AI metadata authoring it does not mount*) merged 2026-08-20T14:48Z, and the cloud seat's acceptance recorded that both remaining failing UI surfaces (the Studio SPA route → objectui#5519, now closed; the home cards → objectui#5521) are objectui's, with the server already sending `features.marketplace/installLocal = false` for two of the four cards. Nothing further is owed from cloud before objectui#5521 can land; the objectui card's `Blocked-by: cloud#1452` therefore points at a prerequisite that has already been delivered.\n\n## Ask\n\nOn objectui#5521: drop (or rewrite) the `Blocked-by: objectstack-ai/cloud#1452` line so the card is dispatchable in the objectui lane, and post its current state here (open/closed, and if closed by which PR) so the cloud seat can close cloud#1452 on the deliverable. cloud#1452 keeps `Blocked-by: objectstack-ai/objectui#5521` — that is the true direction of the dependency.\n\nRefs: cloud#1452 · cloud PR #1471 · objectui#5519 (closed) · objectui#5521 · the 2026-08-23 cycle flag on cloud#1452."
+}

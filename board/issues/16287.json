@@ -1,0 +1,32 @@
+{
+  "number": 16287,
+  "kind": "issue",
+  "title": "finding — a PR against a ratcheted file can be textually clean and still blow the budget: PR CI, mergeable_state and git merge-tree are all textual, and none of them reads the merged result",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T12:08:43Z",
+  "updated_at": "2026-09-08T05:30:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16287",
+  "body": "Recording only — unassigned, no claim. Found the hard way on PR #15427 today, and generalised by that PR's own seat.\n\n## What happened, with the readings\n\nPR #15427 added **one line** to `AGENTS.md`. At the moment it was written the file was **1161** lines against a ceiling of **1162** — headroom 1, and the line fitted exactly.\n\nWhile it waited for human review, the #15379 rules-only programme compressed the same file to **1058** and, by its own shrink-only discipline, **re-locked the ceiling to 1058**. That is correct behaviour for a shrink-only ratchet. It also silently took back the single line of headroom the open PR had been paid from.\n\nThe PR was then approved and **enqueued**. It would have been dropped by the merge queue. Measured before that happened:\n\n```\ngit merge-tree --write-tree origin/main <head> | head -1   →  TREE\ngit cat-file -p \"$TREE:AGENTS.md\" | wc -l                  →  1059\nceiling (check-skill-line-ratchet.mjs)                     →  1058\n```\n\nThe PR's seat reproduced the red verbatim on the merged tree: `check-skill-line-ratchet: AGENTS.md is 1059 lines; the ratchet ceiling is 1058.`\n\n## ⚠️ Why nothing caught it — all three signals are textual by construction\n\n| signal | said | why it could not see this |\n|:--|:--|:--|\n| the PR's own CI | **green** | ran days earlier, against the **old** file and the **old** ceiling |\n| `mergeable_state` | `clean` | answers \"do the texts conflict\", nothing else |\n| `git merge-tree` | no conflict | same question, same blind spot |\n\n**All three read clean, and the merged tree violated a gate.** There is no textual conflict here at all: one side deletes lines elsewhere in the file, the other adds one, and git composes them perfectly. What broke is a **budget**, and no textual check has a concept of one.\n\n⛔ Note this is not the merge queue failing — the queue is the thing that *would* have caught it, which is exactly why it exists. The cost of finding out there is a full CI cycle plus a drop whose reason is only visible in the queue's own logs.\n\n## The class, stated so it is recognisable\n\n**Any PR that touches a ratcheted file can be textually clean and still over-budget, whenever a sibling PR compresses that file and re-anchors its ceiling in between.** The longer a PR waits for review, the likelier it is: #15427 sat two days, and `AGENTS.md` moved 103 lines under it.\n\nThe same shape applies to every other budget in this repo that is pinned rather than derived — the second map in the same script (max table-row bytes, which also moved, 1081 → 768), `check:skills-token-ratchet`, `check:type-check-debt`, and the source-token ratchets in the app repos.\n\n## The mechanical answer\n\nA **merged-result probe**: for each open PR touching a ratcheted path, materialise the merge with `main` and run the ratchet against that tree rather than against either side.\n\n```sh\nTREE=$(git merge-tree --write-tree origin/main \"$HEAD\" | head -1)\ngit cat-file -p \"$TREE:$FILE\" | wc -l          # against the ceiling on main\ngit cat-file -p \"$TREE:$FILE\" | LC_ALL=C awk '{print length}' | sort -rn | head -1\n```\n\n⚠️ `LC_ALL=C` matters — the second pin is in **bytes**, and this corpus is partly Chinese, so a character count silently under-reports by ~3x on those lines.\n\nTwo placements worth weighing (⛔ not adjudicated here):\n\n1. **In the ratchet gate itself**, as a mode that takes a base ref — so the PR-time run measures the merged result rather than the branch. Catches it on the PR, before enqueue.\n2. **In the compressing PR**, as an outbound check: when a PR lowers a ceiling, it enumerates the open PRs touching that file and reports which would now exceed it. Catches it at the moment the headroom is taken, which is earlier and names the right owner — the PR that removed the budget, not the one that had already paid from it.\n\nDirection 2 is the one that fits this repo's usual instinct (the change that breaks something should be the change that reports it), but it needs a live GitHub read at gate time, which several gates here deliberately avoid. Worth costing before choosing.\n\n## Related, same day, same underlying shape\n\n- #15410 — 170 self-tests, only 20 provably fail on zero cases.\n- #15373 — no gate reads the CLI transcripts in `content/docs`; four published pages carried a stale number.\n- #15357 — a gating rule shipped claiming \"0 findings over the corpus\" against a corpus that was not the app it named.\n\nAll four are the same sentence: **a signal that reads clean because it was never looking at the thing that broke.**"
+}

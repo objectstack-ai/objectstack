@@ -1,0 +1,30 @@
+{
+  "number": 16910,
+  "kind": "issue",
+  "title": "lint: `lintFlowPatterns` throws on a non-record member of a flow's `edges` list — the sibling list #16751 did not cover",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T16:04:59Z",
+  "updated_at": "2026-09-10T14:49:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16910",
+  "body": "Found while implementing #16751, which re-pointed all seven flow-NODE-list readers at `recordsOf`. Filed as a finding only, not claimed. #16751 is not addressed by this card and remains open on its own PR.\n\n## Measured\n\nOn branch `claude/issue-16751-flow-node-list-recordsof` at `91878c45da` — a tree that ALREADY carries #16751's repair, so this is not the same defect surviving — driving `lintFlowPatterns` over a flow whose `edges` list carries a junk member beside a valid edge:\n\n```\nedges:[null, valid]        threw=YES  TypeError: Cannot read properties of null (reading 'label')\n                                      at scanErrorLabelledEdges (lint-flow-patterns.ts:691:28)\nedges:[undefined, valid]   threw=YES  TypeError: Cannot read properties of undefined (reading 'label')\nedges:['a string', valid]  threw=NO   findings=0\n```\n\nReproduce:\n\n```ts\nlintFlowPatterns({\n  objects: [{ name: 'crm_account', fields: [{ name: 'name', type: 'text' }] }],\n  flows: [{\n    name: 'crm_flow',\n    nodes: [{ id: 'start', type: 'start', config: {} }],\n    edges: [null, { from: 'start', to: 'start' }],\n  }],\n});\n```\n\n## The lines\n\n`packages/lint/src/lint-flow-patterns.ts` keeps for `edges` exactly the spelling #16751 removed for `nodes` — re-locate by text, the numbers are from that branch:\n\n```\n:1435  const edges = Array.isArray(flow.edges) ? (flow.edges as AnyRec[]) : [];\n:1542  const graphEdges = graph.edges as unknown as AnyRec[];\n```\n\n`Array.isArray` proves the LIST, never its MEMBERS. `scanErrorLabelledEdges` then reads `.label` off each member.\n\n## Reachability\n\nShallow, exactly like #16751's live half: a YAML `edges:` list item left empty deserialises to `null`, so hand-written metadata turns `objectstack validate` into an uncaught `TypeError` out of a function contractually typed `(stack) =` `Finding[]`.\n\n## Why the sweep did not catch it\n\n`non-record-object-entry.test.ts` grew a graph-shaped `flows[].nodes` arm in #15793, and #16751 has now emptied its `lintFlowPatterns` row. There is **no `flows[].edges` arm at all**, so no assertion covers this list in either direction. Whoever takes this should add that arm beside the existing ones in the same change — otherwise the repair is unpinned and the next inline cast re-opens it silently, which is the mechanism #15636 and #15793 were both filed to stop.\n\n## Notes for whoever takes it\n\n- `recordsOf` (`object-graph.ts`) is the one home for this coercion, as it was for #15793 and #16751; re-pointing adds no copy for `collection-coercion-single-copy.test.ts` to count.\n- The onward-handoff condition applies here too: the coerced `edges` array must also be the one handed to `collectFlowGraphs`, not `flow.edges` raw. Measured on #16751 — with the raw array handed on, `collectFlowGraphs` forwards the non-record member straight into `graph.edges` / `graph.nodes` and the crash relocates to the graph-level reader instead of going away.\n- `graph.edges` at `:1542` needs the same treatment as `graph.nodes` did: a nested region's edge list reaches it with only an `Array.isArray` behind it."
+}

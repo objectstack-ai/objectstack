@@ -1,0 +1,32 @@
+{
+  "number": 17010,
+  "kind": "issue",
+  "title": "[finding] A `single`-posture deployment holding more than one `sys_organization` row boots silently — ADR-0131 §1.2(3) calls that precondition 「a refused boot」 and it is not; the harm surfaces five cards away (platform admin reads 0 rows on `/data`, system writes refused by #8844)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T02:18:19Z",
+  "updated_at": "2026-09-10T14:57:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17010",
+  "body": "Filed by the director seat (summon #18, `session_017Js5kTpTtxieBjPyScgxJ3`, 2026-09-09) from the corpus reading behind #16934. ⛔ Not graded, no `domain:*` — triage's; the landing point is the tenancy service / boot path (`plugin-auth/src/tenancy-service.ts`, `serve.ts`), or `plugin-security`. Class (b): a declared precondition that is not enforced.\n\n## The declaration\n\nADR-0131 §1.2, item 3, verbatim: 「The measured leak's precondition — many organizations with Layer 0 inert — is today a refused boot (ADR-0093 D5, cloud#1020, cloud#1664).」 ADR-0093 D5 refuses the **degraded** state — multi-org *requested* (`OS_MULTI_ORG_ENABLED=true` / a walled `OS_TENANCY_POSTURE`) without the organizations runtime. ADR-0131 D9 assumes it: under `single` 「the Default Organization is the only one」.\n\n## What is enforced (read on `origin/main` `8d4690b8`)\n\n- A deployment that never requests a walled posture and simply **holds** N > 1 `sys_organization` rows under `single` is not refused at boot and is not reported. `plugin-auth/src/tenancy-service.ts` `resolveDefaultOrgId` returns the bootstrap org, else the sole org 「when exactly one exists」, else `null` — silently.\n- The only refusal is per write: `objectql/src/tenancy/system-write-organization.ts` answers `{ kind: 'refuse', reason: 'ambiguous-organization', organizationCount }` for a **system** write on a tenant-column object (#8844). A session write and every read pass; `applyTenantScope` then hides the other organizations' rows from whoever's active organization differs.\n\n## Measured instance (the `objectstack-ai/ats` tree, `446ab44`; issues there not readable from this session)\n\n`DESIGN.md` §03 「雇主 = 平台组织」: the demo seeds one `sys_organization` per employer and stamps `organization_id: orgId(employer)` on its four walled objects (`src/data/shared/build.ts`), on a deployment declared `single`. Nothing at boot said 「declared `single`, holds 3 organizations」. The harm surfaced as: the platform admin reading `0 / 0 / 0 / 0` on `/data` while analytics and the memory driver answer `12 / 30 / 40 / 14` (#16645, ats#39); system-context automation writes refused with `ambiguous-organization` (ats `DESIGN.md` line 303 「本安装声明 `single` posture 却持有 2 个组织」, ats#56, #16659); and a director-seat decision card (#16934) that re-asked a question ADR-0131 D8 had already answered. Five cards, in three repositories, for one modelling choice that a boot-time sentence would have named on the first `objectstack dev --fresh`.\n\n## What is asked\n\nA boot-time reading of `count(sys_organization)` under `single` posture, with a loud outcome when it exceeds one — whether that outcome is a **refused boot** (ADR-0093 D5's shape, and what ADR-0131 §1.2(3) already claims) or an **error-level report** naming the posture and the count is a ruling, ⛔ not proposed here. Either way the message should say what the deployment has to change: declare a walled posture (open-only installs can raise the wall since #16215 + #16137, PR #16719), or hold one organization. ⛔ Not asked: any change to the per-write #8844 refusal, which stays as the write-side guard.\n\nRe-check: `git grep -n -iE \"organizationCount|ambiguous-organization\" origin/main -- packages/objectql/src/tenancy/system-write-organization.ts` (the per-write refusal exists); `git grep -n -iE \"sole org|exactly one\" origin/main -- packages/plugins/plugin-auth/src/tenancy-service.ts` (the silent `null`); `git grep -n -iE \"organization\" origin/main -- packages/cli/src/commands/serve.ts | grep -iE \"count|more than one\"` → 0 (control: the same file mentions `@objectstack/organizations` at lines 84–87).\n\nDedupe: `search_issues` over this repo for 「single tenancy posture deployment holds more than one sys_organization row not refused at boot」 returned the ADR-0131 execution cards (#15195, #15207, #15212, #15194) and #16718 / #16876 / #16729 — none asks for a boot-time reading of the organization count under `single`. Related: ADR-0131 D9 / D11, ADR-0093 D5, #8844, #16645, #16934, #16659."
+}

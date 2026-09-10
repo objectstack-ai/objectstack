@@ -1,0 +1,29 @@
+{
+  "number": 11617,
+  "kind": "issue",
+  "title": "hotcrm: the six screen-flow dialogs become visible to `os lint` once the CLI's flow/screen i18n bucket lands — translate them or record the debt",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:on-hold",
+    "repo:hotcrm"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T09:23:56Z",
+  "updated_at": "2026-08-27T06:34:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11617",
+  "body": "`Blocked-by: objectstack-ai/objectstack#11485`\n\nFiled by the `domain:cli` execution seat as the downstream half of #11485 (PR #11615), per the\nmulti-repo rule that the seat accepting a PR files the consumer-side follow-up rather than trusting\nit to memory.\n\n**Named reader:** the `repo:hotcrm` execution seat, at its per-round patrol. This card is the reason\nthat seat will see the finding before a red gate does.\n\n> ⚠️ **This card belongs in `objectstack-ai/hotcrm`, not here.** Issues live in the repo where the\n> fix lands, and this fix is HotCRM metadata. It is filed in `objectstack` as a seam card because\n> the filing session's GitHub scope does not reach the hotcrm repo. The `repo:hotcrm` seat should\n> **move it** (transfer, or re-file with an origin header and close this one as moved) as its first\n> action, not work it from here.\n\n## What changes for HotCRM\n\n#11485 gives `@objectstack/cli` a `flow` bucket in its i18n coverage taxonomy. Before it,\n`collectExpectedEntries` had no pass over `flows`, so `os lint`'s `i18n/missing-*` family could not\nreport a screen-flow copy gap **at all** and `os i18n extract` never scaffolded the keys.\n\nThe measurement that motivated the card was taken on HotCRM: it reported **0 `i18n/missing-*`\nissues** on a tree whose **six screen dialogs rendered English in all four locales**. The gate was\ngreen because the surface was invisible to it, not because the app was translated.\n\nOnce the new CLI reaches this repo, those strings become reportable:\n\n```\nflows.<flow>.label\nflows.<flow>.screens.<node_id>.title\nflows.<flow>.screens.<node_id>.fields.<field>.label\nflows.<flow>.screens.<node_id>.fields.<field>.placeholder\n```\n\nSeverity is `warning`, so nothing breaks by default — the exit code only moves under\n`--i18n-strict`. This is a card, not an incident.\n\n## What \"done\" looks like\n\nTwo honest endings, and the seat picks by measurement rather than by which is cheaper:\n\n1. **Translate them.** `os i18n extract` now scaffolds the whole `flows.<flow>.screens.<node>.…`\n   skeleton for every requested locale, so the vocabulary is discoverable for the first time — an\n   author previously had no way to even learn the key names. This is the ending that matches the\n   charter: a sample app that ships untranslated wizard copy teaches every AI that copies it to do\n   the same.\n2. **Record the debt deliberately**, if translating four locales of wizard copy is out of appetite\n   right now — but as an explicit, visible ledger entry with a date and a reason, never as silence.\n\n⛔ What is **not** an ending: turning the bucket off, filtering `i18n/missing-flow` out of the\nreport, or narrowing the locale set to make the count zero. The finding is the point.\n\n## Boundary — this is HotCRM's work, not a platform gap\n\nPer the hotcrm charter (maintainer 2026-08-20: 「平台相关的功能应该在平台中实现」), the platform half\nis already done in #11485 and needs nothing further. If working this card surfaces something the\nplatform *cannot* express — a screen-copy key the resolver reads but the extractor cannot scaffold,\nsay — that is a platform card filed at destination in `objectstack`, with this card flipped\n`pm:blocked` behind it. ⛔ Do not work around it inside the sample app.\n\n## Related\n\n- #11485 / PR #11615 — the CLI bucket. Unblocks this card when it merges.\n- #11608 — `packages/lint`'s `validate-translation-references` has no `flows` leg, so a bundle naming\n  a nonexistent flow, screen node or field reports nothing. Independent of this card; relevant if a\n  hand-authored bundle is written here rather than scaffolded.\n- #11287 — where the bundle's `flows` group and its resolver came from."
+}

@@ -1,0 +1,29 @@
+{
+  "number": 12337,
+  "kind": "issue",
+  "title": "[finding] The first worktree at a new set of package inputs pays a ~431s cold closure build UNDER the shared verify lock; every sibling afterwards pays 0.2s",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T19:08:46Z",
+  "updated_at": "2026-08-25T19:52:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12337",
+  "body": "Filed unassigned by the dev seat working #11363 (session `session_01UjM2ia8Av1v5NqfqQEQmC6`). ⛔ Not claimed, not triaged — recording a measurement only.\n\nRelated: #12077 already records that **the turbo cache is shared across all worktrees**. This card is not that fact; it is a *different consequence* of it, on the scheduling side rather than the correctness side. It only depends on #12077's finding — it is not inside its completion scope.\n\n## The measurement\n\nTaken while establishing route 2's feasibility on #11363, in a fresh worktree, both legs under `scripts/pm/os-verify-lock.sh`:\n\n| `turbo run build --filter=./packages/* --filter=./packages/*/*` | wall | **lock held** |\n|---|---|---|\n| cold (fresh worktree, first at these inputs) | 431s — `70 successful, 2 cached` | **431s** |\n| warm (same worktree, immediately after) | 0.208s — `70 cached, FULL TURBO` | **0s** |\n\nCross-worktree overlap of build-task hashes (`--dry=json`, read-only) right after that cold build populated the shared cache:\n\n| sibling worktree | build tasks | hash overlap |\n|---|---|---|\n| `objectstack-12304` | 75 | 75 / 75 |\n| `objectstack-11775` | 75 | 50 / 75 |\n\n## Why this is a finding and not just \"builds are slow\"\n\nThe 431s is **held lock**, not merely elapsed time. It is 80% of the entire 540s acquisition budget, so a single cold closure build can time out every other agent in the container for a full budget — and `--re-measure` needs that closure, so it is on the critical path of a gate several cards run before pushing.\n\nThe distribution is the sharp part: **one** worktree pays 431s and the next seven pay ~0.2s. Which worktree pays is decided by nothing but arrival order at a given set of package inputs. So the cost is real, recurring (`main` moves ~18 merges/day), and lands on an essentially arbitrary card.\n\n⚠️ Note the direction that makes it easy to miss: the agent that pays is *not* the agent that caused it, and from inside any single dev's view a 431s hold looks like an ordinary slow build rather than a fleet-level scheduling fact. That is the same structural blindness #11363 was filed to name.\n\n## What is NOT being proposed here\n\n⛔ Not a shared-artifact mechanism. #11363 measured and rejected that: the sharing already exists, and the residual misses are tasks whose inputs genuinely differ, which must not be shared. Turbo's content-addressed key is already the honest one.\n\nThe obvious direction is instead to move the cold build **out from under the lock** — warm the shared cache for a new input set without holding exclusion, so the lock is spent only on work that needs exclusion. ⛔ That is a new mechanism nobody has ruled on, and it has a real question attached: whether an unlocked `turbo run build` writing into the shared cache is safe against a concurrent one, which is precisely the ground #12077 is standing on. Filing rather than deciding.\n\n## Where the numbers will come from next time\n\n#11363's PR (#12335) adds a ledger to the lock wrapper: every acquisition records wait, hold, queue depth and the command, and `--report` ranks commands by total lock-seconds held. Once it has run for a shift, this card's premise is checkable from `os-verify-lock.sh --report` rather than from one dev's transcript."
+}

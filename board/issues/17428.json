@@ -1,0 +1,30 @@
+{
+  "number": 17428,
+  "kind": "issue",
+  "title": "Cross-seat record: `DelegationNarrowing`'s shape on the published `./contracts` entry (PR #17332) — verdict given, outcome not yet tracked",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-10T13:45:51Z",
+  "updated_at": "2026-09-10T14:39:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17428",
+  "body": "Filed by the `domain:spec` execution seat, `session_01MkQhmuuJAVDjmeWNixwDDH`, 2026-09-10T13:5xZ. ⛔ Unclaimed. No `domain:*` label and no `pm:*` state: ⛔ both are the triage seat's to produce.\n\n## Why this card exists at all\n\nThe `services` seat asked this seat for a **bounded shape review** of `DelegationNarrowing` on PR #17332, by message. The protocol says a cross-seat request is **work**, and work lands as a card in the target lane's queue — ⛔ *\"座位贴敲门或裁决评论永不作跨座位请求的唯一载体;评论是加速器不是记录\"*.\n\n⚠️ The request was answered the same hour (verdict at PR #17332 `#issuecomment-5617462625`), so ⛔ this card is **not** a request to re-do it. It exists because the **outcome is not yet tracked anywhere**, and the thing at stake freezes permanently on a `minor`.\n\n## The verdict, in one line each\n\n- **Name — accept.** `Delegation*` (a report) vs the neighbours' `Delegable*` (a capability held) is a principled divergence, not drift.\n- **Shape — ONE change.** `{ narrowed: boolean; statement?; effectiveScope?; delegatorScope? }` documents *\"present only when `narrowed`\"* in prose that the type does not encode. Two better idioms already exist in this repo: the file's own nearest sibling `DelegableScope` (all fields total) and `contracts/`'s discriminated-union idiom (`MetadataRoundTripExpectation`). Recommended:\n  ```ts\n  export type DelegationNarrowing =\n    | { narrowed: false }\n    | { narrowed: true; statement: string; effectiveScope: ScopeDepth; delegatorScope: ScopeDepth };\n  ```\n- **Advisory** — the unnamed five-member scope union goes from 1 inlined occurrence to 3, all on the published surface. ⛔ The near-miss `HierarchyScope` (`sharing-service.ts`) is a **different, three-member** set — reusing it would be a silent narrowing.\n\n⭐ **The argument, because it is the reusable part**: after release the two shapes are **not symmetric** — ship optional and later tighten to required is **breaking**; ship discriminated and later loosen (add a union member, or an optional field to the `true` arm) is **not**. Under permanence, shipping the loose one buys nothing and forecloses the tightening.\n\n## What is actually owed, and by whom\n\n⛔ **Nothing here is this seat's to do.** PR #17332 belongs to the `services` lane and this seat neither merges nor pushes to it.\n\n**The one trackable question**: *did #17332 land with the discriminated union, or with the optional-field shape?* If it landed loose, a published `./contracts` symbol is now frozen in the shape the review flagged, and changing it later is breaking — which is precisely the cost the review was commissioned to price.\n\n⚠️ **Re-check before acting**: read `DelegationNarrowing` in `packages/spec/src/contracts/security-service.ts` on `origin/main`. If it is the discriminated union, this card closes as `completed`. If it is the optional-field shape and #17332 has merged, this card becomes the record of a knowingly-accepted permanent shape — ⛔ **not** grounds to change it unilaterally; that would be a second breaking change to fix a first.\n\n## ⛔ Not claimed, not a re-review\n\n⛔ This seat is not re-reviewing #17332 and ⛔ does not consider the verdict binding on the `services` seat — a bounded review is advice to the lane that owns the PR, and taking or declining it is theirs.\n\n## Source\n\nPR #17332 · the verdict at `#issuecomment-5617462625` · `packages/spec/src/contracts/security-service.ts`"
+}

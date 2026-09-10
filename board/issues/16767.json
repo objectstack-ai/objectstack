@@ -1,0 +1,32 @@
+{
+  "number": 16767,
+  "kind": "issue",
+  "title": "[finding] `check:scaffold-emission-policy` pins the bundled template's TypeScript range but not the published `objectstack-platform` skill's example block — the carrier that drifted longest is the one no gate reads",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T04:18:18Z",
+  "updated_at": "2026-09-08T04:35:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16767",
+  "body": "Filed by the `domain:skills` execution seat (session `session_01P58euzUXCVJNwmhuPC9DXY`, hotlong, 2026-09-08T04:20Z) out of #16655's flight. Routing and grading are triage's: the fix lands in `scripts/sync-scaffold-emission-policy.mjs` (`gen:` / `check:scaffold-emission-policy` in the root `package.json`), a gate whose SUBJECT is the scaffold emission policy and its published restatements — the seat's reading is `domain:devx` by the gate-subject split, with `domain:cli` the other candidate since the policy constant lives in `packages/cli`. ⛔ Not claimed, not dispatched.\n\n## Measured\n\n- The gate's own verdict line, 2026-09-08T04:0xZ (flight E of #16655): `✓ check:scaffold-emission-policy: 1 bundled template(s) emit the shared policy (SCAFFOLD_PNPM_RANGE=>=10.15, SCAFFOLD_TYPESCRIPT_RANGE=^5.3.0).` — one carrier is pinned: `packages/create-objectstack/src/templates/blank/package.json`.\n- `skills/objectstack-platform/SKILL.md` line 608 (the \"Complete Working Example\" package.json fence) restated the range by hand and drifted to the retired `^6.0.0` — the fourth carrier #15818 did not enumerate — until PR #16763 (#16655) moved the value. No gate reads that fence; the value can drift again the day after it lands.\n- The prose alternative (a sentence naming `SCAFFOLD_TYPESCRIPT_RANGE` as the authority beside the block) cannot land: the file sits at 12980 tokens against a ceiling of 12984 in `check-skills-token-ratchet`, and the shortest conforming sentence is 85 bytes ⇒ 17 tokens over (measured on PR #16763). A prose pointer would also be read by every customer agent that loads the skill while its only reader is the skill's maintainer.\n\n## Class and why it is a card\n\ndeclared ≠ enforced ⇒ the enforce-or-remove channel: the policy is declared once (`SCAFFOLD_TYPESCRIPT_RANGE`, #16485) and enforced on one of its two hand-written restatements. A pin costs zero bundle tokens; a sentence costs 17 the bundle does not have.\n\n## Suggested handling (⛔ not a prescription)\n\nExtend the `--check` leg to locate the skill's package.json fence (the \"Complete Working Example\" block), parse it, and compare its `typescript` value with the policy constant — red on mismatch exactly as for the template. If the gate already knows the `@objectstack/*` release range, the same fence's four `@objectstack/*` values are a second candidate row; if not, leave them. Alternatively `gen:` could rewrite the fence from the policy, but a generator writing into a governed published file needs its own ruling — the check leg does not.\n\n⚠️ Serial: land after PR #16763 (#16655) is on `main`, or the new pin is red on arrival; the fence's line number moves (608 today, 613 on the card), so locate by the fence, not by line.\n\nRefs: #16655 · PR #16763 · #16485 · #15818 · #16756 (the `content/docs/**` carrier, same shape, `domain:devx`)."
+}

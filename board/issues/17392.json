@@ -1,0 +1,31 @@
+{
+  "number": 17392,
+  "kind": "issue",
+  "title": "[Decision] Fleet writes leave the free user accounts: a GitHub App identity for every seat's GitHub writes (reads stay on user tokens), and no new free accounts",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "needs-user-decision",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-10T10:58:51Z",
+  "updated_at": "2026-09-10T11:03:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17392",
+  "body": "Filed by the skills seat (session `session_01YKEjmbYNvYWJvWGSWx26zK`, GitHub `os-litant`) from the maintainer's discussion of #17374 in this seat's chat, 2026-09-10T10:3xZ–10:5xZ. The maintainer's readings, verbatim and untranslated: 「最近两个月已经封了三个github账户了。封号之后代码都在，最麻烦的是之前的issue都没了。」 · 「申诉过，10天没回复了；账号都是免费的」. ⛔ Not a triage grading; `needs-user-decision` because the choice moves credentials, cost and the fleet's identity model — the 人工地板.\n\n## 维护者速读\n\n**事情** —— 两个月封了三个账号,申诉十天无回复,而这些账号全是免费账号。GitHub 的条款只允许一个实体持有一个免费账号(机器账号要么占付费席位,要么不被允许);一批一个月内新建、同一基础设施、高频自动化写入的免费账号,正是它反滥用系统识别的「账号舰队」形态。封号时该账号写的 issue、PR、评论全部对他人不可见,分支与提交不受影响(#17374 F3 实测)。快照(#17390)能把每次损失封顶在几小时,但挡不住下一次封号。\n\n**选项** —— A:席位的所有 GitHub 写入改走一个 GitHub App(免费;内容归属 `xxx[bot]`;installation token 由仓库私钥签发,配额按 installation 计;席位账号只做读)。B:保留每席一账号,但改为付费 org 席位上的机器账号(合规,按席收费;仍是人类账号形态,封号风险降低但不归零)。C:维持现状,只写限流纪律(#17374 的 1–4 项)。\n\n**推荐 A**。理由按四轴在下方四棱块。代价:你要建一个 App、装到 org、把私钥放进会话环境的 secret;本席加一个铸 token 的脚本并把 `post-stamped.mjs` 与 REST 写通道切过去;draft 翻转与 auto-merge 这两个 GraphQL-only 动作要按 App 权限重验一遍;App 一个 installation 共用一池配额(比现在每席各一池少),但写入本就该少而慢。回滚:切回用户 token 只是改一个环境变量。\n\n**你要做的** —— 回一个字:A / B / C。\n\n## Governing text\n\n- `.claude/skills/pm-dispatch/SKILL.md` 座位贴协议 / AGENTS.md 「Every agent here shares one GitHub identity」 — the claim discipline solves card coordination on a shared identity, not quota or suspension; #17374 F2/F5 measured that.\n- #17374 F1/F3/F4 (the incident readings: a rate-limit signal binds to the identity; branches survive a suspension, records do not).\n- External, to be verified by the maintainer at the source: GitHub Terms of Service on account limits (one free account per person or legal entity; machine accounts) and GitHub Apps rate limits (per-installation, scaling with the installation's repositories and users). ⛔ This card does not assert the suspension cause; it asserts that the current shape matches the pattern those terms describe.\n\n## Options × real cost\n\n| | what | customer-visible / fleet-visible consequence |\n|---|---|---|\n| **A** | One GitHub App installed on the org; every seat WRITES (comments, labels, PR create, body edits) with an installation token minted from the App's private key; READS keep using the existing user tokens (MCP + REST) | Records are authored by `<app>[bot]` — a seat account's suspension destroys nothing; write quota stops being a human account's; no new free accounts ever. Costs: App setup (maintainer, once), a token-minting script (`scripts/pm/`), channel switch in `post-stamped.mjs` and the REST write path; GraphQL-only actions (draft flip, auto-merge) re-verified under App permissions; one shared installation pool instead of one pool per seat |\n| B | Paid org seats for machine users, one per seat, no new free accounts | ToS-compliant; still human-account shaped (suspension risk lower, not zero; records still die with the account); recurring cost per seat |\n| C | Status quo + the discipline text from #17374 (asks 1–4) | Nothing structural changes; the next suspension is a matter of time and destroys another author face |\n\n## 四维分析\n\n- **实际业务需求** —— 实测:三次封号、六张卡与四条 PR 已销毁、一张 p1 安全决策卡在内;申诉无回音。需求不是假设的。\n- **项目长远合理性** —— A 把「记录归属」从可封的人类账号挪到仓库自己的 App 身份,是结构性答案;B 是同一形态花钱降风险;C 是散文。长远权重 ≥50% 指向 A。\n- **防 AI 犯错** —— A 让「多个客户端压同一身份翻倍速率」这种形状在结构上消失(写只有一条通道),比一句「限流绑定身份」的纪律更难写错;C 依赖记忆,#17366 已实测记忆不是补救。\n- **创业阶段不扩散** —— A 不新增任何能力面,减少账号数;B 增加经常性支出;C 零成本但零效果。\n\nos-decision-facets\n- ① 项目长远合理性:A 结构性(App 身份归仓库),B 花钱降风险,C 不改形态。\n- ② 实际业务拉动:三次封号、记录销毁、申诉无回音 —— 实测拉动。\n- ③ 防 AI 犯错:A 写通道唯一,速率翻倍形状消失;C 靠记忆。\n- ④ 创业阶段不扩散:A 减账号数不增面;B 增支出。\n**推荐 A**;置信缺口:App installation token 能否执行 draft 翻转与 auto-merge 未测;org 一池配额是否够全队写(写入本就应少)。\n\n## 裁后执行(A)\n\nMaintainer: create the App (permissions: issues write, pull requests write, contents read, metadata), install on `objectstack-ai`, store the App id + private key as environment secrets for the seat sessions. Skills seat: `scripts/pm/app-token.mjs` (mint + cache an installation token, refuse when the key is absent), switch `post-stamped.mjs` and the documented REST write path to it, record the channel facts in `references/platform-readings.md`, keep MCP for reads; one card, one PR, governed only where `.claude/**` is touched. Then #17374's discipline text lands on top (the identity rule holds under any architecture).\n\n## Re-check\n\n```sh\n# the fleet identity in this container is a user, not an App (control: the login is a person-shaped account)\ncurl -sS -H \"Authorization: token $GH_TOKEN\" https://api.github.com/user | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"login\"], d[\"type\"])'   # expect: <login> User\n```\n\nRefs: #17374 (incident), #17390 (board snapshot — the loss cap, independent of this decision), #17366 (memory is not a remedy).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

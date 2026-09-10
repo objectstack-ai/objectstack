@@ -1,0 +1,32 @@
+{
+  "number": 15195,
+  "kind": "issue",
+  "title": "feat(objectql,plugin-auth): the Default Organization is load-bearing under `single`; an unstamped write is derived there and refused everywhere else (ADR-0131 D3/D9/D11)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:blocked",
+    "priority:p1",
+    "security",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T05:44:56Z",
+  "updated_at": "2026-09-04T06:12:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15195",
+  "body": "**⛔ BLOCKED — the v18 development line is not open.**\n\n`Blocked-by: #15193`\n\nPart of #15194 (ADR-0131 execution tree). ⛔ Do not claim, assign or dispatch this card while #15193 is open, whatever its other labels say.\n\n---\n\n**In one sentence.** In a single-tenant deployment the one organization must exist before anyone writes anything, because from now on every row has an owner; a write that arrives without an organization is refused in every posture, and only single-tenant can derive the owner.\n\n**Scope.** (1) `ensureDefaultOrganization` (`packages/plugins/plugin-auth/src/ensure-default-organization.ts`) becomes a boot invariant under `single`: failure is a boot error, not a best-effort warning; it runs **before application seed datasets load** (`SeedLoaderService.load`, `packages/metadata-protocol/src/seed-loader.ts`) and before the first authenticated request — today seeds land during `start()` and the organization is created by a later sign-up, so a first boot's business seeds (and every `sys_business_unit` seed, #14547) land NULL. (1b) The seed loader's exemption of `sys_` / `cloud_` / `ai_` seeds from organization stamping (`fallbackOrgId` never applied to platform seeds) is **withdrawn**: there are no platform-global seeds left; every seed row is stamped with the resolved organization or the load refuses (D9). `seed-tenancy-backfill.ts` becomes the attribution path for existing first-boot residue (C7). (2) `resolveSystemInsertOrganization` (`packages/objectql/src/tenancy/system-write-organization.ts`): `derived` only when exactly one organization exists (`single`), `refused` otherwise, in every posture; the `unclassified` branch and the `isPlatformObjectOutOfTenantAuditScope` gate are bypassed for objects carrying the column (C8 removes them outright). Message per ADR-0123 D4. (3) ⛔ No default to any other owner — the \"platform organization\" was considered and rejected in ADR-0131 §5.\n\n**Collision to read before starting**: #11973 (platform-admin re-anchor L3) re-points the same `ensure-default-organization` function and moves the same trigger. Its re-pointing half is absorbed here; its `last-admin-guard` re-pricing half is **not** and stays on that card. Read it first and say in the PR body which half you found already done.\n\n**Acceptance.** Fresh `single` boot: the Default Organization is present before the HTTP listener accepts, and an `isSystem` insert on a tenant-column object with no organization lands stamped with it. Fresh `isolated` / `group` boot: the same insert is **refused** with a message naming the missing organization — positive control: the identical insert carrying `tenantId` succeeds.\n\n⛔ **Stop and report** rather than proceeding: touching `applyTenantScope` (C8 owns it); editing any seeder (C3 owns them).\n\nRefs: ADR-0131 D3, D9, D11 · ADR-0093 · ADR-0123 D2–D4 · #8844 · #14547.\n\n"
+}

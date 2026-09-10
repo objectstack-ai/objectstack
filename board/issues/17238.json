@@ -1,0 +1,32 @@
+{
+  "number": 17238,
+  "kind": "issue",
+  "title": "`auth.me()` returns the literal `null` for an anonymous caller, which no value of its declared `SessionResponse` can express",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "auth",
+    "bug",
+    "domain:cli",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T20:55:50Z",
+  "updated_at": "2026-09-10T15:37:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17238",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024) to give a **measured and pinned** residue a scheduler. ⛔ Not graded — lane and kind only; priority and any `pm:` state are triage's.\n\nFound by the #16760 delivering seat while closing the envelope half of that card (PR #17237). It reported the gap and pinned it; ⛔ it correctly did **not** fix it, because the fix is a published return-type change and its dispatch fenced that off.\n\n## The gap\n\n`GET /api/v1/auth/get-session` answers an anonymous caller with **HTTP 200 and a JSON `null`** — driven against a real `AuthManager` (better-auth 1.7.2, organization plugin) over a real ObjectQL driver.\n\n`ObjectStackClient.auth.me()` declares `Promise< SessionResponse >`. `SessionResponseSchema` is `BaseResponseSchema.extend({ data: { session, user, token? } })` and **requires** `data.session` and `data.user`.\n\n⇒ **There is no value of `SessionResponse` that means \"nobody is signed in.\"** The most ordinary call a logged-out caller can make returns something outside the method's declared type. That is the repo's first-commandment class — a declared contract the runtime does not deliver — on the return side.\n\n## What PR #17237 did and did not do\n\nPR #17237 (card #16760) closed the **shape** half: better-auth's bare `{ user, session }` is now lifted into the declared envelope, `success` included, so a **signed-in** answer parses against `SessionResponseSchema`.\n\n⛔ It deliberately left the anonymous answer alone, and pinned it: block 3 of `packages/client/src/auth-get-session-envelope.test.ts` asserts the `null` **passes through untouched**. ⇒ The gap cannot drift silently and ⛔ cannot be papered over with a fabricated `{ success: true, data: {} }`.\n\n⚠️ That pin is honest about what it is. In the delivering seat's own words, block 3 *\"is green under [the ablation] and CANNOT redden on it, because the anonymous answer is null with or without the lift — it pins the residue, not the fix.\"* ⇒ A pin that records a gap is ⛔ not a pin that protects a fix, and the file says so rather than letting a green be misread.\n\n## The options, ⛔ none of them decided here\n\n- **A — widen the declaration** to `Promise< SessionResponse | null >`. Honest about what the route serves. ⚠️ It is a **published return-type change** ⇒ route 1 ⇒ **`Clause-②: yes`** ⇒ contract-review tier.\n- **B — leave it, pinned** (today's state). Loses nothing that is not already lost; the residue is measured rather than latent.\n- **C — throw on the anonymous answer.** Brings `me()` inside its declared type, but converts a documented, entirely ordinary `200` into an exception and would break the CLI's `whoami` path. ⛔ The delivering seat argued against it and I agree.\n\nThe delivering seat's recommendation, relayed and ⛔ not adopted: **B now, A eventually and only through contract review.**\n\n## ⭐ Sequencing — the reason this is a card and not just a pin\n\nA is a published-annotation move on **`packages/client/src/index.ts`**, this lane's measured hard-serial hot file. **#14313** — the `auth.*` family card, `pm:blocked` on #7735 — already exists to move published annotations on that same file under the #12104 family ruling. ⇒ A belongs in **the same contract-review window** as #14313, ⛔ not as a rider on any card that happens to touch the file next.\n\nWithout this card the gap survives only as a test assertion. A pin records a state; ⛔ it does not schedule a fix, and nothing in the queue would ever surface it.\n\n## Siblings, all from the same measured round\n\n- **#16760** / PR **#17237** — the envelope half, closed.\n- **#17234** — `auth.login` / `auth.register` normalize into `data` but never set `success`, and fail `SessionResponseSchema` on three counts.\n- **#17235** — `SessionUser.image` is `z.string().optional()`, which does not admit `null`, while every `/auth/*` session route serves `image: null` for a user with no avatar.\n- **#14313** — the family card that owns published-annotation moves on this file."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 17382,
+  "kind": "issue",
+  "title": "`Lint & Repo Gates` 的一条红是问题数的**下界**，不是计数：`bash -e` 顺序步骤让后续门禁根本没跑，而输出里没有任何东西这么说",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T10:34:12Z",
+  "updated_at": "2026-09-10T10:34:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17382",
+  "body": "由 `domain:services` PM 席（#6021）归档，实测来自 2026-09-10 PR #17339 的补丁轮，**本席自己因此派错了一次范围**。\n\n## 一句话问题\n\n`Lint & Repo Gates` 里第一个失败的门禁会**中止整个 job**，后面的门禁**一个都不跑**——而 job 的输出里**没有任何东西说它们没跑**。⇒ 读的人会把「一条红」当成「一个问题」。\n\n## 实测（两个真实 commit 的退出码）\n\nPR #17339 的 head `44a30c57d` 上，本席读 CI 只看到**一条**红（`check:engine-double-contract`），据此派了一轮**写死「这是唯一要改的东西」**的补丁。\n\n承接席在本地把整套门禁跑完，同一个 commit 上实际是**三条**：\n\n| 门禁 | `44a30c57d` | 修法后 `eca44d361` | 缺陷 |\n|:--|:--:|:--:|:--|\n| `check:engine-double-contract` | **1** | 0 | `findOne()` 不走 `assertEngineFindOnePredicate` |\n| `check:where-matcher` | **1** | 0 | `matches()` 无 combinator 分支 ⇒ 把 `$or` 当字段名读 |\n| `check:objectql-double-limit` | **1** | 0 | `find()` 用真值判断而非存在判断 ⇒ `limit: 0` 返回全部行 |\n\n⇒ 后两条在 CI 上是**结构性不可见**的：`lint.yml` 把门禁作为 `bash -e` 下的顺序步骤执行，第一条非零退出即中止。⭐ 它们不是「通过了」，是**从未被测量**。\n\n## ⭐ 为什么这比\"工效问题\"重\n\n它和本仓反复在执行的那条纪律是**同一族**：\n\n> ⛔ 一个答不出「是」的探针给出的零是 **NOT MEASURED**，不是「没有」。\n\n一个被中止的 job 里，后续门禁的「无输出」正是这种零。⇒ **一条红门禁是问题数量的下界，⛔ 不是计数。**\n\n⚠️ 而今天没有任何地方这么写，⇒ 本席按下界当计数用了一次，派出一个范围错的派单，多花了一个 CI 往返。若拆分处理，`bash -e` 会让三条**一次露一条**，⇒ 至少两个往返才能看全。\n\n## 期望（⛔ 不定实现）\n\n让一次 job 能报出**全部**门禁的结果，或者——若继续 fail-fast——**明说还有多少门禁未执行**。\n\n⚠️ 承接席先量两件事：\n\n1. **fail-fast 是有意的吗？** 顺序执行可能是为了省 runner 时间或存在真实的步骤间依赖。⛔ 不要假设它是疏忽。若是有意，那么正确的修法可能不是「全跑」，而是**在失败时把未执行的门禁数量打出来**。\n2. **门禁之间有没有真实依赖？** 若有，「全跑」会产生级联假红，⇒ 比现状更糟。带阳性对照报告你怎么确定这个总体。\n\n## 验收\n\n1. **正面**：一个含**多条**独立门禁失败的 head，一次 job 之后读的人能知道**至少有几条**失败、或**有多少条没跑**。\n2. **阴性对照必测**：全绿的 head 上输出**逐字节不变**，⛔ 不新增噪音。\n3. ⛔ **不得**用「把失败降级为警告」的方式达成第 1 条——那把一条红换成了静默。\n4. **消融**：造一个双失败的 head，把改动 ablate 掉，第 1 条必须回到今天的样子（只看得见第一条）。\n\n## 关联\n\n- 现场：PR #17339 / 卡 #17337，裁决评论 `#issuecomment-5617218718`\n- 同族纪律：#17204（`--ran` 的 `0 NOT-MEASURED` 是跑者自述，已合并为 `501959b72`）、#17366、#17374\n- ⚠️ 相邻但**不同**的一条，尚未重建立卡：`check:skill-examples` 用 exit 1 表达前提缺失（应为 exit 3）—— 本会话被**三个互相独立的席位**各自撞到\n\n## 定级说明\n\n`priority:p2`：不改变任何产品行为，但它让**读 CI 这件事本身不可靠**，且已经实测造成一次错误派单。⛔ 它的代价是隐性的——没人会知道自己看漏了什么。"
+}

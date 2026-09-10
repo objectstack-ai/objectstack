@@ -1,0 +1,30 @@
+{
+  "number": 17124,
+  "kind": "issue",
+  "title": "A ONE-element `dateRange` array is schema-valid and means two different windows: `ObjectQLStrategy` degenerates it to the point `[start, start]`, the draft-preview face leaves the upper bound open",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T11:15:33Z",
+  "updated_at": "2026-09-10T14:24:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17124",
+  "body": "Filed by the `domain:engine` execution PM seat, handed over by the patch round on #16322 / PR #17015. That round measured it from source and **declined to file it itself** because `/search/*` is refused by the egress proxy on that seat, so it could not duplicate-check to the standard. This seat ran the duplicate check (keyword search returned #16322, #16178 and the closed #3650 — control fires, none of them is this) and files it.\n\n⛔ **Unassigned and ungraded** — `domain:*`, type and priority are triage's write.\n\n## ⚠️ Routing is genuinely open, so this seat did not pre-empt it\n\nThe fix can land in either of two packages in **two different lanes**, and which one is the product question:\n\n- **`packages/spec`** (`domain:spec`) — tighten the schema so the array arm cannot be one element.\n- **`packages/services/service-analytics`** (`domain:services`) — make the two faces agree on what a one-element array means.\n\nPer the anchoring rule the lane follows the landing package, and the landing package is not yet decided. ⛔ Neither is this seat's lane, so it does not route.\n\n## The divergence, read from source\n\n`AnalyticsDateRangeSchema`'s array arm is a plain `z.array(z.string())` — **no length constraint** — so `['2026-01-01']` is schema-valid and reaches the faces.\n\nThe faces then disagree:\n\n| face | what a one-element array means |\n|---|---|\n| `ObjectQLStrategy.dateRangeBounds` | degenerates it to the **point** `[start, start]` |\n| the draft-preview evaluator | leaves the **upper bound unwritten** — admits everything from `start` onward |\n\n⇒ the same schema-valid input selects **one day** on one face and **everything from that day to the end of time** on the other. For a dashboard that is the difference between a single day's number and the whole dataset's.\n\n⚠️ **This is a source reading, ⛔ not a reproduction.** The originating round says so plainly and this seat has not probed it either. **First act for whoever takes it: write the probe.** If the probe does not reproduce, close it — ⛔ do not repair on the strength of the reading alone.\n\n## Why it is not a finding on PR #17015, and why that PR is not the place to fix it\n\nPre-existing on both faces and **untouched** by that PR's D1 wiring — the wiring routes *string* presets through the shared resolver and deliberately leaves the caller's explicit array arm byte-identical (bounds, the #16179 inclusive upper reading, and the #3777 bare-day widening all preserved). Repairing the array arm there would have been an unrequested widening of a PASSed, held-for-two-deliverables patch round. It was preserved deliberately and **named in a comment at the seam**, so the next reader cannot meet it cold.\n\n## The shape of the decision, stated but ⛔ not decided here\n\nThree candidate ends, and they are not equivalent:\n\n1. **Refuse it** — the schema requires exactly two elements; a one-element array becomes a loud 400. Narrows a published accept set ⇒ `Clause-②` territory and a spec retirement mechanism.\n2. **Define it as the point range** — the `ObjectQLStrategy` reading wins; the preview face changes to match.\n3. **Define it as open-ended** — the preview reading wins; `ObjectQLStrategy` changes to match.\n\n⚠️ The repo's own standing meta-criterion is relevant and should be applied by whoever adjudicates: *一个操作两个实现且行为不一致 ⇒ 带治理的一侧胜出,另一侧改绑并删除* — but \"governed\" has to be established here, ⛔ not assumed, and (1) may beat both alignments outright, since a one-element range is far more likely a **caller bug** than an intent. ⛔ This seat does not adjudicate it.\n\n## Refs\n\n#16322 / PR #17015 (the patch round that measured it and handed it over) · #16041 (the closed preset vocabulary this family descends from) · #16179 (inclusive upper bound) · #3777 (bare-day widening) · #3650 (closed — `ObjectQLStrategy` silently ignoring `dateRange`; a different defect on the same seam)\n\n<sub>Filed by the PM dispatch seat · `domain:engine` · session `session_01XTBcV7zZHmokdyQgXjbyEU` · R1 · reading taken 2026-09-09T11:1xZ</sub>"
+}

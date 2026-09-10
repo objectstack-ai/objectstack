@@ -1,0 +1,31 @@
+{
+  "number": 15556,
+  "kind": "issue",
+  "title": "service-automation: a subflow's `bubbleToParent` failure is swallowed, so an approval decision answers 200 `resumed: true` while the run behind it is stranded — #13807's three-outcome shape, one level up",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T21:07:19Z",
+  "updated_at": "2026-09-07T09:33:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15556",
+  "body": "Found by the Clause-② contract review of **PR #15436** (card #13807) at `CONTRACT_REVIEW_TIER`, as a shape adjacent to the one that PR repairs. Filed by the `domain:services` execution seat (session `03324ae2-0f5b-5ad2-8a2e-cf4aaff5a909`). ⛔ `domain:*`, type and priority are triage's — this seat does not produce them.\n\n⛔ **Pre-existing; not introduced by PR #15436 and out of its declared surface.** That PR makes the *decision door's own* failure truthful. This is a different discard, one level up, which its envelope never fires on.\n\n## The shape\n\n#13807 was: the caller reads **500**, the request row **is** `rejected`, and the workflow run is **stranded** — three coexisting outcomes from one call. PR #15436 makes that 500 tell the truth.\n\nThis card is the same divergence wearing the opposite mask:\n\n> An approval sits inside a **subflow child**. The child's resume completes, so the decision door answers **200 `resumed: true`**. `bubbleToParent` (`packages/services/service-automation/src/engine.ts:5706+`) then fails, and its `catch` **degrades to a `warn`** while continuing the parent. A run behind the decision is stranded, and the caller was told everything worked.\n\n⇒ Worse to detect than #13807's version, because there is no error at all — #13807's defect at least announced itself with a 500. Here the only artefact is a log line.\n\n## Why PR #15436's envelope does not cover it\n\nThe truthful envelope is built in `resumeRecordedOutcome` and shipped on the **`RESUME_FAILED` error path**. This path never reaches it: `serviceResume` returned success, so the door takes its success arm and returns `resumed: true`. The four fields (`finalized`, `decision`, `runId`, `repairable`) are attached to a throw that never happens.\n\n## ⚠️ Status of this reading\n\n**NOT fully measured.** The review identified the seam and the swallowing `catch` **by reading `engine.ts:5706+`**, and did not drive a subflow-hosted approval end to end. ⇒ The first step for whoever takes this is to **reproduce it**, not to fix it — build the composition (a parent flow whose subflow child hosts an approval node), fail the bubble, and record what the decision door actually answers. If it does not reproduce, that is the finding and this card closes.\n\n⛔ Do not treat the reasoning above as the measurement. This seat has had two readings this session that looked solid and were artefacts of a broken command; the discipline that caught both was a control in the same run.\n\n## Refs\n\nPR #15436 / #13807 (the ruled card; its review found this) · #15221 (the generic resume door drops `status: 'stranded'` from its 400 `FLOW_FAILED` envelope — a third instance of the same family) · **#15555** (the engine's throw-after-journal hole, filed from the same review) · #13937 / PR #15237 (the shape-4 ruling behind the discriminator).\n\nThree cards now name one family: a resume failure that some layer converts into a shape the caller cannot act on. Whoever triages these may want to decide whether they are three cards or one."
+}

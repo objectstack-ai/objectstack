@@ -1,0 +1,31 @@
+{
+  "number": 16236,
+  "kind": "issue",
+  "title": "A `min`/`max` over a `formula` field cannot be typed: `sourceFieldMeta` does not carry `FieldSchema.returnType`, the key whose own JSDoc names dataset measures as its consumer",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T06:59:34Z",
+  "updated_at": "2026-09-08T05:45:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16236",
+  "body": "Filed unassigned by the `os-dev` seat working #16098 (session `https://claude.ai/code/session_01XpTx2tbq3pZRYAdoGt6E6Y`). Not graded, no `domain:*` — routing and priority are the triage seat's. Established while giving every `FieldType` member an enumerated verdict for `measureResultType`; `formula` is the one member whose answer EXISTS in the metadata and is nonetheless unreachable.\n\n## What was measured\n\n`FieldSchema` declares a formula field's result type, and its JSDoc names this exact consumer first (`packages/spec/src/data/field.zod.ts`):\n\n```ts\n  /**\n   * The value type a `formula` field computes, declared at authoring (the way\n   * Salesforce/Airtable carry a formula's result type). Lets consumers — dataset\n   * measures, display formatting, validation — read a declared type instead of\n   * re-parsing the expression. Authoring stamps it from the inferred CEL type;\n   * absent when the type can't be proven (an ambiguous/`dyn` expression).\n   */\n  returnType: z.enum(['number', 'text', 'boolean', 'date']).optional()\n```\n\nThe dataset-measure side cannot read it. The only channel from the host to `AnalyticsService` for a field's declared metadata is one callback, and its return shape has three members — none of them `returnType` (`packages/services/service-analytics/src/analytics-service.ts`):\n\n```ts\n  sourceFieldMeta?: (object: string, field: string) => { type?: string; defaultCurrency?: string; max?: number } | undefined;\n```\n\nSo `measureResultType(aggregate, sourceFieldType)` — which decides `AnalyticsResult.fields[].type` for a measure column — receives only the string `'formula'` and can say nothing further. Consequence today: a `min`/`max` over a formula field is described as `type: \"number\"` whatever the formula computes, including a formula whose `returnType` is the declared `'text'` or `'date'`.\n\nLive control that this is a reachable pair, not a hypothetical: nothing between the author and the driver refuses it. `DatasetMeasureSchema` declares `aggregate` and `field` as independent keys, `dataset-compiler.aggregateToMetricType` checks only vocabulary membership (`UNSUPPORTED_AGGREGATES` is empty), the three `ensureCube` source-field gates ask only whether the column exists, and `isIncoherentAggregate` (`spec/data/aggregation-policy.ts`) returns true for exactly one pair — `percent` with `sum`/`count_distinct`.\n\n## Why #16098 did not fix it\n\nTwo reasons, both structural rather than a scope preference:\n\n1. **Carrying `returnType` is a change to the host callback contract and its call site**, not a row in `measureResultType`'s table. The call site is in `analytics-service.ts`, which was fenced to a different open PR for that card.\n2. **`returnType` is OPTIONAL** — \"absent when the type can't be proven (an ambiguous/`dyn` expression)\" — so even with the plumbing the rule answers for some formula fields and not others. That tiering is a design question worth stating rather than implying: is an unproven formula's measure column left as `number`, or is the absence itself the answer?\n\nSo #16098 records `formula` as its one `not-on-this-input` verdict, pinned by the enum walk, and files this.\n\n## What a fix would need\n\n- A decision on the callback's shape: widen `sourceFieldMeta`'s return with `returnType`, or hand `measureResultType` the field definition instead of three extracted keys.\n- The mapping from the four `returnType` members to the `DimensionType` wire vocabulary (`string` / `number` / `boolean` / `time` / `geo`). Note `text` maps to `string` and `date` maps to `time` — the wire vocabulary is not `FieldType`, so this is a translation, not a pass-through.\n- The absent-`returnType` tier, which is the same \"cannot answer, do not block\" shape every other reader of `sourceFieldMeta` already uses.\n\nRelated: #16098 (the enumerated verdict per `FieldType`, where `formula` is left uncorrected and this is named as the reason) · #16101 (the temporal half, which introduced `measureResultType`) · #16099 (`needs-user-decision`: no layer refuses an incoherent aggregate / field-type pair).\n"
+}

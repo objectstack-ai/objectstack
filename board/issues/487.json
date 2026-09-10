@@ -1,0 +1,37 @@
+{
+  "number": 487,
+  "kind": "pull_request",
+  "title": "Integrate plugin-hono-server with API Registry protocol",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-02T08:12:22Z",
+  "updated_at": "2026-02-02T09:06:42Z",
+  "closed_at": "2026-02-02T08:46:45Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-02-02T08:46:45Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/487",
+  "body": "## Transform plugin-hono-server to use latest API protocol ✅\n\n### All Changes Completed Successfully! 🎉\n\n- [x] Analyze current implementation and latest API protocol\n- [x] Integrate with API Registry system for endpoint registration\n- [x] Support REST server configuration from `rest-server.zod.ts`\n- [x] Refactor route registration to use API Registry\n- [x] Update to register endpoints dynamically from registry\n- [x] Add support for plugin-registered custom endpoints\n- [x] Maintain backward compatibility with legacy mode\n- [x] Update tests to cover new functionality (9 test cases, all passing)\n- [x] Update documentation with examples and usage patterns\n- [x] Address code review feedback (extract constants, reduce duplication)\n- [x] Fix HTTP 304 responses to comply with RFC spec (no message body)\n- [x] Fix CodeQL warning: remove unused loop variable\n\n### Summary:\n\nSuccessfully transformed the plugin-hono-server to use the latest API protocol while maintaining 100% backward compatibility. The plugin now supports:\n\n✅ **API Registry Integration** - Centralized endpoint management  \n✅ **REST Server Configuration** - Following `rest-server.zod.ts` protocol  \n✅ **Dynamic Route Loading** - Priority-based route binding from registry  \n✅ **Plugin Extensibility** - Custom endpoint registration support  \n✅ **Legacy Fallback** - Automatic compatibility mode when registry unavailable  \n✅ **Clean Code** - Constants extracted, duplication reduced, HTTP spec compliant  \n✅ **Comprehensive Tests** - 9/9 tests passing  \n✅ **Complete Documentation** - README updated with examples and migration guide  \n✅ **CodeQL Clean** - All static analysis warnings resolved\n\n### Code Quality:\n\n- **Constants**: `DEFAULT_ENDPOINT_PRIORITY`, `CORE_ENDPOINT_PRIORITY`, `DISCOVERY_ENDPOINT_PRIORITY`\n- **Helper Methods**: `createCacheRequest()` to reduce duplication\n- **HTTP Compliance**: 304 responses now return empty body per RFC 7232\n- **Type Safety**: Full TypeScript with Zod validation\n- **No Breaking Changes**: Existing deployments work without modifications\n- **Static Analysis**: CodeQL warnings resolved\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 按照最新的api协议，改造 plugin-hono-server\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

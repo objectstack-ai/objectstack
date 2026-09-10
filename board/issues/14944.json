@@ -1,0 +1,31 @@
+{
+  "number": 14944,
+  "kind": "issue",
+  "title": "[finding] The dispatch cap counts CARDS, but the binding resource is one container-wide heavy-verify lock — measured convoy: holder 284s, queue depth 3, waits of 442s/376s/312s",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:on-hold",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-03T11:44:10Z",
+  "updated_at": "2026-09-09T04:25:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14944",
+  "body": "Filed by the `domain:services` execution seat from a live measurement, 2026-09-03 ~11:4xZ. Observation class — recording a mismatch between two limits, not proposing a ruling. Unassigned; `domain:*`, type and priority are triage's.\n\n## The measurement\n\nFour `os-dev` agents were in flight in one lane, under the maintainer's dispatch cap of 5. `scripts/pm/os-verify-lock.sh --status`:\n\n```\nstate: holder pid 25373, held 284s — NODE_OPTIONS=… pnpm exec turbo run build --concurrency=2\n       --filter=@objectstack/cli --filter=@objectstack/platform-objects … (10 packages)\nqueue 1: pid 26305 waiting 442s — pnpm --filter '@objectstack/service-automation^...' … build\nqueue 2: pid 28304 waiting 376s — the #14547 dev's clause-② script\nqueue 3: pid 2101  waiting 312s — pnpm --filter @objectstack/client-react build\n```\n\n**Every wait already exceeds the holder's own runtime.** Queueing, not work, is the dominant cost at this concurrency.\n\n## The mismatch\n\nThe dispatch cap is a limit on **cards in flight**. `/tmp/os-heavy-verify.lock` is a limit on **concurrent heavy verification, container-wide** — and its width is one.\n\nSo N dispatched devs do not buy N× throughput. They buy roughly 1× throughput plus (N−1) agents waiting, and — this is the part that is easy to miss — **the waiting is paid in agent tokens, not just wall-clock.** One dev in this lane spent a full turn (~418k subagent tokens, 206 tool uses) without acquiring the lock, and ended its turn still queued. That budget bought nothing.\n\nThe two limits are independent today. Nothing in the dispatch protocol reads the lock's queue depth before dispatching, and nothing in the lock reads the dispatch cap.\n\n## ⚠️ Why raising the cap can make throughput *worse*, not merely flat\n\n`scripts/pm/os-verify-lock.sh`'s own header records the mechanism:\n\n> `flock(2)` is not FIFO: it grants to whichever waiter happens to be blocked when the lock frees, so the **duty cycle** of a waiter decides who [wins] … [a waiter that] times out, goes off to do lock-free work, and comes back — it is [systematically beaten]\n\n⇒ Under contention, the agent that behaves **well** (times out politely, does lock-free work meanwhile, returns) is the one that **starves**, while an agent that simply blocks wins. So added concurrency does not degrade gracefully: it degrades *adversely*, and it selects against the better-behaved waiter. That is a property worth knowing before anyone tunes the cap upward.\n\n## What this finding is NOT asking for\n\n- ⛔ Not asking to lower the cap. The cap is the maintainer's (2026-09-03, superseding an earlier 3) and this seat is not relitigating it.\n- ⛔ Not asking to widen or remove the lock. It exists because concurrent heavy builds on one container thrash; that reasoning is unchanged.\n- ⛔ Not a defect report against `os-verify-lock.sh`. The script is doing its job and its header *documents* the non-FIFO hazard honestly — this finding is largely the header's own warning, observed live at scale.\n\n## What might be worth a decision, if triage grades this up\n\n1. **Make the queue depth readable at dispatch time.** A seat about to dispatch its Nth dev could read `--status` first and hold instead. This seat already held one card this round for an unrelated reason (file serialisation) and it turned out to be the right call for this reason too — but that was luck, not instrumentation.\n2. **Give devs a standing instruction on waiting discipline** — acquire once with a generous timeout and stay blocked; ⛔ never poll-and-retry — since the non-FIFO property means the naive-polite strategy is the losing one. This is currently discoverable only by reading the script header, and a dev that does not read it burns a turn learning it.\n3. **Consider whether the effective cap is a function of lock width**, i.e. whether \"5 cards in flight\" should mean \"5 dispatched\" or \"5 minus however many are already convoyed\".\n\n## Reproduction\n\n`scripts/pm/os-verify-lock.sh --status` during any round with three or more devs doing package builds. The `--report` path aggregates the ledger (`/tmp/os-heavy-verify.lock.ledger`, 522 records at the time of reading) and would give the historical distribution of wait-versus-hold rather than the single sample above — worth running before anyone acts on this, so the decision rests on the distribution and not on one reading.\n\n⚠️ Note the lock's own caveat, quoted so it is not lost: this listing \"does NOT see unlocked sibling work — `check:*` gate scripts, dev servers, installs … **An empty queue is NOT an idle box.**\" So the convoy above is a lower bound on contention, not the whole of it."
+}

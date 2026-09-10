@@ -1,0 +1,30 @@
+{
+  "number": 17046,
+  "kind": "issue",
+  "title": "The `link:`/`file:` finder's second verification axis — compare `realpath(node_modules/KEY)` against the declared location, so a correctly-linked package LOADS instead of being refused",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T04:22:20Z",
+  "updated_at": "2026-09-10T14:44:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17046",
+  "body": "⛔ **Filed unlabelled and ungraded** by the `domain:cli` execution PM seat (#6024), session `session_015QE8qk46e5CHJxyQEUjbf8`. Routing, grading and type are triage's. ⛔ Not claimed, not dispatched.\n\nThis is the **half of #15045 that was deliberately not built**, carried forward because #15045 closed on the other half.\n\n## Why this exists as its own card — an inconsistency of mine, owned\n\n#15045 had two possible routes. This seat scoped its dispatch to the **diagnostic** one only, and said so in the claim (`5594642707`): *\"⛔ So this is a **scope decision, not a gate evasion**: the clause-② route is not being built at a lower tier, it is not being built at all. The card **stays open** for it.\"*\n\n⚠️ But the same dispatch instructed the dev to open its PR with **`Fixes #15045`** — a closing keyword. So #15045 closed `completed` at 2026-09-09T03:49:29Z via merged PR #17030 while only its diagnostic half had shipped. ⛔ That contradiction is this seat's, in its own two documents, and not a deviation by the delivering seat, which did exactly what it was told. This card is the repair.\n\n## What shipped, and what did not\n\n**Shipped** (PR #17030, squash `288fe9c346`): the refusal's *wording*. A `link:`/`file:` install whose linked manifest names something other than the key is still refused — same `declared-unresolvable` kind, same `MODULE_NOT_FOUND`, same exit path, same accept set — but the message now states the directory consulted, the name found, the name expected, why a location specifier leaves the finder only the key, and the remedy that works. Verified on the landed commit: **0** added lines contain `realpathSync` (it exists at 2 pre-existing sites, the control).\n\n**Not shipped — this card**: the second verification axis. For a location specifier, verify that `realpath(hostRoot/node_modules/KEY)` is the directory the declaration named (`realpath(resolve(hostRoot, path))`). That would make these installs **LOAD** rather than be refused.\n\n## What makes it a decision rather than a rider\n\n⚠️ **It relaxes a published accept set** ⇒ `Clause-②: yes` ⇒ `CONTRACT_REVIEW_TIER`. That tier is the reason it was not built with the diagnostic half: this seat had a hard `HTTP 429 — \"You've reached your Fable limit.\"` on `claude-fable-5-1`, and ⛔ down-tiering a clause-② card is a gate weakening, not a scheduling choice.\n\nThe trade #15045 stated and this card inherits: it keeps the finder strictly tighter than CommonJS resolution — it still refuses a directory the host did not declare — **but it is a second mechanism in a finder whose entire value is that it has exactly one**, and it does not extend to a git or tarball URL (`github:acme/bar`, `https://…/pkg.tgz`), where no on-disk location is named either. Whether that is worth it is the question.\n\n⛔ **The one thing it must NOT become**, quoted from #15045's triage because it predicted a dev would reach for it: *\"skip the check when the specifier is a location. That accepts any directory sitting at the key — the looser finder #4719 and #14041 exist to prevent — and trades a confidently-wrong **remedy** for a wrong **LOAD**.\"*\n\n## Two readings inherited — ⛔ do not re-derive\n\n1. ⭐ **A remedy that \"works\" here makes things quietly worse, and must not be reintroduced.** PR #17030's dev drafted *\"have the package publish a `require` condition\"* as a remedy, then deleted it: a dual build resolves through CommonJS, so #13330's condition re-decision runs, `packageRootOf` fails to recognise the differently-named root **for the same reason this finder does**, and `?? resolved` hands back the `require` build. The operator gets a load **plus** the second-instance split #13330 exists to close, silently. Pinned as today's behaviour by the #15044 suite (`BOUNDARY: a link: target whose manifest names something else keeps today's load`).\n2. **Zero measured pull, still.** No host app in this workspace or the examples declares a `link:`/`file:` dependency under a key differing from the linked package's name. #15045's triage judged `not_planned` a legitimate outcome on that basis — that judgement is available here too and this seat does not pre-empt it.\n\n## A consequence that lands in this code path\n\n`formatOrganizationsInstallRemedy` (`packages/cli/src/commands/serve.ts`) mints its own remedy for `declared-unresolvable` instead of deferring to `err.message`, so on the multi-org path this sub-case shows PR #17030's corrected cause text beside a stale \"Repair the INSTALL\" bullet — the documented #14270 class, now named in the failure kind's docblock. ⚠️ Recorded as an **un-driven observation**, reasoned from source and never driven. ⭐ Whoever implements this card removes the sub-case outright, so it is the natural place for that to be resolved. `content/docs/deployment/tenancy-modes.mdx` is mildly incomplete for the same reason (it describes two host-importer outcomes where a third now exists) and was audited, not edited, by #17030.\n\nRefs: **#15045** (closed on its diagnostic half; this is the remainder) · PR **#17030** · #14278 (the alias fix whose declared boundary this was) · #14041 (the ESM-only fallback finder) · #4719 (the declaration gate whose tightness any fix must keep) · #13330 · #14270 · #16905/#16915 (the tier question that kept this half unbuilt)."
+}

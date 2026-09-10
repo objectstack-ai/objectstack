@@ -1,0 +1,37 @@
+{
+  "number": 490,
+  "kind": "pull_request",
+  "title": "Add microkernel security enforcement layer: signatures, config validation, permissions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-02T09:24:22Z",
+  "updated_at": "2026-02-02T10:13:39Z",
+  "closed_at": "2026-02-02T10:12:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-02T10:12:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/490",
+  "body": "## Problem\n\nObjectStack kernel has comprehensive protocol schemas (109 Zod definitions) but lacks runtime enforcement. Plugin signature verification and config validation were TODO stubs. Permission enforcement existed only as capability schemas without runtime checks.\n\n## Assessment\n\n**MICROKERNEL_ASSESSMENT.md** (Chinese) documents gap analysis:\n- ✅ Strong foundation: protocol-first design, 3-layer architecture, topological dependency resolution\n- ❌ Missing: signature verification, config validation enforcement, permission checks, sandboxing\n\n## Implementation\n\n### Security Module (`packages/core/src/security/`)\n\n**PluginSignatureVerifier**\n- RSA-SHA256 and ECDSA-SHA256 verification with trusted publisher registry\n- Strict mode (production) vs development mode (self-signed allowed)\n- Cross-platform crypto (Node.js native, browser placeholder)\n\n**PluginConfigValidator**\n- Runtime Zod schema validation with detailed error paths\n- Partial config support, default extraction, non-throwing checks\n\n**PluginPermissionEnforcer**\n- Capability-based access control (service/hook/file/network)\n- `SecurePluginContext` wrapper for transparent runtime enforcement\n- Audit logging for all denials\n\n### Usage\n\n```typescript\nimport {\n  PluginSignatureVerifier,\n  PluginConfigValidator,\n  PluginPermissionEnforcer,\n  SecurePluginContext\n} from '@objectstack/core/security';\n\n// 1. Verify cryptographic signature\nawait verifier.verifyPluginSignature(plugin);\n\n// 2. Validate config against Zod schema\nconst config = validator.validatePluginConfig(plugin, userConfig);\n\n// 3. Enforce capability-based permissions\nconst enforcer = new PluginPermissionEnforcer(logger);\nenforcer.registerPluginPermissions(plugin.name, capabilities);\nconst secureCtx = new SecurePluginContext(plugin.name, enforcer, baseCtx);\n\nawait plugin.init(secureCtx); // Transparent permission checks\n```\n\n## Defense in Depth\n\n```\nSignature Verification (trust) → Capability Declaration (intent) → \nRuntime Enforcement (control) → Sandboxing (future: isolation)\n```\n\n## Files\n\n- **Added**: 3 security components + 2 test files + 2 docs (MICROKERNEL_ASSESSMENT.md, PLUGIN_SECURITY_GUIDE.md)\n- **Modified**: plugin-loader.ts (TODO→implementation notes), core/index.ts (export security)\n- **Tests**: 17 suites covering validation, permissions, signatures\n\n## Notes\n\n- Zero breaking changes - all features are opt-in\n- Algorithm handling: ECDSA requires lowercase 'sha256', RSA uses 'RSA-SHA256'\n- Crypto module loaded at module-level for bundler compatibility\n- Future work: semver range matching, hot reload, Worker thread sandboxing\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 对照最新版的spec协议，扫描目前现有的内核代码评估是否能够满足微内核需求，具体的改进方案。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

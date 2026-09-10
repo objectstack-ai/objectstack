@@ -1,0 +1,30 @@
+{
+  "number": 15293,
+  "kind": "issue",
+  "title": "finding(spec): the option-B readers disagree with `@objectstack/core` about whether a non-array `packages` is a refusal",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T08:57:35Z",
+  "updated_at": "2026-09-04T08:57:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15293",
+  "body": "Related #14122 · surfaced by the isolated contract review of #15282 (PR comment 5538108541), which flagged it as a **program-level** split rather than that card's fault. Filed unassigned.\n\n## The split\n\nTwo guards, same input, opposite answers:\n\n| Reader | Guard | `packages: {}` |\n|:--|:--|:--|\n| `@objectstack/core`'s artifact-collection resolver (#15005 / PR #15261) | `if (!Array.isArray(artifact.packages)) return artifact;` | **not** a refusal — falls through to the top level |\n| `@objectstack/plugin-dev` `dev-i18n.ts:108` (#15232 / PR #15282) | `packages === undefined \\|\\| packages === null` → return, else call the resolver | **refusal** (ADR-0112 envelope out of `resolveArtifactPackageOrder`) |\n| `@objectstack/plugin-security` `declaredPermissionSets` (#15007 / PR #15226) | same as plugin-dev | **refusal** |\n\nSo a stack carrying `packages: {}` boots one way through the runtime reader and is refused through the other two. Nothing today emits that shape, which is exactly why it is worth pinning before something does: the program's whole thesis is that readers must not disagree about what an artifact CONTAINS.\n\n## Which is right is a `packages/spec` question, not a reader's\n\nBoth guards are defensible in isolation:\n\n- **Refuse** is the reader cards' stated rule — `resolveArtifactPackageOrder` is the one traversal *and* the one gate, so a reader that answers questions about an artifact the loader would refuse is answering about nothing. Under this reading `!Array.isArray` silently accepts a malformed artifact.\n- **Fall through** keeps the resolver total: it returns the caller's own object by identity for anything that is not a package list, and the refusal happens at the load boundary that owns it. Under this reading the other two readers refuse in a place with no diagnostic budget.\n\nThe tie-break is whether a non-array `packages` is *malformed* or *absent*, and that belongs beside `AssembledPackageBodySchema` / `ArtifactPackageSchema`, not in three readers.\n\n## Acceptance\n\n- One answer, stated once, in `packages/spec` or in `resolveArtifactPackageOrder`'s own documented contract.\n- All three readers above spell the guard the same way afterwards, or the divergence is recorded as deliberate **with the reason** at each site.\n- A test pinning `packages: {}` (and `packages: 0`, `packages: 'x'`) in whichever direction is chosen.\n\n⚠️ Sequencing: this is cheapest **after** the reader half lands, as part of the convergence pass — three private walks collapse then anyway, and re-spelling a guard twice is worse than once. Do not fold it into any open reader card.\n\nSibling context: #15005, #15006, #15007, #15229, #15232. Emitter half: #14512."
+}

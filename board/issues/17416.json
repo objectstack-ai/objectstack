@@ -1,0 +1,30 @@
+{
+  "number": 17416,
+  "kind": "issue",
+  "title": "GET /api/v1/packages/:id silently ignores ?version= — the only serving surface never reads it, and the handler that did was deleted with the REST twin",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T13:02:56Z",
+  "updated_at": "2026-09-10T14:48:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17416",
+  "body": "Found while implementing #12034 (SDK-side binding of `packages.get`); out of that card's scope, which is the response shape only.\n\n## The defect\n\n`GET /api/v1/packages/:id` accepts a `?version=` query parameter from the SDK and the only surface that serves the route never reads it. The caller is answered `200` with the **installed** version, and nothing in the status, headers or body distinguishes that from a version-scoped read that actually happened.\n\nThe SDK still sends it. `ScopedEnvironmentClient.packages.get` in `packages/client/src/index.ts` takes `version` as its second argument and appends it:\n\n```ts\nget: async (id: string, version?: string) => {\n  const qs = version ? `?version=${encodeURIComponent(version)}` : '';\n  const res = await this.parent._fetch(this.url(`/packages/${encodeURIComponent(id)}${qs}`));\n  ...\n}\n```\n\nThe serving handler is the runtime dispatcher's `/packages` domain (`packages/runtime/src/domains/packages.ts`, the `parts.length === 1 && m === 'GET'` branch). It reads the path id and nothing else — `query` is never touched on that branch:\n\n```ts\nconst id = decodeURIComponent(parts[0]);\nconst pkg = registry.getPackage(id);\n```\n\n## Why it is a regression rather than an always-dead parameter\n\nThe parameter was honoured until recently, by the REST registrar's twin of this route. #16628 (`fix(rest): the dispatcher's /packages domain is the one implementation of the package read and delete routes (#14503)`, merged 2026-09-08) deleted that handler, and the deleted code read the parameter **and** guarded its arity:\n\n```ts\nconst requested = readSingleQueryValue(req.query?.version);\nif (...) {\n  sendError(res, 400, 'VALIDATION_ERROR', repeatedQueryParamMessage('version', requested.count));\n}\nconst version = requested.value || 'latest';\nconst pkg = await packageService.get(packageId, version);\n```\n\nSo the deletion, which was correct about the one-route-one-owner problem it was solving, silently dropped a request-side capability along with the duplicate response shape. The dispatcher never had that read to inherit.\n\n## Repro\n\nAgainst any host serving the dispatcher's `/packages` domain, with `com.acme.crm@1.0.0` installed:\n\n- `GET /api/v1/packages/com.acme.crm?version=99.0.0` answers `200` with the `1.0.0` row.\n- Expected: either the `99.0.0` record, or a refusal naming `version`.\n\nThe environment-scoped mount reaches the same handler through the `@objectstack/hono` catch-all, so `scoped.packages.get(id, '99.0.0')` has the same outcome from the SDK.\n\n## Why this is filed rather than fixed in #12034's PR\n\nThe fix is a decision, not a mechanical repair — three defensible answers, and they differ on the wire:\n\n1. Restore the version-scoped read in the dispatcher branch (with the arity guard the deleted handler carried), making the SDK parameter true again.\n2. Remove `version` from the SDK signature and let the route be identity-only.\n3. Refuse it — declare the route's closed query-parameter set per the Route and surface ownership rule so an unrecognised name gets a located `400` instead of being dropped.\n\nOption 3 is the one the repo's own standing rule points at for a `GET` route that reads `req.query`, and it composes with either of the first two. Whichever is chosen, it is a producer-side wire change and wants its own ruling.\n\n## Notes\n\n- Not a duplicate of #7563, #3610 or #11376 — those are about the mounting/shadowing of these routes and the registry-read swallow, and all three are closed.\n- The unscoped `client.packages.get(id)` does not accept a version at all, so only the scoped SDK method can reach this today."
+}

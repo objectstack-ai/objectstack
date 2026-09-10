@@ -1,0 +1,30 @@
+{
+  "number": 16786,
+  "kind": "issue",
+  "title": "[finding] Ruling A on #16231 narrows `IScopedObjectRepository`, but `ctx.api.object(name)` resolves through the CLASS `ObjectRepository` — the hook-facing door keeps `Promise&lt;any&gt;`, and `updateById` keeps it too",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T05:22:54Z",
+  "updated_at": "2026-09-10T15:12:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16786",
+  "body": "Filed by the `domain:engine` execution PM seat, from the #16231 round (PR #16783). The implementer reported it and ⛔ deliberately did not fold it in; the measurements below are the seat's own, re-taken on `origin/main`.\n\n⛔ Filed unassigned and unlabelled, as an observation for triage. Grade deliberately not asserted.\n\n## Why this is not just \"one more `any`\"\n\nMaintainer ruling A on **#16231** (`5572153316`, 「同意」) extends #15823's `find()` rule to `findOne` / `update` / `delete`, naming *\"`packages/spec/src/contracts/data-engine.ts:276-279` **and the scoped-context mirrors at `scoped-context.ts:148/164`**\"*. PR #16783 narrows exactly those.\n\n⚠️ **The door a hook author actually touches is not among them.** `ScopedContext` **is** `HookContext.api`, so the hook-facing call is `ctx.api.object(name).findOne(…)` — and that call does not resolve through the narrowed interface.\n\n## Measured on `origin/main` `ed7243d52b`\n\n| where | reading |\n|---|---|\n| `packages/spec/src/contracts/scoped-context.ts:181` | `object(name: string): IScopedObjectRepository;` — the **interface** does return the interface |\n| **`packages/objectql/src/engine.ts:14662`** | **`object(name: string): ObjectRepository {`** — the **implementation** returns the **CLASS** |\n| `packages/objectql/src/engine.ts:14479-14480` | the file's own docblock confirms this is *\"what `ScopedContext.object(name)` returns, and what a hook reaches as `ctx.api.object(name)`\"* |\n\n⇒ TypeScript's `implements` accepts a **wider** declared return, so `ObjectRepository`'s own `Promise<any>` members satisfy the narrowed interface while **the call site keeps seeing `any`**. Narrowing the interface therefore does **not** reach `ctx.api.object(name).findOne(…)`.\n\n⚠️ **How I nearly filed this wrong**, recorded because it is the more useful half: my first measurement grepped `packages/spec/src/contracts/scoped-context.ts`, found `object(name): IScopedObjectRepository`, and looked like a **falsification** of the report. It was the wrong file — the claim is about the **implementation class**, not the spec interface. ⇒ ⛔ a reading that refutes a claim about *implementation* by measuring the *declaration* has measured a different thing.\n\n**Second, smaller gap in the same family**: `IScopedObjectRepository.updateById` (`scoped-context.ts:167`) stays `updateById(id: string | number, data: any): Promise<any>` while its `update` sibling narrows under ruling A. A by-id update has the *same* record-or-`null` answer as the `update` by-id exit. The ruling names `:148` / `:164` and not `:167`.\n\n## What this costs, in the ruling's own terms\n\nRuling A exists because *\"every consumer that has to decide whether a normalizer limb over one of these is dead pays a reachability argument instead of reading a type\"* — the #15094 census counted **104** array-or-envelope normalizer blocks. ⇒ for **hook authors**, who reach these verbs through `ctx.api`, that cost is **not** paid down by PR #16783: the type they read is still `any`.\n\n⭐ And the class is live, not theoretical. The same round measured **seven test doubles answering shapes their own `IDataDriver` contract does not have** — `{ deleted: n }`, an array from a `Promise<number>` door, `undefined` from a bare `vi.fn()` — every one invisible while the door said `any`. That is the drift a declaration stops, and the hook-facing door is still undeclared.\n\n## Suggested shape, not asserted\n\nThe implementer's own reading: *\"a one-line annotation change plus its own consumer census.\"* ⇒ annotate `ScopedContext.object` with `IScopedObjectRepository`, and narrow `updateById` alongside `update`.\n\n⚠️ Two things a taker must not skip:\n1. **The census is the cost, not the annotation.** Ruling A's precondition was a measured consumer census posted before any declaration moved, and it found **18 files / 92 compile errors** for the three verbs. This annotation newly type-checks every `ctx.api.object(…)` call in the repo against the narrowed members; that number is **unmeasured** and could be larger.\n2. ⛔ **Do not assume this rides on #16231's ruling.** The maintainer named three anchors and these are not among them — whether the same answer extends here is a question to put, ⛔ not an inference to make. This seat learned that the expensive way tonight on #16589, where a direction settled by a standing criterion turned out to have been ruled the other way a month earlier.\n\n## Boundaries\n\n- ⛔ Do not fold into PR #16783 — that PR delivers exactly the ruling's named anchors and is under contract review.\n- ⛔ Do not touch #15267 (the driver-layer `Promise<any>` twin) — different layer, its own card.\n- ⚠️ Line numbers are `origin/main` `ed7243d52b` and will drift — ⛔ 按符号重新推导."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 17081,
+  "kind": "issue",
+  "title": "The boot banner's \"🔑 Dev admin\" is the only credential a first-run operator is given, and in any audience-gated app it is the account that sees nothing",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T06:53:25Z",
+  "updated_at": "2026-09-10T14:45:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17081",
+  "body": "## What happened\n\nThe maintainer of a downstream app (`objectstack-ai/ats`) ran `pnpm dev`, signed in with the credential the terminal handed them, opened the app — and got **an empty left navigation**. Their words: \"我刚管理员登录进去,看不到 ATS 的左侧菜单\".\n\nThe app was working correctly. The account was the problem, and the platform is what pointed them at it.\n\n## The mechanism\n\n`packages/cli/src/utils/format.ts:829-836` prints, gated on `opts.seededAdmin`, as the last and **only** credential in the boot banner:\n\n```\n  ➜  Console:   http://localhost:4721/_console/\n\n  🔑  Dev admin: admin@objectos.ai / admin123\n      seeded on empty DB · dev only — do not use in production\n```\n\n(The credential itself comes from plugin-auth's `maybeSeedDevAdmin`, per the note at `packages/cli/src/commands/dev.ts:335`; the banner line is the CLI's.)\n\nMeanwhile that app gates its navigation by capability — three groups, each behind a `requiredPermissions` the server strips per caller. Platform-owner standing (`OS_PLATFORM_OWNER_EMAIL`) confers the kernel capabilities only, so the dev admin holds none of the three. Measured on that app, `GET /api/v1/meta/app` per persona:\n\n| signed in as | ATS nav groups |\n|:--|:--|\n| **`admin@objectos.ai`** (what the banner prints) | **0 — empty** |\n| `admin@platform.example` | `Platform[7]` |\n| `ops@platform.example` | `Platform[7]` |\n| `admin@quillstone.example` | `Hiring[7]` |\n| `candidate01@mail.example` | `Job Seeker[5]` |\n\nFour of five personas are fine. The one the banner names is the one that sees nothing.\n\n## Why this is a platform issue and not just that app's\n\nThe banner encodes an assumption: **\"the seeded dev admin is the account you want to look at the application with.\"** That holds for an app with no audience model. It is exactly inverted for any app that partitions its UI by position, capability or permission set — and partitioning the UI by capability is a first-class platform feature that the docs actively teach.\n\nIn that class of app, the dev admin is by construction the account with kernel capabilities and no business role. The more correctly an app models its audiences, the more misleading the banner becomes.\n\nIt also **outranks whatever the app tells you**. That app's README says, on the very row for this account: \"holds no ATS position, so no ATS group — use the personas below for the product\", and its first quickstart line names a different account entirely. None of it wins against a line with a key emoji sitting directly under the command you just ran.\n\n## Suggestions\n\n1. **Let the app contribute a first-run hint.** A stack- or app-level field (say `devHint` / `devLogins[]`) that the banner renders instead of, or beneath, the seeded-admin line. An app that seeds personas could then print the three that actually show something. This is the fix that scales — the app is the only party that knows what its audiences are.\n2. **Failing that, soften the claim.** The line asserts a credential without saying what it is *for*. Something closer to \"platform/Setup access — an app may require a business role\" costs nothing and stops the banner from over-promising.\n3. **Optional, and possibly the cheapest real improvement:** if the console renders an app whose navigation resolved to zero entries, say so in the UI rather than showing an empty shell. The operator is already in the wrong place by then; an empty frame gives them nothing to act on. (This one may belong in `objectui` — happy to move it.)\n\n## Downstream tracking\n\n`objectstack-ai/ats#88` covers the app-side half (empty-state copy, README ordering, and whether that app should give its owner account a position at all). This issue is only about the platform's contribution: the banner, and the assumption inside it.\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01PbJ5Cy9KDAzeQHo8bsMadG"
+}

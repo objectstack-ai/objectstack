@@ -1,0 +1,29 @@
+{
+  "number": 11453,
+  "kind": "issue",
+  "title": "INotificationOutbox has no cancellation, and `ack()` on an unclaimed `pending` row silently succeeds in both implementations",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-23T20:05:09Z",
+  "updated_at": "2026-09-10T13:12:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11453",
+  "body": "Measured while writing the contract for the ruled hard `recall()` on #10753 (that half was forked, see PR #11450's last section). Two related gaps on one surface, filed together because a fix to either has to decide the other.\n\n## 1. There is no cancellation expression\n\n`INotificationOutbox` (`packages/services/service-messaging/src/outbox.ts:115-129`) declares exactly:\n\n```\nenqueue | claim | ack | list | claimDigest\n```\n\nNo `cancel`, no `delete`, no way to move a `pending` row out of the queue. Any feature that means \"stop this delivery before it goes out\" — retraction, a recalled notification, a superseded digest — has nothing to call.\n\n## 2. `ack()` looks like the workaround, and it is a trap\n\n`ack(id, { success: false, suppressed: true })` flips a row to the terminal `suppressed` state, so it reads like the missing cancel. **Neither implementation checks that the row is claimed:**\n\n- `MemoryNotificationOutbox.ack` (`memory-outbox.ts:118`) — looks the row up by id and mutates it, no status precondition.\n- `SqlNotificationOutbox.ack` (`sql-outbox.ts:212`) — reads only `['attempts']` by id, no status precondition.\n\nSo `ack` on an unclaimed `pending` row *works*, and two things go wrong quietly:\n\n- **It races the dispatcher.** Between the caller's `list()` and its `ack()`, `claim()` can take the row (that call is atomic by contract, this one is not part of it), the dispatcher sends it, and acks it back to `success` — or the reverse order suppresses a delivery already on the wire. There is no compare-and-set to express \"suppress only if still pending\".\n- **It corrupts `attempts`.** `ack` increments `attempts` unconditionally. A row cancelled this way records an attempt that never happened — and `attempts === 0` on a terminal row is a load-bearing predicate elsewhere on the sibling HTTP outbox (`assertHttpRedeliverable`, `http-outbox.ts:315+`, distinguishes \"parked, never sent\" from \"sent and failed\").\n\n`ack` is the dispatcher's completion callback. Using it as a cancel primitive is the kind of reuse that reads correct in review and is wrong under concurrency.\n\n## What a fix has to decide\n\nWhether cancellation is a new `INotificationOutbox` member (widening the contract plus both implementations, and `SqlNotificationOutbox` needs a conditional update so the transition is atomic against `claim`), or whether `ack` grows a status precondition and a documented cancel discriminator. Either way it is a surface decision, not a repair — which is why this is filed rather than done.\n\n## Links\n\n- Surfaced by: #10753 (the ruled hard `recall()` cannot express \"cancel pending/unclaimed deliveries\" without this)\n- PR that reports the fork: #11450\n"
+}

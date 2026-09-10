@@ -1,0 +1,31 @@
+{
+  "number": 16099,
+  "kind": "issue",
+  "title": "No layer refuses an incoherent aggregate / field-type pair — a dataset measure `avg` over a datetime works on SQLite and errors on Postgres",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T00:38:12Z",
+  "updated_at": "2026-09-10T14:38:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16099",
+  "body": "Filed unassigned by the `os-dev` seat working #15768 (session `https://claude.ai/code/session_01XpTx2tbq3pZRYAdoGt6E6Y`). Not graded, no `domain:*` — routing and priority are the triage seat's. Established while answering that card's \"what does the shipped code actually do for `sum`/`avg` over a temporal field\" question.\n\n## What was established, by reading every layer that could refuse it\n\nA dataset measure pairing an aggregate with a field whose type the aggregate cannot meaningfully consume — `{ aggregate: 'avg', field: 'last_update_at' }` where `last_update_at` is `Field.datetime` — is refused by **nothing** between the author and the driver:\n\n- **`DatasetMeasureSchema`** (`packages/spec/src/ui/dataset.zod.ts`) declares `aggregate` and `field` as independent optional keys. Nothing correlates them.\n- **`dataset-compiler.aggregateToMetricType`** checks only membership of the `AggregationFunction` vocabulary (`UNSUPPORTED_AGGREGATES`, currently empty since #6188 retired its two members at parse).\n- **The three source-field gates** in `AnalyticsService.ensureCube` — `assertMeasureFields` (#4437), `assertDimensionFields` (#5520), `assertWhereFields` (#5669) — all answer one question, whether the object has the column. None reads the column's type.\n- **`packages/lint`** carries no rule pairing a measure's aggregate with its field type (`git grep` over the rule set finds only view-aggregate and flow-node uses of the word).\n\nSo the pair compiles to `AVG(last_update_at)` and reaches whichever backend the object is bound to.\n\n## Why that matters more than \"it is a nonsense query\"\n\nThe pair does not fail uniformly — it produces a **different outcome per backend**:\n\n- **SQLite** stores `Field.datetime` as an INTEGER epoch, so `AVG` returns a number. The tile renders. Nothing anywhere says the number is a mean of epoch milliseconds.\n- **Postgres** has no `avg(timestamptz)`; the statement is a `42883` at the driver. (#11455 closed the raw-error half of that shape for a boolean column, so the caller now gets an envelope rather than a raw SQLSTATE — but it is still a runtime failure, not a rejected declaration.)\n\nThe dev datasource in this platform's default `pnpm dev` flow is SQLite. So the failure mode is: an author writes the measure, it works locally, the dashboard ships, and it errors on a Postgres deployment — the shape Prime Directive #12 exists to prevent (\"reject it at authoring/publish so the error surfaces loudly\").\n\n## Why #15768 did not type it instead\n\nIts dispatch ruled the case explicitly: `sum`/`avg` over a temporal field is \"a **finding to report**, not a case to invent a type for\". That is the ruling this card carries out. Because the shipped value is backend-decided, there is no single value for `fields[].type` to describe, so #15768 leaves both aggregates saying `number` and states why in `measure-result-type.ts`.\n\n## The decision this needs\n\nWhether the pair should be refused, and where. Sketch of the options, not a recommendation:\n\n- **At authoring / publish (lint)** — an ObjectStack lint rule over dataset measures. Reaches the author earliest and needs the object schema, which lint already loads. Cannot see a dataset assembled at runtime.\n- **At compile (`dataset-compiler`)** — `DATASET_INVALID` / 400 alongside the existing aggregate refusal, using `sourceFieldMeta`'s declared type. Reaches every door including runtime-assembled datasets, but is a per-request refusal rather than an authoring-time one.\n- **Both**, which is the shape #4437 and its siblings already took for the field-existence question.\n\nAny of them needs a ruled table of which `AggregationFunction` member accepts which `FieldType` — including the case `sum` over a `percent` field, which `analytics-service.ts` already calls \"incoherent\" in a comment while refusing it nowhere.\n\n## Related\n\n#15768 (where this was established) · #11455 (the driver-level envelope for the same pair on a boolean column, closed) · #4437 / #5520 / #5669 (the three existence gates this would sit beside) · #6188 (the aggregate-vocabulary retirement that emptied `UNSUPPORTED_AGGREGATES`).\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 15206,
+  "kind": "issue",
+  "title": "feat(metadata-core,metadata-protocol,objectql,plugin-security): the `sys_metadata` family goes tenant-less; the per-organization overlay axis retires; managed content is sealed (ADR-0131 D6/D7/D13)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:blocked",
+    "priority:p1",
+    "security",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:05:24Z",
+  "updated_at": "2026-09-04T06:05:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15206",
+  "body": "**⛔ BLOCKED — the v18 development line is not open.**\n\n`Blocked-by: #15193, #15195`\n\nPart of #15194 (ADR-0131 execution tree). ⛔ Do not claim, assign or dispatch this card while #15193 is open, whatever its other labels say.\n\n---\n\n**In one sentence.** Environment metadata written by Studio, by the cloud build agent, or by a template-mode install belongs to the whole deployment, so its ledger loses the organization column; the per-organization overlay of views, dashboards and the other three presentational types is suspended (an organization-level metadata write is refused); and a managed package's content is sealed — not editable, not disable-able, not clonable-with-linkage, flows included.\n\nMaintainer, 2026-09-04: 「你这么说还不如先完全封死。flow 也先不让改。」\n\n**Scope.** (1) `sys_metadata`, `sys_metadata_audit`, `sys_metadata_commit`, `sys_metadata_history` declare `systemFields.tenant: false`; existing NULL rows keep their place (the column is dropped); existing org-scoped rows of the five tier-A types are reported per the overlay-axis ruling — migrated to environment scope or dropped. (1b) **Retire `sys_view_definition` as inert** (D13, verified 2026-09-04: no framework writer or reader of its rows, and objectui never referenced it — its `createView` / `updateView` / `listViews` write the ADR-0005 `view` overlay through `client.meta.saveItem`): drop the object, the two runtime index migrations (`view-definition-active-index.ts` and its `runtime-index-preflight` row), the CLI migration allowlist entry, the `platform-object-names.ts` entry, the `overlay-views-to-sys-view-definition.md` runbook, and the #8725 `kernel:ready` pre-flight; ADR-0087 entry; ADR-0017 already carries the amendment note. **Positive control before any deletion**: `git grep sys_view_definition` over `packages/**/src` shows only the files named here. (2) `meta-write-org-scope.ts` / `protocol.ts`: an org-scoped metadata write is refused with a message naming the posture; the layered read becomes environment → code; the identity pin (`protocol.org-scoped-write-refused.test.ts`) flips to \"none accepted\". (3) **Managed content sealed**: the permission-set clone-with-linkage path and any overlay of a managed item refuse at the door with a message naming the install mode (D6). (4) The ADR-0005 amendment note lands in the same PR.\n\n**Acceptance.** Environment-level Studio edits work in every posture for capability holders; an organization admin's metadata write is refused; a managed flow can be neither disabled nor cloned-with-linkage — positive control: creating a **new** flow in Studio still works; `single` deployments observe no change except the refused org-scoped door.\n\n⛔ **Stop and report**: changing who holds `manage_metadata` / `studio.access`.\n\nRefs: ADR-0131 D6, D7, D13 · ADR-0005 (per-organization overlay axis retired) · ADR-0017 · ADR-0094 · ADR-0126 (amended, not superseded) · #11665 · #6190 · objectui#7205.\n"
+}

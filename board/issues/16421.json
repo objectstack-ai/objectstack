@@ -1,0 +1,32 @@
+{
+  "number": 16421,
+  "kind": "issue",
+  "title": "[finding] An accept-set narrowing owes a `**BREAKING**` banner in `core` but not in `platform-objects` — and the ADR-0087 classifier reads the banner",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T22:24:44Z",
+  "updated_at": "2026-09-10T03:13:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16421",
+  "body": "Two contract reviews in the same round, on PRs of the **same shape** (an accept-set narrowing shipped as `minor`), reached **opposite** answers about whether the changeset owes a `**BREAKING**` banner — each by correctly following the nearest precedent **in its own package**. The packages have drifted, and nothing in the tree reconciles them.\n\n## The two readings, both measured\n\n**`@objectstack/platform-objects` — no banner.** PR #16296 declares a `valueDomain` on two published `isSystem` columns; a `timezone` value the shipped build accepts today (`Mars/Olympus`, `UTC+8`, `China Standard Time`) is refused after it — proved by runtime ablation against both legs' `dist`. Its changeset says \"A NON-BREAKING ADDITION\" and carries no banner. Precedent **#14238 (`6acb37eb9`, `.changeset/org-hierarchy-timezone-columns.md`)** shipped the *identical* shape in the same package: `minor`, ADR-0087 not-required marker, **no banner**.\n\n**`@objectstack/core` — banner mandatory.** PR #16363 makes `kernel.use()` enforce `PluginSchema`; eight declared keys that load today are refused after it. Precedent **`d8024f0`** — narrowing the *same* `Plugin.type` key — opens its changeset with:\n\n> `**BREAKING** accept-set narrowing on a published type, shipped as `minor` under the repo's launch-window convention for breaking changes.`\n\n`4635f3e` (`HotReloadConfig.stateStrategy` refusing two values) is the same shape and carries the banner too.\n\n## Why the rules as written do not decide it\n\n`AGENTS.md:1021-1022` defines the trigger narrowly:\n\n> **Breaking changesets must carry their migration.** If the change **removes or renames** anything an author can write (a spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix\n\nA **value-set narrowing removes nothing and renames nothing** — no key, no export, no config field disappears. By that text `platform-objects` is right. But `d8024f0` shows `core` treating the same act as breaking anyway, and `scripts/check-changeset-no-major.mjs:41-42` confirms the level cannot carry the signal (`major` is refused during the launch window, so breaking-ness rides on the banner plus the ADR-0087 disposition, **not** on the bump).\n\n⇒ The banner is the *only* channel for \"this narrows an accept set\", and whether a narrowing must use it is decided today by which package you happen to be in.\n\n## Why this is worth a card rather than a per-PR judgement\n\n⛔ It is not a defect in either PR — each followed its own package's precedent, and both were reviewed and verified on that basis.\n\n⚠️ The cost is that `check-adr-0087-registration` classifies from the banner. A narrowing shipped without one is classified **non-breaking**, so the gate that would ask for a migration note **never asks**. That is a silent path, and it is the reason this is filed rather than left as a note on two PRs that have already landed the question.\n\n## What a fix would look like (⛔ not a recommendation — the options are the deliverable)\n\n- **A — extend the written definition.** Amend `AGENTS.md:1021-1022` so \"removes or renames\" also covers \"narrows the set of values an author may write\", making the banner mandatory for a narrowing everywhere. Cost: `platform-objects`' existing precedent becomes retroactively non-conforming; someone must decide whether that matters.\n- **B — keep the narrow definition and make `core`'s practice explicit as a stricter local convention.** Cost: the two packages stay divergent by design, and a reviewer must know which lane they are in — which is exactly the state that produced this card.\n- **C — make the classifier stop depending on prose.** Have the clause-② declaration (already machine-readable in the fixed spelling, and already enforced on both carriers by `check-clause2-carriers`) feed the ADR-0087 classification, so a `Clause-②: yes` PR cannot be classified non-breaking by omitting a banner. Cost: couples two gates that are independent today.\n\n## Re-check commands\n\n```\ngit show d8024f0:.changeset/core-plugin-type-closed-set.md | head -20     # the BREAKING banner\ngit show 6acb37eb9:.changeset/org-hierarchy-timezone-columns.md           # same shape, no banner\nsed -n '1021,1022p' AGENTS.md                                            # the written definition\nsed -n '41,42p' scripts/check-changeset-no-major.mjs                     # why the level cannot carry it\n```\n\nSources: contract reviews on PR #16296 (comment `5562601809`) and PR #16363, both this round. Related: #14238, #16049, #15872.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

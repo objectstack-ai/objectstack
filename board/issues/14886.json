@@ -1,0 +1,31 @@
+{
+  "number": 14886,
+  "kind": "issue",
+  "title": "[repo:objectui] Record page: related-list rows paint over the sticky 详情/相关 tab bar while scrolling (sticky header stacking context vs pinned grid column)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p3",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-03T07:24:08Z",
+  "updated_at": "2026-09-10T00:19:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14886",
+  "body": "## Summary\n\nOn a record detail page, the `详情 / 相关 / 附件 / 历史` tab bar is sticky at the top of the scroll container. When the 相关 tab holds several related lists and the user scrolls, the **rows of the related-list grid scroll over / through the sticky tab bar** instead of disappearing behind it: row text and cells remain visible above the tab labels, and the tab bar becomes hard to read and hit.\n\n## Minimal reproduction\n\nPlatform 17.2.0 console, viewport 1440×900.\n\n1. An object with ≥3 related lists, each with a handful of rows (here: 考核方案 with 指标下达 27 rows, 流程节点 4, 参与主体 5, 到人分工 …).\n2. Open a record → 相关 tab → scroll down ~2 screens.\n\nObserved: the tab bar stays pinned at the top of the panel, but grid rows from the related list above it are painted over the tab strip (the cell text `培训完成率 · 运营部` / `成本费用率 · 运营部` shows through the strip, cut off by the bar's top edge). The row's trailing action cell is the most visible part.\n\n## Likely where (not confirmed by bisect)\n\nThe record page tab strip is sticky with a low stacking context, while the related-list grid pins its trailing action column with\n\n```js\nCr = `sticky right-0 z-10 bg-background border-l border-border`\n```\n\n(`plugin-grid` chunk). A sticky child with `z-10` inside a scrolled sibling can win against a sticky header that has no explicit `z-index` above it. Whatever the exact pair, the header should establish a stacking context above any content that scrolls under it.\n\n## Expected\n\n- The sticky tab bar paints above everything that scrolls beneath it (opaque background + a `z-index` higher than any sticky/pinned cell in the tab panel).\n- Same guarantee for the record page's sticky title header, which sits above the tab bar.\n\n## Environment\n\n`@objectstack/console` 17.2.0 · `objectstack dev` · Chrome. App: objectstack-ai/kpi, object `kpi_plan` record page.\n"
+}

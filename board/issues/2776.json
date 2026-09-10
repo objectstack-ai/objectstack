@@ -1,0 +1,30 @@
+{
+  "number": 2776,
+  "kind": "issue",
+  "title": "Permission Model v2 — named follow-up ADRs (post-ADR-0090 parking lot)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "security",
+    "status:parked",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-10T11:30:25Z",
+  "updated_at": "2026-07-15T13:16:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2776",
+  "body": "Successor to #2696 (ADR-0090 tracking — now fully delivered and closed). This issue carries the six **named follow-up ADRs** that ADR-0090 §\"Non-goals and named follow-ups\" acknowledged and deliberately scoped out of the v2 launch window. None of them changes the v2 breaking surface; each has a workable substitute today.\n\n**Convention:** per the repo's ADR discipline, the ADR for each item is opened **when the work actually starts** — this issue is the parking lot, not a commitment to write six documents up front.\n\n## The six follow-ups\n\n- [x] **1. Grant lifecycle & recertification** — time-boxed assignments (`valid_from`/`valid_until`), delegation-of-duty during absence, break-glass elevation with auto-expiry, periodic access-review campaigns (SOX/等保). Also the substrate for **task-scoped, time-boxed AI-agent grants (D10)** — the agent story is a second trigger for this one.\n  *Today's substitute: permanent grants + manual review.*\n  **→ Delivered (community scope): ADR-0091 Accepted (#2751 proposed, #2764 accepted). L1 validity windows + resolution-time filtering merged (#2795); L2 delegation-of-duty merged (#2810). Break-glass community *shape* (time-boxed, reasoned direct grant) is in L1; break-glass activation workflow + recertification campaigns are ADR-0091 L3 (enterprise, cloud-side) — not tracked here.**\n- [ ] **2. Segregation of Duties (SoD)** — declarative conflict rules between permission sets (\"vendor-create must not combine with payment-approve\"), checked at **assignment time**, with an audit report. Joins the D7 lint family.\n  *Today's substitute: org process / manual audit.*\n- [ ] **3. Scale & reorg hardening** — membership-set materialization/caching, asynchronous share recalculation, batched BU-subtree moves. Hard gate: **100k-user × 10M-record benchmark** — without it, D6 explain/matrix don't hold at enterprise scale. The most engineering-debt-like of the six.\n  *Today's substitute: per-request resolution, fine at current tenant sizes.*\n  *Note: the benchmark's stated blocker (unbounded telemetry, ADR-0057 lifecycle P1–P4, #2786) closed completed 2026-07-11 — no hard precondition remains.*\n- [ ] **4. ERP dimension restrictions** — declarative \"rows where field ∈ my values\" (Frappe User-Permissions shape) as first-class metadata; admin picks dimension values in the UI, platform compiles the row filter.\n  *Today's substitute: hand-written RLS/CEL.*\n- [ ] **5. ALM / environment promotion** — export/import + **semantic diff** of positions/bindings across dev→test→prod, reusing the **D6 access-matrix as the diff layer** (two environment snapshots subtracted = promotion pre-flight report).\n  *Today's substitute: manual reconfiguration per environment.*\n- [ ] **6. Portal identity & licensing** — the product track that activates D11 (`externalSharingModel`) at scale: external registration/auth (separate identity pool vs invite), external-seat licensing/metering. Mechanism is fully shipped (spec shape, runtime enforcement, Studio dial); this is the productization decision.\n  *Today's substitute: D11 mechanism usable ad hoc; no external identity product.*\n  *Note: the kernel-chain posture ladder (#2920 B2, ADR-0095 D2) reserves an `EXTERNAL` rung with locked semantics; item 6 itself has not started.*\n\n## Suggested priority (non-binding)\n\n**#3** (hard benchmark gate) and **#1** (compliance + the D10 agent-grant substrate) are the likeliest first pulls; **#6** activates whenever the portal product track starts. #2/#4/#5 are demand-driven.\n*2026-07-15: #1 pulled and delivered (community scope, see above). #3's precondition is now clear.*\n\n## References\n\n- ADR-0090: `docs/adr/0090-permission-model-v2-concept-convergence.md` §\"Non-goals and named follow-ups\"\n- ADR-0091 (item 1): `docs/adr/0091-grant-lifecycle-and-recertification.md` — Accepted 2026-07-10\n- Predecessor tracking issue: #2696 (all platform + UI deliverables shipped; see closing comment there for the final delivery map)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

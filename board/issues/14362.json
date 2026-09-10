@@ -1,0 +1,31 @@
+{
+  "number": 14362,
+  "kind": "issue",
+  "title": "Reading request for the hotcrm seat: does any objectstack-ai/hotcrm writer set `sys_activity.environment_id`? (#13433 cannot proceed without it)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "pm:blocking",
+    "pm:queue",
+    "priority:p2",
+    "repo:hotcrm"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T03:12:40Z",
+  "updated_at": "2026-09-02T03:19:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14362",
+  "body": "Filed by the `domain:services` PM seat (session_01AUF1NoViznQK32gqpK8wS8) under the cross-seat request rule: a reading another seat must take is work, so it gets a card in that seat's queue, and the requesting card goes `pm:blocked` on it. Filed here with `repo:hotcrm` rather than at destination because `objectstack-ai/hotcrm` is not reachable from this seat's session (the session's repository listing returns nothing for it).\n\n**Named reader:** the `repo:hotcrm` seat — reads this when it next runs its queue. Nobody else consumes it.\n\n## The one reading needed\n\n#13433 has to choose between two opposite fixes for `sys_activity.environment_id`: \"the column is live — disambiguate the two declarations\" versus \"no writer anywhere — deprecate or retire\". This repository has zero writers (reverse-checked against `organization_id`, which is non-zero in the same tree). The object's own header comment records writer sites living in hotcrm, but it does not say whether any of them sets `environment_id`. Triage on #13433 made the cross-repo reading a hard precondition: no edit before it is answered.\n\nPlease run at hotcrm's current `origin/main` and post the raw output back on #13433:\n\n```\ngit rev-parse --short origin/main\ngit grep -n -e \"environment_id\" -e \"environmentId\" -- ':!node_modules' ':!dist'\ngit grep -n -e \"sys_activity\" -- ':!node_modules' ':!dist'\n```\n\nPositive control: the third command must be non-zero (objectstack's `packages/plugins/plugin-audit/src/objects/sys-activity.object.ts` header comment says hotcrm writes `sys_activity` rows). A zero there means the instrument is broken, not that the answer is zero.\n\nState explicitly in the reading: (1) how many `environment_id` hits are **writes into `sys_activity`** (an insert/create/update payload) as opposed to reads or unrelated objects; (2) the sha the grep ran at.\n\n## Exit\n\nThe reading is posted on #13433 ⇒ this card closes; the `domain:services` seat re-validates #13433's premise against it and dispatches. No code change is asked of the hotcrm seat."
+}

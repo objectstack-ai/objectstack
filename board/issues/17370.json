@@ -1,0 +1,29 @@
+{
+  "number": 17370,
+  "kind": "issue",
+  "title": "AGENTS.md Protocol Domains table still lists `Cloud | cloud/` after #16325 relocates the directory to `marketplace/`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T09:47:05Z",
+  "updated_at": "2026-09-10T13:45:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17370",
+  "body": "`AGENTS.md` → **Protocol Domains** table still carries the row\n\n```\n| `Cloud` | `cloud/` | Multi-tenant, deployment, environment |\n```\n\n#16325 (option B \"cut by owner\", director batch #62, maintainer 「同意」) removes `packages/spec/src/cloud/` and the `@objectstack/spec/cloud` subpath: the cloud control plane's contracts leave the open-source spec, and the package & marketplace format moves to `packages/spec/src/marketplace/`, published as `@objectstack/spec/marketplace`. The moment that PR merges, the row names a directory that does not exist and omits the one that replaced it.\n\n**Why it is not fixed in the #16325 PR.** `AGENTS.md` is a governed surface (Prime Directive #14): a mixed diff is governed whole on a single path hit, so the row would have converted a `packages/spec` contract PR into a human-merge-only one. Measured on `d14c05ffc`: no gate reads that table (`git grep -ln \"Multi-tenant, deployment, environment\"` hits only `AGENTS.md` itself; `git grep -ln \"Protocol Domains\" -- scripts .github packages/spec/scripts` hits nothing), so nothing goes red — the row just rots.\n\n**The edit.** Replace the `Cloud` row with\n\n```\n| `Marketplace` | `marketplace/` | Package identity & versions, marketplace listing / publish / install format, template manifests |\n```\n\nkeeping the table's alphabetical position (after `Kernel`). One line, docs-only, `skip-changeset`.\n\nBlocked-by: #16325\n"
+}

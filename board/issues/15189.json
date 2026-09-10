@@ -1,0 +1,32 @@
+{
+  "number": 15189,
+  "kind": "issue",
+  "title": "[finding] check-ratchet-remedy-authority's corpus note and `why` for check-i18n-walk-parity.mjs still say its ledger \"ships EMPTY\" — it now ships with three",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T05:36:40Z",
+  "updated_at": "2026-09-08T12:33:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15189",
+  "body": "## What drifted\n\n`scripts/check-ratchet-remedy-authority.mjs` carries a hand-classified control-corpus entry for `check-i18n-walk-parity.mjs`. Two sentences in it describe that gate's exemption ledger as empty:\n\n- the comment above the entry: *\"The other path adds a group to a shrink-only exemption ledger that ships EMPTY by triage ruling\"*\n- the entry's own `why` string: *\"Its exemption ledger ships empty and only shrinks; …\"*\n\nBoth were true when written. As of the maintainer ruling on #14653 (2026-09-04, comment 5535827386, option A) that ledger ships with **three** entries — `messages`, `settingsCommon`, `settings` — and `LEDGER_CEILING` is 3. The two sentences are now false about the tree they describe.\n\n## Why it is worth a card rather than a shrug\n\nNothing mechanical reads either sentence. The field the gate actually checks is `expect: 'marked'`, which is unchanged and green — `pnpm check:ratchet-remedy-authority` passes on the branch that filled the ledger. That is precisely the shape this repo treats as a finding: a hand-written description of another gate's state, with no gate of its own, drifting silently under a green build. The next reader of that corpus entry is being told the ledger is empty at exactly the moment they might be deciding whether a fourth entry is unusual.\n\nNote the classification itself does **not** change: `marked` is still the right reading (a legitimate exempting act exists, and what it needs is an owner), and the `⛔ MAINTAINER-ONLY` marking in `check-i18n-walk-parity.mjs` is untouched. Only the two descriptive sentences are stale.\n\n## Where\n\n- `scripts/check-ratchet-remedy-authority.mjs` — the comment block and the `'check-i18n-walk-parity.mjs'` entry in the hand-classified control corpus (search the file for `check-i18n-walk-parity.mjs`).\n- The ledger it describes: `KNOWN_NO_EXTRACTOR_FACE` and `LEDGER_CEILING` in `scripts/check-i18n-walk-parity.mjs`.\n\n## Suggested shape\n\nRewrite both sentences to say what is now true — the ledger was filled to three by maintainer ruling and is shrink-only **from three** — rather than deleting the description. The reason the entry is `marked` rather than `refused` should survive the edit unchanged; it is the load-bearing half.\n\nWorth considering while there: a description of another file's numeric state, hand-written and ungated, is the same class as the one #9915 recorded for `check-engine-double-contract.mjs`. If that recurs a third time, the cheap fix is to stop quoting the number at all rather than to re-sync it.\n\n## Provenance\n\nFound while landing the ruling on #14653 (PR #14763). Not fixed there: that patch round's declared file surface was `scripts/check-i18n-walk-parity.mjs` plus merge-conflict resolution only, and this file is outside it. Recorded in that PR's body under \"One file outside the declared surface\" so a reviewer meets it in both places."
+}

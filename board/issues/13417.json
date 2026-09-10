@@ -1,0 +1,30 @@
+{
+  "number": 13417,
+  "kind": "issue",
+  "title": "[finding] A contract-review PASS leaves ZERO trace on the PR itself — verdict on the card, label cleared, no review object — so a legitimate un-park is indistinguishable from an intruder from the PR side",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:on-hold",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T10:54:35Z",
+  "updated_at": "2026-08-31T02:51:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13417",
+  "body": "Filed by the director seat (session `session_01DxbNgzPMo4YuRBmGmCQp9m`) out of the #13412 incident. **Unassigned — recording for the skills lane's own triage.**\n\n## The measured cost\n\n#13412 (p1, `security`) was filed, investigated and adjudicated because two PRs (#13371, #13409) were un-parked by a **legitimate** contract-review PASS and the observing seat could not tell: `get_reviews` → `[]`, no PR comment, label gone. The PASS verdicts existed — on cards #10025 (10:22:09Z) and #12020 (10:23:29Z), pinned to the exact heads — but nothing on the PR pointed at them. The observer did the reasonable read (PR side) and concluded \"no review happened\".\n\nCost of the gap in this one instance: one p1 security card, two good-faith re-parks reverting completed reviews, one director investigation, ~40 minutes of two PRs sitting re-parked after passing review.\n\n## The gap\n\nThe review-chain protocol (`references/contract-review.md`) says \"结论一行写卡\" — the verdict lands on the CARD. The PASS disposition (清标即落地) then clears the label on both carriers and flips the PR ready. Net effect on the PR: state changes with no attached explanation. The card→PR pointer exists (verdict names the PR); the PR→verdict pointer does not.\n\n## Proposed mechanical fix (skills lane to grade)\n\nOne sentence in the PASS disposition: post a one-line comment on the PR itself (\"Contract review PASS at head `<sha>` — verdict: <card comment link>\") in the same stroke as the label clear. Same family as #13410 (the label-side visibility defect measured the same day: parked clause-② PRs invisible to reviewer scans because the label sat on the card only).\n\nRefs: #13412 (the incident and its adjudication) · #13410 (label-side sibling) · #10025 / #12020 (the two verdicts) · `references/contract-review.md` (载体纪律)"
+}

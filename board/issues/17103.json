@@ -1,0 +1,30 @@
+{
+  "number": 17103,
+  "kind": "issue",
+  "title": "Two docs statements promise `os create plugin` emits a publishable `@objectstack/plugin-<name>` — false once #15530's ruled rename lands, and a reader who follows them is refused by npm",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T08:34:18Z",
+  "updated_at": "2026-09-10T14:51:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17103",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024) from a docs-drift report handed over by the seat delivering #15530 → PR #17096, which correctly refused to widen its 3-file surface into `content/docs/**`. ⛔ Not graded and no `domain:*` asserted here — for triage.\n\n⚠️ **Timing: these are true today and become false the moment PR #17096 merges.** It is armed. So this is not a pre-existing defect; it is one this repo is about to create, deliberately, under a maintainer ruling.\n\n## The ruling that falsifies them\n\n#15530, ruling `5596171164` (maintainer 「#106 同意」, batch #106 item 1): the **standalone** default output of `os create plugin` names the package `plugin-NAME` — unscoped — and writes `\"private\": true`. `--in-repo` keeps `@objectstack/plugin-NAME`.\n\n## The two statements, read at source rather than taken from the report\n\n**1. `content/docs/plugins/index.mdx:79-81`** — inside the \"Which artifact this page means\" callout:\n\n> Every plugin taught here is a **kernel code plugin** — TypeScript implementing the `Plugin` contract, built by `tsc`, published as `@objectstack/plugin-<name>`. That is what `os create plugin` scaffolds.\n\n⇒ After the ruling the standalone default is neither `@objectstack`-scoped nor published — it is `plugin-NAME` and `private: true`. Both halves of the sentence go false.\n\n**2. `content/docs/deployment/cli.mdx:106`** — the \"Publishable?\" column of the scaffolder-routing table:\n\n> \\| `os create plugin <name>` \\| … \\| **Yes** — a publishable `@objectstack/plugin-<name>` package \\| …\n\n⇒ False on both halves after the ruling.\n\n**3. ⚠️ A consequence, weaker than the two above and stated as such.** That same table's row `:105` distinguishes `os init <name> -t plugin` by *\"**No** — the emitted `package.json` is `private: true`\"*. Once `os create plugin` is also `private: true`, the **Publishable?** column stops discriminating between the two scaffolders — and discriminating between them is what the table exists to do (`:99-101`, `:109-110` all route by artifact). Whoever fixes rows 1 and 2 should decide what that column now says, rather than leaving a column whose two cells have become the same answer.\n\n⚠️ **The delivering seat reported \"three statements\"; on reading, two are outright false and the third is this consequence.** Recorded precisely so the fix is not over- or under-scoped.\n\n## ⛔ What must NOT be edited\n\nMost `@objectstack/plugin-` occurrences in `content/docs/` name **genuinely first-party, genuinely published** plugins — `@objectstack/plugin-auth`, `@objectstack/plugin-hono-server`, `@objectstack/plugin-security`, `@objectstack/plugin-audit`. Those are correctly scoped and this ruling does not touch them. A blanket find-and-replace on `@objectstack/plugin-` would be a much larger defect than the one this card reports. The sites at issue are only those tying **`os create plugin`'s own emitted name** to a publishable scoped package.\n\nAdjacent and probably fine, but worth a glance by whoever takes this: `content/docs/protocol/kernel/index.mdx:387` and `content/docs/getting-started/your-first-project.mdx:75` both describe `os create plugin` without naming the scope — read them, do not assume.\n\n## Why it matters\n\nNothing in this repo reds. The scaffold smoke, the type-check and `pnpm install` are all green on the emitted project, because the name is never resolved from a registry inside it. The cost lands later, in someone else's terminal, at `npm publish` — which is the same failure shape #15530 itself was filed about, one layer up in the documentation that sent them there.\n\n## Executable criterion\n\nAfter the fix, no hand-written page states that `os create plugin`'s **standalone** output is publishable or `@objectstack`-scoped, while the `--in-repo` behaviour is still described accurately. Grep `@objectstack/plugin-<name>` and `os create plugin` across `content/docs/**` excluding `content/docs/releases/`.\n\n⛔ `content/docs/releases/` is release-owned and is not in scope for this card, per AGENTS.md Documentation Guardrails.\n\n## Dedup\n\nOne targeted search over open and closed returned nothing naming these pages against the scaffold rename. ⭐ The zero is a real reading: a control query run in the same window returned 5 rows including #15530 itself. ⚠️ Recorded because an earlier attempt at this same dedup returned `{\"items\":[],\"total_count\":0,\"incomplete_results\":false}` while the search bucket was exhausted — a rate-limited search returns a clean, plausible zero, and only the control distinguishes it from a genuine one.\n\nNearest neighbours considered and rejected: **#15530** (the code change itself; this is its documentation half, deliberately not folded in), **#16140** (ADR-0026 documenting a manifest `type` both schemas refuse — a different page and a different claim)."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 15815,
+  "kind": "issue",
+  "title": "[finding] `git merge-tree` honours `merge=os-regen`, so a local mergeability probe reports MERGES CLEAN where GitHub reports `dirty` — and the probe writes `os-regen-pending` into the SHARED git dir",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T09:03:46Z",
+  "updated_at": "2026-09-09T02:54:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15815",
+  "body": "Found while resolving a merge conflict on PR #15673. Filed unassigned; not fixed there — that PR's scope was the conflict itself.\n\n## Two halves of one mechanism\n\n`.gitattributes` routes `content/docs/permissions/system-context.mdx` (and the other generator-owned artifacts) to `merge=os-regen`, and `pnpm install` registers that driver per clone. `git merge-tree --write-tree` runs the same merge-ort machinery as `git merge`, so **it invokes the custom driver too**. Two consequences, both measured today.\n\n### 1. A local mergeability probe cannot predict GitHub's answer\n\nMeasured on `origin/main` c99449ab5fd against PR #15673's head b294219cbaa:\n\n```\ngit merge-tree --write-tree origin/main b294219cbaa\n  exit 0  (\"MERGES CLEAN\") — the os-regen driver resolved the .mdx and printed its\n          \"not text-merged — it is generated\" notice\n\ngit -c merge.os-regen.driver= merge-tree --write-tree origin/main HEAD\n  exit 1  CONFLICT (content): Merge conflict in content/docs/permissions/system-context.mdx\n```\n\nThe same three blobs through `git merge-file` (the default text merge, which is what a server-side merge runs) give exit 1 and one conflict hunk.\n\nGitHub runs no custom merge driver, so **`dirty` was correct and the local probe was the wrong instrument** — not a stale flag, not a different snapshot. A PM seat reading the local probe concluded the opposite and dispatched a merge-conflict card describing a contradiction that was really an instrument mismatch.\n\nAGENTS.md already says the driver is a LOCAL facility (Multi-agent discipline §11) and that the queue rebuilds server-side where no custom driver runs. What is nowhere stated is the corollary that costs a seat a round trip: **a local merge probe of any os-regen path is not evidence about GitHub's mergeability.** The safe spelling is the one above — disable the driver for the probe.\n\n### 2. The probe mutates shared state\n\n`git merge-tree` is read-only in name only here. The driver records each path it resolves in `$GIT_DIR/os-regen-pending`. Run from a **linked worktree** that is per-worktree and harmless. Run from the **shared primary checkout** — where a seat naturally probes before building a worktree — `$GIT_DIR` is the common `.git`, so the marker lands in state every worktree shares, and the next ordinary commit in that checkout is refused by `pre-commit` with a staleness report for a merge that never happened.\n\nIt is self-healing (the marker clears the moment the artifact checks clean, which it does, since nothing was merged) but the refusal reads as a real red to whoever hits it. One such marker is sitting in `/home/user/objectstack/.git/os-regen-pending` on this container right now, left by exactly this probe.\n\n## Suggested direction, not prescribed\n\n- Name the safe probe spelling where seats look for it — `scripts/pm/os-regen-merge.sh`'s header is the in-repo authority for this family and already carries the driver's other traps.\n- Consider whether `git-merge-regen.mjs` can tell a probe from a real merge (a `merge-tree` invocation has no worktree to write) and skip the marker; if it cannot, say so where the marker is documented, so the primary-checkout case is a known cost rather than a surprise.\n\nRepro is the two commands above, in any clone where `pnpm install` has run."
+}

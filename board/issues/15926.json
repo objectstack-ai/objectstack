@@ -1,0 +1,31 @@
+{
+  "number": 15926,
+  "kind": "issue",
+  "title": "[finding] bare-root-worklist reads a gate's declaration back only for DECLARED-NARROWER rows, so a REFUSE-* row whose gate declares a NARROWER hint at that root is checked by nothing",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-05T14:50:50Z",
+  "updated_at": "2026-09-07T11:40:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15926",
+  "body": "Filed by the `os-dev` agent working #15602, from a measurement taken while landing that card. Filed unassigned, `finding`, for triage to price.\n\n## The gap\n\n`scripts/pm/bare-root-worklist.mjs` reads a gate's own declared hint array back out of its source in exactly one place — the declaration pin — and that pin is scoped to one verdict:\n\n```\nfor (const [key, v] of TRIAGE) {\n  if (v.verdict !== 'DECLARED-NARROWER' || !v.spelling) continue;\n```\n\n`contradictedRows` is the only other mechanism that compares a recorded refusal against what the gate declares, and it fires on `r.covered` — a row the sweep finds REACHABLE, i.e. one whose declaration reaches an arbitrary file at the top of the root.\n\nSo a row that records a REFUSAL while its gate declares a hint at that root that is genuinely NARROWER than the bare word falls between the two: the declaration pin skips it by verdict, `contradicted` skips it by reachability, and every remaining pin asks the TREE, which a declaration does not move. The record can assert \"the population is a filter the idiom cannot spell\" while the gate's own source spells one, indefinitely, with `--self-test` green.\n\nThat is not hypothetical. It is what #15602 was: `check-declaration-mirrors` declared both sides of its mirror when PR #15601 landed, the row went on recording REFUSE-UNSPELLABLE, and nothing anywhere reddened. That card fixes the ROW. This one is about the missing mechanism, which the same docblock already names in the general case: \"only re-measuring catches this class\".\n\n## Measured, at commit `e581457b`\n\nAsking the question the missing pin would ask — for every REFUSE-* row, does its own gate declare any hint at that row's root, read through `auditSource` — gives exactly two rows today:\n\n```\nDECLARES  REFUSE-UNSPELLABLE  check-declaration-mirrors.mjs SCRIPTS_DIR scripts\nDECLARES  REFUSE-UNSPELLABLE  check-driver-conformance.mjs CASE_SETS_DIR packages\n```\n\nThe first is #15602 and is being fixed there. **The second is a FALSE POSITIVE, and it is the whole design problem this card has to solve.**\n\n## Why the obvious pin is wrong\n\nHints are declared **per FILE**, one array beside the constants. `check-driver-conformance.mjs` carries TWO rows at the `packages` root:\n\n- `DRIVERS_DIR packages` — DECLARED-NARROWER, and the declaration is ITS declaration;\n- `CASE_SETS_DIR packages` — REFUSE-UNSPELLABLE, whose recorded reason already says so in as many words: \"Its sibling constant took the escape; this one has nothing honest to declare\".\n\nA file-level read cannot tell those two apart, so a naive \"a REFUSE row whose gate declares at that root is contradicted\" reds a row that is correct, and correct for a reason already recorded. Attributing a declared hint to one CONSTANT rather than to the file is information the `ROOT_DIR_WATCH_HINTS` idiom does not carry today.\n\n⇒ So this is a real edit with a decision in it, not a pin to bolt on. Three routes a fixer should price rather than inherit:\n\n1. **Attribute by coverage, not by file** — ask whether any declared hint COVERS the population that row's constant names. Needs the row's population, which the map has only as prose plus a number.\n2. **Extend `omits` downward** — let a REFUSE row name the sibling declaration it is deliberately not claiming, the way a DECLARED-NARROWER row names a hint it passes over. Cheapest, and it puts the existing recorded sentence under a pin that re-checks it every run.\n3. **Attribute in the idiom** — carry the constant beside the hint at the declaration site. Widest blast radius: it touches every gate that declares, and `check:watch-hint-literal` with them.\n\n⛔ Not started here: #15602's scope was the row, and adding a pin that forces a re-decision on rows nobody measured is wider than the authorisation sentence that card ran under.\n\n## Why the priority is low, stated rather than assumed\n\nNothing reds today and nothing mis-runs: this map feeds no dispatch prompt, and the CI cost of the class is zero. What it costs is the map's trustworthiness — a recorded refusal that is false at its own gate's source, which is the defect class the file exists to make visible, arriving one level up inside the instrument.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

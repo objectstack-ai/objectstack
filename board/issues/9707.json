@@ -1,0 +1,29 @@
+{
+  "number": 9707,
+  "kind": "issue",
+  "title": "[finding] The whole 520 KB `@objectstack/lint` entry rides the console's eagerly-loaded vendor chunk, to serve one advisory rule — and its `module`/`fs`/`path` imports are browser-stubbed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T16:08:34Z",
+  "updated_at": "2026-08-27T17:00:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9707",
+  "body": "Out-of-scope finding from the #9659 measurement round (the per-package verdict on the four `@objectstack/*` packages the console resolves from objectui's lockfile). Nothing here is a stale-copy problem — it is true of **both** the published and this tree's `@objectstack/lint`, so #9659's injection question does not touch it.\n\n## Measured\n\nBuilt the console at pin `82a94170c405` from framework `origin/main` @ `ed4ca5999` (`scripts/build-console.sh`, unmodified), then read the emitted chunks:\n\n- objectui's only consumer of the package is `packages/app-shell/src/preview/capabilityLint.ts`, and it is deliberately **lazy** — `const mod = await import('@objectstack/lint')`, feature-detecting exactly one export, `validateCapabilityReferences`, as a pre-publish advisory pass.\n- Despite that, the package lands in `assets/vendor-objectstack-CDXqm-hg.js`: **5.6 MB raw / 1.7 MB gzipped, the largest chunk in the app**, and that chunk is a **static** import of the entry chunk `index-*.js` (which `index.html` loads). So the lazy import buys nothing — every console page load downloads and parses the linter.\n- The lint share of it is the package's `.` entry: 520 KB. Measured by string sampling, 18 of 18 literals unique to `dist/index.js` and 161 of 173 literals the package carries are present in the bundle. `dist/runtime.js` is **not** separately present (it is a strict subset — 0 runtime-only literals anywhere in the assets).\n- Every console build emits three browser-externalization warnings naming lint by path — `module`, `path`, `fs`, all statically imported by `dist/index.js` (`createRequire`, `dirname`/`join`, `existsSync`/`readFileSync`). Vite replaces them with browser stubs.\n- The heavy node-only dependencies themselves (`sucrase`, `typescript`) are **not** bundled: lint reaches them through `createRequire` at call time, and the code that does is not on the console's path. So the cost is lint's own bytes, not the transpilers'.\n\n## Why it is worth a card\n\nThe console pays ~520 KB eagerly for one pure `(stack) => findings[]` function that is called once, at publish time, in the metadata designer. The package has no browser-safe entry that offers the authoring rules without the node-only surface: the exports map is `.` and `./runtime`, and `.` is the one that carries both.\n\nTwo candidate fix sites, and they are in different repos, which is why this is filed as a finding rather than a fix:\n\n1. **Framework side (here)** — give `packages/lint` an entry that carries the pure authoring rules without `module`/`fs`/`path`, so a browser consumer can import that instead. This is the ADR-shaped half: the export map is our contract, and today it forces a browser consumer to take node-only code.\n2. **objectui side** — the eager placement is objectui's `advancedChunks` rule (`VENDOR_OBJECTSTACK_TEST` in `apps/console/vite.config.ts`) folding a lazily-imported package into a chunk the entry statically imports. Even with fix 1, that rule is what turns \"lazy\" into \"eager\". Not filed there yet — it needs the maintainer's call on which half moves first.\n\nNo user-visible break is measured: the stubbed builtins are never reached on the console's path, and the advisory lint works. This is bundle weight and a contract-shape observation, not a bug.\n\nRefs: #9659 (the measurement round this came out of), #8134 / #9660 (the `OBJECTSTACK_SPEC_DIST` injection, which is what puts a second, injected `@objectstack/spec` in the same chunk).\n"
+}

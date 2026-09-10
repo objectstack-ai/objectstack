@@ -1,0 +1,32 @@
+{
+  "number": 16094,
+  "kind": "issue",
+  "title": "lint: `liveness-dead-property` and `liveness-live-elsewhere-property` cannot fire on 17.3.0 — 90 `dead` + 1 `live-elsewhere` ledger rows and not one sets `authorWarn`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T00:33:07Z",
+  "updated_at": "2026-09-07T10:19:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16094",
+  "body": "Measured on the **pinned `@objectstack/lint@17.3.0` + `@objectstack/spec@17.3.0`** artifacts as installed by `objectstack-ai/hotcrm`, ⛔ not on the platform source tree. Filed unassigned by the hotcrm step-3 rule survey (hotcrm#1613); the local assertion currently standing in for these stays in place there.\n\n## The gap\n\n`lintLivenessProperties` only considers a ledger row when `shouldWarn` accepts it:\n\n```js\nfunction shouldWarn(entry) {\n  if (!entry) return false;\n  return entry.authorWarn === true || entry.status === \"experimental\";\n}\n```\n\n`describe(entry)` then maps `status: 'dead'` to `LIVENESS_DEAD_PROPERTY` and `status: 'live-elsewhere'` to `LIVENESS_LIVE_ELSEWHERE_PROPERTY`. Both branches are unreachable on this pin, because no row with either status opts in.\n\nEnumerating every `props` entry (children included) across all 36 files in `@objectstack/spec/liveness/`:\n\n```\nstatus histogram: live 636 · dead 90 · planned 14 · experimental 5 · live-elsewhere 1 · (unset) 34\n\nevery row shouldWarn accepts:\n  action.json       operation             planned      authorWarn: true\n  action.json       patch                 planned      authorWarn: true\n  field.json        relatedListFilter     planned      authorWarn: true\n  object.json       externalSharingModel  planned      authorWarn: true\n  translation.json  flows                 planned      authorWarn: true\n  agent.json        lifecycle             experimental\n  agent.json        memory                experimental\n  agent.json        guardrails            experimental\n  agent.json        structuredOutput      experimental\n  tool.json         outputSchema          experimental\n```\n\nTen rows, all `planned` or `experimental`. **Zero** `dead`, **zero** `live-elsewhere`. So the only rule ids the liveness linter can emit today are `liveness-planned-property` and `liveness-experimental-property`; the other two are dead code paths against this ledger, and `authorWarnedProperties(type)` returns a non-empty set for exactly three types (`object`, `field`, `action`).\n\n## Measurement, with a working control\n\nOne committed tree (hotcrm at `a0362a37`), one injection at a time, restored by blob hash. Clean-tree baseline: `0 error(s), 17 warning(s), 12 suggestion(s)`, exit 0.\n\n| injection | result |\n|:--|:--|\n| **control** — `externalSharingModel: 'private'` on `crm_account` (a row that DOES set `authorWarn`) | `liveness-planned-property` **warning**, exit 0 |\n| a schema-legal `list.tabs: [{ name, label }, …]` on `crm_account`'s list view | **no `liveness-*` finding** — 17 warnings, exit 0, byte-identical to baseline |\n\nThe control fires in the same harness on the same command, so the second row is a reading about the ledger, not about the linter being off.\n\n## The second half, and it points the other way\n\n`hotcrm` carries `test/view-tab-label-inert.test.ts`, which asserts that no `list` / `listViews` block declares `tabs` at all. Its premise (hotcrm#1307) is that the object-view switcher never reads `list.tabs`, so authoring one is inert metadata. The pinned ledger disagrees:\n\n```\nview.json   list.tabs   status: live\n```\n\nSo even if the `dead` rows were opted in, this particular key would be judged **live** and the rule still would not fire on it. One of the two readings is wrong and it would be good to know which — that is a question for whoever owns `view.json`, not something this survey can settle. (Note `list.tabs` is schema-accepted with member shape `{ name, label }`; a `{ key, label }` member is refused outright by `ViewTabSchema`, which is a different mechanism.)\n\n## Suggested direction, not a prescription\n\nTwo separable asks:\n\n1. Decide whether the `dead` and `live-elsewhere` verdicts should imply `authorWarn` rather than requiring a per-row opt-in. Ninety rows carrying a verdict the author lint can never surface is a large silent surface, and ADR-0049's enforce-or-remove loop is exactly the consumer that wants it.\n2. Re-derive `view.json`'s `list.tabs` verdict against the shipped switcher.\n\n⚠️ Both `LIVENESS_DEAD_PROPERTY` and `LIVENESS_LIVE_ELSEWHERE_PROPERTY` are currently untestable end to end for the same reason, so whichever way (1) goes, a pin proving each id can be produced would keep this from regressing quietly.\n\n## Related, and why this is not a duplicate\n\n- #14057 (closed) — `describe()` had not been taught the `live-elsewhere` verdict and would throw \"the day such a row opts into `authorWarn`\". That card anticipated this exact state from the other side; it fixed the throw, not the reachability. On this pin no row has opted in, so the branch is still never taken.\n- #15080 (open) — flipping `ActionSchema.operation` / `patch` from `planned` to `live`. Different rows, different direction.\n- #7079 (closed) — the array fan-out having \"no warned subject left\" is the same shrinking-opt-in-set symptom, one helper down.\n\nRefs: hotcrm#1613 · hotcrm#1582 (the family card) · hotcrm#1307 (the `list.tabs` premise)"
+}

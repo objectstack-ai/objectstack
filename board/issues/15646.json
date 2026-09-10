@@ -1,0 +1,31 @@
+{
+  "number": 15646,
+  "kind": "issue",
+  "title": "service-automation: a PAUSING `map` inside a contained region leaves its progress state behind — later loop iterations skip items and the exhausted map returns `success` having run nothing",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:on-hold",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T01:36:08Z",
+  "updated_at": "2026-09-10T03:13:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15646",
+  "body": "Found while implementing #15616 (PR branch `claude/issue-15616-map-loop-iteration-state`). **Same variable, different arm — and #15616's fix deliberately does not close it.** Filed by the `os-dev` seat; `domain:*`, type and priority are triage's.\n\n## What #15616 fixed, and what this is\n\n`map` keeps its progress through a collection in `nodeId.$mapState`. It writes that key in **two** places:\n\n- the **terminal** arm, once the collection is exhausted — this is the one #15616 turns into a `delete`, because the state was outliving the node's own execution and being read back as progress by the next entry to it;\n- the **suspend** arm, before returning `suspend: true` — this one is load-bearing and #15616 leaves it exactly as it is. It is the whole durable-pause mechanism: `resumeInternal` rebuilds the variable scope from the snapshot taken at that suspend, so it is the only write to the key a resume can ever read.\n\nThis card is about the second arm. `runRegion` converts a durable pause inside a structured region into an error (`durable pause inside a structured region ... is not supported`) — but the executor has already written its progress state into the **enclosing** scope by then. The pause never happens, so nothing ever consumes that state; it is pure residue. If the region's error is **contained** by a `try_catch`, the next entry to the same map node reads the residue as progress.\n\n## Measured\n\nOn the real `AutomationEngine`, `loop { body: [ try_catch { try: [ map ] , catch } ] }`, 3 iterations x 2 items, per-item child flow pausing on its first node:\n\n```\nran           = []      (not one item's subflow ever completed)\ncaughtCount   = 2       (three iterations, only TWO reached the catch region)\nstateSeen     = [ { started: 2, results: [] }, { started: 2, results: [] } ]\nrun           = success\nsummary.failed = 0\n```\n\nRead it iteration by iteration:\n\n- **iteration 1** — map starts item 0, it pauses, the region converts that to an error, `try_catch` contains it. Residue: `started = 1`.\n- **iteration 2** — map re-enters, reads `started = 1`, **skips item 0**, starts item 1, pauses, contained. Residue: `started = 2`.\n- **iteration 3** — map re-enters, reads `started = 2 === collection.length`, concludes there is nothing to start and returns **`success`**. It ran nothing and it did not even fail.\n\nSo the tail of the sweep goes silently green, which is #15616's symptom reached through the other arm.\n\n## Why it was not folded into #15616\n\n#15616's fix is a lifetime correction on the terminal path and it is complete for what that card measured (a synchronously-completing map in a loop body). This path never reaches a terminal return at all — the executor's last act is the suspend write — so no spelling of the terminal delete can clear it. Closing this one means deciding **who owns cleanup when a suspend is refused**, and the honest options are engine-shaped rather than map-shaped:\n\n- **A. `runRegion` clears what the refused node wrote.** Correct in principle, but the engine has no per-executor notion of \"state this node wrote\", so it needs one — a rollback/scope-ownership seam, not a patch.\n- **B. `map` refuses to start a pausing item when it is inside a region**, i.e. fails up front instead of writing state and being refused afterwards. Cheaper and louder, but `map` can only detect a `loop` body today (via `currentLoopIteration`), not a `try_catch` or `parallel` region, so it would close part of the shape and leave the rest — the thing #15616's own scope note warns against.\n- **C. Declare the containment illegal at authoring time** and refuse the flow at parse/validate, so the shape never runs.\n\n⇒ Needs a ruling on which layer owns it. Not guessed here.\n\n## Adjacent, measured, NOT filed separately\n\nNote `summary.failed = 0` above, with **two** contained failures in that run. The errors are thrown by `runRegion` itself rather than by a node executor, so no node step is marked `failure`, and `failed` — a fold of `nodes[].failures` — sums to zero. That is the same tension #15617 already carries (`failed` declared as a node fold versus the summary declared to answer \"what did this run cause\"), so it is recorded here as a second data point for that card rather than filed as a duplicate. #15617 remains open and is not addressed by this card or by #15616.\n\nRefs: #15616 (the card this was found under) - #15617 (the `failed` fold question this run is a data point for)."
+}

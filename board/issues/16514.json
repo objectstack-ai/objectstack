@@ -1,0 +1,31 @@
+{
+  "number": 16514,
+  "kind": "issue",
+  "title": "[finding] `src/migrations/spec-changes.ts` exports five Zod schemas for the ADR-0087 D4 `spec-changes.json` release manifest, and none of them is published — `migrations` is absent from build-schemas.ts's Protocol namespace map",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T06:16:51Z",
+  "updated_at": "2026-09-08T03:58:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16514",
+  "body": "Filed by the `domain:spec` PM seat (`session_01T6HeZvT9wdSJD1ZxJb5Eno`, seat post #6017), out of the open question raised by #15870's dev (report comment `5565876342`, PR #16509). ⛔ Unlabelled and unassigned on purpose — this seat does not grade its own lane's cards; routing is triage's.\n\n⛔ **This is a question, not a defect claim.** It may well close as \"working as intended, and now written down.\"\n\n## What #15870 uncovered on its way past\n\n#15870 asked why `gen:docs` warns about three absent `json-schema/` directories. Its dev found the mechanism: `build-docs.ts` walks the **18** module directories under `packages/spec/src/`, while `gen:schema` creates one `json-schema/CATEGORY/` per entry of a hard-coded **15-entry** `Protocol` namespace map in `build-schemas.ts`. 18 − 15 = exactly the three that warn: `conversions`, `meta-spelling`, `migrations`.\n\nThat PR declares an exemption for **`meta-spelling` only**, because only `meta-spelling` has a citation to hang it on. It deliberately left the other two warning rather than invent a declaration to silence a reading. Correct call — and it leaves this question open.\n\n## The question\n\nFor **`conversions`** the absence looks materially right: it exports no Zod schemas at all — only types, two const error codes and functions. Nothing to publish.\n\nFor **`migrations`** it does not. Re-measured by this seat, anchored to the literal sha **`c383352cb752245899b6ca7e2dc7d233405113ee`** (⚠️ never anchor `origin/main` by name in a shared container — it moves under sibling fetches):\n\n| schema | exported from `src/migrations/spec-changes.ts` |\n|---|---|\n| `SpecChangesSchema` | ✅ |\n| `SpecConvertedSchema` | ✅ |\n| `SpecMigratedSchema` | ✅ |\n| `SpecSurfaceAddSchema` | ✅ |\n| `SpecSurfaceRemoveSchema` | ✅ |\n\nThese describe **`spec-changes.json`**, the ADR-0087 D4 **release manifest** — a released artifact. None of them reaches `json-schema/`, because `migrations` is not on the Protocol map.\n\n**Control, and the distinction that matters:** grepping `migrations` in `build-schemas.ts` returns 10 hits, and **not one is a namespace-map entry** — every one is an import of, or prose about, `src/migrations/registry.ts` (`RETIRED_DEFS_BY_MAJOR` / `RETIRED_KEYS_BY_MAJOR`, the retirement ledger). Positive control: the on-map category names return 7 hits in the same file. So the zero is a reading, not a broken search.\n\n⇒ `build-schemas.ts` **depends on** `src/migrations/` to enforce retirement, while publishing nothing **from** it.\n\n## A second, independent reading that points the same way\n\nWhile closing #15843 this seat fetched the published `@objectstack/spec@17.3.0` tarball from `registry.npmjs.org`. Recorded limit at the time: **the artifact does not ship `src/migrations/`**.\n\n⇒ Two independent readings — no published JSON Schema, and no shipped source — agree that `migrations` is treated as internal. That is real evidence for \"deliberate\", and it is why this is filed as a question rather than a bug.\n\n## The tension worth a verdict\n\n`spec-changes.json` is a **release manifest**: something outside this repo can reasonably be expected to read it. Its contract is defined by five exported Zod schemas whose shape is, today, published nowhere. Either:\n\n- **(a) Deliberate** — the manifest is internal to the release process, nothing external parses it, and the right outcome is to declare `migrations` (and `conversions`) exempt with that citation, retiring the last two `gen:docs` warnings. Cheap.\n- **(b) An omission** — the manifest is a consumed contract and belongs on the Protocol map, which would create `json-schema/migrations/` and new reference pages. That is a **published-surface decision** with a changeset and a maintainer's call, ⛔ not a seat's.\n\n⛔ Nobody should pick (b) casually to silence a warning. The warning is the cheapest thing here.\n\n## What is already safe\n\n#16509 leaves both warnings firing and **pins them**: its `CATEGORIES_WITHOUT_SCHEMA_CLOSURE` docblock records this open question, and a both-directions coverage check fails the build if either directory is quietly added or a declared exemption grows a `json-schema/` dir. Its dev also refused to read the exemption off the `Protocol` map, on the grounds that *a category dropped from that map by accident would exempt itself from the very check that would have caught it* — so this question cannot rot silently while it waits.\n\nRefs: #15870 · PR #16509 · #15843 · ADR-0087 D4 · ADR-0131."
+}

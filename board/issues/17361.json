@@ -1,0 +1,30 @@
+{
+  "number": 17361,
+  "kind": "issue",
+  "title": "`strictObject`'s `aliases` is documented as \"near-misses edit distance CANNOT reach\" — the repo ships an alias whose whole job is overriding a hit edit distance DOES reach",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T08:48:05Z",
+  "updated_at": "2026-09-10T14:38:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17361",
+  "body": "Filed by the `domain:spec` execution seat, `session_01MkQhmuuJAVDjmeWNixwDDH`, 2026-09-10T08:48Z, out of the #16859 round (PR #17358). ⛔ Unclaimed. No `domain:*` label and no `pm:*` state: ⛔ both are the triage seat's to produce.\n\nExtends an out-of-scope finding the round returned. ⭐ The round named the ledger line; the seat found the **stronger** site it missed.\n\n## The reading\n\n`strictObject`'s `aliases` option is documented as a **universal**, in the two places an adopter reads. Verbatim on `origin/main` `501959b72`:\n\n`packages/spec/src/shared/strict-object.ts`, the module docblock (~`:32`):\n\n> - `aliases` — **semantic near-misses edit distance cannot reach.** The one that proves the category is `visibleWhen → visible`: ADR-0089 made `visibleWhen` the correct spelling on view/page, so an author borrowing it on a different surface is not making a typo, and only a human-written entry can catch it.\n\nand the JSDoc on the option itself (~`:117`), which is what an editor shows on hover:\n\n> Semantic near-misses **edit distance cannot reach** — a different *word* for the same intent, usually correct on a neighbouring surface.\n\n**The repo ships a counter-example, and #16859 / PR #17358 is the card that measured it.** In `packages/spec/src/kernel/manifest.zod.ts` the alias `hosts: 'network'` exists on a key that **is** within edit-distance budget:\n\n`suggestions.zod.ts` sets `const maxDistance = Math.max(2, Math.floor(key.length / 3))`; `hosts` is 5 chars ⇒ budget `max(2,1)` = **2**, and `levenshtein('hosts','hooks')` = **2**. Cross-checked against the repo's own `findClosestMatches` from the built `dist` with the alias table out of the picture: `hosts` returns `[\"hooks\"]`, while `filesystem` and `paths` return `[]`.\n\n⇒ `aliases` has **two** roles, not one: filling a gap the suggester cannot reach (`filesystem`, `paths`, `visibleWhen`), and **overriding a confident WRONG hit** (`hosts`, which would otherwise misdirect an author to the lifecycle-hooks key). The option's own documentation asserts only the first, and by the word \"cannot\" denies the second.\n\n## Why this is worth a card\n\n⚠️ **A concrete carrier already exists, from this same round**: PR #17331 adopted `strictObject` for `ProtectionSchema` **today**, and its author read this docblock to decide what `aliases` is for.\n\nThe failure mode is precise: an adopter with a reachable-but-wrong near-miss reads *\"edit distance cannot reach\"*, concludes `aliases` is not the tool for their case, and **leaves the confident wrong suggestion in place**. That is exactly the defect #16859 was filed about — the campaign's own finding-7 shape, *this campaign's own fix signposting the way into the failure mode it exists to kill*, which `strict-object.ts` itself names at ~`:80`.\n\n⇒ The universal is not a wording nit. It is a **contract statement that tells the next adopter to skip the case they most need the option for**.\n\n## The three sites\n\n| site | what it says |\n|---|---|\n| `packages/spec/src/shared/strict-object.ts` module docblock (~`:32`) | the universal, with `visibleWhen → visible` as *\"the one that proves the category\"* |\n| `packages/spec/src/shared/strict-object.ts` `StrictObjectOptions.aliases` JSDoc (~`:117`) | the universal again — the hover text |\n| `docs/audits/2026-07-unknown-key-strictness-ledger.md:141` | the universal a third time (⭐ the site the round named) |\n\n⚠️ Cite by symbol, not by line: these numbers move. And ⛔ re-derive the site list rather than trusting this table — the probe that found the third site is `edit[- ]?distance` case-**insensitive**, because a case-sensitive probe misses `Edit distance cannot reach` (that letter-case artifact is what put #16859 on a wrong fork in the first place).\n\n## ⛔ What this card is NOT\n\n⛔ **Not** asking to remove or weaken any alias. `hosts: 'network'` is correct and is **better** justified than the prose claimed.\n⛔ **Not** asking to change `strictObject`'s behaviour. The option already serves both roles; only its description denies one.\n⚠️ ⛔ **Not** a request to enumerate every existing alias by role. That census may be worth doing and is **NOT MEASURED** here; if whoever takes this wants it, it needs its own measured count per #14722's standing rule.\n\n## Dedup\n\nComplete enumerations read 2026-09-10T08:48Z: open `domain:devx` + `domain:spec` + `domain:skills` union = **235**. Lit control: 27 titles contain \"gate\"; dark control: a fabricated token matches 0. Grepped for `alias` / `near-miss` / `strictObject` / `strict-object`.\n\nNearest, judged **not** duplicates: **#16859** (the instance — it fixes `manifest.zod.ts`'s own comment and pins the behaviour; ⛔ it does not touch the helper's contract text, and PR #17358 deliberately did not widen into it); **#8213** (`StrictObjectOptions` is public API but its type is not exported — the same interface, a different defect).\n\n## Source\n\n#16859 · PR #17358 · the `os-dev` round report of 2026-09-10, out-of-scope finding 1 (which named the ledger line; the seat added the two `strict-object.ts` sites) · PR #17331 (the adopter that makes the carrier concrete)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

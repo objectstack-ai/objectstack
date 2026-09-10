@@ -1,0 +1,31 @@
+{
+  "number": 15009,
+  "kind": "issue",
+  "title": "[repo:hotcrm] Install the half-state patrol in hotcrm — workflow copy, anchor issue, repository variable (hotcrm half of the ruled 纳入)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:queue",
+    "priority:p2",
+    "repo:hotcrm",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-03T17:12:11Z",
+  "updated_at": "2026-09-03T17:12:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15009",
+  "body": "Seam card, filed by the `domain:skills` seat (session `session_019RfFHiRCSs3JXLK4cwcfox`, os-steve) for the **`repo:hotcrm` execution seat** as its named reader. hotcrm's API is refused for this session (measured `403` on the repository and labels endpoints against `200` on objectstack), so the hotcrm half of the ruled install is handed over here rather than filed into hotcrm's own queue.\n\n## What was ruled\n\nMaintainer ruling recorded on the parent card (director seat, summon 11, 2026-09-03, verbatim 「其他同意」 adopting 纳入): hotcrm runs the same half-state patrol the platform repos run — a workflow copy in hotcrm plus a pinned anchor issue whose rows the hotcrm seat reads at round open; report-only, no strip-on-close, no bulk relabel of the closed carriers.\n\n## What this card asks the hotcrm seat to do\n\nExecute the install recipe the measurement flight delivered — the \"Part B\" section of the `os-dev-report` comment on the parent card (comment id 5529279872), measured against a read-only hotcrm clone at `18444c8`. In one line each:\n\n0. label prerequisite first: PR hotcrm's governed `.github/labels.yml` to declare `tracking` (its only anchor label and an H13 exemption; the fleet seeder does not create it — see the queued card on the seeder);\n1. copy THREE files unchanged from objectstack `main` after the objectstack half lands: the sweeper, `scripts/invoked-as.mjs` (the sweeper imports it), and the workflow; verify with the sweeper's `--self-test` in the hotcrm tree (expect 2062 cases, exit 0);\n2. open the install PR with `skip-changeset`;\n3. open the anchor issue (title, single `tracking` label, pinned, first body line = the machine-findable marker, exactly as the recipe spells it);\n4. set the repository variable `HALF_STATE_ANCHOR_ISSUE` to the anchor number;\n5. prove it by one `workflow_dispatch` run: sweep exit 0, anchor body rewritten with a fresh `Swept` line.\n\nThe form is a verbatim copy: the upstream workflow declares no `workflow_call`, so `uses:` is structurally unavailable; the checkout variant would pin hotcrm to a floating upstream ref and is not taken.\n\n## Decisions this card carries for the hotcrm seat (not decided here)\n\n- **Priority-axis spelling.** hotcrm spells it `prio:p0/p1/p2`; the shared sweeper reads `priority:*`. The patrol installs and runs either way (an absent label is a blind dimension, never an error — measured), but H10 can never fire there and H11 misses `prio:*` as a signal. The flight's recommendation, argued on the four axes in the report: **A** — hotcrm aligns to the fleet vocabulary, relabelling only the open `prio:*` cards (the hotcrm seat's own 11:19Z census counted six; not independently verified here) and adding `priority:*` to hotcrm's labels manifest; ⛔ no sweep over the closed archive, per the earlier ruling that refused a bulk relabel. B (a per-install prefix knob in the shared tool) is consumer-side tolerance for a producer-side divergence; C (document the gap) is the fallback if the census is stale. If the hotcrm seat reads this as human floor, it goes to the maintainer through that seat's own decision batch.\n- **`PM_SWEEP_CLOSED_FLOOR`.** Decided by the skills seat as an execution detail: install with no floor, read one run's census line, add a floor only if the count is dominated by pre-convention closes (the row-per-carrier flood the floor was invented against has been folded to a count, and the closed-issue window is three days).\n- **Stale bot.** hotcrm's stale workflow does not exempt `tracking` and closes after 7 days; the same hazard is queued for objectstack's own anchor. Decide whether the hotcrm anchor also needs `pinned` before the first 7 days elapse.\n\n## Boundaries\n\n⛔ Nothing in the recipe writes a label or closes a card in hotcrm beyond the anchor's own `tracking`. ⛔ No local re-implementation of the sweeper. The objectstack half (the corrected adopt list and path filter) is PR 15000 on the parent card, `Part of` that card; the parent stays open until this card closes.\n\nRefs: parent objectstack card 14881 (ruling comment 5523302416, recipe comment 5529279872) · seeder gap card 15001 · stale-bot card 15002 · objectstack anchor 9857.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

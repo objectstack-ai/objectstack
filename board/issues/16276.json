@@ -1,0 +1,31 @@
+{
+  "number": 16276,
+  "kind": "issue",
+  "title": "[repo:objectui] Page `object-grid` block renders the row-hover 「打开 ›」 button but clicking it does nothing — same control navigates to the record on the standard list view",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p2",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T09:36:36Z",
+  "updated_at": "2026-09-08T05:32:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16276",
+  "body": "## Summary\n\nAn `object-grid` block placed on a structured page renders the same per-row hover affordance as the standard object list — the row number turns into a 「打开 ›」 button on hover — but clicking it does **nothing**: no navigation, no drawer, no console error, no network request. On the standard list page (`/_console/apps/<app>/<object>`) the identical button navigates to `/_console/apps/<app>/<object>/record/<id>`.\n\nUsers read the affordance as \"open this record\" (it is the only visible way out of the row), click it, and conclude the page is broken. This surfaced the first time a real user touched the page.\n\n## Minimal reproduction\n\nPlatform 17.2.0 console.\n\nPage (`definePage`, `type: 'home'`, `kind: 'full'`) with a component:\n\n```ts\n{ type: 'object-grid', properties: { objectName: 'kpi_entry_line', editable: true, columns: [...] } }\n```\n\n1. Open the page as any user; hover a row → the `#` cell shows the button `absolute inset-0 hidden group-hover/row:flex … 打开 ›` (it has an `onclick`).\n2. Click it.\n\nObserved (measured via script on the page): `location.pathname` unchanged, `[role=dialog]` count 0, no error events, no new requests. Four such buttons exist for four rows; all inert.\n\nControl: same object, standard list page, same button → `location.pathname` becomes `/_console/apps/com.objectstack.kpi/kpi_entry_line/record/<id>`.\n\n## Expected\n\n- Either the button navigates to the record (page or drawer) with the page as the `from` breadcrumb, like the list view does, or\n- the block does not render the affordance when it has no open handler (and exposes a property such as `rowClick: 'record' | 'none'` so the author can choose).\n\n## Environment\n\n`@objectstack/console` 17.2.0 · `objectstack dev` · Chromium 1440×900 · zh-CN. App: objectstack-ai/kpi, page `kpi_home`, block on `kpi_entry_line` (also reproduced on the second block bound to `kpi_entry_sheet`)."
+}

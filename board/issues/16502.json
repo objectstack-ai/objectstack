@@ -1,0 +1,31 @@
+{
+  "number": 16502,
+  "kind": "issue",
+  "title": "[Decision] A commit-trailer red is unclearable by any permitted act, and the gate's own repair requires a MANUAL merge the lane forbids — which rule yields?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:blocked",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T04:57:43Z",
+  "updated_at": "2026-09-07T06:20:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16502",
+  "body": "## 维护者速读\n\n**事情**：一个 dev 把 `Fixes #14895` 写进了 **commit message**（应该只写在 PR 正文里）。门禁 `Part-of PR must not also close its card` 因此变红，PR [#16470](https://github.com/objectstack-ai/objectstack/pull/16470) 卡住。\n\n**麻烦在于这个红清不掉**：门禁检查 PR 上的**每一条** commit，所以再推新提交只会增加问题、不会减少（已用门禁自己的判定函数跑了四种反事实证明）。唯一能去掉它的两种手段，一是改写历史 force-push（`AGENTS.md` 三处无条件禁止），二是重开一个 PR。\n\n**而且门禁自己说它就该是红的**：它的文件头写着「已推送分支上的红，是在正文里、在合并那一刻修的」。但**合并那一刻的修法是人工的** —— 仓库设置 `squash_merge_commit_message` 是 `COMMIT_MESSAGES`，所以要人在合并按钮那里手动把 squash 正文换成 PR 正文。自动合并不会做这一步。\n\n**于是两条成文规则撞上了**：车道规定「每一个 check 全绿才能入队」且「队列是唯一被认可的落地路径，永不队列外合并」；门禁规定的补救却要求一次人工合并。两条都遵守是不可能的。\n\n**本 PR 的实际风险是零**（已测）：正文和 commit 指向同一张卡、同一种关系，#14895 无论如何都会正确关闭。所以这是**先例问题**，不是本 PR 的安全问题。\n\n**你要做的**：选 A / B / C / D（可多选，C+D 是我的推荐）。\n\n---\n\n`Governing text:`\n- `.claude/skills/pm-dispatch/SKILL.md` → 入队与落地：「入队资格 = PR 上每一个 check 全绿，⛔ 不是 required 子集」「队列是唯一被认可的落地路径，⛔ 永不队列外合并」\n- `scripts/check-partof-closing-keyword.mjs` RULE 2 及其文件头 `:108-112`\n- `AGENTS.md:464`、`AGENTS.md:474`、`.claude/agents/os-dev.md:63`（禁止改写已推送历史）\n\n## 测得的事实（⛔ 全部实测，非推断）\n\n| 事实 | 读数 |\n|:--|:--|\n| 该门禁是否必查 | **否**。main 的 required contexts 恰七个，不含它；`mergeable_state` = `unstable`，**不是** `blocked` |\n| 队列会不会被它挡 | **不会**。该 workflow 无 `merge_group` 触发器，按设计无法在队列构建上报告 |\n| 推新提交能否清红 | **不能**。门禁自身判定函数四例反事实：真实2提交=1、追加任意干净提交=**1**、去掉该提交=0、单条干净提交=0 |\n| 合并那一刻的补救是否自动 | **否**。`squash_merge_commit_message` = `COMMIT_MESSAGES` |\n| 本 PR 落地的残余风险 | **零**。双载体同卡同关系 |\n| PR 其余健康度 | 33 个 check，27 success / 5 skipped / **1 failure**；门禁联合 57/57 绿，Artifact rosters 37/39 |\n\n## 四棱\n\n**① 实际业务需求** — #16470 是一个真缺陷的修复：`os i18n extract --check` 打印的\"重新生成\"命令会丢标志位，照它跑会写出**不同的 bundle**，下一次 `--check` 再失败并再打印同一条错命令 —— 一个本可一步自愈的失败被变成了死循环。修复已完成、已契约复审、门禁全绿（除这一条）。**它应该落地**，问题只是从哪条路落。\n\n**② 项目长远合理性** — 这是**类问题**，不是本 PR 的偶发。只要有 dev 把卡片 trailer 写进 commit，就会重现，而且每次都不可清除。选项 **D 是唯一触及根因的**：让门禁自己规定的补救变成自动发生，而不是依赖每次合并时有人记得手动改。A 和 C 都是本次绕过，不改变下一次。\n\n**③ 防 AI 写代码犯错** — RULE 2 存在的理由正是「AI 逐条诚实写的 commit message 被 squash 连成一条自相矛盾的落地文本，关掉了没人想关的卡」。⚠️ 但当前形态有个反向陷阱：**门禁的失败输出自相矛盾**（\"推送改写后的提交会重跑本检查\"紧挨着\"⛔ 不许 amend/rebase/force-push\"），只有文件头里才有化解。一个 agent 照失败输出行事，会被引向被三处规则禁止的动作 —— 这本身是 (c) 类陷阱。D 消除诱因；单独的 A/C 不消除。\n\n**④ 创业阶段不扩散** — 倾向最小动作。B（重开 PR）每次都要一整轮返工、新 PR 号、重跑全部 CI，为一个已测零风险的红付这个价，是最贵的。⛔ 不推荐把 B 变成常规通道。\n\n## 选项\n\n**A — 人工合并 #16470**，在合并按钮处手动把 squash 正文换成 PR 正文（门禁文件头写下的正是这条）。\n· 代价：破「永不队列外合并」。该规则是为合并串行化安全存在的，⛔ 不宜为一个装饰性的红破例。\n\n**B — 授权重开 PR**（相同 diff、干净 commit message），关闭 #16470。\n· 代价：一整轮返工。⭐ 澄清一点：**契约复审记录不会丢** —— 裁决锚在卡 #14895（评论 `5565241724` 与 `5564848115`），不在 PR 上；要重做的只是 27 个绿 check 和载体配对。\n\n**C — 允许本 PR 带这一个红入队**（门禁非必查、队列不受其阻）。\n· 代价：破「每一个 check 全绿才入队」。⚠️ 但该规则的前提是「非必查门的红要么是真缺陷要么是坏门」—— 这里是**第三种：按设计而红**，规则没有涵盖。所以这可能是**规则需要补一条**，而不是破例；补规则是 skills 车道的 PR，⛔ 不是我当场能改的。\n\n**D — 把 `squash_merge_commit_message` 改成 `PR_BODY`**（仓库设置）。\n· 让门禁自己规定的补救自动发生，此后这一类红不再需要任何人工步骤。⛔ 这是维护者的设置决定，我无权改。\n\n## 推荐：**C + D**\n\n**C** 落本 PR：门禁按设计而红、非必查、队列不受阻、残余风险实测为零，而 A 要破的那条规则（队列唯一）保护的是真实的合并安全，比 C 要破的那条更硬。\n**D** 修类问题：它把「记得手动改 squash 正文」从一条无人强制的纪律，变成一个设置。\n\n⇒ 若同意 C，我会另开一张 skills 车道卡，给入队规则补上「按设计而红」这第三种情形，**并**修正该门禁自相矛盾的失败输出（把文件头的化解写进输出里）。⛔ 这两处都是治理面文本，不由本席位自行改写。"
+}

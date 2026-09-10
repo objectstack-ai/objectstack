@@ -1,0 +1,30 @@
+{
+  "number": 17286,
+  "kind": "issue",
+  "title": "driver-memory: the stored-ARRAY value axis is still unrepaired outside the equality arm — $in/$nin, the text family and the ordering family answer one filter two ways, and the two exclusion arms answer it in the WIDENING direction",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T03:11:24Z",
+  "updated_at": "2026-09-10T15:00:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17286",
+  "body": "Found while landing #16838, which repaired the EQUALITY arm of the same axis. Filed unassigned; the fix is deliberately not in that PR, whose ruling was to fix the single line the card blamed and make both faces agree on it.\n\n## What is measured\n\n#16838 closed the stored-ARRAY value axis for equality only. Every other operator arm still reads a stored array as one opaque value, while `driver-memory`'s live query path (`InMemoryDriver.find`, through mingo) reads it as a set of members. So this package's two filter faces still answer one filter two ways, on five more arms.\n\nMeasured on this repo's own driver, both faces in one process, on the tree at `17058b6dc7` (the #16838 branch tip, so the equality row below is the repaired one and the control for the rest). Fixture, one row per id:\n\n| id | stored `tags` |\n|---|---|\n| 1 | `['a','b']` |\n| 2 | `['a']` |\n| 3 | `[['a']]` |\n| 4 | `'a'` — the scalar firing control |\n| 5 | `[null,'b']` |\n| 6 | `[]` |\n| 7 | `[5]` |\n\n| filter | live query path (mingo) | reference matcher | direction |\n|---|---|---|---|\n| `{ tags: { $in: ['a'] } }` | `1, 2, 4` | `4` | narrowing — members are invisible |\n| `{ tags: { $nin: ['a'] } }` | `3, 5, 6, 7` | `1, 2, 3, 5, 6, 7` | **widening** — rows that DO hold `a` survive an exclusion filter |\n| `{ tags: { $contains: 'a' } }` | `1, 2, 3, 4` | `4` | narrowing |\n| `{ tags: { $notContains: 'a' } }` | `5, 6, 7` | `1, 2, 3, 5, 6, 7` | **widening** |\n| `{ tags: { $startsWith: 'a' } }` | `1, 2, 3, 4` | `4` | narrowing |\n| `{ tags: { $gt: 'a' } }` | `1, 5` | `1` | narrowing (and `1` agrees only by the joined string `\"a,b\"` happening to sort the same way) |\n| `{ tags: 'a' }` — the equality arm | `1, 2, 4` | `1, 2, 4` | agrees, since #16838 |\n\nRow 4 answers identically on both faces in every case above: the filters run, so a disagreement is a disagreement and not a suite that never fired.\n\nThe two `$nin` / `$notContains` rows are the sharper half, for the reason #16838 recorded for its own false positive: a filter written to EXCLUDE returning a row it should not is, on an RLS read scope, a permission concern rather than a degraded filter.\n\n## Why it is a card rather than a note\n\nIt is the #5240 / #5328 / #5347 / #13549 / #16838 shape exactly — one filter, one package, two answers, nothing reported — and the package's whole refusal architecture exists to remove that class. `if (!rows.length)` cannot tell \"genuinely none\" from \"the predicate asked the wrong question\", in either direction.\n\nIt was deliberately left out of #16838: that card measured, and its dispatch ruled on, the single line `checkCondition`'s equality arm ended in. These arms are separate lines with separate cells, and at least three of them need a reading of their own rather than a mechanical edit — see below.\n\n## What is NOT decided here\n\nWhat each arm should MEAN against a stored array. Membership is the obvious reading for the two list operators, and it is what the live path gives. The text and ordering families are less obvious and mingo's answer is not self-evidently the right contract:\n\n- `$gt` against `['a','b']` — mingo matches when ANY element satisfies the comparison, so an array can be both greater than and less than the same comparand.\n- `$startsWith` / `$contains` against `[['a']]` — the live path matched the NESTED array (row 3), which the equality arm's ruling in #16838 deliberately does not do (one level only, matching mingo's equality semantics). So the live path is not internally consistent about descent either.\n\n`@objectstack/formula`'s record-at-a-time matcher, the sibling this face's conformance suites are held against, answers `false` for a stored array on every one of these arms, so converging on the live path here is not the free choice it was for equality.\n\n## Repro\n\nBoth faces, same rows, no build beyond the driver's own dependency closure:\n\n```ts\nimport { InMemoryDriver } from '@objectstack/driver-memory';\nimport { match } from '@objectstack/driver-memory/src/memory-matcher.js';\n\nmatch({ tags: ['a', 'b'] }, { tags: { $in: ['a'] } });   // false — the live path returns the row\nmatch({ tags: ['a', 'b'] }, { tags: { $nin: ['a'] } });  // true  — the live path excludes it\n```"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 491,
+  "kind": "pull_request",
+  "title": "Fix TypeScript compilation errors in security module",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-02T09:50:00Z",
+  "updated_at": "2026-02-02T10:09:30Z",
+  "closed_at": "2026-02-02T10:05:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-02T10:05:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/491",
+  "body": "CI build failing with 26 TypeScript errors in `packages/core/src/security/`. Root causes: interface/class name collision, Zod 4.x API changes, incorrect logger signatures, and Node.js environment type checks.\n\n## Changes\n\n- **Duplicate export resolution**: Renamed `PluginConfigValidator` interface to `IPluginConfigValidator` in `plugin-loader.ts` (class with same name exported from `security/`)\n\n- **Zod 4.x compatibility**: Changed `ZodError.errors` → `ZodError.issues`, added type parameter `ZodError<any>` for property access\n\n- **Logger signature fix**: Updated `logger.error(message, metadata)` → `logger.error(message, undefined, metadata)` to match 3-parameter signature `(message, error?, meta?)`\n\n- **Environment type guards**: Changed `typeof window` → `typeof (globalThis as any).window` to avoid Node.js compilation errors\n\n- **Test fixtures**: \n  - Fixed relative import paths in `security/` subdirectory tests\n  - Changed unsupported log level `'silent'` → `'error'`\n  - Added required `certified: false` field to `PluginCapability` test objects\n  - Fixed `getService` mock to use generic type parameter\n\n```typescript\n// Before\nlogger.error(errorMessage, { plugin: plugin.name, errors });\n\n// After  \nlogger.error(errorMessage, undefined, { plugin: plugin.name, errors });\n```\n\n```typescript\n// Before\nreturn error.errors.map(e => ({ ... }));\n\n// After\nreturn error.issues.map((e: z.ZodIssue) => ({ ... }));\n```\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21584866296/job/62190969307#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

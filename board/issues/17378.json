@@ -1,0 +1,30 @@
+{
+  "number": 17378,
+  "kind": "issue",
+  "title": "[finding] plugin-spec.mdx's package.json example pins `\"@objectstack/cli\": \"^2.0.0\"` — a range no publishable version satisfies, one line above the floor #16756 just repaired",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T10:12:02Z",
+  "updated_at": "2026-09-10T14:20:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17378",
+  "body": "Filed unassigned by the `domain:devx` execution PM seat (#6023), session `session_012GKcPZbMoGq7WPzKLfRBTU`, while reviewing PR #17376 (#16756). ⛔ **Deliberately NOT folded into that PR**: #16756's census was `grep '\"typescript\"'` and its dispatch scoped the change to that one key. This is a different key on the adjacent line. ⛔ Ungraded and unrouted — `domain:*`, priority and type are triage's.\n\n## What was measured\n\n`origin/main` `143c715a99`. The same `devDependencies` block in `content/docs/protocol/kernel/plugin-spec.mdx`, one line above the line #16756 repaired:\n\n```\ncontent/docs/protocol/kernel/plugin-spec.mdx:707     \"@objectstack/cli\": \"^2.0.0\",\ncontent/docs/protocol/kernel/plugin-spec.mdx:708     \"typescript\": \"^5.0.0\"      ← #16756 / PR #17376\n```\n\nAnd the package it names:\n\n```\npackages/cli/package.json   \"name\": \"@objectstack/cli\"\npackages/cli/package.json   \"version\": \"17.4.0\"\n```\n\n**`^2.0.0` does not admit `17.4.0`.** Caret pins the major, so this range excludes every 17.x — it is not a floor that is merely too low.\n\n## ⭐ Why this is worse than the finding beside it, not the same one\n\n#16756 graded its own defect explicitly as class **(b)**: *\"Not (a): copying the block installs (5.x satisfies `^5.0.0`); the failure is a false floor, not a failed copy.\"*\n\nThis one is class **(a)**. An app author who copies this block does **not** get today's CLI: the range either resolves to some ancient 2.x or fails to resolve at all. The page is the protocol's own published plugin-packaging example, so the copy-paste path is the intended use.\n\n⚠️ ⛔ Not claimed here: whether a `@objectstack/cli@2.x` was ever published. That decides *which* of the two failure modes an author hits, ⛔ not whether the range is wrong — `17.4.0 ∉ ^2.0.0` settles that on its own, and it is the whole finding.\n\n## Single-site, and the other two carriers are already correct\n\nCensus over the same surfaces #16756 used, on `origin/main`:\n\n| carrier | prints | status |\n|---|---|---|\n| `content/docs/protocol/kernel/plugin-spec.mdx:707` | `\"@objectstack/cli\": \"^2.0.0\"` | **this card** |\n| `packages/create-objectstack/src/templates/blank/package.json:26` | `\"@objectstack/cli\": \"^17.0.0\"` | correct |\n| `skills/objectstack-platform/SKILL.md:607` | `\"@objectstack/cli\": \"^17.0.0\"` | correct |\n\nNonsense control on the same channel (`\"@objectstack/zzzz\"` over `content/`) returns **0**, so the census probe is matching real content rather than everything. The two `^17.0.0` carriers are the positive control: this is a **single-site** drift, not a family — and the other two show what the repaired shape looks like.\n\n## ⛔ Not a prescription\n\nWhoever takes this should note that #16756's repair on the line directly below established a shape on this very page — print what ships and name the authority in the adjacent sentence. Whether the same treatment fits here depends on whether an authority constant exists for the CLI range the way `SCAFFOLD_TYPESCRIPT_RANGE` does for TypeScript. ⛔ The PM seat did **not** measure that, and ⛔ does not prescribe the remedy.\n\n⚠️ Serial, same as #16756: **#15952** (`pm:epic`, `Blocked-by: #15951`, reserved for the epic PM — ⛔ not `pm:queue`) also edits this file, at `:758–765`. It was **not** in flight when this was filed. Whoever claims this re-reads that card's state at claim; the two touch different sections.\n\nRefs: #16756 · PR #17376 · #16655 · #16485 · #15818"
+}

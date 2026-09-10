@@ -1,0 +1,31 @@
+{
+  "number": 16171,
+  "kind": "issue",
+  "title": "[repo:objectui] Form field `immutable: true` is not enforced on the edit dialog — the lookup stays fully editable after create, while `readonly` disables required lookups on the create form; no flag delivers create-then-lock",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p3",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T04:05:05Z",
+  "updated_at": "2026-09-06T04:31:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16171",
+  "body": "## Summary\n\nA form field declared `immutable: true` (spec: editable on create, locked after the record exists) is honoured only on the create form. On the **edit** dialog of the same form view the field is still fully editable — the lookup's 「选择…」 picker is enabled (`disabled === false`), the chip can be cleared, and a new value can be picked. So the only tool an author has to say \"this FK is set once and never changes\" (`readonly` breaks create because required lookups become disabled) does nothing on the surface it exists for.\n\n## Minimal reproduction\n\nPlatform 17.2.0 console.\n\nObject `kpi_entry_line` with `sheet: Field.lookup('kpi_entry_sheet', { required: true })` and `plan_indicator: Field.lookup('kpi_plan_indicator', { required: true })`. Form view:\n\n```ts\nformViews: { form: { type: 'simple', data: obj('kpi_entry_line'), sections: [{ name: 'entry', fields: [\n  { field: 'sheet', immutable: true }, { field: 'plan_indicator', immutable: true },\n  { field: 'actual_value' }, { field: 'remark' }, ...\n] }] } }\n```\n\n1. List → 「新建」: both lookups editable, record can be created — correct.\n2. Open an existing record → row menu 「编辑」 (or record page edit): both lookups still render as editable lookups; picking another sheet and saving sends the new `sheet` value.\n\nControl: `readonly: true` on the same fields locks them on edit but also disables them on the create form, where they are `required` — the create form then fails with 「所属填报单不能为空」. So neither flag gives \"settable once\".\n\n## Expected\n\n- `immutable: true` renders the field as read-only (display value, no picker, no clear ✕) whenever the form is bound to an existing record, and as a normal input on create.\n- If the console cannot yet distinguish the two modes for a field, the spec should say so, or `readonly` should stop disabling `required` fields on create — one of the two flags must deliver the create-then-lock semantics.\n\n## Environment\n\n`@objectstack/console` 17.2.0 · `@objectstack/spec` 17.2.0 (`view.zod.ts` FormField `immutable`) · `objectstack dev` · Chromium 1440×900 · zh-CN. App: objectstack-ai/kpi (`kpi_entry_line` form)."
+}

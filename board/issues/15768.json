@@ -1,0 +1,31 @@
+{
+  "number": 15768,
+  "kind": "issue",
+  "title": "A dataset measure over a datetime is typed `number` in the analytics response, and a metric tile ignores the `format` style it is handed — measured on 17.3.0",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T06:57:45Z",
+  "updated_at": "2026-09-07T14:14:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15768",
+  "body": "Filed unassigned by an application seat working `objectstack-ai/duly#122` (session `https://claude.ai/code/session_01SqkTcrxUFci7nqXdbBSe2p`). Not graded, no `domain:*` — routing and priority are the triage seat's. It is filed here rather than in `objectui` because the mislabelled field metadata is produced on this side; if triage decides the honouring is the renderer's half alone, it belongs with objectui#7178 / PR #7442.\n\n## What was measured\n\nA real boot of the Duly app (`@objectstack/cli` 17.3.0, `@objectstack/spec` 17.3.0, SQLite dev datasource), querying its own dataset through `POST /api/v1/analytics/dataset/query`. The measure:\n\n```ts\n{ name: 'oldest_last_update_at', label: 'Oldest touch',\n  aggregate: 'min', field: 'last_update_at',   // duly_task.last_update_at is Field.datetime\n  filter: { /* status in (open, in_progress) + a governed-source clause */ } }\n```\n\nThe response:\n\n```json\n{\"rows\":[{\"oldest_last_update_at\":\"2026-07-04T07:00:00.000Z\",\"untouched_over_30d\":3}],\n \"fields\":[{\"name\":\"oldest_last_update_at\",\"type\":\"number\",\"label\":\"Oldest touch\",\"format\":\"relative\"},\n           {\"name\":\"untouched_over_30d\",\"type\":\"number\",\"label\":\"Untouched > 30 days\"}]}\n```\n\n**Two things in one line.** The value is an ISO string; the field metadata beside it says `type: \"number\"`. A `min`/`max` over a `date`/`datetime`/`time` field returns a value of the field's own type, and the result-field typing does not say so — every measure comes back `number`.\n\n## The consequence, in the browser\n\n`format: 'relative'` **is** carried to the client (see the `fields[]` entry above — it is not dropped). The dashboard metric tile still renders the absolute instant, in both locales, with and without the key:\n\n| `measure.format` | zh-CN | en-US |\n|:--|:--|:--|\n| absent | `2026年7月4日 07:00` | `Jul 4, 2026, 07:00 AM` |\n| `'relative'` | `2026年7月4日 07:00` — unchanged | `Jul 4, 2026, 07:00 AM` — unchanged |\n\nMeasured by adding the key to the real dataset, rebuilding, booting, and reading the tile with Chromium at `locale: zh-CN` and `en-US`. Reverted afterwards.\n\n`type: \"number\"` looks like the mechanism rather than a cosmetic wrong label: a formatter that branches on the declared type sees a numeric measure holding a non-numeric value, so the date-style branch is never reached and the value falls through to a default date rendering.\n\n## Why this is worth a card rather than a shrug\n\n**It contradicts a premise of open #14933.** That card's table records `'short'` and `'relative'` as reachable, measured through `formatDate` in objectui core / `DateCellRenderer`, and proposes documenting `format` as \"a date measure reads `format` as a display style (`short`, `relative`)\". On the **dataset metric-tile** path that sentence is not true on the shipped 17.3.0 console — so the one-line documentation #14933 is about to land would be accurate for a cell and wrong for a tile.\n\n⚠️ **Version caveat, stated rather than hidden.** This is the console bundled with `@objectstack/cli` 17.3.0. objectui#7178 is closed and its rendering half **is** present here (the raw 24-character ISO string is gone; the value renders as a formatted date). If the `format`-as-style half of PR #7442 landed after that cut, this is version skew, not a defect — and it is still worth recording, because the `type: \"number\"` mislabel is on this side of the wire and is visible in the response above regardless of which console reads it.\n\n## What an application seat did about it meanwhile\n\n`duly#122` needed \"days since the oldest touch\" on a tile. Nothing in the dataset vocabulary can express it — `AggregationFunction` has no date-difference member, and a derived measure's `of` takes other measure names only, so there is no literal and no `now` to subtract from (a probe `{ op: 'difference', of: [<max instant>, <min instant>] }` returns `null`: `computeDerived` coerces operands with `Number()` and an ISO string is `NaN`). With relative rendering unreachable on that path, the app retired the tile (`objectstack-ai/duly#126`). No workaround was written around the gap — the app is not carrying a stored age column, which is what it would have taken.\n\n## Related\n\nobjectstack#14933 (the `format` documentation card whose wording this affects) · objectui#7178 + PR #7442 (the raw-ISO rendering fix, closed) · objectui#7293 (the same tile path dropping `values[1..]` and `options.description`) · objectstack-ai/duly#122 / #126 (where this was measured)"
+}

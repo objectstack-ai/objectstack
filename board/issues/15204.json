@@ -1,0 +1,33 @@
+{
+  "number": 15204,
+  "kind": "issue",
+  "title": "refactor(plugin-security,platform-objects,spec): retire the catalog seeders, the per-organization catalog machinery and the four catalog objects; Setup creation is an environment write under `single` and refused under a wall (ADR-0131 D2/D3/D5/D13)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p1",
+    "security",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:05:22Z",
+  "updated_at": "2026-09-07T10:24:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15204",
+  "body": "**⛔ BLOCKED — the v18 development line is not open.**\n\n`Blocked-by: #15193, #15195, #15196`\n\nPart of #15194 (ADR-0131 execution tree). ⛔ Do not claim, assign or dispatch this card while #15193 is open, whatever its other labels say.\n\n---\n\n**In one sentence.** Boot stops writing positions, permission sets, capabilities and sharing rules into any table; the four catalog tables retire (ADR-0094's \"the table is only a projection\" carried to its end — not even the projection remains); in single-tenant an administrator creating a position or permission set in Setup is writing environment metadata, and on a shared-database multi-tenant deployment tenants are refused creation and may only assign.\n\nMaintainer, 2026-09-04, on who may create catalog items: 「角色、岗位、权限集，Setup 里组织自建的是组织级。这个说的是单库单租户吧，单库多租户我可以禁止他们创建。但是你要支持我绑定到人员。」\n\n**Scope.** Retire `bootstrapBuiltinRoles`, `bootstrapDeclaredPositions`, `bootstrapDeclaredPermissions`, `bootstrapDeclaredSharingRules`, `bootstrapSystemCapabilities`, `bootstrapPlatformAdmin`'s `defaultPermissionSets` materialization, the `sys_permission_set` projector/reconciler (`permission-set-projection.ts` — ADR-0094 D2/D4; **D1 stands**), and `per-organization-catalog.ts` (`catalogIsPerOrganization`, `listSeedOrganizationIds`, `warnPreFixOrganizationLessRows`). Declare the four identity roles and the two audience anchors (`everyone`, `guest`) as `position` metadata in the platform's own declarations. Add `PositionSchema.permissionSets` to `packages/spec` (the one new authoring key of this record; C2 consumes it). `bootstrap-platform-admin.ts` Choice 4A writes the `admin_full_access` grant row **owned by the Default Organization** under `single`; under a wall nothing is written (unchanged); `reportLegacyPlatformAdminGrant` and the unscoped anchor retire in C8. Tests: `per-organization-catalog.test.ts` cases retire with the module; `deal_p1` re-justified, not deleted.\n\n**Absorbs** the platform-admin re-anchor family where it overlaps: #11979 (config-anchor the `single` posture) and #11978 (stop minting org-less rows) are decided by ADR-0131 D5 — read both cards before starting, and close them by pointer in this PR if nothing survives them.\n\n**Acceptance.** A fresh boot in **every** posture writes **zero** rows to `sys_position`, `sys_permission_set`, `sys_position_permission_set`, `sys_capability`, `sys_sharing_rule` — count pinned, with a positive control that performs one organization-authored create and sees exactly one row. `PLATFORM_ADMIN` still derives for the config-anchored owner and, under `single`, for the first user. Setup role/position/permission-set pages still show the declared catalog, through C9's registry source.\n\n⛔ **Stop and report**: deleting existing rows (C7 owns every deletion); dropping the four objects' tables (C7/C8).\n\nRefs: ADR-0131 D2, D3, D5, D13 · ADR-0094 D1 (stands) / D2 / D4 · ADR-0090 D5/D9 · ADR-0068 D2 · #10103 Option C (retired) · #13514 L4 · #11973 · #11978 · #11979.\n"
+}

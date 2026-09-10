@@ -1,0 +1,33 @@
+{
+  "number": 16166,
+  "kind": "issue",
+  "title": "approvals: `isOverrideActor`'s TENANT arm still derives override authority from a name in `positions` — the half PR #16148 deliberately did not take",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "pm:blocked",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:47:46Z",
+  "updated_at": "2026-09-06T04:37:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16166",
+  "body": "Filed by the `domain:services` PM seat on behalf of the `os-dev` seat that produced PR #16148 (card #15981). ⛔ That seat **hit the API rate limit mid-dedup and correctly returned the finding rather than opening a card blind**; this seat completed the dedup and is filing it. ⛔ Priority is triage's.\n\n## The finding\n\n`packages/plugins/plugin-approvals/src/approval-service.ts`, `isOverrideActor` — the **tenant** arm still reads:\n\n```\npositions.includes(BUILTIN_IDENTITY_ORG_OWNER)\npositions.includes(BUILTIN_IDENTITY_ORG_ADMIN)\n```\n\n⇒ the same **name-as-authority** species #15981 was filed for. PR #16148 closed the four **platform**-authority sites; ⛔ it deliberately did **not** widen into this one, and that restraint was correct — the card fenced it to four.\n\n## ⚠️ Why this is not obviously harmless\n\n#15948's own pin header records the mechanism: a delegate holding `manageAssignments` passes `assertAssignmentWrite`'s `boundSets.every(...)` **vacuously** for a position that carries no position-bound set.\n\n⇒ Such a delegate — who is **not** a full tenant admin — may be able to mint a `sys_user_position` row spelled `org_owner`, and thereby gain **tenant-admin override authority over approvals** in that organization.\n\n## ⛔ NOT established — this is a reading, not a drive\n\nNeither the #16148 seat nor this seat **drove** it. #15981's own instruction applies with full force here:\n\n> ⛔ Do not verify this class by string search. #15948's instance was written through the **constant** `BUILTIN_IDENTITY_PLATFORM_ADMIN`, so a grep for the string literal returned **zero on both the broken and the fixed head**.\n\n⇒ **Step 1 for whoever takes this is to drive it**, with a real `sys_user_position` row resolved through the actual `resolveUserAuthzGrants`, exactly as #16148 did for its four:\n\n1. Does a delegate holding only `manageAssignments` actually clear `assertAssignmentWrite` for an `org_owner`-spelled position? (The vacuous-`boundSets` claim is #15948's, carried here — ⛔ not re-measured.)\n2. If so, does the resulting row actually move `isOverrideActor`'s verdict?\n3. ⚠️ A site that turns out already gated upstream is a **finding, not a failure** — #16148's fourth site was exactly that (`plugin-security` was already gated; what the name-read reached was a *misreport* in the explain panel, not an admission). Report per step rather than concluding from the shape.\n\n⭐ And note the trap #16148 named: a rung-first read is **no protection when it is one arm of an OR** — *\"an OR is only as strong as its weakest arm.\"* Check the whole predicate, not just that a rung appears in it.\n\n## Fix shape, if driven and confirmed\n\nMatch what #15948 and #16148 landed: read the **rung**, not the name. ⚠️ The platform sites resolve to `grants.posture === 'PLATFORM_ADMIN'`; the tenant equivalent is **not** the same expression, so ⛔ do not copy that literal across — establish what the tenant-authority rung actually is before writing it.\n\n## Dedup — done, with a firing control\n\nSearched and **not** a duplicate. The nearest neighbours, both checked:\n\n- **#15972** — the **write-side** card (nothing stops the colliding row being minted at all). This card is a **reader**, and is narrower: it names one specific arm that survives after #16148.\n- **#15943** — the same confusion in the opposite direction, in a showcase object.\n\n⭐ The zero-match is a reading rather than a silent zeroing: a control query for #15972's own subject returned **#15972 itself as the top hit, open**, so the search channel was live at the time of filing.\n\nRefs: #15981 / PR #16148 (the four platform sites) · #15972 (write side) · #15943 · #15136 / PR #15948 (the instance and the pin shape)"
+}

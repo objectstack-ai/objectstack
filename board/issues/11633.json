@@ -1,0 +1,30 @@
+{
+  "number": 11633,
+  "kind": "issue",
+  "title": "Design: cross-request caching for the authenticated request path (tranche 2 of #10757) — write-invalidation-first, short-TTL fallback, configurable staleness window",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:blocking",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T10:00:00Z",
+  "updated_at": "2026-08-31T21:05:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11633",
+  "body": "Chartered by maintainer ruling, 2026-08-24, live PM chat on #10757 (「10757 接受你的建议」— accepting the design-first recommendation). This is the design card whose output unblocks #10757's tranche 2; #10757 carries `Blocked-by:` pointing here.\n\n## Why design-first (recorded so it is not re-litigated)\n\nCaching session and authorization state is **a security change wearing a performance costume** — a stale grants cache is a privilege-escalation window (a permission revoked at T honoured until TTL expiry). The invalidation design is agreed BEFORE implementation code, per the tranche split's own words on #10757.\n\n## Ruled direction (the design works within this, deviations come back as a fork)\n\n- **Write-invalidation is primary**: permission/session mutations (grant/revoke/role change/session revoke/settings write) invalidate the affected cache entries in the same operation — correctness does not rest on a timer.\n- **Short TTL is the fallback bound**, not the mechanism: a configurable staleness ceiling (order of seconds, default conservative) catching invalidation paths the design missed, out-of-process writers, and multi-node skew.\n- **Configurable**: deployments can tighten to zero (cache off) — the security-sensitive default must be defensible in the ADR-class writeup.\n- **Low-sensitivity caches first**: localization (`sys_setting` success reads — note #10221 deliberately caches failures only; the dogfood read-after-write pin is satisfied by invalidation-on-write) and `getMetaItems`' `sys_metadata` read (registry-epoch keyed) may be designed to ship ahead of grants/session caching.\n- Multi-node: state the story explicitly (per-process cache + TTL bound, or the invalidation bus), since cloud runs more than one instance.\n\n## Deliverable\n\nA design document (issue comment or ADR draft — if ADR-class, governed rules apply: draft PR, human merge) covering: cache keys and scopes per leg (A session / B grants / C localization / D metadata, from #10757's trace), invalidation triggers per mutation path, TTL defaults and config surface, multi-node semantics, and the test/pin plan (the existing batch-equivalence golden discipline extends to \"cached answer ≡ uncached answer\" identity pins). Implementation is dispatched as follow-up cards against the approved design, not as riders on this one.\n\nRefs: #10757 (trace + tranche history; tranches 1/1b landed via #10824/#11197/#11200/#11208) · cloud#1521 (the ≤200ms gate this ultimately serves) · cloud#1518 (placement half, separate)."
+}

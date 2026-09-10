@@ -1,0 +1,32 @@
+{
+  "number": 16146,
+  "kind": "issue",
+  "title": "[finding] declaredServerFaultAnswer cannot tell a deliberate REFUSAL from a server FAULT, so every producer-declared 5xx refusal loses its prose on the wire",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T03:13:55Z",
+  "updated_at": "2026-09-06T14:39:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16146",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024) from a measurement handed back on #15685, using [Claude Code](https://claude.ai/code). Not dispatched: the repair changes platform-wide behaviour and is a maintainer's call.\n\n## The finding\n\n`declaredServerFaultAnswer` (`packages/rest/src/error-response.ts`) gates on **`declaredHttpStatus(error) >= 500` alone**. It therefore cannot distinguish a deliberate **REFUSAL** from a server **FAULT**, and replaces the prose of both with `INTERNAL_ERROR_MESSAGE`.\n\nThat arm is the **single relay for every producer-declared 5xx at every door** — #11718 lifted it out precisely so `/analytics/dataset/query` would answer the same bytes as `/data`. So the scrubbing is uniform, and so is the loss.\n\n## Driven proof that this is not theoretical\n\nThe `/references` door's unanswerable-target refusal is a producer-declared **501** whose message is authored **for the caller** under ADR-0110 D3 — it tells an operator *what to ask instead*:\n\n> References to a `field` item cannot be computed. … Ask the owning object instead: `GET /api/v1/meta/object/account/references`.\n\nIt reached the wire as **`\"Internal server error\"`** until PR #16143 caught it **one route down**. That PR is a route-local patch by design; it does not touch this relay.\n\n⇒ **Every other producer-declared 5xx refusal in the repo still loses its prose**, and each will need its own route-local patch until the relay can tell the two apart.\n\n## A second symptom, measured in the same pass\n\nBecause the scrubbed answer is not an expected route error, `handleRouteError` logs a **deliberate refusal** as `[REST] Unhandled error` **with a stack**. The sibling refusal at the same door — hand-built into the nested envelope — logs nothing. So the same door's two refusals differ in the log as well as on the wire.\n\n## The trade, stated plainly\n\nThis is the **durable half** that #15685's route (b) deliberately did not buy. The seat chose (b) because it is bounded; triage had named the inversion first: **(a) has the largest radius and the most durability, (b) the smallest of both**, and whoever chooses should be explicit about which they are buying. This card is the other half, written down so the choice stays visible rather than decaying into a series of route-local patches.\n\n⛔ Not graded by this seat. A repair here changes behaviour for every producer-declared 5xx across every door, which is a maintainer's decision rather than a dev's or a PM's. The shape of the question is: **what distinguishes a refusal from a fault, mechanically?** — a producer-side declaration, a status/code pair on a published allow-list, or something else.\n\n## Dedupe\n\nRun before filing, with a control query that hit (#15685 returned first, so the query reaches this area and an empty result would have been meaningful). The targeted query returned five rows, none of them this: **#14656** is a decision box about *logging* a declared 501 on a polled route; **#11718** and **#11684** are closed and are the cards that *built* this arm; **#13242** is about `declaresServerFault` having no consumer. No open duplicate.\n\n## Provenance\n\n⚠️ Not independently re-derived by this seat — this is the dev agent's measurement on #15685, relayed. The `declaredHttpStatus(error) >= 500` gate, the driven `/references` reading and the `[REST] Unhandled error` logging asymmetry should be re-checked before anyone acts on them."
+}

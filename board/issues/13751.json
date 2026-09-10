@@ -1,0 +1,31 @@
+{
+  "number": 13751,
+  "kind": "issue",
+  "title": "日历视图：从「今天所在的那个月」点「下一月」会跳两个月、跳过下一个月（3/3 可重现）——同一操作在月份弹层里正常 +1",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p2",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T09:42:53Z",
+  "updated_at": "2026-08-31T13:18:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13751",
+  "body": "> **来源**：宣传视频车道 #147 排镜时的只读实测。**未改动任何平台代码、配置或声明。**\n>\n> **本单只描述现象，不预设修正方向。** 是否算缺陷、以及该怎么处理，留给负责人裁定。**故不带 `pm:queue`——请先分级。**\n\n## 现象\n\n日历视图打开后默认落在**当月**。此时点主标题栏的「下一月」，**落到的是两个月之后，中间那个月被跳过**。\n\n实测当天为 **2026-08-31**，默认月 `August 2026`。每组均**重开日历**后从默认月起：\n\n| # | 点击序列与落月 |\n|---|---|\n| 1 | `August` → **next → October** → next → November → next → December |\n| 2 | `August` → prev → July → prev → July*（见附注） → prev → June |\n| 3 | `August` → prev → July → next → August → **next → October** |\n| 4 | `August` → **next → October** → prev → September → next → October |\n\n**规律**：\n\n- **从「今天所在的那个月」按「下一月」必定跳两个月、跳过 September** —— 第 1、3、4 组各命中一次，**3/3 可重现**；\n- **其它月份的 `next` 正常 +1** —— July→August、October→November、November→December、September→October 均正确；\n- **`prev` 基本 −1**，未见跳月。\n\n注意第 3 组：从 July 点 next 回到 August（当月）之后，**再点 next 又跳到 October**。所以触发条件是**「当前显示的月份 == 今天所在的月份」**，不是「刚打开」。\n\n## 同一个操作，在月份弹层里是正常的\n\n这是本单最有价值的对照：**点标题 `August 2026` 弹出的小月历选择器里，也有一组上/下月箭头——那组箭头没有这个问题。**\n\n| 入口 | 从当月点「下一月」 |\n|---|---|\n| **主标题栏的箭头** | `August` → **`October`**（跳过 September） |\n| **月份弹层内的箭头** | `August` → **`September`**（正确 +1） |\n\n也就是说，**同一个\"翻到下一月\"的语义，两个入口的行为不一致，其中一个只在特定条件（当前月 == 今天所在月）下出错**。\n\n## 复现最小路径\n\n1. 打开任一带 `calendar:` 配置块的列表视图，切到日历呈现（默认落在当月）；\n2. 点主标题栏的「下一月」一次 → **落到两个月之后**；\n3. 对照：重开日历，点标题弹出月份选择器，在弹层内点「下一月」一次 → **落到下一个月，正确**。\n\n## 附注（如实标注，**不作为判据**）\n\n第 2 组中出现过一次 **`prev` 原地不动**（`July` → `July`）。**只观察到一次，未能稳定复现**，可能是自动化点击间隔不足被吞。**本单不把它算作现象的一部分**，仅记录以免后续有人重复观察到时以为是新问题。\n\n## 取证环境\n\n2026-08-31，载体 `objectstack-ai/hotcrm`，钉 `@objectstack/* 17.1.0`。纯只读实测；元素级 DOM 点击与常规坐标点击**结果完全相同**，排除自动化伪影。\n\n## 邻近既有单（已查，非重复）\n\n- #13748 视图声明 calendar 可视化但缺 `calendar:` 配置块时静默渲染成错位画面（同为日历呈现，但那条是**配置不完整时的渲染行为**，本条是**导航控件的步长**，两者独立）\n- #13533 / #13568 / #13696 —— 同一次 #147 取证中发现的其余三条，与本条无关"
+}

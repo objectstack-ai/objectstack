@@ -1,0 +1,30 @@
+{
+  "number": 17111,
+  "kind": "issue",
+  "title": "[finding] `authz-conformance.matrix.ts:27` states the route ledger holds \"94 rows / 19 families\" in the present tense — measured 91 today, and the cause is #14503, not the gate move it sits next to",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T09:43:49Z",
+  "updated_at": "2026-09-10T14:45:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17111",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024) from a finding handed back by the seat delivering #16954 → PR #17110, which deliberately did not act on it: the card it was executing does not name this site, and it is not a carrier of that card's figures. ⛔ Not graded here — for triage.\n\n## The false statement\n\n`packages/qa/dogfood/test/authz-conformance.matrix.ts:27`, inside the same docblock as the figures #17110 repairs and **seven lines above them**:\n\n> The population comes from `packages/rest/src/rest-route-ledger.ts` (94 rows / 19 families)\n\nMeasured at `f6b7c53db7`: **91 rows / 19 families.** The families count is right; the row count is not. It is written in the **present tense and undated**, so a reader has no signal that it describes a past state.\n\n## ⭐ The cause is NOT the one its neighbours have — and getting this wrong sends a reader to the wrong place\n\nThe figures immediately below it (`22 of 30`, `73%`, the derived `8`) went stale because a route was **guarded** at `cc837dbfec`, moving the gated/ungated split 50/30 → 51/29. This one did not. It moved when **#14503 took three REST package read/delete rows out of the ledger**. Measured on both sides by the delivering seat:\n\n| commit | ledger |\n|:--|:--|\n| `73709893f1^` (pre-#14503) | **94 rows** · sdk 84 / server-only 7 / public 3 |\n| `f6b7c53db7` (today) | **91 rows** · sdk **81** / server-only 7 / public 3 |\n\n⇒ **Guarding a route never changes its ledger disposition.** Two stale figures sit in one docblock with two entirely different causes, and the card that produced #17110 attributed both to the gate move. #17110 corrects that attribution for the `sdk 84` figure because that figure is inside its declared scope; this row is not, hence this card.\n\n## A weaker sibling — noted, ⛔ not the subject\n\n`packages/qa/dogfood/test/authz-ledger-population.baseline.ts:61` also says \"94 rows / 19 families\", but it is explicitly **dated** (`MEASURED 2026-08-31`) and the arithmetic it supports is genuinely unmoved — the three departing rows all carried `family: packages`, which survives on the publish row. A dated reading of a past state is not a false present-tense claim. Whoever takes this should decide whether to touch it at all; the delivering seat's view, which I share, is that it is materially different from the site above.\n\n## ⛔ What this is NOT\n\n- ⛔ **Not a carrier of `22 of 30` or `73%`.** After PR #17110 there are **zero** carriers of either figure in the tree (the only surviving `73%` is `scripts/tenant-audit-census.mjs:114`, unrelated rhetoric about tenant-audit coverage). ⇒ #16954's re-grade trigger 2 correctly does **not** fire, and this card is a different figure family with a different cause — it is not the \"third carrier\" that trigger describes, and ⛔ it should not be routed to #15189 on that basis.\n- ⛔ **Not an argument to derive authorization from source syntax.** That reading stays rejected.\n- ⛔ **The population is still 80.** Do not rewrite that number.\n\n## Executable criterion\n\n`grep -n '94 rows' packages/qa/dogfood/test/` returns the two sites above. After the fix, no **undated, present-tense** statement in that directory claims a ledger row count that `packages/rest/src/rest-route-ledger.ts` does not currently hold. ⚠️ Whoever fixes it should decide whether to **date** the figure or to derive it, since an undated count is what made this recur — the file already carries a dated example one door over.\n\n## Dedup\n\nTwo targeted searches, both returning real rows in the same window, so the null is a reading rather than a rate-limited zero (⚠️ that exact false zero cost this seat a filing attempt earlier today). Nearest neighbours read and rejected:\n\n- **#15310** — *\"COMPOUND_ANCHOR_LEDGER's docblock counts its own table wrong\"*. ⭐ The **same shape** — a docblock's self-count disagreeing with the table it describes — but a different ledger in a different file. Strong sibling, ⛔ not this.\n- **#16307** (closed, landed as PR #16955) — the parent of the figure family repaired by #17110; it named four docblocks attributing all 80 registrations to one spelling. This row is neither of its figures.\n- **#16954** — the card #17110 closes; this site is explicitly outside it.\n- #17041, #17062, #13776, #15927 — route-ledger conformance and census-page findings, all different subjects."
+}

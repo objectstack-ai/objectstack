@@ -1,0 +1,30 @@
+{
+  "number": 15140,
+  "kind": "issue",
+  "title": "seam(objectui console): render the environment's trigger-binding audit as a health item in environment detail — the visible half of cloud#1962's control-plane-clock ADR (route-B ruling on cloud#1288, 2026-08-15)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:blocked",
+    "priority:p3",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T03:12:49Z",
+  "updated_at": "2026-09-07T11:47:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15140",
+  "body": "Blocked-by: objectstack-ai/cloud#1962\n\nSeam card filed by the `repo:cloud` PM seat (objectstack#6026, session `session_01EK4Q5Nrx779cxjdeTxsK7P`) — 2026-09-04T03:2xZ. **Named reader: the objectui execution seat (`domain:ui`), at candidate selection — ⛔ not before its blocker closes.**\n\n## Why this card exists\n\nOn cloud#1288 (2026-08-15, `os-zhuang`, delegated adjudication) the maintainer ruled route B — the control plane owns the clock for hosted scheduled automation — and instructed:\n\n> Fold in the parked scope-3 item — surfacing `getTriggerBindingAudit()` as an environment-level health item — since it needs the same console surface; that is two cards, cloud's being the `Blocked-by:` of objectui's.\n\ncloud#1962 is the cloud card (the ADR + the read-only exposure). This is the objectui card.\n\n## What it renders\n\nThe framework already produces the data: `AutomationEngine.getTriggerBindingAudit()` / `getFlowRuntimeStates()`, emitted today only as WARN lines at `kernel:bootstrapped` (per flow: `flowName`, `triggerType`, `reason`). cloud#1962 exposes them read-only as an environment-level health item. This card renders that item in the environment detail view so a user sees \"this automation is not bound / not scheduled, and why\" **without an AI turn** — the distinction cloud#1316's dev drew: letting `verify_build` see a binding failure is in-turn; letting the user see it is a console surface, and that is what cloud#1288 asked for.\n\n## ⛔ Sequencing\n\n- Blocked on **cloud#1962**, which is itself blocked on **cloud PR #1926** (ADR-0112). ADR-0112 places scheduled/time-relative flows outside v1 of the hosted AI build, so this surface is post-v1 work. ⛔ Do not dispatch ahead of the chain.\n- The data shape this renders is cloud's to declare (in #1962's read-only route); ⛔ do not invent it on the consumer side.\n\n## Re-check\n\ncloud#1288 (ruling comment 2026-08-15; unlock re-grade 2026-09-04) · cloud#1962 (the ADR card, its `Blocked-by:` and the health-item shape once drafted) · framework `AutomationEngine.getTriggerBindingAudit()`."
+}

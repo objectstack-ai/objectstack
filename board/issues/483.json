@@ -1,0 +1,37 @@
+{
+  "number": 483,
+  "kind": "pull_request",
+  "title": "Add unified API registry with OpenAPI generation and plugin support",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-02T04:50:28Z",
+  "updated_at": "2026-02-02T05:51:22Z",
+  "closed_at": "2026-02-02T05:43:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-02T05:43:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/483",
+  "body": "System lacked centralized management for heterogeneous API types (REST, GraphQL, OData, WebSocket, File, Auth) and plugin-registered endpoints. No unified documentation or testing interface existed.\n\n## Implementation\n\n**Registry Schema** (`api/registry.zod.ts`)\n- `ApiProtocolType` enum: 10 protocol types (rest, graphql, odata, websocket, file, auth, metadata, plugin, webhook, rpc)\n- `ApiRegistryEntry`: Complete API metadata with endpoints, security, versioning\n- `ApiDiscoveryQuery`: Type/status/tag/plugin-source filtering\n- Plugin API tracking via `metadata.pluginSource`\n\n**Documentation Schema** (`api/documentation.zod.ts`)\n- `OpenApiSpec`: Full OpenAPI 3.0 specification generation\n- `ApiTestingUiConfig`: 9 testing UIs (Swagger UI, Redoc, GraphQL Playground, GraphiQL, RapiDoc, Stoplight, Scalar, Postman, custom)\n- `ApiTestCollection`: Postman-like collections with variables, folders, expected responses\n- `ApiChangelogEntry`: Version tracking with migration guides\n- `CodeGenerationTemplate`: Multi-language client generation\n\n## Usage\n\n```typescript\n// Register heterogeneous APIs in single registry\nconst registry = ApiRegistry.create({\n  version: '1.0.0',\n  apis: [\n    ApiRegistryEntry.create({\n      id: 'customer_rest',\n      type: 'rest',\n      endpoints: [/* OpenAPI-compatible metadata */],\n    }),\n    ApiRegistryEntry.create({\n      id: 'payment_webhook',\n      type: 'plugin',\n      metadata: { pluginSource: 'payment_gateway_plugin' },\n      endpoints: [/* ... */],\n    }),\n  ],\n});\n\n// Configure Swagger UI from registry\nconst docs = ApiDocumentationConfig.create({\n  ui: { type: 'swagger-ui', enableTryItOut: true },\n  generateOpenApi: true,\n});\n```\n\nPlugins register custom endpoints using same `ApiRegistryEntry` schema as core APIs. OpenAPI specs generated from typed Zod schemas eliminate manual documentation sync.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 系统会有很多套Api,包括graphql, odata rest file,auth,包括插件自己注册的Api,如何统一登记管理这些API并且能够提供统一的API查看测试界面比如swagger\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

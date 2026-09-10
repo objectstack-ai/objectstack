@@ -1,0 +1,30 @@
+{
+  "number": 15184,
+  "kind": "issue",
+  "title": "retire `ListViewSchema.fieldOrder` (spec) — a second, undefined-precedence spelling of the column order `columns` already carries; zero authored instances outside spec's own tests (objectui#7516 ruling A, 2026-09-04)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T05:15:58Z",
+  "updated_at": "2026-09-04T05:15:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15184",
+  "body": "Filed by the director seat from the maintainer's ruling on objectui#7516 (2026-09-04, decision batch #28, verbatim 「同意」 on recommendation **A — retire at the spec**). `domain:spec` set from the ruling's named executor; triage corrects if the landing point disagrees. Clause-②: **yes** (a published contract's accept set narrows) — contract-review tier, `needs:contract-review` on the PR.\n\n## What to retire\n\n`packages/spec/src/ui/view.zod.ts:1794` — `fieldOrder: z.array(z.string()).optional().describe('Explicit field display order for this view')` on the list-view schema (measured on `origin/main` `e293038`, 2026-09-04T05:03Z).\n\n## Why (the ruling's reasoning, for the implementer)\n\n- `columns` on the same schema is an ordered array and is the authoritative column order every host relays. `fieldOrder` is a second expression of the same thing, and no contract defines who wins when they disagree (objectui's `ListView.tsx:2265` applies `fieldOrder` after `columns`, so it wins by implementation order, not by declaration). One slot, one spelling.\n- Authored instances: **zero** in objectstack outside `packages/spec/src/ui/view.test.ts` (two test documents) and the generated docs; zero in objectui `packages/**` / `apps/**` / `examples/**`. The `hiddenFields` control returns 14 files in objectstack, so the zero is a reading.\n- The liveness ledger (`packages/spec/liveness/view.json:164`) records `fieldOrder` as live on evidence that names `objectui: packages/react/src/spec-bridge/bridges/list-view.ts:124` — a path that no longer exists on objectui `origin/main` `4bb5e10`. The ledger row must be re-measured as part of this retirement, not trusted.\n\n## Route\n\nFollow the `spec-property-retirement` playbook (ADR-0049 enforce-or-remove): named refusal / tombstone for the key, ADR-0087 conversion entry, the liveness ledger row, generated baselines (`authorable-surface*.json`), `content/docs/references/ui/view.mdx` regeneration, the two `view.test.ts` fixtures, and the objectstack lint rule `packages/lint/src/validate-list-view-field-refs.ts` (it validates `fieldOrder` references — it retires or narrows with the key; `validate-react-page-props.ts` and `reference-integrity-suite.ts` reference it too, re-derive on the tree). Changeset per the spec's BREAKING-as-minor convention with the migration text: \"use the order of `columns`\".\n\n## Stop conditions\n\n- A consumer census with a positive control before deleting: objectstack, objectui, and the sibling repos (`hotcrm`, `cloud`) for authored `fieldOrder` on list views. Any real authored instance ⇒ stop and report on objectui#7516; the ruling's fallback (keep, and define `columns` × `fieldOrder` × `hiddenFields` precedence with pins) is then re-presented.\n- ⛔ Do not touch objectui's reader in this PR — objectui#7516 carries the reader removal and is `Blocked-by:` this card; it lands after the spec pin covering this retirement is consumable there.\n\nRefs: objectui#7516 (ruling and facet block) · objectui#7218 (`rowColor`, the other half, unaffected) · ADR-0049 · ADR-0087."
+}

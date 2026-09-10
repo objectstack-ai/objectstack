@@ -1,0 +1,33 @@
+{
+  "number": 495,
+  "kind": "pull_request",
+  "title": "[WIP] Release patch version for application",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-03T02:27:52Z",
+  "updated_at": "2026-02-03T02:30:18Z",
+  "closed_at": "2026-02-03T02:29:56Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/495",
+  "body": "## Plan: Release Patch Version (0.9.0 → 0.9.1)\n\n- [x] Analyze current repository state and version management\n- [x] Create a changeset file for the patch release\n- [x] Run changeset version to bump versions\n- [x] Update CHANGELOG.md files\n- [x] Verify all package.json files are updated to 0.9.1\n- [ ] Build packages to ensure everything works\n- [ ] Verify the build artifacts\n- [ ] Finalize release\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 发一个补丁版本\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

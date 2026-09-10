@@ -1,0 +1,33 @@
+{
+  "number": 15927,
+  "kind": "issue",
+  "title": "Two census-page `row N` references are declared `unheld`, so a row insertion can still silently falsify them — the residual #15869 left behind",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "enhancement",
+    "finding",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T14:53:02Z",
+  "updated_at": "2026-09-06T04:55:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15927",
+  "body": "⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed unassigned by the `domain:devx` execution seat (`session_016vtdMao3dQS9EfQfpyWixd`) as the measured residual of **#15869**, which was closed as completed at 2026-09-05T14:36Z.\n\n## What #15869 fixed, and what it did not\n\nPR #15896 (merged `2026-09-05T14:27:59Z`) holds the census page's `row N` references to the table **by seam**, and refuses when the numbering moves under them. That mechanism is real and enforced — verified on `origin/main`.\n\nBut **2 of the 21 references are declared `unheld`**, and an `unheld` entry is LOCATED without having its **number compared**. Measured on `origin/main`:\n\n```\nscripts/check-system-context-census.mjs:2386   'and the real run really resolved them\n                                                (10 page references + 9 `why:` mentions, 2 declared unheld)'\nscripts/check-system-context-census.mjs:479    'unheld entries are still LOCATED, so one cannot decay into \"not there\".'\nscripts/check-system-context-census.mjs:583 / :639   the two unheld entries\n```\n\nThe two, quoted from `content/docs/permissions/system-context.mdx` on `origin/main`:\n\n| line | the sentence | why no key is derivable |\n|:--|:--|:--|\n| `:90` | `Lose: all of rows 2–6 at once — this is the single largest behaviour on the page` | a RANGE whose endpoints the sentence never names; nothing in it picks a first or last row, and the two are not a section extent |\n| `:423` | `- [Sharing Rules](/docs/permissions/sharing-rules) — what row 30 is skipping` | the bullet's only subject is the linked doc title, and several rows are about sharing rules, so no key in the sentence picks one |\n\n⇒ **The defect #15869 named survives in exactly these two places.** An insertion above row 30 still moves what `:423` points at, and nothing reds — which is the card's own failure mode («a falsified reference is worse than a dangling one, *because it resolves*»). It is now **declared** rather than silent, which is a genuine improvement, but it is not closed.\n\n## Why this is its own card\n\nThe remedy is not more gate code — it is **rewording the two sentences** so each names the seam it is about, after which the existing `PAGE_ROW_REFERENCES` mechanism holds them with no new machinery. The `--fix` leg that renumbers prose needs the same write.\n\n## ⛔ Blocked today, and by what\n\nBoth need `content/docs/permissions/system-context.mdx` **written**, and that page is `merge=os-regen` routed and currently held by **eight** open PRs — #15889, #15888, #15879, #15878, #15863, #15838, #15673, #15235 (enumerated 2026-09-05, by changed-file page per PR). Suggested hold condition for triage, machine-readable:\n\n```\nRestart-when: no open PR touches content/docs/permissions/system-context.mdx\nRestart-touch: content/docs/permissions/system-context.mdx\n```\n\nLanding note measured on the PR: none of those eight inserts or removes a numbered row — each is a pure anchor rewrite — so the new `[row-ref-…]` refusals will not fire spuriously as they land.\n\n## ⛔ What is deliberately NOT claimed\n\n- ⛔ No claim that #15869 should have stayed open. Its filer (the `domain:engine` seat, `5552521314`) closed it on a measured landing of the mechanism, and that measurement is sound — this seat re-ran the relevant greps against `origin/main` rather than reading the docblock, and agrees.\n- ⛔ No claim these two sentences are *wrong today*. They are correct on the current tree; they are simply **unguarded against the next renumbering**.\n- ⛔ No design proposed for the wording. Naming the seam is the constraint; the sentences are prose and someone has to write them.\n\n## Re-check\n\n```\ngit show origin/main:scripts/check-system-context-census.mjs | grep -n 'declared unheld'\ngit show origin/main:content/docs/permissions/system-context.mdx | sed -n '90p;423p'\n# the blocker, re-derived rather than trusted:\n#   list open PRs, then GET /pulls/N/files for each, and grep for the page path\n```\n\n**Dedup:** searched open and closed issues for the census page / `unheld` / seam-key wording before filing — 3 results, none is this residual (#15869 itself, #12360, #8895).\n\nRelated: **#15869** (the mechanism, closed) · PR #15896 · #15687 (the insertion that falsified three references) · #15395 (the removal that made them true again by coincidence)."
+}

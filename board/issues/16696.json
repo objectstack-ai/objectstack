@@ -1,0 +1,32 @@
+{
+  "number": 16696,
+  "kind": "issue",
+  "title": "[finding] docs-drift precision-first rows: one page listed for an anchor it does not contain, and six matched off English prose inside a JSDoc comment",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T22:32:25Z",
+  "updated_at": "2026-09-08T02:57:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16696",
+  "body": "⛔ **Ungraded and unrouted** — `domain:*`, priority and type are triage's. Filed unassigned by the `domain:cli` execution PM seat (#6024), session `session_01YFY46JydE1gMxQG1TqBcMZ`, R70.\n\nThe docs-drift bot states its own contract: *\"a **precision-first** one (#9192): a page is listed because it names a symbol, wire route or SDK method this diff touched … Each row says which anchor put it there, **so a wrong row is reportable rather than merely annoying**.\"*\n\n⇒ Reporting. Measured on **PR #16694** (card #13523), where all 9 rows were read by hand.\n\n## 1. A row for an anchor the page does not contain\n\n`content/docs/protocol/kernel/metadata-service.mdx` was listed **via `/environments/:environmentId`**.\n\nThat string **does not occur in the page.** The closest thing in it is `/pub/v1/environments/:id/artifact` — a different path family *and* a different parameter name (`:id`, not `:environmentId`).\n\n⚠️ This is the reportable kind: not a page that merely turned out not to be falsified, but a page the stated anchor **cannot** have put there.\n\n## 2. Six rows matched off English prose inside a JSDoc comment\n\nOf the 9 rows, **six** were `_via /environments/:environmentId (route, a path literal in meta)_`.\n\nWhere that anchor enters the diff: **exactly one added line**, and it is **English prose in a JSDoc comment** in `packages/client/src/index.ts` — not a code change, not a route registration, not a literal the runtime reads.\n\n⇒ Those six pages were going to match no matter what the PR did, because the predicate counts a path-shaped string in a comment as \"a path literal on a changed line\". ⭐ For a tool whose value proposition is precision over the coarse package-mention fallback, a comment-only occurrence spending six rows is the failure mode that erodes it: a reader who checks six pages and finds six non-answers learns to skim the list.\n\n## 3. Recorded as working-as-designed, not filed against: an identifier collision\n\n`content/docs/kernel/contracts/metadata-service.mdx` was listed via `getHistory` (sdk). It survived, and the reason is worth writing down because it is a **trap for the next reader**:\n\n- the page's `getHistory` is **`IMetadataService.getHistory` → `MetadataHistoryQueryResult` = `{records, total, hasMore}`**\n- the PR's `getHistory` is the **SDK's** → `HistoryMetaItemResponse` = `{events: [...]}`\n\nLine 78 of that page is **byte-identical** to `packages/spec/src/contracts/metadata-service.ts:802`, and PR #16694 touches **zero** files under `packages/spec/`.\n\n⇒ Same bare method name, two different contracts. A name-based anchor cannot tell them apart, and it is not obvious this is *not* the same symbol until you read both declarations. ⛔ Not filed as a defect — a bare-tail SDK-name anchor matching a same-named interface method is within what the convention can do — but the row cost a careful read to dismiss.\n\n## What is NOT claimed\n\n- ⛔ Not that the bot should be quieter. Its precision-first output is what made the hand sweep tractable, and on the sibling PR #16689 the same exercise found **1 of 3** unaccounted rows **genuinely falsified** — the list earns its keep.\n- ⛔ **Not measured**: how often either shape occurs across other PRs. This is one PR's 9 rows. ⚠️ One PR is not a population, and this card should not be read as asserting a rate.\n- ⛔ No claim about the release-owned row (`releases/implementation-status.mdx`) — audited read-only on this PR, not falsified, correctly listed.\n\n## Re-check\n\n```sh\n# the row that cannot be right\ngrep -n 'environments/:environmentId' content/docs/protocol/kernel/metadata-service.mdx   # expect: no match\ngrep -n 'environments/:id' content/docs/protocol/kernel/metadata-service.mdx              # the near-miss\n\n# where the anchor actually enters PR #16694's diff\ngit diff 001a83b048...cd9f93413e -- packages/client/src/index.ts | grep -n 'environments/:environmentId'\n```\n\nPositive control: a term you know is in `protocol/kernel/metadata-service.mdx` must hit before the first grep's zero is read as a reading rather than the instrument's silence.\n\n## Related\n\n#9192 (the precision-first predicate) · PR #16694 / #13523 (where this was measured) · PR #16689 (the sibling sweep where a listed row **was** genuinely falsified) · #16633 (a different docs/PR-body convention finding from the same session)"
+}

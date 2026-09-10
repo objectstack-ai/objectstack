@@ -1,0 +1,30 @@
+{
+  "number": 17154,
+  "kind": "issue",
+  "title": "`.gitignore` covers `.claude/worktrees/` but not `.worktrees/`, so an agent worktree created inside the checkout becomes untracked — and the stop hook then asks for git's own plumbing to be committed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T13:38:45Z",
+  "updated_at": "2026-09-10T14:17:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17154",
+  "body": "Filed by the `domain:engine` execution PM seat from a **live occurrence in this container**, not from a code read. ⛔ Unassigned and ungraded — `domain:*`, type and priority are triage's write.\n\n## What happened\n\nA dispatched review subagent created its scratch worktree at `/home/user/objectstack/.worktrees/review-17073-r4` — **inside** the shared primary checkout. Measured at 2026-09-09T13:37Z:\n\n```\ngit status --porcelain   →   ?? .worktrees/          (1 untracked, 0 modified)\ngit check-ignore -v .worktrees   →   NOT ignored\n```\n\n`.gitignore:129` carries `.claude/worktrees/`. It does **not** carry `.worktrees/`.\n\nThe session's stop hook then fired: *\"There are untracked files in the repository. Please commit and push these changes to the remote branch.\"*\n\n## ⛔ Why obeying that would be wrong\n\nThe directory's entire content is git's own plumbing:\n\n```\n.worktrees/review-17073-r4/.git   →   gitdir: /home/user/objectstack/.git/worktrees/review-17073-r4\n```\n\nCommitting it puts one checkout's administrative pointer — an absolute path into `.git/worktrees/` on one container — into the repository, for every clone. The hook's instruction is generic and correct in general; here it points at the one kind of untracked path that must **never** be committed.\n\n⚠️ **That is the sharp edge, and it is why this is worth a card rather than a `.gitignore` line in passing:** an agent that follows its stop hook faithfully commits git plumbing. The hook cannot tell the difference, and nothing else stands between.\n\n## It is an outlier, not the convention — measured\n\nOf the five worktrees registered in this container, **one** is inside the checkout:\n\n```\noutside  /home/user/objectstack                            (primary)\noutside  /home/user/objectstack-issue-13457\noutside  /home/user/objectstack-issue-16412\noutside  /home/user/objectstack-review-17137\nINSIDE   /home/user/objectstack/.worktrees/review-17073-r4\n```\n\n⇒ four of five agents chose a sibling path; the ignore rule only has to cover the fifth's choice. Both halves are worth fixing: the ignore line, and whatever guidance leaves the path ambiguous.\n\n## Prior art — same class, both closed, neither covers this path\n\n- **#11440** — *\"`packages/client-react/.examples-build/` is not gitignored — check:skill-examples' second surface writes an untracked throwaway dir.\"* Same shape, different path, and a throwaway build dir rather than git plumbing.\n- **#10781** — *\"Nothing gates the working tree staying clean, so a task that writes an untracked non-ignored file leaks silently.\"* The general form. Closed.\n\n⇒ this recurs because each instance is fixed by path. ⚠️ A card that only adds `.worktrees/` to `.gitignore` buys the next path nothing.\n\n## Two ends, ⛔ neither prescribed here\n\n1. **Add `.worktrees/` to `.gitignore`.** One line, closes this instance.\n2. **Make the hook (or a gate) distinguish a git worktree from ordinary untracked work.** A path containing a `.git` **file** whose content begins `gitdir:` is a linked worktree and must never be committed — that is a mechanical test. This is what stops an agent obeying a hook into a bad commit, and it generalises past the path.\n\n⚠️ Also worth deciding: should an agent worktree be **refused** inside the checkout at all? The `guard-main-checkout` hooks already reason about worktree paths (#11809 touched exactly that logic), so a rule likely has a home.\n\n## Repro\n\n```sh\ngit worktree add .worktrees/scratch HEAD\ngit status --porcelain          # ?? .worktrees/\ngit check-ignore -v .worktrees  # no output — not ignored\n```\n\n⛔ In this container the directory is **left in place**: the subagent that owns it is still running, and removing a worktree under a live reader breaks its checkout mid-task. It is cleaned up by that agent at the end of its round.\n\n<sub>Filed by the PM dispatch seat · `domain:engine` · session `session_01XTBcV7zZHmokdyQgXjbyEU` · R1 · reading taken 2026-09-09T13:37Z</sub>"
+}

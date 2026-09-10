@@ -1,0 +1,31 @@
+{
+  "number": 16583,
+  "kind": "issue",
+  "title": "finding(sdui-parser): this copy declares a `binding: 'field'` arm with zero writers on both sides of the port — objectui is retiring its producer-face half, and nothing propagates that here",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T10:57:41Z",
+  "updated_at": "2026-09-07T22:40:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16583",
+  "body": "Observation-class finding, measured from the `domain:spec @ objectui` seat while accepting objectui PR #8297. Filed unassigned, no labels — grading and `domain:*` are the triage seat's. ⛔ Not claiming; this repo is not my lane.\n\n## The claim\n\nA 2026-09-07 maintainer-adopted ruling (objectui#6950, director seat decision batch #69, verbatim 「其他同意」) retires the `binding: 'field'` arm under ADR-0049 on the ground that it has **zero writers**. That ruling names one coordinate, in objectui. **This repo's `packages/sdui-parser` carries the same arm in three declarations, and no mechanism carries the retirement across.**\n\n## Measured on this repo's `origin/main` = `f2f6684`\n\n```\npackages/sdui-parser/src/index.ts:81     binding?: 'object' | 'field';\npackages/sdui-parser/src/types.ts:84     binding?: 'object' | 'field';\npackages/sdui-parser/src/types.ts:107    bindings: Array<{ tag: string; input: string; kind: 'object' | 'field'; value: unknown }>;\n```\n\nAnd on `objectstack-ai/objectui` `origin/main` = `8f9d87a`, the same three, one of which objectui PR #8297 is narrowing to `'object'`:\n\n```\npackages/sdui-parser/src/index.ts:90     ← narrowed by objectui PR #8297\npackages/sdui-parser/src/types.ts:100    ← residue, carried by objectui#8315\npackages/sdui-parser/src/types.ts:138    ← residue, carried by objectui#8315\n```\n\n**The zero-writer reading, with a live control.** In objectui, `binding: 'field'` occurs **0** times across `packages/` / `apps/` / `examples/`, while the control word `binding: 'object'` occurs **7** times across 5 files — so the discriminator works and the zero is real.\n\n⚠️ **What I have NOT measured, and am not asserting**: the writer count for `'field'` *in this repo*. I measured this repo's declarations only. ⇒ Whoever takes this runs the same grep here first; if this repo has a `'field'` writer, the premise differs on this side and the answer may differ with it.\n\n## Why it is worth a card here rather than a line on the objectui one\n\nRule 1: the issue lives where the fix lands. Two copies, two fixes, two repos. Filing it only on the objectui side would leave this copy to be discovered by whoever next reads the port-parity gate — which is exactly the accretion pattern #12810's family is about.\n\n⛔ I have **not** measured which copy is upstream of which, and this card does not assert a direction. What is measured: both repos carry a `packages/sdui-parser` with these declarations, and objectui runs a `check:upstream-port-parity` gate, so the copies are kept in step by some mechanism whose owner decides whether a retirement propagates.\n\n## Family, checked rather than assumed\n\n- **#12858** — the two copies diverging on the manifest-generation guard (`assertFullyLoaded` / `RegistryConfigLike.lazy`), `pm:on-hold`. **Same family, different key** ⇒ ⛔ not a duplicate. ⚠️ It also records \"zero in-repo pull today\" for this copy — if that still holds, this arm is dead on both axes here (no writer AND no consumer), which would make the disposition cheaper than it looks. Re-measure rather than inherit that.\n- **#12810** — the parent the above is filed against.\n- **#12814**, **#12719** — earlier lockstep ports, both closed; precedent that changes to this copy's accept/reject behaviour are handled as their own cards.\n\n## Refs\n\n- objectui#6950 / objectui PR #8297 — the ruling and the producer-face retirement.\n- objectui#8315 — the objectui reader-face half of this same residue.\n\nFiled by the `domain:spec @ objectui` PM seat, session `session_01QtGhnU3WnnWyiWeYQhw2aX`.\n\n---\n_Generated with [Claude Code](https://claude.com/claude-code)_\n\nhttps://claude.ai/code/session_01QtGhnU3WnnWyiWeYQhw2aX"
+}

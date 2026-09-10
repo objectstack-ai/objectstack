@@ -1,0 +1,32 @@
+{
+  "number": 17307,
+  "kind": "issue",
+  "title": "console: #7804's `GlobalFilterSchema.object` is never read, and `ChartAxisSchema.title` bypasses a locale resolver in its own bundle — two dashboard i18n surfaces declared translatable and not resolved",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "i18n",
+    "pm:blocked",
+    "priority:p2",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T05:27:27Z",
+  "updated_at": "2026-09-10T15:01:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17307",
+  "body": "Filed from `objectstack-ai/hotcrm` (the reference app) after both halves were measured **in a real browser** against the pinned `@objectstack/console@17.4.0`, not read off a docblock. Source cards: hotcrm#1822 and its PR objectstack-ai/hotcrm#1851, where the app worked around half of this and documented the other half in source.\n\nBacklog searched before filing (this repo, semantic + control): the closest neighbours are all **closed** — #7804, #5428, #5141, #5076, #5084, #16773, #16167. None is open and none covers either half as stated below. #7804 is the direct ancestor and is why this is a *consumer-half* card rather than a feature request.\n\n## Two keys the spec types as translatable, and the Console resolves neither\n\n### 1. `GlobalFilterSchema.object` — shipped in the spec by #7804, never implemented in the Console\n\n`@objectstack/spec@17.4.0` documents it in terms (`dist/index.js:21087-21103`):\n\n> *\"Source object for i18n label resolution (#7804): when set, this filter's field label **and option labels** resolve through the SAME `fields.<object>.<field>` translation-bundle convention lists/forms already use, keyed by this object and `field` — zero new i18n vocabulary, one resolver path.\"*\n\n**#7804 is CLOSED.** The spec half landed; the reading half was never built.\n\nMeasured: a dashboard `globalFilters[]` entry carrying `object` and **no** `label`, rendered under `zh-CN`, shows the **raw field name** — the literal string `type`, not 类型 — and leaves its option labels in English. The Console's filter-definition builder never copies the authored `object` onto the definition, and the label component reads `def.label` and nothing else:\n\n```js\n// plugin-dashboard chunk\nfunction In(e){ let { language: t } = xe(); return K(e.label, t) }\n```\n\n⇒ the key is authorable, documented, validated, and inert. That is the declared-but-unenforced shape ADR-0049 exists to close, on a key whose own docblock names the resolver it is supposed to reach.\n\n### 2. `ChartAxisSchema.title` accepts an inline locale map and is flattened locale-blind\n\n`ChartAxisSchema.title` is `I18nLabelSchema` = `z.union([z.string(), InlineLocaleMapSchema])`, so `{ en: 'Revenue', 'zh-CN': '收入' }` parses, builds and validates. At render the axis normaliser takes **whichever value comes first**:\n\n```js\n// framework chunk\nvar lo = e => !!e && typeof e === 'object' && !Array.isArray(e);\nfunction uo(e){ if (typeof e === 'string' && e) return e;\n                if (lo(e)) return Object.values(e).find(e => typeof e === 'string' && e) }\n```\n\nMeasured both directions, same map, order swapped:\n\n| authored | viewer | rendered |\n|---|---|---|\n| `{ en: …, 'zh-CN': … }` | `zh-CN` | **English** |\n| `{ 'zh-CN': …, en: … }` | `en` | **Chinese** |\n\nand dropping `title` renders **no axis title at all** rather than a translated fallback. ⇒ an author has three options and all three are wrong: hardcode one language, hardcode one language behind a map that also depends on key order, or lose the axis title.\n\n### ⭐ The part that makes this cheap to fix\n\n**The resolver already exists in the same bundle.** Two of them, in fact — one walking `default → en-US → en → zh-CN`, and one walking the exact BCP-47 tag, then the language prefix, then `default`, then `en`, before any first-value fallback:\n\n```js\nlet r = Object.keys(n).find(e => e.split(`-`)[0] === a && …);\nreturn r(i) ?? r(a) ?? (o === void 0 ? void 0 : r(o)) ?? r(`default`) ?? r(`en`)\n       ?? Object.values(n).find(e => typeof e === `string`) ?? ``\n```\n\nSo this is not \"the platform cannot resolve an inline locale map\". It resolves them correctly on the filter-label path and on at least one other. **The axis path bypasses a resolver two chunks away**, and the filter-`object` path never got a consumer at all. Both are one resolver-family fix.\n\n## Why it matters beyond one app\n\n`lint:i18n-gate` is green at zero and **legitimately so** — it counts `i18n/missing-*` findings, and a key nothing reads produces none. So the gate built for exactly this failure mode is blind by construction here: an app can be fully translated by every available measure and still render half-English analytics chrome. In the reference app that meant `Sales Rep: 全部` beside `商机类型: 全部` on the most-viewed dashboard, long enough to be baked into a published marketing screenshot.\n\n## What the reference app did in the meantime\n\nhotcrm PR objectstack-ai/hotcrm#1851 writes an inline locale map on every `globalFilters[].label` and static option label across five dashboards (the path that **does** resolve), leaves all 18 axis titles as plain English, and records the measurement in `src/dashboards/index.ts` so the next author does not repeat it. ⛔ It did **not** work around the axis half — there is no correct workaround, only three wrong ones.\n\n## Suggested acceptance\n\n1. The filter-definition builder copies the authored `object` through, and the filter label / option-label path resolves `fields.<object>.<field>` when it is present — i.e. #7804's stated contract, which is currently prose.\n2. The axis-title normaliser resolves an inline locale map against the active locale using the resolver already in the bundle, instead of `Object.values(...).find(...)`.\n3. Either would be provable by a rendering test at two locales, since a schema-level test cannot see this class at all — that is precisely how it shipped.\n\nRefs: #7804 (the spec half, closed) · #5428 · #5141 · #5076 · #16773 · #16167 · objectstack-ai/hotcrm#1822 · objectstack-ai/hotcrm#1851\n\nBlocked-by: objectstack-ai/objectstack#17250\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

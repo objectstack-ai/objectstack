@@ -1,0 +1,32 @@
+{
+  "number": 16973,
+  "kind": "issue",
+  "title": "[finding] PR #16650 merged with clause-② `yes` and both packages it grew graded `patch` — the LEVEL axis could not see them, so it printed green",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T20:56:34Z",
+  "updated_at": "2026-09-10T12:52:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16973",
+  "body": "PR #16650 was merged with the clause-② level rule **declared and unsatisfied**. It went green because the LEVEL axis could not see the packages it graded — the blindness #16713 is fixing. This card is the merged instance, filed separately because ⛔ a level ruling on an already-released bump is the maintainer's, not an execution seat's.\n\nFiled unlabelled by the `domain:devx` execution PM seat (`session_012GKcPZbMoGq7WPzKLfRBTU`). ⛔ Grade, `domain:*` and the ruling are triage's / the maintainer's. ⛔ Not claiming, ⛔ not proposing a remedy.\n\n## Measured, independently, on `origin/main`\n\n**PR #16650** — *fix(driver-sql, driver-turso): SqlDriver.execute() declares a backend refusal as…* — merged **2026-09-07T21:13:32Z**.\n\n| reading | value |\n|---|---|\n| line-start `^Clause-②:` matches in the PR body | **1** — the line is `Clause-②: yes` |\n| carrier or durable line? | ⭐ a **durable body line**, ⛔ not a strippable `needs:contract-review` label ⇒ the reading is stable and reproducible today |\n| changeset | `.changeset/driver-raw-statement-declared-fault.md` |\n| grades | `\"@objectstack/driver-sql\": patch` · `\"@objectstack/driver-turso\": patch` |\n| `packages/GROUP/NAME/src/**` files moved | **8**, under `packages/drivers/driver-sql`, `packages/drivers/driver-turso`, `packages/services/service-analytics`, `packages/services/service-package` |\n\n⇒ The PR **declares** that it widens a published surface, and grades **`patch`** two of the packages whose `src/**` it moved. The maintainer ruling of 2026-09-04 (decision batch #35, on #15294) is that *\"a purely additive widening of a published package's public surface takes AT LEAST `minor`\"*.\n\n## Why it was green\n\n`scripts/check-changeset-no-major.mjs` resolved the grown package through `/^packages\\/([^/]+)\\/src\\//` — one path segment. `packages/drivers/driver-sql/src/…` does not match it, so `packagesTouched` returned **no package at all**, and the cross-check had nothing to judge. ⭐ Not a tolerance and not a bug in the rule: **the gate could not report a limb it never grew.**\n\n⇒ #16713 / PR #16969 closes that blindness. This card is what the fix **found**, surfaced by replaying the gate's own predicate over the 150 most recently merged PRs at each merge commit against its parent: **7 verdicts move 0 → 1, 0 move the other way.** Six of the seven are `not-measured-moot → not-measured-material` with no readable declaration — historical, and the gate's own printed remedy for that shape is one body line. **This is the seventh, and the only one where a declaration was actually made and contradicted.**\n\n## ⛔ What this card does NOT claim\n\n- ⛔ **Not that anything must be re-released or re-graded.** All 69 packages sit in one `fixed` group and the released bump is set by the highest pending changeset, so a `patch` here does not by itself mean a widened surface shipped inside a patch release. ⚠️ Whether it did is exactly the question this seat is not qualified to close.\n- ⛔ **Not a criticism of #16650's author or reviewer.** The gate printed green. There was nothing to see.\n- ⛔ **Not blocking #16713 / PR #16969.** That fix lands on its own merits; this is what it revealed.\n- ⛔ **No remedy proposed.** Re-grade, leave it, or rule that the axis only binds going forward — that is a maintainer call, and it also sets the precedent for the six historical `not-measured` cases beside it.\n\n## The other six, for completeness\n\n`#16759` service-automation · `#16730` plugin-auth · `#16739` plugin-approvals · `#16722` plugin-security · `#16700` plugin-webhooks · `#16680` hono. ⚠️ Each is `not-measured` rather than a contradicted declaration — i.e. the axis had **no input**, not a disagreement. ⛔ Listed so the population is not mistaken for seven of this card's shape; it is **one**.\n\n## Forward-looking check already done\n\nThe **open** PR board was swept for the same shape before #16969 lands: all 23 open PRs (control: 23 of 23 returned a readable file list), and **zero** carry a nested package graded `patch` under a clause-② `yes`. ⇒ no author meets a new red without warning. Recorded on PR #16969.\n\n## Related\n\n- **#16713** / PR #16969 — the blindness itself, and where the measurement came from.\n- **#16692** — the ROOT axis of the same regex (`bin/**` ships but is not `src/**`), ⛔ still open and ⛔ deliberately not closed by #16969.\n- **#15294** / decision batch #35 (2026-09-04) — the level ruling being applied.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

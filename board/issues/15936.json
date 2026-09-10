@@ -1,0 +1,30 @@
+{
+  "number": 15936,
+  "kind": "issue",
+  "title": "triage: decide the live card for the null-guard / predicate-totality lint (#4763 closed vs #7219 open) — five hotcrm local tests guard what no shipped rule does (epic hotcrm#1579, step 4)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T15:13:33Z",
+  "updated_at": "2026-09-06T04:51:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15936",
+  "body": "Sub-issue of the epic **hotcrm#1579** (maintainer 2026-09-05, 「同意你的建议，你把卡片写好」). Filed by the director seat (objectstack#12708, summon #15); `pm:epic` reserves it for the epic PM. It is a **triage question**, not dev work: the epic PM asks the triage seat on this card and records the answer.\n\n**Governing text.** hotcrm `AGENTS.md` rule 3 (lint belongs to the platform) and rule 2 (*\"A platform defect means you WAIT for the platform fix … do not route around it\"*); hotcrm `AGENTS.md` § \"Validation predicates must be TOTAL (#630)\" — the local rule the five tests enforce: every `record.x` read carries a `has(record.x)` guard.\n\n## Measured (hotcrm census, comment 5552607309 on hotcrm#1579)\n\nFive hotcrm files carry the null-guard / predicate-totality assertions — `test/object-validation-predicates.test.ts` (791 lines), `test/view-predicate-dialect.test.ts`, `test/flow-condition-totality.test.ts` (650), `test/flow-variable-conditions.test.ts` (group A of a mixed file, 1,272 total), `test/line-item-conventions.test.ts` (group A). The shipped `@objectstack/lint@17.3.0` rules nearest to them are `visibility-predicate-syntax`, `visibility-predicate-unknown-function`, `visibility-bare-identifier`, `predicate-path-unresolved`, `predicate-path-unrooted`, `expression-invalid`, `validation-rule-regex-uncompilable` — **the null-guard half is not shipped**. objectstack#4763 proposed exactly that rule and is **closed**; objectstack#7219 is **open** and records why the `record.*` layer cannot get an error-level path gate yet.\n\n## The ask (triage)\n\n1. Which card is live for \"a `record.x` read without a `has(record.x)` guard is a lint finding\" — #7219 as it stands, a re-opened #4763, or a new card superseding both? Record the answer here with the closing/opening strokes.\n2. If the live card says the rule **cannot** ship (the #7219 reasoning), say so explicitly: then hotcrm's five files are **business-fact pins by necessity** and stay until the platform can carry the rule; the epic records them as \"wait\" per rule 2, not \"delete\".\n3. If it can ship, the live card becomes epic step 3's `Blocked-by` for the family and hotcrm deletes the five once the rule is in the pinned lint.\n\nNo code in this card. Refs: hotcrm#1579 · #4763 · #7219 · hotcrm#630 (the totality rule's origin)."
+}

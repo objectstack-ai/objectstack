@@ -1,0 +1,29 @@
+{
+  "number": 8006,
+  "kind": "issue",
+  "title": "Reject specs that do not round-trip through JSON at `put()` — the option-1 tightening deferred by #7856",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T11:03:59Z",
+  "updated_at": "2026-08-20T23:55:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8006",
+  "body": "Filed by the `domain:metadata` PM seat. **This is the follow-up the #7856 triage ruling explicitly deferred rather than rejected**, and it is filed because the implementing session drafted it but could not file it (the `objectstack-ai` org does not have the Claude GitHub App connected, so dev containers are blocked from the GitHub API — see #7856's PR #7992). Filing it here so a drafted card does not evaporate; a \"drafted\" card with no number is not a filing.\n\n## Provenance and what is already settled\n\n#7856 (landed as PR #7992, `c7e7900`) fixed the **coherence** half: `canonicalize` now honours `toJSON` exactly as `JSON.stringify` does, so `canonicalize(x) === canonicalize(JSON.parse(JSON.stringify(x)))` holds by construction and `put().version === get().hash` is true again.\n\nThe triage ruling on #7856 (comment `5263973459`) chose **option 2 (hash the serialized form)** and was explicit about this card:\n\n> Option 1 (reject non-round-tripping specs at the door) is **NOT rejected on the merits** — it is a separate accept-set tightening with its own blast radius; if the dev's measurement of real spec corpora shows non-round-tripping values are rare-to-zero, file the option-1 tightening as its own follow-up card (contract-first, likely `domain:spec`-adjacent for the authorable face) rather than riding it here.\n\n**That measurement was taken and it favours the tightening.** #7992 hashed this repository's entire checked-in JSON corpus under both the old and new implementations: **1973 files, 0 hashes changed.** The only positions that behave differently are those carrying a callable `toJSON`, and the corpus contains none.\n\n## The question this card decides\n\n`put()` currently **accepts** a spec whose in-memory form does not round-trip through JSON. After #7992 the stored bytes and the returned version agree, so nothing is *incoherent* any more — but the author still gets silent lossiness: a `Date` they wrote is a string when read back, and a class instance is whatever its `toJSON` yields.\n\nShould `put()` **refuse** such a spec, loudly, naming the offending key?\n\n**For:** it matches the repo's contract-first posture (\"declared = enforced\"), and it is the hardest shape for an AI author to get silently wrong — the failure becomes a message at the door instead of a value that quietly changes type between write and read.\n\n**Against:** it is an **accept-set tightening**, i.e. a breaking change for any caller that does this today. The corpus measurement bounds the blast radius for *checked-in* specs at zero, but it says nothing about specs constructed at runtime by consumers.\n\n⚠️ **Measure the runtime constructors before assuming zero.** The 1973-file result covers the on-disk corpus only. `put()` callers that build a spec in memory — plugins, migrations, tests, `SysMetadataRepository` writers — are the population this tightening would actually break, and they were **not** measured by #7992.\n\n## ⚠️ Three open questions the drafting session flagged\n\nRecorded as questions, not answers — this card does not pick:\n\n1. **Where does the refusal live** — `put()` in each repository implementation, or the shared contract suite / `hashSpec` layer that #7992 already unified? The latter is the natural chokepoint but changes the accept set for every implementation at once.\n2. **What is the error's shape** — a declared error code (subject to `check:error-code-casing`), or a thrown validation error? It must name the offending **key path**, not just the fact of the failure.\n3. **Is `Date` genuinely disallowed, or normalised?** A blanket refusal of `toJSON`-carrying values is simple but rejects `Date`, which is the single most likely thing an author writes. An alternative is to refuse only values whose `toJSON` is *lossy* in a way the reader cannot invert — which is harder to define and may not be worth it.\n\n⚠️ **If the choice turns on product intent unreadable from the code, that is a `needs-user-decision`, not a coin flip** — the original card said so and it still applies.\n\n## Routing note\n\nFiled `domain:metadata` because the mechanism lives in `packages/metadata-core` / `packages/metadata-fs`. ⚠️ **If the remedy changes the authorable acceptance face, it belongs to `domain:spec` (#6017)** — the triage ruling anticipated this (\"likely `domain:spec`-adjacent for the authorable face\"). Re-route rather than reaching across.\n\n## Precondition\n\n⛔ Do not start before confirming #7992 (`c7e7900`) is on `main` — this card is meaningless without it, since the coherence bug would otherwise mask the accept-set question."
+}

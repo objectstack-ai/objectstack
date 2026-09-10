@@ -1,0 +1,31 @@
+{
+  "number": 15610,
+  "kind": "issue",
+  "title": "[finding] service-settings' shared-predicate ratchet: a `.json` code table imported by the DOOR'S CALLER is caught by nothing — and the reason it was left uncovered has since been falsified",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T23:34:17Z",
+  "updated_at": "2026-09-04T23:41:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15610",
+  "body": "Finding-class, filed by the `domain:services` execution seat (session `03324ae2-0f5b-5ad2-8a2e-cf4aaff5a909`). ⛔ `domain:*`, type and priority are triage's — this seat does not produce them.\n\nFound by the round-4 Clause-② contract review of **PR #15434** (card #15162) at `CONTRACT_REVIEW_TIER`. The reviewer **deliberately did not make it a condition of its PASS**, under an explicit proportionality instruction, and said so. This card exists so the finding is not lost and so the ratchet's own NOT-covered list stops being larger than its evidence — not to reopen that PR.\n\n## The shape, measured\n\n`import ALPHA2 from './zz-alpha2.json' with { type: 'json' }` in **`settings-service.ts`** — the door's *caller* — judging `iso_3166_alpha2` at the `validatePatch` refusal, with `value-domains.ts` untouched. 249 codes counted back off the `.json`:\n\n| | |\n|---|---|\n| the ratchet | **7/7 green** |\n| `settings-service.test.ts` | **139/139 green** |\n| `tsc --noEmit` | exit 0 (`resolveJsonModule` is on at the root) |\n| `tsup` build | exit 0 |\n\n⇒ **Closed by nothing.** A second membership definition for a domain the #14168 ruling exists to unify ships entirely green.\n\n**Why each instrument misses it:** `runtimeSources()` reads only `*.ts` (`value-domains.shared-predicate.pin.test.ts:133`), so the carrier file is never scanned; the import-surface pin reads the **door** only; and the caller itself carries no dense run of two-letter tokens, because its table lives in the `.json`.\n\n## ⚠️ The part that makes this worth a card rather than a shrug\n\nRound 3 of the same review recorded the walk's `.json` / `.mts` / `.cts` blindness and dismissed it as **\"harmless while the door is the consumer.\"**\n\nThat premise was falsified **in the same review round**, by the N6 measurement: a second judge placed in the door's *caller* is never reached by the door and needs no import at all, which is precisely why the density scan had to be widened from door-only to package-wide in PR #15434's final round. ⇒ The reason the `.json` carrier was omittable is gone; the omission is not.\n\nSo this is a known carrier crossed with a topology that was only established afterwards — small, but the ratchet's header currently implies a completeness it no longer has.\n\n## Suggested closure (advisory)\n\nReportedly one line: admit `.json` in the walk's extension filter, at which point the existing package-wide `ARRAY` scan catches a JSON array of quoted codes. ⚠️ **NOT MEASURED** — the reviewer stated it as the likely closure and explicitly did not measure it. Whoever takes this should drive it rather than trusting the sentence, and re-run the census afterwards: `DENSE` currently returns **1** hit across every scope measured (up to 5,909 git-tracked files including tests), and that one hit is `packages/spec/src/shared/value-domain.zod.ts` — the shared table's own module, where the definition belongs.\n\n⚠️ Also worth carrying into the fix: `.mts` and `.cts` are unscanned for the same reason and were never separately measured.\n\n## Shapes deliberately NOT part of this card\n\nThe same review considered and set aside, with reasons: an object-key map (`{ AD: 1, … }`) or a string enum (`AD = 'AD'`) as a judge — both fall in the ≥3-character-separator class already listed as a documented gap; a quoted array or `Set` in the caller — already caught by the package-wide `ARRAY` scan; and a caller consulting `ISO_3166_ALPHA2_CODES` from `@objectstack/spec/shared` directly — a second *call site*, not a second *definition*, so not the divergence the ratchet exists for. ⛔ Do not fold those in.\n\nRefs: #15162 / PR #15434 (the card and the ratchet) · #14168 (maintainer ruling A: one closed vocabulary, one membership predicate) · the round-3 and round-4 reviews on that PR."
+}

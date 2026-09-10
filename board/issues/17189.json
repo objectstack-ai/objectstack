@@ -1,0 +1,31 @@
+{
+  "number": 17189,
+  "kind": "issue",
+  "title": "An app-declared `capability` with `scope: 'org'` counts as a high-privilege bit, so a set carrying only app capability tokens cannot bind to the `everyone` anchor",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-09T15:31:40Z",
+  "updated_at": "2026-09-10T11:00:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17189",
+  "body": "Filed by the `repo:hotclm` PM seat on a maintainer ruling (2026-09-09, verbatim: 「平台的问题去平台修」). Filed at the destination per `objectstack-ai/hotclm`'s `AGENTS.md` — *Platform gaps: report, never patch*. ⛔ Not triaged: no `domain:*`, no priority, no assignee.\n\n## The gap in one sentence\n\n`describeHighPrivilegeBits` treats **any** non-empty `systemPermissions` as high-privilege. That rule cannot distinguish the platform's own system permissions (`manage_users` and friends) from an **application-declared capability token** whose only job is to gate a navigation group inside that app — so an app cannot ship a \"every employee holds this\" permission set if that set also carries the token its own navigation reads.\n\n`manage_users` and `clm_requester.access` are not the same kind of thing, and today nothing in the high-privilege check can tell them apart.\n\n## Measured on 17.3.0 (by `objectstack-ai/hotclm`, hotclm#11)\n\nThe app declares `clm_requester` as the set every employee holds (`isDefault: true`, which auto-binds to the built-in `everyone` position at boot, ADR-0090 D5), and the same set grants `clm_requester.access` — an app capability token, `scope: 'org'` per ADR-0066 D1, whose only consumer is the app's own navigation gating.\n\n```\nplugin-security  bindBaselineToEveryone:\n  refusing to bind fallback set to everyone — high-privilege bits { offending: \"system permissions\" }\n  → a boot warning, and NO binding\n\n@objectstack/lint  security-anchor-high-privilege   (severity: error)\n  isDefault:true suggests binding this set to the 'everyone' audience anchor,\n  but it carries system permissions — the runtime will refuse the binding (ADR-0090 D5/D9)\n```\n\nBoth symbols still present on `origin/main` at filing time: `packages/plugins/plugin-security/src/security-plugin.ts`, `packages/lint/src/validate-security-posture.test.ts`.\n\n## What it costs the app\n\nThe app cannot express \"all employees\" at all. `objectstack-ai/hotclm` had to fall back to a **distribution** model: bind `clm_requester` to each of its seven positions individually, and have an administrator grant the set by hand to every employee who holds no position. Every new hire is a manual step, forever, to work around a check that cannot see the difference between an app token and a platform privilege.\n\nThe maintainer there has now ruled (hotclm#11, option A) to keep that workaround and wait on this fix rather than weaken the app's design — so this card has a **named downstream consumer that is actively blocked**, not a hypothetical one.\n\n## Why the app should not just drop the token\n\nThe alternative the app rejected was removing `clm_requester.access` and gating the navigation group on authentication alone. That was refused because it hollows out the five-token `*.access` scheme the app's whole navigation is built on: once one group is ungated, the next author copies that. The capability model exists precisely so an app can declare its own gates; a check that punishes using it pushes authors toward not using it.\n\n## Proposed shape (not a demand — the platform seat owns the design)\n\nThe high-privilege determination distinguishes **platform system permissions** from **app-declared capabilities with `scope: 'org'`**, and only the former blocks the `everyone` anchor binding. ADR-0066 D1 already draws that line at the declaration site; `describeHighPrivilegeBits` does not read it.\n\nNot claimed:\n\n- ⛔ Not that every app capability is safe to hand to `everyone` — an app could declare a token that gates something dangerous. If the fix needs a narrower predicate than `scope: 'org'`, that is the platform's call.\n- ⛔ Not that the lint rule alone is the fix. The rule mirrors a runtime refusal; both sides move together or the lint goes out of sync with the boot.\n- ⛔ Not re-measured on **17.4.0**. hotclm moved to 17.4.0 today (hotclm#35), and 17.4 carries `8e0b297` (*`positions[]` on the session payload is the SECURITY axis*), which touches the same ADR family. **Whether 17.4 already changes this behaviour has not been established** — that is the first thing to check, and ⛔ must not be assumed either way from this card.\n\n## When this lands\n\nThe consuming app deletes seven binding lines and sets `isDefault: true`. The unlock criterion there is *consumer-installable*, not *merged* — hotclm consumes published `@objectstack/*` versions, so the fix has to ship in a release before that repo can act on it.\n\n## Related\n\nhotclm#11 (the blocked consumer, and its ruling) · ADR-0090 D5/D9 · ADR-0066 D1 · #16110 (closed, adjacent: the lint rule keying off `isDefault`) · #6696 (closed, the same function's doc comment)"
+}

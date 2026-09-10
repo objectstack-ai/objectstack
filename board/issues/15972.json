@@ -1,0 +1,35 @@
+{
+  "number": 15972,
+  "kind": "issue",
+  "title": "A tenant can mint a `sys_user_position` row spelling any built-in identity name — PR #15948 closed every reader, nothing stops the row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "needs:contract-review",
+    "pm:dispatched",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T16:55:11Z",
+  "updated_at": "2026-09-10T14:33:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15972",
+  "body": "## The class, not the instance\n\n`sys_user_position` is `apiEnabled` and its names are **unconstrained**, so a tenant can mint a row spelling **any** ADR-0068 built-in identity name — `platform_admin`, `org_owner`, `org_admin`.\n\nPR [#15948](https://github.com/objectstack-ai/objectstack/pull/15948) (card #15136) closes every in-repo reader that turned such a name into **authority**. ⛔ **It does not stop the row existing.** A future reader — or an existing one outside this repository — can reintroduce the hole, and nothing mechanical will catch it.\n\n## Provenance and what is measured\n\nFound by the `os-dev` seat while reworking #15948 after its Clause-② review **FAILED** on exactly one instance of this class. ⭐ That instance is worth reading before working this card, because it shows how invisible the shape is:\n\n- `isPlatformAdmin` was derived as `positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN)`.\n- Measured on the real pipeline: a plain org member holding a `sys_user_position` row spelled `platform_admin` got `isPlatformAdmin: true` and **passed `judgePlatformAdmin`**, the `/admin/*` mount gate, while `hasPlatformAdminStanding` — the rung `/sso/register` and impersonation use — said `false`.\n- Reachable by a tenant admin (who clears the D12 gate outright) or a `manageAssignments` delegate, because the seeded `platform_admin` position has **no bound sets**, so `assertAssignmentWrite`'s `boundSets.every(...)` passes **vacuously**.\n- Core's own resolver already forbids the form, in a comment at `resolve-authz-context.ts:1125-1129`: *\"Read the RUNG — never `positions.includes(...)`; an ADR-0057 D4 `sys_user_position` row may spell that very name.\"*\n\n⚠️ **That ⛔ is a comment, not a gate.** It was there the whole time and did not prevent the read.\n\n## Why the instance being fixed does not close the class\n\n1. ⚠️ **The name is still writable.** Nothing at the write path refuses a `sys_position` name that collides with a built-in identity. Every defence today is a **reader** choosing to consult the rung.\n2. ⚠️ **Out-of-repo readers are unmeasured.** The rework grepped `isPlatformAdminUser` / `judgePlatformAdmin` repo-wide with a firing control (51 in-package hits) and found no consumer outside `plugin-auth` — but that covers `objectstack` and `objectui` only. **`cloud` was not reachable from that session**, and a name-as-authority read there would be invisible to every gate in this repo. ⇒ A fleet sweep is owed, and is this card's **first deliverable**.\n3. ⭐ **The card that created the exposure did not create the class.** #15136's ruling A moved `positions` onto the security axis, which moved these strings into tenant-writable space. Before that, `positions` carried auth roles and no tenant could make the platform say `platform_admin`. So the ruling was right *and* it converted a dormant naming collision into a live one — worth stating plainly so nobody reads this card as an argument against A.\n\n## Direction, ⛔ not prescribed\n\nA `sys_position` **name-collision guard**, refusing the ADR-0068 built-in identity names at **write** time, would close it at the source rather than one reader at a time. ⚠️ That is a security-design call with real questions attached, which is why this is filed rather than fixed:\n\n- What happens to rows that **already** collide in a live deployment — refuse at write only, or migrate?\n- Is the reserved set exactly the ADR-0068 built-ins, or does it need `org_*` shapes too?\n- Does the guard belong at the object layer, the API layer, or both?\n\n⛔ **Do not close this by fixing readers.** Readers are #15948's job and it did that; this card exists because the readers are not the invariant.\n\n## First deliverable for whoever takes it\n\nNot a fix — a **census across the fleet**: every reader, in any repository, that treats a **name** in `positions[]` (or in a `sys_user_position` row) as authority rather than reading the capability rung. With a control that fires, because a zero-hit grep across an unfamiliar repository proves nothing.\n\n## Related\n\n- **#15136** / PR #15948 — the instance, the ruling that exposed it, and the three-way-agreement pin (`isPlatformAdmin` / `judgePlatformAdmin` / `hasPlatformAdminStanding` must agree) that now guards the fixed readers.\n- **#15943** — a showcase object gating on `'admin' in current_user.positions`, where `admin` is never on the server's axis. Opposite direction, same underlying confusion about what that array contains."
+}

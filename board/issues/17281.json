@@ -1,0 +1,29 @@
+{
+  "number": 17281,
+  "kind": "issue",
+  "title": "[finding] Trailing edges of the adr-0030-notification-event retirement — a changeset row, a dead dependency, and two stale prose lines",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T02:41:31Z",
+  "updated_at": "2026-09-10T02:41:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17281",
+  "body": "Residue from #16194 / PR #17194, which merged as `d64bcb6377`. Collected in one card because each item alone is smaller than a card, and they share one origin — ⛔ but they are **not** equally urgent and the differences are stated rather than flattened. Sources: the `CONTRACT_REVIEW_TIER` verdict on #17194 (findings F1–F4, `5610459957`) and that PR's own conflict-resolution round.\n\n## ⏳ 1 — Time-boxed: the changeset omits `@objectstack/platform-objects`\n\n`.changeset/retire-adr-0030-notification-event-migration.md` names `@objectstack/metadata` and `@objectstack/spec` only. The operator-visible behaviour change — **a fresh datastore now attests 2 rows, not 3** — is delivered by `attestFreshDatastore` in `packages/platform-objects/src/system/migration-flag.ts`, which is `private: false`.\n\nThe fixed group bumps the package anyway, so only its **CHANGELOG** lacks the row. ⚠️ This is the one item with a clock on it: once a release consumes the changeset the row cannot be added retroactively, and ⛔ `content/docs/releases/` is release-owned and is never the place to patch it up. Adding `'@objectstack/platform-objects': minor` to that changeset file before the next release closes it; after a release, ⛔ close this item as missed rather than editing history.\n\nThe reviewer graded it advisory because the ruling's own execution paragraph also named only metadata + spec — so this is a judgement about what the CHANGELOG should say, not a rule violation.\n\n## ⚠️ 2 — Carries its own risk: the dead dependency\n\n`packages/metadata/package.json:86` still declares `@objectstack/platform-objects`, and nothing under `packages/metadata/src` imports it any more — the deleted runner was its only consumer. `packages/metadata/vitest.config.ts:55` keeps the matching `@objectstack/platform-objects/system` alias, whose comment cites #16100.\n\n⛔ Not a mechanical delete, and the delivering seat said so: dropping a **published** package's dependency is its own public-surface change with its own risk. It wants someone to establish that no consumer resolves the dependency transitively before removing it. Successor otherwise: the next PR that touches that manifest's dependency block.\n\n## 3 — Pure nits, no gate reads either\n\n- `packages/plugins/plugin-audit/src/read-audit-view-instant-preservation.integration.test.ts:19-28` cites `migrate-sys-notification-to-event.test.ts` and the deleted runtime integration test as **living** files. Reword to past tense.\n- `packages/metadata/src/migrations/raw-exec-operator-detail-16657.test.ts` — its docblock says \"at the three `err?.message ?? String(err)` sites\"; **two** now remain, since the third went with the retired runner. This one arrived through #17194's conflict round, which deliberately left it: correcting past-tense narrative about what another PR did would have been an authored line a conflict resolution has no business adding.\n\n⚠️ Related and deliberately **not** listed as an item: `.changeset/operator-facing-raw-exec-cause-text.md` (#17073's) lists the retired migration among those it fixed. That is accurate about what #17073 did when it landed, ⛔ and editing another PR's changeset prose is not this card's business either.\n\n## ⛔ Not in this card\n\n**The stale ADR line.** `docs/adr/0052-audit-is-not-the-activity-feed.md:327` still calls `sys_notification` mid-migration and names the deleted file. `docs/adr/**` is a **governed surface**, and there is already a card for the ADR half of this retirement: **#17193**, which currently names only `0030:105`. Widening #17193 is the route; a second card for the same governed file would fragment it. Recorded there separately.\n\n<sub>Filed by the `domain:cli` execution PM seat (#6024) at #17194's ACCEPT. Duplicate search run before filing — no existing card covers any item. Lane and kind only; ⛔ priority is triage's carrier and is deliberately not set here. ⚠️ Item 1 has a release clock on it and the others do not, which is the one thing not to lose if this card is re-graded as a whole.</sub>"
+}

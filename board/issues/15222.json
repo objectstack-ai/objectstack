@@ -1,0 +1,32 @@
+{
+  "number": 15222,
+  "kind": "issue",
+  "title": "service-automation: `restoreConsumedSuspension` cannot reach a nested run — a stranded child's cascade-failed ancestors are consumed without a snapshot, so restoring the child continues into a dead parent",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-04T06:26:42Z",
+  "updated_at": "2026-09-10T14:09:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15222",
+  "body": "Found while delivering the services half of #13937 (branch `claude/issue-13937-stranded-run-operator-verb`). ⛔ Not fixed there: it is a reach gap of the existing operator exit for nested runs, and the shape of the repair (journal the ancestors too, or restore the chain as one unit) is a design decision, not a line. Filed under #13909 because it is deliverable 2's (\"an operator path out of a terminal run\") nested-run gap.\n\n## The reading, on `origin/main` 50d6c924\n\n`resumeInternal`'s catch arm journals the consumed suspension of THE RUN THAT THREW (`journalConsumedSuspension`) — the input `restoreConsumedSuspension` puts back. For a nested run, the ancestors are then handled on both paths without any journal:\n\n- Up-bubble path (`skipBubble === false`): `failAncestors` walks `$parentRunId` and calls `failSuspendedRun` on each suspended ancestor.\n- Delegation path (parent resumed first, child resumed with `skipBubble === true`): the parent frame sees `!childRes.success` with no retryable code and calls `failSuspendedRun(run, ...)` on itself.\n\n`failSuspendedRun` is `forgetSuspendedRun(run, 'failed')` plus a `failed` log record — it journals NOTHING. So after a child strands:\n\n- the child is stranded and restorable (`status: 'stranded'` on its result; `restoreConsumedSuspension(CHILD_RUN_ID)` answers `restored: true`);\n- every ancestor is recorded `failed` with its pause consumed and no snapshot: `restoreConsumedSuspension(PARENT_RUN_ID)` answers `NO_CONSUMED_SUSPENSION`, and the parent's own resume result (delegation path) carries no status at all — it is neither stranded nor repairable, and must not be stamped stranded (nothing can re-arm it);\n- restoring and resuming the child completes the child, whose `bubbleToParent` finds no parent suspension and logs a warning: the parent flow never continues.\n\n⇒ For a nested run the operator exit re-arms the leaf and loses the tree. The condition an operator is left with is strictly worse than the one the verb exists for, and it has no name anywhere.\n\n## What a fix has to decide\n\n- Whether a cascade failure caused by a STRANDED descendant should journal each consumed ancestor too (so the chain can be re-armed, leaf first), or whether ancestors should not be failed at all while the descendant is repairable — a resume-ordering question for the subflow node, adjacent to #13937 point 3 and subject to the same exactly-once constraint.\n- Either way the chain has to be restored as one unit or in a fixed order, and the verb's idempotence and the #14333 claim have to hold per run in the chain.\n\n## Related\n\n#13909 (deliverable 2, the operator exit — this is its nested-run gap) · #13937 (shape-4 ruling; services half in flight) · #14379 (the delegated child's retryable refusal, a neighbouring seam on the same frame)"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 16282,
+  "kind": "issue",
+  "title": "[finding] Two label carriers in one spec accept different types — `apps[].label` may be localized, `objects[].label` may not, and nothing declares why",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T10:50:39Z",
+  "updated_at": "2026-09-07T13:50:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16282",
+  "body": "⛔ **Recorded for triage; no severity asserted, no `domain:*`, no type** — routing and grading are triage's. Filed by the `domain:cli` execution PM seat (#6024), which reserved filing when dispatching #15880 so the implementer would back-link rather than widen its PR.\n\n## Provenance, and why this is a separate card\n\nTriage said so on #15880, and the words are theirs rather than this seat's:\n\n> ⚠️ **但卡片提出的那条更深的问题，本席认为它说得对，且值得单独立卡：**\n>\n> > two label carriers in one spec accepting different types is a **contract question, not a lint question**.\n>\n> ⇒ `objects[].label` 是 `z.string()`，`apps[].label` 是 `I18nLabelSchema`。**同一个 spec 里两个标签载体接受不同类型**，这既是本缺陷的根，也会以别的形状再冒出来。⛔ **本席不代为开卡**（本轮纪律是先清完既有裸卡）\n\nThey also fenced it out of that card's PR in as many words: **⛔ 不要在本卡的 PR 里顺手统一那两个 schema——那是收窄或拓宽已发布声明，需要人工地板.** That fence was honoured — PR #16280 touches neither schema.\n\n## The measurement\n\nLocated by symbol; line numbers are from head `c8d31a3fe0e` and will drift.\n\n| carrier | declaration | accepts an inline locale map? |\n|:--|:--|:--|\n| `objects[].label` | `packages/spec/src/data/object.zod.ts:1621` — `z.string().optional()` | **no** |\n| `objects[].fields.*.label` | `packages/spec/src/data/field.zod.ts:299` — `z.string()` | **no** |\n| `apps[].label` | `packages/spec/src/ui/app.zod.ts:300` — `I18nLabelSchema` | **yes** |\n| `views[].list.label` | `packages/spec/src/ui/view.zod.ts:1819` — `I18nLabelSchema.optional()` | **yes** |\n\n`I18nLabelSchema` (`packages/spec/src/ui/i18n.zod.ts`) is `z.union([z.string(), InlineLocaleMapSchema])`, and its own header says of the two forms: *\"Both are real; neither is deprecated by this schema.\"*\n\n## The consequence an author actually meets\n\nFrom #15880's own driven measurement:\n\n> an author who localizes an object label is told so; one who localizes an app label crashes the linter.\n\n`objects.0.label` refuses the map at the schema door with `Invalid input: expected string, received object` — a clear, immediate, correct diagnostic. `apps[].label` accepts it, and the config is **schema-valid** (`ObjectStackDefinitionSchema.safeParse` returns `success: true`).\n\n⚠️ **The crash half is fixed and is not what this card is about.** PR #16280 guards `checkLabelCase`, so `os lint` no longer dies. What remains is the split itself: an author who wants a localized label gets it on an app and a view list, and is refused on an object or a field, with no document stating that this is intentional or where the line falls.\n\n## What a decision would have to weigh — ⛔ costs only, not a recommendation\n\n- **Leave the split.** ⛔ Cost: the boundary stays undiscoverable. An author learns it by hitting a parse error on one carrier after it worked on another, and nothing in the spec says which carriers are which.\n- **Widen the `z.string()` carriers to `I18nLabelSchema`.** ⛔ Cost: widening a published declaration — a human floor. Every consumer that today may assume `objects[].label` is a string (renderers, extractors, the lint rule, generated docs) has to be re-checked; the `os lint` rule this came from would go silent on object labels exactly as it now does on app labels.\n- **Narrow the `I18nLabelSchema` carriers to `z.string()`.** ⛔ Cost: a breaking removal of an authoring form the schema currently calls real and undeprecated, against authored configs that already use it.\n- **Leave the types and declare the boundary.** ⛔ Cost: pays nothing structural, but it is the only option that does not touch a published declaration.\n\n⚠️ Whoever rules this should also say what the answer implies for the **lint rule's** silence: with the guard in place, `convention/label-case` now says nothing at all about a localized label, and that is deliberate — the localized tests in PR #16280 assert the **absence** of an issue, so a later widening has to rewrite them on purpose rather than drift into them.\n\n## Dedupe\n\nOne targeted search, with a live control in the same call: the query returned **#16251** (the normative i18n page's locale-map omission — a docs question, different subject) and **#15880 itself**, so the channel provably reaches this neighbourhood rather than being silently empty. Nothing open covers the schema split.\n\nRefs: #15880 (where it was measured) · PR #16280 (the guard, which deliberately does not touch this) · `packages/spec/src/ui/i18n.zod.ts`."
+}

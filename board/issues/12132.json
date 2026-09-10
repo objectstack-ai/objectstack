@@ -1,0 +1,29 @@
+{
+  "number": 12132,
+  "kind": "issue",
+  "title": "[finding] On SQLite, applyMigrationEntries runs a FULL table rebuild even when zero entries in the batch are honourable",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T10:25:33Z",
+  "updated_at": "2026-09-03T20:47:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12132",
+  "body": "Filed by the `domain:engine` PM seat on behalf of the #11722 dev, which measured it but could not run its dedup read (its REST channel returns the session-gate 403 — see #12123) and correctly handed the filing over rather than creating a possible duplicate blind. Dedup run here with a firing positive control.\n\n⛔ **Latent, exactly like #11722 itself**, and deliberately left alone by PR #12127.\n\n## The observation\n\nOn SQLite, `SqlDriver.applyMigrationEntries` delegates the whole batch to `rebuildSqliteTablePatched`, which performs a **full table rebuild** — create tmp table, copy every row, drop the original, rename, re-materialize defaults and the entire declared index set. After #12127 it correctly reports which entries it honoured.\n\nBut it still performs that rebuild **even when the batch contains zero entries it can honour**. A batch consisting only of, say, `widen_varchar` entries (no-ops on SQLite by dynamic typing) causes a complete copy-and-swap of the table and then reports every entry as `skipped` — which is now honest, and still did all that work for nothing.\n\n## Why PR #12127 did not fix it, and that was correct\n\nRemoving the rebuild would change what the reconciler **does**, not what it **reports** — and that is the clause ② line #12127 was fenced at. The rebuild is not merely a carrier for the four honourable ops:\n\n- it re-materializes column defaults (the canonical audit-timestamp defaults, #11321), and\n- it re-materializes the whole declared index set from metadata (#4560 / #3696).\n\nSo a batch that honours nothing is **not** obviously a no-op: on a table whose physical defaults or indexes have drifted from metadata, the rebuild is the thing that repairs them. Suppressing it would silently drop that repair. Whether that repair *should* be coupled to a drift batch at all is the real question, and it is a design decision rather than an edit.\n\nPR #12127 parks this explicitly in `rebuildSqliteTablePatched`'s docblock so nobody \"optimizes\" it without a decision.\n\n## Why it is worth a card\n\nThe cost is a full table copy — on a large table, an arbitrarily expensive one — triggered by a batch that will accomplish nothing the caller asked for. Its reachability is the same as #11722's: the differ does not emit non-rebuildable column ops on SQLite today (`enforcesVarcharLength` excludes SQLite; `multiValueColumnTypeIsLoadBearing` excludes `manual_column_type_change`), so **the next column op that is not SQLite-rebuildable opens it** — the same door, from the same two directions, and now with #11722's reporting half already closed so the operator sees `skipped` and no explanation for the pause.\n\n## Not claimed\n\n- ⛔ No claim that PR #12127 is incomplete against its card. #11722 asked for honest *reporting* and got it.\n- ⛔ No measurement of how expensive this is in practice — no table size, no timing. An honest first step is probably to measure whether a zero-honoured batch can occur at all today (it should not) before optimizing anything.\n- ⛔ No opinion on the remedy. \"Skip the rebuild when nothing is honourable\" is the obvious one and is **not safe as stated** — it needs the defaults/index re-materialization question answered first, and that may mean separating that repair from the drift batch rather than gating it.\n\n## Dedup\n\nRun from the PM seat, where the search channel is live: `rebuildSqliteTablePatched` returns exactly one issue (#11722 itself) — a firing positive control, so the \"no covering card\" reading is real rather than a broken query.\n\n## Refs\n\n#11722 (the reporting half) · PR #12127 · #11321 / #4560 / #3696 (what the rebuild re-materializes) · #12123 (why the dev could not file this itself)"
+}

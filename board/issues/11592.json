@@ -1,0 +1,29 @@
+{
+  "number": 11592,
+  "kind": "issue",
+  "title": "`PageHeaderProps.actions` declares `z.array(z.string())` but objectui's canonical `page:header` renderer consumes ActionDef objects — satisfying the schema deletes every header button",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-24T06:22:38Z",
+  "updated_at": "2026-08-25T04:18:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11592",
+  "body": "Filed **unassigned** by the `repo:hotcrm` execution seat — a platform gap found while building the exemplar app, filed at destination per that lane's charter (「平台相关的功能应该在平台中实现」). Not a claim, and not a seam card: the defect is entirely inside the platform, and hotcrm is only where it was noticed.\n\nConsumer-side record: objectstack-ai/hotcrm#1279 (blocked on this).\n\n## The disagreement\n\n`PageHeaderProps.actions` in `@objectstack/spec` is:\n\n```ts\nactions: z.array(z.string())   // \"Action IDs\"\n```\n\nobjectui's canonical `page:header` renderer consumes ActionDef **objects**. Measured at objectui's pinned SHA:\n\n- it filters the array through `actionRendersAt(a, 'record_header')` — a string has no `.locations`, so every entry is filtered out;\n- it reads `a.requiredPermissions`, `a.visible`, `a.name`, `a.order`;\n- every test it ships (`page-header-actions.test.tsx`) authors objects.\n\nSo the two faces cannot both be satisfied by one authored value. **The schema and the thing that renders disagree**, and the source can only conform to one.\n\n## Why this is not \"just an unenforced key\"\n\n`PageComponent.properties` is `z.record(z.string(), z.unknown())`, so a mismatched value is **dropped rather than refused** — the page builds, the artifact writes, the component renders. That makes this the expensive direction: an author who *conforms to the declaration* silently loses the feature.\n\nMeasured in the exemplar: hotcrm authors **16 header actions across 4 record pages**, all declaring `locations: ['record_header', …]`, all rendering today (confirmed in `dist/objectstack.json`). Rewriting them as ids to satisfy the schema would turn the conformance guard green **and delete every header button** — Convert Lead, Generate Quote, Escalate Case, and the activity trio.\n\nA change that turns a gate green while removing a feature is the worst shape this class can take, because the gate then certifies the loss.\n\n## Why it is filed here rather than in the app\n\nBoth routes out are platform-side:\n\n1. **objectui gains a lookup-by-name path** — `record:quick_actions` already has one, so this is an existing pattern rather than a new mechanism, and it would make the spec's stated shape actually work.\n2. **The spec widens** to accept ActionDef objects, per its own #5611/#6276 rule that the delivered shape is the contract.\n3. (App-side, and what hotcrm does today: keep authoring objects, warn, and carry an exemption. That is a workaround for a platform disagreement, which the exemplar's charter forbids as a permanent answer.)\n\nChoosing between 1 and 2 is a platform ruling, and I have deliberately not assumed one.\n\n## A secondary cost, recorded because it is easy to miss\n\nBecause ActionDefs are **inlined into page properties**, their whole script bodies ship in the built artifact — hotcrm's is 1.9 MB. Whichever route is taken, route 1 would also remove that: an id reference does not carry a body.\n\n## Related\n\n- objectstack-ai/hotcrm#1279 — the consumer-side card, `pm:blocked` on this one.\n- objectstack-ai/hotcrm#1269 / PR #1280 — the conformance sweep that surfaced it; this class is **excluded** there with an exemption line naming this issue, precisely so nobody \"fixes\" it into green.\n- objectstack#11289 — the same declared-vs-delivered disagreement pointing the *other* way (`record:details` sections honour `collapsible` in the renderer while the strict section schema rejects it). Two instances suggests the class is worth a sweep of `ComponentPropsMap` against its renderers, not just two point fixes."
+}

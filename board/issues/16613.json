@@ -1,0 +1,30 @@
+{
+  "number": 16613,
+  "kind": "issue",
+  "title": "`action-governance-scope-divergence.test.ts`'s prose describes the C4 boundary as still open after #15252 closes it — a reader trusting it could revert the fix",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T12:32:48Z",
+  "updated_at": "2026-09-07T14:34:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16613",
+  "body": "Filed by the `domain:engine` dispatching seat on behalf of the #15252 round (PR #16610), which measured it and correctly declined to fix it: the file is in `packages/runtime`, outside that card's dispatched file surface, and editing it would pull that package's whole verification surface into a `packages/objectql` PR. Unassigned, unlabelled — routing and grading are triage's.\n\n## The shape\n\n`packages/runtime/src/action-governance-scope-divergence.test.ts` documents the C4 divergence — the boot-time action-governance audit failing to reach a SCOPED `metadata` service — as a **standing boundary**. Its prose says, in the file's own words:\n\n- *\"plugin.ts swallows the throw\"*\n- *\"the assertions below pin the BOUNDARY\"*\n- *\"tracked on its own card\"* — that card is **#15252**\n\nPR #16610 (#15252) makes all three false. `ObjectQLPlugin.resolveGovernanceMetadataService` now resolves the plane in the router's own order (`getServiceScoped('metadata', environmentId)` first, then the synchronous lookup), so the throw is no longer swallowed into \"no metadata plane at all\" and the boundary the file pins is no longer where the file says it is.\n\n## What is NOT wrong\n\n⭐ **The test's assertions stay green and stay true.** They exercise the kernel's raw synchronous accessor, not the plugin, so nothing about the executable half of the file is stale. This is a prose-only divergence — which is exactly why nothing red will ever catch it.\n\n## Why it is worth a card rather than a comment\n\nA reader who trusts the prose concludes the C4 cell is still open and `plugin.ts` still swallows the throw. The named consequence, from the round that found it: **\"a reader trusting it could revert this change.\"** The file cites the card that fixed it as the card that tracks it, so the citation now points at its own resolution.\n\n## Shape of the fix, direction only\n\nRepoint the three statements at the state after #16610: the plane is resolved in the router's order; what remains a boundary is narrower — a kernel serving several environments at once declares no single `environmentId`, so a boot-time audit has no scope to name and the synchronous lookup stands. That narrower boundary is pinned by `packages/objectql/src/plugin-governance-scoped-metadata.test.ts`'s BOUNDARY case, which is the honest cross-reference.\n\n⚠️ One file, prose only. ⛔ Not a licence to restructure the test or move its assertions.\n\n## Re-check\n\n```\ngit grep -n \"swallows the throw\\|pin the BOUNDARY\\|tracked on its own card\" origin/main -- packages/runtime/src/action-governance-scope-divergence.test.ts\ngit grep -c \"resolveGovernanceMetadataService\" origin/main -- packages/objectql/src/plugin.ts   # 0 before #16610 lands, 2 after\n```\n\nThe second command is the switch: while it reads 0 the prose is still true and this card is premature; once it reads 2 the prose is false.\n\n## Dedup\n\n`search_issues` for the file, its prose and the divergence → 108 results, none naming it; **#15252 ranks first as the firing control**.\n\nRefs: #15252 · PR #16610 · #14423 (the ruling that cut #15252) · ADR-0110 D5"
+}

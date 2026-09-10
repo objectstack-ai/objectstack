@@ -1,0 +1,32 @@
+{
+  "number": 15214,
+  "kind": "issue",
+  "title": "docs: close out the #13564 family under ADR-0131; supersede #13636; the tenancy docs state the three sentences",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:blocked",
+    "priority:p2",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:07:01Z",
+  "updated_at": "2026-09-05T23:06:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15214",
+  "body": "**⛔ BLOCKED — the v18 development line is not open.**\n\n`Blocked-by: #15193, #15212, objectstack-ai/cloud#1979`\n\nPart of #15194 (ADR-0131 execution tree). ⛔ Do not claim, assign or dispatch this card while #15193 is open.\n\n---\n\n**In one sentence.** Close the card family that produced ADR-0131, and make the tenancy documentation say the record's three sentences instead of describing the mechanism it replaced.\n\n**Scope.** Rule **#13564** by pointer to ADR-0131 — the two read-side ledgers stay as the inventory's provenance, they are not deleted. Close **#13636** as superseded, with a comment pointing at ADR-0131 §1.6, and leave **PR #14923** unmerged with the same pointer (the \"declare an organization-less write\" alternative is rejected in §5). Answer **#11611** in the tenancy documentation. Record **#10103**'s warn-not-reap posture as superseded by C7's ceremony. Update the `content/docs` tenancy and permissions pages and the driver docblock to state the three sentences:\n\n1. A managed package's metadata is not in the database; its definitions are sealed; customization is environment-level state.\n2. A row with an organization column was written by that organization; the column is `NOT NULL`; references to declared items are by machine name.\n3. A table with no organization column is deployment-level or code-level, protected by permissions rather than by the wall.\n\n⛔ `content/docs/releases/` is **not** touched by this card. Release notes are written centrally at release time; the v18 upgrade ceremony's prominence there (D10) is the release writer's input, delivered as this line's changesets — not as a row appended per PR.\n\nRefs: ADR-0131 (all decisions) · #13564 · #13636 · PR #14923 · #11611 · #10103.\n"
+}

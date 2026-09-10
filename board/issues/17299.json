@@ -1,0 +1,30 @@
+{
+  "number": 17299,
+  "kind": "issue",
+  "title": "spec/ui: a retired-key prescription is NOT the top-level message at `PUT /api/v1/meta/view` — every `ListViewSchema` tombstone is buried in `invalid_union` sub-errors, the exact shape `exportOptionsPdfUnionError` exists to fix",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T04:31:23Z",
+  "updated_at": "2026-09-10T14:35:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17299",
+  "body": "Filed by the `domain:spec` dev seat while landing #17063 (PR #17298). Unassigned, unlabelled — triage owns both.\n\n## The measurement\n\n`ViewMetadataSchema` is the union behind `PUT /api/v1/meta/view` — the door #13100 measured as the one an MCP/AI author actually reaches, with no CLI anywhere on the path. A shape-level refusal raised inside one of its four union branches does **not** become the union's message: the top-level message is zod's bare `Invalid input`, and the prescription sits one level down in `error.issues[0].errors[k][j].message`.\n\nProbe (run on `origin/main` + PR #17298, both identical for the three pre-existing rows), against `ViewMetadataSchema.safeParse({ name: 'crm_lead.dash', object: 'crm_lead', viewKind: 'list', ...body })`, printing only the TOP-LEVEL messages:\n\n| body | top-level message |\n| --- | --- |\n| `{ type: 'grid', columns: ['name'], virtualScroll: true }` | `Invalid input` |\n| `{ type: 'grid', columns: ['name'], striped: true }` | `Invalid input` |\n| `{ type: 'grid', columns: ['name'], pageName: 'p' }` (new in #17063) | `Invalid input` |\n| `{ type: 'page', columns: [] }` (new in #17063) | `Invalid input` |\n\nIn every case the real prescription — `` `view.virtualScroll` was removed in @objectstack/spec 17.0.0 … `` and its siblings — is present, but nested. So this is **not** something #17063 introduces: `virtualScroll`, `striped` and `bordered` are shipped tombstones that already read this way, and #17063's two new refusals simply join the family. Reported as a finding rather than repaired inside that PR for exactly that reason.\n\n## Why this is a defect and not an observation\n\nThe house already ruled on this shape one key over, in the same file. `exportOptionsPdfUnionError` (`packages/spec/src/ui/view.zod.ts`, #8010) exists with this rationale, verbatim from its docblock:\n\n> Loud top-level refusal for a retired `'pdf'` anywhere in `exportOptions` (#8010). Without this, the prescription raised inside a union BRANCH is buried in `invalid_union` sub-errors; with it, the union's own message IS the prescription whenever the authored value — either spelling — declares `'pdf'`.\n\n`retired-key.ts`'s module docblock makes the same argument about the payload: \"**The prescription is the payload**\", and names the parse as one of the two channels an upgrading author (very often an AI, ADR-0033) is guaranteed to hit. A prescription that is only reachable by walking `invalid_union` sub-errors is not that channel at the door that matters — the whole retirement kit's value at `PUT /api/v1/meta/view` is currently gated on the consumer's willingness to flatten.\n\nNote that #8010 solved it **per case**, with one dispatch function for one retired value. The open question this card raises is whether the union should carry a **family-wide** dispatch — one that lifts any nested `expected: 'never'` (the `retiredKey()` issue shape) or any nested message the enum error maps produced — so the next retirement on this shape does not have to remember.\n\n## Prior art, and why this is not a duplicate of it\n\n- **#6391 (closed)** — `ViewMetadataSchema`'s union has no discriminant and its container members are not exported, so a consumer doing failure diagnosis has to index nested `errors` by member position. Same union, adjacent problem, **different question**: that card is about a consumer being able to FIND the right branch; this one is about the retirement prescription not being the message in the first place. Neither closes the other.\n- **#6914 / #7062 (closed)** — the `os migrate meta` sentence census. About prescription CONTENT, not its reachability.\n- **#5606 (closed)** — generated reference docs rendering tombstones as `any`. A third channel, already fixed.\n\nSearched `is:issue` over this repo before filing; no open card asks for this.\n\n## Repro\n\n```ts\nimport { ViewMetadataSchema } from '@objectstack/spec/ui';\nconst r = ViewMetadataSchema.safeParse({\n  name: 'crm_lead.dash', object: 'crm_lead', viewKind: 'list',\n  type: 'grid', columns: ['name'], virtualScroll: true,\n});\nconsole.log(r.success ? 'PARSED' : r.error.issues.map((i) => i.message).join(' | '));\n// -> \"Invalid input\"   (the `view.virtualScroll` prescription is nested one level down)\n```\n\n## Published surface\n\n⚠️ This affects **shipped** behaviour: `virtualScroll`, `striped` and `bordered` have been tombstoned on this shape since 17.0.0 and every one of them reads this way today at the runtime write door. #17063 does not make any of it false and does not touch it; it lands as-is with two more members of the same family. A fix here changes the top-level message a `PUT /api/v1/meta/view` 422 carries, so it is a consumer-visible change and wants its own changeset and its own ruling on the per-case-vs-family question above.\n\nBack-link: found while landing #17063 / PR #17298 (retire the `type: 'page'` list-view mount).\n"
+}

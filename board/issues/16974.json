@@ -1,0 +1,30 @@
+{
+  "number": 16974,
+  "kind": "issue",
+  "title": "messaging: `sys_inbox_message` 不带 actor,消费端无法识别「自己触发的回执」",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-08T20:57:48Z",
+  "updated_at": "2026-09-10T14:54:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16974",
+  "body": "## 缺口\n\n`sys_inbox_message` 行上**没有任何 actor 列**,因此任何客户端消费者都无法回答「这条消息是不是我自己的动作引起的」。\n\n## 证据(读自 `main` 工作副本)\n\n| 断言 | 读数 |\n|---|---|\n| 对象声明无 actor 列 | `packages/services/service-messaging/src/objects/inbox-message.object.ts` — fields 为 `id` / `user_id` / `notification_id` / `delivery_id` / `topic` / `title` / `body_md` / `severity` / `action_url` / `created_at` |\n| 写入侧也不带 | `packages/services/service-messaging/src/inbox-channel.ts` 的 `const row = {...}`(约 198 行)逐字段构造,无 actor |\n| REST 视图也不带 | `MessagingService.listInbox` 映射出的 `InboxNotificationView` 只有 `id/type/title/body/read/actionUrl/createdAt` |\n| actor 确实存在,但在上一层 | `sys_notification.actor_id`(`packages/platform-objects/src/audit/sys-notification.object.ts`),由 notify 节点的 `actorId` 写入(`packages/services/service-automation/src/builtin/notify-node.ts`) |\n| 那一层普通用户读不到 | `plugin-security` 的默认权限集只授予 `sys_inbox_message` 与 `sys_notification_receipt` 的 allowRead,`sys_notification` 不在其中 |\n\n⇒ actor 与收件箱行之间隔着一个 FK 跳,而跳到的对象对普通用户不可读。\n\n## 影响 —— 一个已发卡的设计约束因此无法落地\n\nobjectui#7011(站内信到达提醒)明确要求:**「自己触发的回执类消息不弹」**,失败形态是「我刚提交,系统就通知我我提交了」。呈现层已实现并合入,但这一条**做不了**:行上没有可比对的 actor,凭空补一个消费端代理属于投机。\n\nobjectui 那边还有一条相反方向的既有裁定,值得一并知晓:objectui#5203 退休了 `InboxNotification.actor_name`,理由正是「`sys_inbox_message` 声明无 actor 列可供映射」,并留了两个 pin(一个类型 pin,一个产出行 key-set pin)禁止在没有列的情况下重新声明。⇒ 消费端不能先行,必须生产者先有列。\n\n## 建议\n\n在 L5 物化时把事件的 actor 抄到收件箱行上:\n\n1. `inbox-message.object.ts` 增加 `actor_id`(与 `sys_notification.actor_id` 同语义,lookup `sys_user`);\n2. `inbox-channel.ts` 的 row 构造带上它(通知事件已在手边,`n.notificationId` 就是从那条事件来的);\n3. 默认权限集里该列随 `sys_inbox_message` 的 allowRead 一起可读(它就是收件人自己的行)。\n\n这样消费端只需一次纯本地比较 `row.actor_id === currentUserId`,不新增任何读。\n\n被这条挡住的消费端跟进:objectui#7011 的后续单(见回链)。\n\n关联:objectui#7011 · objectui#5203 · ADR-0030 L5"
+}

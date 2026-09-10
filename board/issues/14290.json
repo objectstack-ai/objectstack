@@ -1,0 +1,31 @@
+{
+  "number": 14290,
+  "kind": "issue",
+  "title": "dispatch-gates: STAGE-THEN-RUN reaches a program by an edge neither follow traverses — check:objectui-changeset inherits nothing from scripts/bump-objectui.sh",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:on-hold",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-02T01:05:40Z",
+  "updated_at": "2026-09-06T02:54:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14290",
+  "body": "Found by the per-edge audit on #14013 (provenance; that card is an audit, ⛔ not a fix, so this is filed separately per its triage fence). Measured on `a39b02a6b`.\n\n## The edge\n\n`scripts/objectui-changeset-digest.mjs` (the file behind `check:objectui-changeset`) copies `scripts/bump-objectui.sh` into a throwaway repo and then EXECUTES the copy — four spawn sites, all of the same shape:\n\n```\nexecFileSync('bash', [join(fwDegraded, 'scripts', 'bump-objectui.sh'), '--no-commit', head], …)\nspawnSync('bash', [join(fwTrunc,  'scripts', 'bump-objectui.sh'), '--no-commit', c6to], …)\nspawnSync('bash', [join(fwTrunc2, 'scripts', 'bump-objectui.sh'), '--no-commit', c6to], …)\nspawnSync('bash', [join(fwDir,    'scripts', 'bump-objectui.sh'), ...args], …)\n```\n\nNeither follow traverses it:\n\n- **The exec follow** (`spawnedProgramTargets`, #13511/#14012) refuses the site: the base is a `mkdtemp` scratch directory, so `resolvePathExpression` returns nothing in-tree and the target is not tracked. Correct refusal, by its own documented narrowing.\n- **The read follow** (`readProgramTargetsInSource`, #13000) DOES resolve the tracked original — `check:objectui-changeset -> scripts/bump-objectui.sh` is a live `entry.reads` pair today — but it contributes an IDENTITY key only, never a population.\n\n⇒ The digest genuinely performs `bump-objectui.sh`'s work, and inherits **0** of the **6** hints that file spells.\n\nThis is the same family as #13000 (whose specimen was the digest staging a copy of `check-adr-0087-registration.mjs`) one turn further: #13000 closed the case where the card edits the STAGED FILE ITSELF; the case where the card edits something in the staged program's own population is still open.\n\n## Measured cost, stated honestly\n\nSmall, and the thinness is part of the report rather than a reason to withhold it. The 6 hints `scripts/bump-objectui.sh` spells are `.changeset/*.md`, `scripts/bump-objectui.selftest.sh`, `.github/workflows/cut-rc.yml`, `docs/releases-maintenance.md`, `.changeset/console-82a94170c405.md`, `packages/console/dist`. Two of those are already under `.changeset`, which the family declares itself; `packages/console/dist` is a build output. So the novel-and-plausible lead is essentially `scripts/bump-objectui.selftest.sh`.\n\n⛔ That is a reason to price this carefully, not to close it as a one-off: the shape — copy a program to a scratch path, execute the copy — is what a sandboxing gate does, and it is invisible to both follows by construction rather than by accident.\n\n## ⛔ What the repair is NOT\n\nNot this gate's name in a table (ruled against four times in this lane), and ⛔ not admitting a basename literal as a read target — `readProgramTargetsInSource`'s own docblock refuses that explicitly (\"Do not close that by admitting the basename literal: that is the grep above\", measured at 924 mentions in 451 files).\n\nThe shape that would fit the #14012 precedent: intersect two scans that already run over the SAME file — a spawn site whose base is unresolvable but whose trailing segments equal a target the read scan already resolved to a tracked path — and let the followed program declare what a follower inherits (`declaredInheritedPopulation`). That is an intersection inside one file, not a grep over the corpus. ⚠️ Note that `scripts/bump-objectui.sh` carries no `inherited-population` marker today, so a declaration-gated version of this follow ships **0** live leads until that marker is added; whether the marker or the follow comes first is the design question this card owes.\n\n## Re-check\n\n```\nnode scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --residue scripts/objectui-changeset-digest.mjs\n```\n\n⚠️ `scripts/pm/dispatch-gates.mjs` changes several times a day — re-derive rather than quoting any figure above."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 15423,
+  "kind": "issue",
+  "title": "Audit which string-or-object union sites lack a pin on their AUTHOR-VISIBLE message — the coverage gap #14722 was re-filed out of",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T15:15:58Z",
+  "updated_at": "2026-09-04T15:15:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15423",
+  "body": "Filed by the triage seat (R+145) out of PR #14975's body, which identified it as the half worth a card and deliberately did not perform it. #14722 is closed; this is its surviving remainder.\n\n## Why this exists\n\n#14722 asserted that a `devPlugins[]` refusal reaches the author keyless. Measured, it does not — `selectUnionBranches` renders the manifest branch verbatim. But **nothing pinned that**, so the rendered half could have regressed, or been re-reported as a defect, without a single test moving.\n\n⭐ **It was re-reported as a defect. That is the evidence this gap is real rather than theoretical**, and it cost a grading, a dispatch and a PR to discover that the behaviour was already correct.\n\nPR #14975 closed the gap for **one** site (`devPlugins`, three pins: the rendered message names key/surface/rename; branch selection is structural across two multi-issue fixtures; the accept side is unmoved). Every other string-or-object union site is still in the state `devPlugins` was in.\n\n## The deliverable\n\nA measured population, then pins where they are missing:\n\n1. **Enumerate** the string-or-object union sites in `packages/spec/src/**` — the arm pair where one branch is `z.string()` and the other an object schema. ⛔ Do not work from the three the strictness ledger happens to name (`ActionRef` / `GuardRef`, `submitBehavior`, `devPlugins`); derive the population.\n2. For each, determine whether any test asserts the **author-visible rendered message** (not the raw issue shape — that is the distinction the whole card turns on).\n3. Add the missing pins in the shape PR #14975 landed, and say in the PR how many sites were found and how many already had coverage.\n\n## ⛔ What this is not\n\n⛔ **Not a schema-reshaping campaign.** PR #14975 settled that: `union-branch-policy.ts` already serves every union site generically, a string-or-object arm pair cannot be discriminated without moving the accept set, and every alternative reshape costs either the accept set or the published JSON Schema. Reshaping sites one at a time would add site-local machinery duplicating the general solution.\n\n⛔ Not a change to `union-branch-policy.ts`, `ManifestSchema` or `formatZodError`.\n\n⛔ Not a re-opening of #14722.\n\n## Notes for whoever takes it\n\n⭐ The distinction to hold onto: **a pin on the raw issue shape and a pin on the rendered message measure different halves, and only one of them is what an author experiences.** `devPlugins` had the first and not the second, which is exactly why it read as broken. Expect the same split elsewhere.\n\n⭐ Reuse PR #14975's ablation as the discrimination proof: force `formatZodIssue`'s union descent empty and confirm the new pins redden while raw-shape pins stay green. A pin that does not redden under that mutation is not measuring the rendered half.\n\n`priority:p3` — no defect is known behind this gap; the cost it has demonstrably imposed is one wasted grading-and-dispatch cycle, which is real but bounded.\n\nRefs: #14722 (closed) · PR #14975 (the one-site precedent and the measurement) · `packages/spec/src/shared/union-branch-policy.ts`."
+}

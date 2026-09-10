@@ -1,0 +1,29 @@
+{
+  "number": 7849,
+  "kind": "issue",
+  "title": "A package with unit tests and no `vitest.config.ts` lets a stale `@objectstack/core` dist decide its verdicts — #7668 fixed one, nothing stops the next",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-11T20:41:47Z",
+  "updated_at": "2026-08-12T10:24:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/7849",
+  "body": "Filing unassigned; `domain:*` routing is the triage seat's. Carried forward from PR #7778's out-of-scope report, where the dev explicitly declined to widen the fix into a repo-wide sweep and asked for it to be its own card.\n\n## The hazard, as proven on one package\n\n`packages/services/service-storage` had no `vitest.config.ts`, so `@objectstack/core` resolved through the workspace link to `packages/core/dist/index.js` — **a build artifact**. Every unit pin in that package therefore returned a verdict about *build state*, not about the source in the checkout.\n\n#7668 is what that cost: all 17 cases of `attachment-access-hooks.test.ts` — the only executable guard on the #4757 predicate-less unscoped-multi-delete refusal, which cannot be expressed over REST — errored with `TypeError: withoutOperationPrivateKeys is not a function` against a tree whose prebuilt core predated that export, while `packages/core/src/security/operation-private-keys.ts` was correct the whole time.\n\n**The loud error is the mild half.** A core dist merely *behind* rather than *missing* the symbol lets a pin run **green** against core's old behaviour — a passing test that is not testing the code in the checkout, with nothing in the output saying so.\n\nOrdering does not reach it: `turbo.json` already declares `test` `dependsOn` `^build`, and `turbo run test` was never the failing path. What broke are the paths turbo does not mediate — `pnpm test` inside the package, `vitest run <file>`, an editor runner, or an agent working in a tree built at an older commit. Those are exactly the paths a pin is re-run on *while someone is changing core*, i.e. when it most needs to be telling the truth.\n\n## Why this card exists\n\nPR #7778 added the missing `vitest.config.ts` to `service-storage` — one package, the one the issue named. It did not sweep, and said so: *\"the same hazard shape exists wherever a package with unit tests imports `@objectstack/core` and ships no vitest config… a repo-wide sweep (or a lint gate asserting the invariant) is a separate change and should be its own issue rather than a rider here.\"*\n\nTen packages already alias core to source (`service-knowledge`, `plugin-audit`, `runtime`, `metadata`, `driver-memory`, `driver-sql`, `knowledge-memory`, `knowledge-ragflow`, `plugin-dev`, `plugin-hono-server`), which is what makes the omission a **drift** rather than a design: the convention exists and is unevenly applied, with nothing enforcing it.\n\n## The ask (unmeasured — step 1 is the census)\n\n1. **Count first.** How many packages have unit tests, import `@objectstack/core` (or another workspace package whose dist can go stale), and ship no vitest alias? Nobody has that number; it decides whether this is a five-line sweep or a staged one.\n2. Then either add the configs, or — better, since a new package will re-introduce it — assert the invariant mechanically, so \"package has tests + imports a workspace package + has no alias\" fails a gate rather than waiting to produce a wrong verdict.\n\nNote the failure mode being defended against is **silent**: the observable symptom is a test that passes for the wrong reason. That argues for the gate over the sweep, since a sweep leaves the next package unguarded.\n\n### One thing to get right, from #7778's own notes\n\nAlias with the **anchored regex / array form**, not the object form: the object form matches by *prefix*, so a bare `@objectstack/core` entry also swallows `@objectstack/core/logger` and resolves it to `core/src/index.ts/logger` (`ENOTDIR`). And aliasing is graph-wide, which is a feature here — the deps still loaded from dist resolve to the same single core instance rather than a second copy.\n\n## Provenance\n\nPR #7778 (`test(service-storage): resolve @objectstack/core from source so a stale dist can't decide a pin`), out-of-scope findings section. Filed by the devx PM seat (#6023)."
+}

@@ -1,0 +1,29 @@
+{
+  "number": 17448,
+  "kind": "pull_request",
+  "title": "measure-test-shard-timings: fold a package's test:repo leg into its sample",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T14:55:51Z",
+  "updated_at": "2026-09-10T14:57:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17448",
+  "body": "Closes #16550\n\n## What changed\n\n`samplesFromSummary()` in `scripts/measure-test-shard-timings.mjs` kept only\n`task.task === 'test'`, so the six packages `#16466` split into `test` +\n`test:repo` (core, objectql, rest, runtime, spec, types) had their\n`test:repo` execution window silently dropped from every future refresh.\n\n`samplesFromSummary()` now folds a package's `test` and `test:repo` legs by\n**summing** their execution windows into one whole-package reading. The\nrejection rule composes across the fold rather than being re-derived per\nleg: **every** leg present for a package must be `cache.status === 'MISS'`\nand `exitCode === 0`, or the **whole package is skipped** — one cached or\nfailed leg is exactly as disqualifying as it was for a lone `test` task\nbefore. The existing throw paths (no execution window, negative seconds, no\npackage name) apply per leg, so they still fire for either task name.\n\nThe partitioner (`scripts/partition-test-shards.mjs`) is untouched — it only\nweighs packages, and both `--check-drift` and the shard's own\n`turbo run test test:repo` already run/read both tasks for a package through\nthis same function.\n\n## `--check-drift` self-consistency (boundary check)\n\nFed a synthetic two-leg summary for `@objectstack/spec`\n(`test` 349.75s + `test:repo` 53.9s) against the *current, unrefreshed*\n`scripts/test-shard-timings.json` (weight `403.65`, measured before the\nsplit when both halves still lived inside one `test` task):\n\n```\n$ node scripts/partition-test-shards.mjs --check-drift <fixture> --label \"issue-16550 two-leg fixture\"\nshard-timing-drift: OK -- issue-16550 two-leg fixture, 403.6s measured vs 403.6s predicted\nacross 1 package(s) = 1.00x (bound 1.5x).\n```\n\nMeasured and predicted agree (1.00x) because `--check-drift` reads legs\nthrough the same now-fixed `samplesFromSummary()` — before this change, only\nthe 349.75s `test` leg would have been read against the 403.65s prediction,\na 0.87x undershoot invisible to nobody watching for it today but exactly the\n\"measured and predicted shrink together\" blind spot the card names once the\ndataset is refreshed and predicted also starts under-counting.\n\n## Dataset\n\n`scripts/test-shard-timings.json` is **not** touched — this PR fixes the\ngenerator only; \"until the refresh the existing rows are right\" per the\ncard. Refreshing is `#16464`'s scheduled workflow's job.\n\n## Tests\n\n- `node scripts/measure-test-shard-timings.mjs --self-test` — OK. Added a\n  two-task-summary battery: the sum case, an un-split control riding in the\n  *same* summary (proves the fold does not disturb ordinary packages —\n  the discriminating leg, since a before/after-identical reading on that\n  control alone would not catch a fold that leaked), either-leg-cached (both\n  orderings), and either-leg-failed. Floor raised `50 -> 56` for the 6 new\n  cases (#13799).\n- `node scripts/partition-test-shards.mjs --self-test` — OK (71 measured\n  packages, unaffected — it imports `samplesFromSummary` but its own fixtures\n  are single-task).\n- Scoped gate derivation: `node scripts/pm/dispatch-gates.mjs --commands`\n  named 34 families for this diff (editing a gated tooling script with its\n  own `--self-test` pulls in the self-test-wiring/declaration-mirror family).\n  All 34 ran green under `scripts/pm/os-verify-lock.sh`; reconciled with\n  `--ran` — 34 derived, 34 run, 0 NOT-MEASURED.\n- `pnpm exec eslint scripts/measure-test-shard-timings.mjs --no-inline-config\n  --format json` — 1 file checked, 0 errors, 0 warnings.\n- `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]' scripts/measure-test-shard-timings.mjs`\n  — no control bytes.\n\n## Changeset\n\n`skip-changeset` — measured, not assumed: `scripts/measure-test-shard-timings.mjs`\nlives at the repo root, outside every package directory, and every\npublishing package's `\"files\"` array is limited to `dist` / `README.md` /\n`CHANGELOG.md` (checked across `packages/*/package.json`). No package\nbundles or re-exports this script (`grep -rl measure-test-shard-timings`\noutside `scripts/` returns nothing). Nothing published moves. Applying the\n`skip-changeset` label on this PR now.\n\n**Clause-②**: no\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012GKcPZbMoGq7WPzKLfRBTU\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012GKcPZbMoGq7WPzKLfRBTU)_"
+}

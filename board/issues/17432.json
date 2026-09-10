@@ -1,0 +1,30 @@
+{
+  "number": 17432,
+  "kind": "issue",
+  "title": "finding(runtime/docs): `projectResolution: 'required'` is documented as registering ONLY scoped routes for package handlers, but the dispatcher mounts `/packages*` unscoped unconditionally",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T13:53:17Z",
+  "updated_at": "2026-09-10T14:49:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17432",
+  "body": "Found while landing #16781. Pre-existing, unchanged by that PR, and filed rather than fixed there: removing a currently-mounted route surface is a different change with a different blast radius than adding a missing door.\n\n## The contract, verbatim\n\n`content/docs/api/environment-routing.mdx`, the `projectResolution` table:\n\n> | `required` | Registers only environment-scoped routes for data/meta/AI/automation/package handlers. | Hardened clients that always pass an environment id. |\n\n\"only environment-scoped\" and \"package handlers\" are both explicit.\n\n## What the code does\n\n`packages/runtime/src/dispatcher-plugin.ts` honours that for three of the four families named — `registerAutomationRoutes`, `registerActionRoutes`, `registerAIRoutes` all sit inside the `required` branch and drop their unscoped mounts:\n\n```ts\nif (enableProjectScoping && projectResolution === 'required') {\n    registerAutomationRoutes(`${prefix}/environments/:environmentId`);\n    registerActionRoutes(`${prefix}/environments/:environmentId`);\n    registerAIRoutes(`${prefix}/environments/:environmentId`);\n} else {\n    …\n}\n```\n\nThe package routes are **not** in that branch at all. `registerPackageRoutes(prefix)` is called unconditionally, several hundred lines earlier, so `GET/POST/PATCH/DELETE /api/v1/packages*` stay mounted on a `required` host regardless.\n\n## Why it matters rather than being a doc nit\n\n`required` is the posture a host picks to guarantee every caller names an environment. A host that selected it to close the unscoped surface still serves the whole unscoped `/packages` family — including `DELETE /api/v1/packages/:id` and the destructive lifecycle verbs — with no environment segment in the URL. The operator's mental model and the served surface disagree, and the doc is what set the model.\n\n## State after #16781\n\n#16781 added the scoped package mount, so on a `required` host the scoped routes the doc promises now exist. The unscoped ones the doc says should be absent still do too. The asymmetry is recorded in a comment at the mount site rather than silently tidied into a removal.\n\n## Two options, both a decision rather than a repair\n\n1. **Move the code to the doc** — put `registerPackageRoutes` in the same three-way branch as its siblings. This REMOVES a mounted route surface on `required` hosts; it needs a ruling on whether any host relies on it, since it can 404 a caller that works today.\n2. **Move the doc to the code** — state that package routes are always mounted unscoped and that `required` narrows only data/meta/AI/automation.\n\n⛔ Not choosing here; option 1 is a wire removal and belongs to whoever owns that call.\n\nRelated: #16781 · #14503 · `content/docs/api/environment-routing.mdx`."
+}

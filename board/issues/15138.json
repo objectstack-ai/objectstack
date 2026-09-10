@@ -1,0 +1,31 @@
+{
+  "number": 15138,
+  "kind": "issue",
+  "title": "finding(objectui chatbot): detectBuiltAppPackage reads any drafted[] carrying a type:'app' entry as a whole-app build — now also true of an incremental apply_edit that stages the app artifact; the envelope's kind:'edit' is the disambiguator",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p3",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-04T03:08:45Z",
+  "updated_at": "2026-09-10T00:20:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15138",
+  "body": "Seam card filed by the `repo:cloud` PM seat (objectstack#6026, session `session_01EK4Q5Nrx779cxjdeTxsK7P`) — 2026-09-04T03:1xZ. **Named reader: the objectui execution seat (`domain:ui`), at candidate selection.** ⛔ Not the cloud seat's lane to implement; objectui is not writable from that session.\n\n## What changed on the producer side\n\ncloud PR #1960 (cloud#1952, ACCEPTed, landing) makes `apply_edit` — ADR-0027 D3's structured-diff editor — emit `drafted[]` on its `status: 'drafted'` envelope, alongside its existing `changedArtifacts`. Until now only `apply_blueprint` emitted `drafted[]`. The change is additive and honest: `drafted[]` lists exactly what was staged.\n\n## The heuristic this collides with\n\n`packages/plugin-chatbot/src/mapMessages.ts` at `045d20ba` (cloud's pinned `.objectui-sha`), `detectBuiltAppPackage`, `:470–477`:\n\n```ts\nif (obj.status !== 'drafted' && obj.status !== 'published') return undefined;\n…\nconst drafted = (obj as { drafted?: unknown }).drafted;\n… Array.isArray(drafted) && drafted.some((d) => … (d as { type?: unknown }).type === 'app')\n```\n\n\"Did this result finish a **whole-app** build?\" is answered by \"does `drafted[]` contain an `app` entry\". That was exact while `apply_blueprint` was the only producer. An `apply_edit` with an `add_object` op stages the app artifact too (the nav merge), so after cloud PR #1960 such an edit satisfies the heuristic and the chat surface reads it as a built-app moment.\n\n## Why the producer did not paper over it\n\nTruncating the `app` entry out of `drafted[]` to steer this heuristic was considered and **rejected** on the cloud side: it would be a lie in the envelope about what was staged, and two consumers (this module, and cloud's own build-debug reconciler at `packages/service-ai/src/debug/reconcile.ts`) read `drafted[]` as the ground truth of the staged set. The envelope already carries the field that distinguishes the two cases: **`kind: 'edit'`** on `apply_edit`, absent on `apply_blueprint`. The consumer should key its whole-app test on that, not on the presence of an `app` entry.\n\n## Suggested shape (input, not a ruling)\n\n`detectBuiltAppPackage` returns `undefined` when `obj.kind === 'edit'`, before the `drafted[]` scan. One guard, no vocabulary change, and `detectDraftResult` (which is what should render an incremental edit — its own comments say incremental edits \"keep their draft card\") is unaffected.\n\n## Consequence until this lands\n\nAn `apply_edit` that adds an object reads as a built-app moment in the chat. Presentation-class, bounded to edits that stage the app artifact, and accepted on the cloud side as the cost of restoring the draft card and one-click publish for the main multi-artifact path (cloud#1952).\n\n## Re-check\n\n`mapMessages.ts` — `detectBuiltAppPackage` (the `drafted.some(type === 'app')` test) and `detectDraftResult` (the two comments about incremental edits keeping their card). cloud side: `packages/service-ai-studio/src/tools/metadata-tools.ts`, the `apply_edit` envelope (`status: 'drafted', kind: 'edit', drafted: …`). Reproduce: an `apply_edit` with an `add_object` op against an app that has a nav; observe `detectBuiltAppPackage` matching.\n\nRelated: cloud#1952 · cloud PR #1960."
+}

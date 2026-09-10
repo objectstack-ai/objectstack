@@ -1,0 +1,30 @@
+{
+  "number": 532,
+  "kind": "pull_request",
+  "title": "chore: version packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-05T16:08:59Z",
+  "updated_at": "2026-02-05T16:17:06Z",
+  "closed_at": "2026-02-05T16:09:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-05T16:09:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/532",
+  "body": "This PR was opened by the [Changesets release](https://github.com/changesets/action) GitHub action. When you're ready to do a release, you can merge this and the packages will be published to npm automatically. If you're not ready to do a release yet, that's fine, whenever you add more changesets to main, this PR will be updated.\n\n\n# Releases\n## @objectstack/hono@1.0.8\n\n### Patch Changes\n\n-   8f2a3a2: fix: standardize discovery endpoint response to include 'data' wrapper\n    -   @objectstack/runtime@1.0.8\n\n## @objectstack/nestjs@1.0.8\n\n### Patch Changes\n\n-   8f2a3a2: fix: standardize discovery endpoint response to include 'data' wrapper\n    -   @objectstack/runtime@1.0.8\n\n## @objectstack/nextjs@1.0.8\n\n### Patch Changes\n\n-   8f2a3a2: fix: standardize discovery endpoint response to include 'data' wrapper\n    -   @objectstack/runtime@1.0.8\n\n## @objectstack/cli@1.0.8\n\n### Patch Changes\n\n-   Updated dependencies [8f2a3a2]\n    -   @objectstack/plugin-hono-server@1.0.8\n    -   @objectstack/spec@1.0.8\n    -   @objectstack/core@1.0.8\n    -   @objectstack/objectql@1.0.8\n    -   @objectstack/runtime@1.0.8\n    -   @objectstack/driver-memory@1.0.8\n\n## @objectstack/client@1.0.8\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.8\n-   @objectstack/core@1.0.8\n\n## @objectstack/client-react@1.0.8\n\n### Patch Changes\n\n-   @objectstack/client@1.0.8\n-   @objectstack/spec@1.0.8\n-   @objectstack/core@1.0.8\n\n## @objectstack/core@1.0.8\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.8\n\n## @objectstack/metadata@1.0.8\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.8\n-   @objectstack/core@1.0.8\n-   @objectstack/types@1.0.8\n\n## @objectstack/objectql@1.0.8\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.8\n-   @objectstack/core@1.0.8\n-   @objectstack/types@1.0.8\n\n## @objectstack/driver-memory@1.0.8\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.8\n-   @objectstack/core@1.0.8\n\n## @objectstack/plugin-hono-server@1.0.8\n\n### Patch Changes\n\n-   8f2a3a2: fix: standardize discovery endpoint response to include 'data' wrapper\n-   Updated dependencies [8f2a3a2]\n    -   @objectstack/hono@1.0.8\n    -   @objectstack/spec@1.0.8\n    -   @objectstack/core@1.0.8\n    -   @objectstack/types@1.0.8\n    -   @objectstack/runtime@1.0.8\n\n## @objectstack/plugin-msw@1.0.8\n\n### Patch Changes\n\n-   8f2a3a2: fix: standardize discovery endpoint response to include 'data' wrapper\n    -   @objectstack/spec@1.0.8\n    -   @objectstack/core@1.0.8\n    -   @objectstack/types@1.0.8\n    -   @objectstack/objectql@1.0.8\n    -   @objectstack/runtime@1.0.8\n\n## @objectstack/runtime@1.0.8\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.8\n-   @objectstack/core@1.0.8\n-   @objectstack/types@1.0.8\n\n## @objectstack/types@1.0.8\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.8\n\n## @objectstack/spec@1.0.8\n\n\n\n## @example/app-crm@0.9.11\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.8\n\n## @example/app-host@0.9.11\n\n### Patch Changes\n\n-   Updated dependencies [8f2a3a2]\n    -   @objectstack/plugin-hono-server@1.0.8\n    -   @example/app-crm@0.9.11\n    -   @example/app-todo@0.9.11\n    -   @example/plugin-bi@0.9.11\n    -   @objectstack/spec@1.0.8\n    -   @objectstack/metadata@1.0.8\n    -   @objectstack/objectql@1.0.8\n    -   @objectstack/runtime@1.0.8\n    -   @objectstack/driver-memory@1.0.8\n\n## @example/app-react-crud@0.9.11\n\n### Patch Changes\n\n-   Updated dependencies [8f2a3a2]\n    -   @objectstack/plugin-msw@1.0.8\n    -   @objectstack/client@1.0.8\n    -   @example/app-todo@0.9.11\n    -   @objectstack/spec@1.0.8\n    -   @objectstack/client-react@1.0.8\n    -   @objectstack/metadata@1.0.8\n    -   @objectstack/objectql@1.0.8\n    -   @objectstack/runtime@1.0.8\n    -   @objectstack/driver-memory@1.0.8\n\n## @example/app-todo@0.9.11\n\n### Patch Changes\n\n-   @objectstack/client@1.0.8\n-   @objectstack/spec@1.0.8\n-   @objectstack/objectql@1.0.8\n-   @objectstack/runtime@1.0.8\n-   @objectstack/driver-memory@1.0.8\n\n## @example/features@0.9.11\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.8\n-   @objectstack/core@1.0.8\n-   @objectstack/runtime@1.0.8\n\n## @example/guide-cli@0.0.12\n\n### Patch Changes\n\n-   @objectstack/cli@1.0.8\n-   @example/plugin-bi@0.9.11\n-   @objectstack/spec@1.0.8\n\n## @example/metadata-demo@0.1.8\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.8\n-   @objectstack/core@1.0.8\n-   @objectstack/metadata@1.0.8\n\n## @example/plugin-bi@0.9.11\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.8\n\n## @example/plugin-crm@0.1.11\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.8\n\n## @objectstack/docs@1.0.8\n\n\n"
+}

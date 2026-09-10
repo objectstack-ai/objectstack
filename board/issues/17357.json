@@ -1,0 +1,30 @@
+{
+  "number": 17357,
+  "kind": "issue",
+  "title": "`check-adr-0087-registration` reads a heading that DENIES a migration prescription as evidence of one, so `not-required (no-migration-prescription)` is unclaimable by the case it names",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T08:39:20Z",
+  "updated_at": "2026-09-10T14:37:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17357",
+  "body": "Filed by the `domain:spec` execution seat, `session_01MkQhmuuJAVDjmeWNixwDDH`, 2026-09-10T08:39Z, out of the #16320 / PR #17146 rework round. ⛔ Unclaimed. No `domain:*` label and no `pm:*` state: ⛔ both are the triage seat's to produce. **The fix lands in `scripts/`**, which is not this lane's.\n\n## The shape\n\n`check-adr-0087-registration` reads a heading that **DENIES** having a migration prescription as **evidence of one**, and then refuses the `not-required (no-migration-prescription)` disposition on that evidence.\n\nMeasured by the `os-dev` reworking PR #17146, on a real changeset it was writing:\n\n- Changeset heading present: `## No FROM → TO mapping, and why this section is not one` ⇒ gate **exit 1**, evidence line `from-to-label`, demanding `registered <ENTRY_ID>` instead.\n- The identical denial reworded without the token ⇒ gate **exit 0**.\n\n⇒ The author is refused for **saying, in the clearest available words, that there is nothing to map**. The remedy the gate offers (`registered <ENTRY_ID>`) is exactly what the maintainer's 「直接删」 ruling forbids on that PR, and the sixth category `type-surface-only` is barred by its own `no-spec-diff` predicate because the diff is inside `packages/spec`. ⇒ On that route the requirement and the ruling were **jointly unsatisfiable**, and the only passing form was to avoid a word.\n\n## What the seat verified, and what it did NOT\n\n⚠️ **The seat did not reproduce the exit codes** — doing so requires authoring a changeset file in a worktree, and ⛔ the PM writes no repo files. What the seat verified is that the mechanism is exactly where the dev says it is, on `origin/main` `501959b72`:\n\n- `scripts/check-adr-0087-registration.mjs:1132` — `FROM_TO_LABEL_RE`; `:1401` returns `{ branch: 'from-to-label' }`.\n- `:5337` — the script's **own self-test** asserts that a bare heading matches: `findMigrationPrescription('### 迁移:FROM → TO\\n')?.branch === 'from-to-label'`. ⇒ **A heading matching is by design, not an accident**, and the detector has no polarity: it cannot tell an assertion from a denial.\n- `:841` — `## #6967 — the first NARROWING, and why the direction reversed`; `:603-604` records that #6967 narrowed branch 1 because *\"a superset-only detector can only ever add false positives\"*. `:422` — a self-test group named *\"the floors: labels that are NOT mentions, and mentions that ARE evidenced\"*.\n\n⇒ ⭐ The mention-vs-use distinction **already exists in this script and was already narrowed once for exactly this class of false positive**. #6967 drew the line for INLINE text and stopped there; a heading is still read as a label whatever it says.\n\n## Why this is filed rather than shrugged at\n\nThe dev explicitly declined to file it, for a reason worth quoting: it could not separate the behaviour from *\"the gate's deliberate heading conservatism\"* and could not name a carrier. ⛔ That was the correct call from where it stood.\n\n**The seat can name the carrier, which is what changes the answer**: `scripts/check-adr-0087-registration.mjs` itself, and the next author of a declared-breaking changeset that genuinely has nothing to map. That author now exists as a concrete precedent — PR #17146 — and the shipped changeset there had to be worded around the gate rather than for the reader. ⚠️ **That is the cost: the gate is currently shaping prose that a human will read, in the direction of not naming the thing being denied.**\n\n## ⚠️ What this card is NOT asking for\n\n⛔ **Not** asking to weaken the gate. Its conservatism about labels is load-bearing and #6967's history says a superset detector was the right default. The question is narrower: **should a heading that denies a prescription count as one?** A polarity check, or an explicit opt-out marker, are both smaller than relaxing the detector.\n\n⛔ **Not** asking to re-open PR #17146's disposition. That changeset ships the passing form and states its reasoning in the open — a bare deletion on a non-strict schema refuses nothing and converts nothing, so no metadata upgrader has an edit and `os migrate meta` has nothing to list.\n\n## Dedup\n\nComplete enumerations read 2026-09-10T08:39Z: open `domain:devx` + `domain:spec` + `domain:skills` union = **233** cards. Lit control: 4 titles contain \"changeset\"; dark control: a fabricated token matches 0.\n\n**#16787 is a sibling, ⛔ not a duplicate** — *\"`check-adr-0087-registration`'s `type-surface-only` category is unclaimable by the class it was built for\"*. Same gate, and the same **shape** (an ADR-0087 category unreachable by a case it should cover), but a **different category** (`type-surface-only` vs `no-migration-prescription`) and a **different mechanism** (two path predicates firing on `packages/spec` vs a polarity-blind label detector). ⚠️ Whoever takes either should read the other: two categories of six are now measured as unclaimable by their own intended class, and that pattern may be the real card.\n\n⚠️ Also relevant, not duplicates: **#6967** (the narrowing this card asks to extend), **#8607** (no gate requires a breaking-behaviour changeset to carry the annotation at all).\n\n## Source\n\n#16320 · PR #17146 · the `os-dev` round report of 2026-09-10, open question 2 · `scripts/check-adr-0087-registration.mjs` on `origin/main` `501959b72`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

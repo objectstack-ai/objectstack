@@ -1,0 +1,31 @@
+{
+  "number": 14952,
+  "kind": "issue",
+  "title": "[repo:objectui] List page loses the selected view tab after a record round-trip (overflow re-collapses), and the 「行内编辑」 toggle reads as a button and disables editing on first click — measured 4–5.5 clicks per approval in a role-based run",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p3",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-03T12:25:41Z",
+  "updated_at": "2026-09-10T00:19:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14952",
+  "body": "## Summary\n\nTwo list-page behaviours that turn a routine \"work through my queue\" task into repeated navigation, measured in a role-based UI run (17.2.0 console, 11 records, 6 roles, click counts logged per action):\n\n1. **The selected view tab does not survive leaving the list.** A reviewer opens a record from the 「待人力审核」 tab, acts on it (an action that changes status), and lands on the record page; going back to the list resets the tab bar to the default view, so the next record needs \"click tab → open record\" again. With 8 list views the wanted tab is also inside the `{{count}} more` overflow (#14883), so each record costs: back → open overflow → pick tab → open record.\n   - Measured: HR reviewer approving 11 sheets = 4 clicks + 1 navigation per sheet; approver in the overflow case = 5.5 clicks per sheet. Roughly half of these clicks are re-selecting the same tab.\n\n2. **The grid's 「行内编辑」 (inline edit) control is a toggle that defaults to ON and reads as a button.** Users click it expecting to \"start editing\"; the click turns inline edit OFF, after which clicking a cell navigates to the record page instead of editing. Because the record page shows no Edit button for this role (#14912), the user concludes they have no edit permission. In the run, one tester (an automated agent following the manual) mis-diagnosed exactly this and tried three alternative paths before recovering.\n\n## Reproduction\n\nPlatform 17.2.0 console, any object with ≥5 `listViews` and an action that changes the record's status.\n\nA. Tab reset: list → pick a non-default tab (via overflow if needed) → open record → run an action → browser back / breadcrumb back → observe: default tab selected again, overflow collapsed.\n\nB. Inline edit toggle: list with `inlineEdit: true` → toolbar shows 「行内编辑」 highlighted → click it once → click a numeric cell → observe navigation to the record page, no edit.\n\n## Expected\n\nA. The list remembers its last selected view (per object, per session at least — URL param or session storage), and returning from a record restores tab + scroll position; when the selected tab is in the overflow, the tab bar promotes it (it already does this for the *active* tab on first render — it should persist across the round trip).\n\nB. The inline-edit control should read as a state (switch with label 「行内编辑:开/关」) rather than an action button, and turning it off should not silently change what a cell click does without feedback; alternatively keep it on by default and hide the toggle unless the view author exposes it.\n\n## Environment\n\n`@objectstack/console` 17.2.0 · `objectstack dev` · Chromium 1440×900 · zh-CN. App: objectstack-ai/kpi (object `kpi_entry_sheet` with 8 list views; `kpi_entry_line` with `inlineEdit: true`)."
+}

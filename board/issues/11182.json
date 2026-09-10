@@ -1,0 +1,29 @@
+{
+  "number": 11182,
+  "kind": "issue",
+  "title": "[Deferred by ruling] Unify flow field-expression assignment onto the CEL engine — the B half of the #11060 ruling, awaiting maintainer appetite",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-23T01:25:07Z",
+  "updated_at": "2026-08-24T09:50:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11182",
+  "body": "Filed by the triage seat as the ruled follow-up of #11060 (maintainer 2026-08-23, live PM chat, verbatim: 「其他同意你的意见」— adopting \"A now + B follow-up on hold pending appetite\").\n\n## What this card is\n\n#11060's ruled option A ships the six-function table (`round`/`floor`/`ceil`/`abs`/`min`/`max`, semantics mirrored from CEL) to unblock the quote flow. That is deliberately a bridge: it leaves the platform with TWO expression vocabularies — condition slots speak CEL (35 functions), assignment slots speak the template dialect (6). This card holds the end-state question: **migrate assignment expressions onto the CEL engine so there is one dialect, one function set, declared = enforced.**\n\n## Why it is on hold rather than queued\n\nThe migration cost is real and unmeasured — the `{var}` template dialect's compatibility surface across existing flows was the recorded confidence gap in #11060's analysis. Scheduling it is an appetite call the maintainer explicitly deferred.\n\nRestart-when: closed objectstack-ai/objectstack#11060\n\n(When A lands and #11060 closes, the unlock scan returns this card to the decision inbox for an appetite ruling — with A's landed shape and the by-then-measurable `{var}` dependency surface as inputs. ⛔ Do not implement from this card without that second ruling.)\n\nRefs: #11060 (ruling + analysis) · hotcrm#1206 (the measured business pull)."
+}

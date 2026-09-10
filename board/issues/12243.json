@@ -1,0 +1,33 @@
+{
+  "number": 12243,
+  "kind": "issue",
+  "title": "epic(docs-site): the site is technically un-indexable — fix robots/sitemap/canonical/OG first, then the keyword shape",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:blocking",
+    "pm:epic",
+    "priority:p0",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-25T14:48:53Z",
+  "updated_at": "2026-09-01T09:38:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12243",
+  "body": "## Why this epic exists\n\nThe docs site at `https://objectstack.ai` is, as of 2026-08-25, **technically un-indexable in the ways that matter**: there is no sitemap and no robots.txt (both paths answer 200 with the homepage HTML), no canonical link on any page, and no `metadataBase`. 403 doc pages exist with nothing pointing a crawler at them. On top of that the on-page keyword signal is thin — half the pages ship two `<h1>`s, page titles have a median length of 14 characters, and half the meta descriptions are too short to be used as snippets.\n\nThe order matters: **the P0 lane is the precondition**. Rewriting 403 titles while `/sitemap.xml` returns HTML buys nothing.\n\n## Lane / territory (epic PM declaration)\n\n- Epic PM session: `f9f0958b-ab68-46cc-801c-216aa7ee2107`\n- Declared file territory:\n  - `apps/docs/**` — app routes, `proxy.ts`, `lib/`, `components/`, `public/`\n  - `content/docs/**` — frontmatter `title` / `description`, body headings\n  - `scripts/check-*.mjs` + the `Lint & Repo Gates` step list — only for the new doc-shape gates two sub-issues ask for\n- Not in territory: `packages/**`, anything under `docs/adr/**`, `.claude/**`.\n\n## Sub-issues\n\n**P0 — indexability (do these first; #12234 unblocks #12235)**\n\n- [ ] #12232 — `/robots.txt` and `/sitemap.xml` do not exist; both answer 200 with the homepage\n- [ ] #12233 — any single-segment dotted path renders the homepage with 200 (soft-404 class)\n- [ ] #12234 — no `metadataBase`, no canonical link on any page\n- [ ] #12235 — OG images generated for all 403 pages, referenced by none\n\n**P1 — keyword shape (maintainer-voice; PRs stay open for review)**\n\n- [ ] #12236 — 205 pages render two `<h1>`, 129 the same text twice\n- [ ] #12237 — page titles carry no search intent (median 14 chars)\n- [ ] #12238 — descriptions too thin to serve as snippets (median 46 chars)\n- [ ] #12239 — homepage title/description not keyword-shaped (615-char description)\n\n**P2 — structured data, crawl hygiene, weight**\n\n- [ ] #12240 — no JSON-LD anywhere (SoftwareApplication / TechArticle / BreadcrumbList)\n- [ ] #12241 — `/docs/**.mdx` serves an indexable parallel copy with no robots directive\n- [ ] #12242 — homepage hero cover is a 406 KB PNG (LCP candidate)\n\n## Shared facts every sub-issue inherits\n\n- Canonical origin is `https://objectstack.ai` — maintainer ruling recorded in #10659:\n  > 这个仓的文档站规范 URL 是 https://objectstack.ai\n- The origin belongs in **one** shared constant that the sitemap, `metadataBase`, canonical links and JSON-LD all read. Three sub-issues need it; the first one to land creates it and the rest import it.\n- Locales: `lib/i18n.ts` is English-only (`languages: ['en']`, `hideLocale: 'default-locale'`). No `hreflang` work is in scope, and `/en/docs` correctly 307s to `/docs` today — do not break that.\n- `llms.txt` / `llms-full.txt` / `.mdx` endpoints are a deliberate feature for agent readers. ⛔ Do not remove or gate them; the only change any sub-issue may make is a robots directive.\n- Two sub-issues (#12237, #12238) rewrite maintainer-voice copy across 403 files: the PR must carry the **rule plus the full before/after table** in its body, and must be left for maintainer review rather than self-merged.\n\n## Definition of done for the epic\n\n- [ ] `curl -sI https://objectstack.ai/robots.txt` → `200 text/plain`, naming the sitemap\n- [ ] `/sitemap.xml` is XML and lists every doc page\n- [ ] a random dotted path 404s\n- [ ] every page type emits one absolute canonical and a working OG card\n- [ ] no page renders more than one `<h1>`\n- [ ] title/description length gates run in `Lint & Repo Gates`\n\n## Source\n\nFiled from an SEO review of `apps/docs` on 2026-08-25 — every claim above was measured against the local dev server and against production, with the commands recorded in the individual sub-issues.\n"
+}

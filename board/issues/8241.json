@@ -1,0 +1,29 @@
+{
+  "number": 8241,
+  "kind": "issue",
+  "title": "[finding] adding an RLS narrowing to `member_default` silently narrows ORG ADMINS on the default `single` posture — both of their widening mechanisms are absent there",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-12T22:04:59Z",
+  "updated_at": "2026-09-04T06:12:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8241",
+  "body": "Restart-when: a new member_default narrowing policy lands in packages/plugins/plugin-security/src/default-permission-sets.ts for an object organization_admin covers only via a strippable _org tenant policy (sys_team is the named unruled candidate)\n\nA structural trap found while implementing #8095. The instance is fixed in that PR; the trap is general and the next author to do the same thing will hit it the same way.\n\n## The shape\n\n`member_default` is bound to the `everyone` anchor, so it resolves for **every** authenticated principal — org owners and admins included. RLS policies OR-combine across resolved sets, so an admin stays unnarrowed only while some policy of theirs still admits the rows a new `member_default` policy excludes. Two mechanisms are supposed to provide that, and on the **default** `single` posture **neither** does:\n\n1. **The superuser short-circuit.** `computeLayeredRlsFilter` skips Layer 1 entirely when the caller holds `viewAllRecords` on a posture-permitting object. ADR-0105 D4 withholds exactly those bits from a wall-less deployment — `auto-org-admin-grant` hands out `organization_admin_no_bypass` instead of `organization_admin` whenever no wall is enforced.\n2. **The per-object `_org` carve-out.** `organization_admin` ships `sys_member_org`, `sys_invitation_org`, `sys_team_org`, each `organization_id == current_user.organization_id`. ADR-0105 D3 has `collectRLSPolicies` **strip** platform tenant policies when org isolation is inactive — correctly, since the token means nothing without a wall.\n\nSo on a stock `single` boot an org admin reaches those objects through **no policy at all**, and \"no applicable policy\" is what `RLSCompiler.compileFilter` turns into a null filter, i.e. unrestricted. The admin's whole read is riding on an absence. Introduce one narrowing policy on that object in `member_default` and the absence becomes a predicate — for the admin too.\n\n## Measured\n\nImplementing #8095 (row-scope `sys_invitation` to its addressee) with only the member-side policy in place, on a stock `showcase` boot:\n\n```\nposture: single, isolationActive: false\nowner grants: [organization_admin_no_bypass]\nGET /api/v1/data/sys_invitation as the org OWNER -> 200, total: 0\n```\n\nThe Setup app's Invitations page would have gone blank for the one persona entitled to it, on the default posture, as a side effect of a member-side security fix. Caught only because that PR's fixture asserts the owner control alongside the two narrowing assertions.\n\n## Currently latent elsewhere, not currently broken\n\n`sys_member` and `sys_team` are in the same state today — widened for admins only by a strippable `_org` policy, narrowed by nothing in `member_default`. Nothing is wrong right now precisely because no narrowing exists for them. If one is ever added (a plausible follow-on to #8095: `sys_member` was explicitly left alone there as a legitimate staff directory, but `sys_team` has had no such ruling), it will reproduce this exactly.\n\n## What #8095 did about it\n\nStated the admin admission in its own right rather than relying on the absence — a second policy on `organization_admin`, `positions`-domained to `org_owner` / `org_admin`, carrying no tenant token for the strip to key on. The domain is on the **widening** so it can only add: a principal it does not match keeps the narrow scope and fails closed. Putting the domain on the narrowing instead inverts that, because \"no matching position\" means \"no policy\" means no row filter at all.\n\n## Worth deciding\n\nThat fix is per-object and hand-rolled. Options a maintainer may want to weigh:\n\n- **Leave it per-object.** Each future narrowing pays the same two-policy cost, and each author has to know why. Cheapest today, and the trap is at least now documented in `default-permission-sets.ts`.\n- **A general rule** — e.g. have `deriveWallLessOrgAdmin` synthesise a non-tenant-token admission for every object its parent scopes with an `_org` policy, so the wall-less variant is not silently thinner than the walled one on the row axis.\n- **A gate** that fails when `member_default` gains a policy for an object that `organization_admin` covers only by a strippable tenant policy. This is the class `check:*` gates exist for, and it is exactly the kind of composition mistake no single file review catches.\n\nRelated: #3539 (ADR-0105 F1 to D3 — the strip swallowing app-authored policies) is the same mechanism seen from the authored-policy side.\n\nFiled from the #8095 implementation. Not assigned; observation-class.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

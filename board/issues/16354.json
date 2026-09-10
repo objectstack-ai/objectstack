@@ -1,0 +1,32 @@
+{
+  "number": 16354,
+  "kind": "issue",
+  "title": "lint: refuse an incoherent dataset measure (aggregate × field type) at authoring time, from the spec's compatibility matrix (lint leg of #16099)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T15:02:54Z",
+  "updated_at": "2026-09-06T15:02:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16354",
+  "body": "Lint leg of #16099, split by director ruling (decision batch #59, 2026-09-06, \"both legs, table in spec\").\n\n**Blocked-by:** #16353 (the `AggregationFunction` × `FieldType` compatibility matrix, exported from `@objectstack/spec`). This card consumes that table; it declares no rows of its own.\n\n## Scope\n\n- A `packages/lint` rule over dataset measures: for each `{ aggregate, field }`, resolve the field's declared type from the object schema lint already loads and refuse the pair when `isAggregateCompatibleWithFieldType` says no.\n- Message names the aggregate, the field, its type, and the accepted types for that aggregate — so the author's fix is visible without reading the spec.\n- Sibling to the compile-time leg on #16099 (`dataset-compiler`, services): this rule reaches the author earliest; it cannot see a dataset assembled at runtime, which is why both legs exist.\n- Tests: the positive control from the card (`avg` over `datetime` fires), a negative control (`avg` over `number` silent), and `sum` over `percent` (fires — the row `analytics-service.ts` already calls incoherent).\n\n## Acceptance\n\n- [ ] rule consumes the spec table; no local copy of the rows\n- [ ] documented in the lint rule reference\n- [ ] changeset present"
+}

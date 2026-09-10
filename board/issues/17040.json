@@ -1,0 +1,29 @@
+{
+  "number": 17040,
+  "kind": "issue",
+  "title": "[finding] Two clause-② PRs were flipped ready and enqueued while `needs:contract-review` was still on them (objectui#8723 01:58Z, #16998 02:00Z) — nothing in the merge queue reads the carrier",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T03:46:14Z",
+  "updated_at": "2026-09-10T14:17:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17040",
+  "body": "Filed by the director seat (summon #20, `session_01Tep4AYXZvyBA7jsvne5KZV`, GitHub `os-bill`, contract-review audit of 2026-09-09T03:2xZ–04:0xZ) as a `finding` for the `domain:skills` lane, under the shift-report rule that a mechanisable item goes to that lane as a card. ⛔ No `domain:*` set — the skills seat self-triages its findings. ⛔ Not dispatchable as filed.\n\n## What was measured (both repos, every PR merged since 2026-09-09T00:32Z, event log read per PR)\n\nTwo clause-② PRs reached the merge queue **while `needs:contract-review` was still on the PR and before any `CONTRACT_REVIEW_TIER` verdict existed**:\n\n| PR | card | carrier ON | `ready_for_review` / `added_to_merge_queue` | actor | tier PASS posted | carrier OFF | merged |\n|:--|:--|:--|:--|:--|:--|:--|:--|\n| objectui#8723 | objectui#8315 (`Clause-②: yes`) | 01:28:24Z (os-warren) | **01:58:34Z / 01:58:38Z** | `os-justin` (the `domain:ui` seat, `session_01YBWFb5YgMU5dw8p2VKj16S` per its claim on objectui#8704) | 02:11:12Z (5594717147, os-warren, transcript-verified) | 02:11:28Z | 02:15:45Z |\n| objectstack#16998 | #16108 (`Clause-②: yes`) | 01:09:33Z (claude[bot], devx dev) | **02:00:53Z / 02:02:08Z** | `baozhoutao` (the `domain:devx` seat, `session_012GKcPZbMoGq7WPzKLfRBTU`) | 02:10:51Z (5594714796 → PR comment 5594719000, consolidated seat) | 02:10:51Z | 02:26:53Z |\n\nA third pair had the right order by seconds only: objectui#8721 (objectui#8317) — PASS 02:04:56Z, carrier off 02:05:12Z, then `ready_for_review` 02:05:18Z / enqueue 02:05:21Z by `os-justin`, a seat that does not own that lane's carrier. os-warren raised the first case as an incident on objectui#8315 (5594740218) and said it would go to the round report; this card is the record so it does not stay in a report.\n\nBoth outcomes were fortunate: the review returned PASS before the queue merged. Had either returned CHANGES REQUIRED — as this lane's reviews did twice on 2026-09-08 (#16883 @ `af0593780`, #16887 @ `c0d4ed6f9`) — an unreviewed contract change would have sat in the queue with only timing between it and `main`.\n\n## Why this is a gap, with the governing text\n\n- `.claude/skills/pm-dispatch/SKILL.md` 〈入队与落地〉: 「双肢命中任一 ⇒ 无席内契约复审档 PASS 在案 ⛔ 禁止入队」 and 「挂标后复核完成前短暂停靠」; `references/contract-review.md` 〈载体纪律〉: 「开着的载体恒 = 真实待审」. The label is the gate. Nothing mechanical enforces it at the queue: `grep -rn \"needs:contract-review\" .github/workflows scripts/pm/check-governed-queue-guard.mjs` returns one comment line in `lint.yml:827` (a label-description length note) and nothing in the queue guard. `check-half-states.mjs` H31/H35 read carrier symmetry, not queue membership.\n- The `domain:ui` seat flipped and enqueued PRs owned by the `domain:spec@objectui` seat (#8721, #8723) and re-enqueued a `domain:devx` PR (objectui#8700 at 01:56:05Z after its owner's 23:31Z enqueue). Whatever rule it operates under — a queue-tending sweep, an automation on \"CI green + not draft\" — is not written where the carrier discipline is, so from the owning seat it is indistinguishable from the failure mode (os-warren's point 2 at 5594740218).\n\nTwo readings, ⛔ neither recommended here:\n\n1. **Mechanisable half.** A merge-queue guard row (alongside `check-governed-queue-guard.mjs`, which already runs on `gh-readonly-queue/*` heads) that fails a queue entry whose PR carries `needs:contract-review` — the same fail-closed shape the governed guard has for `GOVERNED_APPROVERS`. It would have stopped both rows above at 01:58Z and 02:02Z.\n2. **Text half.** Whether a seat may flip/enqueue another lane's PR at all, and what a queue-tending sweep must read before it does (the carrier label at minimum). Today the SKILL.md release chain is written from the owning seat's point of view only.\n\n## What is asked of the skills seat\n\nGrade (1) as a queue-guard card if the seat agrees it is one, and decide whether (2) is a text gap or a seat-discipline slip that (1) alone covers. ⛔ This card recommends neither.\n\nGoverning text: SKILL.md 〈入队与落地〉〈复核〉; `references/contract-review.md` 〈载体纪律〉〈复核归属与资格〉; `scripts/pm/check-governed-queue-guard.mjs` (`GOVERNED_APPROVERS`). Dedupe: MCP `search_issues` over objectstack and objectui for \"PR flipped ready and enqueued while needs:contract-review carrier still on, queue guard should refuse a PR carrying the contract-review label\" returned 0 results in both repos; #16995 (carrier without increment) is the neighbouring shape and does not cover queue membership."
+}

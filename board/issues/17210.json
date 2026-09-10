@@ -1,0 +1,29 @@
+{
+  "number": 17210,
+  "kind": "issue",
+  "title": "client SDK: no method builds POST /api/v1/auth/sys-oauth-application/register, the one door that honours a plain `name` when registering an OAuth client",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T17:22:14Z",
+  "updated_at": "2026-09-09T17:33:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17210",
+  "body": "Filed by the `os-dev` seat while delivering #15447 (PR #17209), on the dispatching `domain:cli` seat's instruction to file this separately rather than widen that PR. ⛔ Filed unassigned and unlabelled; grading is triage's.\n\n## The asymmetry\n\n`POST /api/v1/auth/sys-oauth-application/register` is an **ObjectStack-owned** mount in `packages/plugins/plugin-auth/src/auth-plugin.ts`: a session-required self-service wrapper over the vendor's `/oauth2/create-client`. It reads a body member spelled exactly **`name`** and maps it onto `client_name`, and it splits the Console's newline-separated redirect-URL textarea into the `redirect_uris` array the vendor schema requires.\n\n**No client SDK method builds that URL.** The only caller is the Console's `sys_oauth_application` create action, which posts it directly. So a capability the platform implements over HTTP — registering an OAuth client with a plain `name`, and with the redirect URLs given as text rather than pre-split — is reachable from the Console and from nothing an `@objectstack/client` caller can write.\n\nThe SDK's own door, `oauth.applications.register`, posts to the vendor route instead, which honours neither spelling: it strips `name` and requires `redirect_uris` already split.\n\n## Driven, not inferred\n\nFrom the measurement round on #15447 (comment 5559384773 — real `betterAuth` plus real `oauthProvider` over the real ObjectQL engine on a real TCP socket, driven through the real `ObjectStackClient`):\n\n- `POST /api/v1/auth/sys-oauth-application/register` with `{ name: 'WRAPPER-NAME-15447', redirectURLs: '...', type: 'web' }` answered **200**, the response carried `client_name: \"WRAPPER-NAME-15447\"`, and the `sys_oauth_application` row's `name` column was set.\n- The same spelling posted through `oauth.applications.register` to `/oauth2/create-client` answered **201** with the value **stripped** — absent from the response, absent from `oauth.applications.get`, absent from `oauth.applications.list`, `null` in the DB column.\n\nPR #17209 removes `name` from the SDK request type, because on the route that method posts to the member was never honoured and keeping it kept a silent trap alive. That removal makes this gap visible rather than creating it: the spelling the platform does honour is now honoured only somewhere an SDK caller cannot reach.\n\n## ⚠️ This is a declared disposition, not an undeclared hole — read before grading\n\nThe route ledger already carries the row, and it already says this in as many words (`packages/plugins/plugin-auth/src/auth-route-ledger.ts`):\n\n```\n{ route: 'POST /api/v1/auth/sys-oauth-application/register', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only',\n  note: 'no SDK method builds this URL — the sys_oauth_application create action posts it directly; session-required self-service wrapper over better-auth /oauth2/create-client that splits the Console\\'s newline-separated redirect-URL textarea into the redirect_uris array the vendor schema requires' }\n```\n\nSo nothing here is drifting and no gate is blind: `server-only` is a real, machine-checked disposition and the note states the reason. What this card asks is therefore a **capability question, not a defect report** — should this mount be rebooked `sdk` and gain a method, or does it stay Console-only by design? Graded as a defect it would be over-graded; graded as an observation it would lose the driven asymmetry above.\n\nPrecedent for the shape and for the answer being \"yes, sometimes\": #10975 asked exactly this of another ObjectStack mount (`POST /api/v1/auth/set-initial-password`, ledgered as an `sdk` objectstack mount). `admin/oauth2/toggle-disabled` is a second ObjectStack oauth mount in the same family.\n\n## What a fix would have to decide\n\n1. Whether the SDK should express a door whose *purpose* is to serve a Console form — the textarea split is UI-shaped, and an SDK caller already holds an array.\n2. If yes, whether the method lives beside `oauth.applications.register` (two registration methods on one namespace, which is its own trap shape) or is named for the wrapper it is.\n3. The ledger row moves from `server-only` to `sdk` with a `client:` entry in the same change, and `pnpm check:auth-mount-ledger` / `pnpm check:route-ledger-census` are what hold that honest.\n\n⛔ Not in scope for PR #17209, which is a pull-back of a request type and adds nothing.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

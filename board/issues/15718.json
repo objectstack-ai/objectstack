@@ -1,0 +1,30 @@
+{
+  "number": 15718,
+  "kind": "issue",
+  "title": "plugin-auth: `probeSignInAccountsPresence` is existence-only, so one unusable `sys_account` row silences `no_sign_in_account_at_boot` permanently",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T04:11:35Z",
+  "updated_at": "2026-09-05T07:00:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15718",
+  "body": "Blocked-by: #15074\n\nFound while implementing #15588 (the remedy text on that same boot report); filed unassigned, `pm:queue` only, for triage. ⛔ Not fixed there, deliberately: #15588 is message-text only, and changing this probe moves #14353's diagnostic semantics.\n\n## The gap\n\n`packages/plugins/plugin-auth/src/boot-sign-in-reachability.ts` — `probeSignInAccountsPresence` asks one question:\n\n```ts\nconst rows = asRows(await engine.find(SystemObjectName.ACCOUNT, { limit: 1 }, SYSTEM));\nreturn rows.length > 0 ? 'present' : 'absent';\n```\n\nThat is deliberate and documented — \"a row of any provider, any issuer, banned or not, means SOMEBODY has a login\". But the predicate it stands in for is *\"can anyone sign in\"*, and one `sys_account` row that authenticates nobody satisfies the first while falsifying the second. Measured on this card's population (#15588): a row whose `password` column holds a plaintext string is refused `401 INVALID_EMAIL_OR_PASSWORD` at sign-in, while `probeSignInReachability` answers `{\"humanUsers\":\"present\",\"signInAccounts\":\"present\"}` and the report goes quiet.\n\n⇒ **The report can be silently and permanently defeated by the single most likely operator instinct** — hand-writing a credential row — and once defeated it never fires again on that deployment. A deployment that was loudly unrecoverable becomes quietly unrecoverable.\n\n#15588 closes the half that could be closed without moving behaviour: the boot line now says outright that writing any `sys_account` row silences this report. That makes the message honest about today's probe. It does not make the probe answer the question it is standing in for.\n\n## Why it was left out of #15588\n\nQuoting that card's own triage, adopted verbatim as its scope:\n\n> ⛔ **Tightening that probe (e.g. to check the credential is usable) is a behaviour change and is out of scope here** — it would move #14353's admission/diagnostic semantics, which this card explicitly does not.\n\nSo this is the separate card that note anticipated. It is a decision for the maintainer, not a defect with one obvious repair — see the open questions below.\n\n## Evidence the boundary is real, not assumed\n\nWhile mutation-checking #15588's pins, one mutation simulated exactly this fix — tightening the probe to judge the credential rather than count rows. It turned **three pre-existing #14353 pins red**, none of them #15588's:\n\n- `ANY sys_account row counts — provider, issuer and ban state are not asked about`\n- `NEGATIVE CONTROL — one account exists and the boot is silent`\n- `the neighbour is UNTOUCHED when this report did not fire`\n\n⇒ The existence-only reading is pinned as intended behaviour by #14353's own suite. Any change here has to re-decide those three pins, which is why it is a card and not a patch.\n\n## Open questions for triage\n\n1. **What would \"usable\" even mean, cheaply, at boot?** A federated `sys_account` row carries no password at all and is perfectly usable; a `credential` row with a well-formed hash may still belong to a banned user. A predicate that gets this wrong in the fires-on-every-boot direction is the failure mode #14353 built its controls against.\n2. **Or leave the probe and change nothing?** The message now tells the truth, and the docs page (`content/docs/deployment/self-hosting.mdx`, #14495) says the same. \"Documented, not detected\" is a legitimate resting place for a diagnostic.\n3. Note this pulls against **#15074**, which reports the opposite direction — this same report firing at `error` on healthy platform-SSO tenant kernels. Anything that makes the probe *more* eager should be read together with that card.\n\nRefs: #15588 (the remedy text, where this was found) · #14353 (the diagnostic) · #14349 (option A, ruled) · #15074 (the same report's false-positive direction).\n"
+}

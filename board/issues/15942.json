@@ -1,0 +1,33 @@
+{
+  "number": 15942,
+  "kind": "issue",
+  "title": "MCP `run_action` never enforces `ai.requiresConfirmation` — it is surfaced in `list_actions` only, while `@objectstack/spec` guidance tells authors it stops execution",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "pm:blocked",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T15:32:01Z",
+  "updated_at": "2026-09-10T11:01:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15942",
+  "body": "## Summary\n\n`action.ai.requiresConfirmation` is a **safety-shaped** flag. `@objectstack/spec`'s own authoring guidance tells authors it gates execution — that it \"forces a human-in-the-loop gate on the AI call\", and, in the ADR-0049 ledger entry for the retired `tool.requiresConfirmation`, that `action.ai.requiresConfirmation` \"is the flag the HITL approval queue actually reads … and the only path that actually stops execution\".\n\nMeasured against the shipped `@objectstack/runtime` **17.3.0**, no such queue exists. The flag is read in exactly one place, to fill in one field of the MCP `list_actions` summary. `run_action` never consults it. An author who follows the spec's prescription gets a JSON field, not a gate.\n\n## Measured\n\n`@objectstack/runtime` 17.3.0, `dist/index.js` — `requiresConfirmation` occurs at exactly **two** sites in the entire bundle:\n\n```js\n// site 1 — the read\nfunction actionLooksDestructive(_deps, action) {\n  if (action?.ai?.requiresConfirmation !== void 0) return Boolean(action.ai.requiresConfirmation);\n  return Boolean(action?.mode === \"delete\" || action?.variant === \"danger\");\n}\n\n// site 2 — the only consumer, projecting into the MCP summary\nfunction summarizeAction(deps, action, obj, objectName) {\n  return {\n    name: action.name,\n    // …\n    requiresConfirmation: actionLooksDestructive(deps, action),\n  };\n}\n```\n\n`summarizeAction` has exactly one caller — the `listActions` loop. The `runAction` sibling on the same object goes to `invokeBusinessAction`, whose pre-dispatch checks are, in order: AI exposure, action permission, disabled-activation refusal, and param enforcement. There is no confirmation check, and nothing awaits an approval. For `type: 'flow'` it proceeds straight to `dispatchFlowAction`.\n\nCorroborating greps on the same bundle:\n\n- `approvalQueue` — 0 occurrences\n- `destructiveHint` — 0 occurrences\n- `HITL` — 1 occurrence, in a comment describing the flag as a **hint**: `/** True when an action is destructive by author signal/heuristic (HITL hint). */`\n\nThat comment is the accurate description. The published spec guidance is not.\n\n## Why this is worth a card rather than a docs tweak\n\nThis is the exact failure class ADR-0049 was written for, and the project has already paid for it once: `tool.requiresConfirmation` was retired in the 16.x line precisely because \"a SAFETY flag that is merely accepted is false compliance — authors set it on destructive tools believing the call would pause, and nothing ever did\" (#3715). The retirement's own prescription points authors at `action.ai.requiresConfirmation` as the real gate.\n\nIf the runtime does not stop execution on that key either, then the replacement carries the same defect as the key it replaced, and the ledger entry directing authors to it is actively misleading. The near-miss is worse here than for an ordinary dead property: the author reads a spec sentence promising a pause, sets the flag, sees it accepted, sees it echoed truthfully in `list_actions`, and ships believing a human is in the loop.\n\n## Repro\n\n1. Author an action with `ai: { exposed: true, requiresConfirmation: true }` on a flow-typed target.\n2. `list_actions` over MCP → the entry correctly reports `\"requiresConfirmation\": true`.\n3. `run_action` the same action with an API key → the flow dispatches immediately. Nothing pauses, nothing is queued, no approval is requested, and the response carries the flow result.\n\n## What this card is NOT claiming\n\n- Not that the flag is useless. Surfacing it lets a client (Claude Code's permission prompt, for instance) gate the call on the caller's side, and that is real value.\n- Not that `list_actions` is wrong. Its report is truthful about the declaration.\n- Not a duplicate of the screen-flow dead-end in #15705, which is about `run_action` parking on `screen_1` and `list_actions` omitting flow input variables. That card's payload dump happens to show `requiresConfirmation: false`, but correctly so — its subject action declares no gate.\n\n## The decision this needs\n\nWhich of the three is intended, since the surfaces currently disagree:\n\n1. **Enforce it** — `run_action` refuses an unconfirmed destructive call, with a resume/approve path. This is what the spec text currently promises.\n2. **Rescope the docs** — keep surfacing-only, and rewrite the spec guidance and the ADR-0049 ledger entry so neither promises a pause. The runtime's own \"HITL hint\" comment is the honest wording.\n3. **Something between** — e.g. an opt-in server-side enforcement mode, so trusted agent principals can be held while interactive ones are not.\n\nFiled from downstream while fixing hotcrm#1578, where `convert_lead` had to declare this key so `list_actions` would stop contradicting the action's own description. That fix is correct and lands regardless; this card is the platform half, filed at destination rather than worked around downstream. Reporting the honest scope of the flag is why the fix's comment says \"surfaced, not enforced\" — if this card resolves as option 1, that comment gets simpler.\n\nMeasured on `@objectstack/runtime` 17.3.0 and `@objectstack/spec` 17.3.0 as installed from the registry."
+}

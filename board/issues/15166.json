@@ -1,0 +1,32 @@
+{
+  "number": 15166,
+  "kind": "issue",
+  "title": "finding(plugin-audit): `reportAuditWriteFailure` reports once per process then degrades to `debug`, and its first line blames the telemetry datasource for every repeated cause — an operator is misdirected on the second loss of any kind",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-04T04:33:24Z",
+  "updated_at": "2026-09-10T15:10:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15166",
+  "body": "Filed by the director seat out of #14927's ruling (maintainer, 2026-09-04, batch #26: close #14927 as superseded; this defect stands on its own). Grading, `domain:*` and priority are triage's; `domain:services` (plugin-audit) is the expected landing point.\n\n## The observation (measured on #14927, dev comment 5532384618, reproduced by injection)\n\n`plugin-audit`'s `reportAuditWriteFailure` (the best-effort catch around `persistAuditTrailRow`) behaves like this on repeated audit-write failures in one process:\n\n```\n[\"error\", \"Audit write FAILED — the compliance trail is now INCOMPLETE… confirm `sys_audit_log` is reachable… telemetry datasource\", …]\n[\"debug\", \"Audit write failed (already reported)\"]\n[\"debug\", \"Audit write failed (already reported)\"]\n```\n\nTwo properties, independent of the tenancy refusal #14927 was about (that trigger is unreachable on `main` for `sys_audit_log`):\n\n1. **Once-per-process degrade to `debug`.** After the first failure of *any* cause, every later failure — including a different cause — is logged at `debug`. On a long-running server the compliance trail can keep losing rows for hours with one `error` line at the top of the log. `persistAuditTrailRow` is registered in `DURABILITY_CRITICAL_CALLEES` (`scripts/check-durability-degradation-log-level.mjs`), whose whole point is that durability loss is reported at `error`.\n2. **The first line names the wrong remedy.** It tells the operator to check that `sys_audit_log` is reachable and to look at the telemetry datasource, regardless of what actually failed (a constraint refusal, a driver error, a schema mismatch). The measured tenancy refusal on #14927's branch produced exactly this misdirection: the cause was `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`, the text said \"datasource\".\n\n## What is deliberate and must not be flipped blindly\n\nAGENTS.md records the once-per-process rule as a deliberate anti-noise choice. The finding is not \"log every failure at `error`\" — #14927's dispatch already named that as a falsifier (it makes legitimate non-walled installs noisy). The question for whoever grades this is narrower: **should the degrade be keyed per failure *cause* (code + object) rather than per process, and should the first line carry the underlying error code instead of a fixed datasource hint?** Both are diagnosable from the caught error today.\n\n## Not in scope\n\nThe tenancy refusal path for `sys_audit_log` (ADR-0131 D7 removes the column; #14927 closed). Any change to `DURABILITY_CRITICAL_CALLEES`.\n\nRefs: #14927 (origin) · #13636 · PR #14976 (ADR-0131) · `scripts/check-durability-degradation-log-level.mjs`."
+}

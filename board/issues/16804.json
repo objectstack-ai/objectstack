@@ -1,0 +1,32 @@
+{
+  "number": 16804,
+  "kind": "issue",
+  "title": "`objectstack dev` has no https mode, so the advertised OAuth path for interactive MCP clients cannot be tried against a local dev server",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "auth",
+    "domain:cli",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-09-08T06:19:38Z",
+  "updated_at": "2026-09-10T10:31:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16804",
+  "body": "## Summary\n\n`objectstack dev` serves plain `http://localhost:<port>` only. The Claude desktop client refuses to start an OAuth flow against a non-TLS URL (`Refused to open sign-in URL for hotcrm: must be https`), so the path the Setup → Connect an Agent page advertises for interactive clients — \"the OAuth login opens automatically on first use\" — **cannot be exercised on a local dev server at all** without the developer bringing their own TLS.\n\nToday the only ways around it are (a) an API key header, which the same page labels *headless — for CI, scripts, and agents without a browser*, or (b) a hand-built local https reverse proxy plus `OS_AUTH_URL=https://…` so the discovery documents advertise the https origin. (b) works — it is how #16530 and #16549 were found — but it is a page of openssl/proxy setup that every developer, demo, and video recording has to repeat off-camera.\n\n## Ask\n\nA first-party dev-time https mode, e.g.\n\n```\nobjectstack dev --https            # self-signed dev cert, https://localhost:<port>\nobjectstack dev --https --cert … --key …\n```\n\nthat (1) terminates TLS in the dev server itself, (2) sets the canonical origin so `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server` advertise the https URL without a separate `OS_AUTH_URL`, and (3) prints the https endpoint in the `🤖 MCP server` connect hint (today that block prints `http://localhost:<port>` even when `OS_AUTH_URL` is https — noted in #16530). Optionally print a one-line hint on how to trust the generated CA on macOS/Windows/Linux.\n\n## Why\n\n- The Connect an Agent page's headline promise (\"Identity is self-serve … interactive clients just open a browser login\") is only demonstrable against https. A local dev server is the first place anyone tries it.\n- Demo/video recordings of the OAuth path against a local instance currently depend on an undocumented, third-party proxy — the setup ends up in nobody's screen and everybody's shell history.\n- It removes the incentive to reach for API keys in interactive scenarios, which the page itself says is not what keys are for.\n\nRelated: #16530 (resource registration behind a canonical https origin), #16549, #16746.\n"
+}

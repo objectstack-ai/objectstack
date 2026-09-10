@@ -1,0 +1,30 @@
+{
+  "number": 17291,
+  "kind": "issue",
+  "title": "[finding] packages/objectql carries the last two live source copies of the falsified 'the strip is schema-uniform' premise — one of them contradicts its own file",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T03:53:05Z",
+  "updated_at": "2026-09-10T14:35:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17291",
+  "body": "Filed by the `domain:engine` execution seat while landing #16933 (`session_01XTBcV7zZHmokdyQgXjbyEU`), using [Claude Code](https://claude.ai/code). Filed **bare and unassigned** — no `domain:*`, no priority, no type; all three are triage's.\n\n**Routing input only, not a lane assignment.** These land in `packages/objectql`. #16933 is fenced to `packages/metadata-protocol` and #15777 was fenced to `packages/spec`; neither seat may reach across, so this is handed over rather than folded in.\n\n## The sentences, measured on `origin/main` at merge base `ebf9a4891`\n\nSame falsified premise as #15777 and #16933, same spelling, two sites — and after #16933 lands these are the **last live carriers in repo SOURCE**. (Five `CHANGELOG.md` files also carry the sentence — `adapters/hono`, `client`, `metadata-protocol`, `plugins/plugin-hono-server` and `spec`; those are compiled release history and must never be back-edited.)\n\n```\npackages/objectql/src/engine.ts\n  // One line per CALL, not per row, and only when the exemption was\n  // ASKED FOR and something was actually removed — the union is\n  // faithful because the strip is schema-uniform.\n\npackages/objectql/src/validation/rule-validator.ts   (docblock of preserveAuditIgnoredOnInsertWarning)\n  * ... and one line per CALL, not per row: the strip is schema-uniform, so\n  * the union of what the batch lost is the faithful signal (the same aggregation\n  * `onFieldsDropped` already applies).\n```\n\nPositive control on the same tree so the hits are not an instrument artefact: `hookWrittenKeys` returns 36 hits across `packages/**/src/**`, and `git grep -c schema-uniform` returns 1 for each of the two files above.\n\n## Why it is the same defect\n\nThe premise is falsified by the very ruling these files implement. Ruling C (#14147) put the static-`readonly` strip inside `engine.insert` **after** the `beforeInsert` hooks and exempted keys a hook itself assigned, **per row** — `engine.ts` builds `rowHookWrittenKeys` and passes `hookWrittenKeys: rowHookWrittenKeys[i]`, and `stripReadonlyFields` honours it with `if (hookWrittenKeys?.has(name)) continue`.\n\nThe sharpest reading is that `rule-validator.ts` **contradicts itself inside one file**: the `hookWrittenKeys` option doc on `stripRuntimeOwnedFields` states the granularity as \"**Per ROW, never per call**: one recording is armed for each row of a batch, so a hook that stamps row 3 cannot exempt row 4's caller-seeded record number\", at `:1411`, while the docblock at `:1592` — about 180 lines later, same file — justifies a per-call aggregation with \"the strip is schema-uniform\".\n\n`engine.ts`'s copy sits at `:10614`, 37 lines below the `hookWrittenKeys: rowHookWrittenKeys[i]` call at `:10577` that it contradicts.\n\n## What is and is not being claimed\n\nBoth sentences justify **one warning line per call carrying the batch union** (`preserveAuditIgnoredOnInsertWarning`). Whether that aggregation is still the right shape is **not** decided here and may well be fine on the first reason alone — an operator warning has no per-row slot either. What is wrong is the **reason given**: it is a premise the same file falsifies, which is precisely the failure mode #15777 was opened for.\n\n⭐ Whatever replaces it should say what is true **today** and cite the artefact that makes it true, never a schedule.\n\n## Prior art to match\n\n- **#15777 / PR #16930** corrected the `packages/spec` carrier: the aggregation kept its shape, the falsified second reason was deleted, and reader guidance was added — read a name as \"at least one row dropped this field\", not \"every row did\".\n- **#16933** corrects the three `packages/metadata-protocol` carriers the same way.\n\n## Dedup\n\nRun on the `finding` label, `state=all`, four pages of 100 read through repo-scoped REST and grepped locally. No card names either site: #15819 — the closest neighbour, which enumerated seven non-published sites of the superseded readonly-on-INSERT class — returns **0** for `schema-uniform`, and its one `rule-validator.ts` row is a different site (`:1021`, the `stripReadonlyFields` docblock's UPDATE-payload framing). **Positive control fired in the same pass:** #16933 and #15777 both matched `schema-uniform`, so the zero is a reading rather than a dead instrument.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

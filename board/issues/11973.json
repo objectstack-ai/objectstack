@@ -1,0 +1,31 @@
+{
+  "number": 11973,
+  "kind": "issue",
+  "title": "platform-admin re-anchor L3 (plugin-auth): re-point ensure-default-organization; re-price last-admin-guard as its own reviewed step",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:blocked"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:31:23Z",
+  "updated_at": "2026-09-09T01:53:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11973",
+  "body": "Leg **L3** of the accepted #11663 platform-admin re-anchor design. Provenance: design document = #11663 comment 5394453215 (§6 row L3, migration steps 4–5); maintainer acceptance = #11663 comment 5404675670 (2026-08-25, verbatim 「接受你的建议，继续」). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\nBlocked-by: #13689\n\n**Surface**: `packages/plugins/plugin-auth`.\n\n**Content**:\n- `ensure-default-organization` re-pointed + its trigger moved (design H4 — it is a fourth id-shaped read of a different *kind*, population not predicate, so #10348-C as specified does not absorb it; verify whether #10348's landing already covered it before re-doing).\n- The post-#10348-C judge reads the same oracle as core's derivation (no second derivation site — the 4A posture branch lives inside the one site).\n- **`last-admin-guard` re-pricing is its own reviewed step** (migration step 5): with no runtime write able to empty the platform-admin population, several refusals become obsolete and several become newly necessary. ⛔ Do not delete refusals as a side effect of the re-pointing commit — separate, reviewed change.\n\n**Discipline**: `needs:contract-review` at review (authorization-adjacent guard semantics).\n\n**Acceptance criterion**: walled bootstrap end-to-end per the design §2 flow passes on a walled rig; `single` posture behaviour unchanged (Choice 4A); every deleted or added guard refusal is enumerated in the PR body with its re-pricing rationale.\n\n---\n\n## ⛔ STATE — the code half is LANDED; this card is parked on two non-code conditions\n\nRecorded 2026-09-01 by the `domain:services` execution seat (#6021), executing the transition this seat pre-registered in comment 5474793550 so it would not have to be re-derived.\n\n**Landed**: PR #13685, merged `2026-08-31T08:12:39Z` at `df17ff0a7`, marked `Part of` (⛔ not a closing keyword — deliberately). Contract review **PASS** (comment 5475234248, tier fuse machine-read `claude-fable-5`). Two of the three acceptance clauses are **MET** and independently verified (guard-refusal enumeration — an empty set in code, with the set arithmetic pinned both directions; `single`-posture invariance under Choice 4A). ⇒ ⛔ **Do NOT re-dispatch the implementation. There is no code left to write in this repo.**\n\n### ⛔ RESTART CONDITION — a CONJUNCTION. Both halves, ⛔ not either.\n\n⚠️ ⭐ **This is stated here in the BODY, and as an explicit conjunction, on purpose.** The unlock scan reads `issue.body` only, and a single `Blocked-by:` edge would promote this card the moment #13689 closes while acceptance clause 3 is still unmet. That exact false-promotion already happened once on #7401 tonight, because its correction lived in a comment. ⛔ Do not promote on (a) alone.\n\n**(a) `Blocked-by: #13689` — the out-of-repo trigger adoption.**\nThe enterprise organizations package reuses `ensureDefaultOrganization` with its own wiring on `sys_user_permission_set` inserts, which post-L4 never fire on a fresh walled rig. L3 **shrank** that window from \"forever\" to \"until the next process start\" (their `kernel:ready` pass now resolves a config-anchored admin, since L3 re-pointed the population without changing the signature) — it did not close it. Closure needs their wiring to import the exported `isDefaultOrganizationBootstrapTrigger` (one import; the predicate was exported precisely so their trigger cannot drift from ours). ⛔ That fix lands **outside this repo**, which has no `repo:enterprise` label and is outside this session's GitHub scope ⇒ #13689 is the objectstack-side seam anchor, ⛔ not the implementation.\n\n**(b) Acceptance clause 3 — the walled-rig end-to-end pass. ❌ NOT MET, and ⛔ not claimable from this repo.**\nThe criterion needs a live walled rig with a real registration + verification round trip. Every unit-pinnable step of the §2 flow is green (population, trigger set, guard prices, `single`-posture invariance).\n⛔ **Those green unit suites are NOT the end-to-end pass and must never be allowed to stand in for it.** The dev delivering L3 flagged this rather than claiming it — that was the correct call, and this card preserves it. Vehicles: the L6 reap card **#11978** (\"reader census on a walled rig\"), or an operator running the §2 flow on any walled deployment and recording the reading here.\n\n⇒ ⭐ **Full closure = (a) AND (b).** Alternatively a **maintainer ruling** that (b) is satisfied by other evidence — ⛔ that ruling is not this seat's to make, and ⛔ not any dev's."
+}

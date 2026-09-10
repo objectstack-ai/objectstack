@@ -1,0 +1,32 @@
+{
+  "number": 13272,
+  "kind": "issue",
+  "title": "Three liveness ledgers still cite `packages/services/service-ai/…`, a path that exists in NEITHER repo, and repeat the falsified \"stale build artifact with no src/\" note",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-29T16:39:54Z",
+  "updated_at": "2026-08-30T04:01:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13272",
+  "body": "Measured while re-closing `tool.json` against a live cloud checkout (refs #13042). That card's fence is `packages/spec/liveness/tool.json` only, so the identical defect in its three siblings is filed rather than fixed.\n\n## Census at `74049254`\n\nLedger entries whose `evidence` / `producer` cites the prefix `packages/services/service-ai/`:\n\n| ledger | entries citing the stale prefix | `_note` repeats the falsified sentence |\n|---|---|---|\n| `agent.json` | 11 | yes |\n| `skill.json` | 8 | yes |\n| `action.json` | 3 | yes |\n| ~~`tool.json`~~ | ~~5~~ (repaired in #13042) | repaired |\n\n22 entry citations remain after #13042 lands.\n\n## Both halves of the claim are false, and each is false in its own way\n\n**1. The framework tree is absent, not stale.** All four notes say the framework's own service-ai tree \"is a stale build artifact with no `src/`\". Measured in this checkout: `git ls-files | grep -ic service-ai` returns `0`, `find . -name service-ai` returns nothing, and `packages/services/` holds 16 members, none of them service-ai. There is no artifact to be stale.\n\n**2. The cited path is wrong for the cloud repo too.** Cloud's real layout (measured at cloud `origin/main@15f55df`) is `packages/service-ai/…` and `packages/service-ai-studio/…` — never `packages/services/service-ai/…`. So the 22 citations name a path that exists in neither repository. They are unfalsifiable pointers, which is exactly the condition the ledger's own README says a `live` verdict must not rest on.\n\n## The mechanical trap a repair will hit\n\n`packages/spec/scripts/liveness/evidence.mts` hardcodes\n\n```js\nexport const FOREIGN_PATH_PREFIXES = ['packages/services/service-ai/'];\n```\n\nso the **stale** spelling is silently treated as foreign and never resolved — which is why 22 dead pointers have sat green. The **real** cloud path `packages/service-ai/…` is repo-rooted in shape and is NOT in that list, so a naive repoint resolves it as LOCAL and fails CI.\n\nEvery repointed citation therefore MUST carry the `cloud` realm marker (`cloud @<sha>: packages/service-ai/…`). This is not optional prose — it is the difference between a green gate and a red one. #13042 hit this and its `_note` now records it.\n\n## Suggested shape of the work\n\nSame as #13042, once per ledger: read each cited consumer against a real cloud checkout, confirm or falsify, stamp `verifiedAt`, repoint with the `cloud` realm marker plus a pinned cloud SHA and a `#symbol` anchor, and repair the `_note`. Each of the three is independently doable.\n\n**Executor constraint (the same one that parked #13042 for a day): a container with the `cloud` repo checked out.** A framework-only container cannot close any of these 22 without manufacturing false confidence — it can only re-spell the path.\n\nWhether `FOREIGN_PATH_PREFIXES` should also gain `packages/service-ai/` is a separate judgement: doing so would make an unmarked citation of the real path pass silently, which trades one unfalsifiable spelling for another. #13042 chose the realm marker instead and did not touch the constant."
+}

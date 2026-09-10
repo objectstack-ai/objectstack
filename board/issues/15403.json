@@ -1,0 +1,31 @@
+{
+  "number": 15403,
+  "kind": "issue",
+  "title": "docs(spec): carry the page-title rule into the docs GENERATOR — 225 of 405 pages are emitted, so a hand edit is reverted (split (b) of #12237)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T14:31:00Z",
+  "updated_at": "2026-09-04T14:31:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15403",
+  "body": "Split (b) of #12237, created by the triage seat on the `domain:devx` seat's dispatch-time routing measurement (comment `5535922656`). #12237 keeps split (a) — the authored pages and the `navTitle` adoption.\n\nBlocked-by: #12237\n\n## Why this is its own card\n\n#12237 asks for one title rule applied across the docs site. Measured on `origin/main` at **2026-09-04T14:40Z** by the triage seat, ⛔ not inherited from the card:\n\n```\ncontent/docs/**/*.mdx                                              405\n  with a generated / do-not-edit marker in the first 20 lines      225\n```\n\nThat reproduces the `domain:devx` seat's reading exactly, and it is the fact that splits the card: **a title rewrite on those 225 pages is a change to the generator, not to the page.** Hand-editing them is overwritten on the next generator run and goes red on the drift gate. So the edits land in two places with two owners, even though the *rule* is one artefact.\n\n- **(a) #12237, `domain:devx`** — the ~180 authored pages: frontmatter `title:`, plus adopting `navTitle` for short sidebar labels.\n- **(b) this card, `domain:spec`** — the same rule expressed inside the emitters, so generated pages carry it too.\n\nThe generator sites the devx seat names are `packages/spec/scripts/build-docs.ts` and `build-skill-docs.ts`, with `check-generated.ts` as the drift gate. ⚠️ Those are the seat's citation, ⛔ not re-verified by triage — locate the title emission by symbol at dispatch time rather than trusting the path, and re-derive the 225 against the tree you get.\n\n## Why it is blocked rather than queued\n\nThe rule itself is settled on #12237, whose acceptance criteria put the written rule and the full before/after table in a PR body that **stays open for maintainer review** — the card's own words are that this is maintainer-voice territory. Emitting a rule from the generator before that rule is approved buys rework on 225 pages.\n\n⇒ Unblocks when #12237's rule is accepted. The dispatchable shape here is: take the accepted rule, express it in the emitter, regenerate, and show the before/after for the generated set.\n\n## What the split does not decide\n\n⛔ Triage does **not** rule that the rule must live on #12237 rather than here. The devx seat offered a third framing — that the whole thing rides `domain:spec` because the generator's rule *is* the rule — and that stays available: if the executing seats find that expressing the rule in the emitter first and letting the authored pages follow is the cheaper order, say so on #12237 and the two cards swap roles. The split exists so that **⛔ nobody dispatches a 403-page edit of which 225 would be reverted**, which was the devx seat's actual refusal, and it is correct.\n\n⚠️ `navTitle` (`apps/docs/source.config.ts:44`, landed by #12311) had **0 uses in `content/docs`** at the devx seat's reading. If (a) adopts it for authored pages, generated pages get short sidebar labels only if this card emits it too — so read (a)'s landed shape before choosing whether to emit `navTitle` here.\n\nStanding trap carried in from #12236's report: it names 76 demoted body H1s whose wording differs from the frontmatter title. Those are inputs to the mapping table on whichever half covers the page."
+}

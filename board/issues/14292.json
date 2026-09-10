@@ -1,0 +1,31 @@
+{
+  "number": 14292,
+  "kind": "issue",
+  "title": "Skills catalog optimization program (maintainer-directed): audit every skill on both roots, then optimize — program anchor",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "priority:p1",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-02T01:21:15Z",
+  "updated_at": "2026-09-02T01:51:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14292",
+  "body": "Program anchor, filed by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`, GitHub `os-litant`) on the maintainer's in-session order.\n\n## Mandate (verbatim, untranslated)\n\n2026-09-02, chat: 「审核所有的 skills，进行全面的优化。」 Standing context: 2026-08-21 「对外发布的 skills 是整个平台的最大价值，尤其要整体考虑和评估。」 · 2026-08-21 「需要整体考虑 skills 的长度，不能为了一个小功能扩写很多。」 · 2026-08-31 「最近我也感觉项目经理越来越笨，是不是胡乱写的文字太多了」.\n\n## Relationship to the two prior programs — builds on, does not repeat\n\n| program | corpus | what it settled | what it left |\n|---|---|---|---|\n| #13658 published-skills factual sweep (done, 12/12 flights merged) | `skills/**` both repos | behavioral TRUTH — every claim VERIFIED / FALSE / NOT MEASURABLE; 121+ false sites corrected | structure, density, routing, redundancy, gaps, evals, size — the OPTIMIZATION axes |\n| #13597 PM-corpus audit (Phase 1 Tables 1–2 posted) | `.claude/skills/pm-dispatch/**`, os-dev.md, AGENTS/CLAUDE | KEY/DUP/DEM/DEL method; references layer measured dense | Tables 3–6 — resumed under this program and posted on that card |\n\n⛔ This program does not re-verify claims one by one; it reads the corpus from the seat of the customer agent that loads a whole package, and from the seat of the repo agent that loads the internal skills.\n\n## Scope (measured at objectstack `origin/main` a59f78d · objectui `origin/main` 67dadd6)\n\n| root | package | lines | files |\n|---|---|---|---|\n| `skills/` | objectstack-data | 4,942 | 12 |\n| | objectstack-platform | 2,656 | 8 |\n| | objectstack-ui | 2,309 | 4 (+2 generated) |\n| | objectstack-query | 1,517 | 6 |\n| | objectstack-automation | 1,169 | 4 |\n| | objectstack-pm-dispatch | 1,086 | 1 |\n| | objectstack-i18n | 799 | 3 |\n| | objectstack-api | 705 | 3 |\n| | objectstack-upgrade | 693 | 1 |\n| | objectstack-ai | 681 | 3 |\n| | objectstack-formula | 576 | 2 (no evals) |\n| objectui `skills/` | objectui | 5,810 | 18 md + 11 eval json |\n| `.claude/skills/` | pm-dispatch corpus (via #13597) | 2,561 | 21 |\n| | checklist-author · checklist-test · dogfood-verification · spec-property-retirement · objectui `verify` | 62 · 238 · 157 · 337 · 44 | 5 |\n| | `.claude/agents/os-dev.md` · `AGENTS.md` · `CLAUDE.md` (via #13597) | 469 · 1,162 · 86 | 3 |\n\nPublished bundle at pin: 171,406 ratcheted units + 16,448 generator-owned = 187,854 (`ceil(utf8/4)`, `scripts/check-skills-token-ratchet.mjs`).\n\n## Method\n\n**Phase A — read-only audit (in flight).** One auditor per published package (opus), one for the small internal skills (opus), four contract-tier auditors for #13597 Tables 3–6. Fixed rubric, nine dimensions: A trigger precision · B structure / progressive disclosure · C cross-package redundancy · D density · E constructs & examples (top-5 real authoring tasks derived from `examples/**` and `packages/apps/**`, not from the doc) · F gaps vs real usage (both directions: uncovered frequent patterns; documented surfaces with zero real usage) · G consistency & retired-spelling residue · H evals · I size proportionality. Every finding carries a span, measured evidence, a proposal (DELETE / MERGE-INTO / MOVE-TO / REWRITE-AS-CONSTRUCT / ADD-paid-by-deletion / RETIRE-SURFACE), a signed token delta, the three value-gate answers, confidence, and a human-floor flag. Verdict scale per package: HEALTHY / TRIM (<10% reducible) / DIET (10–30%) / RESTRUCTURE (>30% or structural).\n\n**Phase B — cards.** Auditor reports are cross-read (twin findings across packages), passed through the standing value gate (① changes a specific decision ② deletion over addition ③ construct over prose), deduplicated against open lane cards, and filed one member card per package linking back here. Findings on the human floor — removal of published capability text, ceiling raises, cross-file restructures, retired/deprecated semantics — go to the maintainer in batches of ≤5 with recommendations, ⛔ never executed on seat judgment.\n\n**Phase C — flights.** One os-dev flight per package, ≤3 in parallel, no file overlap; `skills/objectstack-pm-dispatch/**` and `.claude/skills/pm-dispatch/**` never in one PR. Token ratchet discipline: byte-neutral-or-shrinking per file, ⛔ no re-wrap as payment, ⛔ no ceiling raise by a dev. Governed posture: any `.md` diff stays draft, review-requested to the authorized approvers; pure code faces reviewed in-seat at contract tier. Each PR body carries the per-item 落点 | before | after list; zero out-of-list changes.\n\n## Roster\n\nMember cards are filed after Phase A per package and listed here as they are filed. Phase-1 Tables 3–6 of the PM corpus post on #13597, not here.\n\nRefs: #13658 (truth sweep, method precedent) · #13597 (PM corpus audit, parallel corpus) · seat post #7623 (running state)."
+}

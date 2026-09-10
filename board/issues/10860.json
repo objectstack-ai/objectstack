@@ -1,0 +1,29 @@
+{
+  "number": 10860,
+  "kind": "issue",
+  "title": "[finding] the ledger annotates `DOMAIN_VERIFICATION_FAILED` as \"pass-through from better-auth\", but plugin-auth now authors it too",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T14:18:53Z",
+  "updated_at": "2026-08-21T16:03:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10860",
+  "body": "Recording an annotation that goes incomplete when PR #10858 (#10716) lands. Observation, not a defect: no vocabulary changes, no gate fails, nothing on the wire moves. Filed so it is not carried by memory.\n\n## The line\n\n`packages/spec/src/api/error-code-ledger.zod.ts:341`, under `'@objectstack/plugin-auth'`:\n\n```ts\n'DOMAIN_VERIFICATION_FAILED', // pass-through from better-auth\n```\n\nThe trailing comment records **provenance** — where the code comes from — and the ledger's own header treats provenance as something worth stating (`WRITABLE_PACKAGE_REQUIRED` carries a note explaining a second emitter: \"a code emitted by several packages is listed once per emitting package — provenance, not identity\").\n\n## What changes\n\nUntil now the only site touching this code read it: `register-sso-provider.ts` compares `parsed?.code === 'DOMAIN_VERIFICATION_FAILED'` to substitute friendlier copy — a genuine pass-through of @better-auth/sso's own code. #10716 makes ObjectStack **author** the same code as the default for both SSO domain-verification routes when the vendor returns none. So after that PR the code has two provenances, and the annotation names one of them.\n\nNo entry is added or needed: same package, same code, and the ledger lists a code once per emitting package.\n\n## Why it was not fixed in the PR that caused it\n\nThat PR's lane is fenced out of `packages/spec` entirely, so it could not edit the comment even to keep it accurate. Its author noted the drift in the PR body and here rather than reaching across the line.\n\n## Possible dispositions (not prescriptive)\n\n1. Reword to cover both — e.g. `// better-auth pass-through AND our own default for the SSO domain-verification routes`.\n2. Leave it. An argument for this: the annotation was written to explain why a code exists in the ledger at all, and a reader who follows it to the emitter sees both arms immediately.\n\nWhoever picks (1) should read the emitter first — if the reuse decision in #10716 is redirected during contract review (the alternative there is registering `REQUEST_DOMAIN_VERIFICATION_FAILED` / `VERIFY_DOMAIN_FAILED` instead), this finding dissolves and the annotation stays exactly right.\n\n## Refs\n\n#10716 · PR #10858 · ADR-0112 D3\n"
+}

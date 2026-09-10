@@ -1,0 +1,32 @@
+{
+  "number": 17212,
+  "kind": "issue",
+  "title": "objectql: engine.find logs `Find operation failed` at ERROR inside a catch that rethrows — the fourth member of #17052's class, scoped out on purpose",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T17:27:28Z",
+  "updated_at": "2026-09-09T20:32:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17212",
+  "body": "`packages/objectql/src/engine.ts`'s `find` door reports a failure it is about to\nhand back to its caller at ERROR, through `reportFindFailure`. It is the same\nshape #17052 repaired on the three write doors, and it is the one member of that\nclass #17052 deliberately did NOT repair.\n\n⛔ Filed by the seat that landed #17052 (PR #17211), from the sweep that card\nmarked NOT MEASURED. It is scoped out of that PR on purpose — see \"Why this is a\ncard and not a rider\" below. **`domain:*` and `priority:*` are triage's to set** —\ndeliberately not set here.\n\n## The site\n\n`find`'s catch, `packages/objectql/src/engine.ts`:\n\n```ts\n} catch (e) {\n    this.reportFindFailure(object, e);\n    throw e;\n}\n```\n\nand, one frame down in `reportFindFailure`, after the missing-table branch has\nreturned:\n\n```ts\nthis.logger.error('Find operation failed', error as Error, { object });\n```\n\nThe rethrow is the next statement, and it is the catch's only exit.\n\n## The contract it violates\n\nAGENTS.md, *Degradation log levels — `warn` vs `error`*, verbatim:\n\n> **And a failure handed to the CALLER is not a degradation at all** — the third\n> legal answer: a `catch` that answers `errorFromThrown(e, 400)`, or a batch\n> whose contract IS a per-item outcome report, does not look normal from the\n> outside — the requester was told. Do **not** bolt a `logger.error` onto such a\n> site.\n\nThe requester was told: `e` is rethrown one line down, unmodified.\n\n## Measured, in the #17052 sweep\n\nAn AST matcher over `packages/objectql/src` (145 files carrying a `catch`),\nfollowing same-file helper calls one frame and requiring the ERROR log to sit on\nthe same path as the rethrow, found exactly four members of the class:\n\n| site | message | disposition |\n|:--|:--|:--|\n| `engine.ts` `insert` | `Insert operation failed` | repaired in #17052 |\n| `engine.ts` `update` | `Update operation failed` | repaired in #17052 |\n| `engine.ts` `delete` | `Delete operation failed` | repaired in #17052 |\n| `engine.ts` `find` | `Find operation failed` | **this card** |\n\nOne further catch was discriminated out and is correct as it stands:\n`hook-wrappers.ts` logs at ERROR only on the `onError:'log'` branch that\nsuppresses and returns, and logs nothing on its rethrow branch — there the\ncaller is genuinely not told.\n\n## Why this is a card and not a rider on #17052\n\n`reportFindFailure`'s level was set by a separate, recent ruling: the missing-table\ndemotion, whose docblock argues the non-benign branch stays `error` and weighs it\nagainst the driver's own surviving `warn` line (\"the driver already puts one\nwarn-level line per refusal in front of a reader, so a second would move this\nnoise rather than remove it\"). That reasoning is about the READ path's own\nduplicate-noise budget, which the write doors do not have. Overturning it is a\ndecision, not a repair, so it does not belong inside a card about the write doors.\n\n#17052 did correct that docblock's now-false sentence about the write verbs\n(\"`insert`/`update`/`delete` keep their unconditional `error`\") and recorded the\nopen question there, but left the level itself untouched.\n\n## What this card does NOT decide\n\n⛔ It does not prescribe the level. The two facts a decision needs:\n\n- The driver's own `warn` (`SqlDriver.backendStatementFault`) already carries the\n  table, the dialect reason and the compiled statement for the refusal class,\n  and `runtime/src/expected-read-refusal-noise.ts` documents it as where this\n  class of fault is picked up. So a demotion here may cost less than it does on\n  a write door.\n- But `find`'s catch is reached by faults with no such sibling line\n  (a connection drop, a permission denial, a query fault), and for those this\n  entry is the only operator-facing copy.\n\n## Not measured here\n\n- ⛔ Whether the same shape exists outside `packages/objectql`. The #17052 sweep\n  was scoped to that package by its dispatch; the matcher is general and the\n  scan root is a one-line change.\n- ⛔ Whether any consumer depends on the ERROR level of `Find operation failed`.\n  The #17052 survey covered the three write messages only.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 17431,
+  "kind": "issue",
+  "title": "finding(spec/runtime): `GET /packages` rows are the ASSEMBLED package body, but `InstalledPackageSchema` types them as the AUTHORING manifest — the #14242 stage mismatch, one layer up on the read API",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T13:53:00Z",
+  "updated_at": "2026-09-10T14:40:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17431",
+  "body": "Found while landing #16781 (deliverable 2). Filed rather than fixed: the remedy is a `packages/spec` declaration, and #16781 is explicitly routed away from `packages/spec`.\n\n## The contract, verbatim\n\n`ListInstalledPackagesResponseSchema` (`packages/spec/src/api/package-api.zod.ts`) types every row of `data.packages` as `InstalledPackageSchema`, whose `manifest` is `ManifestSchema`. `ManifestSchema` declares:\n\n```ts\nobjects: z.array(z.string()).optional().describe('Glob patterns for ObjectQL schemas files'),\n```\n\n— i.e. the **authoring** stage, where `manifest.objects` names file patterns. `ManifestSchema` is additionally a `strictObject`.\n\n## What the door actually serves\n\n`SchemaRegistry.installPackage` records what it is handed, and `ObjectQL.registerApp` is handed `manifest.objects` as object **definitions** — it iterates them and calls `registerObject(objDef, …)`. That is the **assembled** body, and it is what a `defineStack()` host produces (`examples/app-showcase/objectstack.config.ts`: `objects: [...Object.values(objects), ExternalCustomer, ExternalOrder]`). `GET /packages` projects those rows through `toPackageResponse` and serves them.\n\n## Measured\n\nDriven against the real `SchemaRegistry` + the real dispatcher door, after #16781 added the missing `hasMore`:\n\n| package authored as | `ListInstalledPackagesResponseSchema.safeParse(body)` |\n|:---|:---|\n| glob patterns (`objects: ['./src/objects/*.object.yml']`) | **success** |\n| `defineStack()` shape (`objects: [{ name, fields }]`) | **failure**, one issue: `data.packages.0.manifest.objects.0` — `expected string, received object` |\n\nSo the shipped open-core path serves a payload its own declared response schema refuses, and the single surviving reason is the manifest stage.\n\n## Why this is the same thing as #14242, not a new class\n\n#14242 identified exactly this authoring-vs-assembled split one layer down, and the ruling is quoted in `packages/spec/src/stack.zod.ts` at `ArtifactPackageSchema`:\n\n> This key is read at LOAD time, so the authoring-time `ArtifactPackageEntrySchema` (whose `manifest.objects` are glob patterns) cannot describe it: that mismatch was #14242, and the maintainer's decision (2026-09-02) was to **declare the assembled stage rather than widen the authoring one**.\n\n#14242 declared the assembled stage for the **artifact load path**. The **read API** never got the same treatment: `InstalledPackageSchema` still wraps the authoring manifest, so the API contract inherits the mismatch.\n\n## Consequence today\n\n`packages/runtime/src/route-ledger.ts`'s `GET /packages` row is left with **no** `responseSchema` by #16781, deliberately, and the blank is a measured verdict. The ledger header forbids filling a row without conformance coverage, and a name there would promise conformance the door keeps only for glob-authored packages. The boundary is pinned in both directions in `packages/runtime/src/domains/packages-read-delete-response-conformance.test.ts`:\n\n- the glob row parses end to end;\n- the assembled row does **not**, and the test asserts the surviving issue list is exactly `['data.packages.0.manifest.objects.0']`.\n\n⇒ Whoever declares the assembled stage for this surface gets a **red test** telling them the ledger row has become fillable. That is the intended pickup path.\n\n## Suggested shape (not a ruling)\n\nFollow #14242's ruling one layer up: an assembled-stage counterpart of `InstalledPackageSchema` in `@objectstack/spec/api` whose `manifest` is the assembled body, bound to the `GET /packages` and `GET /packages/:id` response declarations. ⛔ Not widening `ManifestSchema` — that is the option #14242 already rejected.\n\nRelated: #14242 (the ruling) · #16781 (where this was measured) · #16628 · #3877 (the `responseSchema` programme)."
+}

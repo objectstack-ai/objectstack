@@ -1,0 +1,31 @@
+{
+  "number": 17229,
+  "kind": "issue",
+  "title": "`check-changeset-no-major.mjs` reports `needs:contract-review` absent (0 labels read) while a sibling step in the same job reads it — and the false line routes the reader to the repair that strips the review gate",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "ci/cd",
+    "domain:devx",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T19:42:53Z",
+  "updated_at": "2026-09-10T03:13:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17229",
+  "body": "Found by the `domain:cli` execution PM seat (#6024) while acting on a real `Check Changeset` red. ⛔ Not graded and no `pm:` state — lane and kind only; priority is triage's.\n\n## The contradiction, inside one job, 119 ms apart\n\nJob `102616882441` (run `34396338801`), `Check Changeset` on PR #17228:\n\n```\n19:40:02.7148889Z  Labels on PR #17228 right now: documentation\n19:40:02.7149246Z  size/m\n19:40:02.7149451Z  tests\n19:40:02.7149645Z  tooling\n19:40:02.7149872Z  needs:contract-review          ← present\n...\n19:40:02.8332871Z     · carrier: `needs:contract-review` is not on this PR (0 label(s) read)\n```\n\nThe label **is** on the PR. The step immediately before — the `allow-major` guard, which notes in its own echo that it reads labels *\"live, not from the event payload\"* — enumerates five labels including it. `scripts/check-changeset-no-major.mjs`, run seconds later in the same job, reads **zero**.\n\n**Reproducible, not a one-off**: the same PR failed identically in two separate workflow runs — jobs `102616882441` (run `34396338801`) and `102616922544` (run `34396350963`).\n\n⇒ The likely difference is the one the sibling step names: reading labels **live** versus from the event payload. A PR whose labels were applied after the event was emitted reads as unlabelled. ⚠️ That is a hypothesis from the sibling's own echo, ⛔ not a measurement — I have not read the script.\n\n## ⛔ Why this is more than a cosmetic wrong line\n\nThe false reading is not inert: the gate **uses** it to characterise the PR's state, and then routes the reader on that characterisation.\n\n```\nThe two declarations disagree, inside one PR:\n   · carrier: `needs:contract-review` is not on this PR (0 label(s) read)\n   · declaration line: `Clause-②: yes`\n```\n\nThey do **not** disagree — both say clause-② is on. And the gate's two remedies are explicitly *\"not interchangeable\"*:\n\n> 1. The declaration is right and the level is wrong → raise the widened package to `minor`.\n> 2. The level is right and the **DECLARATION** is wrong → correct it at the producer: the `needs:contract-review` carrier is the review seat's to place and to clear, and the `Clause-②:` line is the claim's.\n\n⇒ A manufactured disagreement is **evidence for path 2**, and path 2's repair is **removing the carrier or the `Clause-②` line**. On PR #17228 that would have stripped a **maintainer-ruled** contract-review requirement (2026-09-04, decision batch #27, on #15071) off the PR — to clear a red actually caused by a changeset graded `patch` instead of `minor`, which is path 1.\n\n⚠️ The gate is right about the failure and wrong about the diagnosis, and the wrong half is the half that reads as a verdict on the declaration. Its closing warning — 「⛔ Do not add a tolerance here to route around a declaration that says something its author did not mean」 — is exactly the discipline the false line undermines, since it invites a reader to conclude the author did not mean it.\n\n## What would close it\n\n1. `check-changeset-no-major.mjs` reads labels the way its sibling step does — **live**, not from the event payload — or, if it cannot, says *\"could not read labels\"* rather than *\"0 label(s) read\"* and ⛔ never presents an unread carrier as an **absent** one. An instrument that cannot see must not report a zero: a zero with no firing control is not a reading.\n2. The \"two declarations disagree\" branch fires only when it actually **read** both. With one side unreadable there is no disagreement to report, and ⛔ path 2 must not be offered on the strength of it.\n3. A control on the gate itself: a fixture PR carrying `needs:contract-review` must make the carrier line report **present**. Without that leg, this defect is invisible to the gate's own tests — it is a wrong *string*, not a wrong *exit code*, and the exit code here was correct.\n\n## Not in scope\n\n- ⛔ The `patch`-vs-`minor` verdict on PR #17228 is correct and is being fixed there as path 1. This card is only about the carrier line and what it routes a reader toward.\n- ⛔ Nothing about the batch #35 level ruling itself, which the gate states accurately.\n\n## Refs\n\n- PR **#17228** (card #15071) — where it fired; its acceptance notes will cite this card so the next reader of that red is not sent down path 2.\n- **#16946** — an existing `domain:devx` finding on `pr-automation.yml`'s \"WHICH LEVEL\" prose, adjacent surface, ⛔ different defect."
+}

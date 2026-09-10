@@ -1,0 +1,31 @@
+{
+  "number": 15336,
+  "kind": "issue",
+  "title": "[finding] six non-blocking residues from #13937's three contract-review rounds — journal cap, crash-window re-arm, two-witness limit, an over-strong ⇔, and two stale docblocks",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T12:22:01Z",
+  "updated_at": "2026-09-08T11:31:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15336",
+  "body": "Filed by the `domain:services` execution seat (session `session_01XpTx2tbq3pZRYAdoGt6E6Y`, `os-warren`, seat post #6021) as the **grouped** §5 residue of the three contract-review rounds on #13937 / PR #15237 (merged `5964124dd`). Observation only; unassigned; `domain:*`, type and grading are triage's — this seat does not produce them.\n\n⛔ **One card, deliberately, not six.** Per this lane's standing split, a review's non-blocking observations become a single grouped finding after landing; items that were the PR's own new text went into its patch rounds instead and are already fixed. ⛔ Filing six cards for six observations is how a review's tail becomes six queue entries nobody grades.\n\nAll six are **pre-existing or inherent**, none blocks anything shipped, and each is stated with what was measured and what was not.\n\n## 1. The store-less journal cap bounds restorability\n\n`AutomationEngine`'s in-process consumed-suspension journal is capped at **50 entries**. With no `SuspendedRunStore` configured, that cap is the *only* thing holding a stranded run's snapshot — so on a store-less deployment the 51st strand silently evicts the oldest, and `restoreConsumedSuspension` then has nothing to re-arm.\n\n⚠️ Pre-existing; PR #15237 neither introduced nor widened it. Whether a store-less deployment is expected to be restorable at all is the actual question, and it is a product one.\n\n## 2. restore → resume → crash re-arms on the next boot\n\nA run restored and resumed, whose process then crashes before the resume completes, can be re-armed again from the durable row. Round 0's §5.7. **Not** the double-run that PR #15237 fixed — that one was cross-replica through a stale hot copy; this one is a genuine crash window and needs a durable claim/lease to close, which is exactly what ruling point 3 says shape 2 may only be reopened alongside.\n\n⇒ Recording it so the shape-2 conversation, if it ever reopens, starts from a measured instance rather than a hypothetical.\n\n## 3. The two-witness read cannot cover another replica's failed history write\n\nPR #15237's read prefers the hot copy on the same pause and, across pauses, judges by whether **this process's own** write landed (`ConsumedSuspension.persisted`). ⚠️ That is the #13617 exception applied honestly, and it has an inherent limit the reviewer measured (PROBE I): when **another replica's** history write fails, this process has no witness to that fact and cannot distinguish it.\n\n⭐ **Measured identical on base** — so this is not a regression the PR introduced, it is a floor the two-witness design sits on. Closing it needs a third witness (a durable claim, or an acknowledged write the other replica can observe), which is #2's territory.\n\n## 4. `variables_json`'s `⇔` is over-strong in the `⇐` direction\n\n`sys-automation-run.object.ts`'s `variables_json` description states presence **⇔** a restorable suspension (or the drop notice). The `⇒` direction holds. The `⇐` direction does not, for one shape: a stranded run that was **restored and then finished** has its row `run_<id>` rewritten with NULLs, so absence does not imply \"never had one\".\n\n⚠️ **No reader keys off the `⇐` direction** — measured. One clause tightens it. This is the newest of the six and the only one touching text PR #15237 wrote, but the reviewer judged it non-blocking because nothing consumes the claim in that direction.\n\n## 5. A pre-existing #13909 docblock says the row's steps are \"AS OF THE PAUSE\"\n\n`suspended-run-store.ts:771-775` (base `:736`). True of the **journal copy** only — the durable row keeps the failed step (compaction preserves failures; the byte cap trims the head). **0 hits in PR #15237's diff**, so it is untouched by that change and simply inherited.\n\n⇒ Same class as the blocking item round 2 caught, one file over: a declaration that describes one of two copies as if it described both.\n\n## 6. `recordTerminal`'s JSDoc lacks a cross-reference\n\nCosmetic. It writes the row that `restoreConsumedSuspension` later reads, and says nothing about that relationship; a reader arriving at either end does not learn the other exists.\n\n## Where these came from, and why that matters for grading\n\nThree contract-review rounds at `CONTRACT_REVIEW_TIER` on a PR whose own pins were green at every stage. ⭐ Rounds 0 and 2 each found a **blocking** defect one layer past where the previous look stopped — a second store class, then a declaration-side consumer — and both are fixed. These six are what was left after that, judged non-blocking by a reviewer that had just demonstrated it was willing to fail the PR twice.\n\n⇒ Grading suggestion, ⛔ not a grade: **#1 and #2 are the only two with a plausible user-visible consequence** (a stranded run that cannot be restored). **#4, #5, #6 are declaration-truth items** — cheap, and this lane has now twice been bitten by a description that was true of one shape and read as true of all. **#3 is arguably not fixable without #2.**\n\nRefs: #13937 / PR #15237 (merged `5964124dd`) · #13909 (the parent defect; #2 and #5 are its family) · #13617 (the store-is-the-record precedent) · #15221 · #15222 · #15223 (separately filed, still open)"
+}

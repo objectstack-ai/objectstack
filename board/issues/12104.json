@@ -1,0 +1,31 @@
+{
+  "number": 12104,
+  "kind": "issue",
+  "title": "A sixth client-SDK erasure spelling, larger than the other five combined: 43 exported methods `return res.json()` directly, whose lib.dom type is `Promise< any >`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:blocked",
+    "priority:p2",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T09:00:17Z",
+  "updated_at": "2026-09-09T01:53:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12104",
+  "body": "Found while building the client-side `check:exported-any` equivalent (#11927). **Out of that card's\ndeclared scope and deliberately not fixed there** — that card builds the ratchet and seeds its\nledger; this is the worklist the ledger now names and nothing schedules.\n\nMeasured at `0e0bf8049`, on the **built** `packages/client/dist/index.d.ts`.\n\n> ⓘ Angle brackets are spaced throughout (`Promise< any >`) on purpose — GitHub's body sanitizer\n> strips tag-shaped spans, backticks and fenced code included. The first write of this card lost\n> every unspaced one; this is the repaired text.\n\n## The spelling\n\n#8140's census enumerated four spellings, all putting `any` inside a `Promise< … >` return\nannotation where a grep can see it. #11925 added a fifth: no annotation, type inferred from\n`this.unwrapResponse< …any… >(res)`.\n\nThere is a **sixth**, and it is the largest single class:\n\n```ts\nsetActive: async (organizationId: string) => {\n    const res = await this.fetch(...);\n    return res.json();          // lib.dom: Response.json(): Promise< any >\n},\n```\n\nThe method carries no return annotation and never names `any`, `Promise`, or `unwrapResponse`, so\nit is invisible to every grep #8140's census and #11925 used. Its published type is\n`Promise< any >` all the same, because `Response.json()` is declared `Promise< any >` in `lib.dom`.\n\n## Count and how it was taken\n\nNot a grep — the count comes from asking the type checker what each export **resolves to** on the\nbuilt declaration, which is the whole reason #11927 reads a built `dist`:\n\n```\n$ pnpm --filter @objectstack/client check:exported-any-returns\n❌  65 exported callable(s) of @objectstack/client resolve to `any` …\n```\n\nClassified by mechanism against `packages/client/src/index.ts`, the 65 split:\n\n| mechanism | n | card |\n|---|---:|---|\n| declared `Promise< any >`, deliberate — no contract exists to bind | 4 | #11924 |\n| no annotation, `return this.unwrapResponse< any >(res)` | 17 | #11925 |\n| **no annotation, `return res.json()`** | **43** | *this card* |\n| no annotation, delegates to an already-erased sibling (`organizations.invitations.resend` → `organizations.invite`) | 1 | closed out by whichever card binds `invite` |\n\n## The 43\n\n- `analytics.*` — `query`, `meta`, `explain`, `queryDataset` (4)\n- `organizations.*` — `create`, `update`, `setActive`, `get`, `listMembers`, `invite`, `leave`,\n  `delete`, `removeMember`, `updateMemberRole`, `getActiveMember` (11)\n- `organizations.invitations.*` — `cancel`, `accept`, `reject` (3)\n- `organizations.teams.*` — `create`, `update`, `delete`, `addMember`, `removeMember` (5)\n- `oauth.*` — `applications.register`, `applications.get`, `applications.getPublic`,\n  `applications.delete`, `consent` (5)\n- `auth.*` — `updateUser`, `changePassword`, `setInitialPassword`, `changeEmail`,\n  `sendVerificationEmail`, `verifyEmail`, `deleteUser` (7)\n- `auth.sessions.*` — `revoke`, `revokeOthers`, `revokeAll` (3)\n- `auth.twoFactor.*` — `verifyTotp`, `disable`, `verifyBackupCode` (3)\n- `auth.accounts.unlink` (1)\n- `automation.trigger` (1)\n\n## Why it is worth its own card rather than a rider on #11925\n\n- **Different mechanism, different remedy shape.** #11925's population is erased by a type\n  ARGUMENT the author wrote; these are erased by a lib declaration the author never sees. A sweep\n  written for one does not find the other, which is exactly how this class survived two censuses.\n- **The families differ.** #11925 is `meta.*` / `packages.*` / cloud `projects.*`. This is\n  `auth.*` / `organizations.*` / `oauth.*` — the better-auth-backed surface, where the response\n  shapes are third-party and may need contracts authored rather than relayed (same class as\n  #11924 for some of them, plain annotation work for others). That split wants triage.\n- **It is already ratcheted, so it cannot grow.** #11927's gate holds all 65 as named, shrink-only\n  ledger entries: a 66th site is red, and a site fixed here is red until its entry is deleted. This\n  card is the worklist, not a leak.\n\n## Note on the overlap with #11925\n\n#11925 counts **38** unannotated `unwrapResponse< …any… >` methods; #11927's gate flags **17** of\nthem. The other 21 are typed `{ package: any }` / `{ packages: any[]; total }` / `{ project: any }`\n— return types that CONTAIN `any` rather than BEING `any`, which is a deliberate and documented\nscope line in both `check:exported-any` gates (a type with `any` inside it is a far broader\nquestion, and admitting it costs the gate its zero-false-positive property). Those 21 are #11925's\nalone and are not ledgered by #11927 — recorded here so the two counts are not read as\ncontradicting each other.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UjM2ia8Av1v5NqfqQEQmC6)_\n"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 16270,
+  "kind": "issue",
+  "title": "[finding] The org record page's \"Members / Invitations / Teams\" tab strip is asserted in three places but declared by no metadata — zero `relatedList` prominence keys under `packages/platform-objects/src/identity/`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T09:06:52Z",
+  "updated_at": "2026-09-07T09:16:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16270",
+  "body": "Observation-class finding, filed from the #14508 dispatch (PR #16267, ADR-0133) after re-locating that card's anchors. ⛔ Not repaired there — it is outside that card's scope and a repair would be a metadata change, which that card's `Clause-②: no` declaration forbids without stopping and reporting first.\n\nNo assignee, no `pm:queue` — this is a measurement handed to triage, not a decision.\n\n## The claim, and where it is made\n\nThree documents in this repository describe the organization record page as opening on a **Members** tab, with Invitations and Teams beside it:\n\n- `packages/platform-objects/src/identity/sys-member.object.ts` — the `invite_user` mirror's comment: *\"the org record page (ADR-0081) opens on tab-0 **Members**, and the email-invite entry used to live only on tab-1 Invitations\"*.\n- `packages/platform-objects/src/identity/invite-entry-toolbar.test.ts` — the file header, same wording, as the rationale for the whole pin.\n- `docs/qa/platform-checklist/areas/identity-auth.json` — a checklist clause asserting the nav *\"opens that org's record page (Members/Invitations/Teams tabs), not the raw `sys_organization` list\"*, with the raw-list outcome called a FAIL.\n\n## What the tree actually declares\n\nMeasured on `origin/main` at `77781151d`:\n\n```text\n$ git grep -rn \"relatedList\" -- packages/platform-objects/src/identity/\n(no output, exit 0)\n\n$ git grep -rn \"relatedList:\" -- packages/ ':!*CHANGELOG.md' ':!*.test.*' ':!packages/spec/*'\npackages/drivers/driver-sql/src/builtin-column-collision.ts:130:  relatedList: 'presentation',   # unrelated string in a collision map\n```\n\n- **No object under `packages/platform-objects/src/identity/` declares the `relatedList` prominence key** (`packages/spec/src/data/field.zod.ts#relatedList`, the tri-state `false | true | 'primary'`).\n- **No `relatedLayout` override exists anywhere in this repository** — the only hit is a mention inside a `field.zod.ts` doc comment.\n- Seven identity objects declare a lookup to `sys_organization` (`sys_api_key`, `sys_business_unit`, `sys_invitation`, `sys_member`, `sys_session`, `sys_team`, plus `sys_organization`'s own self-parent), so the related-list set on that record page is **derived**, not curated.\n\n## Why that matters — the renderer reads the key this repo does not set\n\nobjectui derives tab promotion from **this repository's** field key: `packages/app-shell/src/utils/deriveRelatedLists.ts` sets `isPrimary` from `fieldDef.relatedList === 'primary'`, and `packages/plugin-detail/src/synth/buildDefaultPageSchema.ts` documents the resulting rule — lists flagged primary each get their own tab, *\"every other related list collapses into a single stacked `Related` tab\"*, and *\"with no primary lists this is identical to the legacy stacked behavior\"*.\n\nWith zero primary declarations and no layout override, the documented default is **one stacked `Related` tab**, not a Members/Invitations/Teams strip with Members at index 0.\n\n## So one of two things is true — and this issue does not pick\n\n1. **The metadata is missing a declaration.** The intended surface is a tab strip, and the three `relatedList: 'primary'` declarations that would produce it were never written (or were lost). The comments describe the intent correctly and the tree is short of it.\n2. **The three documents are stale.** The page really does render one stacked Related tab, and a tab-0 claim that was true under an older renderer or an authored page has outlived it — in which case the QA checklist is asserting a FAIL condition that can never be met.\n\n⚠️ Both readings are consistent with the static evidence, and telling them apart needs the running app, not another grep — the `dogfood-verification` / `checklist-test` route against a real console. That is deliberately **not** done here.\n\n## Why it is worth a card either way\n\nThe tab-0 claim is not decorative: it is the stated rationale for the third `invite_user` mirror on `sys_member` and for the pin that holds all three mirrors equal (`invite-entry-toolbar.test.ts`). If reading 2 is the true one, that rationale is resting on a fact that no longer holds, and #11544's fix is being kept alive by a comment rather than by a measurement. If reading 1 is the true one, the surface the checklist grades is not the surface the metadata builds.\n\nRefs: #14508 · #16267 (ADR-0133, which records this under \"What this record does not decide\" rather than resolving it) · #11544 (the closed card that introduced the tab-0 rationale)."
+}

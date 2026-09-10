@@ -1,0 +1,31 @@
+{
+  "number": 15295,
+  "kind": "issue",
+  "title": "[question] `serve.ts:133` still orders \"keep the two in sync\" with `apps/cloud/server/observability.ts` — does that mirror still exist in `objectstack-ai/cloud`?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T08:59:26Z",
+  "updated_at": "2026-09-08T03:12:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15295",
+  "body": "Split out of #14806, which ruled this site out of scope for a comment sweep and asked for it to be carded on its own. Filed unassigned for triage. Needs a seat that can read `objectstack-ai/cloud`.\n\n## The site, verbatim at `origin/main`\n\n`packages/cli/src/commands/serve.ts:133` (the observability bootstrap for `objectstack serve`):\n\n```ts\n// Env knobs (also documented in apps/cloud/server/observability.ts — keep\n// the two in sync if you tweak names):\n//   OS_OBS_EXPORTER       noop (default) | console | json | otlp\n//   OS_OTLP_ENDPOINT      OTLP/HTTP root, e.g. https://otlp.grafana.net/otlp\n//   OS_OTLP_HEADERS       comma-separated Key=Value; values may be URL-encoded\n//                         (Grafana ships `Authorization=Basic%20<base64>`)\n//   OS_OBS_SERVICE_NAME   resource attr, default `objectstack`\n//   OS_OBS_DEPLOYMENT_ENV resource attr, default `production`\n```\n\n## Why it is not a rename\n\n`apps/cloud` was deleted from this repo and now lives in `objectstack-ai/cloud/apps/cloud` (root `CHANGELOG.md`; `git ls-tree origin/main -- apps/` returns exactly `apps/docs`, the positive control that makes that a reading rather than a broken query). Every other site in #14806's census was fixable by re-spelling the comment, because each only *described* something. This one **instructs**, and the counterparty is a file nobody in this repo can open:\n\n- Renaming the path and leaving the instruction preserves a sync duty nobody here can discharge — a reader who \"tweaks names\" is told to go update a file they cannot see.\n- Deleting the instruction may silently drop a duty that is still real, and the failure mode is quiet: the two exporters drift, and the cloud host stops reading the env vars an operator set.\n\nSo the edit is downstream of a fact about another repo. #14806's PR left these bytes **unchanged on purpose**, and this is the card that unblocks them.\n\n## What answering it takes\n\nRead `apps/cloud/server/observability.ts` in `objectstack-ai/cloud` and answer one of three:\n\n1. **The mirror exists and still reads these names** ⇒ keep the obligation, and re-spell only the path so the reader can find it, in the house style this repo settled on — see `packages/services/service-cluster/src/multi-node-gate-mount.ts:9`, which writes \"(`apps/objectos-ee/objectstack.config.ts`, cloud repo)\". Consider also recording the duty somewhere both repos can see, since a one-sided comment is how it decayed to begin with.\n2. **The file exists but no longer reads these env vars** ⇒ the obligation is already dead. Delete the \"keep the two in sync\" clause and say where the knobs are actually consumed now.\n3. **The file is gone** ⇒ delete the whole parenthetical.\n\n⛔ Do not add an `apps/cloud` directory to this repo to satisfy the comment.\n\n## Scope\n\nOne comment block, `packages/cli/src/commands/serve.ts`. Comment text only in outcomes 2 and 3; outcome 1 may want a durable cross-repo record, which is a bigger decision and should come back for triage rather than being invented in the same PR."
+}

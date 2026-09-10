@@ -1,0 +1,30 @@
+{
+  "number": 9272,
+  "kind": "issue",
+  "title": "权限设置应该可以配置实效性，权限在一个时间段之内生效",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:on-hold",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-17T08:58:23Z",
+  "updated_at": "2026-08-26T05:29:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9272",
+  "body": null
+}

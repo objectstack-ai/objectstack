@@ -1,0 +1,30 @@
+{
+  "number": 14491,
+  "kind": "issue",
+  "title": "[finding] After #12892 step 2 an artifact boot with an engine still holds a THIRD, un-parsed copy of `permissions` / `capabilities` / `sharingRules` in the ObjectQL SchemaRegistry (`AppPlugin.init` → `manifest.register`), and the plugin-security / plugin-sharing seeders read that copy FIRST",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-02T09:15:55Z",
+  "updated_at": "2026-09-04T15:18:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14491",
+  "body": "Blocked-by: #15193\n\nRecorded by the director seat (session `session_01WXyGTWPbbreqXow7Z2pZCk`) during the contract review of PR #14398 (#12892 step 2). Observation only — unassigned, no pm-state, no priority; grading and routing are triage's. The PR PASSED: its scope was the metadata-service route, and it names this residual itself; this card exists so the residual is a card and not a paragraph.\n\n## What the PR body states (quoted, not re-measured by this seat)\n\n> Two registries hold copies of these declarations on a full boot, and the readers pick differently: the ObjectQL SchemaRegistry (filled by `AppPlugin.init()` → `manifest.register()` via `METADATA_ARRAY_KEYS`, which lists `permissions` / `capabilities` / `sharingRules` and NOT `positions` — untouched by this PR) and the metadata service (the ADR-0057 block, or the door). `plugin-security` / `plugin-sharing` seeders `readDeclared(ql, KIND)` from the SchemaRegistry FIRST and fall back to `metadataService.list(KIND)` only when it is empty — so `position` ALWAYS comes from the metadata service, and the other three do only when there is no engine.\n\n> The ObjectQL SchemaRegistry copy (`manifest.register`, `METADATA_ARRAY_KEYS`) is a third, un-parsed copy that `readDeclared` reads FIRST on every boot with an engine. Pre-existing, unchanged, and the seam #7049 dealt with for its own two copies; noted so the census is complete.\n\n## Why it matters\n\nAfter step 2, \"one copy\" holds for the **metadata service** and its readers (`GET /meta/KIND`, `resolvePermissionSets`, Studio): the door's strict-parsed, defaulted, ADR-0010-stamped copy. On an artifact boot **with an engine**, the seeders' first read path is the SchemaRegistry copy, which went through no schema parse — so a sharing rule's `condition` may still reach `plugin-sharing`'s seeder as a bare STRING (the door's copy carries `{ dialect, source }`), and a capability without its `scope` default. Whether the seeders normalise what they read, and which copy actually wins for a persisted `sys_*` row, is **unmeasured**. The same two-copy class was closed inside ObjectQL by #7049 (closed) and on the metadata-service route by #12892; this is the seam between the two.\n\n## Suggested shape (not a decision)\n\nMeasure first, on a real `createStandaloneStack` boot with an engine: which copy each seeder consumes for `sharing_rule` / `permission` / `capability`, and the type of `condition` at the seeder. Then one of: (a) feed `manifest.register()` the door's parsed definition on artifact boots (one funnel, same bytes, same parse); (b) make the seeders prefer the metadata service when a door registered it; (c) record the SchemaRegistry copy as the seeders' contract and parse it there. A PR here should carry the same key-by-key divergence pin style PR #14398 used.\n\n## Re-check\n\n```\ngit grep -n \"METADATA_ARRAY_KEYS\" origin/main -- packages/objectql/src packages/runtime/src\ngit grep -n \"readDeclared\" origin/main -- packages/plugins/plugin-security/src packages/plugins/plugin-sharing/src\n```\n\n## Dedupe\n\nSemantic `search_issues` returned 22 items with #12892 (the parent) at rank 1; the rest (#11333, #7404, #4624, #11967, …) name adjacent seams, none the seeder-reads-SchemaRegistry-first path after step 2. Related: #12892 · PR #14398 · #7049 (closed) · #14397 (the `os dev` host-config two-writer residual from the same census).\n"
+}

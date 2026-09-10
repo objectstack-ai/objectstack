@@ -1,0 +1,31 @@
+{
+  "number": 14883,
+  "kind": "issue",
+  "title": "[repo:objectui] View tab bar caps visible tabs at a fixed `maxVisibleTabs = 4` — 8 queues on a 1440 px page render 4 + '还有 4 个' with ~700 px of empty bar",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p2",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-03T07:24:00Z",
+  "updated_at": "2026-09-10T00:18:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14883",
+  "body": "## Summary\n\nThe object list page's view tab bar shows at most **4** view tabs regardless of available width. An object with 8 list views on a 1440 px viewport renders 4 tabs, then `还有 4 个` (`{{count}} more`), leaving roughly 700 px of the tab bar empty. The queues a role needs most (here: 待领导审批 / 已通过 / 已归档 / 流程看板) are hidden behind the overflow menu for every user, on every screen size.\n\n## Minimal reproduction\n\nPlatform 17.2.0 console, viewport 1440×900 (also 1920).\n\n1. Define an object with a `list` view plus 7 `listViews` (short 2–5-character Chinese labels; here 全部填报单 / 填报中 / 分公司核对中 / 待人力审核 / 待领导审批 / 已通过 / 已归档 / 流程看板).\n2. Open the object list page.\n\nMeasured in the page (DevTools, `data-testid=\"view-tab-bar\"`):\n\n```\nviewport 1440 · tab-bar width 1152 px · parent width 1184 px\nvisible tabs: 全部填报单, 填报中, 分公司核对中, 待人力审核\noverflow button: \"还有 4 个\"\n```\n\nThe four visible tabs occupy ~430 px; the remaining ~720 px of the bar are blank.\n\n## Where\n\n`plugin-view` chunk of the console — the tab bar component destructures its options with a fixed default:\n\n```js\nlet { showAddButton:S=!0, inlineRename:C=!0, contextMenu:w=!0, reorderable:T=!1,\n      maxVisibleTabs:E=4, showIndicators:k=!0, ... } = i\n...\n{visibleViews:U, overflowViews:fe} = useMemo(() => {\n  let e = H.slice(0, E), n = H.slice(E); ...\n```\n\nNo `ResizeObserver` / width measurement participates; `E` is not set from view metadata anywhere I could find.\n\n## Expected\n\n- Overflow should be **width-aware**: fit as many tabs as the bar can hold (measure, or CSS container query), and only then collapse the rest into `{{count}} more`.\n- Or, at minimum, let the app author raise the cap from view metadata (e.g. a `tabs.maxVisible` / `listViews` display option), and raise the default well above 4 — most business objects have 5–8 status queues.\n- Keep the current behaviour (active tab promoted out of the overflow) — that part is fine.\n\n## Environment\n\n`@objectstack/console` 17.2.0 via `@objectstack/cli` 17.2.0 · `objectstack dev` · Chrome. App: objectstack-ai/kpi, object `kpi_entry_sheet`.\n"
+}

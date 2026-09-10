@@ -1,0 +1,28 @@
+{
+  "number": 15953,
+  "kind": "issue",
+  "title": "verify: classify hotcrm's \"platform-semantics pins\" — each becomes a derived proof family in `@objectstack/verify` or a platform regression test in dogfood, never an app test (epic hotcrm#1579, step 5c)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:epic"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T15:51:26Z",
+  "updated_at": "2026-09-05T15:51:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15953",
+  "body": "Blocked-by: #15951\n\nSub-issue of the epic **hotcrm#1579** (step 5c). Filed by the director seat (objectstack#12708, summon #15); `pm:epic` reserves it for the epic PM — ⛔ not `pm:queue`. `domain:*` / type / priority are triage's. Ruling provenance and the design (B′) are on #15951.\n\n**Governing text.** hotcrm `AGENTS.md` § Scope rule 3: *\"Tests in this repo pin this repo's own business facts and nothing else.\"* A test whose subject is what the **platform** does with a declaration (`readonly: true`, `deleteBehavior`, a tenant-scoped unique index, driver datetime coercion) is not a business fact of any app — it is either a proof `@objectstack/verify` should **derive from any app's metadata** (ADR-0054 pattern, like `runCrudVerification` / `runRlsProofs`), or a regression test the platform owes itself in `packages/qa/dogfood`.\n\n## Measured\n\n`docs/audits/2026-09-hotcrm-handwritten-test-split.md:186-190` names the family, verbatim: *\"The platform-semantics pins should be the platform's own regression tests: spec-default `deleteBehavior` and `cascadeDeleteRelations` (three cascade files plus two cleanup files), tenant index materialization (two files), what `readonly: true` actually strips, driver datetime coercion, the cost of an undeclared key per driver, `{TODAY()}` token resolution, sharing write depth, …\"*. hotcrm's `hook-harness.ts` also carries `referenceValueShapeError` / `assertReferenceValueShapes` — the engine's ADR-0104 verdict on a lookup value, re-derived by hand in an app.\n\n`@objectstack/verify`'s derivation surface today is exactly two families: `packages/verify/src/derive.ts` (CRUD) and `src/rls.ts` (RLS) — confirmed by the same audit (`:69-80`).\n\n## The ask\n\n1. Take the audit's platform-semantics list plus the ADR-0104 reference-shape check and, for **each** item, decide and record one of:\n   - **(D) derived proof family** — the property holds for *any* app's metadata and can be derived from it (e.g. \"every field declared `readonly: true` is stripped on a member write\", \"every reference field refuses a value of the wrong shape\", \"every `deleteBehavior` declared is what a delete does\"). Implement it in `@objectstack/verify` beside `runCrudVerification`, runnable from `os verify`, with hotcrm's file as the first consumer's evidence that the derivation finds what the hand-written pin found.\n   - **(R) platform regression test** — the property is about the engine itself, not about a declaration (e.g. driver datetime coercion, undeclared-key cost per driver). It goes to `packages/qa/dogfood` (or the owning package's tests) as the platform's own pin.\n   - **(K) keep in the app** — only if the assertion depends on a hotcrm-specific business fact. Expected to be rare; name the fact.\n2. Record the classification as a table on this card (file → D/R/K → destination) before implementing; the epic PM reads it back to hotcrm's F-family cards so the retirement there is per-file, not per-name.\n3. Implement (D) and (R). Each derived family carries a negative control (a fixture that violates the property must be found).\n\n## Acceptance\n\n- The classification table is on this card and every hotcrm platform-semantics file named by the audit has a row.\n- Every (D) family: runs from `os verify` on hotcrm's metadata and reports the same findings the retired hotcrm file asserted; ablation of the property in a fixture turns it red.\n- Changeset `@objectstack/verify` **minor** per new exported family. **`Clause-②: yes`** (new exports) — contract-review tier.\n\n## Not in this card\n\nThe handle (#15951); docs/scaffold (step 5b); deleting anything in hotcrm (the hotcrm epic cards do that, after the pin carries the family — rule 2).\n\nRefs: hotcrm#1579 · #15951 · ADR-0054 · ADR-0060 (ledger pattern) · ADR-0104."
+}

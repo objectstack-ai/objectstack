@@ -1,0 +1,29 @@
+{
+  "number": 17108,
+  "kind": "issue",
+  "title": "spec(ui): widen `element:text.variant` to the published nine — release 1 of 2 for the objectui#7450 convergence, additive only",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "protocol:ui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T09:26:54Z",
+  "updated_at": "2026-09-09T09:26:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17108",
+  "body": "Filed by the `domain:spec@objectui` PM seat (session `session_01Jmxdo7bmeqCQHLSfmLVX9w`) routing objectui#7450, whose ruling cannot be implemented in objectui. ⛔ Not claiming. Grading is the triage seat's.\n\n**Maintainer decision, 2026-09-09: option B — split across two releases.** This card is **release 1**, and it is **additive only**: nothing is refused here.\n\n## Why this is a spec card and not an objectui one\n\nobjectui#7450's ruling (director batch #71, 2026-09-07, maintainer 「其他同意」) is: converge `element:text` on the published nine (`h1`–`h6`, `body`, `caption`, `overline`), with `heading` / `subheading` becoming named refusals carrying migration hints.\n\n⚠️ **The ruling's premise was false**, and the correction is what routes it here. The card, its census and its triage all state that `element:text`'s vocabulary was *never declared, so nothing could refuse a wrong value*. Measured, it **is** declared — here, at `packages/spec/src/ui/component.zod.ts:1819`:\n\n```ts\nvariant: z.enum(['heading','subheading','body','caption']).optional().default('body')\n```\n\nOn the installed 17.3.0 pin, `ElementTextPropsSchema` **REFUSES** `h1`–`h6` and `overline` with `invalid_value`, and objectui's own `sdui-parser` `validateTree` already raises `invalid-enum` at severity **ERROR** for `element:text` + `variant: h1`.\n\n⇒ The accurate statement is *\"the renderer swallows what the authoring gate already refuses\"*, ⛔ not *\"refused by nothing\"*.\n\n⇒ Declaring the nine in objectui is the **consumer-side widening AGENTS.md #0.1 bans**, and objectui's own per-PR gate catches it. Verified independently: `apps/console/src/__tests__/registry-inputs-spec-parity.test.ts` emits `the contract refuses the declared member(s) …` at `:1539` and `:1800`, and `element:text` is in its covered set (`:536`). Ablated end to end by the implementing seat: swapping objectui's registry `inputs` enum to the nine takes that gate **198 passed → 1 failed | 197 passed**, naming all seven refused members.\n\nThe one-line in-repo migration is blocked by the same wall: objectui's `apps/console/src/preview-samples.ts` authors `variant: 'subheading'`, which is spec-**legal** today, while `h3` would be spec-**illegal**.\n\n## What release 1 does\n\nWiden `element:text.variant` to the nine published values, so the enum **accepts** `h1`–`h6`, `body`, `caption`, `overline` **and still accepts** `heading` / `subheading`.\n\n⛔ **Nothing is retired here.** No refusal, no deprecation error, no removal. This release exists so objectui can converge its renderer and its five faces on a released pin **before** any spelling stops working.\n\n⚠️ **The defaulting must be decided, not inherited.** The current declaration carries `.optional().default('body')`, so a *parsed* `element:text` document materialises `variant: 'body'`. That interacts with objectui#6942's ruling, which **deliberately does not** synthesise `body` for an absent `variant` on `ui:text` — protecting ~690 unannotated corpus nodes. ⛔ Widening the enum must not silently change what absence means on either side; state explicitly what happens to `.default('body')` and why.\n\n## Sequence, so nothing is dispatched out of order\n\n1. **This card** — spec widens to the nine. Additive. `Clause-②: yes` (a published accept set grows).\n2. **objectui** converges on the released 17.x pin: the renderer, the five faces (`elements.tsx` `:70` class map, `:78` inline union, `:85` tag map, `:111` registry inputs enum, plus `block-config.ts`'s inspector options), the two i18n rows, and the one-line `preview-samples.ts` migration.\n3. **Release 2** — `heading` / `subheading` become named refusals with migration hints, once out-of-repo authors have had a window. ⚠️ That step is **blocked on the value-level retirement mechanism**, which does not exist yet — filed separately, see below.\n\n⇒ objectui#7450 closes after step 2; step 3 is its own card.\n\n## ⛔ Blocked-by, and it is real\n\nThe ruling's *\"named refusals carrying migration hints\"* has **no mechanism to land on**. `retiredKey()` / ADR-0087 D2 retire a **key**; a sweep of `packages/spec/src/shared/` surfaced no value-level equivalent. The maintainer chose the **generic helper** (2026-09-09), filed as its own card — release 2 waits on it. Release 1 (this card) does **not**.\n\n## Appetite\n\n⛔ Falls off the back: retiring anything; changing `element:text`'s renderer (that is objectui's, on the released pin); the `ui:text` side; objectui#6942's absence semantics.\n\nRefs: objectui#7450 (the ruling and the falsification, comment `5599277303`) · objectui#6942 · objectstack#12708 (the batch #70/#71 ledger) · objectui PR #8795 (the resolution pin that landed instead)"
+}

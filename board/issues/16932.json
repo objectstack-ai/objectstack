@@ -1,0 +1,34 @@
+{
+  "number": 16932,
+  "kind": "issue",
+  "title": "[finding] `os register` prompts \"Name (optional)\" and can send a payload without `name`, which `RegisterRequestSchema` declares required — the mismatch is held open by an `as any`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T17:08:24Z",
+  "updated_at": "2026-09-10T15:28:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16932",
+  "body": "Filed by the `domain:cli` execution PM seat (session `session_015QE8qk46e5CHJxyQEUjbf8`, seat post #6024). Surfaced by the seat delivering #16210 / PR #16926, which found it while type-checking that README fence and correctly declined to fold it in. Every line below re-read at `origin/main@9a89a0040d` before filing.\n\n⛔ **Not graded, not routed, no `domain:*` label, no assignee — that is triage's.** ⛔ And there is no reproduction here: see **What is NOT measured**.\n\n## The mismatch\n\n`packages/cli/src/commands/register.ts`:\n\n```ts\n:115        name = await rl.question('Name (optional): ');\n:126        const registerPayload: { email: string; password: string; name?: string } = { email, password };\n:127        if (name) registerPayload.name = name;\n:128        const response = await client.auth.register(registerPayload as any);\n```\n\n`packages/spec/src/api/auth.zod.ts`:\n\n```ts\n:93   export const RegisterRequestSchema = lazySchema(() => z.object({\n:94     email: z.string().email(),\n:95     password: z.string(),\n:96     name: z.string(),          // ← required\n:97     image: z.string().optional(),\n:98   }));\n```\n\n⭐ **The neighbouring line is the control.** `image` on `:97` carries `.optional()` and `name` on `:96` does not, in the same object, so the distinction is deliberate rather than an oversight in the schema. (Instrument control: 9 `export const` in that file, so the grep reaches it.)\n\n⇒ The command **advertises the field as optional to the user**, its local payload type marks it optional, and the declared request type marks it required. An empty answer at the prompt sends `{ email, password }`.\n\n## The `as any` is what holds it open\n\n`:128`'s cast is the only reason this compiles. Drop it and it is `TS2345: Property 'name' is missing in type '{ email: string; password: string; }' but required in type '{ email: string; password: string; name: string; image?: string | undefined; }'` — **the identical error**, against the same declaration, that PR #16926 just fixed in `packages/client/README.md`'s namespace tour. One instance was in the published README and was corrected; this one is in the CLI's own command and is masked.\n\n⇒ Same defect class, two carriers, and the cast is why only one of them was visible.\n\n## ⛔ What is NOT measured — the card turns on this\n\n**Whether the live route rejects a missing `name` has not been established.** The delivering seat's reading is that `RegisterRequestSchema` is parsed at **no door**: the request that actually goes out is better-auth's `POST /sign-up/email`, whose own validation was not exercised. ⇒ ⛔ This is un-rehearsed drift, ⛔ not a reproduced runtime failure, and no severity is claimed.\n\n⚠️ **Whoever takes this should measure that first**, because the two outcomes need different fixes and both are real:\n\n- **the route requires `name`** ⇒ `os register` with an empty answer fails at runtime, and the prompt's *\"(optional)\"* is a false promise to the user. Fix the prompt and the payload, ⛔ not the schema.\n- **the route accepts a missing `name`** ⇒ `RegisterRequestSchema` over-declares, and the `as any` has been hiding that the SDK's declared type does not describe the door. Fix the declaration, ⛔ not the prompt.\n\n⛔ **In neither case is the answer \"keep the cast.\"** Whatever the route does, `as any` at a call site is what turned a compiler-visible contract mismatch into something only a hand type-check would find — the same mechanism #5543 called out on this repo's other `registerObject` seam, where the cast also hid genuinely misspelled keys.\n\n## Dedupe — method stated\n\n`search_issues` returned **3** with the positive control firing (the SDK-request-shape family came back populated). **None is this**:\n\n| card | state | subject |\n|:--|:--|:--|\n| #15447 | **open** (`pm:awaiting-maintainer`) | `oauth.applications.register` declares three request members better-auth silently strips — a **different** method (`oauth.applications`, not `auth`) and the opposite direction (extra members stripped, not a required one missing) |\n| #12623 | closed | `SchemaRegistry.registerObject`'s `packageId` required vs optional |\n| #5543 | closed | `registerObject` annotated with the schema's OUTPUT type — cited above for the `as any` mechanism |\n\n## Why it was not folded into PR #16926\n\nThat PR's card is `packages/client/README.md` and its declared file surface is that file plus a changeset. This is `packages/cli/src/commands/register.ts` — a different package, a different surface, and a change whose direction depends on a measurement nobody has taken. ⭐ The seat named the successor (`domain:cli`) and left the call to the PM rather than widening a documentation PR into the CLI; filing it is that call.\n\n## Re-check\n\n```sh\nsed -n '110,130p' packages/cli/src/commands/register.ts\nsed -n '93,98p'   packages/spec/src/api/auth.zod.ts\n# then: drop the `as any` at register.ts:128 and run the package typecheck — expect TS2345\n```"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 14850,
+  "kind": "issue",
+  "title": "Migrate the two in-repo hook examples (app-crm `OpportunityStageHook`, app-todo `taskHook`) to `defineHook()` so the platform's own examples match what the published data skill teaches (#14685 item 1, ruled A)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-03T05:28:06Z",
+  "updated_at": "2026-09-04T14:54:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14850",
+  "body": "Opened by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) as the post-ruling step of decision card #14685 item 1 (DATA-F-07), ruled **A** by the maintainer on 2026-09-03 (recorded by the director seat, comment 5520452691: 「同意，然后执行契约复审」 adopting the lane's recommendation). Unassigned; no `domain:*` label by design — the files live under `examples/`, not `skills/`, so triage routes it.\n\n## The ruling, verbatim from the record\n\n> 1. **A** — the `defineHook()` prescription stays in the published data skill; one S card migrates the two in-repo hook examples (`app-crm`, `app-todo`) to `defineHook()` so the platform's own examples match what the skill teaches.\n\n## Measured at `origin/main` `f3ae441fa2` (2026-09-03T05:26Z)\n\n| site | today |\n|:--|:--|\n| `examples/app-crm/src/hooks/opportunity.hook.ts:9` | `export const OpportunityStageHook: Hook = {` — bare literal |\n| `examples/app-todo/src/objects/task.hook.ts:50` | `const taskHook: Hook = {` — bare literal |\n| `packages/spec/src/data/hook.zod.ts:1016` | `export function defineHook(config: Hook): ResolvedHook {` — the import-time-validated authoring path the skill prescribes |\n| callers of `defineHook(` outside `packages/spec` and `packages/cli` | **0** files under `packages/**`, `examples/**`, `apps/**` |\n\n`skills/objectstack-data/references/data-hooks.md` teaches `defineHook()` (the prescription the ruling keeps); the two real hooks in the repo are the only counter-examples an agent can read.\n\n## Scope\n\n- Wrap each of the two hook objects in `defineHook(...)` and import it from `@objectstack/spec` (confirm the export path the package index actually exposes — read it, do not assume). Keep every field of both hooks byte-identical inside the wrapper.\n- If `ResolvedHook` differs from `Hook` in a way the consuming `defineStack({ hooks })` call or a test asserts on, say so in the PR body with the file:line; do not widen the change to fix a schema.\n- Run the examples' own gates (their `typecheck` / `test` scripts by name, and `os validate` on each app if that is how they are checked) plus `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --commands` over the change set.\n- Size S; `Fixes` this card. Not a governed surface. A changeset is not expected (examples release nothing) — apply `skip-changeset` and let the gate say so.\n\n⛔ Not in scope: the skill text (unchanged by ruling A), any other example, the `defineHook` implementation.\n\nRefs: #14685 (batch 3, item 1) · #14297 (the data-skill flight that deferred DATA-F-07) · #14292 (programme anchor) · `packages/spec/src/data/hook.zod.ts:1016`."
+}

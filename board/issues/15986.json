@@ -1,0 +1,32 @@
+{
+  "number": 15986,
+  "kind": "issue",
+  "title": "The ioredis-mock inertness declaration expires if either dependency range moves, and nothing defends it — pin the version pair it names",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding",
+    "pm:queue",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T17:25:17Z",
+  "updated_at": "2026-09-09T02:54:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15986",
+  "body": "## What needs defending\n\nPR [#15985](https://github.com/objectstack-ai/objectstack/pull/15985) (card #15467) resolves the `ioredis-mock@8` (peer `ioredis@^5`) versus `ioredis@^6` mismatch by **measuring it and declaring it inert** — comments only, no code, dependency or CI change. The measurement is good and the route was the one triage named for that outcome.\n\n⚠️ **But the whole deliverable is a claim in a comment, and the claim has an expiry condition it states itself:** it holds for the pair `ioredis 5.11.1` / `6.0.0` and **stops holding if either range moves**. Nothing checks that. ⇒ A dependency bump six months from now silently invalidates a header that will still read as authoritative.\n\n## Why this is worth a card rather than trust\n\nThis repository keeps rediscovering the same defect class, three separate times today alone:\n\n- a header promising `RUN_REAL_REDIS=1` + `REDIS_URL` and *\"conditional `describe.skipIf` blocks at the bottom\"* — **no such blocks existed**, and neither name occurred anywhere else in the package (removed by that same PR);\n- `eval-user.zod.ts` documenting `createEvalUser` as *\"the single factory every surface uses (server buildScope, **the customSession bridge**, …)\"* — measured, **there is no customSession bridge**, and that non-existent producer is exactly the gap card #15136 fell through;\n- `resolve-authz-context.ts:1125-1129`'s ⛔ *\"never `positions.includes(...)`\"* — a **comment, not a gate**, which did not stop a privilege escalation from being written twice (#15948 round 1, and the four pre-existing readers in #15981).\n\n⭐ In every one, the prose was correct when written and rotted without a signal. That is the shape here.\n\n## Suggested shape, ⛔ not prescribed\n\nA pin asserting the two dependency ranges still match the pair the new header names — so the declaration reddens when it stops being true, instead of being quietly wrong.\n\n⚠️ **This is a policy call, which is why it is filed rather than folded in.** It reddens on **every** bump of either dependency, and whether that is a feature or a nuisance is a judgement:\n\n- **For:** the bump is exactly the moment the claim needs re-measuring, and a red pin puts the header in front of whoever is bumping — the only person positioned to re-check it.\n- **Against:** it is new verification surface nobody asked for, and a pin that fires on routine maintenance trains people to edit the pin rather than re-do the measurement, which would be worse than no pin.\n\n⇒ A middle option worth considering: pin the **conclusion** rather than the versions — re-derive the overload intersection in CI — which does not fire on a bump that changes nothing. ⚠️ More expensive, and it needs both packages' type declarations resolvable in that environment.\n\n## What a taker should NOT do\n\n⛔ Do not \"fix\" this by adopting `@types/ioredis-mock` and dropping the `@ts-expect-error`. That was measured and deliberately rejected on #15467: those types declare the mock constructor as returning a real ioredis `Redis`, so they **assert conformance instead of verifying it** — trading a visible `any` for an unearned certainty TypeScript would then vouch for. ⭐ That is the same failure mode this whole family is about, one layer up.\n\n⛔ Do not re-litigate the inertness measurement itself; it is on PR #15985 with its controls, and the ablation there shows the suppression has **not** rotted (removing it yields `TS7016 … implicitly has an any type`).\n\n## Related\n\n- **#15467** / PR #15985 — the measurement and the declaration this card would defend.\n- **#15983** — from the same instrumentation run: `RedisKV.delete`'s versioned branch is unexercised, so the optimistic-concurrency claim in its header has **zero** assertions behind it. Same package, same species — a claim with nothing checking it."
+}

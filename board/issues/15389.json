@@ -1,0 +1,31 @@
+{
+  "number": 15389,
+  "kind": "issue",
+  "title": "approvals: `restoreConsumedSuspension` re-arms the pause but the approvals door cannot continue it — a restored approval suspension can only be cancelled, never decided",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-04T14:03:30Z",
+  "updated_at": "2026-09-10T00:15:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15389",
+  "body": "Filed from #13807's measurement round (measurement only, no PR). ⛔ Not a duplicate of #15222: that one is the engine's own nesting limit (a stranded child's cascade-failed ancestors carry no snapshot). This one is the **approvals seam** — the restore succeeds completely, and the continuation it tells the operator to re-issue is then refused.\n\n## Measured\n\nReal `AutomationEngine` + real `ApprovalService` (built dists at `65846bc46`, harness outside the repo). A flow pauses at an `approval` node; the reject branch's node throws; `service.decide(..., 'reject')` strands the run exactly as #13807 reports. Then:\n\n| step | result |\n|---|---|\n| `engine.restoreConsumedSuspension(runId, {requestedBy:'ops'})` | `restored: true`, reason *\"the run is resumable again; re-issue the continuation\"* |\n| `engine.hasSuspendedRun(runId)` | `true` — the pause really is back |\n| `service.decide(requestId, {decision:'reject'})` — re-issue the continuation | ❌ `INVALID_STATE: request is rejected` |\n| `service.recall(requestId, ...)` | ❌ `INVALID_STATE: request is rejected` |\n| generic door `engine.resume(runId, {branchLabel:'reject'})` | ❌ `PERMISSION_DENIED` — *\"paused at a 'approval' node, which only its owning service may resume\"* |\n| `engine.cancelRun(runId)` | ✅ `true` |\n\n**Reverse control** (same harness, downstream node does not throw): `decide` returns `resumed: true`, the run records `completed`, and `restoreConsumedSuspension` refuses with `RUN_COMPLETED` — so the probes above measure rather than return constants.\n\n## Why the three refusals compose into a dead end\n\n`restoreConsumedSuspension`'s own contract says the resume signal is deliberately **not** replayed: the continuation must be re-issued. For an `approval` suspension the only issuers are `decide` / `recall` / `sendBack` / `resubmit`, and every one of them guards on a non-terminal request (`approval-service.ts:2451`, `:2915`, `:3340`). The row is already `rejected` — written by the very call that stranded the run. The generic REST resume door cannot stand in either, because the approval node declares `resumeAuthority: 'service'` (`approval-node.ts:126`) and the #3801 gate refuses a raw resume.\n\nSo the operator exit lands the run in a state where the **only** remaining verb is `cancelRun`: the decision stays recorded and mirrored onto the business record, and the reject branch's downstream work never happens. That is better than terminal-failed — the run becomes visible and cancellable — but it is not a path to completing the flow.\n\n## Scope note\n\nThis is deliverable 3's residual, not #13807's open deliverable 2 (the atomicity posture, which is the maintainer's to decide). Whichever posture is chosen for the door going forward, the runs already in this state need a completion path, and today there is none through approvals. ⛔ No assignee, no lane label — left for PM triage.\n\nRelated: #13807 (the reject-door divergence) · #13909 (the strand, closed) · #15222 (the nested-run restore limit) · #4420 (the ancestor) · #3801 (the `resumeAuthority` gate)."
+}

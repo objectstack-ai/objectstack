@@ -1,0 +1,31 @@
+{
+  "number": 15205,
+  "kind": "issue",
+  "title": "refactor(plugin-email): templates resolve the registry; the seed and the provenance stamp retire; organization-level editing is closed (ADR-0131 D6/D10)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:blocked",
+    "priority:p1",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:05:23Z",
+  "updated_at": "2026-09-04T06:05:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15205",
+  "body": "**⛔ BLOCKED — the v18 development line is not open.**\n\n`Blocked-by: #15193`\n\nPart of #15194 (ADR-0131 execution tree). ⛔ Do not claim, assign or dispatch this card while #15193 is open, whatever its other labels say.\n\n---\n\n**In one sentence.** Email and notification templates are read straight from code or Studio instead of being seeded as rows; an organization administrator cannot edit a template for now (the door opens later as copy-on-write if a real request appears); rows an organization has already customized are handled per the maintainer's ruling on §6 Q1.\n\nMaintainer, 2026-09-04, on why not to seed per organization: 「在组织没有提出编辑诉求前，强制为每个组织 seed 也是很蠢。我宁可先不让他编辑。」\n\n⚠️ **ADR-0131 §6 Q1 must be ruled before this card is dispatched** — it is the only open question the record leaves. The two answers are in Scope below.\n\n**Scope.** `TemplateLoader` (`template-loader.ts`) resolves `email_template` from the registry — code-declared and Studio-authored — by `(name, locale)`; `seedTemplates`, `bootstrapDeclaredEmailTemplates` and `email-template-provenance.ts` retire; the `sys_email_template` data door refuses create/update for organizations with an ADR-0123 D4-style message naming the closed door; notification templates likewise. **§6 Q1**: existing `customized: true` rows are either **(A)** kept readable as the Default Organization's overrides — the read half of the copy-on-write door, resolution `(organization, name, locale)`, the organization's row winning whole — or **(B)** dropped with a release note. Object retirement or retention follows the ruling (ADR-0087 entry if retired).\n\n**Acceptance.** Every built-in auth mail renders from the registry with **byte-identical** output to today's seeded row (pin on the rendered body); a Studio-authored template goes live without a restart (`metadata.subscribe` path); an organization's create/update is refused with the door named; under (A), a customized row still wins for the Default Organization.\n\n⛔ **Stop and report**: dispatching before §6 Q1 is ruled; deleting customized rows before the ruling says to.\n\nRefs: ADR-0131 D6, D10, §6 Q1 · ADR-0005 (tier A) · ADR-0123 D4 · #4509.\n"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 15861,
+  "kind": "issue",
+  "title": "Reading request for the cloud seat: does any objectstack-ai/cloud host still EMIT the retired `/api/v1/projects/:id/...` scoped prefix?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T11:30:07Z",
+  "updated_at": "2026-09-07T14:45:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15861",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024). ⛔ **Routing is triage's** — this needs a `repo:cloud` style label to reach the cloud seat (#6026); I have deliberately not guessed one.\n\n**This is a reading request, not a change request.** One question, answerable by a grep in a repository this seat cannot see.\n\n## The question\n\n**Does any host wiring in `objectstack-ai/cloud` still emit an API URL of the form `/api/v1/projects/:id/...` ?**\n\nThat is the whole ask. A yes/no plus the call sites if yes.\n\n## Why it is being asked\n\nPR #15859 (card #15488) repairs `HttpDispatcher.dispatch()`, whose scope-strip regex matched `/projects/:id` while its own hint parser (`extractEnvironmentIdFromPath`) read `/environments/:id`. The two readings of one convention disagreed **inside a single method**, and they failed in opposite directions — measured, driven through the real `@objectstack/hono` catch-all:\n\n```\n/api/v1/projects/env_alpha/data/task       urlEnvironmentId = undefined   -> stripped, served UNSCOPED\n/api/v1/environments/env_alpha/data/task   urlEnvironmentId = \"env_alpha\" -> parsed, then matched NO domain (404)\n```\n\nAfter the repair the `/environments/` spelling routes correctly and the `/projects/` spelling answers `404 ROUTE_NOT_FOUND`.\n\n## What is already settled, and is NOT being re-opened here\n\nInside this repository the removal is decided, and this card does not re-litigate it:\n\n- **ADR-0006 v4, second addendum** (D2 executed 2026-08-28) renames the API surfaces to `environment` / `environments` **with no aliases**, stating the posture in as many words: *\"no gradualism, no dual-spelling interval, no single release carrying both.\"*\n- `content/docs/api/environment-routing.mdx` already instructs callers: *\"Replace `/api/v1/projects/:projectId/...` with `/api/v1/environments/:environmentId/...`\"* and *\"there is no alias, so the old spelling does not resolve.\"*\n- No in-repo emitter of the retired form survives (the one remaining hit is a UI-location fixture in an unrelated websocket test).\n\n⇒ ⛔ The answer to this reading request **cannot** re-introduce a dual-spelling alias — the ADR forbids it. So a \"yes\" does not change PR #15859's shape.\n\n## Then why ask at all\n\nBecause a \"yes\" changes what the cloud side has to do, and **when**, and it is better on record before release than discovered after it.\n\n⚠️ Worth stating plainly, because it inverts the usual risk reading: a cloud host still emitting the retired prefix is **not** working today. It is being served **from the host default rather than from the environment its own URL names** — silently, with no error. The strip removed the segment and nothing parsed it. A `404` is strictly better than that: it is a wrong answer becoming a refusal.\n\nSo this is not \"will we break cloud?\" — it is *\"where does cloud need to change a URL that is already giving it the wrong environment?\"*\n\n## Boundary note\n\nSame repo boundary that #15256 and #15163 both hit: the host wiring ships from `objectstack-ai/cloud`, which this seat's session cannot read. The #15488 triage comment already recommended a reading request to the cloud seat as the first deliverable; this is it, filed after the measurement rather than before, so the question is concrete."
+}

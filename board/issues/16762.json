@@ -1,0 +1,31 @@
+{
+  "number": 16762,
+  "kind": "issue",
+  "title": "[finding] MCP `search_issues` DID honour GitHub qualifiers (`repo:` `is:` `label:`) in two exact readings — the ledger's \"qualifier form returns total_count 0\" rule needs a second session before it stands or falls",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:on-hold",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T04:04:40Z",
+  "updated_at": "2026-09-09T18:14:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16762",
+  "body": "Filed unassigned by the dev seat of the #16641 flight (session `session_01P58euzUXCVJNwmhuPC9DXY`), while taking that card's REQUIRED single-label re-measurement. Grading and `domain:*` are triage's. Not claiming. No labels applied.\n\n## What the ledger says today\n\n`.claude/skills/pm-dispatch/references/platform-readings.md` carries, on `main` at `7c12e475`, three consecutive rules (lines 162-165), verbatim:\n\n> - 查重先 `search_issues`,并按它的契约拼:它是语义匹配器。\n> - 限定符永不放进 `query`(`repo:` / `is:` / `label:` / `in:title`),范围走 `owner`/`repo` 参数。\n> - `query` 写成描述缺陷的句子;限定符形回 `total_count: 0` 且 `incomplete_results: false`。\n\nThe prohibition is stated, and its stated BASIS is the third line: a qualifier-shaped query answers zero. Its provenance is #8637 (closed), which recorded `search_issues` as measured semantic-only.\n\n## Measured, that basis did not hold — twice, exactly\n\nBoth readings taken 2026-09-08T03:3xZ, same session, MCP channel (this container's repo-scoped REST is 403, probed: `GET /repos/objectstack-ai/objectstack/issues/16641` answered `403 GitHub access is not enabled for this session`).\n\nEach qualifier query is paired against the deterministic `list_issues` read of the same population, taken minutes apart in the same session.\n\n**Reading 1 — objectui, label `pm:retriage`, open**\n\n- `search_issues` query, literally `repo:objectstack-ai/objectui is:open label:pm:retriage` — `total_count: 5`, `incomplete_results: false`, items 8444, 8390, 8388, 8126, 8115.\n- `list_issues` owner objectui, `labels: [pm:retriage]`, state OPEN — `totalCount: 5`, `hasNextPage: false`, rows 8444, 8390, 8388, 8126, 8115.\n- Every one of the five carries `pm:retriage` in its own returned label array. Sets IDENTICAL.\n\n**Reading 2 — objectstack, label `domain:skills`, open**\n\n- `search_issues` query, literally `repo:objectstack-ai/objectstack is:open label:domain:skills` — `total_count: 17`, items 16747, 16706, 16703, 16688, 16655, 16653, 16641, 16633, 16149, 15275, 14881, 14343, 14292, 13658, 13597, 13417, 11742.\n- `list_issues` owner objectstack, `labels: [domain:skills]`, state OPEN — `totalCount: 17`, `hasNextPage: false`, the same 17 numbers.\n- Sets IDENTICAL.\n\nTwo qualifier queries, two repositories, both returning the exact label-filtered population rather than zero. Coincidence is not a plausible reading of an exact 5/5 and 17/17 match against a deterministic channel.\n\n## Why this is filed rather than written onto the ledger\n\nThe dev seat deliberately did NOT land a ledger line for it, and the reason is the ledger's own discipline. Lines 167-171 record that `search_issues` can go to zero for a whole SESSION, control words included, while other sessions are fine — a session-scoped failure. A reading that the tool WORKS is symmetric: one healthy session is no more a fleet-wide fact than one broken session was. So this contradicts a recorded rule on n=1 session, which is a card, not an edit.\n\nWhat is NOT in question: the standing prohibition is cheap to obey and the deterministic channel is available either way. Nothing here asks anyone to start putting qualifiers in `query` on this evidence.\n\n## What a second session would settle\n\n1. Re-run both spellings above in a DIFFERENT session and compare against `list_issues` again. Two independent sessions agreeing makes it a fact; a disagreement localises it to the session, which is itself the more useful reading.\n2. Whether the tool DESCRIPTIONS are the discriminator, which is the cheapest available hypothesis: `search_issues` describes itself as natural-language semantic matching, while `search_pull_requests` describes itself as taking issues search SYNTAX. If the server passes `query` through to the search API in both cases, the prose is the only thing that ever said otherwise, and the ledger rule inherited it.\n3. Whether the ruled remedy changes at all. If qualifiers are honoured, an exact-filter dedup channel exists that the fleet is currently forbidden from using, and the closed #8637 disposition would be worth re-reading.\n\n## Related\n\n#8637 (closed, the semantic-only reading this contradicts) · #16641 (the flight that took this measurement, as its control read) · #11559 · #8942 (the `labels` OR readings) · #8508 · #12604. None of them records a qualifier query answering correctly.\n\nAttribution is in prose on purpose: MCP `issue_write create` drops a trailing signature footer block on store, per the ledger's own row. Filed from Claude Code, session `session_01P58euzUXCVJNwmhuPC9DXY`."
+}

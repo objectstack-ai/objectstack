@@ -1,0 +1,30 @@
+{
+  "number": 17290,
+  "kind": "issue",
+  "title": "[finding] insertManyData attributes a batch-union dropped-field name to every row that supplied it — ruling C's per-row hook exemption falsifies that inference",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T03:51:28Z",
+  "updated_at": "2026-09-10T14:43:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17290",
+  "body": "Filed by the `domain:engine` execution seat while landing #16933 (`session_01XTBcV7zZHmokdyQgXjbyEU`), using [Claude Code](https://claude.ai/code). Filed **bare and unassigned** — no `domain:*`, no priority, no type; all three are triage's.\n\nFound by the by-claim census #16933's dispatch required (ruling 5: \"enumerate by CLAIM not by spelling\"). #16933 corrects prose that asserts the create-side strip is uniform across rows. This card is the **converse** claim, at a different call site — and unlike #16933's, **the code implements it**, so this is a behaviour defect and not a prose one. #16933 is prose-only by its own ruling 1 and deliberately does not touch this.\n\n## The claim, measured on `origin/main` at merge base `ebf9a4891`\n\n`packages/metadata-protocol/src/protocol.ts`, the `insertManyData` docblock (locate by content — line numbers drift; it was at `:12484`):\n\n```\n// [#5503/#14147] Every create-side strip is the ENGINE's ... and its\n// `onFieldsDropped` event is the UNION over the batch, the listener signature\n// carrying no row index. This partial-success path HAS a per-row slot\n// (`outcomes[i]`), and row precision is recoverable without an index: the strip\n// only removes keys the ROW ITSELF supplied, so a dropped name belongs to\n// exactly the rows whose supplied payload carried it.\n```\n\nThe inference is executed a few lines down, in the same method:\n\n```ts\nconst supplied = (request.records?.[i] ?? {}) as Record<string, unknown>;\nconst mine = [...engineDropped].filter((f) => f in supplied);\n```\n\n## Why the inference is false\n\nMaintainer ruling C (#14147) put the static-`readonly` strip inside `engine.insert`, **after** the `beforeInsert` hooks, and exempted keys a hook itself assigned — recorded and applied **per row**:\n\n- `packages/objectql/src/engine.ts` builds `rowHookWrittenKeys` per row and hands `stripReadonlyFields` the option `hookWrittenKeys: rowHookWrittenKeys[i]`.\n- `packages/objectql/src/validation/rule-validator.ts`, inside `stripReadonlyFields`: `if (hookWrittenKeys?.has(name)) continue; // the hook wrote this value — keep`.\n- That option's own doc states the limit: \"It may only ever turn a STRIP into a KEEP, and only for a key a hook assigned.\" Its `stripRuntimeOwnedFields` twin spells the granularity out: \"Per ROW, never per call.\"\n- `engine.insertMany` — the method `insertManyData` calls — is `return this.insert(object, rows, { ...options, __partialRowErrors: true })`, so it inherits all of the above.\n\nSo the true set of rows that dropped name N is `{rows whose payload carried N}` **minus** `{rows whose beforeInsert hook assigned N}`. `f in supplied` computes only the first set.\n\n## The consequence\n\nA batch where a `beforeInsert` hook stamps a protected key on some rows and not others:\n\n- row A — caller supplied `approval_status`, no hook write ⇒ stripped, and it enters the batch union;\n- row B — caller supplied `approval_status`, hook re-assigned it ⇒ **kept**, the value is written;\n- `insertManyData` then reports `outcomes[B].droppedFields = [{ fields: ['approval_status'], reason: 'readonly' }]`, on an outcome whose `record` still carries `approval_status`.\n\nThe response tells the caller a field was dropped when it was written. The docblock names the import surface as the consumer that prefers this path, so the reader most likely to act on it is an importer reconciling what landed.\n\n## Why the pin does not catch it\n\n`packages/metadata-protocol/src/protocol.dropped-fields.bulk.test.ts`, the `insertManyData` case, restates the same inference in its own comment (\"row precision here is recovered by asking which row SUPPLIED each dropped name. That recovery is what this case pins\") and its engine double never exercises the exemption — it drops whenever any row carries the key and has no hook-write concept at all. The double is looser than the producer, so the case is green through exactly the shape it is written for.\n\n## Suggested acceptance criterion (a suggestion, not a prescription)\n\n`insertManyData` no longer attributes a dropped name to a row whose record still carries that key, and the pin gains a case where a hook exempts one row of a batch. Whether the fix is a post-hoc check against `outcomes[i].record`, a per-row channel from the engine, or a narrowing of the claim to what the union can honestly support is a design question this card does not decide.\n\n## Dedup\n\nRun on the `finding` label, `state=all`, four pages of 100 read through repo-scoped REST and grepped locally. Zero hits for `insertManyData`, `hookWrittenKeys` or `rowHookWrittenKeys` on any open card; the closed neighbours (#15703, #15777, #15819, #15964, #16311) are each a different site or a different class — #15819's class is the superseded readonly-on-INSERT contract, and it returns 0 for this site. **Positive control fired in the same pass:** #16933 matched `schema-uniform` and `droppedFields`, so the zero is a reading rather than a dead instrument.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

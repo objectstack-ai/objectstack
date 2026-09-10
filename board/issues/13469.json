@@ -1,0 +1,31 @@
+{
+  "number": 13469,
+  "kind": "issue",
+  "title": "RelatedList renders user columns as raw IDs while ordinary lists resolve user names",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "go-laoji",
+    "id": 92168729,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p2",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-30T13:49:41Z",
+  "updated_at": "2026-09-10T09:36:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13469",
+  "body": "Part of go-laoji/bitdata-ai-plugin#1\n\n## Summary\n\nA record-detail `RelatedList` renders a primitive `user` value as the stored user ID. An ordinary object list renders the same field as the referenced user display name.\n\nThis is a renderer defect, not invalid metadata: protocol 17 defines `user` as a reference-bearing field fixed to `sys_user`, and ObjectUI already includes it in the canonical expandable field family.\n\n## Minimal reproduction\n\nPublish two protocol-17 objects with the following relevant shape:\n\n```json\n{\n  \"objects\": [\n    {\n      \"name\": \"demo_account\",\n      \"fields\": {\n        \"name\": { \"type\": \"text\", \"required\": true }\n      }\n    },\n    {\n      \"name\": \"demo_opportunity\",\n      \"highlightFields\": [\"name\", \"owner_id\"],\n      \"fields\": {\n        \"name\": { \"type\": \"text\", \"required\": true },\n        \"account_id\": {\n          \"type\": \"lookup\",\n          \"reference\": \"demo_account\",\n          \"relatedList\": \"primary\"\n        },\n        \"owner_id\": {\n          \"type\": \"user\",\n          \"reference\": \"sys_user\",\n          \"required\": true\n        }\n      }\n    }\n  ]\n}\n```\n\nInsert one account and one opportunity whose `owner_id` is a valid `sys_user.id`. Open the account detail page and its Opportunity related-list tab.\n\n## Expected\n\nThe Owner cell renders the referenced user display name and avatar, matching the standalone `demo_opportunity` list.\n\n## Actual\n\nThe related-list Owner cell renders the primitive stored ID, for example:\n\n```text\nlDPJgIdeRsnAguu8xj9vgeUzXSjsmxGd\n```\n\nThe standalone list renders `Dev Admin` for the same field and record.\n\n## Contract\n\n- `packages/spec/src/data/field.zod.ts`: `Field.user` is a semantic lookup fixed to `sys_user` and uses the same reference resolution path.\n- ObjectUI `packages/core/src/utils/expand-fields.ts`: `EXPANDABLE_FIELD_TYPES` contains `lookup`, `master_detail`, `tree`, and `user`, with an explicit note that unexpanded user columns return raw IDs.\n\n## Current mechanism\n\nVerified against the newest ObjectUI default branch at commit `fab4802e3d80f012720f2f60571d631fd12d68dc` on 2026-08-30:\n\n- `packages/plugin-detail/src/RelatedList.tsx` auto-fetches child records without `$expand`.\n- Its fallback label-hydration loop only accepts `lookup` and `master_detail`, so it skips `user`.\n- Its cell metadata only injects resolved labels for `lookup` and `master_detail`.\n- `UserCellRenderer` intentionally prints a primitive value as text, so the unresolved ID reaches the DOM unchanged.\n\nThe ordinary list path uses the canonical expandable-field machinery and therefore renders the user object correctly.\n\n## Measured downstream impact\n\nThe reporting CRM contains 30 user fields. Twelve metadata-derived related-list relationships definitely expose this defect because their child `highlightFields` include a user field. The affected entries include account to opportunity, contact to opportunity, lead to opportunity, IP asset to opportunity, and several lead conversion/source relationships.\n\n## Suggested acceptance coverage\n\n- A `RelatedList` regression test with a visible `user` column and primitive user ID.\n- Assert that the rendered DOM contains the user display name and does not contain the stored ID.\n- Assert that reference hydration derives from the shared expandable-field family rather than another private `lookup` and `master_detail` predicate.\n- Cover both the auto-fetch path and caller-provided primitive data if both remain supported.\n\n## Versions\n\n```text\n@objectstack/console 17.2.0\n@objectstack/spec    17.2.0\nNode.js              24.15.0\nmacOS, zh-CN browser locale\n```\n\n`17.2.0` is the newest published `@objectstack/console` version at the time of filing. The current ObjectUI default branch still reproduces the source-level omission.\n\n## No downstream workaround\n\nThe app has not converted `Field.user` to a generic lookup, hidden the columns, patched generated console assets, or persisted duplicate user-name strings. Those approaches would weaken the canonical schema or create a second source of truth.\n"
+}

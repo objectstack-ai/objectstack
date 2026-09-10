@@ -1,0 +1,31 @@
+{
+  "number": 14888,
+  "kind": "issue",
+  "title": "[repo:objectui] page:header crashes with React #31 when the record's name field is empty — the title fallback picks a lookup field and renders its expanded record object as a JSX child",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p2",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-03T07:53:04Z",
+  "updated_at": "2026-09-10T00:19:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14888",
+  "body": "## Summary\n\nThe record page's `page:header` block crashes with **Minified React error #31** (\"Objects are not valid as a React child\") when the record's name field is empty. The header falls back to another candidate title field — here the `subject` lookup — and renders its **expanded lookup object** (`{id, name, code, kind, parent_business_unit_id, organization_id, manager_user_id, active, effective_from, effective_to, external_ref, …}`) directly as a child. The whole header is replaced by the red \"Component \"page:header\" failed to render … Retry\" panel; the rest of the page renders.\n\n## Minimal reproduction\n\nPlatform 17.2.0 console.\n\nObject `kpi_entry_sheet`: `nameField: 'name'`, `name: Field.text({ readonly: true })`, `subject: Field.lookup('sys_business_unit', { required: true })`.\n\n1. Create a record whose `name` is `null` (any path — REST `POST /api/v1/data/kpi_entry_sheet {\"plan\": \"...\", \"subject\": \"bu_east\", \"subject_type\": \"department\"}` is enough; `name` is not required).\n2. Open `/_console/apps/<app>/kpi_entry_sheet/record/<id>`.\n\nObserved:\n\n```\nComponent \"page:header\" failed to render\nMinified React error #31; args[]=object with keys {id, created_at, updated_at, created_by, updated_by, name, code, kind, parent_business_unit_id, organization_id, manager_user_id, active, effective_from, effective_to, external_ref}\n```\n\nConsole: `Error: Minified React error #31 … vendor-react-*.js`. The breadcrumb, which resolves the same record, shows `华东分公司` (the lookup's display name) correctly — so the display value is available; the header just does not use it.\n\nControl: the same object with a non-empty `name` renders the header normally.\n\n## Where (as far as the minified bundle shows)\n\n`plugins-views` chunk — the title-field chooser tries `nameField` / `displayNameField`, then walks `['name','full_name','title','subject','display_name']`. When the chosen field's value is empty the header ends up with the next candidate's raw value; for a lookup that value is the expanded record object, which is handed to JSX unchanged.\n\n## Expected\n\n- A lookup / reference value used as a title must go through the same display-value resolution the breadcrumb and grid cells use (`name` / `displayField` of the target object), never be rendered raw.\n- An empty title should degrade to a placeholder (`—` or the record id), not to a different field's raw value, and certainly not to a crash of the whole header block.\n- Defensive: `page:header` should stringify any non-string title candidate before rendering.\n\n## Environment\n\n`@objectstack/console` 17.2.0 · `objectstack dev` · Chrome. App: objectstack-ai/kpi, object `kpi_entry_sheet` (record created manually by an admin, so its hook-computed `name` was never filled).\n"
+}

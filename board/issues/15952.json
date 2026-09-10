@@ -1,0 +1,28 @@
+{
+  "number": 15952,
+  "kind": "issue",
+  "title": "docs + scaffold: `plugin-spec.mdx` stops promising the non-existent `@objectstack/testing` and points at `@objectstack/verify`; the `create-objectstack` blank template ships a test story (epic hotcrm#1579, step 5b)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:epic"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T15:51:04Z",
+  "updated_at": "2026-09-05T15:51:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15952",
+  "body": "Blocked-by: #15951\n\nSub-issue of the epic **hotcrm#1579** (step 5b). Filed by the director seat (objectstack#12708, summon #15); `pm:epic` reserves it for the epic PM — ⛔ not `pm:queue`. `domain:*` / type / priority are triage's. Ruling provenance and the design (B′) are on #15951 — read that card first.\n\n**Governing text.** Protocol baseline (maintainer 2026-09-05, verbatim): 「本项目以协议为基准。所以开发应该对其协议，协议有问题应该立卡修改协议」 — the published docs are part of what an app author (and every AI reading them) treats as the contract; a documented package that does not exist is a contract the platform is not honouring.\n\n## Measured (`origin/main` `04679418`)\n\n- `content/docs/protocol/kernel/plugin-spec.mdx:758-765` — a `<Callout type=\"warn\">` says the `@objectstack/testing` package with `createTestContext()` / `createTestEnvironment()` is **\"proposed — there is no such published package today\"**, then shows snippets importing it. Every app author who follows the docs is told to test against a package that does not exist, and hotcrm's hand-built `makeCtx()` is exactly the shape that snippet teaches.\n- `packages/create-objectstack/src/templates/blank/package.json` — scripts: `dev`, `start`, `build`, `validate`, `typecheck`. **No `test` script, no vitest, no `test/` directory.** A scaffolded app starts with no way to assert its own business behaviour, so the first test its author writes is a hand-rolled kernel assembly (as `examples/app-crm`, `app-todo`, `app-showcase` each did).\n\n## The ask\n\n1. **Docs.** Rewrite the \"Plugin Testing\" section of `plugin-spec.mdx` around what ships: `bootStack` + the in-process handle from #15951. Delete the ghost callout and every `@objectstack/testing` import. Where the platform's own docs generator owns the text (`check:generated`), fix the source and regenerate — never hand-edit a generated page. Search the whole `content/docs` tree for other `@objectstack/testing` / `createTestContext` mentions and treat them the same way (`git grep -n \"objectstack/testing\\|createTestContext\\|createTestEnvironment\" -- content/ skills/ packages/*/README.md`); published `skills/**` text that teaches testing follows through the generator.\n2. **Scaffold.** The blank template gets: `\"test\": \"vitest run\"`, a `vitest.config.ts`, `@objectstack/verify` + `vitest` as devDependencies at the template's pinned range, and **one** example test that boots the template's own stack with `bootStack` and asserts one business fact through the handle. Keep it to one file — this is a starting point, not a framework.\n3. `create-objectstack`'s own tests assert the scaffolded project's `pnpm test` runs green (the scaffold test that already exercises `validate`/`typecheck` extends by one step).\n\n## Acceptance\n\n- `git grep -n \"objectstack/testing\"` over `content/`, `skills/`, `packages/` returns zero hits outside a changelog.\n- A freshly scaffolded blank app runs `pnpm test` green with the one example test.\n- Changeset: `create-objectstack` **minor** (new template files); docs-only changes need none. `Clause-②: no` (no exported symbol changes) — the dispatching seat re-reads from content.\n\n## Not in this card\n\nThe handle itself (#15951); derived proof families (step 5c); hotcrm's migration (hotcrm card); any change to `os test`.\n\nRefs: hotcrm#1579 · #15951 · ADR-0054."
+}

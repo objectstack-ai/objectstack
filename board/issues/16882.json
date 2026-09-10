@@ -1,0 +1,30 @@
+{
+  "number": 16882,
+  "kind": "issue",
+  "title": "Connect an Agent page: the \"Claude (claude.ai / Desktop)\" card claims local/intranet reach that the custom-connector dialog cannot deliver, and advertises an http:// endpoint interactive clients reject",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T13:45:23Z",
+  "updated_at": "2026-09-10T14:54:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16882",
+  "body": "## Summary\n\nTwo statements on **Setup → Connect an Agent** (`/_console/apps/com.objectstack.setup/page/connect_agent`) do not survive contact with the clients they describe. Both were measured 2026-09-08 against a local dev server (hotcrm `789a7324`, objectstack 17.3.0, Claude for Mac 1.46388.x / Claude Code 2.1.260).\n\n### 1. The \"Claude (claude.ai / Desktop)\" card advertises a path that cannot reach a local or intranet deployment\n\nCard text (i18n `connectAgent.claude.body` / `reachability`):\n\n> Settings → Connectors → Add custom connector, then paste this URL. Sign in through the browser when prompted.\n> claude.ai (web) connects from Anthropic's servers — the deployment must be reachable over public HTTPS. **Claude Desktop and local clients also reach intranet deployments.**\n\nWhat the desktop app actually does in Customize → Connectors → Add → *Add custom connector*:\n\n- `http://localhost:4001/api/v1/mcp` → rejected client-side: `URL must start with 'https'`\n- `https://localhost:4443/api/v1/mcp` (TLS terminated by a local reverse proxy, CA trusted, `OS_AUTH_URL` set, discovery documents advertising https) → `Checking server · Connect to the server · Couldn't reach this address · Nothing answered at this URL`. The manual-configuration screen that follows still has the connection initiated from Anthropic's side.\n\nAnthropic's own documentation for custom connectors: \"your MCP server must be reachable over the public internet from Anthropic's IP ranges. Servers hosted on a private corporate network, behind a VPN, or blocked by a firewall won't connect.\" The desktop app's *Add custom connector* is the same claude.ai connector system, so the sentence \"Claude Desktop and local clients also reach intranet deployments\" is not true for that card. (Local reach *is* true for the **Claude Code** card — `claude mcp add` / plugin — which is a different mechanism.)\n\n### 2. The endpoint shown on the page is `http://` whenever the server was started without `OS_AUTH_URL`\n\nOn a plain `objectstack dev` the page — and the `🤖 MCP server` boot hint — print `http://localhost:4001/api/v1/mcp`. The Claude desktop app refuses OAuth against that URL (`Refused to open sign-in URL … must be https`), and the custom-connector dialog refuses it outright (see above). So the page hands a first-time user a URL that both interactive Claude surfaces will reject, with no hint that https is required. (Related: #16804 asks for a dev https mode; this card is about what the page *says*.)\n\n## Suggested copy changes\n\n- Claude (claude.ai / Desktop) card: replace the intranet sentence with the real constraint — the deployment must be reachable over public HTTPS from Anthropic's servers; for local or intranet deployments use the Claude Code card (CLI/plugin) instead.\n- When the advertised endpoint is `http://`, show a warning on the page (and in the boot hint) that interactive clients require https, pointing to `OS_AUTH_URL` / #16804.\n\nRelated: #16530, #16549, #16746, #16804.\n"
+}

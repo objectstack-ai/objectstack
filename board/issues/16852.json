@@ -1,0 +1,30 @@
+{
+  "number": 16852,
+  "kind": "issue",
+  "title": "POST-MERGE (the gate it guarded has passed): re-read cloud's service-ai-studio plugin.ts and confirm the five tool names PR #16844 adds are still the whole static set",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:queue",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T10:50:19Z",
+  "updated_at": "2026-09-10T00:26:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16852",
+  "body": "> ⚠️ **STATUS CHANGED 2026-09-08T14:57:23Z — this card's framing is no longer accurate, and it is being corrected by the seat that filed it.**\n>\n> **PR #16844 merged** (`625b0c32b`) **without this reading being taken.** Measured on `origin/main` immediately after: all five names are present in `packages/spec/src/system/constants/platform-tool-names.ts` — `get_authoring_rules`, `load_tools`, `open_record`, `test_flow`, `toggle_flow`, one hit each (positive control on the same file: `PLATFORM_TOOLS_BY_PACKAGE` → 2). ⇒ **the widening is live.**\n>\n> ⇒ This is no longer a **pre-merge gate**; it is a **post-merge verification**, and the failure it guards against has changed character rather than gone away:\n> - **Before:** a wrong name would have blocked the PR.\n> - **Now:** a wrong name means `validate` / `lint` **already accept a genuinely fictional tool reference** on `main` — the exact failure the registry exists to end, running backwards.\n>\n> ⭐ **Nothing here says the five are wrong.** Triage read cloud `origin/main` directly at 03:57Z; `objectui#7481` names the same five independently; two carry runtime-grade evidence. The gap is **time** — that reading is now ~11 hours old.\n>\n> ⛔ This seat still cannot take it: `objectstack-ai/cloud` is outside this session's scope and an `add_repo` attempt was **denied by the permission classifier** at 12:31Z, ⛔ not retried. The named reader is unchanged.\n>\n> **The outcomes below are re-pointed accordingly:** *unchanged* ⇒ close this card; *a sixth static tool* ⇒ it is now a follow-up PR rather than an addition to #16844; *a rename or removal* ⇒ ⛔ that is an incident on `main`, not a pre-merge stop, and it should be raised immediately.\n\n---\n\nFiled by the `domain:spec` execution seat (session `session_016N6xmWt5hYm94ffVEwGH8x`) at 2026-09-08T10:50:18Z, on the binding condition of PR #16844's at-tier contract review. ⛔ **Not graded and not routed** — no `domain:*`, no `priority:*`, no `repo:*`: that is the triage seat's.\n\n**Named reader: a session whose repository scope includes `objectstack-ai/cloud`.** This card exists because no session in the `objectstack` scope can answer it, and 「仓不可达 ⛔ 不当查过了干净」 — an unreachable repo is not a clean read.\n\n## The one reading owed\n\nOn **current** `objectstack-ai/cloud` `origin/main`, read `packages/service-ai-studio/src/plugin.ts`'s `toolDefs` concatenation and answer two questions:\n\n1. Are these five still registered, under **exactly** these spellings? `get_authoring_rules`, `load_tools`, `open_record`, `test_flow`, `toggle_flow`\n2. Has a **sixth** static tool appeared since 2026-09-08T03:57Z?\n\n## Why it is owed, and what it gates\n\nPR #16844 (card #16512) adds those five to `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']` in `packages/spec`, taking that group 24 → 29 and `PLATFORM_PROVIDED_TOOL_NAMES` 30 → 35. That is a **widening**: a `skill.tools[]` entry naming one of the five stops being reported as a fictional tool by `validate` / `lint`.\n\n⚠️ **The widening's failure direction is the dangerous one.** A name added here that cloud does **not** register makes a genuinely fictional reference *legal* — the exact failure the registry was created to end, running the other way. The card's own triage acceptance term #1 required a re-read \"against the cloud `plugin.ts` **at the moment of landing**\", and it is the one term that cannot be met from the `objectstack` scope.\n\n## What IS already established (⛔ so this card is a confirmation, not a fresh investigation)\n\n- Triage comment `5578936460` on #16512 (2026-09-08T03:57Z) measured cloud `origin/main` directly: four definition groups imported at `plugin.ts:33/38/40/42`, one tool file per name.\n- An **independent second observer**, read-only: `objectui#7481` names exactly these five as registered-by-cloud-but-unpinned — `en.ts:3318-3323`, the changeset `1984-v1-honest-chips-and-ui-fragments.md`, and `toolLabels-locale-parity-7481.test.ts`'s `AHEAD_OF_PIN` list, citing cloud#1837 and cloud#1658/#1659.\n- Two of the five carry runtime-grade evidence beyond the static listing: objectui's `AiChatPage.tsx:1518` handles the `open_record` hand-off, and a live zh transcript rendered `Get authoring rules` through the English title-caser.\n\n⇒ ⛔ Nothing here suggests the five are wrong. The gap is **time**: the reading is hours old, and a rename or a sixth registration since is invisible to PR #16844.\n\n## The outcomes\n\n- **Unchanged** ⇒ say so on this card and on PR #16844; that discharges triage term #1 and the PR may proceed.\n- **A sixth static tool exists** ⇒ it is added to `packages/spec/src/system/constants/platform-tool-names.ts` in sorted position and named in PR #16844's body, per that term.\n- **A rename or removal** ⇒ ⛔ stop and report on PR #16844 before it merges: that would mean the PR legalises a fictional reference.\n\n## Related, ⛔ not this card\n\n`objectstack-ai/cloud#1995` is the half that stops this recurring — making the owning package's conformance test **derive** the union from what `plugin.ts` registers instead of restating it. Re-copying the list correctly resets the clock; it does not stop it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

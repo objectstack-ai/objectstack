@@ -1,0 +1,36 @@
+{
+  "number": 518,
+  "kind": "pull_request",
+  "title": "Fix metadata-loader tests for updated schema contract",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-04T16:51:01Z",
+  "updated_at": "2026-02-05T01:38:31Z",
+  "closed_at": "2026-02-05T01:36:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-05T01:36:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/518",
+  "body": "`MetadataLoaderContractSchema` now requires `protocol` and `capabilities` fields, but test fixtures were not updated.\n\n## Changes\n\n- Added `protocol` field to test contracts ('file' and 'http')\n- Added `capabilities` object with read/write/watch/list flags to both test cases\n- Added assertions to verify `protocol` field parsing\n\n```typescript\nconst contract = {\n  name: 'filesystem',\n  protocol: 'file',  // Added\n  capabilities: {     // Added\n    read: true,\n    write: true,\n    watch: false,\n    list: true,\n  },\n  supportedFormats: ['json', 'yaml', 'typescript'] as const,\n};\n```\n\n2 failing tests → all 3064 tests passing.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 发一个补丁\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

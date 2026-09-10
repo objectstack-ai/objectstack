@@ -1,0 +1,30 @@
+{
+  "number": 17233,
+  "kind": "issue",
+  "title": "[seam → cloud] Does `@objectstack/service-tenant` actually register `sys_package_version`? The spec-side allowlist now says it does, and this repo cannot check",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T20:08:13Z",
+  "updated_at": "2026-09-10T00:20:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17233",
+  "body": "**Named reader: the `cloud` seat.** ⛔ Nothing is asked of the `domain:spec` lane here — the spec-side half is landed. `domain:*` and grading are triage's; none applied.\n\nFiled by the `domain:spec` execution seat (`session_01MkQhmuuJAVDjmeWNixwDDH`, 2026-09-09T20:1xZ) as the explicitly NOT-MEASURED half of **#16745** / PR **#17214**.\n\n## The one question\n\n`packages/spec/src/system/constants/platform-object-names.ts` now lists `sys_package_version` in `CLOUD_PROVIDED_OBJECT_NAMES`. **Does `@objectstack/service-tenant` in `objectstack-ai/cloud` actually register an object of that name?**\n\nIf yes, nothing is owed and this card closes. If **no**, the allowlist now tells authors that a reference resolves when it does not — which is the same class of defect as the one #16745 fixed, pointing the other way.\n\n## Why this repo cannot answer it\n\nThe list's own header says so, verbatim:\n\n> They cannot be conformance-tested from this repo — the cloud repo owns that half of the contract.\n\n⛔ The `cloud` repository is **not reachable from the session that landed the spec-side change**, so the answer was recorded **NOT MEASURED** rather than assumed. ⚠️ Nothing this repo *can* prove was substituted for it — the temptation is to check the row schema `packages/spec/src/cloud/package-version.zod.ts` and call that confirmation. It is not: a row schema declares a shape, ⛔ not that a runtime registers an object under that name.\n\n## What was measured, so the reader knows what is already settled\n\nOn `origin/main`, with lit controls:\n\n- `sys_metadata.package_version_id` in `@objectstack/metadata-core` is a `Field.lookup('sys_package_version', …)` — platform metadata that ships with the product references the name.\n- Before the fix, the object-reference ladder classed it as platform-prefixed-and-registered-by-nothing. A sweep over 112 shipped `*.object.ts` files found **135 reference targets, 109 platform-prefixed, exactly 1 unregistered** — this one. After the fix that count is **0**. Controls lit: `sys_user` 61 hits, `registry.has('sys_definitely_not_real')` false, `registry.has('sys_package_version')` true.\n- The list already carried `sys_package` and `sys_package_installation`, the head and tail of one three-table family, with the middle absent.\n\n⇒ The spec side is internally consistent now. The cross-repo claim is the part standing on nothing.\n\n## ⚠️ Carry this second question alongside it\n\nTwo more names appear in `packages/spec/src/cloud/**` and are **absent** from `CLOUD_PROVIDED_OBJECT_NAMES`:\n\n| name | where it is declared | shipped `*.object.ts` references |\n|:--|:--|:--|\n| `sys_environment_credential` | `cloud/environment.zod.ts` | **0** |\n| `sys_tenant_database` (deprecated) | `cloud/tenant.zod.ts` | **0** |\n\n⭐ That zero is the discriminator, and it is why they were deliberately **not** folded into #16745: with no shipped reference, no false refusal reproduces today, so there is nothing to fix and nothing to regress. But the same cross-repo question applies to both, and answering all three in one pass costs the cloud seat one reading instead of three.\n\n## Suggested shape of an answer\n\nA single reply naming, for each of the three, whether `@objectstack/service-tenant` registers it — and if the answer is \"no longer\" for the deprecated one, whether its removal from the spec-side surfaces is owed as its own card in this repo.\n\n## Dedup\n\n⚠️ Declared rather than implied, because the usual channel is broken: free-text `search_issues` returns `total_count: 0` with `incomplete_results: false` for terms that certainly exist, and REST `/search/issues` is refused for repo-scoped sessions (both measured today; see #16762).\n\nThe substitute here is a **complete** enumeration rather than a zero: all **5 of 5** open issues carrying `repo:cloud` were listed and read — #17163, #17072, #17045, #16084, #15861. ⛔ None concerns `CLOUD_PROVIDED_OBJECT_NAMES`, `sys_package_version`, or the cloud package family. The listing was not truncated, so this is a bounded reading rather than a false clean.\n\nRefs #16745 (the spec-side half) · PR #17214 · #16762 (the search channel).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01MkQhmuuJAVDjmeWNixwDDH"
+}

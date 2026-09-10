@@ -1,0 +1,29 @@
+{
+  "number": 9659,
+  "kind": "issue",
+  "title": "Four more `@objectstack/*` packages still reach the Console bundle from objectui's lockfile — the same publish-ordering trap #8134 closes for `spec`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-18T14:29:22Z",
+  "updated_at": "2026-08-27T17:00:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9659",
+  "body": "Filed unassigned as an out-of-scope finding from the #8134 implementation round (the `OBJECTSTACK_SPEC_DIST` injection). #8134 asked its dev to enumerate every `@objectstack/*` package that reaches the console's vendor bundle and report which are resolved from objectui's lockfile rather than from this workspace. This is that list. ⛔ Nothing here is addressed by that PR, by design — it injected `spec` only.\n\n## The shape, restated once\n\n`scripts/build-console.sh` builds the console at the pinned objectui SHA with `pnpm install --frozen-lockfile`. Every `@objectstack/*` package objectui declares therefore resolves to the **last published tarball**, never to this workspace. For any such package, a change made here is invisible in the shipped console until three ordered cross-repo steps complete: publish, objectui lockfile refresh, console pin bump. The framework-side card closes green the whole time.\n\nInjection is the escape hatch, and it is now used twice: `OBJECTSTACK_CLIENT_DIST` (pre-existing) and `OBJECTSTACK_SPEC_DIST` (#8134).\n\n## Measured inventory\n\nMeasured in the real build tree (`.cache/objectui-82a94170c405`) at pin `82a94170c405`, framework `origin/main` @ `40162f1e2`:\n\n| package | installed | objectui workspace packages declaring it | injected from this tree? |\n|:--|:--|--:|:--|\n| `@objectstack/spec` | 17.0.0 | 30 | ✅ #8134 |\n| `@objectstack/client` | 17.0.0 | 2 | ✅ pre-existing |\n| `@objectstack/formula` | 17.0.0 | 2 | ❌ **exposed** |\n| `@objectstack/lint` | 17.0.0 | 1 | ❌ **exposed** |\n| `@objectstack/core` | 17.0.0 | 0 (transitive) | ❌ **exposed** |\n| `@objectstack/sdui-parser` | 17.0.0 | 0 (transitive) | ❌ **exposed** |\n\nAll six are installed from npm into the build tree's pnpm store. So **4 of 6 remain** on the publish-ordering trap after #8134.\n\n`@objectstack/lint` is confirmed to actually reach the console bundle, not merely to be installed: the vite build resolves it and emits browser-externalization warnings naming its `dist/index.js` by path, on every console build.\n\n## Why this is a `finding` and not a bug\n\n⚠️ No user-visible break is measured for any of the four. The exposure is real but latent, and the severity is not uniform:\n\n- `spec` was the acute one precisely because it is the **authorable surface the Studio designer validates against** — a stale copy turns a freshly declared key into an \"unrecognized key\" banner. That property does not transfer automatically to the other four.\n- `core` and `sdui-parser` are transitive with zero direct import sites in objectui, so their bundled surface is whatever `client`/`spec`/`lint` drag in.\n- `formula` (2 declarers) and `lint` (1) are directly declared and the more plausible next instance.\n\nThe right next step is a judgement about **which of the four can carry an authoring-visible surface at all**, not a reflexive fourfold injection — each injection adds a hook that must exist on the objectui side (spec's needed `objectui#4854`, a subpath-aware resolver, because a plain prefix alias cannot serve an exports map).\n\n## Suggested scoping, not a recommendation\n\n1. Decide per package whether its console-visible surface can go stale in a way an author or admin would notice. Only those need injection.\n2. If more than one does, the third injection is the point to stop copying the block and factor `build-console.sh`'s guard/export/assert triple into a loop over a declared list — two is a coincidence, three is a pattern.\n3. `scripts/assert-console-spec-injection.mjs` (added by #8134) derives its probes from the two package trees on disk and is not spec-specific in principle; it could generalize.\n\nRefs: #8134 (the `spec` injection and the measurement that produced this list), `objectstack-ai/objectui#4854` (the hook the spec injection needed)."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 16127,
+  "kind": "issue",
+  "title": "[repo:objectui] Master-detail form's batch save sends owner_id on every parent and child operation, so a permitted line edit 403s with \"'owner_id' is system-managed\" — the list view's inline grid sends only the dirty cell and succeeds",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p1",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T02:29:22Z",
+  "updated_at": "2026-09-06T03:06:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16127",
+  "body": "## Summary\n\nThe master-detail form (`inlineEdit: 'grid'` on a child's `master_detail` field, or a form view `subforms` entry) saves parent + children through `POST /api/v1/batch`, and the payload it builds includes **`owner_id` in every operation** — parent and each child row — whether or not ownership was touched. The server correctly refuses that field for any caller without the transfer grant, so the whole atomic batch fails with 403 and the user cannot save an edit they were fully permitted to make.\n\nNote this is a *different* payload defect from #15259 (which is about field-level-security-denied fields): here the master-detail grid actually picks the right business columns — it sends only the editable cells and does not send the FLS-denied ones — and is stopped by a system-managed field the form adds on its own.\n\n## Minimal reproduction\n\nPlatform 17.2.0, `objectstack dev`, SQLite, single tenancy, `requires: ['sharing']`.\n\n- Parent `kpi_entry_sheet`, child `kpi_entry_line` with `sheet: Field.masterDetail('kpi_entry_sheet', { inlineEdit: 'grid', inlineColumns: [...] })`.\n- Position `reporter` permission set: both objects `allowEdit: true`, `writeScope: 'own'`, `allowTransfer` absent (false), `modifyAllRecords` false. Rows are visible/editable to this user through a sharing rule (`sys_record_share`, `access_level: 'edit'`), not through ownership.\n\nSteps as the `reporter` user:\n\n1. Open the parent's edit form (any surface that renders it — a related list row menu `Edit`).\n2. Change one cell in the inline child grid (`actual_value`) — touch nothing else.\n3. Click Update.\n\nObserved request:\n\n```\nPOST /api/v1/batch\n{\"operations\":[\n  {\"object\":\"kpi_entry_sheet\",\"action\":\"update\",\"id\":\"QYH…\",\"data\":{\"owner_id\":\"ptc…\",\"plan\":\"_LH…\",\"subject\":\"bu_sw_sales\",\"subject_type\":\"department\",\"status\":\"draft\",\"pending_action\":null,\"action_reason\":null,\"remark\":\"…\"}},\n  {\"object\":\"kpi_entry_line\",\"action\":\"update\",\"id\":\"AVy…\",\"data\":{\"owner_id\":null,\"sheet\":\"QYH…\",\"plan_indicator\":\"fAV…\",\"actual_value\":1000,\"last_adjustment\":null,\"remark\":null}},\n  {\"object\":\"kpi_entry_line\",\"action\":\"update\",\"id\":\"rgQ…\",\"data\":{\"owner_id\":null,…,\"actual_value\":1100,…}},\n  {\"object\":\"kpi_entry_line\",\"action\":\"update\",\"id\":\"tfr…\",\"data\":{\"owner_id\":null,…,\"actual_value\":1200,…}}],\n \"atomic\":true}\n```\n\nObserved response:\n\n```\n403 {\"code\":\"PERMISSION_DENIED\",\n     \"error\":\"[Security] Access denied: 'owner_id' on 'kpi_entry_line' is system-managed — changing record ownership on update requires the transfer grant (allowTransfer or modifyAllRecords)\"}\n```\n\nControls with the same session on the same rows, isolating `owner_id` as the sole cause (the child rows' `owner_id` is `null` before and after — the form is resending the value it read):\n\n```\nPOST /batch  operations[].data = {actual_value: 900}                 → 200, all three rows saved, scoring hooks ran\nPOST /batch  operations[].data = {actual_value: 950, owner_id: null} → 403 (same message)\nPATCH /api/v1/data/kpi_entry_line/<id> {\"actual_value\": 95}          → 200\n```\n\nThe same user editing the same field through a list view's inline grid succeeds, because that path sends one PATCH per row carrying only the dirty cell.\n\n## Expected\n\n- The master-detail batch should send only **dirty** fields, and in no case emit server-managed / injected fields (`owner_id`, `owning_business_unit_id`, `organization_id`, `created_*`, `updated_*`). Resending an unchanged system-managed value is indistinguishable from an ownership transfer attempt at the security layer, so a read-only round-trip of the record turns into a permission error.\n- At minimum, `owner_id` should be stripped from update operations when its value is unchanged — a no-op write should never require the transfer grant.\n- Secondary: the console surfaces this as a generic save failure; the message naming the refused field only appears in the network response.\n\nBecause of this, a master-detail form is currently unusable for every role except one holding `allowTransfer` / `modifyAllRecords` — i.e. exactly the line-entry roles the feature exists for.\n\n## Environment\n\n`@objectstack/*` 17.2.0 (runtime, console, spec) · Node 22 · better-sqlite3 · single tenancy · SharingServicePlugin active · Chromium 1440×900 · zh-CN. App: objectstack-ai/kpi (`kpi_entry_sheet` / `kpi_entry_line`, position `kpi_dept_reporter`)."
+}

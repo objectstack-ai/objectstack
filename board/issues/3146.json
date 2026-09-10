@@ -1,0 +1,30 @@
+{
+  "number": 3146,
+  "kind": "issue",
+  "title": "Implement soft delete (recycle bin): `enable.trash` / `softDelete` are spec-only with zero runtime readers",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "enhancement",
+    "status:parked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-17T14:07:26Z",
+  "updated_at": "2026-08-19T07:28:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3146",
+  "body": "## Current state\n\nThe spec declares soft-delete capability in two places, but **neither has any behavior-changing reader** — every delete today is a physical hard delete at the driver level.\n\n- `enable.trash` (default `true`, described as \"Enable soft-delete with restore capability\") — `packages/spec/src/data/object.zod.ts` (~L110)\n- `SoftDeleteConfigSchema` (`enabled` / `field: 'deleted_at'` / `cascadeDelete`) — `packages/spec/src/data/object.zod.ts` (~L288)\n- The permission model also reserves a Restore (soft-delete recovery) semantic (`packages/spec/src/security/permission.zod.ts`)\n\nThe June 2026 liveness audit (`docs/audits/2026-06-objectschema-property-liveness.md`) confirms:\n\n> `trash` is one of the 10 flags with **zero behavior-changing readers** in either repo; `softDelete` ↔ `enable.trash` — duplicated, **both dead**.\n\nThe default `trash: true` is actively misleading: schema authors reasonably assume deleted records are recoverable, but they are gone.\n\nNote: `deleted_at` on some identity objects (e.g. `sys_user`) is a better-auth convention local to those objects, not a platform mechanism.\n\n## Proposal\n\nImplement platform-level soft delete honoring the existing spec surface:\n\n1. **Delete path**: when soft delete is enabled for an object, `delete` stamps the configured timestamp field (default `deleted_at`) instead of removing the row.\n2. **Query path**: default-scope all reads to exclude soft-deleted rows; provide an explicit opt-in to include/only-trashed (recycle-bin views).\n3. **Restore**: a restore operation clearing the marker, gated by the reserved Restore permission.\n4. **Purge**: a real (physical) delete for emptying the trash, plus optional retention/TTL via the ADR-0057 LifecycleService.\n5. **Cascade**: honor `cascadeDelete` for related records (or explicitly descope it for v1).\n6. **Spec reconciliation**: collapse the duplicated `enable.trash` vs `softDelete` surface into one canonical config (and fix the misleading `trash: true` default until the runtime actually enforces it).\n\nOpen questions: interaction with unique indexes (soft-deleted rows still occupy unique keys), lookup integrity when a target is trashed, and REST/console surface for the recycle bin."
+}

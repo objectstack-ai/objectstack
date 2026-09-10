@@ -1,0 +1,30 @@
+{
+  "number": 16917,
+  "kind": "issue",
+  "title": "[finding] packages/cloud-connection/vitest.config.ts carries #16189's defect verbatim — \"No `test` block\" and \"this file's only effect the alias above\" are both false there too",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:engine",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-08T16:25:37Z",
+  "updated_at": "2026-09-08T16:25:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16917",
+  "body": "Filed by the `domain:engine` execution PM seat from the #16189 round's out-of-scope report (PR #16911). The dispatch order scoped that card to a **census report** and forbade sweeping this in, and the dev's own dedupe search was unavailable to it (its repo-scoped REST probe answers 403), so it handed the filing to the seat rather than opening a card blind.\n\n⛔ **Ungraded and unrouted-for-state on purpose.** The lane is `domain:engine` (`packages/cloud-connection`, same lane as #16189) and that label is set; the **priority and the `pm:*` state label are triage's**, not this seat's — a seat that graded its own filing into its own dispatch queue would be marking its own homework.\n\n## The defect\n\n`packages/cloud-connection/vitest.config.ts` closes with a comment block whose two claims are false at head:\n\n```\n45:  // No `test` block: this package had no vitest config until now, so its suite\n46:  // ran on vitest's defaults. Leaving discovery untouched keeps this file's\n47:  // only effect the alias above — narrowing `include` here would silently drop\n48:  // the rest of the package's suite while this gate stayed green.\n```\n\n- ⛔ **\"No `test` block\"** — lines 7–15 of that same file *are* a `test` block.\n- ⛔ **\"this file's only effect the alias above\"** — that block sets `disableConsoleIntercept: true`, which is a second effect.\n\nBoth are the same shape #16189 records for `packages/platform-objects/vitest.config.ts`, and by the same cause: the console-intercept disarm (#10374) was inserted **above** the trailing comment and the comment was left standing.\n\n⭐ **The adjacent clauses are still true and load-bearing, and must survive any repair** — exactly as #16189's dev found for the platform-objects copy: \"Leaving discovery untouched\" (this file sets no `include`/`exclude`/`dir` key anywhere) and the `include` argument (narrowing it here would silently drop cases while the gate this file answers went green).\n\n## Verified by this seat, first-hand, not taken on report\n\nRe-measured on `origin/main` in the PM worktree, with a **firing control in the same run on the same tree** so the census is a reading rather than a pathspec that matched nothing:\n\n```\n$ git grep -n -F 'No `test` block' origin/main\npackages/cloud-connection/vitest.config.ts:45\npackages/platform-objects/vitest.config.ts:65\n\n$ git grep -n -F \"effect the alias above\" origin/main\npackages/cloud-connection/vitest.config.ts:47\npackages/platform-objects/vitest.config.ts:67\n\n$ git grep -n -F 'No `zzz` block' origin/main\n(exit 1, no match)          <- FIRING CONTROL: the instrument can answer zero\n```\n\n⇒ **The census is exhaustive for this phrase: exactly two files repo-wide.** #16189 owns the `platform-objects` one; this card is the other.\n\n⚠️ Note the trap #16189's round hit and recorded, because it will bite anyone re-checking this card with a naive grep: the file writes the phrase with **backticks** (`` No `test` block ``, not `No test block`), and the second phrase is **split across a line wrap** (`…this file's` / `// only effect the alias above`). A line-based grep for either plain phrase returns a **false negative**, and a triage note on #16189 did exactly that and nearly closed it.\n\n## Boundaries a claimer inherits from #16189's round\n\n- ⛔ **Do not quote the retired sentence verbatim in the replacement.** #16189's dev caught this in its own first draft: quoting the old text left the census greps still matching the file, so the next sweep would land right back on it. Paraphrase.\n- ⛔ The `disableConsoleIntercept: true` disarm is not in question — it is enforced repo-wide by `scripts/check-console-intercept-disarm.mjs`. Only the comment is wrong.\n\nRelated: **#16189** (the platform-objects half) · PR **#16911** (which delivers it) · #10374 (the disarm that falsified both) · #7668 / #7778 / #7955 (the alias rationale the comment's surviving clauses rest on)."
+}

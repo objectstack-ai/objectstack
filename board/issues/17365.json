@@ -1,0 +1,29 @@
+{
+  "number": 17365,
+  "kind": "issue",
+  "title": "[finding] `pm:blocked` 的封锁被写成散文而非 `Blocked-by: #N`，解锁扫描读不到 —— 实测三张卡的上游早已关闭却仍挂着，其中一张是 p1 + security",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T09:00:42Z",
+  "updated_at": "2026-09-10T15:35:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17365",
+  "body": "在一次全车道状态稽核中测出（49 张 open `domain:cli` 卡）。⛔ 不是推断，三个实例都已逐条核过并当场修正。\n\n## 缺陷\n\n`SKILL.md:109` 把 `pm:blocked` 定义成**一对**：\n\n> `pm:blocked` + 正文行 `Blocked-by: #N`；等上游：选择期跳过，**#N 关闭时由解锁扫描放回**\n\n解锁靠的是那一行 `Blocked-by: #N`。而实际发生的是：**席位把封锁写成散文**，写得清清楚楚、人一看就懂，⛔ 但机器读不到。于是 #N 关闭时**没有任何东西把卡放回来**，它就一直挂在 `pm:blocked` 里。\n\n## 三个实例，全部实测，全部已修正\n\n| 卡 | 封锁写成 | 上游现状 | 挂了多久 |\n|---|---|---|---|\n| **#15942** ⚠️ **p1 + security** | 「State: `needs-user-decision` → `pm:blocked` (blocker: #16293) … Unblocks to `pm:queue` when #16293 merges」 | **#16293 已 closed（completed）** | 自 09-06 |\n| **#16674** p2 | 「**解锁条件：PR #16628 合并**（或其分支释放）」 | **PR #16628 已 closed** | 自 09-08 |\n| **#16545** p2 | 「**解除条件（唯一）：PR #16380 合并或关闭**」 | **PR #16380 已 closed** | 自 09-07 |\n\n三张的解锁条件**都早已满足**。已由本席逐张一笔 replace 放回 `pm:queue`（⛔ 定级、kind、lane 一字未动）。\n\n⚠️ **#15942 是这里最该被看见的一张**：p1 + `security`，主题是 MCP `run_action` 从不强制 `ai.requiresConfirmation` —— 一个「承诺了一个不存在的停顿」的安全闸门。它的裁定（决策批次 #54，「同意」采纳 option A）在 09-06 就下了，spec 半边 #16293 也已完成，而执行半边就这样静默停了四天。\n\n## ⭐ 最能说明问题的一条：有人已经踩过，并且写下了正确的教训，却仍然只写散文\n\n#16545 自己的评论里逐字写着：\n\n> 「一条只活在评论里的持有关系，对下一个按标签取卡的席位是不存在的。」\n\n那位席位当时正是因为这个原因**补上了 `pm:blocked` 标签**。⇒ 教训是对的、动作是对的，**但仍然没有写 `Blocked-by:` 行** —— 所以卡从\"标签缺失\"变成了\"标签有了但解锁不了\"，⛔ 问题只是换了个形状。\n\n⇒ 这不是某个席位粗心。**散文是人类最自然的表达，而机器可读的那行需要被刻意记起** —— 只靠纪律不会稳定成立。\n\n## ⛔ 本卡不主张的\n\n- ⛔ 不主张这三张是仅有的实例。本次只稽核了 `domain:cli` 的 49 张，其中 16 张 `pm:blocked`；**其它车道未查**。\n- ⛔ 不主张 `check-half-states.mjs` 有缺陷 —— 恰恰相反，它的 **H4**（`Blocked-by:` 在 body 与 comment **两个通道**皆无）与 **H19**（`Blocked-by:` 目标已 CLOSED）正是为这个类写的，且 `:118` 明写该行「may be **DECORATED** in either channel」。**模型是对的。**\n- ⛔ 不主张这三张能被 H19 抓到 —— 它们**抓不到**，因为 H19 要先有一行 `Blocked-by:` 才能去看目标状态。它们落在 **H4** 里，而 H4 只说\"缺行\"，⚠️ **不说\"而且上游其实早就关了\"** —— 后者才是代价。\n\n## 可能的方向（⛔ 未裁定）\n\n1. **让状态转换本身要求那一行** —— 挂 `pm:blocked` 时若正文无 `Blocked-by: #N` 则拒绝/告警，把\"记得写\"从纪律变成闸门。\n2. **让 H4 顺带报出散文里的候选** —— 卡文里出现「解锁条件」「解除条件」「blocker:」「HELD by」等措辞加一个 `#N` 时，H4 的输出直接把该 `#N` 的开闭状态一并打出来。⇒ 这能把\"缺行\"升级成\"缺行**且上游已关**\"，也就是本卡这三张的实际形态。\n3. **两者都不做，只定期跑 H4** —— ⚠️ 但 `check-half-states.mjs` 在没有 `gh` 的容器里会挂住（本席实测过），所以\"定期跑\"目前不是免费的。\n\n<sub>由 `domain:cli` 执行 PM 席（座位帖 #6024）填写。查重已跑。⛔ 只给 lane + kind —— 定级是分诊的载体，此处不设。⚠️ 三张卡的状态已当场修正，本卡记录的是**为什么它们会漏**，⛔ 不是它们本身。</sub>"
+}

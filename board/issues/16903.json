@@ -1,0 +1,32 @@
+{
+  "number": 16903,
+  "kind": "issue",
+  "title": "spec/data: getDriverConfigJsonSchemaById returns a truthy NON-schema (an empty object, or a string) for an off-vocabulary driver id that names an Object.prototype member",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T15:29:08Z",
+  "updated_at": "2026-09-10T15:29:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16903",
+  "body": "Found while working #15315 (same defect family, different file and different lane call). ⛔ Out of scope there: that card's claimed file surface is `packages/spec/src/shared/value-domain.zod.ts` and its test, and the change here is **not** mechanical — see \"Why this was left out\" below.\n\n> Note: generic type brackets are written with **square** brackets throughout this issue (`Record[string, unknown]` stands for the angle-bracket spelling) so the body survives GitHub's body sanitiser intact.\n\n## What was measured\n\n`packages/spec/src/data/driver/config-registry.zod.ts:382`\n\n```\nexport function getDriverConfigJsonSchemaById(id: BuiltinDriverId): Record[string, unknown] {\n  return DRIVER_CONFIG_JSON_SCHEMAS[id]();\n}\n```\n\n`DRIVER_CONFIG_JSON_SCHEMAS` is an object literal, so it inherits `Object.prototype` and an off-vocabulary `id` resolves a prototype member. Measured against the BUILT artifact (`packages/spec/dist/data/index.mjs`) on the repo's Node 22 baseline (v22.22.2):\n\n| `id` argument | result | `typeof` |\n|:--|:--|:--|\n| `memory` (canonical) | the JSON Schema | `object` |\n| `toString` | `'[object Object]'` | **`string`** — the declared return type is an object |\n| `constructor` | `Object()`, an empty object | `object` — an empty schema that validates ANYTHING |\n| `valueOf` | the registry object itself | `object` |\n| `__proto__` | throws `TypeError` | — |\n| `nope` | throws `TypeError` | — |\n\nTwo of these are worse than a throw. `constructor` hands back `{}` — an **empty JSON Schema**, which accepts every config it is asked to judge; `toString` hands back a **string** where the signature promises an object, so a consumer that indexes into it gets `undefined` rather than an error.\n\n## Why it is worth filing rather than shrugging at\n\n`getDriverConfigJsonSchemaById` is **published**: it is in `packages/spec/api-surface/data.json:728`. The parameter is typed `BuiltinDriverId`, so in-repo this is unreachable — but \"unreachable in-repo\" is not \"unreachable\". A plain-JS consumer reaches it with zero type checking, and the function's **own TSDoc** already anticipates ids that did not come from source:\n\n> Takes a CANONICAL id (not an alias) so a caller enumerating drivers cannot quietly get `undefined` for a spelling it thought was covered; use `resolveDriverId` first when the id came from authored metadata.\n\nThat doc is about the alias/canonical distinction, and it names exactly the metadata-sourced path on which `constructor` and `toString` show up. What the doc promises a careless caller is a quiet `undefined`; what the code actually does for those two words is hand back a schema-shaped object that accepts everything.\n\nThe sibling accessor twelve lines above, `getDriverConfigSchema`, is **not** affected — it returns `DRIVER_CONFIG_SCHEMAS[id]` without calling it, declares an optional return, and routes through `resolveDriverId` first.\n\n## Why this was left out of the #15315 PR\n\nThe bounded in-place exemption wants a change whose shape is already settled. This one is not:\n\n- `isValueDomainMember` returns `boolean`, so \"refuse\" has an obvious spelling — `false` — and that is a pure narrowing.\n- `getDriverConfigJsonSchemaById` returns a non-optional object. There is no in-band refusal value. Closing it means **either** widening the declared return to an optional (a published signature change) **or** throwing a typed refusal (changing published behaviour for the `toString` / `constructor` / `valueOf` callers who today get an object back).\n\nBoth are decisions with an owner, and one of them widens a published signature — so this wants triage, not a drive-by rider on another card's PR.\n\n## Suggested shape\n\nAn `Object.prototype.hasOwnProperty.call(DRIVER_CONFIG_JSON_SCHEMAS, id)` guard, with the refusal spelling chosen by whoever takes it — an optional return, or a thrown refusal. Plus a pin whose POPULATION contains `toString`, `constructor`, `valueOf`, `__proto__` and a plain unknown word: the existing tests iterate canonical ids only, which is exactly the population that behaves.\n\nFiled unassigned and unlabelled for triage.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

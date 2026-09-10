@@ -1,0 +1,31 @@
+{
+  "number": 17072,
+  "kind": "issue",
+  "title": "[seam → cloud] Control plane stamps `email_verified: true` into a tenant's owner seed without reading the creator's verification state — the verification gap #11977's fork measured",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "priority:p2",
+    "repo:cloud",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T05:51:32Z",
+  "updated_at": "2026-09-09T05:51:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17072",
+  "body": "**Named reader: the `repo:cloud` execution seat (#6026), at its queue-scan step.** Seam card: the fix lands in `objectstack-ai/cloud`, unreachable from the filing session. Filed by the director seat (summon #20, `session_01Tep4AYXZvyBA7jsvne5KZV`, `os-bill`) executing the maintainer's ruling A′ on #11977 (decision batch #109, 2026-09-09T05:5xZ, reply verbatim 「11977 同意」): the platform-admin anchor question is superseded by ADR-0131 D5; this residual defect is split out as its own card.\n\n## What was measured (cloud seat, 2026-09-03, #11977 comment 5521221594 premise 3 — cloud `58c20e2c`, pin `655b106c`; ⛔ not re-measured here, cloud is out of reach for this seat)\n\n- `environment-provisioning.ts:1064-1071` copies the environment creator's email into the tenant's owner seed **without reading `email_verified`**.\n- `environment-owner-seed.ts:91` stamps `email_verified: true` **unconditionally** into the tenant database.\n- The tenant-side verification check (`env-owner-admin-grant.ts:143-147`) therefore reads a verification the control plane *asserted*, not one that happened. Under ADR-0131 D5 the tenant's platform-admin anchor is the first-user promotion row owned by the Default Organization, so this stamp is what decides who becomes that first verified user.\n\n## Acceptance\n\n1. The owner seed carries the creator's **actual** `email_verified` state (or the seed is written only after verification succeeds); a control-plane account whose email is unverified does not arrive in the tenant as verified. Pin both directions.\n2. Existing tenants seeded with a false `true` are reported (count + environment ids) by a read-only census; whether to re-verify them is the cloud seat's call to put on the card, ⛔ not a silent migration.\n3. No change to the anchor itself (ADR-0131 D5) and none to `app.allowOrgOverride` or the platform-admin rung derivation (#11663 / #13514 L4).\n\nGoverning text: ADR-0131 D5; #11663 (platform-admin re-anchor; verified-email premise of L4/L8); #11977 ruling A′ (this card's origin).\n\nBlocked-by: none."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 17167,
+  "kind": "issue",
+  "title": "metadata-protocol: the organization probe records 'unknown error' for an empty message channel, unlike the other three raw-exec sites",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T14:01:54Z",
+  "updated_at": "2026-09-10T14:41:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17167",
+  "body": "## The divergence\n\n`packages/metadata-protocol/src/migrations/seed-tenancy-backfill.ts` keeps\n\n```ts\norganizationProbeError = operatorFacingErrorText(e) || 'unknown error'\n```\n\n— the only surviving `'unknown error'` in the file. At the other three `operatorFacingErrorText` sites in the same file the record is the helper's return value as is.\n\nSo for an **empty** operator-facing channel that one site does not follow the rule the surrounding documentation states.\n\n## Measurement\n\nFrom the round-4 contract review of PR #17073 (isolated subagent at `CONTRACT_REVIEW_TIER`, verdict adopted verbatim by the `domain:engine` seat), measured at `82ee689cdb2aafb8e4a478ef0afe28b0ed88eb4d` by driving `backfillSeedTenancy` with the site test's own `seamExec` fixture and throwing at the `ORGANIZATION_TABLE` probe:\n\n| thrown | recorded |\n|---|---|\n| `''` | `'unknown error'` |\n| `[]` | `'unknown error'` |\n| `Error` with `name` `''` and `message` `''` | `'unknown error'` |\n| `new Error('boom')` *(control)* | `'boom'` |\n| `throw ''` at the pinned collision-probe site *(control)* | `''` |\n\nBoth controls fire, so the reading is not an artefact of the harness.\n\n## The question this card carries\n\nShould the fallback be **removed**, so the site records what the other three record (`''` for an empty channel), or is `'unknown error'` a **deliberate** choice for a migration record, where an empty string in a persisted probe result is worse than a placeholder?\n\nThis is a behaviour question, not a wording question. Whoever takes it should also check whether any consumer of `organizationProbeError` distinguishes empty from absent.\n\n## Why this is not being settled in PR #17073\n\n#17073 is code-free by construction: at `82ee689cd` its 84 changed `.ts` lines are 62 comment lines and 22 test-title lines, **0 other**, and the runtime bundles (`packages/types/dist/index.mjs`, `dist/index.js`) are byte-identical across all four verification rounds. Removing the fallback is a behaviour change; folding it in would discard that invariant and the four rounds of verification resting on it.\n\n#17073 instead corrects its own prose to **name** this site's surviving fallback, in the three carriers that currently assert otherwise — the metadata-protocol docblock's after-state, the \"at every one of these sites\" title, and `.changeset/operator-facing-raw-exec-cause-text.md` `:79-84`, which ships as release notes.\n\n## Provenance\n\nFound by the round-4 contract-review subagent on PR #17073 as blocking item 2; the verdict comment on that PR carries the full reading. Related: card #16657."
+}

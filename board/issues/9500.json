@@ -1,0 +1,29 @@
+{
+  "number": 9500,
+  "kind": "issue",
+  "title": "[v3 migration 4/4] Verify the migrated release path inside the next real RC window",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-18T05:35:01Z",
+  "updated_at": "2026-08-18T05:35:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9500",
+  "body": "Sub-issue of #9465.\n\nBlocked-by: #9498\n\nRestart-when: `.changeset/pre.json` exists on `origin/main` with `\"mode\": \"pre\"` — i.e. the next RC window has been entered.\n\nOn hold by design, not by neglect. Everything #9497 and #9498 measure happens in a throwaway clone or on a PR; the behaviour this epic exists to protect — a real cut, over a real accumulated changeset set, under the enforced `cut-rc.yml` allowlist — only exists inside a genuine pre-mode window. A migration that is green on a PR and wrong at cut time is exactly the failure mode we are buying insurance against, so the insurance is not claimed until it is testable.\n\n## What to check when it fires\n\n- The **first** `pnpm run version` of the window: does it produce the file set #9497 measured, and does `cut-rc.yml`'s allowlist accept it without an override?\n- Where consumed changesets actually go (`.changeset/pre/` vs the root), and whether the count matches what the migrated gates expect.\n- `check-changeset-no-major.mjs` against a live pre-mode repo: does its exemption behave as the migration assumed, and does a typo-sized PR in the window see a sane verdict rather than the 171-file absurdity the old shape produced?\n- `objectui-changeset-digest.mjs` against the live `pre.json`.\n- At window close: the post-exit state, which is where #8654's self-test failure lived.\n\n## Non-goals\n\nThis card **observes** a release window; it does not create one. No pre-mode entry or exit, no publish, no tags, no release-workflow dispatch. If something is wrong, the deliverable is a precise report plus a fix card — not a hot fix applied mid-cut.\n\n## Acceptance\n\n- A verification report on #9465 covering each bullet above with real output from the window.\n- Any divergence from #9497's rehearsal filed as its own card with the measurement, and linked here — a rehearsal that mispredicted reality is a finding worth keeping, not an embarrassment to bury.\n"
+}

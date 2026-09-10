@@ -1,0 +1,30 @@
+{
+  "number": 8897,
+  "kind": "issue",
+  "title": "check-durability-degradation-log-level: `collectLoggedLevels` only recognises a logger named logger/log/console, so a catch that reports through an injected logger reads as silent to BOTH rules",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:on-hold",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-15T15:46:14Z",
+  "updated_at": "2026-08-25T11:14:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8897",
+  "body": "Restart-when: a seam reporting through an injected receiver goes red with a \"silent\" message\n\n> ✅ **Discharged 2026-08-25 — the first restart disjunct has been consumed and is removed from the line above.**\n> It read `any PR touches scripts/check-durability-degradation-log-level.mjs (decide options 1/2/3 in that change)`. PR #12137 (fixes #11921) touched that file and **decided option 1**, recording it in the file itself under `## DECIDED, 2026-08-25 (#8897, option 1) — narrow on purpose, and recorded`, which quotes this card's own `Restart-when:` and states what option 1 costs.\n> It is removed because a consumed disjunct that stays on the line re-fires on **every** future PR to that gate, demanding a decision that has already been made — #12138's eventual fix would have tripped it first. The card stays `pm:on-hold` on its **second** condition, which has not fired and which the merged file calls \"the promote-immediately one\": if an injected-receiver seam ever goes red with a \"silent\" message, option 1 was wrong and the evidence says so out loud.\n> ⛔ Not closed. The misclassification this card records is still real and still latent — option 1 chose to document the narrowness, not to remove it.\n\n---\n\nObservation found while measuring for #8845. Unassigned. Not a claim. No behaviour is wrong on `main` today — filing so the narrowness is on the record rather than rediscovered.\n\nMeasured on `origin/main` @ `8664a2c`.\n\n## What I found\n\n`scripts/check-durability-degradation-log-level.mjs`, `loggerLevel()`:\n\n```js\nif (!receiverName) return undefined;\nreturn /^(logger|log|console)$/i.test(receiverName) ? level : undefined;\n```\n\nThe level vocabulary (`error`/`warn`/`info`/…) is matched against the method name, but the **receiver** must be spelled `logger`, `log`, or `console`. A logger reached through any other name is not a log as far as this file is concerned.\n\nThis is shared by both rules in the file, deliberately (`collectLoggedLevels`' header says so) — so the narrowness applies to the log-level rule's \"how loud?\" question and the read-seam rule's \"did it say anything at all?\" exemption at once.\n\n## The live example\n\n`packages/objectql/src/integrity/dangling-reference-audit.ts:547` — a catch that is careful and explicit about reporting:\n\n```ts\nreport.unreadableObjects.push(name);\nport.warn?.('[integrity] dangling-reference audit could not list an object', {\n  object: name, error: (err as Error)?.message ?? String(err),\n});\n```\n\nThe receiver is `port` (the audit's injected dependency bundle), so `collectLoggedLevels` returns an empty array and my census classified this seam as silent. It is not silent; it is one of the better-written seams in the scan roots.\n\n## Why it has cost nothing yet\n\nThe read-seam rule only consults the log exemption after it has found an invented answer, and this seam invents none — so the misclassification never reaches a verdict. It is latent, not active.\n\n## Why it is still worth recording\n\nThe direction of the error is the unsafe one for the read-seam rule specifically: a genuinely loud catch reads as silent, so if such a seam ever also returns an empty value it goes red for the wrong reason, and the message will tell the author to \"say something\" next to a line that already does. The author's cheapest response is a baseline entry, on a shrink-only ledger.\n\nWhether to widen it is a real judgement call, not an obvious yes: the receiver vocabulary is doing the same work `DURABILITY_CRITICAL_CALLEES` does elsewhere in the file — keeping a generic method name (`warn`) from matching anything that happens to spell it. Options I can see, none of them free:\n\n1. leave it, and note the narrowness in the header next to the other honest limitations;\n2. follow a same-file injected-logger parameter the way the file already follows same-file helper functions;\n3. declare additional receiver names explicitly, which is a second vocabulary to keep from going stale — the file's staleness checks exist because of exactly that.\n\nMy weak preference is (1) plus a header note, on the grounds that the file's existing answer to \"my reporter has an unusual shape\" is to follow a same-file helper, and (2) is the version of that which needs no new declared names.\n\n**→ Decided 2026-08-25 in PR #12137: option 1.** Note that the deciding PR's reasoning is *not* the filer's: options 2 and 3 widen an **exemption**, which is the unsafe direction for a rule whose value is that its self-description is true.\n\n## Related\n\n- #8845 — the measurement this came out of.\n- #5186 / #6451 — the read-seam rule and its prior extension.\n- #12137 / #11921 — the PR that consumed the first restart disjunct.\n- #12138 — the mirror-image under-count in the same recognizer; it would have tripped the removed disjunct."
+}

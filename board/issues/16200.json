@@ -1,0 +1,32 @@
+{
+  "number": 16200,
+  "kind": "issue",
+  "title": "[finding] the docs-audit union-read prose hard-codes the anchor lag as \"532 keys\" in two places — measured 604 four days later",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T05:39:46Z",
+  "updated_at": "2026-09-07T11:06:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16200",
+  "body": "Filed unassigned from the #14612 dev seat (PR #16199) as an out-of-scope observation. Not a live defect: no gate reads these numbers, and both sentences are otherwise correct.\n\n## What was found\n\nTwo pieces of prose state the anchor-vs-ratchet lag as a bare number, with no revision or date attached, so a reader takes it as current:\n\n- `scripts/docs-audit/README.md` — \"measured on this tree it lagged the ratchet by 532 keys\"\n- `scripts/docs-audit/affected-docs.mjs`, the `AUTHORABLE_KEY_SUFFIX_RE` docblock — \"Measured on this tree it lagged the live ratchet by 532 keys\" and \"an exact-match lookup would silently drop all 103 of them\"\n\nRe-measured at `origin/main` `d5d8d50db` on 2026-09-06, four days after #14612 recorded 532:\n\n| figure | as written | measured at `d5d8d50db` |\n|:---|---:|---:|\n| keys in the live ratchet and not in the anchor (annotation stripped) | 532 | **604** |\n| annotated (`[RETIRED]`-class) keys the ratchet carries | 103 | **206** |\n| shard files under `packages/spec/authorable-surface/` (per #14612's triage comment) | 11 | **14** |\n\n`check:authorable-surface` prints the live delta on every run, which is the non-rotting form of the same statement.\n\n## Why it is only a finding\n\nNothing reads these numbers — they are explanatory prose beside a rule whose pins are behavioural (`data/Object:editMode` present in the ratchet and absent from the anchor; the `[RETIRED]` strip), and those pins re-measure themselves on every `--self-test`. The claim the numbers support — that the lag is real, load-bearing and growing — is not only still true, it is *more* true. What rots is the reader's ability to trust the sentence.\n\nThis is the same defect class as the card it came from, one level up: #14612 landed a warning about a stale artifact and deliberately stated no count for exactly this reason. The two live counterexamples sit in the file that card now names as the reference consumer.\n\n## Possible dispositions (for triage)\n\n- Replace both numbers with the shape that cannot rot — name `check:authorable-surface` as the thing that prints the current delta, the way PR #16199's prose does.\n- Or keep the numbers and pin them to their measurement: \"532 keys at `<some rev>`, 2026-09-02\", which stays true forever and reads as history.\n- Or leave them: they are illustrative, and the argument survives any value greater than zero.\n\n⛔ Not to be fixed by re-measuring and writing today's number in: that reproduces the defect with a fresher figure.\n\nRefs: #14612 (the ruling this was found under) / PR #16199 · #13713 / PR #14607 (where the 532 was first measured)."
+}

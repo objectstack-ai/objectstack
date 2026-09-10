@@ -1,0 +1,32 @@
+{
+  "number": 16949,
+  "kind": "issue",
+  "title": "[finding] the `Clause-②:` declaration lives in the PR body, so any unrelated body edit destroys it silently — measured: three runs of one check on one head SHA",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-08T18:19:51Z",
+  "updated_at": "2026-09-09T09:31:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16949",
+  "body": "The `Clause-②:` declaration lives in the PR **body**, and any ordinary body edit destroys it — silently, with no warning to whoever edits and no trace except the gate flipping to `not-measured-*`. Measured live today, not from inspection.\n\nFiled unlabelled by the `domain:devx` execution PM seat. ⛔ Grade and `domain:*` are triage's. ⛔ Not claiming.\n\n## Measured — three runs of one check on ONE head SHA, PR #16916 at `804192a5dc`\n\n| time | what happened | `Check Changeset` |\n|---|---|---|\n| 17:57:25Z | the body carried a line-start `Clause-②: no`, written by the PM seat at 16:29Z | **success** |\n| ~18:14Z | the **dev rewrote the PR body** while repairing a merge conflict — a legitimate, in-scope edit that had nothing to do with the declaration | — |\n| 18:14:19Z | the `edited` trigger re-read the body. Line-start `^Clause-②:` matches: **0**. The whole string `Clause` appeared **0** times | **failure** |\n| 18:16:15Z | the PM seat re-declared the identical line | **success** |\n\n⛔ No commit was pushed between any of these. The SHA is the same in all three. The only variable is the body.\n\n⭐ **Nobody did anything wrong.** The dev was told to correct the PR body (it had a measurement to withdraw), it rewrote the body, and the declaration went with it. There is no step in that sequence anyone would flag in review.\n\n## Why this is worth a card rather than a shrug\n\n⭐ **This is the carrier the two cards that just landed both depend on.**\n\n- **#16776** (PR #16897, merged today 15:55:35Z) fixed the gate so an unread declaration that decides the verdict now **fails** instead of concluding `success`. Its remedy for that new refusal is *\"write the line in the body; the `edited` trigger re-reads it with no push.\"*\n- **#16361** (PR #16945) leaves the declaration PR-scoped and reads it from the same place.\n\n⇒ Both rest on the body being a **durable** carrier for a governance declaration. It is not. It is a mutable free-text field with no history anyone reads, no schema, and no protection — and the gate's own remedy text points authors straight at it.\n\n⚠️ **The failure direction here is the good one, and that is the only reason this is not p1**: losing the line makes the gate *refuse*, loudly, because #16776 landed. ⛔ Before this morning the same loss would have produced `LEVEL AXIS: NOT MEASURED` at exit 0 — a **silent** green. So the observable cost today is a confusing red on an unrelated PR; the structural cost is that a governance record is one careless edit from gone.\n\n⭐ And note the asymmetry that makes it nastier than it looks: the **carrier label** (`needs:contract-review`) is protected by label-write discipline and shows up in the timeline. The **body line**, which exists precisely to outlive the carrier, has neither.\n\n## ⛔ What this card does NOT claim\n\n- ⛔ Not that the `edited` trigger is wrong. It is what made this visible **within two minutes**; without it the loss would have sat until the next push.\n- ⛔ Not that the body is the wrong place for the declaration. It may still be the best available one — this card reports that it is destructible, ⛔ not what should replace it.\n- ⛔ Not a repair proposal. Whether the answer is a bot that re-asserts the line, a check that reds when a body edit removes a declaration that was present, a machine-readable carrier outside the body, or simply documenting the hazard where authors read it — that is the taker's, and it likely touches the same governed surface #16361's direction 1 does.\n\n## Reproduce\n\nCheapest form, no repo needed: on any open PR whose diff moves `packages/*/src/**` with a `patch` changeset and which carries a line-start `Clause-②:` line, edit the body to remove that line and read `Check Changeset` on the unchanged head. Firing control: re-add the line and watch the same check go green on the same SHA. Both directions were driven above.\n\n## Related\n\n- **#16776** — the gate that makes this loud rather than silent. Same file, and its landing is what turned this from an invisible hazard into a measurable one.\n- **#16361** / PR #16945 — reads the same declaration from the same place.\n- **#16448** / **#16349** — the C5 row and directional reading that consume the declaration downstream; a lost `no` there is a different failure again.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

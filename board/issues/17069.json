@@ -1,0 +1,30 @@
+{
+  "number": 17069,
+  "kind": "issue",
+  "title": "os validate and os lint judge an EMPTY stack when a project declares its metadata only in packages[] — the ADR-0130 D4 union fold (authoringRuleUnionStack) is wired into os build alone",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T05:49:35Z",
+  "updated_at": "2026-09-10T15:08:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17069",
+  "body": "## Symptom\n\nA project whose definitions live only in `packages[]` — the ADR-0130 D4 artifact shape, with no collections at the top level — is judged by `os validate` and `os lint` as if it declared **nothing**. Both exit 0 with no diagnostic of any severity. `os build` judges the same stack correctly and exits 1.\n\nTwo of the three authoring gates report a clean bill of health on a stack they read nothing of. This is the exact \"weakest gate\" class #4409 was filed for and #15006 fixed — fixed for `os build` alone.\n\n## Minimal repro\n\n`objectstack.config.ts`, no top-level `objects`:\n\n```ts\nexport default {\n  manifest: { id: 'com.example.ob', name: 'ob', version: '1.0.0', type: 'app', namespace: 'ob' },\n  packages: [\n    { manifest: { id: 'com.example.ob', name: 'ob', version: '1.0.0', type: 'app', namespace: 'ob',\n        objects: [\n          { name: 'ob_order', label: 'Order', sharingModel: 'private',\n            fields: {\n              number: { type: 'text', label: 'Number' },\n              ghost: { type: 'lookup', label: 'Ghost', reference: 'ob_nowhere' },\n            } },\n        ] } },\n  ],\n};\n```\n\nMeasured on branch `claude/issue-16611-lookup-reference-target-gate` at `904c1dceb0`, through the real binaries:\n\n```\nos validate   exit 0    ✓ Validation passed (89ms)\nos lint       exit 0    (no finding)\nos build      exit 1    ✗ Author-time rules failed (1 issue)\n                        rule: object-reference-unknown  at objects[0].fields.ghost.reference\n```\n\nThe dangling `ob_nowhere` is only the probe that makes the blindness visible; the same silence covers every author-time rule, because the input those two commands hand the rule table is an empty stack.\n\n## Cause, located\n\n`compile.ts` folds the packages back in before it runs the table:\n\n```\npackages/cli/src/commands/compile.ts:  runAuthoringRules('build', {\n                                         normalized: authoringRuleUnionStack(normalized),\n                                         parsed: authoringRuleUnionStack(result.data), ... })\n```\n\n`authoringRuleUnionStack` (`packages/cli/src/utils/stack-collections.ts`) fills every package-owned collection the top level does not carry, from `packages[]`, in dependency order. Its own header states the failure it exists to stop: *\"Under option B the union run's input is an empty stack, so every cross-package rule reports nothing and `os build` publishes green. That is the weakest-gate failure #4409 was filed for, arriving a second time through a different door.\"*\n\nNeither sibling command imports it:\n\n```\ngit grep -n authoringRuleUnionStack -- packages/cli/src/commands/\n  packages/cli/src/commands/compile.ts:18   <- the only command\n```\n\n`validate.ts:246` and `lint.ts:514` call `runAuthoringRules` on the unfolded stack.\n\n## Why this is a contract violation, not a preference\n\n`content/docs/deployment/validating-metadata.mdx` states the parity as a promise — *\"So `os validate` is the fast inner-loop check (no artifact), `os build` is what ships\"*, and *\"anything that can fail a build fails `os lint` too\"* (line 580). `deployment/cli.mdx:1378` says the same: *\"`os validate` and `os build` run — so anything that can fail a build fails here\"*. On this stack shape the promise is false in the loudest direction: the fast inner-loop check passes what the build refuses.\n\n## Suggested shape\n\nHand the same folded stack to the other two call sites. `authoringRuleUnionStack` returns a stack that still carries its collections **by identity**, so a single-package project is unaffected by construction — which is what makes this cheap and low-risk. It needs its own measurement of the two commands' populations before it lands, and it is not a rider on another card.\n\n## Where it was found\n\nWhile landing #16611 (PR #17066). Not in that card's scope and not created by it: `validate.ts` never imported the fold. Found because that PR's non-degeneracy control needed a stack whose union leg is clean, which is the same shape.\n\n⛔ Deduplication was one targeted `search_issues` call (repo REST `/search/*` is refused by this session's egress proxy, HTTP 403), over open and closed. Nearest neighbours read out and rejected: #16544 (closed — `os validate` did not lower inline handlers; a different input defect on the same command, fixed), #11896 / #11643 / #11727 (closed — `os build` vs `os validate` parity on advisories and `--json` payloads, not on which stack is judged). No card names the union fold.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

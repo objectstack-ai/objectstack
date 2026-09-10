@@ -1,0 +1,30 @@
+{
+  "number": 2657,
+  "kind": "issue",
+  "title": "Studio metadata coverage gaps: surface remaining types + promote un-typed concepts",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:on-hold",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-06T15:13:57Z",
+  "updated_at": "2026-09-04T07:56:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 14,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2657",
+  "body": "## Summary\n\nCoverage audit of the **new object-centric Studio** (`StudioDesignSurface`, objectui `packages/app-shell`) against the authoritative metadata-type registry in `@objectstack/spec` (`DEFAULT_METADATA_TYPE_REGISTRY`). Of the **27 authorable metadata types**, the new Studio surfaces ~11; the rest have no home yet. This issue tracks the gaps.\n\nTwo of the gaps (per-object **API** reference + **Hooks** inventory) are already being handled on the objectui side (`feat/studio-object-api-hook-tabs`) and are **out of scope here**.\n\n## Coverage matrix\n\n| Domain | Type | New Studio |\n|---|---|---|\n| Data | `object` | ✅ full (fields / form / validations / settings) |\n| Data | `field` `validation` | 🟡 nested in object (validation: only `script` editable) |\n| Data | `hook` | 🟠 in-progress (objectui, separate PR) |\n| Data | `seed` `mapping` | ❌ |\n| UI | `view` `page` `dashboard` `app` `report` | ✅ Interfaces pillar |\n| UI | `action` `dataset` | ❌ **previews already registered, just not railed** |\n| Automation | `flow` | ✅ Automations pillar |\n| Automation | `job` | ❌ |\n| Security | `permission` `profile` | ✅ Access pillar |\n| Security | `role` | ❌ |\n| System | `datasource` `translation` `email_template` `book` `doc` | ❌ |\n| System | `external_catalog` | ➖ runtime-derived by Sync wizard — intentionally skip |\n| AI | `agent` `tool` `skill` | ❌ **no AI pillar exists** |\n\n## Work split\n\n### A. objectui Studio UI (spec already complete — no framework change needed)\n\nThese are registered types with Zod schemas; the work is purely surfacing them in Studio (rail wiring + reuse of the generic `SchemaForm`, or a bespoke canvas where the structure warrants it).\n\n- **Quick wins** — `action`, `dataset`: previews are already registered in `metadata-admin/previews`, only the Interfaces-pillar rail load is missing.\n- **Fill existing pillars** — `job` → Automations (next to `flow`); `role` → Access (next to permission/profile); `seed`/`mapping` → Data; `datasource` → Data or a \"Sources\" area.\n- **New AI pillar** — `agent` (note ADR-0063 §2: platform-only, not runtime-creatable → read-only surface), `tool`, `skill`.\n- **New System/Integration pillar** — `translation`, `email_template`, `book`/`doc`; this is also the natural home for a global, executable API Console + auth (`Authorize`) control.\n\n*(Tracked here for a single platform-wide view; execution lands in objectui.)*\n\n### B. framework `@objectstack/spec` (blocking dependency — must land here first)\n\nThese concepts exist in `ObjectStackDefinitionSchema` (`stack.zod.ts`) as config but are **not registered metadata types**, so Studio cannot surface them generically until they pass the ADR-0088 admission test and get a Zod schema + registry entry:\n\n- [ ] `webhooks` (`WebhookSchema`) — outbound webhooks\n- [ ] `connectors` (`ConnectorSchema`) — external-system connectors\n- [ ] `portals` (`PortalSchema`) — external-user projections of apps/views/actions\n- [ ] `sharingRules` (`SharingRuleSchema`) — object sharing rules\n- [ ] `apis` (`ApiEndpointSchema`) — currently code-only via `contributes.routes`; formalizing as browsable metadata is what powers a first-class, executable API Console in Studio\n\nPer the cross-repo flow, each of these must merge in framework (schema + registry) **before** objectui can consume it.\n\n## Ask\n\n1. Decide which of the **Part B** concepts are worth promoting to registered metadata types (and in what order).\n2. Confirm the **Part A** placement plan (pillars) so objectui can schedule the UI work.\n\n---\n_Generated from a two-repo coverage audit (framework spec × objectui new Studio)._\n\nBlocked-by: #6234\nBlocked-by: #6245"
+}

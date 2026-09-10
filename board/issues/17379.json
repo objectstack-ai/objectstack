@@ -1,0 +1,29 @@
+{
+  "number": 17379,
+  "kind": "issue",
+  "title": "Sweep the remaining `@objectstack/organizations` enterprise/cloud-private spellings that #16718's pattern could not see",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T10:25:00Z",
+  "updated_at": "2026-09-10T10:25:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17379",
+  "body": "Follow-up to #16718, whose PR corrected 57 statements inside the boundary that card measured. This one is the residue **outside** its regex.\n\n## Why a second card rather than a wider first one\n\n#16718's pattern was a proxy, not a census. It is case-sensitive on `enterprise` and does not see the neighbouring `cloud-private` / `enterprise package` spellings. Roughly **60 more** statements using that vocabulary live outside it — in `packages/spec`, `packages/types`, `packages/services/service-cluster`, `packages/rest`, `packages/core`, and several `plugin-dev` / `plugin-auth` test headers.\n\nFolding them into #16718 was declined deliberately: it would have blown past the boundary that card measured and reopened a population sort over packages the dev had not verified sentence by sentence.\n\n## ⛔ The reason this is not a find-and-replace\n\n**Most of these are probably correct.** `security-enterprise`, `service-ai-studio` and the multi-node gate carrier really are commercial, and prose calling *them* enterprise is true and must survive. The job is a **per-sentence population sort**, exactly as #16718 defined it:\n\n1. **Now false** — the sentence is about `@objectstack/organizations`, which ADR-0132 made Apache-2.0 open core. Confirmed instance to start from: `packages/plugins/plugin-dev/src/dev-plugin-tenancy-posture.test.ts:23` still calls it *\"a cloud-private enterprise package\"*.\n2. **Still true** — the sentence is about a genuinely private package. ⛔ Leave it. Do not \"harmonise\" the vocabulary.\n3. **True but stale as a reason** — report, do not rewrite. #17369 is the known member of this class and is out of scope here.\n\nBecause the same name now denotes two packages — the open one and cloud's private subclass — every edit must say **which** it means. A sentence ambiguous between them is not fixed, it is differently wrong.\n\n## Scope\n\nAll spellings of the `@objectstack/organizations` name only. ⛔ Not a general sweep of the words \"enterprise\" or \"cloud-private\" across the tree.\n\n## Acceptance\n\n- population 1 corrected; **state how many hits were left alone and why**, per package — \"I edited fewer files than the count\" is otherwise indistinguishable from missing some\n- ⛔ no behaviour change: prose only. If logic needs editing, stop and report\n- tests that pin wording are updated deliberately with their reason recorded, ⛔ never silently\n"
+}

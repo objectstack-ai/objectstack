@@ -1,0 +1,30 @@
+{
+  "number": 17343,
+  "kind": "issue",
+  "title": "driver-sql: a `multiple: true` BOOLEAN column loses its `$contains` membership filter — the #14079 type-gate compiles it to `1 = 0`, where the same shape on a `multiple: true` number keeps its GLOB",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T07:59:51Z",
+  "updated_at": "2026-09-10T15:00:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17343",
+  "body": "Filed unassigned by the #15683 dev while landing the temporal half of the declared-type gate. Recording only — no severity asserted, routing is triage's. Dedup: one targeted MCP `search_issues` (2026-09-10) returned no open card on this cell; a control query in the same session hit its target, so the empty result is a reading.\n\n## Measured\n\nCompile-shape probe against `SqlDriver` at `origin/main` + the #15683 branch (the behaviour below is on `main` and is NOT introduced by that branch — its temporal limb carries the carve-out this one lacks). Object registered through `registerExternalObject`, dialect `better-sqlite3`, filter `{ FIELD: { $contains: 'true' } }`:\n\n| declared field | compiled WHERE | verdict |\n|:--|:--|:--|\n| `{ type: 'boolean', multiple: true }` | ``select * from `probe_tbl` where 1 = 0`` | ⚠️ the membership filter is dead |\n| `{ type: 'number', multiple: true }` | ``select * from `probe_tbl` where `nums` GLOB '*true*'`` | correct |\n| `{ type: 'tags' }` | ``select * from `probe_tbl` where `tags_` GLOB '*true*'`` | correct |\n\n## Why the boolean row is a defect\n\nA `multiple: true` field is stored as a JSON TEXT array (`SqlDriver.isJsonField` = `JSON_COLUMN_TYPES.has(type) || !!field.multiple`). On such a column `$contains` is not a substring test at all — it is the MEMBERSHIP spelling, and it is the ONE operator #7398 left working there after refusing the equality family. `sql-driver-json-column-operator-refusal.test.ts` pins it in prose as well: \"`$contains` unchanged … It is the only working membership spelling and downstream code depends on it\".\n\nCompiling it to `1 = 0` turns a working membership filter into \"matches nothing\" — the fail-CLOSED direction that suite's own table calls out.\n\n## Where it comes from\n\n`SqlDriver.isNonTextColumn` reads `numericFields` and `booleanFields`. The two registries are filled asymmetrically, in both `initObjects` and `registerExternalObject`:\n\n```ts\nif (type === 'boolean' || type === 'toggle') {\n  booleanCols.push(name);                                  // no `multiple` condition\n}\nif (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) {\n  numericCols.push(name);                                  // carries the carve-out\n}\n```\n\n`booleanFields` exists for READ COERCION (stored 1/0 back to a JS boolean), a question that legitimately applies to a multi-valued column too, so narrowing the registry is probably the wrong repair — three other seams read it. The #15683 branch spells the equivalent condition at the predicate instead, for the temporal limb only:\n\n```ts\n(this.temporalFieldKind(table, localField) !== null && !this.isJsonColumn(table, localField))\n```\n\nThe same `!this.isJsonColumn(table, localField)` on the boolean limb is the candidate shape. It was deliberately NOT taken on the #15683 branch: that branch implements the temporal ruling, and the boolean limb is #14079's cell, so widening it there would have been a second ruling riding on the first.\n\n## Repro\n\n```ts\nclass P extends SqlDriver {\n  compileWhere(where: FilterCondition): string {\n    const b = this.getKnex()('probe_tbl');\n    this.applyFilters(b, where);\n    return b.toString();\n  }\n}\nconst d = new P({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });\nd.registerExternalObject({ name: 'probe_tbl', fields: { flags: { type: 'boolean', multiple: true } } });\nd.compileWhere({ flags: { $contains: 'true' } });   // -> `where 1 = 0`\n```\n\n`toggle` is in the same registry arm and is expected to answer identically; not separately probed.\n\n## Related\n\n#14079 (the non-string-column row and the gate this sits in) · #15683 (the temporal half, where the carve-out was first spelled) · #7398 (the JSON-column refusal family and the `$contains` membership spelling it preserves)\n"
+}

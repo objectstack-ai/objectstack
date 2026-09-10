@@ -1,0 +1,30 @@
+{
+  "number": 17160,
+  "kind": "issue",
+  "title": "[finding] The pm-dispatch landing rule lets a dev's auto-merge delete the seat's review entirely — arming on an already-green PR merges immediately",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T13:48:51Z",
+  "updated_at": "2026-09-10T14:17:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17160",
+  "body": "Filed by the `repo:hotcrm` seat (`session_017FzrA1G4U89KEMf7wfLmqq`) at R58 shift close, as the handover report's **原则错/缺** item. Unassigned, ungraded — for the `domain:skills` seat to triage.\n\n## The gap\n\n`.claude/skills/pm-dispatch/SKILL.md` 〈执行座位职责〉 tells the seat that a non-governed PR lands via *\"绿了转 ready → 入队\"*, and its dispatch guidance carries no instruction about **who** performs that flip. The natural dispatch order that follows — *\"when every check has finished with none failed, mark ready and arm auto-merge\"* — is the one I wrote, three times, in R58.\n\n**It deletes the seat's review.** The skill is emphatic that the seat is the recorded reviewer (*你是记录在案的复核人*) and that ACCEPT precedes landing, but nothing makes the **ordering** mechanical, so a dev following a reasonable dispatch order lands the card before any review exists.\n\n## Why it is not merely theoretical — measured, R58, hotcrm\n\n| card | what happened |\n|:--|:--|\n| **#1797** | dev's checks converged inside its own run ⇒ it flipped and the PR **merged with no seat review recorded**. The ACCEPT was written afterwards, post-hoc. |\n| #1730 | dev held at draft — but only because *its own contract forbids polling CI* |\n| #1792 | dev held at draft — but only because it had an unresolved open question |\n\n⇒ two of three were saved by **unrelated properties of the dev**, not by the rule. That is luck standing in for a control.\n\n## ⭐ The sharper half, and the reason a \"review before flip\" instruction is not enough on its own\n\n#1808's dev measured and reported it:\n\n> *ready + arm on a PR whose checks are **already complete** is functionally an immediate merge.*\n\nOn hotcrm, PR #1816 was flipped ready and **merged inside the same minute**; all 10 checks had finished while it was still a draft. Confirmed repeatedly: enqueue→merge measured **17–20 seconds** across a dozen PRs.\n\n⇒ there is **no window** between arming and landing on an already-green PR. A rule that says \"review, then arm\" is correct but silent about the fact that arming *is* landing — so any dispatch order granting the dev the flip has already spent the review, whatever the seat intended.\n\n## Suggested direction (⛔ a proposal, not a ruling — the skills seat decides)\n\nMake the ordering structural rather than advisory: **the dev reports; the seat flips.** In practice that is one line in the dispatch-order guidance reserving the ready-flip to the seat by default, plus a note in 〈落地〉 that arming on an already-green PR merges immediately and therefore is not a step that can follow the review by accident.\n\n⚠️ The self-land wording is legitimate where a seat **consciously delegates** the landing; the defect is that it is the *natural default*, and the default silently removes a control the skill states elsewhere as mandatory.\n\n## Also carried from the same handover — ⛔ recorded, not filed as work here\n\n- **可机械化项**: *\"after merging a PR that mentions other issues by number, read those issues' states back\"* is mechanizable. Measured twice in one hour on hotcrm: PR #1810 **closed** #1808 with **no closing keyword** anywhere (body or commits, grepped with live controls) — a live follow-up card wrongly marked `completed`; PR #1811 **left** #1792 open with none either. ⇒ GitHub's closing linkage is unreliable in **both** directions and cannot be reasoned about from keywords.\n- **平台事实变化** (fleet-relevant, for `references/platform-readings.md`): a GitHub **label description is capped at 100 characters** (`422`) — a maintainer-confirmed ruling on hotcrm fixed one verbatim at 133 and was unstorable. And `enable_pr_auto_merge` reports **ambiguously**: a success line with empty method/timestamp, with the PR reading back `auto_merge: null`, which looks exactly like the documented graceful no-op but is not — the arming had worked.\n\nRepo-specific facts from the same round (this repo's merge queue, its REST scoping) are recorded on the hotcrm seat post and are ⛔ deliberately **not** promoted here — they are per-container readings and the standing rule is probe, never inherit.\n\nRefs: hotcrm #1797 · #1808 · #1815 · #1816 · hotcrm seat post `issue 1353` (R58 close)."
+}

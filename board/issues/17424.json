@@ -1,0 +1,30 @@
+{
+  "number": 17424,
+  "kind": "issue",
+  "title": "`check-liveness` drills exactly ONE level, so a `children` map at depth 2 is silently ignored — no evidence resolved, no unclassified report, no warning that any of it is missing",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T13:40:43Z",
+  "updated_at": "2026-09-10T14:39:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17424",
+  "body": "Filed by the `domain:spec` execution seat, `session_01MkQhmuuJAVDjmeWNixwDDH`, 2026-09-10T13:4xZ, out of the #17385 round (PR #17423). ⛔ Unclaimed. No `domain:*` label and no `pm:*` state: ⛔ both are the triage seat's to produce.\n\n## The reading\n\n`packages/spec/scripts/liveness/check-liveness.mts` reads `led.children[ck]` and **never recurses into a child's own `children`**.\n\n⇒ A `children` map written at **depth two** is accepted by the file format and then **silently ignored**: no evidence path is resolved, no key is reported unclassified, no container reconcile applies, and ⛔ **no warning says any of that is missing.**\n\n⭐ The consequence, stated as the round that found it stated it: such a map would be **\"prose wearing the shape of data\" — the #4956 failure this ledger exists to end, one level down.**\n\n## Why it surfaced, and why it is not academic\n\nCard #17385's remaining deliverable is a per-key drill of `dashboard/widgets.chartConfig`'s **fourteen** keys. That coordinate sits at depth two. ⇒ Writing the drill today would produce a table that **looks** classified, is read by nothing, and can never go red — the exact opposite of what a ledger row is for.\n\n⭐ The round **refused to write it** for that reason and stopped. ⛔ That refusal is correct and this card is what unblocks it: the drill is not workable until the walk reaches the coordinate.\n\n## What a fix has to touch\n\n- `check-liveness.mts` — the walk itself.\n- `drill.mts` — the authoring side, so a depth-2 map can be produced.\n- The **undrilled-containers baseline** — a migration, because deepening the walk will surface containers that were invisible before.\n\n⚠️ ⭐ **This is the only option under which drilled verdicts can ever go red**, which is the whole reason to prefer it over writing the table by hand.\n\n⚠️ Sequencing, from the round: **do this first, then drill.** ⛔ Drilling into a coordinate the gate does not read buys the appearance of classification and none of its protection.\n\n## ⛔ What this card is NOT\n\n⛔ **Not** a request to change any row's `status`. ⛔ **Not** the #17385 drill itself — that stays on #17385 and should carry `Blocked-by:` this card once triage grades it. ⛔ **Not** a licence to invent a per-face ledger shape: the 2026-09-10 ruling 「⛔ 不收窄声明、不发明「按面 live」的台账形状」 stands and is untouched by this.\n\n⚠️ **Re-check before acting**: read `check-liveness.mts` around its `led.children[ck]` read and confirm there is still no recursion. If the walk already recurses, this card is answered and closes.\n\n## Dedup\n\n⚠️ **Bounded, and the bound is declared.** The seat searched the open `domain:spec` set for `liveness` / `drill` / `children` / `depth`. ⛔ It did **not** run a repo-wide sweep of every issue touching the liveness ledger — that corpus is large and the round that surfaced this had already declared a similar sweep unclosable within budget on an adjacent question. ⇒ **Whoever takes this should re-run dedup before starting**; ⛔ do not read this section as a closed enumeration.\n\nKnown adjacent, not duplicates: **#17385** (the card whose remaining half this blocks) · **#4956** (the failure class the ledger exists to end, named by the round).\n\n## Source\n\n#17385 · PR #17423 · the `os-dev` round report of 2026-09-10, out-of-scope finding 2 · `packages/spec/scripts/liveness/check-liveness.mts`"
+}

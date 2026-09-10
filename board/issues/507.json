@@ -1,0 +1,33 @@
+{
+  "number": 507,
+  "kind": "pull_request",
+  "title": "Investigation: No import.meta.url test failures found",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-03T16:55:18Z",
+  "updated_at": "2026-02-04T02:15:36Z",
+  "closed_at": "2026-02-04T02:15:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/507",
+  "body": "## Investigation Summary\n\nProblem statement claimed Jest cannot parse `import.meta.url` from `@objectstack/core@0.9.2`, causing test failures in plugin-formula and plugin-validator packages.\n\n## Findings\n\n**No test failures exist:**\n- All 3,422 tests pass (3,232 in `@objectstack/spec`, 190 in `@objectstack/core`)\n- `import.meta.url` usage in `packages/core/src/logger.ts:60` does not cause failures\n\n**Environment mismatch:**\n- Repository uses **Vitest**, not Jest\n- No `jest.config.js` files exist\n- All test configs are `vitest.config.ts`\n\n**Packages do not exist:**\n- `plugin-formula` - not found\n- `plugin-validator` - not found (only `plugin-validator.zod.ts` schema exists in `packages/spec/src/system/`)\n\n## Conclusion\n\nProblem statement does not match repository state. No changes required.\n\nIf this was intended for external consumers of `@objectstack/core`, documentation on mocking strategies could be added separately.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> Jest cannot parse import.meta.url from @objectstack/core@0.9.2 when running in CommonJS mode, causing test failures in plugin-formula and plugin-validator.\n> \n> Changes\n> \n> Added Jest mocks for @objectstack/core following the existing pattern from core, protocol-graphql, and other packages:\n> \n> plugin-formula\n> \n> test/__mocks__/@objectstack/core.ts - Mock implementations\n> jest.config.js - Added moduleNameMapper entry\n> plugin-validator\n> \n> test/__mocks__/@objectstack/core.ts - Mock implementations\n> jest.config.js - Added moduleNameMapper entry\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

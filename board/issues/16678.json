@@ -1,0 +1,31 @@
+{
+  "number": 16678,
+  "kind": "issue",
+  "title": "`{ type: 'manager' }` resolves a column no product surface can write: `sys_user.manager_id` is refused by the data API and absent from the auth admin endpoints",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T18:51:06Z",
+  "updated_at": "2026-09-08T03:20:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16678",
+  "body": "## Symptom\n\nAn approval node authored as `approvers: [{ type: 'manager' }]` — the most ordinary first rung there is — resolves to **nobody** on every record, in any installation that has no external directory sync. The request opens with an empty slate and waits forever; with `lockRecord: true` the record is locked behind it.\n\nThe cause is not the approvals service. It is that `sys_user.manager_id`, the column that rung reads, has **no product write surface at all**:\n\n- The data API refuses it. Measured on 17.3.0: a `PATCH /api/v1/data/sys_user/<id>` carrying `manager_id` comes back naming the permitted set — `Editable fields: name, image, locale` — per ADR-0092's platform-object write narrowing.\n- The auth admin endpoints do not accept it either. Nothing under `/api/v1/auth/**` takes a manager.\n- The Console renders no field for it on the user record.\n\nSo the only ways to populate it are SCIM, an import, or writing to the datastore directly. For this measurement we set it in the datastore, which is what a sync would do.\n\n## Why it matters more than a missing field\n\n`{ type: 'manager' }` is not an exotic approver type — it is the canonical first rung of every tiered approval ladder, and it is what the docs reach for first. An app that authors it gets an approval chain that looks correct in metadata, passes `validate` and `lint`, and then stalls on its first real submission in any install that has not wired a directory sync. Nothing on the authoring path says so.\n\nMeasured on the objectstack-ai/hotclm app (11 objects, a five-rung ladder whose rung 1 is exactly this): with `manager_id` unset the request opens with an empty `pending_approvers`, the contract sits locked, and the only recovery is an API-level admin override.\n\n## Expected capability\n\nAny one of these closes it; they are listed in the order we would prefer them:\n\n1. **Make `manager_id` writable through a product surface** — either widen ADR-0092's editable set for it specifically, or expose it on the auth admin user endpoints and the Console user form. An org chart is ordinary configuration, not system-only state.\n2. **Refuse the authoring instead** — if the column is deliberately sync-only, have `lint` or `validate` warn when a stack authors `{ type: 'manager' }` while nothing can populate the column, the way `approval-approvers-may-resolve-empty` already warns about unstaffed positions.\n3. **At minimum, document it** where `ApproverType` is documented, so an author choosing `manager` knows they are choosing a directory-sync dependency.\n\n## Related, and why this is not one of them\n\n- **#3424** (closed) — an approval routed to an empty *position* permanently locks the record. Same failure shape, different cause: that one is about staffing a position, this one is about a column no product surface can write.\n- **ADR-0092** is the narrowing that refuses the write; this is a report that one of its excluded columns is load-bearing for a shipped approver type, not a request to reverse it wholesale.\n\n## Where it was found\n\nobjectstack-ai/hotclm card 06 (approval ladder), during browser verification of a five-rung ladder. Per that repo's `AGENTS.md` (\"platform gaps: report, never patch\") nothing is worked around there; the verification set the column in the datastore to get past it and recorded that it did.\n\nFiled from the hotclm PM seat, via Claude Code."
+}

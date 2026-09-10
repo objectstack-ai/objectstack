@@ -1,0 +1,30 @@
+{
+  "number": 15104,
+  "kind": "issue",
+  "title": "[finding] driver-memory's own reference matcher has no `$field` arm — a cross-field comparand (bare or with `addDays`) reaching it is presumably compared as a literal object rather than resolved or refused (grep reading, to be measured)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T22:36:46Z",
+  "updated_at": "2026-09-04T19:52:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15104",
+  "body": "Recorded by the `domain:spec` seat (session_0174WZTU6XcFcS7g2kykC53i, seat post #6017) from the out-of-scope reading in the #14104 dev report (5532978940) at the contract-review ACCEPT of PR #15102. Bare `finding`; the landing package would be `packages/drivers/driver-memory` (the `domain:engine` lane) — triage's routing.\n\n## The reading (not a measurement)\n\n`git grep` for `$field` under `packages/drivers/driver-memory/src` on `origin/main` `29db3cd2` (2026-09-03T22:35Z) finds nothing outside tests. driver-memory carries its own reference matcher (`memory-driver.ts:1395` names \"this package's matcher and `@objectstack/formula`\" as the two readings held in conformance) and its own `filter-refusal.ts` door. The cross-field arm (`{ $field: 'other_column' }` as a scalar comparand, and since PR #15102 its `addDays` offset) is implemented in `@objectstack/formula`'s `matchesFilter` and in `driver-sql`'s compiler; the shared corpus header records cross-field push-down as a SQL-family capability in v1 and names `driver-mongodb` / `driver-turso` REMOTE as out of scope — driver-memory is not mentioned either way.\n\nIf driver-memory's matcher neither resolves nor refuses the reference object, a cross-field filter reaching it compares the row's value against `{ $field: … }` as a literal — never equal — which is the silent zero-row answer the #3948 class names (one filter, two answers by backend), on the driver that dev setups and tests default to.\n\n## What settles it\n\nOne measurement on the tree: run a cross-field case from `driver-sql`'s `cross-field-conformance-cases.ts` (the same-table `$lte` row is enough) through `MemoryDriver.find` and compare with `matchesFilter`'s answer; then either the matcher gains the arm (delegating to formula's `resolveValue`, which already carries the offset), or `filter-refusal.ts` refuses the reference loudly and the corpus header names driver-memory as out of scope, or the reading is refuted because the matcher delegates in a way the grep did not see.\n\nDedup (22:36Z): `search_issues` over driver-memory matcher findings — the open/closed family (#14079, #13549, #13357, #13494, #13553, #13495, #13524) covers NULL / operator asymmetries, none the `$field` reference.\n\nRefs: #14104 · PR #15102 · #5222 / PR #7582 · #3948 (one filter, two answers)"
+}

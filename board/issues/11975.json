@@ -1,0 +1,30 @@
+{
+  "number": 11975,
+  "kind": "issue",
+  "title": "platform-admin re-anchor L5 (migration): time-boxed legacy-grant dual read, then its removal one minor later",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:blocking",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T03:31:46Z",
+  "updated_at": "2026-09-07T09:44:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11975",
+  "body": "Leg **L5** of the accepted #11663 platform-admin re-anchor design. Provenance: design document = #11663 comment 5394453215 (§6 row L5, migration steps 3–6); maintainer acceptance = #11663 comment 5404675670 (2026-08-25, verbatim 「接受你的建议，继续」). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\nBlocked-by: #13515\n\n⛔ **`Blocked-by: #11974` was struck 2026-09-01 — that leg is SPENT.** #11974 (L4) closed `completed` 2026-08-31T01:36Z via merged PR #13514. The live blocker is **#13515** (this card's EXIT half), established by the `domain:services` seat's landing note of 2026-08-31T15:29Z (`issuecomment-5480570817`) but recorded only in that comment while the body still named the closed card. Migrated into the body here, which is the canonical home — a body pointing at a closed target with the real blocker parked in a comment is the stale shape the patrol reports, and it made this card read as releasable to any sweep keyed on \"is the `Blocked-by:` target closed\".\n\n⚠️ ⛔ **This is a line migration, not a re-derivation.** The blocker itself was judged by the seat that owns the card; nothing about the dependency is changed here. #13515 waits on a **release boundary**, not on work: L4 rides 17.3.0, so the exit lands no earlier than 17.4.0.\n\n**Content**: own the migration window as a first-class deliverable — the dual read (config-derived standing added in L2, legacy row-id grant still honoured, deprecation log firing from L4) is **time-boxed and loud**, and the removal of the legacy path lands **one minor after** L4's landing. Per the design: the removal card is filed at L4's landing (not later); this card carries the window's discipline — derivation prefers env; a detected legacy grant logs its deprecation pointer every boot; ⛔ never a silent dual-track, ⛔ never removal as a rider on another leg.\n\n**Acceptance criterion**: the window's entry (dual read live + deprecation log) and exit (legacy read deleted, one minor later) are both verifiable on `origin/main` history, each as its own reviewed change; the exit PR's body names the minor boundary it honours.\n\n**Entry half: delivered and verified** (PR #13666, merged `1467b19f6`) — all three disciplines hold on `origin/main`; see `issuecomment-5474359693` for the readings. The only live residue is the exit, #13515.\n"
+}

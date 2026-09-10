@@ -1,0 +1,29 @@
+{
+  "number": 12148,
+  "kind": "issue",
+  "title": "[finding] `check-drift-comment.mjs` has no fixture that reaches the SDK-bridge line, so that bullet's rendered bytes — the cause split included — are pinned only by source grep",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T11:20:12Z",
+  "updated_at": "2026-08-25T17:57:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12148",
+  "body": "Observed while implementing #11867 (PR #12146). Filed unassigned for grading. ⛔ Not a claim on anyone's time.\n\n## The reading\n\n`scripts/docs-audit/check-drift-comment.mjs` is the repo's end-to-end pin on what the docs-drift comment actually *says*: it runs real fixture diffs through the real `affected-docs.mjs` and the real `github-script` block, then asserts on the posted bytes. Its own header states why that shape was chosen — a source grep \"would pass on text that is never REACHED\".\n\nNone of its five fixtures reach the SDK-bridge line. That is deliberate and documented:\n\n```js\n// `MAX_WIDGETS` is the anchorable symbol on purpose — an ALL-CAPS name is excluded from\n// the sdk route bridge, so these repos (which declare no route ledger) do not trip the\n// bridge's broken-scan verdicts and the fixture stays about the headline.\n```\n\nThe consequence is narrow and worth recording: the bridge bullet in the fold — now the longest single line the comment renders, carrying `reachable` / `clientRows` / `unreachable` **and**, since PR #12146, the three-way cause split — has its *existence* pinned by source grep in `affected-docs.mjs --self-test` (`/bridge\\.causes/`, `/parts === bridge\\.unreachable/`) but its *rendered bytes* pinned by nothing. Every other verdict that comment produces is byte-pinned by this harness; this one is not.\n\n## What that does and does not cost\n\n- It is **not** unpinned: the source pins go red if the render branch, the partition guard, or the advisory ceiling is removed, each reverse-verified in PR #12146.\n- What no pin can see is a change that keeps those tokens and still renders wrong — a template-literal typo, a bucket printed under the wrong label, the guard inverted so the split renders exactly when it should be withheld. On this line specifically, the `withheld` and `unmeasured` arms were verified in PR #12146 only by hand, against synthesised payloads, and that verification does not persist.\n\n## The shape, if taken\n\nA sixth fixture whose repo declares a `*-route-ledger.ts` and a registrar file, with a non-ALL-CAPS changed symbol, so the bridge runs and the bullet renders. Cost worth pricing before committing: such a fixture must not trip `brokenScan`, so its ledger has to be spelled the way `parseLedgerSource` reads (single-quoted `route:` / `client:`), and the existing comment's reasoning for avoiding the bridge is exactly that this is fiddly. A cheaper variant that pins the arms without a ledger: drive `renderComment` from a synthesised `affected.json` rather than a git fixture — weaker, since it no longer rides the real mapper, but it would pin the three arms' bytes.\n\n## Not claimed\n\n- **No opinion on whether this is worth a fixture.** The harness's cost-of-entry is real and the source pins are not nothing.\n- Whether the other unpinned fold lines (`crossCutting`, `overbroad`, `weak`) are in the same position was not checked — this was noticed about the bridge line only.\n\n## Refs\n\n#11867 · PR #12146 (where the cause split reached this line) · #11357 (the harness and why it spawns fixtures) · #9433 (the half-wired-key rule)"
+}

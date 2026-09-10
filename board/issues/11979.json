@@ -1,0 +1,29 @@
+{
+  "number": 11979,
+  "kind": "issue",
+  "title": "platform-admin re-anchor follow-up (Choice 4B): config-anchor the `single` posture — first-user promotion becomes development-only fallback",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:blocked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-25T03:32:25Z",
+  "updated_at": "2026-09-04T06:09:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11979",
+  "body": "Sequenced follow-up **ruled, not optional**, in #11663's acceptance (Choice 4: 「4A for the first landing, with 4B filed as the sequenced follow-up」). Provenance: design document = #11663 comment 5394453215 (§4 Choice 4, migration step 8); maintainer acceptance = #11663 comment 5404675670 (2026-08-25, verbatim 「接受你的建议，继续」). Filed by PM session `session_01KWRU3s15AJz7PGW7a7wdCh`.\n\nBlocked-by: #11978\n\n⛔ **`Blocked-by: #11974` was struck 2026-09-01 — that leg is SPENT.** #11974 closed 2026-08-31T01:36:53Z, so the edge could never fire again while it sat here advertising an unmet dependency. Struck by the `domain:engine` seat (session `session_01Q5WBDtaUnoz5XuJ6jk8pQ5`) on the half-state patrol's **H19** row, which reads a partial discharge and reports it rather than deciding it.\n\n⚠️ **The remaining wait is TRANSITIVE (patrol row H26), so this card is NOT dispatchable:** #11978 is itself `pm:blocked` — on #11975, which is in turn the sound half of a mutual-`Blocked-by` deadlock with #13515 that was repaired on #13515 on 2026-09-01. ⇒ This card waits on a card that is waiting on a card. A single-level unlock predicate cannot see past one hop, so **re-derive this blocker when the #11978 → #11975 → #13515 chain clears** — ⛔ do not read #11978's closure alone as this card's release without re-reading the chain.\n\n**Content**: extend the config anchor to the `single` posture — with no config, first-user promotion survives **in development only**; production `single` deployments derive platform admin from `OS_PLATFORM_OWNER_EMAIL` like walled ones. This is what lets the Choice-5 reap and the `last-admin-guard` simplification **complete** (the design's stated honest cost of 4A: under it, the ruling is only half-achieved — the row, the grant, and the guard's lockout-refusal family stay alive for `single`).\n\n**Constraints**: the posture branch stays inside the **one** derivation site (the 4A mitigation is absolute — if it cannot be held, this card's priority rises); zero-config `pnpm dev:crm` / `packages/verify` harness flows keep working via the development-only fallback; the product promise change for production `single` (config now required for admin) gets its own loud migration note, same discipline as L5.\n\n**Discipline**: Clause-② expected **yes**; `needs:contract-review` at review.\n\n**Acceptance criterion**: a production-mode `single` boot with no config has zero platform admins (fail closed, loud pointer at the variable); development-mode keeps first-user promotion; the walled/`single` derivation is verifiably one code path with a posture parameter, not two sites."
+}

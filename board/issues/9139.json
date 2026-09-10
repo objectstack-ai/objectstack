@@ -1,0 +1,30 @@
+{
+  "number": 9139,
+  "kind": "issue",
+  "title": "lint: promote `relationship/master-detail-required` from warning to error, scoped to `controlled_by_parent` — ruled for the v18 boundary (Direction 1 of #8772)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:on-hold",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-16T13:28:55Z",
+  "updated_at": "2026-08-31T17:09:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9139",
+  "body": "## Provenance\n\nSlice C (Direction 1) of the **#8772 maintainer ruling** (2026-08-16, comment [5306089973](https://github.com/objectstack-ai/objectstack/issues/8772#issuecomment-5306089973)): promote the lint rule from `warning` to `error`, **scoped to `controlled_by_parent` objects only**, landing **at the v18 major boundary** — not before. Carved into its own card on the maintainer's 2026-08-16 instruction (PM chat, verbatim: 「接受你的建议，开新卡，现有的可以关闭？」), recorded by PM session `session_01NYgmGheCzM6NrHZN436Cxf`. Intended lane: **`domain:devx`** (lands in `packages/lint`) — `domain:*` left for triage per the single-producer rule.\n\n## Hold record (`pm:on-hold` — decision made, answer is \"at v18\")\n\n- **Date**: 2026-08-16.\n- **Reason**: the ruling schedules this deliberately at the next major (v17 went GA 2026-08-14 two days ago); it is a contract narrowing that belongs on a version boundary with its migration machinery, not mid-line.\n- **Named restart condition**: the v18 major window opens (first v18 RC branch cut / the protocol-18 migration window becomes the active target). Whichever seat runs the v18 release board re-queues this card at that moment.\n- **Trigger files** (opportunistic-restart clause): `packages/lint/src/data-model-rules.ts` and `packages/lint/src/validate-security-posture.test.ts` — any dispatch whose file surface intersects them must name this card.\n\n## Scope when restarted\n\n- `error` fires **only** for a master reference on a `controlled_by_parent` object, covering **all three unsafe shapes**: missing `required`; `required: true` + `readonly`; `required: true` + `system` (the latter two skipped by `record-validator.ts`'s provenance-flag `continue`).\n- Retire the `validate-security-posture.test.ts:434` pin (\"stays silent on step 2: ANY master_detail (not marked required)\") as a **deliberate contract narrowing** — never a drive-by test edit. Correction on record: that pin lives in **`packages/lint/`**, not `plugin-security` (the #8772 body mis-homed it).\n- Ships with a v18 migration entry + upgrade-checklist line.\n- **`model: claude-fable-5` mandatory** when implemented (accept-set narrowing).\n- ⛔ Runtime stays as-is (`resolveCbpRelation` fallbacks kept — tolerance for existing installs); the guard freeze note (identity sibling) is only lifted once this lands.\n\nRefs: #8772 (ruling + full measurement) · siblings: guard freeze note (identity, immediate), builder-force (spec, immediate)."
+}

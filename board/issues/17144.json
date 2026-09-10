@@ -1,0 +1,30 @@
+{
+  "number": 17144,
+  "kind": "issue",
+  "title": "Sweep the stale `summary is a table.float` comments left behind by #16318's NUMERIC representation change — nine sites in four packages, the sweep already exists on a sibling branch",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T12:54:20Z",
+  "updated_at": "2026-09-10T14:26:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17144",
+  "body": "Filed by the `domain:engine` execution PM seat as the follow-up F3 of the contract review on PR #16887 (comment `5597570687`), now that **#16887 has merged**. That review graded F3 non-blocking and its disposition reserved the cherry-pick for *\"the maintainer or the engine seat **after this merges**\"*.\n\n⛔ **Unassigned and ungraded** — `domain:*`, type and priority are triage's write.\n\n## Why it needed a card at all\n\nThe disposition was recorded twice on **#16318**, with a named taker, and an earlier round decided that was enough and declined to file. That was reasonable then and is not now: **#16318 is closed**, and a closed card cannot carry open work. This card is the record; the two comments on #16318 are its provenance.\n\n## Measured LIVE on `origin/main` `ce7bae8b4` at 2026-09-09T12:51Z\n\nThe falsified sentence still stands:\n\n| file | `table.float` hits |\n|---|---|\n| `packages/metadata-protocol/src/protocol.ts` | 2 |\n| `packages/lint/src/validate-sortable-fields.ts` | 1 |\n| `packages/objectql/src/query-expression-conformance.test.ts` | 2 |\n| `packages/services/service-analytics/src/__tests__/measure-result-type.test.ts` | 2 |\n\nControl fires: 48 `export` lines in `protocol.ts`, so the pathspec resolves and these are real hits. ⚠️ That is **7 lines**; the originating review counted **nine sites** (it counted sites including a test's two call sites, this seat counted lines carrying the literal). ⛔ **Neither number is settled — re-measure before you start**, and say which instrument you used.\n\n⚠️ ⛔ **Do not trust any line number in this card or in #16318's thread.** Re-locate every site by content on your own head and name that head's SHA.\n\n## The work is a cherry-pick, ⛔ not a fresh round\n\nThe sweep **already exists** on `claude/issue-16318-patch-dup-01ADLdAs` @ **`5339717b6d`**, still on the remote at this reading. That branch is the duplicate patch round that stood down without force-pushing; `5595029333` describes it as substantively the same round. ⇒ read that branch's version of the sweep first and cherry-pick or re-derive from it, rather than writing it again.\n\n⛔ **Do not force-push or delete that branch.** It is not this seat's to rewrite.\n\n## Fences — all three that blocked this are now GONE, measured\n\n- `packages/services/service-analytics/**` was held by PR #17015 → **landed**.\n- `packages/spec/**` and `driver-sql` were held by PR #16887 → **landed**.\n- The only live neighbour is PR **#17133**, whose `packages/lint` surface is `flow-variable-scope.test.ts` and `validate-visibility-predicates.test.ts` — **disjoint** from `validate-sortable-fields.ts`. ⚠️ Re-check that before starting; it may have landed or moved.\n\n## Class, and why it is not a `finding`\n\nStale comments: ⛔ not a reproducible defect, ⛔ not a declared-contract violation, ⛔ not an AI-metadata trap. It is prose that says something the tree no longer does — the same class as #16728 and #16818. The originating review verified by its own grep of `content/docs` that **no published page** carries it, so nothing user-facing is wrong; this is source-comment hygiene with a known, bounded site list.\n\n## Refs\n\n#16318 / PR #16887 (the change that falsified them) · review `5597570687` (F3) · `5599324665` and `5599295515` (the disposition, recorded twice) · #16728, #16818 (prior instances of the same class)\n\n<sub>Filed by the PM dispatch seat · `domain:engine` · session `session_01XTBcV7zZHmokdyQgXjbyEU` · R1 · reading taken 2026-09-09T12:51Z</sub>"
+}

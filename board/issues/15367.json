@@ -1,0 +1,32 @@
+{
+  "number": 15367,
+  "kind": "issue",
+  "title": "`check:react-declaration-parity` refuses to run for want of a manifest that is now checked in at the repo root",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T13:05:04Z",
+  "updated_at": "2026-09-08T10:57:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15367",
+  "body": "Found while measuring evidence sources for #14897 (not fixed there — that card's scope is the `replacedBy` reader guard). Recording only; no assignee.\n\n## The shape\n\n`packages/spec/scripts/check-react-blocks-declaration-parity.ts` treats a missing manifest as a hard failure (`EXTERNAL_INPUT_REQUIRED`), and its header states the reason as a measured fact:\n\n```\n// This repository carries no manifest to fall back on. Measured, so the next reader\n```\n\n`AGENTS.md` repeats it: the manifest's \"only producer\" is objectui's browser dump, the gate \"is the one gate `check:generated` cannot run at all\", and it must not be wired into a workflow.\n\nThat is no longer true of this tree. A tracked `sdui.manifest.json` sits at the repo **root**, landed by #13446:\n\n```\n$ git ls-files --error-unmatch sdui.manifest.json\nsdui.manifest.json\n$ git log --oneline -1 -- sdui.manifest.json\n4ca7ccf2f feat(sdui): wire the ADR-0080 manifest into the production JSX gate ... (#13446)\n```\n\nIt is of exactly the shape the gate parses (`manifestInputs` reads `manifest.components[schemaType].inputs`):\n\n```\n$ node -e \"const m=require('./sdui.manifest.json'); console.log(m.components['list-view'].inputs.map(i=>i.name).join(', '))\"\nobjectName, viewType, columns, filter, sort, options\n```\n\nand it is pin-anchored rather than rotting: `scripts/check-sdui-manifest.mjs` asserts absence/shape, a sha256 tamper record, and that the record's `objectuiSha` equals `.objectui-sha`, so a pin bump goes red until it is regenerated. It runs offline in the required lint job (`.github/workflows/lint.yml`, step \"SDUI manifest is present, intact and fresh at the objectui pin\").\n\n## Why it matters\n\nThe gate's refusal is correct behaviour for a genuinely absent input — the point of #4690 was that a skip is worse than a red. But the input is no longer absent, so the refusal now rests on a premise the tree contradicts, and a comparison that could run per-PR runs only on demand at a pin bump. Two prose sources assert the stale premise, which is how the next reader re-derives the wrong conclusion.\n\n## Not asserted here\n\nWhether the root artefact and the browser dump are input-for-input equal is **not** measured above. They are produced by different routes — `scripts/gen-sdui-manifest-node.mjs` from the published packages the pin ships, vs `manifestFromConfigs(getPublicConfigs())` driven in a browser — and the gate's `registry-only` / `spec-only` / `missing` verdicts would be only as good as that equality. That comparison is the first step for whoever picks this up, and it is the thing that decides whether the answer is \"wire it up\", \"wire it up with a narrowed verdict set\", or \"keep the refusal and correct the two prose sources\".\n\nWhatever the outcome, the header sentence and the AGENTS.md paragraph need to stop stating an absence that is no longer there.\n\n## Dedup\n\n`search_issues` on the parity gate refusing while a checked-in root manifest exists: 0 results (control query in the same session returned #14897 and #14559, so the empty read is a reading, not a dead channel). REST was 403 for this session; the search went through the MCP channel.\n\nRefs: #14897 · #13446 · #4690"
+}

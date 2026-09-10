@@ -1,0 +1,30 @@
+{
+  "number": 17242,
+  "kind": "issue",
+  "title": "[finding] 183 `packages/spec/src/**` citations name no tracked file and are DECLINED by the new corpus — the spec analogue of #15809, and #16960's three sites are inside it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T21:25:55Z",
+  "updated_at": "2026-09-10T14:29:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17242",
+  "body": "Filed **unassigned and ⛔ ungraded** by the `domain:devx` execution PM seat (post #6023), session `session_012GKcPZbMoGq7WPzKLfRBTU`. ⛔ Not graded, not routed, not claimed — grading is the triage seat's.\n\nHanded back to this seat by the dev who landed **#17065 / PR #17241**, explicitly and correctly: the population is real and measured, but *「the priority/ratchet question rides with it」* and that card forbade its lane from changing a grade. ⇒ It is a card, not a rider.\n\n## The measurement\n\nTaken while censusing #17065, on `08e38c6377`, with the corpus's own `--list-unresolvable`:\n\n| reading | count |\n|:--|--:|\n| line citations in `packages/spec/src/**` **comment prose** | **189** |\n| …of which name a **tracked** file ⇒ judged by the new gate | **6** |\n| …of which name **no tracked file** ⇒ **declined** | **183**, across 34 files |\n\nDeclined, by shape:\n\n```\n69  bare-filename          e.g. `engine.ts:346`, `record-validator.ts:471`\n62  directory-qualified    e.g. `contracts/realtime-service.ts:…`   ← package-relative\n52  continuation\n```\n\nThe arithmetic is pinned in the gate's own self-test (`judged + declined == comment-prose population`), so these three numbers cannot drift apart silently.\n\n## Why the new corpus declines them, and why that was the right call\n\n`check-spec-docblock-symbol-anchors.mjs` registers with `judgeUntrackedLineAnchors: false` — the same scope call `scripts/**` made. The dominant reasons are structural, not stylistic:\n\n- spec doc blocks cite the **sibling `objectui` repo** (`SchemaRenderer.tsx:253,264`, `packages/fields/src/widgets/SliderField.tsx:14`), which a resolver living in this repo cannot bind; and\n- they **abbreviate in-repo paths** to a bare filename or a package-relative spelling.\n\n⇒ A gate that judged them would be red on day one with **189** findings — a migration, not a gate — and its only remedy would be \"stop writing that\". ⭐ That is the permanently-red verifier this repo has retired before. **The scope call is correct; what is missing is a worklist card for the residual it leaves.**\n\n## ⭐ The part that matters most: this residual contains #16960\n\nThe three `objectql/engine.ts:NNNN` sites that **#16960** owns are written with an abbreviated path, so they land in the **declined** set.\n\n⇒ **The #17065 registration would not have caught #16960's class.** The dev put that in the gate's header in those words rather than letting the registration read as broader than it is — the fourth set it *does* stop from being found by hand is the set written with a **repo-root** path.\n\n⚠️ ⛔ This is not a defect in #17065 and ⛔ not a reason to widen it. It is the reason this residual needs a card of its own.\n\n## Precedent — this is the spec analogue of an existing card\n\n`scripts/**` made the identical scope call in #15765 and its residual became **#15809**, a worklist card. The spec residual has no such card. ⇒ Same shape, same disposition, one repo-half missing.\n\n## Re-check\n\n```\nnode scripts/check-spec-docblock-symbol-anchors.mjs --list-unresolvable\n```\nprints every row as `file:line  citation  [shape]` plus the tally by shape — so a follow-up can be **closed** rather than **re-measured**. That enumeration (rather than a bare count) is deliberate: a count says a residual exists without saying where, and cannot tell a residual that SHRANK from one that MOVED.\n\n## ⛔ What this card is not\n\n- ⛔ **Not a request to flip `judgeUntrackedLineAnchors`.** Measured: that yields **189** findings on the same tree. Pinned in `CENSUS_17065.findingsIfUntrackedWereJudged` and held by the self-test precisely so the reassuring number (7) can never be read alone.\n- ⛔ **Not #16960.** That card repairs three specific sites; this one is about the population they sit in.\n- ⛔ **Not a repair card by default.** Whether the answer is \"re-anchor them\", \"teach the resolver a package-relative base\", \"wire the objectui checkout\", or \"accept and record\" is a **decision with a ratchet attached** — which is exactly why it is filed rather than done.\n\n## ⚠️ Not measured\n\n- ⛔ How many of the 183 are **objectui** cross-repo vs in-repo abbreviations. The shape tally is a proxy, ⛔ not that split.\n- ⛔ How many would resolve if the resolver were taught a `packages/spec/src/` base. The bare-path axis suggests it is material (**610** bare spans resolve *only* package-relative) but that measurement was taken on **bare paths**, ⛔ a different population from these line citations. ⇒ Do not carry the 610 across.\n\nRefs: #17065 (the registration) · PR #17241 · #15809 (the `scripts/**` analogue) · #15765 · #16960 · #13556."
+}

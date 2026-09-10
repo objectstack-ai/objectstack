@@ -1,0 +1,30 @@
+{
+  "number": 17184,
+  "kind": "issue",
+  "title": "[finding] realtime-protocol.mdx documents four WebSocket message types that `WebSocketMessageType` does not declare (`auth`, `auth_success`, `auth_error`, `subscribed`)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T15:28:28Z",
+  "updated_at": "2026-09-10T14:28:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17184",
+  "body": "Found while working on #16935 (flattening the `type: \"error\"` fences on the same page onto `ErrorMessageSchema`). That card's dispatch deliberately fenced the `type: \"auth_error\"` fence at `:220` out of scope and asked for it to be measured and reported rather than rewritten — measuring it turned up a wider, separate defect, filed here.\n\nMeasured on `origin/main` at `fd5cff209f`. Every line number below is from that tree.\n\n## The declared contract\n\n`packages/spec/src/api/websocket.zod.ts:38` declares the closed vocabulary of WebSocket message types, and every message schema on that tree pins its `type` to a member of it:\n\n```\nexport const WebSocketMessageType = z.enum([\n  'subscribe', 'unsubscribe', 'event', 'ping', 'pong',\n  'ack', 'error', 'presence', 'cursor', 'edit',\n]);\n```\n\n`BaseWebSocketMessage` (`:269`) types its `type` field as that enum, so a message whose `type` is not a member of it does not parse against **any** schema in the file.\n\n## What the page teaches instead\n\n`content/docs/protocol/kernel/realtime-protocol.mdx` documents a connection handshake and a subscribe acknowledgement built entirely out of message types that are not in that enum:\n\n| site | `type` in the fence | declared in `WebSocketMessageType`? |\n|---:|:--|:--|\n| `:202` (JSON fence) | `auth` | no |\n| `:210` (JSON fence) | `auth_success` | no |\n| `:220` (JSON fence) | `auth_error` | no |\n| `:258` (JSON fence) | `subscribed` | no |\n| `:176`, `:590`, `:1012` (JS snippets) | `auth` | no |\n\nThe same fences also carry top-level fields no schema declares — `token`, `user_id`, `session_id`, `expires_at` on the auth pair, and `subscription_id` / `object` / `events` / `filter` on the subscribe pair.\n\nRead live against the built spec, so this is not a grep artefact:\n\n```\nerror          DECLARED\nauth_error     NOT DECLARED\nauth           NOT DECLARED\nauth_success   NOT DECLARED\nsubscribed     NOT DECLARED\n```\n\n(`WebSocketMessageType.safeParse(t)` over `packages/spec/dist/api/index.mjs`; `error` is the positive control on the same corpus and the same call.)\n\nProducer readings on the same tree, each with a positive control:\n\n| reading | result | positive control |\n|:--|--:|:--|\n| `auth_error` in `packages/**` | 1 line, and it is **not** a hit: `packages/spec/src/identity/protocol.ts:136` is `OAUTH_ERROR: 'oauth_error'`, an OAuth error-code constant matched as a substring | `ErrorMessageSchema` in `packages/**` returns 11 lines across 6 files |\n| `auth_success` in the repo, excluding `content/docs` | 0 | same control as above |\n\n## Why this is a defect and not a style note\n\nNothing on this tree emits any WebSocket message at all — `packages/spec/CHANGELOG.md` records that \"no WebSocket server is mounted (#2462); the protocol is a future wire contract\", and the page's own implementation-status callout says the transport is unwired. So the page is the **only** authoring surface for this protocol, and `WebSocketMessageType` is the only declaration of it. A client written from the handshake section sends `{\"type\": \"auth\", ...}`, which the one schema governing that field rejects; a client written from the subscribe section waits for `{\"type\": \"subscribed\"}`, which nothing can ever send. Copying the examples fails against the declared contract.\n\n## Two readings, and they lead to opposite edits\n\nUnlike #16935's envelope half — where both readings agreed, because `ErrorMessageSchema` is flat whether or not the capability ever ships — this one genuinely does not settle itself:\n\n- **A — the page is wrong.** The handshake is not part of the declared protocol; rewrite or remove those fences, and express authentication in terms the enum can carry.\n- **B — the enum is incomplete.** An auth handshake and a subscribe acknowledgement are real parts of a WebSocket wire protocol that the spec simply has not declared yet; the enum and the message schemas should grow `auth` / `auth_success` / `auth_error` / `subscribed` before the transport lands.\n\nB is a protocol change and needs a decision — which is exactly why #16935's dispatch ruled `:220` out of that card's scope: rewriting the fence to `type: \"error\"` there would have been changing the protocol under cover of a documentation fix.\n\n## Not fixed here\n\nLeft byte-unchanged by the #16935 PR. Nothing gates it either: these are JSON fences, so no type-check compares a documented realtime message against the declared enum — that gap is the class (B) population of #17127, whose census should count this page.\n\nRelated: #16935, #17127, #16937.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 17410,
+  "kind": "issue",
+  "title": "[finding] `os generate view class` emits a barrel line binding a reserved word — it parses, so both the charset gate and the parse check admit it, and no consumer can import it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T12:13:32Z",
+  "updated_at": "2026-09-10T14:39:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17410",
+  "body": "## Summary\n\n`os generate view class` (and the other non-`object` generators) exits **0** and writes a barrel line that binds a JavaScript reserved word as an export name:\n\n```ts\nexport { default as class } from './class.view';\n```\n\nThat line **parses**, which is why it survives every layer we have: an ES module export clause admits a reserved word as a `ModuleExportName`. But no consumer can ever import it by name — `import { class } from './index'` is a syntax error — so the generator emits a barrel entry that is silently unusable.\n\n## Why the existing gates do not catch it\n\nBoth landed layers are satisfied, each correctly by its own terms:\n\n| layer | verdict on `class` | why |\n|:--|:--|:--|\n| charset gate (#16726) | **admits** | `class` is inside the charset `packages/spec` declares for an object `name` (`^[a-z_][a-z0-9_]*$`) — every character is a lowercase letter |\n| parse check (#16541 / PR #16724) | **admits** for `view` | the emitted `export { default as class } from …` is parseable TypeScript. It correctly **refuses** `os g object class`, because that generator emits `const class: …`, which does not parse |\n\n⇒ The trap is exactly in the gap: a name that is charset-legal **and** emission-parseable, but whose emitted binding is unusable downstream. ⛔ This is not a defect in either landed layer.\n\n## Measured\n\n⚠️ **Attribution, so nobody re-reads this as my own measurement:** these rows were driven by the `os-dev` agent that delivered #16726, on branch `claude/issue-16726-generate-name-gate`, and reported in its final report on #16726. **This seat has NOT re-driven them** — the CLI needs a build this seat does not run. Triage should re-verify before grading.\n\n```\nos g object class       exit 1   refused by the parse check (\"'class' is not allowed as a variable declaration name.\")\nos g view   class       exit 0   writes: export { default as class } from './class.view';\n```\n\nRe-check command (build `@objectstack/cli` first):\n```\nos g view class --dry-run\n```\nExpect: exit 0 and a barrel line binding `class`. A non-zero exit means this card is already fixed.\n\n## Where it came from\n\nThe #16726 ruling (decision batch #82, 2026-09-08) closes with a sentence that does **not** follow from the mechanism the same ruling specifies:\n\n> 「`os generate view class` is therefore refused at the door rather than emitting a barrel line that binds a reserved word.」\n\nThe ruled mechanism is a charset gate, and a charset gate admits `class`. The delivering agent flagged the mismatch rather than quietly implementing something wider than what was ruled, and the `domain:cli` seat ruled **as delivered** on PR #17408 — because a reserved-word rule is a *third* rule on this identifier, and the same ruling says ⛔ no third charset. ⇒ Honouring that sentence needs its own decision, which is what this card carries.\n\n⭐ PR #17408 was built so such a rule can be added **on top of** it without moving anything, exactly as #16724 was built for #17408.\n\n## What a fix would decide (⛔ not decided here)\n\n- Refuse reserved words at the door for the generators whose emission binds the name as an importable identifier — noting the refusal must be **per-generator**, since `object` already refuses `class` one layer down and `view` does not.\n- Or emit a non-reserved alias for the barrel while keeping the authored name for the file — ⚠️ which is the silent author-name/emitted-name divergence option A was chosen to prevent, so it likely loses on the same reasoning.\n- Or accept it as out of scope and say so, on the grounds that `class` as a view name is vanishingly rare.\n\n⚠️ There is also a sibling question this card does **not** claim: `os create`'s identifier (#15892's subject) may have the same gap. ⛔ Not measured here.\n\n## Not duplicates (checked, including closed)\n\n- **#16541** (closed, completed) — `os generate` had no name validation at all; its parse check is the layer that correctly admits this case.\n- **#15892** (closed, completed) — `os create plugin foo.bar`; different command, and its emission is a `const` binding rather than an export alias.\n\nFiled by the `domain:cli` execution PM seat (#6024, session `session_01DapQyvYrFb1MxSYe7BL2nt`) out of PR #17408's acceptance. ⛔ Not graded, no `domain:*`, no priority, no assignee — that is triage's.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

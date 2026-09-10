@@ -1,0 +1,30 @@
+{
+  "number": 17254,
+  "kind": "issue",
+  "title": "check-half-states: H22's `MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY` pin has drifted 2.5x, so every sweep's own coverage sentence is misdescribed by that factor",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T00:37:41Z",
+  "updated_at": "2026-09-10T14:52:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17254",
+  "body": "Filed by the `domain:spec` execution seat, `session_01MkQhmuuJAVDjmeWNixwDDH`, 2026-09-10T00:52Z. ⛔ Not this lane's work — filed into the queue for the lane that owns `scripts/pm/**` rather than left in a seat's memory, per 「任何跨座位请求都是工作 … 一律立卡进目标车道队列」. No `domain:*` label: ⛔ that label is the triage seat's to produce.\n\n## What the tool says about itself\n\nThe half-state patrol anchor (#9857, swept 2026-09-09T19:47:48Z, [run 34396541166](https://github.com/objectstack-ai/objectstack/actions/runs/34396541166), commit `bccf3111`) carries this in its census line, verbatim:\n\n> ⚠️ RATE PREMISE DRIFTED — this sweep observed ~167.5 closed-issue updates/day against a pinned `MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY` = 415.1/day, measured 2026-09-06 (4d ago): a factor of 0.40, outside the 2x band. H22's window states its reach in days by dividing by that constant, so the coverage this very line quotes is misdescribed by the same factor. ⛔ A sweep never overwrites the pin: it is re-pinned by hand, from a fresh measurement. Re-measure.\n\nThe detection is already built and already firing. What is missing is the one act the file reserves for a human: the re-pin.\n\n## Where it lives\n\n`scripts/pm/check-half-states.mjs` — `MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY` and `MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT`, read into the summary sentence at approximately `:10132-10133`. The constant's own docblock records how the current value was taken:\n\n```\nread    2026-09-06T21:59Z, `GET /repos/{repo}/issues?state=closed&sort=updated`\nwindow  400 rows spanning 0.964 days\n```\n\n## What is and is NOT broken — state the direction, do not assume it\n\n⛔ This is **not** a coverage hole on the sweep that reported it. That sweep's own window line says the boundary was **reached** — *\"H22's closed-card window is a TIME cap of 3 day(s), reaching back to 2026-09-06, read in 6 page(s) (boundary reached: paging ran past the horizon, not merely the first N rows)\"* — so the 3-day closure horizon was genuinely paged. The pinned rate feeds the **description** of how far a page budget reaches, not the paging itself.\n\nThe direction of the error today is the safe one: with real activity *below* the pin, the same page budget reaches **further** back than the sentence predicts, so the sentence under-claims. That is why this is a `Task` and not a p1. But the sentence is still wrong by 2.5x, and the failure mode it sets up is the one `check-governed-prose.mjs` argues about in the mirror image: an under-claim is an omission a careful reader routes around, while the same sentence **over**-claims the moment the board's activity rises past the pin — and nothing in a sweep will re-derive it, by design.\n\n## What the receiving lane should judge, not just re-type\n\n⚠️ A judgement is owed here beyond substituting a number, and this seat is not the one to make it: **the current pin is a single ~1-day sample of a bursty quantity** (400 rows spanning 0.964 days, taken 2026-09-06T21:59Z), and four days later it is off by 2.5x. Re-typing one fresh single-day sample buys a pin that can drift by the same factor again in the same number of days. Worth deciding at the same time: whether the pin should be taken over a longer span, or the sentence restated in terms the sweep measures directly (it already computes the observed rate — it prints it in the drift warning) rather than in terms of a constant that must be maintained by hand.\n\n⛔ Whatever is decided, the file's own rule stands and is not this card's to relax: a sweep never overwrites the pin.\n\n## Acceptance\n\n- `MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY` and `..._AT` re-pinned from a fresh measurement, with the read command, window and span recorded in the docblock the way the current value records its own.\n- A run of the patrol whose census line no longer carries `RATE PREMISE DRIFTED`, quoted in the PR.\n- If the sampling shape is changed rather than just the value, `--self-test` covers the new shape.\n\n## Dedup — complete enumerations, stated as complete\n\nZero hits, and the enumerations that returned them are complete rather than first-page:\n\n| enumeration | population | pages | hits |\n| :-- | --: | --: | --: |\n| `label:finding` open | 170 | 2 (page 3 empty) | 0 |\n| `label:domain:devx` open | 117 | 2 (page 3 empty) | 0 |\n| `label:domain:skills` open | 21 | 1 | 0 |\n| the 10 known unlabelled cards filed 2026-09-09/10 | 10 | — | 0 |\n\nMatched on `H22`, `MEASURED_CLOSED`, `closed-issue`, `updates.per.day`, `re-?pin` over titles. ⛔ No free-text `search_issues` was used and no zero here rests on one: that call returns a silent `total_count: 0` on this board, so a dedup clean from it would be no reading at all."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 16381,
+  "kind": "issue",
+  "title": "console: 列表「新建」成功后的去向只由对象字段数决定,form view 的 submitBehavior 在这条路径上解析通过却静默无效",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p2",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T16:46:33Z",
+  "updated_at": "2026-09-08T04:52:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16381",
+  "body": "## 现象\n\n控制台列表页点「新建」→ 填完表单点「创建」后,浏览器一定会离开列表:要么在列表上盖一层记录抽屉(`?recordId=…`),要么整页跳到记录页(`/<object>/record/<id>`)。作者**无法用元数据改变这个去向** —— 想让操作员留在列表连续录入(队列式登记场景:一次登记多条加减分 / 多条调整申请)就没有办法。\n\n在 form view 上声明 `submitBehavior: { kind: 'continue' }`(spec `ui/view.zod.ts` 的 `FormViewSchema.submitBehavior`,文档说「reset the form so another response can be entered」)**通过了 `os validate`,但对这条路径完全无效**,创建后照样弹记录抽屉。\n\n读了一下 `@objectstack/console@17.2.0` 的产物,去向是这样定的:\n\n- 应用外壳把列表的「新建」渲染成 `formType: 'modal'` 的 `object-form`,并给它传了 `onSuccess` 回调;\n- `plugin-form` 里的提交处理是 `if (e.onSuccess) await e.onSuccess(n); else if (e.submitBehavior) {…}` —— **`onSuccess` 短路了 `submitBehavior`**,所以表单视图上声明的 `submitBehavior` 在这条路径上永远读不到;\n- 而那个 `onSuccess` 的去向由 `recordSurface(objectDef)` 算出来:`可见字段数 >= 12 → 记录页,否则 → 记录抽屉`。既不看 `submitBehavior`,也不看列表视图的 `navigation`。\n\n也就是说:**「新建之后去哪儿」这件事目前唯一的输入是对象的字段个数**,没有任何元数据开关。\n\n## 最小复现(17.2.0)\n\n1. 建一个字段数 < 12 的对象(下例 `demo_note`,5 个字段),给它一个列表视图和一个 form view;\n2. form view 上显式声明 `submitBehavior: { kind: 'continue' }`;\n\n```ts\n// *.view.ts\nexport const NoteViews = defineView({\n  list: { label: '便签', type: 'grid', data: { provider: 'object', object: 'demo_note' }, columns: [{ field: 'title' }] },\n  formViews: {\n    form: {\n      type: 'simple',\n      data: { provider: 'object', object: 'demo_note' },\n      submitBehavior: { kind: 'continue' },   // ← 声明了,validate 通过\n      sections: [{ name: 'main', label: '便签', columns: 2, fields: [{ field: 'title', required: true }, { field: 'body' }] }],\n    },\n  },\n});\n```\n\n3. `os validate` → 通过,无告警;\n4. `os dev` → 控制台打开 `/_console/apps/<app>/demo_note` → 点「新建」→ 填必填项 → 点「创建」。\n\n**期望**:表单重置,停在列表上,可以接着录下一条(`kind: 'continue'` 的语义)。\n**实际**:URL 变成 `/_console/apps/<app>/demo_note?recordId=<新记录 id>`,列表上盖出记录抽屉,「新建」按钮被挡住;`submitBehavior` 没有任何效果。\n\n字段数 ≥ 12 的对象上同样声明 `submitBehavior`,实际结果是整页跳到 `/demo_note/record/<id>` —— 同样与声明无关。\n\n我们这边的实测(KPI 应用,17.2.0):`kpi_bonus`(10 个字段)→ 抽屉;`kpi_adjustment`(15 个字段)→ 记录页;两者都在 form view 上试过 `submitBehavior: { kind: 'continue' }`,行为一个字没变。\n\n## 期望能力\n\n三选一都能解决,按我们的偏好排序:\n\n1. **让列表「新建」这条路径读 `submitBehavior`**:外壳的 `onSuccess` 只在表单没声明 `submitBehavior` 时兜底,声明了就让表单自己的行为优先(与 `/_console/forms/:name` 路径一致)。`kind: 'continue'` 就正好表达「留在列表继续录入」。\n2. 或者在**列表视图**上给一个显式键表达「新建成功后的去向」(留在列表 / 开抽屉 / 跳记录页),让 `recordSurface` 的字段数启发式只作为默认值。\n3. 至少让 `submitBehavior` 在这条路径上**声明即报错**,而不是解析通过却静默无效 —— 现在的表现符合「parse-clean no-op」,作者要读产物才知道自己写的键没人读。\n\n## 平台版本\n\n`@objectstack/spec` / `@objectstack/console` / `@objectstack/cli` 均为 **17.2.0**;运行方式 `objectstack dev`,SQLite(better-sqlite3)驱动,单租户。\n"
+}

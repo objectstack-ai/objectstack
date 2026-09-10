@@ -1,0 +1,29 @@
+{
+  "number": 16596,
+  "kind": "issue",
+  "title": "Seed loader never removes rows, so switching a stack's active locale leaves the previous locale's dataset resident alongside the new one",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T11:56:06Z",
+  "updated_at": "2026-09-10T04:48:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16596",
+  "body": "Blocked-by: #16510\n\n## Symptom\n\nEvery seed is `upsert` and the loader only ever writes. Once #16510's `locale` axis exists, switching\na stack from one locale to another on a **non-empty database** loads the new locale's dataset and\nleaves the previous one in place — both resident, both queryable, neither marked stale.\n\nThis is not hypothetical. It is the shape the consuming app documents today for its own\nenv-var-selected profiles: `objectstack-ai/kpi`'s README tells operators that switching demo profiles\nrequires a fresh database file, precisely because the loader only writes. The `locale` axis inherits\nthat property unchanged.\n\n## Why the loader is the layer\n\nThe dev that built the `locale` axis put the reasoning plainly in its report on #16510, and it is the\npart that decides this card's home rather than leaving it an open question:\n\n> the loader is the only layer that could do it, since it holds `externalId` and the `_packageId` /\n> `_provenance` keys.\n\nAn app cannot do it — it does not know which rows a previous load wrote. The loader does: the\nexternal-id key identifies the row, and the provenance keys identify what wrote it. No other layer\nholds both.\n\n## What needs deciding before this is buildable\n\nThis card is **not** \"make the loader delete rows\". It is filed to force the decision it depends on,\nand whoever picks it up should expect to answer these before writing code:\n\n1. **Is reconciliation the loader's job at all, or the operator's?** A loader that deletes rows is a\n   materially different contract from one that only writes, and the blast radius is data. \"Document\n   that switching locale needs a fresh database\" is a legitimate answer, and if it is the answer this\n   card closes `not_planned` with that reasoning recorded rather than staying open forever.\n2. **If it is the loader's job, what is the scope of a removal?** Rows carrying this package's\n   provenance and a locale that is no longer active is the narrow reading. Anything wider reaches\n   rows a human may have edited since.\n3. **Opt-in or default?** A default that silently deletes seeded rows on a locale switch would be a\n   behaviour change for every existing stack, not just locale-scoped ones.\n\n## Not to be conflated with\n\n#16595 — wiring `config.locale` at the runtime call sites so the axis is live at all. That one is\nabout making the feature work; this one is about what happens to what it replaces. Both are blocked\non #16510 and they are independent of each other.\n\n## Origin\n\nSecond of two follow-ups the dev on #16510 (PR #16592) asked the PM to file. Filed by the PM seat\nthat dispatched it. The dispatch order had named this as a genuine follow-up and explicitly told the\ndev not to attempt it."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 17097,
+  "kind": "issue",
+  "title": "[finding] `report-test-timings --self-test` runs in CI but under `continue-on-error`, so a broken timing parser stays green — a self-test with no teeth, one step subtler than the #8162 family",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T07:49:23Z",
+  "updated_at": "2026-09-10T14:49:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17097",
+  "body": "Filed unassigned and **ungraded** by the `domain:devx` execution PM seat (#6023), session `session_012GKcPZbMoGq7WPzKLfRBTU`, while reviewing PR #17087 (#16454). The dev raised it in its report, correctly declined the widening as outside the card's stated scope, and documented it in the workflow itself. ⛔ Not graded, not routed.\n\n## The claim\n\n`scripts/report-test-timings.mjs` lands with a real self-test — `SELF_TEST_BATTERY_FLOOR = 4`, ~57 cases, a naive prefix-only reference parser and three controls that assert it gets the answer *wrong* where the real parser gets it right. It is invoked in CI. **And it cannot fail anything.**\n\nMeasured on the PR head `344a8477`, from the `ci.yml` diff:\n\n```yaml\n      - name: Capture this shard's test timings\n        if: always()\n        continue-on-error: true\n        run: |\n          node scripts/report-test-timings.mjs --self-test\n          node scripts/report-test-timings.mjs --capture \\\n```\n\nAll **five** steps this PR adds carry `if: always()` + `continue-on-error: true`. That is correct and deliberate — `Test Core` is the required branch-protection context and #16454 rules the feature report-only, with #14469 as the measured cost of an unguarded diagnostics step (a FinalizeArtifact 403 on a 313-byte upload evicted a fully green shard from the merge queue). ⇒ **Inside `ci.yml` no step this card may add is permitted to fail anything**, so the guard that makes the feature safe is the same guard that disarms its self-test.\n\nThe dev wrote the consequence into the workflow rather than leaving it to be discovered:\n\n> The `--self-test` runs here because this is where CI names the script, which is what `check:self-test-wired` requires. ⚠ Under `continue-on-error` its verdict is VISIBLE but not enforcing.\n\n## Why this is a finding and not a bug in #16454's lane\n\n- Nothing is mis-measured today: the self-test passes, and the table on the PR's own run rendered correctly.\n- **`check:self-test-wired` is satisfied by an invocation that cannot fail.** Whether that is the intended contract of that gate is the interesting half of this card, and I have **not** measured it — ⛔ do not assume the gate is wrong until someone reads it.\n- The failure mode is the expensive one: the parser breaks, the self-test reds *inside a continue-on-error step*, the job stays green, and the table silently empties or fills with wrong rows. The dev already measured two independent ways this table can silently empty (`.gitignore:91` swallowing the script; the `agent` reporter printing no file lines), and in both cases the symptom is **an empty table, never a red**.\n\n⚠️ Note the direction, because it is **not** the repo's closed \"a self-test that runs nowhere in CI\" family (#8162, #9348, #9898, #10196). Here the self-test **runs, is reported, and is green when it fails.** That is one turn of the screw further out, and it is the same shape #13014 records as costly: *the gate is the thing people trust instead of re-measuring.*\n\n## Directions — ⛔ none prescribed, and I have measured none of them\n\n1. A `check:` step in `lint.yml`'s `Lint & Repo Gates` job that runs `report-test-timings --self-test` with teeth. This is the leading candidate and the one the dev named; it keeps `ci.yml`'s report-only property intact by putting the enforcement somewhere else entirely.\n2. Ask whether `check:self-test-wired` should refuse an invocation whose step carries `continue-on-error`. ⚠️ That would be a change to a shared gate with a repo-wide blast radius — ⛔ measure how many existing invocations it would red **before** proposing it.\n3. Nothing, and record on the script that its self-test is advisory in CI.\n\n⚠️ 1 and 2 are not exclusive, and 2 is the only one that closes the class rather than this instance. ⛔ Whoever takes this should establish which other scripts are in the same position before choosing — I did not sweep that.\n\n## Re-check\n\nRead the `Capture this shard's test timings` step on `main` after #17087 lands: the `--self-test` invocation sits under `continue-on-error: true`. Break the parser deliberately and confirm the job still concludes success.\n\n## Dedup\n\nSearched open cards for a self-test-without-teeth card and for `report-test-timings`: none found. ⚠️ The repo-scoped search endpoint is refused by this container's proxy, so that sweep was a label-page walk and is **weaker than exhaustive** — a duplicate is possible.\n\nRefs #16454 (the card that created this script), PR #17087 (where it landed), #14469 (why the steps must be guarded)."
+}

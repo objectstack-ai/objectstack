@@ -1,0 +1,35 @@
+{
+  "number": 16506,
+  "kind": "issue",
+  "title": "Queue-flake anchor: src/email-service.queue-delivery.test.ts",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:services",
+    "finding",
+    "pm:dispatched",
+    "priority:p2",
+    "queue-flake-anchor",
+    "tests"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T05:42:37Z",
+  "updated_at": "2026-09-08T04:04:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16506",
+  "body": "`src/email-service.queue-delivery.test.ts` has ejected **2 pull requests** from the merge\nqueue within a rolling 24 hours — **2 independent hits** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #16369 | independent | [34072528482](https://github.com/objectstack-ai/objectstack/actions/runs/34072528482) |\n| #16442 | independent | [34086147182](https://github.com/objectstack-ai/objectstack/actions/runs/34086147182) |\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nLast refreshed by queue build [34086147182](https://github.com/objectstack-ai/objectstack/actions/runs/34086147182) (PR #16442).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:src/email-service.queue-delivery.test.ts -->"
+}

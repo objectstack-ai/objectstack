@@ -1,0 +1,33 @@
+{
+  "number": 493,
+  "kind": "pull_request",
+  "title": "Add missing protocol documentation for QA, Contracts, and AI categories",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-02T10:36:27Z",
+  "updated_at": "2026-02-02T11:42:25Z",
+  "closed_at": "2026-02-02T11:32:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-02T11:32:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/493",
+  "body": "Documentation gap analysis revealed 10 undocumented protocols across the spec. This adds comprehensive reference documentation to achieve full protocol coverage.\n\n## Changes\n\n### New Protocol Categories (2)\n\n- **QA Protocol** (`content/docs/references/qa/`)\n  - Testing protocol: test suites, scenarios, steps, actions, assertions\n  \n- **Contracts** (`content/docs/references/contracts/`)\n  - TypeScript interfaces for plugin implementations\n  - Data Engine: `IDataEngine`, `DriverInterface` \n  - Plugin Validator: `IPluginValidator`, `ValidationResult`\n  - 7 additional contract interfaces\n\n### Completed AI Protocols (2)\n\n- **DevOps Agent**: Autonomous CI/CD with GitHub/Vercel integration\n- **Feedback Loop**: Runtime issue detection and self-healing architecture\n\n### Updated References\n\n- Main index updated: 109 → 119 documented protocols\n- Added navigation for new categories\n\n## Example Usage\n\n```typescript\nimport { TestSuiteSchema } from '@objectstack/spec/qa';\nimport type { IDataEngine } from '@objectstack/spec/contracts';\n\n// QA Protocol\nconst testSuite: TestSuite = {\n  name: 'CRM Tests',\n  scenarios: [{\n    id: 'test-001',\n    steps: [{ name: 'Create contact', action: { type: 'create_record', ... }}]\n  }]\n};\n\n// Contracts\nclass PostgresEngine implements IDataEngine {\n  async find(objectName: string, query?: DataEngineQueryOptions) { ... }\n}\n```\n\nAll documentation follows existing patterns with TypeScript examples, use cases, and best practices.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 扫描所有软件包代码和spec协议，对官网文档进行必要的更新\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

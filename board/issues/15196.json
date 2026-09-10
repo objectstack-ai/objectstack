@@ -1,0 +1,33 @@
+{
+  "number": 15196,
+  "kind": "issue",
+  "title": "feat(core,objectql,plugin-security,plugin-sharing): the catalog is read from the registry; assignment tables reference it by name (ADR-0131 D2/D3/D4)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "domain:services",
+    "pm:blocked",
+    "priority:p1",
+    "security",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T05:44:58Z",
+  "updated_at": "2026-09-05T16:44:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15196",
+  "body": "**⛔ BLOCKED — the v18 development line is not open.**\n\n`Blocked-by: #15193`\n\nPart of #15194 (ADR-0131 execution tree). ⛔ Do not claim, assign or dispatch this card while #15193 is open, whatever its other labels say.\n\n---\n\n**In one sentence.** Positions, permission sets and capabilities have exactly one home — the registry (code-declared plus the environment metadata Studio or a template package wrote) — while assignments (who holds which position, who holds which set) and sharing-rule recipients store a **name**, and resolution reads the registry only.\n\n**Scope.** (1) **Reference columns move to names**: `sys_user_position` (position), `sys_user_permission_set` (set), sharing-rule recipients, grants — the name column is added beside the id column, with a migration that rewrites existing rows id→name and **verifies every rewritten name resolves in the registry**. The id column is dropped in C8, not here. (2) **Resolution**: `packages/core/src/security/resolve-authz-context.ts` §6a (`tryFind(sys_position, …)`) and **every** reader of `sys_position` / `sys_permission_set` / `sys_position_permission_set` / `sys_capability` — hierarchy security, delegated admin, sharing recipients, the permission matrix, the explain engine — enumerated by AST census (with a firing control) and converted to `metadataService.list('position')` / `list('permission')` / capability registry reads. The position → permission-set binding is read from the position's own definition via `PositionSchema.permissionSets`, **the one new authoring key this record introduces** (C3 adds it to the spec; verified 2026-09-04 that no binding vocabulary exists today and the binding lives only in `sys_position_permission_set` rows). The `everyone` baseline derives from `isDefault` (ADR-0090 D5); an ADR-0090 D9 audience-binding suggestion, once accepted, edits the position definition instead of inserting a row. (3) **One namespace**: Studio refuses a name a managed package holds. (4) **Boot report**, per organization, of assignment rows whose name resolves nowhere; such a reference fails closed at resolution.\n\nMaintainer's ruling this card implements, 2026-09-04, on whether a position's permission sets are definition or appointment: 「ok」 to *definition* — so the binding travels with the position, and only the person→position link is a row.\n\n**Acceptance.** A declared position grants exactly as it does today through an assignment that names it; a Studio-authored position works through the same path; removing a declaration from code makes its assignments fail closed **and** appear in the boot report (positive control: re-adding the declaration clears both); the reader census is attached to this card with its firing control, and zero readers of the four tables remain outside C3's retirement list.\n\n⛔ **Stop and report**: deleting any seeded row (C7 owns deletions); touching the driver arms (C8).\n\nRefs: ADR-0131 D2, D3, D4 · ADR-0129 D1 · ADR-0094 D1 · ADR-0090 D5/D9 · #13564 read-side ledger §2.\n"
+}

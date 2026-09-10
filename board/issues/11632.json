@@ -1,0 +1,33 @@
+{
+  "number": 11632,
+  "kind": "issue",
+  "title": "[Epic] Migrate SCIM from @better-auth/scim 1.7.0-rc.1 to stable 1.7.x — seven-model provision, sys_scim_provider disposition, token reissue coordination, net-new Setup surface",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:blocking",
+    "pm:epic",
+    "priority:p0"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-24T09:59:44Z",
+  "updated_at": "2026-09-05T23:15:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11632",
+  "body": "Chartered by maintainer ruling, 2026-08-24, live PM chat on #3653 (「os#3653 立项迁移」). The spec half of #3653's question A is thereby answered **implement** — the `SCIMGroup` family becomes true through this migration, not through retirement.\n\n**Owner**: PM session `6679d191-11f4-465b-b322-0e0409d76793` (GitHub `hotlong`), from **2026-09-06** on the maintainer's instruction 「帮我接手处理这个epic」 — the same channel and the same form of words that installed the previous owner. Takeover audit: this card's 2026-09-06 comment.\n**Previous owner** (history, not superseded silently): `domain:services` seat, session `session_0194kbQJxUvv2yvsGRtuXpP5` (GitHub `os-litant`), 2026-08-26 → 2026-09-06, installed by 「#11632 你接手」; takeover audit `11632#issuecomment-5436576411`. ⛔ Its work is not disowned by this handover — nine of the ten sub-issues closed under it.\n\n⚠️ **Read `11632#issuecomment-5436607274` before acting on any leg below.** It re-measures this card against the **published** `@better-auth/scim@1.7.1` tarball and corrects two premises the leg list rests on. Where it and this body disagree, it wins.\n\n## Model diff — corrected\n\n⚠️ The earlier version of this table omitted `scimProvider` from **lost**, which read as though it survived on stable and made `sys_scim_provider`'s disposition look like a free choice among available shapes. It is not — there is nothing upstream left to mirror. Three independent instruments agree: the repaired parity gate, #11697's probe against a real constructed plugin, and a direct read of the published 1.7.1 bundle.\n\n| | models |\n|---|---|\n| **gained** | `scimConnectionBinding`, `scimIdentityTombstone`, `scimProjectionGrant`, `scimSubject`, `scimUser` |\n| **lost** | `scimGroupRole`, `scimGroupRoleGrant`, **`scimProvider`** |\n| **kept** | `scimGroup`, `scimGroupMember` |\n\n**Seven** declared models on stable, not six (`pnpm-workspace.yaml`'s hold note enumerates six, omitting `scimProjectionGrant` — tracked as #11943, comment-only fix).\n\n## Scope\n\n1. **Platform objects**: provision the seven stable models. ⛔ `managedConnections` (the conditional trio `scimManagedConnection`/`scimManagedCredential`/`scimManagedConnectionEvent`, ten in total) is **not adopted** — #11693 rejected it for bundling a posture decision nobody asked for. `sys_scim_provider`'s disposition is decided INSIDE this epic; #11693 ruled retirement, #11757 is that leg.\n2. **plugin-auth**: `scim({...})` gains stable's options. ⭐ Stable's constructor refusal is a **three-way** — `connections` **or** `verifyBearerToken` **or** `managedConnections` — and `verifyBearerToken` is handed `database: Pick<DBAdapter, \"findOne\" | \"update\">`, so an app-owned verifier keeps connections as **runtime data** without static declaration and without the managed catalog. `storeSCIMToken` is **gone**; `AUTH_MODEL_TO_PROTOCOL` entries for the new models (stable accepts no schema option — adapter bridging remains the only naming route).\n3. **spec**: field-level parity between `SCIMGroupSchema` and stable's group wire shape — **measured, closed** (#11697: zero schema movement).\n4. **Parity gate**: `better-auth-schema-parity.test.ts` — see the atomicity constraint below. The #11380/PR #11429 constructor repair is landed.\n5. **Setup surface**: net-new build (objectui and cloud measured at zero SCIM UI today).\n6. ⚠️ **Operator coordination — a human action, not a dev card**: token digests are NOT portable on any path, so **every SCIM-enabled deployment's IdP reissues its token on migration day**. SCIM is default-off (`OS_SCIM_ENABLED`), so landing the code is not itself the breaking event; scheduling this is the maintainer's.\n7. Scaffold `allowedVersions` suppressions retire with the pin move (the two presence-ratchet tests flip in the same stroke); ⛔ the `better-auth>better-sqlite3` and `@better-auth/utils` entries do **NOT** retire with it.\n8. ⚠️ **Credential-at-rest posture must be re-established at parity or better.** `storeSCIMToken: 'hashed'` disappears with the pin, and `credential-at-rest-posture.test.ts` exists precisely because the upstream default is cleartext. Under an app-owned verifier ObjectStack owns bearer storage outright. ⛔ No loosening; if parity proves impossible that is a stop-and-report fork, not a dev's judgement call.\n\n## ⛔ Atomicity constraint — legs 2 and 1b are ONE PR\n\n`better-auth-schema-parity.test.ts` asserts `KNOWN_UNMAPPED_MODELS` as an **exact set in both directions**. The moment the pin moves, two members disappear, five new models appear unmapped, and `scimProvider` goes stale on the mapped side ⇒ **a pin-move-only PR is red on arrival.**\n\n⇒ **Leg 2′ = pin move + seven platform objects + bridge entries + item 7 + item 8, atomically.** It is XL because a gate correctly refuses to let it be smaller. The alternative — widening `KNOWN_UNMAPPED_MODELS` — is **gate weakening on a security-adjacent surface, maintainer floor**, and is ⛔ not taken.\n\nOrdering within the epic: leg 2′ is the head (the seven models do not exist in the installed tree until the pin moves, so nothing can be provisioned against them first). #3653 carries it. Legs 4 and 5 follow it.\n\n## Open before leg 2′ can be dispatched\n\n**Which row the verifier reads once `sys_scim_provider` retires** — stable's own `scimConnectionBinding`, or a replacement platform object. Bounded design work inside scope item 1; it decides whether #11757 lands before, with, or after leg 2′.\n\n## Discipline\n\nContract-first decomposition by the owning seat: parent (this card) + sub-issues per surface, `Blocked-by:` chains between legs. Standing operational note until the migration lands: SCIM-enabled deployments must not let the IdP push groups.\n\nRefs: #3653 (pin-move card, leg 2′) · #11757 (leg 1a) · #11693 (retirement ruling) · #11697 (spec parity, closed) · #11943 (workspace note fix) · #11380 / PR #11429 (gate repair, landed) · ADR-0071.\n"
+}

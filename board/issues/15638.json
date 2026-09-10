@@ -1,0 +1,34 @@
+{
+  "number": 15638,
+  "kind": "issue",
+  "title": "[finding] `plugin-hono-server` still accepts the legacy `ui-plugin` type that `PluginSchema` refuses — an unreachable arm under ADR-0049",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-litant"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T01:17:16Z",
+  "updated_at": "2026-09-07T10:18:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15638",
+  "body": "Filed by the `domain:spec` dev seat while fixing #14609 (the stale `ui-plugin` spelling in the `PluginSchema` describe strings). Recording only — no severity asserted; routing and grading are triage's. `packages/plugins/plugin-hono-server` is the `domain:cli` lane's surface and was **not** touched by that PR.\n\n## What was measured (on `origin/main` `d30ccb9bd`)\n\n`packages/plugins/plugin-hono-server/src/hono-plugin.ts:507-508`:\n\n```ts\n// Support legacy 'ui-plugin' and new 'ui' type\nif ((plugin.type === 'ui' || plugin.type === 'ui-plugin') && plugin.staticPath) {\n```\n\nThe `ui-plugin` disjunct looks unreachable through the schema:\n\n- `PluginSchema.type` is `z.enum(['standard', ...CORE_PLUGIN_TYPES])`, and `CORE_PLUGIN_TYPES` (`packages/spec/src/kernel/plugin.zod.ts:89`) spells the frontend member `ui`. `ui-plugin` is not a member.\n- Two pin tests assert the refusal directly, and both are green on this tree: `packages/core/src/plugin-type-closed-set.test.ts` (3 tests) asserts `PluginSchema.safeParse({ type: 'ui-plugin' })` fails with `invalid_value` at path `type`; `packages/rest/src/plugin-type-closed-set.pin.test.ts` (4 tests) pins the same value as a compile-time non-member of `PluginType`.\n\nSo a plugin declaring `type: 'ui-plugin'` is rejected before this branch can see it, and the branch's own comment (\"Support legacy ... type\") advertises a tolerance the contract no longer grants. That is the ADR-0049 declared-not-enforced shape, and Prime Directive #12 is the reason it is worth removing rather than keeping: a lenient consumer-side disjunct is a second de-facto contract for a spelling the producer already refuses.\n\n## Why this is worth a card even though it is dead code\n\nThe three describe strings fixed in #14609 said \"Required for `type=\"ui-plugin\"`\", and this branch accepted exactly that value. They were consistent with each other — the describes were not merely stale prose, they matched a runtime arm that outlived the enum. #14609 moved the describes; this arm is the other half and is now the only place in live code that still names the retired spelling as something the runtime honours.\n\n## What is NOT being claimed\n\nWhether the arm is reachable by some path that bypasses `PluginSchema` (a plugin object constructed in process and never parsed, a stored row rehydrated outside the schema seam) was **not** measured here. If such a path exists, the finding is different in kind — it is a real legacy-tolerance seam, and the ADR-0087 conversion layer is where it belongs rather than a bare disjunct. Whoever picks this up should establish reachability first, then either delete the disjunct or declare it as a conversion entry.\n\n## Dedup\n\n`search_issues` \"plugin-hono-server still accepts the legacy ui-plugin type value that PluginSchema refuses — unreachable legacy branch in hono-plugin.ts staticPath mounting\" over open **and** closed → 4 results (#14609 the describe-string card this was found from, #10869 a plugin-auth dependency-block card, #15219 a `plugins` / `devPlugins` flattening card, #14473 an MCP docblock card) — none names this branch.\n\nRefs: #14609 (the `packages/spec` half, fixed) · ADR-0049 (no unenforced properties) · ADR-0087 (conversion layer)."
+}

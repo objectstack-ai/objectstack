@@ -1,0 +1,31 @@
+{
+  "number": 15135,
+  "kind": "issue",
+  "title": "App nav item `visible` (CEL) is served to the client but never evaluated — a silently inert gate (17.2.0)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p2",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T02:47:41Z",
+  "updated_at": "2026-09-04T19:56:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15135",
+  "body": "## Summary\n\nAn app navigation item's `visible` CEL predicate is **not evaluated by the Console shell**. The predicate is authored, validated, persisted, and served to the browser intact — and then ignored. The entry renders for every user, including the ones the predicate excludes.\n\nThis is the exact failure shape ADR-0049 / ADR-0078 legislate against (\"a gate that validates and then silently does nothing is an authoring trap\"), and the spec's own docblocks assert the opposite behaviour, so an author has no way to discover it short of measuring.\n\n## Environment\n\n- `@objectstack/*` **17.2.0** (runtime, spec, rest, plugin-security, plugin-sharing), Console UI as shipped by `objectstack dev`\n- Node 22, better-sqlite3 driver, single-tenant, `NODE_ENV=development`\n\n## What the contract says\n\n`spec/src/ui/app.zod.ts`, on the nav-item surface:\n\n```\nvisible: ExpressionInputSchema.optional()\n  .describe('Visibility predicate (CEL). e.g. P`\\'org_admin\\' in current_user.positions`'),\n```\n\nand `AREA_VISIBLE_RETIRED` (the message shown when someone authors the retired area-level key) prescribes the item-level key as the working replacement:\n\n> \"…gate the items INSIDE the area — a navigation ITEM's `visible` takes the same CEL expression and IS evaluated per item by the shell.\"\n\n`rest/dist/index.js` (`filterAppForUserWithReason`) is consistent with that division of labour and says so:\n\n> \"NOT gated here: `visible` (CEL) at any level, and `requiresObject` — both are still evaluated client-side only.\"\n\nSo the server deliberately forwards `visible`, on the stated understanding that the shell applies it. The shell does not.\n\n## Minimal reproduction\n\n1. Author an app with one nav group and one leaf item, both carrying an item-level `visible` predicate that is FALSE for the signed-in user:\n\n```ts\nimport { P } from '@objectstack/spec';\nimport { App } from '@objectstack/spec/ui';\n\nexport const DemoApp = App.create({\n  name: 'demo_app',\n  label: 'Demo',\n  navigation: [\n    { id: 'nav_home', type: 'page', pageName: 'demo_home', label: 'Home' },\n    {\n      id: 'group_admin', type: 'group', label: 'Admin Only',\n      visible: P`!('demo_member' in current_user.positions)`,\n      children: [\n        { id: 'nav_secret', type: 'object', objectName: 'demo_thing', label: 'Secret',\n          visible: P`!('demo_member' in current_user.positions)` },\n      ],\n    },\n  ],\n});\n```\n\n2. Sign in as a user who **holds** the `demo_member` position (so both predicates evaluate to `false`).\n3. Observe the sidebar.\n\n## Observed\n\nBoth the group and the leaf render. `GET /api/v1/meta/app/demo_app` returns them with the predicate attached and uncompiled:\n\n```\ngroup_admin group visible={\"dialect\":\"cel\",\"source\":\"!('demo_member' in current_user.positions)\"}\n  nav_secret object visible={\"dialect\":\"cel\",\"source\":\"!('demo_member' in current_user.positions)\"}\n```\n\nMeasured in a real app with six positions: the predicate was `false` for the signed-in user on both a group and a leaf, and the sidebar was byte-identical to a user for whom it was `true` — same six top-level entries, same children after expanding every group.\n\n## Expected\n\nOne of the two, either is fine — what is not fine is the current silence:\n\n- the shell evaluates item-level `visible` against the session (what the spec's own text promises); **or**\n- `visible` is retired from the nav-item surface the way `areas[].visible` already was in 17.0.0, with the same kind of hard error naming `requiredPermissions` as the replacement.\n\n## Impact / workaround\n\n`requiredPermissions` **does** work, and is a strictly better gate for anything security-adjacent — it is applied server-side in `filterAppForUser`, so the entry never reaches the browser. We switched to it and got correct per-role menus.\n\nTwo sharp edges worth documenting wherever `visible` is (or is not) fixed, both hit while migrating:\n\n1. `requiredPermissions` is **AND over exact strings** (`req.every(p => sysPerms.has(p))`) — no wildcard, and **no superuser bypass**. A platform admin holding `admin_full_access` (`manage_metadata`, `manage_platform_settings`, `studio.access`, …) is pruned from an entry gated on an app-defined capability just like an ordinary member. That is defensible, but it is surprising enough that it cost us a debugging cycle: the admin silently lost two menu groups. If that is intended, the docblock next to the `every()` is the place to say so.\n2. Because the gate is AND-only, an app cannot express \"admins OR this capability\" declaratively; it has to grant the capability to the admins as data.\n\nNo behaviour change is being requested urgently on our side — we are unblocked via `requiredPermissions`. Filing because a silently-inert authoring key is the category this project has repeatedly chosen to eliminate rather than document.\n"
+}

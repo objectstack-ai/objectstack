@@ -1,0 +1,31 @@
+{
+  "number": 14026,
+  "kind": "issue",
+  "title": "Re-raise of #4375 with the downstream confirmation it asked for: the console import wizard never sends `mappingName` and hardcodes `writeMode:\"insert\"`, so a named mapping's `upsert` can never reach a user",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p1",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-01T00:25:17Z",
+  "updated_at": "2026-09-10T00:18:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14026",
+  "body": "**这是 #4375 的重提，带上它关闭时点名要的那样东西。** #4375 的关闭评论是：\n\n> 撤回：此条未经下游 PM 确认即批量提报，先关闭；后续由 PM 决定是否重提。\n\n我是 `steedos-labs/hotcrm-heimao` 的 PM 席。**确认：这个缺口在我们这条线上真实存在、已实测、且正在挡住一条已交付功能的可用性。** 现按那句话重提。\n\n⚠️ 顺带一条与内容无关但值得修的：#4375 的 `state_reason` 是 **`completed`**，而它其实是**撤回**。搜索时它看起来像「已修复」—— 我这次差点因此判定本缺口已解决而不再跟进。撤回的卡建议用 `not_planned`。\n\n## 与 #4375 的关系\n\n#4375 报的是 17.0.0-rc.0 上的三件事（向导无写入模式选项、autonumber 编号列不可映射为匹配键、API `writeMode` 400）。**其中第三件在 17.1.0 上已经不成立** —— API 侧现在支持命名映射与 upsert，我们正靠它工作。\n\n剩下的是**向导侧**，而且形态比 #4375 描述的更具体：不是「向导缺一个写入模式选项」，是**向导根本不读已注册的命名映射**。\n\n## 实测（17.1.0，浏览器真人操作 + 抓包，zh-CN，本地服务器）\n\n列表页「导入」按钮走控制台自带的通用导入向导。它向 `POST /api/v1/data/crm_plant_cost/import` 发的是：\n\n```json\n{\"format\":\"json\",\"rows\":[…],\"writeMode\":\"insert\",\n \"createMissingOptions\":false,\"runAutomations\":true,\"skipBlankMatchKey\":false}\n```\n\n两处关键：**没有 `mappingName`**，且 `writeMode` 恒为 `\"insert\"`。向导用界面上自动匹配出来的临时投影，完全不读应用注册的命名映射，因此映射上声明的 `mode: 'upsert'` 与 `upsertKey` **从来没有机会生效**。\n\n## 后果：同一台服务器、同一份数据，两条通道结果相反\n\n| 场景 | 向导（`writeMode:\"insert\"`） | 带 `mappingName` 的接口 |\n| --- | --- | --- |\n| 重传同一份周文件 | 25 行**全部失败**：`A record with this value already exists` | `created: 0, updated: 25, errors: 0` |\n| 重传含历史日期的文件 | 同上，报重复键 | 逐行 `VALIDATION_FAILED`，带业务守卫那句可操作的提示 |\n\n数据没有被写坏（唯一键在尽职），但**更新没有发生，且提示说不清发生了什么**。操作者看到的不是「已更新 25 行」，也不是「这行 2026-08-29 已生效不能改，请补记新行」，而是一句 `A record with this value already exists`。\n\n我们为这张表写的两条业务规则（重复导入幂等、冻结行的拒绝要可见），**从界面走一条都到不了人手里**。\n\n## 另一处更小的摩擦：列头匹配按当前语言的字段标签\n\n同一个向导里，列头是按**当前语言的字段标签**自动匹配的。zh-CN 下 `crm_product` 的标签是「牌号」，模板列头是 `Grade`，匹配不上 → 该列被自动置为「— 跳过 —」，而它是必填，于是向导直接拦住不让继续，必须手动在下拉里选一次。\n\n`Effective From` / `Ex-Works Cost` 因为规范化后正好等于字段名（`effective_from` / `ex_works_cost`）而高置信度命中 —— 所以这不是全面失效，是**按语言而定的部分失效**：英文部署碰不到，中文部署碰得到。\n\n## 影响面不限于我们\n\n向导对**任何**对象都不发 `mappingName`。所以「应用注册一份命名映射，客户就不用手工映射列」这个承诺，目前只在走接口时成立。我们这边四份映射（`crm_account_import` / `crm_contact_import` / `crm_lead_import` / `crm_plant_cost_import`）一律如此。\n\n## 为什么我们不在应用侧变通\n\n我们的维护者今天定了一条原则，逐字：\n\n> 元数据项目原则上不开发专用导入入口，应该复用平台的能力。\n\n我们确实考虑过在应用里做一个固定带 `mappingName` 调接口的专用 action/页面 —— **已否决**。那是拿 app 去补平台的洞：能解决我们这一张表，解决不了通用问题，还会让「导入」在同一个产品里有两种入口、两种行为。所以我们选择上报并等平台，界面侧目前只在文档里写清两条通道的差别。\n\n## 建议方向\n\n1. 向导识别并允许选用**本对象已注册的命名映射** —— 选中后按该映射的 `mode` / `upsertKey` 调接口，而不是用临时投影。这是最贴合「元数据即产品」的一条：映射已经是被声明的元数据，向导只是没去读它。\n2. 若 1 太大，一个更小的中间步：向导至少**把 `mappingName` 透传**（当对象只注册了一份映射时默认选它），让声明过的 `mode` 生效。\n3. 列头匹配同时按**字段名**与**当前语言标签**两路匹配，消掉上面那个按语言而定的部分失效。\n\n## 复现\n\n```bash\n# 界面：任一注册了命名映射的对象 → 列表页「导入」→ 传模板 → 再传第二遍\n#       抓 POST /api/v1/data/<object>/import 的请求体，观察无 mappingName、writeMode 恒为 insert\n# 接口对照：POST /api/v1/data/<object>/import\n#           {\"format\":\"csv\",\"csv\":\"…\",\"mappingName\":\"<registered_mapping>\"}\n```\n\n下游登记：`steedos-labs/hotcrm-heimao#117`（含完整抓包与两条通道的逐行对照）。"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 16345,
+  "kind": "issue",
+  "title": "Console list: the 「导入」 button is gated on allowCreate although the wizard can update, and 「导出」 emits a file the wizard refuses — the export→edit→import round trip is unreachable",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p2",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T14:45:55Z",
+  "updated_at": "2026-09-08T05:01:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16345",
+  "body": "Measured on a real app (ObjectStack 17.2.0, console list view of a business object) while walking the intended end-user journey **export → edit one column → import back**. Two independent console behaviours make that journey unreachable for the role it is meant for.\n\n## 现象 A — the list toolbar gates 「导入」 on **create** permission, but the import can update\n\nAn object whose permission set grants `allowEdit: true` and `allowCreate: false` shows 「导出」 in the list toolbar and **no 「导入」 button at all**. Measured on three objects for the same user in one session:\n\n| object | allowCreate | allowEdit | allowExport | toolbar |\n|---|---|---|---|---|\n| `kpi_entry_line` | false | true | true | 导出 only |\n| `kpi_entry_sheet` | false | true | true | 导出 only |\n| `kpi_adjustment` | **true** | true | (unset) | 新建, 导入 |\n\nThe button tracks `allowCreate` exactly. But the wizard itself is not create-only — its step 3 offers 「当某行匹配到已有记录时」 with `始终新建 / 更新已有(无匹配则跳过) / 匹配则更新,否则新建`, and the update mode works: with match fields selected the run reports `全部 4 行均有效` → `导入完成 · 更新 4 条`, and the collection row count is unchanged.\n\nSo an update-only import — the exact shape of \"bulk-edit one column in Excel and put it back\" — is gated behind a permission it does not need. The role that is supposed to do the data entry is the one role that cannot reach it; only an admin can.\n\nRelated but not the same: #14026 (wizard hardcoding `writeMode:\"insert\"`) is about the mapping payload; on 17.2.0 the wizard clearly does send update modes. This is the *entry point* being gated on the wrong verb.\n\n## 现象 B — the list export omits the object's required lookup columns, so its own output cannot be imported back\n\nExporting the same list (`导出 → 导出为 XLSX`) emits exactly the view's visible columns:\n\n```\n指标名称 | 计量单位 | 目标值 | 权重(%) | 实际值 | 完成率(%) | 得分率(%) | 最终得分 | 已调整 | 备注\n```\n\nNo record id, and neither of the object's two `required` lookups. Feeding that file straight back into the wizard auto-maps all 10 columns and then hard-stops on step 2:\n\n```\n无法继续——以下必填字段未映射:所属填报单 (sheet), 来源下达 (plan_indicator)。\n请在文件中添加对应的列,或返回上一步重新上传包含该列的文件。\n```\n\nThe 「下载模板」 CSV confirms the asymmetry — it carries 28 columns including the two required lookups, but **no record id column either**, so even the template offers no id-keyed update path; matching is only ever by business columns.\n\nAdding the two lookup columns by hand (display values, e.g. `2026 年第 3 季度考核 · 华南分公司`) makes the whole loop work in 9 clicks, and the row-level validation is good: an unmatched row reports `第 4 行:来源下达: 找不到匹配 \"…\" 的记录`, a missing row is simply left untouched, and the run ends `更新 3 条 · 已跳过 1 条` with no stray inserts. So the machinery is sound — the export just does not emit a re-importable file.\n\n## 最小复现\n\n1. Define an object with at least one `required` lookup, and a list view whose columns do not include it.\n2. Grant a role `allowRead / allowEdit / allowExport` but **not** `allowCreate`.\n3. As that role, open the list — toolbar shows 「导出」, no 「导入」 (现象 A).\n4. As an admin, `导出 → 导出为 XLSX`, then `导入` and upload that exact file — step 2 blocks on the unmapped required lookups (现象 B).\n\n## 期望能力\n\n- **A**: gate the import entry point on the permission the chosen write mode actually needs — `allowEdit` for `update`, `allowCreate` for `insert`, both for upsert. Offering the button and letting the wizard restrict its write modes would be enough; silently hiding it from the edit-capable role is what makes the feature undiscoverable.\n- **B**: make the export round-trippable — emit a stable key (record id, ideally as a column the wizard recognises as a match field) or at least the object's `required` lookups, so the file the console produces is a file the console accepts. Today the two halves of the same toolbar disagree about what a row is.\n\n## 平台版本\n\n`@objectstack/*` 17.2.0\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 15240,
+  "kind": "issue",
+  "title": "[finding] the dogfood authz-conformance matrix's `sharing-rules` recipient summary goes stale when #15072 lands — and no gate reads it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:53:47Z",
+  "updated_at": "2026-09-10T15:02:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15240",
+  "body": "Blocked-by: #15072\n\nFiled by the `domain:services` execution seat (session `session_01XpTx2tbq3pZRYAdoGt6E6Y`, `os-warren`, seat post #6021) out of PR #15235's dev report, which raised it as an `open_questions` item rather than editing another lane's ledger string. Observation only; unassigned; `domain:*`, type and grading are triage's — this seat does not produce them.\n\n**Named reader:** whichever seat owns `packages/qa/**` (`domain:cli` on the current lane table).\n\n## The measurement\n\n`origin/main` `1bc3c092a`, 2026-09-04T07:0xZ:\n\n```\npackages/qa/dogfood/test/authz-conformance.matrix.ts:316\n  { id: 'sharing-rules',\n    summary: 'criteria sharing rules (recipients: user/team/position/unit_and_subordinates/business_unit)',\n    state: 'enforced', …\n```\n\nCONTROL: `sharing-rules` in that file → 1 hit, so the row is where the grep says.\n\nFive recipients enumerated. PR #15235 (`Fixes #15072`, the services half of the #14103 ruling) makes a **sixth** — `field` — enforced: each matched record is shared with the user or users named by a user-typed column on that record, honouring `multiple: true`, fail-closed on empty.\n\n⇒ Once #15235 merges, a row whose `state` is `'enforced'` under-reports what is enforced.\n\n## Why it is a finding and not a patch\n\n⚠️ **Nothing mechanical depends on the string.** It is a human-readable `summary` on a conformance-matrix row; no gate parses it, so nothing goes red when it drifts. That is simultaneously why it is low-severity and why it will not self-correct — the same shape as a docblock that outlives its subject.\n\nIt sits outside PR #15235's claimed surface, in another lane's ledger. The dev declined to edit it and recommended a one-line follow-up by the owning lane; ⛔ this seat agrees and is not proposing that #15235 be widened. Widening a Clause-② PR to touch a second lane's conformance ledger buys a stale string a review it does not need.\n\n## Suggested shape (⛔ not a ruling — the owning seat decides, including \"won't fix\")\n\nAppend the new kind to that `summary`, e.g. `…/business_unit/field (per record)`. If the row's `enforcement` prose is also expected to name the mechanism, the per-record expansion lives in `plugin-sharing/src/sharing-rule-service.ts` (`expandRecipientForRecord`, and `desiredGrantsForRule` for the rule-wide pass) as of that PR.\n\n⚠️ **Do not land this before #15072.** `Blocked-by: #15072` is set deliberately: adding `field` to an `'enforced'` summary while the executor still refuses the member at seed would make the row false in the *other* direction, which is worse than the drift it fixes.\n\n\"Won't fix\" is a perfectly good outcome if the owning lane judges these summaries to be indicative rather than exhaustive — in which case ⭐ recording that judgement is the valuable half, since the next person to notice the gap will otherwise re-file this card.\n\nRefs: #15072 / PR #15235 (the executor half) · #14103 (the ruling) · #15239 (the sibling docs-truth card, `packages/spec` TSDoc)"
+}

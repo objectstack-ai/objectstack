@@ -1,0 +1,30 @@
+{
+  "number": 13838,
+  "kind": "issue",
+  "title": "Should `os build` fail by default on the accidental hook-body-lowering class? — deferred until the new lint rule has produced a real population number",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:on-hold",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T14:33:04Z",
+  "updated_at": "2026-09-07T09:46:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13838",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024), session `session_01UngCYXF98BVpYA9hfz6NYk`, as the recorded remainder of **#13651** / PR #13834. ⛔ **Not work today** — see the trigger.\n\n## The question\n\n#13651 (ask 1) made the accidental hook-body-lowering class **loud in `os lint`**: a handler that is expressible as a metadata body but names a module-scope const, helper or import now fails `os lint` as `hook-body/not-lowerable` (severity `error`). ⛔ It deliberately did **not** change what `os build` accepts — the fallback-to-bundling catch is kept and pinned.\n\n⇒ Should `os build`'s **default** eventually fail on that same class?\n\n| | |\n|:--|:--|\n| **A** | keep `os build` at warn-and-bundle indefinitely |\n| **B** | flip the default to fail after a window, once the lint rule has shown a real population |\n| **C** | flip it now |\n\n**Implementer's recommendation and mine: B.** ⛔ **C is unjustifiable on today's evidence**, and the reason is the sharpest reading #13651 produced.\n\n## ⭐ Why the measured zero is not permission to flip\n\n#13651 measured the silent-downgrade population at **0** — 44 callables lowered, 41 bodies extracted, 0 downgraded, across every config in this tree including the reference app.\n\n⚠️ **That zero measures avoidance, not absence:**\n\n> The reference app reads zero **BECAUSE IT ALREADY PAID**: all 39 callables are written defensively, constants hand-copied into each handler, guarded by **eight bespoke pin tests**.\n\nAnd the bound the implementer stated without being asked: **a zero inside this tree says nothing about apps outside it, on a published CLI.** ⇒ The set the flip would actually affect is precisely the set nobody has measured. Flipping a contract on a number drawn from the wrong population is guessing.\n\n⭐ The lint rule is the **instrument that will produce the real number**. Deciding before it has reported is the same mistake in miniature that #13411 was dispatched to stop: choosing a repair before the measurement that sizes it.\n\n## Restart-when — a predicate, not a reminder\n\nRe-run #13651's own census (the real build path: `loadConfig` → `normalizeStackInput` → `lowerCallables`, classification read off the reason strings `extractHookBody` actually produced — ⛔ nothing re-implemented) across the measured configs.\n\n**This card wakes when `silent_downgrade_warnings > 0` in any measured tree** — i.e. the lint rule has a population to point at.\n\n⚠️ Two things about that predicate, stated so it is not misread:\n\n- ⛔ **It does not wake on \"the rule shipped\".** Shipping is not reporting. The number is the trigger.\n- ⚠️ **It cannot see downstream apps**, which are the population that matters most. If a downstream report arrives by any other route — an issue, a support thread, a dogfood run on a tree outside this repo — that is also a wake, and is worth more than the in-tree number. ⛔ Do not treat the in-tree census as the whole instrument; it is the only half that is automatable from here.\n\n⭐ Re-establish the instrument with the same **positive control** #13651 used before trusting any new zero: a fixture with three known outcomes must return exactly `free-identifiers`, `forbidden-token` and `extracted`. A zero from an unproven instrument is not a reading.\n\n## ⛔ What this card is NOT\n\n- ⛔ **Not a re-litigation of #13651's choice.** Option 2 (the lint diagnostic) was correct and is landed; this is the *next* question, not a second opinion on that one.\n- ⛔ **Not the deliberate-bundle declaration.** That was ruled **A — leave it** on #13651: two escape channels already exist and are already silent (an explicit `body` on the hook, or the top-level `functions:` map, which 3 callables already use warning-free). A new authorable key is `packages/spec` contract expansion and belongs with **#13718**, ⛔ not here.\n- ⛔ **Not blocking anything.**\n- ⚠️ **A flip would be its own clause-② act** with its own decision — `os build`'s accept set is a different contract from `os lint`'s. ⛔ Do not ride it in on another card.\n\n## Refs\n\n- **#13651** / PR #13834 — the lint rule, the population measurement, and the reasoning this card defers\n- **#13718** — the declared constant surface (`needs-user-decision`, `domain:spec`); the input it asked for is #13651's census\n- **#10678** — made the default path print the recorded warnings; ⚠️ the reason this is *warn*-and-bundle rather than literally silent"
+}

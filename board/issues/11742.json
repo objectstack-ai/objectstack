@@ -1,0 +1,31 @@
+{
+  "number": 11742,
+  "kind": "issue",
+  "title": "[Decision] The shared GitHub identity's GraphQL quota is being burned to 2× — MCP writes go through GraphQL, so seats are silently write-blocked while reads keep working",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:on-hold",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T14:45:33Z",
+  "updated_at": "2026-09-09T02:44:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11742",
+  "body": "Filed by the `domain:devx` PM seat (session `session_015ahemw8RcTgqtxrj15PEZx`) for maintainer decision. **Measured, not inferred.**\n\n## What was measured\n\n`GET /rate_limit` on the shared identity, read directly with the environment token at **2026-08-24 14:33:22Z**:\n\n```\ngraphql   10006/5000   remaining      0   reset 14:40:10Z     <<< EXHAUSTED, 2× over quota\ncore         35/15000  remaining  14965                        <<< REST essentially untouched\nsearch        0/30     remaining     30\n```\n\n⚠️ **`used` exceeds `limit` by more than 2×.** That is not a seat unlucky at the tail of its budget; it is the whole fleet's hourly GraphQL allowance spent and then spent again.\n\n## Why it is invisible until it bites\n\n**The MCP GitHub server's writes go through GraphQL; its reads go through REST.**\n\nThe tell is the error text itself — `issue_write` fails with **`failed to get issue ID`**, because it resolves the issue's GraphQL node ID before it can write. Meanwhile every `issue_read`, `list_issues` and `pull_request_read` kept working normally throughout.\n\n⇒ A seat in this state **reads a perfectly healthy repo and cannot change it**, and nothing in the read path says so. This session hit it for roughly 9 minutes and it produced a real half-state: issue #11673 carried a comment saying *\"Closing `completed`\"* while its `state` stayed `open`, because the comment (REST) landed and the state change (GraphQL) did not.\n\n## Why it is a fleet problem, not a seat problem\n\nAll AI seats share one GitHub identity (`user ID 317605050`). The quota is per-identity, so **every seat draws on one 5000/hour GraphQL budget**, and one seat's burst starves the others. With concurrency at 5 this is structural rather than incidental.\n\n⭐ Same family as **#11363** (shared verify-lock contention, measured superlinear in seat concurrency): a cost that only becomes visible once concurrency is raised, and whose symptom is misread as a local failure by the seat that meets it.\n\n## What needs deciding\n\n⛔ Every mitigation is a tradeoff that belongs to you, not to a lane PM:\n\n| # | Route | Cost |\n|---|---|---|\n| **A** | **Lower concurrency** | Directly reduces the draw; costs throughput — and you have twice asked for concurrency to stay at 5 |\n| **B** | **Move MCP writes to REST** where the API supports it (the `core` bucket is at 35/15000 — effectively free) | Needs an MCP-server change, outside this repo; largest headroom by far |\n| **C** | **Per-seat identities** so the quota is not shared | Removes the coupling entirely; changes attribution, permissions and the claim-comment discipline that exists *because* identity is shared |\n| **D** | **Rate-aware backoff in the seats** — check `/rate_limit` before write bursts, stagger | Cheap, no infra change; does not add capacity, only stops seats from wasting turns discovering exhaustion |\n| **E** | **Accept and document** — teach seats to recognise the signature | Zero cost; the failure keeps happening, but stops being misdiagnosed |\n\n## What this seat has already done (no decision needed)\n\nAdopted **D** locally as a discipline, and corrected a rule that was almost right:\n\n> This lane's instrument rule said *\"a rate-limit probe must use a WRITE call, because read-green ≠ write-green.\"* That was right about the symptom and wrong about the cause. The precise version: **MCP writes are GraphQL and reads are REST — they are separate quota buckets and must be probed separately.** A single `/rate_limit` read tells you which one is exhausted and exactly when it resets, which is strictly better than retrying blind.\n\n⭐ Worth propagating to other lanes: any seat that concludes \"GitHub is down\" or \"my write failed, I'll retry\" on this signature is misreading it.\n\n## What I recommend\n\n**B if it is reachable, D immediately regardless.** B is where the headroom is — the REST bucket is 15000 and effectively unused, so the same work costs nothing there. D is free and stops seats burning turns on blind retries. ⛔ I do not recommend A: you have set concurrency at 5 deliberately, twice, and this is a quota-shape problem rather than a workload-size one.\n\n⛔ Nothing is being changed on this card until you choose.\n\nRefs: #11363 (the sibling concurrency cost, measured) · #11673 (the half-state this produced)"
+}

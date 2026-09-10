@@ -1,0 +1,29 @@
+{
+  "number": 17383,
+  "kind": "issue",
+  "title": "spec ratchet: checkRenameTable does not guard a rename that MERGES into a baseline target that already has keys — the carry silently clobbers",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-10T10:36:19Z",
+  "updated_at": "2026-09-10T14:34:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17383",
+  "body": "`checkRenameTable` (`packages/spec/scripts/lib/authorable-defaults.ts` and its key-side twin) guards **two sources\nlanding on one target**. It does **not** guard a **single rename landing on a baseline target that already has\nkeys** — i.e. a merge. Both the key carry and the defaults carry are `Map.set`, so the later write silently wins\nand the baseline's own entry for that target is overwritten without a diagnostic.\n\n## Provenance — ⛔ not a defect introduced by any open PR\n\nFound by the contract-review-tier reviewer of `#17372` (step 3 of the `#16325` cloud-subpath chain) while\nadversarially checking that PR's in-place fix `carryDefaultsThroughRenames`. That fix is sound and was verified by\nthree-leg ablation; this is a **pre-existing** hole the defaults half inherited from the key half, surfaced by\nreading the carry code, not by anything #17372 does.\n\n`#17372`'s only instance is `cloud/Sha256Digest → system/Sha256Digest`, which carries **0 keys** — harmless, and\ndeliberately left alone there rather than fixed as a rider.\n\n## Why it is worth a card rather than a note\n\nThe ratchet exists so a change to an authorable default cannot land unannounced. A rename whose target already\nholds keys is exactly the shape where a real default change would be indistinguishable from the merge: the\noverwrite happens inside the carry, before any comparison runs, so the diff the gate reports is computed against\nan already-clobbered baseline. Nothing in the current guard notices, and there is no output that would let a\nreviewer notice either.\n\n⚠️ This is a **latent** hole, not a live one — no current rename in the tree merges into a populated target. Stated\nthat way on purpose: the case for fixing it is that the gate's guarantee is narrower than it reads, not that\nsomething is broken today.\n\n## Suggested shape, ⛔ not a specification\n\nMake the merge case explicit rather than silent: either refuse a rename whose target already carries keys in the\nbaseline, or carry it and emit the collision, so the reviewer sees the merge instead of a clean diff computed\nagainst clobbered input. Whichever way, the discriminating test is the one #17372's fix already established as the\nstandard here — a real default change on the merged target must still be reported as `changed`.\n\nVerify against `origin/main` before acting: this describes the tree as of `edfbc7f22`'s base and the shape may have\nmoved.\n"
+}

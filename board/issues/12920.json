@@ -1,0 +1,33 @@
+{
+  "number": 12920,
+  "kind": "issue",
+  "title": "finding: \"stored pre-fold rows are live data\" is decided per-consumer — the REST lookup route keeps a legacy-spelling chain while objectui consumers just removed theirs",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "needs:contract-review",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-28T08:42:48Z",
+  "updated_at": "2026-09-10T15:00:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12920",
+  "body": "Filed unassigned by the objectui `domain:ui` execution seat, out of objectui#6528's census. Recording only — not graded, no `domain:*`. Filed here rather than in objectui because the code that would change, and the stance that needs settling, live in this repo.\n\n## The tension, in two facts that are both true today\n\n**One.** objectui#6528 just narrowed **three** relationship-target resolvers to the spec spelling `reference` alone, deleting a four-spelling tolerant chain. The census behind it was thorough: `ObjectSchema.safeParse` on `@objectstack/spec` 17.2.0 **refuses** `reference_to` / `referenceTo` / `reference_to_object` **by name** (with rename hints), while accepting `reference`; and across both trees no producer emits any of the three onto an object-metadata document. The reasoning is Commandment #0.1 — a lenient consumer is where a wrong producer hides.\n\n**Two.** This repo's public-form lookup-picker route (`packages/rest/src/rest-server.ts`) keeps **its own** legacy-spelling chain — `reference ?? referenceTo ?? target ?? …` — guarded by a test whose stated rationale is, in substance, that **stored pre-fold rows are live data, not history**.\n\nBoth are defensible in isolation. Together they mean the platform answers \"does a stored row spelling the target the old way still work?\" **differently depending on which consumer the request happens to reach.**\n\n## Why this is worth settling once rather than per-consumer\n\nThat REST test is currently the **strongest surviving evidence that stored legacy rows exist at all**. Every other line of evidence points the other way — producers retired, read door stripping, spec refusing by name. So the two positions are not equally weighted by evidence; they are weighted by *which* evidence a given seat happened to look at.\n\nThe consequence is already concrete. objectui#6528's changeset declares a deliberate behaviour change on one path — `chart-series.ts` reads `GET /meta/object/:name` directly with no read-door stripping, so a stored pre-fold row now degrades **visibly** there instead of being silently absorbed. If this repo's stance is \"stored pre-fold rows are live data\", that degradation is a regression and wants a producer-side migration to accompany it. If the stance is \"the fold is the contract, and a stored row spelling it the old way is a producer defect\", then the REST route's chain is the outlier and it is the thing that should go.\n\n⛔ Nobody should resolve this by making one more consumer match the other. That is how it got here.\n\n## The one measurement that decides it\n\n**Is a stored pre-fold row reachable in production today?** Not \"could one exist historically\" — whether one can still be served. Concretely: does any persisted metadata row in a live deployment spell a lookup/master_detail target anything other than `reference`, and does any served path return it un-folded?\n\nThat needs a positive control in the same query shape (a spelling that IS present) so a zero is a measurement rather than a broken query — objectui#6528's own census caught **two** of its zeros being broken exactly that way, one of them because `reference` is also an ordinary English word and polluted a raw word count.\n\n- **If yes** → the REST route's leniency is load-bearing, and the platform owes a producer-side migration before any further consumer narrows. objectui#6528's chart-series change should be re-priced against that.\n- **If no** → the REST chain is dead code wearing a rationale, and it can be retired on the same evidence the objectui cut used.\n\n## Input worth having in front of whoever grades this\n\nThe objectui maintainer ruled a **standing class rule** on 2026-08-27 (objectui#6355), verbatim: 「6335 和以后这种类似的，都立即退休。项目在创业阶段，用户也很少，短期不考虑渐进。」 — for a deprecated alias whose canonical form is already ruled, the default is immediate retirement, no phased window, with the silent-reversion cost for externally-stored old documents **accepted**.\n\nThat points toward \"the fold is the contract\". But it was ruled about an **authoring alias in a UI schema**, not about **stored rows on a server read path**, and those are not obviously the same risk. Whether the class rule reaches this case is precisely the part a human should say out loud rather than have inferred.\n\n## Related\n\nobjectui#6528 (the census and the cut) · objectui#6041 (producer retirement) · objectui#6519 (read-door stripping) · this repo's #7486 and #7134, both closed, which touch the same route and the same \"producer fold does not reach stored rows\" theme without settling the stance."
+}

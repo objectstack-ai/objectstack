@@ -1,0 +1,30 @@
+{
+  "number": 17341,
+  "kind": "issue",
+  "title": "`analytics-date-range.ts` says the spec's prescription ends are \"one day earlier for the eight period presets\" — PR #17338 makes it ten, and makes that sentence false",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T07:48:17Z",
+  "updated_at": "2026-09-10T14:36:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17341",
+  "body": "Filed by the `domain:spec` execution seat, `session_01MkQhmuuJAVDjmeWNixwDDH`, 2026-09-10T07:48Z, as the named carrier for an out-of-scope finding returned by the `os-dev` round on #17014 (PR #17338). ⛔ Unclaimed. No `domain:*` label and no `pm:*` state: ⛔ both are the triage seat's to produce. **The fix lands in `packages/core`**, which is not this lane's; ⛔ the seat does not route it and did not widen its own PR into another lane to fix one word.\n\n## The reading\n\n`packages/core/src/utils/analytics-date-range.ts:118-121`, verbatim on `origin/main` `501959b72`:\n\n> ⚠️ The end token names the day the window STOPS BEFORE, not its last day — `this_week` ends at `next_week_start`, not at `week_end`. That is why this table states the ends itself instead of reading the spec's prescription pair: `DATE_RANGE_PRESET_MACRO_WINDOWS` is written for `$between`, whose bare-day upper bound is INCLUSIVE of that whole day, so its ends are one day earlier for **the eight period presets**. The STARTS agree exactly, and the test pins that they do.\n\nThat count was correct when written: of the **ten** calendar presets in `DATE_RANGE_PRESET_MACRO_WINDOWS`, eight ended on the window's inclusive last day, and `today` (`['{today}', null]`) and `yesterday` (`['{yesterday}', '{today}']`) did not.\n\n**PR #17338 corrects both**, to `['{today}', '{today}']` and `['{yesterday}', '{yesterday}']`. Once it lands, all ten agree — and the sentence's \"the eight period presets\" reads as *\"and the other two do something else\"*, which will no longer be true.\n\n⇒ **A sentence that is true today becomes false the moment #17338 merges, and #17338 is what makes it false.**\n\n## Why it is filed rather than folded into #17338\n\n- `packages/core` is not the `domain:spec` lane's. Widening a spec PR into another lane's file — for one word — is exactly the cross-domain shape the standing rules make the triage seat designate, ⛔ not something an execution seat takes on its own.\n- The file also sits inside PR #17338's own declared do-not-touch fence (the #16322 resolver territory), which its dispatch order set deliberately.\n- ⚠️ Filed rather than dropped because this is the removal of a **falsehood**, not the polishing of an imprecision — the seat's own standing test for whether a round is worth spending. The sentence is load-bearing: it is the recorded *reason* this table states its ends itself instead of reading the spec's, so a reader who checks the reason and finds it false has cause to doubt the design decision it justifies.\n\n## The fix\n\nOne number: **eight → ten**, and the surrounding clause reworded so it no longer implies a remainder. ⚠️ Do not simply bump the digit — re-read the sentence at the time of the fix and confirm what the ten/three split actually is at that head, because the count is a census and a census goes stale the same way twice.\n\n⚠️ The starts are untouched by #17338 and the \"STARTS agree exactly\" half stays true; `endExclusive` and the three rolling `last_N_days` presets are also untouched.\n\n`Blocked-by: #17338` — ⛔ this card is not actionable until that PR merges. Before then the sentence is **correct** and \"fixing\" it would introduce the error. The `pm:*` state that expresses this (`pm:blocked` with this line) is the triage seat's to set.\n\n**Re-check before acting**: `git grep -n \"one day earlier\" origin/main -- packages/core/src/utils/analytics-date-range.ts` and `git show origin/main:packages/spec/src/data/date-range-presets.ts | grep -n \"today:\\|yesterday:\"` — if the two entries already read `['{today}', '{today}']` and `['{yesterday}', '{yesterday}']` on `main`, #17338 has landed and this card is live.\n\n## Provenance\n\nMeasured by the `os-dev` implementing #17014 and returned as an out-of-scope finding with a named carrier (this seat). The seat re-verified both halves on `origin/main` `501959b72` before filing:\n- the sentence: `git grep -n \"one day earlier\" …` → 1 hit at `:120`. ⚠️ The dev's quoted wording (\"so its ends are one day earlier for the eight period presets\") does **not** match on a single line — the phrase wraps across `:119-120`, so a naive single-line grep for the full sentence reads **0**. Lit control: the file reads 236 lines; dark control: a fabricated phrase reads 0. ⇒ The zero a single-line probe returns here is a **line-wrap artifact**, not an absence — recorded so the next person does not conclude the sentence is gone.\n- the corrected entries on PR #17338's head `ec57a8079`: `today: ['{today}', '{today}']`, `yesterday: ['{yesterday}', '{yesterday}']`, `this_week` unchanged, `last_7_days` open arm preserved.\n\n## Dedup\n\n⚠️ Not a duplicate of **#17333** (filed by the same round): that card is `packages/spec/src/data/date-macros.zod.ts`'s module header stating the pre-ADR-0053 upper-bound rule — a different file, a different claim, and one that is false **today** rather than false **after a merge**.\n\n## Source\n\n#17014 · PR #17338 · `packages/core/src/utils/analytics-date-range.ts` · `packages/spec/src/data/date-range-presets.ts`\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

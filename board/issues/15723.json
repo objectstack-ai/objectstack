@@ -1,0 +1,32 @@
+{
+  "number": 15723,
+  "kind": "issue",
+  "title": "A wire error code stamped through `APIError.from(status, VENDOR_CONSTANT.MEMBER)` is registered nowhere and no gate notices",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "enhancement",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T04:28:21Z",
+  "updated_at": "2026-09-10T03:13:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15723",
+  "body": "Found while implementing #15587; filed unassigned, `pm:queue` only, for triage to grade and route.\n\n## Measured\n\n`packages/plugins/plugin-auth/src/auth-manager.ts` now raises an explicit refusal on `/sign-up/email` using better-auth's own constant:\n\n```ts\nconst { APIError, BASE_ERROR_CODES } = await import('@better-auth/core/error');\nthrow APIError.from('UNPROCESSABLE_ENTITY', BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL);\n```\n\nThat puts `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL` on the wire from our own code. **Neither vocabulary gate can see it.** Controlled measurement, not inference — the ledger entry was removed from disk (mutation confirmed by counting the line off the file and by a distinct `git hash-object`), and the gate was re-run:\n\n```\nledger entry occurrences before=1 after=0\nmutation CONFIRMED on disk\nCONTROL check:dispatcher-error-vocabulary EXIT=0\n```\n\nExit 0 with the registration absent. A gate that would have caught an unregistered emitted code must go red there; this one stays green, so its green carries no information about this stamping shape. `check:error-code-provenance` agrees by its own printed bounds — `patterns = objlit, assign, constdef`, \"blind to non-`*_CODE` constants, helper/shorthand indirections, templates and class fields\".\n\n## Why this is not #9223\n\nClosed #9223 covered a non-literal at an **object-literal `code:` key**, and the gate has since grown `objlitconst` / `objlithelper` / `objlitexpr` for exactly that. This shape is different on both axes: the value sits in an **argument position** of `APIError.from(status, rawError)`, and it is a **member expression on an imported third-party object**, so there is no `code:` anchor to find and no in-repo constant to resolve.\n\n## Why it matters\n\nADR-0112's premise is that an unregistered code fails schema parse and therefore fails CI — \"no silent fourth state\". For this shape the enforcement is absent, and the shape is not exotic: `APIError.from(status, BASE_ERROR_CODES.X)` is better-auth's own documented idiom, and plugin-auth is wired to that vendor throughout. `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL` had in fact been reaching the wire unregistered from the vendor's own `invite_only` lane before #15587 registered it — nothing reported that in either direction.\n\nNote the registration is still correct and is included in #15587; what is missing is anything that would have required it, or that will require the next one.\n\n## Suggested direction (not a decision)\n\nReach the `APIError.from` / `new APIError` argument position, at least for a member expression whose object is an imported binding the scan can name. Whether vendor-owned code tables should be registered wholesale or per emitted member is the real question and belongs to triage — registering a vendor's entire table would import a vocabulary this repo does not own.\n\nRefs: #15587 (where this surfaced) · #9223 (the closed, adjacent object-literal case)."
+}

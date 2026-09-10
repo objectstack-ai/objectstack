@@ -1,0 +1,31 @@
+{
+  "number": 16356,
+  "kind": "issue",
+  "title": "app-showcase nests no control-flow construct inside another, so the QA checklist's new `loop { parallel }` clause can only score blocked(fixture)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T15:08:20Z",
+  "updated_at": "2026-09-08T05:03:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16356",
+  "body": "Found while implementing #15230 (the `runRegion` tagger half of #14414). Filed unassigned; `domain:*`, type and priority are triage's.\n\n## What is missing\n\n`examples/app-showcase` declares each ADR-0031 structured construct as its **own top-level flow** and nests none of them in another:\n\n```\ngit grep -n \"type: 'loop'\" -- examples/ apps/\n  examples/app-showcase/src/automation/flows/index.ts:868   (BatchRemindersFlow, body = one notify node)\n  examples/app-todo/src/flows/task.flow.ts:29\n  examples/app-todo/src/flows/task.flow.ts:83\n```\n\nThe per-node-type map the checklist already records says the same thing explicitly — `automation.flow-node-type-matrix`, `fixtures.requires`:\n\n```\nloop=showcase_batch_reminders · parallel+http=showcase_fan_out_notify · try_catch=showcase_resilient_sync\n```\n\nThree separate flows. `showcase_batch_reminders` loops a single `notify`; `showcase_fan_out_notify` fans out at top level; `ProjectEscalationFlow` composes `decision` with `parallel` and `try_catch` but sits under no loop.\n\n## Why it blocks something concrete\n\nPR for #15230 adds a `loop { parallel }` acceptance clause to `automation.flow-run-step-nesting` (item revision 3). That clause exists because the maintainer ruling of 2026-09-03 made `iteration` single-valued and gave the parallel branch index its own `branch` key, and a step inside a parallel branch that is itself inside a loop body is the **only** shape where both index keys are populated on one record. A run of that clause today scores `blocked(fixture)`: there is no flow to trigger.\n\nThe clause was written anyway rather than deferred — an absent clause is exactly what let the `iteration` overload sit unmeasured — and the item's `fixtures.requires` records the gap in the open. This card is the other half.\n\n## What would close it\n\nA showcase flow whose `loop` body holds a two-branch `parallel`, exported and added to the flow list in `examples/app-showcase/src/automation/flows/index.ts`, with at least two rows so the clause's `(iteration, branch)` pair check has something to distinguish. No gate script enumerates showcase flows by path, so the cost looks like the `defineFlow` plus its array entry.\n\nWorth deciding as part of it: whether the nested-composition gap is wider than this one clause. `loop { try_catch }` is documented as the per-iteration containment spelling (#13681, #14394) and is the shape #14456 taught the engine to attribute to a row, and showcase demonstrates that nesting nowhere either — so a reader of the examples app cannot see the containment spelling the docs recommend.\n\nRefs: #15230 (the engine change that makes the clause writable) · #14414 / PR #15227 (the contract half) · #14622 (the neighbouring observation that `showcase_batch_reminders` loops a fallible node with no containment) — none of those is addressed here."
+}

@@ -1,0 +1,29 @@
+{
+  "number": 16629,
+  "kind": "issue",
+  "title": "plugin-auth: decide the durable answer to better-auth's account-issuer rollback — 1.7.3 removed the issuer identity outright, and #16186 shipped an exact pin as a stopgap",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T14:15:50Z",
+  "updated_at": "2026-09-10T14:19:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16629",
+  "body": "The durable half of #16186, which shipped the stopgap: `@objectstack/plugin-auth` now pins the `better-auth` family to an exact `1.7.2`, which restores a working fresh install but freezes the family on a line upstream has already moved off.\n\n## What upstream actually did\n\n`@better-auth/core@1.7.3` did not rename `createLocalAccountIssuer` — it removed the issuer-scoped account identity outright (better-auth/better-auth#10909, merged 2026-08-24). Measured by diffing the two published `src` trees:\n\n- `db/schema/account.ts` — the `issuer` field is gone from `accountSchema`; `AccountKey` reverts from `Pick(BaseAccount, \"issuer\" | \"accountId\")` to `Pick(BaseAccount, \"providerId\" | \"accountId\")`; `createLocalAccountIssuer` and `createOAuthAccountIssuer` are deleted.\n- `db/get-tables.ts` — the `account.issuer` column and the `unique (issuer, accountId)` index are both gone.\n- `oauth2/oauth-provider.ts` — the `accountIssuer` option is gone, and with it the per-provider declarations (`google`, `apple`, `line`, `facebook`, `cognito`, `paybin`, and the Entra per-login resolver). `accountIssuer` occurs zero times in the whole 1.7.3 package.\n\nSo there is no drop-in replacement to adopt. `findAccountByKey` keys on `(providerId, accountId)` again.\n\n## What adopting it costs here\n\nAdoption is not a range bump. It removes a required column from a platform object and needs a migration for every existing deployment:\n\n- `packages/platform-objects/src/identity/sys-account.object.ts` — `issuer` is a declared field; the four generated translation bundles carry its label.\n- `packages/plugins/plugin-auth/src/backfill-account-issuer.ts` (plus its test, 44 references) — the boot-time pass that stamps `sys_account.issuer` exists only to serve the 1.7 identity model. It retires whole.\n- `packages/plugins/plugin-auth/src/account-issuer-parity.test.ts` — pins our issuer derivation against `@better-auth/core/social-providers`, a surface 1.7.3 no longer has.\n- `auth-schema-config.ts`, `managed-extension-fields.ts` and `auth-manager.ts` map the column into better-auth's schema.\n- Existing databases hold rows stamped `local:credential` and provider issuers under a unique `(issuer, account_id)` index. Dropping the column changes which rows collide.\n\n## The decision this needs\n\n1. **Adopt the rollback** — drop `sys_account.issuer`, retire the backfill, migrate existing rows, and raise the family floor to `1.7.3`. Matches upstream; costs a schema migration on the identity table.\n2. **Keep the 1.7 identity model as ours** — declare `issuer` as an application-owned additional field and resolve accounts on it ourselves rather than through `findAccountByKey`. Keeps the data model; owns a divergence from the vendor forever.\n3. **Stay pinned** — the state #16186 leaves behind. Correct today; the pin cannot take a security patch without a reviewed lift, and the gap widens with every upstream release.\n\nWhichever is chosen, the family still moves as one line: `@better-auth/core@1.7.2` and `@better-auth/kysely-adapter@1.7.3` are mutually incompatible in both directions (1.7.2 has `createLocalAccountIssuer` and lacks `checksSchema`; 1.7.3 is the reverse).\n\n## What already guards the choice\n\n`pnpm check:vendor-export-contract` (added by #16186) fails on any lift whose new version drops a symbol our shipped source imports, and its `--resolve` leg enumerates every registry version the declared range admits. So this decision cannot be taken by accident, only deliberately.\n\nFiled by the developer seat that shipped the #16186 stopgap. Not claimed.\n"
+}

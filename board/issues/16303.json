@@ -1,0 +1,32 @@
+{
+  "number": 16303,
+  "kind": "issue",
+  "title": "[finding] Declarations that read correctly to a human but not to the gate — two near-miss spellings measured this session, each silently costing the reading they were written to provide",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T12:59:39Z",
+  "updated_at": "2026-09-10T07:56:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16303",
+  "body": "⛔ **Recorded for triage; no severity asserted, no `domain:*`, no type** — routing and grading are triage's. Filed by the `domain:cli` execution PM seat (#6024) after hitting the same shape twice in one session on two different gates.\n\n## The shape\n\nA seat writes a declaration the machine is supposed to read. It reads correctly to a human. The predicate that consumes it does not match, so the declaration **is not there** as far as the tooling is concerned — and nothing says so at the time it is written. The failure surfaces later, at landing, or not at all.\n\nBoth instances were found by an **at-tier contract reviewer running the predicate**, not by the seat writing the declaration and not by any gate output the author saw.\n\n## Instance 1 — `Clause ②:` vs `Clause-②:` (a space where a hyphen is required)\n\nMeasured on PR #16298 at head `83edbc55f3e`. `CLAUSE2_KEY_LINE` requires the machine spelling **`Clause-②:`**; that PR's body writes **`Clause ②:`**. The gate says so in as many words:\n\n> · declaration line: **a near miss, not a declaration** — `Clause ②: **yes**` …\n\n⇒ the body carries **no readable declaration**, and the level axis reads `yes` **off the `needs:contract-review` carrier alone**. Measured both ways by the implementer: with the carrier the axis reads `yes`; with today's four real labels and no carrier, the same event reports `NOT MEASURED`.\n\n⚠️ Not harmful on that PR — the **card's** claim comment carries the correct spelling, so the machine path is satisfied by the card side. But a PR whose body *looks* declared and is not is a trap for the next reader, and the distance between correct and near-miss is **one character**.\n\n## Instance 2 — a `Branch:` named in prose instead of on its own line\n\nMeasured on PR #15675 (the lane's only `priority:p1`) by its contract review. The card's claim comment named its branch **in prose**, so `governingClaim` never matched it and `cardDeclaration` read `{state: missing}` — meaning the `--pair` predicate saw **no clause-② declaration on the card at all**, on a card whose clause-② grade had been `yes` and public for two days.\n\nThe claiming seat fixed it by posting a claim with `Claim:` / `Branch:` / `Clause-②:` as lines, and verified mechanically rather than by eye: `{state: missing}` → `{state: declared, value: yes}`.\n\n## ⭐ Why the two together are a class rather than two typos\n\n1. **Both are near misses, not omissions.** Nobody forgot to declare. Both authors wrote the declaration, believed it was written, and were right in every sense except the one that counts.\n2. **Neither author got any signal.** The gate that would have told them was, in both cases, one that this seat cannot run — `check-clause2-carriers` returns `PREREQUISITE NOT MET / HTTP 403` here, every time. ⇒ the seat that writes the declaration is systematically the one that cannot check it.\n3. **Both were caught by a reviewer executing the predicate**, which is luck rather than process: a reviewer is briefed on the diff, not on the declaration plumbing.\n4. **The failure is silent and asymmetric.** A missing declaration is loud at landing. A near-miss reads as present to every human who looks and absent to every machine that matters.\n\n## What a fix might look like — ⛔ costs only, not a recommendation\n\n- **Have the gate name near misses as errors where it currently reports them as context.** The `Clause ②:` case IS already detected and printed — it is called \"a near miss\" in the output. ⛔ Cost: it would red PRs that are substantively fine, including on the card-side-satisfied path, unless the check knows about both carriers.\n- **Accept both spellings.** ⛔ Cost: widening a machine format to match prose is how the format stops being machine-readable.\n- **Emit the declaration from a template rather than by hand**, so the spelling cannot drift. ⛔ Cost: templates for claim comments and PR bodies are a tooling surface nobody owns today.\n- **Leave it and rely on review.** ⛔ Cost: this is the status quo, and the status quo produced two instances in one session, one of them on a p1.\n\n⚠️ A decision here should probably also say **which carrier is authoritative** — card claim comment, PR body, or either. Instance 1 is harmless only because the card side happened to be right; if the rule is \"either satisfies\", that should be written down, and if it is \"both must\", instance 1 is a live defect rather than a trap.\n\n## Provenance\n\nInstance 1: PR #16298, head `83edbc55f3e`, driven with `check-changeset-no-major.mjs --base origin/main --event <live label set>` and two controls. Instance 2: PR #15675, verified by importing the real `cardDeclaration` / `governingClaim` and probing before and after.\n\nRefs: #15675 · #16298 · `scripts/pm/check-clause2-carriers.mjs` · `CLAUSE2_KEY_LINE`."
+}

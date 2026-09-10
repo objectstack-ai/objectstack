@@ -1,0 +1,35 @@
+{
+  "number": 16319,
+  "kind": "issue",
+  "title": "[finding] driver-sql and both migration generators default an absent or unknown field `type` to DIFFERENT families — `string` versus `text`, so the unvalidated authoring door produces two different columns",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "finding",
+    "needs:contract-review",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sam"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T14:06:59Z",
+  "updated_at": "2026-09-10T15:06:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16319",
+  "body": "Found while stating what the #16091 probe set cannot reach (PR #16298). Every probe on that card is a real `FieldType` member; these two shapes are not, so no sweep there could have found them.\n\n## The two defaults\n\n```\nSqlDriver.createColumn   const type = field.type || 'string';\ngenerate.ts              String(fieldDef.type || 'text')          (both formats)\n```\n\n`'string'` heads `createColumn`'s STRING-family arm, which sizes the column from `declaredVarcharLength(field)` — the declared `maxLength` verbatim, knex's 255 without one. `'text'` heads the generators' TEXT arm, which is unbounded unless the column is keyed. Two different families, from the same declaration.\n\nAn unknown `type` string splits the same way for a different reason: the driver falls to its catch-all (`table.string(name)`, `varchar(255)`), the generators to their own `default:` arm (`TEXT`).\n\n## The measurement\n\nLive PostgreSQL 16.13, all three producers driven from one object, columns read back out of `information_schema.columns`:\n\n```\n                                                    driver                  sql gen   ts gen\n{ maxLength: 100 }                    (no `type`)   character varying(100)  text      text\n{ type: 'this_is_not_a_field_type',\n  maxLength: 100 }                                  character varying(255)  text      text\n```\n\nBoth directions of harm are present in the first row: the platform REFUSES a 101-character value that both generated tables accept.\n\n## Reachability, honestly\n\nNeither shape parses. `FieldSchema` requires `type` and rejects a non-member at `[type]` (#12593 measured the same for `'string'` itself). So this is the UNVALIDATED authoring door only — a config loaded without `os validate`, a hand-built object, a metadata row written by something other than the authoring path. `fieldTypeToSql`'s own docblock already says that door exists and can deliver a `type` string.\n\nThat is exactly why it is filed rather than repaired inside #16298: the fix is one character of default text on each side, but WHICH side moves is a decision about what an unvalidated field means, and #16091's ruling (\"the generator follows the driver\", #15521) was given for declarations that parse.\n\n## The narrower half\n\n`FieldType.options` omits `'string'` and there is no `Field.string` builder (#12593), so `createColumn`'s `case 'string':` is reachable only through this same door — the driver's default and its own arm are consistent with each other, and it is the generators' `|| 'text'` that disagrees."
+}

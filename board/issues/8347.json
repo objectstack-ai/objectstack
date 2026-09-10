@@ -1,0 +1,31 @@
+{
+  "number": 8347,
+  "kind": "issue",
+  "title": "realtime: no WS/SSE transport — service-realtime is in-process only and clients long-poll; big-screen/command-center scenarios need real push",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "enhancement",
+    "pm:on-hold",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-13T06:49:53Z",
+  "updated_at": "2026-08-19T17:16:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8347",
+  "body": "## Status\n\n**Maintainer decision (2026-08-13): scheduled for v18.**\n\n## Current state (all honestly reported, per ADR-0076 D12)\n\n- `packages/runtime/src/http-dispatcher.ts:1441-1444` — capability discovery hard-codes `websockets: { enabled: false }`: \"No WS/HTTP realtime surface is mounted anywhere — a mere in-process realtime service must not advertise websockets\" (ADR-0076 D12, #2462).\n- `packages/services/service-realtime/` — in-memory, in-process pub/sub adapter only; no transport.\n- `packages/client/src/realtime-api.ts` — long-polling placeholder; header comments: \"For production WebSocket/SSE support, extend with transport adapters\" / \"WebSocket/SSE transport planned for future\".\n- The one live \"near-realtime\" mechanism is dashboard polling: `dashboard.refreshInterval` (seconds) is confirmed live in the objectui renderer (`packages/spec/liveness/dashboard.json` → `DashboardRenderer.tsx` `setInterval(onRefresh)`).\n\n## Why now\n\nSolution scoping for an overseas port/terminal customer (2026-08): a command-center big screen showing gate traffic, yard inventory, and berth/operation status. 5–30s `refreshInterval` polling covers the baseline, but sub-5s \"event hits the screen\" (gate pass-through, weighbridge reading) needs push. The same transport would also serve in-app notifications (`service-messaging` inbox channel) and list-view live updates.\n\n## Suggested scope (for discussion)\n\n1. **SSE first** — one-directional server→client fits the dashboard/notification cases, avoids WS proxy/auth complexity, and slots behind the existing `service-realtime` adapter seam.\n2. Client transport adapter replacing the long-poll placeholder in `realtime-api.ts` (the reserved fields are already stubbed for it).\n3. Flip capability discovery honestly per D12 only when the surface is actually mounted.\n4. Multi-node fan-out: document that horizontal deployments need a shared bus (a `service-cluster-redis` seam already exists) — single-node in-process bridge is an acceptable first ship.\n\n## Related\n\n- #2462 / ADR-0076 D12 (honest capabilities — the reason today's state is `enabled: false` rather than a broken promise)\n- #8345, and the PDF re-plan issue from the same customer scoping batch (all v18)"
+}

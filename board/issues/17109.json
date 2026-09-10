@@ -1,0 +1,28 @@
+{
+  "number": 17109,
+  "kind": "issue",
+  "title": "spec: there is no VALUE-level retirement mechanism — `retiredKey()` retires a key, and a ruled enum-member retirement has nothing to land on",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T09:27:19Z",
+  "updated_at": "2026-09-09T09:27:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17109",
+  "body": "Filed by the `domain:spec@objectui` PM seat (session `session_01Jmxdo7bmeqCQHLSfmLVX9w`), surfaced while routing objectui#7450. ⛔ Not claiming. Grading is the triage seat's.\n\n**Maintainer decision, 2026-09-09: add the generic helper** (option A of the two put to them) — ⛔ not a one-off refinement on the single enum that exposed the gap.\n\n## The gap\n\n`packages/spec` can retire a **key**: `retiredKey()` / ADR-0087 D2. It has **no way to retire a VALUE** — one member of a `z.enum` — with a named refusal that carries a migration hint.\n\nMeasured by the implementing seat while executing objectui#7450: a sweep of `packages/spec/src/shared/` surfaced no value-level equivalent to `retiredKey()`. ⚠️ That reading is the dev seat's, taken 2026-09-09; ⛔ re-derive it before building, with a firing control (`retiredKey` itself resolving is the obvious one).\n\n## Why it blocks something concrete\n\nobjectui#7450's ruling (director batch #71, maintainer 「其他同意」) requires `element:text.variant`'s `heading` and `subheading` to become **named refusals carrying migration hints** — `heading → h2`, `subheading → h3`, \"or pick the level you mean\". Today the only expressible outcomes are *accept* or *a bare `invalid_value`*, and neither is what was ruled.\n\nThat retirement is **release 2** of the sequence in objectstack#17108. Release 1 (the additive widening) does **not** depend on this card; release 2 does.\n\n## Why generic rather than local\n\nThe maintainer's reasoning, adopted: a `.superRefine` on `element:text.variant` alone would be cheaper for one card, but **a second such ruling would want the mechanism** — and value-level retirement is exactly the shape that recurs once a vocabulary is published and then narrowed. Building it once, beside `retiredKey()`, means every enum in the spec can retire a member the same way and the diagnostic reads the same everywhere.\n\n## What it needs to do — from the one ruled instance\n\n- refuse the retired member **by name**, ⛔ not as an anonymous `invalid_value`;\n- carry a **migration hint** the message can print (`heading → h2`);\n- leave the rest of the enum's members accepted, unchanged;\n- compose with `.optional()` and `.default(…)` — ⚠️ `element:text.variant` carries `.default('body')` today, so a retired member and a defaulted enum have to coexist coherently. That is the sharp case, and it is exactly the one the first consumer presents.\n\n⚠️ **Design questions this card must answer rather than assume**, since it is design work and not a rename:\n- Does a retired value refuse at **parse**, or parse-with-a-diagnostic? `retiredKey()`'s existing posture is the precedent to check, not to copy blindly.\n- What does a retired value do when the enum is **defaulted** and the document omits the key entirely?\n- Is the hint free text, or a structured `{ from, to }` the tooling can render?\n\n## Appetite\n\n⛔ Falls off the back: retiring any actual value (that is objectstack#17108's release 2 and objectui#7450's follow-up); changing `retiredKey()`'s own semantics; auditing the spec for other enums that might want it — file those separately if the sweep finds them.\n\nRefs: objectstack#17108 (release 1, the widening this unblocks release 2 of) · objectui#7450 (the ruling, and the falsification at comment `5599277303`) · ADR-0087 D2 · objectstack#12708 (batch ledger)"
+}

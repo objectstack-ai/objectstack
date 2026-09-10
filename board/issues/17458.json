@@ -1,0 +1,29 @@
+{
+  "number": 17458,
+  "kind": "issue",
+  "title": "Two `--self-test` harnesses assume `/bin/bash` is bash 4+, so they fail on macOS — including `check-bash32-floor`, the gate that defends the 3.2 floor",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T15:27:33Z",
+  "updated_at": "2026-09-10T15:32:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17458",
+  "body": "Found while verifying an unrelated PR (#17435) on macOS: two `--self-test` runs fail on a\ndeveloper machine and are green on CI. Both reduce to one assumption — **the harness spawns\n`/bin/bash` and expects bash 4+**, but `/bin/bash` on macOS is `3.2.57`, which is the very\nfloor this repo defends.\n\nMeasured on merge base `92242041e`, a tree carrying none of that PR's work, so neither is\ncaused by it. Both reproduce there identically.\n\n## Instance 1 — `check-step-collectors --self-test`: 30 failures, all `got 127`\n\nThe harness reproduces GitHub's `run:` invocation faithfully (`spawnSync('bash', ['-e', script])`,\n`scripts/check-step-collectors.mjs:515`), which is exactly the point of it. But the workflow\nblocks it replays use `mapfile`, a bash 4 builtin:\n\n```\nmapfile -t selftests < <(find .claude/hooks -type f -name '*.selftest.sh' | sort)\n```\n\nOn macOS that line exits 127 before the block does anything, so every assertion about the\ncollector's behaviour fails — including the ablation legs, which then \"cannot reproduce the\ndefect\" and say so. The step under test is fine; the harness cannot run it here.\n\n```\nGNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)\n$ /bin/bash -c 'type mapfile'\n/bin/bash: line 0: type: mapfile: not found\n```\n\n## Instance 2 — `check-bash32-floor --self-test`: 8 of 153 failures\n\nThe one that matters, because of what it is defending. The failing case is:\n\n    the simulated-3.2 harness really removes the builtin (else the next leg proves nothing)\n        plain= sim.out= sim.err=...: line 1: mapfile: command not found\n\nThe harness simulates a 3.2 shell by disabling `mapfile`, then verifies the simulation worked\nby checking the builtin ran BEFORE and not after. On a real 3.2 host the \"before\" probe is\nalready empty, so \"removed by the harness\" and \"never there\" are indistinguishable and the\ncase fails. **The gate that defends the bash 3.2 floor cannot self-test on bash 3.2.**\n\nNote what is NOT wrong: the gate's verdict over the real tree is green and correct here —\n`real tree: 33 shell file(s) — 31 by extension, 2 by shebang alone — 0 finding(s)`. Only the\nself-test's harness-verification leg fails. This is not #17141, which rules on the gate's\nBOUNDARY (userland-binary differences being a different axis) and leaves the harness alone.\n\n## Why this is worth a card rather than a shrug\n\n- Both gates are in the derived family set for ordinary changes, so every agent and every\n  human running the local gate sweep on a Mac meets two reds that take real time to\n  characterize as environmental. I spent that time this round; the next one will too.\n- A self-test that cannot pass on a platform is a self-test whose verdict nobody reads on\n  that platform, which is how a genuinely red one gets waved through.\n- For instance 2 specifically, the simulation leg exists precisely so the following legs mean\n  something. On the floor platform it is the leg that fails.\n\n## Not proposing the fix\n\nDeliberately unassigned and ungraded. Sketches only, for triage to weigh: instance 1 could\nresolve the interpreter once and skip with a stated reason when it is not 4+ (a skip that is\nloud, not silent, or #4690 applies); instance 2 needs the harness to detect that the builtin\nis natively absent and take that as the simulation rather than failing to create it. Both\ntouch the \"an empty population is a refusal, not a quiet pass\" rule, so neither should be\nwritten as a quiet skip.\n"
+}

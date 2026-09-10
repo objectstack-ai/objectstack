@@ -1,0 +1,32 @@
+{
+  "number": 16390,
+  "kind": "issue",
+  "title": "analytics: 数据集维度只解析 lookup 字段,user 字段维度返回原始用户 id —— 以人为轴的图表/报表标签是一串 id",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T17:00:41Z",
+  "updated_at": "2026-09-10T15:25:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16390",
+  "body": "## 现象\n\n数据集(dataset)的维度解析只认 `lookup` 字段:同一次 `POST /api/v1/analytics/dataset/query` 里,`lookup` 维度返回**目标记录的名称**,`user` 维度返回**原始用户 id**。于是任何以「人」为轴的图表 / 报表,轴标签是一串 id,不是姓名。\n\n同一个数据集的两次查询(应用对象 `kpi_result`:`unit` 是 `Field.lookup('sys_business_unit')`,`person` 是 `Field.user()`):\n\n```json\n// dimensions: [\"unit\"]\n{\"rows\":[{\"unit\":\"客户成功部\",\"avg_score\":91.5},{\"unit\":\"华东分公司\",\"avg_score\":106.12}, …],\n \"fields\":[{\"name\":\"unit\",\"type\":\"string\",\"label\":\"组织单元\"}]}\n\n// dimensions: [\"person\"]\n{\"rows\":[{\"person\":\"7zLYIwpX82If4BvtWGdx2FJeP1S3yyrE\",\"avg_score\":124.25},\n         {\"person\":\"F8Ue761QN8IwpEXDcqjvmElGMrBxbEXs\",\"avg_score\":128.6}, …]}\n```\n\n两个字段都带 `reference`,差别只在 `type`:\n\n```js\nField.user({ label: '人员' })                       // {\"type\":\"user\",\"reference\":\"sys_user\",\"label\":\"人员\"}\nField.lookup('sys_business_unit', { label: '组织单元' }) // {\"type\":\"lookup\",\"reference\":\"sys_business_unit\",\"label\":\"组织单元\"}\n```\n\n数据集侧把维度声明成 `type: 'lookup'` 不改变结果 —— 解析看的是对象字段的类型,不是维度声明。\n\n## 最小复现\n\n1. 建一个对象,含一个 `Field.user()` 字段(例:`person`)与一个 `Field.lookup()` 字段(例:`unit`),各写入若干行;\n2. `defineDataset` 声明两个维度分别指向这两个字段(`type: 'lookup'`),一个 `avg` measure;\n3. `POST /api/v1/analytics/dataset/query`,`dimensions: [\"unit\"]` → 返回名称;`dimensions: [\"person\"]` → 返回用户 id;\n4. 把该数据集挂到 dashboard widget / report 上,人员轴显示的就是 id。\n\n## 期望能力\n\n`user` 字段作为数据集维度时,与 `lookup` 同样按 `reference`(`sys_user`)解析出显示名(`sys_user` 的 nameField),或提供一个显式的维度选项(如 `displayField`)让作者指定用哪一列显示 —— 现在 `DatasetDimensionSchema` 是 strict 的,只有 `name / label / field / type / dateGranularity`,应用侧没有任何声明式出口;能绕开它的只有「换一个本身存着姓名的列」,那要求应用把姓名反规范化进结果表。\n\n## 平台版本\n\n`@objectstack/runtime` / `@objectstack/spec` / `@objectstack/cli` 17.2.0(SQLite 驱动,单租户 dev 实例)。\n\n上报来源:objectstack-ai/kpi 的看板「人员得分」与「到人得分」报表;应用侧按纪律不绕平台、不打补丁,当前用「结果记录名称(含姓名)」作展示维度顶着,平台补上后换回 `person` 维度。\n"
+}

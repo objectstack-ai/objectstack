@@ -1,0 +1,37 @@
+{
+  "number": 505,
+  "kind": "pull_request",
+  "title": "feat: Implement Phase 2 - Microkernel lifecycle, dependency resolution, and security",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-03T11:03:26Z",
+  "updated_at": "2026-02-03T12:53:40Z",
+  "closed_at": "2026-02-03T12:40:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-03T12:40:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/505",
+  "body": "Implements Phase 2 of the microkernel improvement plan: advanced lifecycle management, semantic versioning with dependency resolution, and security sandboxing infrastructure.\n\n## Components\n\n**Lifecycle Management** (`health-monitor.ts`, `hot-reload.ts`)\n- Health monitoring with auto-recovery (6 status levels, configurable backoff)\n- Hot reload with state preservation (memory/disk/distributed strategies)\n- Graceful degradation on dependency failures\n\n**Dependency Resolution** (`dependency-resolver.ts`)\n- SemVer 2.0 parser with constraint matching (`^1.2.3`, `~1.2.3`, `>=1.2.3`, `1.0.0 - 2.0.0`, etc.)\n- Topological sort (Kahn's algorithm) with cycle detection\n- Compatibility level detection (fully-compatible → breaking-changes)\n- Conflict resolution with best version selection\n\n**Security** (`security/permission-manager.ts`, `security/sandbox-runtime.ts`, `security/security-scanner.ts`)\n- Fine-grained permissions: 17 resource types × 11 actions × 5 scopes\n- Sandbox runtime with 5 isolation levels (file/network/process/env controls)\n- Security scanner framework with configurable scoring\n\n## Usage\n\n```typescript\nimport { \n  PluginHealthMonitor, \n  DependencyResolver,\n  PluginPermissionManager \n} from '@objectstack/core';\n\n// Health monitoring with auto-restart\nmonitor.registerPlugin('my-plugin', {\n  interval: 30000,\n  autoRestart: true,\n  restartBackoff: 'exponential'\n});\n\n// SemVer constraint resolution\nconst version = resolver.findBestVersion(\n  ['1.0.0', '1.1.0', '1.2.0', '2.0.0'],\n  ['^1.0.0', '>=1.1.0']\n); // Returns '1.2.0'\n\n// Permission enforcement\npermManager.checkAccess('plugin-id', 'data.object', 'read', 'customer');\n```\n\n## Security Notes\n\nProduction deployments should replace:\n- Simple hash → SHA-256 for state checksums\n- Prefix matching → `path.resolve()` for file access\n- String matching → `new URL()` for network access\n- Global tracking → per-plugin resource monitoring\n\nAll security-sensitive areas marked with `WARNING` comments and remediation guidance.\n\n## Test Coverage\n\n150+ tests covering SemVer parsing, dependency resolution, permission management, and lifecycle operations.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 按照文档开发 ObjectStack Microkernel and Plugin Architecture Improvement Plan\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

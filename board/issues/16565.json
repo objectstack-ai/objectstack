@@ -1,0 +1,31 @@
+{
+  "number": 16565,
+  "kind": "issue",
+  "title": "[finding] Nothing an app author reads says a `type: 'app'` package may hold only ONE app — the ui skill and `ui/audience-based-interfaces` both omit it, and `ADR-0019` is two different records",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T09:47:05Z",
+  "updated_at": "2026-09-10T07:18:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16565",
+  "body": "Found by building a real app against the documented surface (`objectstack-ai/ats`). A three-audience recruiting app was designed, carded and half-implemented as **three apps** — platform, employer, seeker — before `defineStack` threw:\n\n```\nAn 'app' package must define at most one app, but found 2 (ats_admin_app, ats_employer_app) ... (ADR-0019 D3)\n```\n\nThe rule is right and well-argued. The problem is that **no surface an app author actually reads states it.**\n\n## Measured gaps\n\n| Surface | mentions the one-app rule |\n|:--|:--|\n| `skills/objectstack-ui/SKILL.md` — the skill for authoring `*.app.ts` | **0** |\n| `content/docs/ui/audience-based-interfaces.mdx` — the page on serving multiple audiences | **0** |\n| `packages/spec/src/stack.zod.ts:1418` | the throw itself |\n| `docs/adr/0019-app-as-consumer-unit.md` D3 | the decision |\n\nThe constraint is enforced at the very last moment and documented only in the ADR — a file an app author has no particular reason to open.\n\n`audience-based-interfaces.mdx` is the sharpest miss. It is *the* page about giving different audiences different surfaces, and its worked example is a single `crm` app gated by `requiredPermissions` — **the correct pattern**. But its scenario is framed as builder-vs-end-user, and it never says \"and one app is all you may have\". A reader designing for three *business* audiences sees a page about gating, not a page about a cap, and reasonably reaches for one app per audience.\n\n## The citation is ambiguous too\n\n`ADR-0019` names **two different records** in this repo:\n\n- `docs/adr/0019-app-as-consumer-unit.md` — D3 is the one-app rule\n- `docs/adr/0019-approval-as-flow-node.md` — D3 is deprecating `ApprovalProcessSchema`\n\nEvery `ADR-0019` mention in the published skills bundle (`objectstack-automation`, `objectstack-platform`) refers to the **approvals** record. So an author who follows the throw's own citation is as likely to land on the wrong ADR as the right one — and both have a D3. This is the same defect class as #11781 (a bare `ADR-0057` shared by two records).\n\n## What would have prevented it\n\nAny one of these, in rough order of value:\n\n1. **Say it in `audience-based-interfaces.mdx`** — one sentence in *Recommended solution*: a package of `type: 'app'` exposes exactly one App; multiple audiences are navigation groups inside it, gated by `requiredPermissions`. The page already demonstrates this; it just never claims it.\n2. **Say it in the `objectstack-ui` skill**, in the App Navigation section, where an agent authoring `*.app.ts` will actually read it.\n3. **Disambiguate the citation** — the throw and the skills should cite `ADR-0019 (app-as-consumer-unit) D3`, not a bare number two records answer to.\n4. Optionally, catch it earlier than `defineStack` — a lint rule would name it at author time rather than at load.\n\n## Why this is worth more than a docs nit\n\nThe failure is cheap to *hit* and expensive to *have designed around*. The throw is loud and immediate, so nobody ships a broken app — but by the time it fires, the architecture document, the work cards and part of the implementation have all been written against a shape the platform refuses. In this case that was a design section, a backlog card and one dispatched implementation, all of which had to be re-ruled and re-done.\n\nThe agent that hit it stopped and asked rather than forcing it, which is the good outcome. It should not have needed to."
+}

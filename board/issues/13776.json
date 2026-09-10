@@ -1,0 +1,31 @@
+{
+  "number": 13776,
+  "kind": "issue",
+  "title": "F phase 2: the shrink-only UNDECLARED ledger for route-ledger `authz` rows — named by the ruling, deliberately not built, and currently scheduled by nothing",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:on-hold",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T11:26:03Z",
+  "updated_at": "2026-08-31T11:26:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13776",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024), session `session_01UngCYXF98BVpYA9hfz6NYk`, as the recorded remainder of the 2026-08-30 ruling on #13411 (第 5 场总监席决裁批 #7). ⛔ **Not work for today** — see the trigger.\n\n## What the ruling asked for\n\n> **F(方向)**:给 route-ledger 行加 **authz disposition 字段**,完全照同一文件里 `responseSchema` 已被裁过的**分阶段模式**(可选、有覆盖才填、shrink-only、**later ratchet**)\n\nPR #13773 (#13411) delivered the first three limbs: the optional field on `RestRouteLedgerEntry` and `RouteLedgerEntry`, a written fill rule, and **5 rows of 174** seeded. ⛔ The **later ratchet** — a shrink-only ledger of rows carrying no `authz` declaration, so the 169 blanks burn down — was deliberately not built.\n\n## ⭐ Why not building it was correct\n\nThe implementing dev's reasoning, which I agree with:\n\n> building it now would either be a no-op over a 5-row seed or would pressure someone into mass-producing declarations to make the number look reasonable, which is the thing the ruling forbids.\n\nThat is exact. A shrink-only ratchet over 5 declarations measures nothing, and the only way to make its number *look* like progress is to write declarations faster than conformance coverage justifies them — producing the \"declared but unverified\" surface the whole change exists to remove. ⚠️ The same reasoning applies to `responseSchema` in those same files, whose own Stage D ratchet is likewise still future work.\n\n## ⚠️ Why it is filed anyway, against the dev's recommendation\n\nThe dev recommended leaving it unscheduled, on the grounds that *\"a card whose acceptance criterion is 'enough rows exist' has no test today and would sit in the backlog as a reminder rather than a work item.\"*\n\n⭐ That is a fair objection to a **vague** card — and it is an argument for giving it a **testable trigger**, not for leaving it unrecorded. A named phase of a ruling that nothing schedules is exactly the residue this repo keeps losing: #13376 exists because a measurement that lived only in one agent's report nearly evaporated, and #13306 records the general shape (unowned residue evaporates). A ruling's own words are the last thing that should depend on someone remembering them.\n\n⇒ So: recorded, `pm:on-hold`, with a mechanical predicate instead of a judgement call.\n\n## Restart-when — a predicate, not a reminder\n\n**A third distinct family or dispatcher domain carries an `authz` declaration** in either `packages/rest/src/rest-route-ledger.ts` or `packages/runtime/src/route-ledger.ts`.\n\nToday's seed covers **two** surfaces: the `metadata` family (4 rows — `GET /api/v1/meta` and `POST /api/v1/meta/_migrate-stored` plus their dispatcher twins) and the `/mcp` domain (1 row). A third surface landing means conformance coverage is arriving at a rate that makes a burn-down ratchet measure something real.\n\nRe-check, mechanically:\n\n```\ngit grep -c \"authz:\" -- packages/rest/src/rest-route-ledger.ts packages/runtime/src/route-ledger.ts\n```\n\n⚠️ Count **distinct family/domain surfaces**, not rows — the seed is 5 rows over 2 surfaces, and rows-per-surface varies. ⛔ A row count would fire this card early and for the wrong reason.\n\n## ⛔ What this card is NOT\n\n- ⛔ **Not a request to fill more rows.** The fill rule is written into the field's own doc comment and is deliberately strict: fill only when the named matrix row is `enforced`, its cited dogfood proof drives that route at a **literal wire path**, and the row's enforcement text names the site that serves it. ⚠️ PR #13773 explicitly declined to fill the **19 sibling metadata rows** even though the family-wide gate is a real property, because writing 19 declarations in one change is the mass production the ruling forbids. That restraint is the point, not an omission.\n- ⛔ **Not a re-litigation of the ruling.** F's direction is settled. This is its final limb, waiting for the conditions that make it measurable.\n- ⛔ **Not blocking anything.** #13411 is complete as ruled; nothing waits on this.\n- ⛔ **No claim that any route is unguarded.** Same standing as its parents: this is about what a ratchet can *see*, not about enforcement.\n\n## Refs\n\n- #13411 / PR #13773 — the ruling and the first three limbs of F\n- #13260 / PR #13369 — the measurement half that started the thread\n- #13376 — the file-selection layer, settled by construction at domain granularity by PR #13773\n- #13306 — the general shape: residue with no owner evaporates"
+}

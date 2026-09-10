@@ -1,0 +1,30 @@
+{
+  "number": 17215,
+  "kind": "issue",
+  "title": "client SDK oauth.applications.register declares redirect_uris REQUIRED where the better-auth body schema declares it optional, so a legal vendor call cannot be expressed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-09T17:43:43Z",
+  "updated_at": "2026-09-09T17:57:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17215",
+  "body": "Filed on the `domain:cli` execution PM seat's instruction (#6024), overruling the delivering dev's not-filed call. Found while delivering #15447 (PR #17209), out of that card's three-member scope and deliberately not fixed there.\n\n## The divergence\n\n`ObjectStackClient.oauth.applications.register` declares `redirect_uris` **required** (`packages/client/src/index.ts`):\n\n```ts\nregister: async (req: {\n  client_name?: string;\n  redirect_uris: string[];        // no `?` — required\n  token_endpoint_auth_method?: 'none' | 'client_secret_basic' | 'client_secret_post';\n  ...\n})\n```\n\nThe route it posts to, `POST /api/v1/auth/oauth2/create-client`, is mounted verbatim from `@better-auth/oauth-provider@1.7.2`, and its body schema declares `redirect_uris` **optional**, typed as an array of `string`. Every one of that schema's 21 members is optional.\n\nSo the SDK is **narrower than the producer**, and a request the route would accept — one that omits `redirect_uris` entirely — cannot be expressed through this method at all. The caller does not get a wrong answer; they get a call they cannot write.\n\n## Driven, not inferred\n\nFrom the measurement round on #15447 (comment 5559384773). The vendor body schema was not transcribed from the package's `.d.ts` — it was introspected **at runtime**: instantiate `oauthProvider()`, walk `endpoints`, read `options.body`. Its row for this member, verbatim from that comment's table:\n\n| member | type |\n|---|---|\n| `redirect_uris` | optional array of string ⚠️ *optional here; the SDK declares it required* |\n\nThe same round recorded that the object sets no `catchall`, so it is zod's default strip, and that the member list has no drift at 1.7.2.\n\n## Why this is p3 and not p2, stated so the grade is checkable\n\nThis is the **same family** as #15447 — a published SDK declaration that does not match the route it posts to — but in the opposite direction, and the direction is the whole of the grade:\n\n- #15447's three members ran the **unsafe** direction: the SDK declared more than the route honoured, so a caller's value was silently discarded behind an HTTP 201. Trap-shaped, graded p2.\n- This one runs the **safe** direction: the SDK declares less than the route accepts. Nothing is silently lost and no receipt lies. What is lost is expressiveness — a legal vendor call has no spelling here.\n\nThe safe direction is why it is p3. ⛔ It is not a reason the divergence is not real: the declaration still does not match the producer, which is the defect class this repo files.\n\n## Not decided here\n\n1. **Relax to optional** — matches the producer exactly, and is the answer if the SDK's job is to express the route.\n2. **Keep it required, and say so** — defensible on its own terms: a client registered with no redirect URI cannot complete an `authorization_code` flow, so requiring it is a guard rather than an accident. If this is the intent it should be stated in the method's TSDoc, because today the stricter declaration is indistinguishable from an oversight; a deliberate narrowing that says nothing reads as a bug to the next auditor, which is how this card came to exist.\n3. Whichever wins, the answer is worth checking against the **two other doors** that register a client: the RFC 7591 DCR endpoint `POST /oauth2/register`, and the ObjectStack mount `POST /api/v1/auth/sys-oauth-application/register`, which takes redirect URLs as newline-separated **text** and splits them itself.\n\nRelaxing a required member to optional is not breaking for callers (every existing call still compiles); tightening later would be.\n\n## Siblings\n\n- **#15447** — the three members this same request type declared and the route silently stripped (`name`, `scopes`, `metadata`). Landed as draft PR #17209; that PR reports this divergence in its acceptance notes and ⛔ deliberately does not widen to take it.\n- **#17210** — the third finding out of the same measurement round: no SDK method builds `POST /api/v1/auth/sys-oauth-application/register`, the ObjectStack-owned mount that honours a plain `name`.\n\nAll three are readings of the same driven round, comment 5559384773 on #15447, against `@better-auth/oauth-provider@1.7.2`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

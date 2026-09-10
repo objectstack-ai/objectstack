@@ -1,0 +1,31 @@
+{
+  "number": 14885,
+  "kind": "issue",
+  "title": "[repo:objectui] Pure `date` fields within ±7 days render as relative text ('3天前') in lists and detail — unconditional in the date formatter, so a period-end business date loses its value",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p3",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-03T07:24:05Z",
+  "updated_at": "2026-09-10T00:19:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14885",
+  "body": "## Summary\n\nA pure `date` field (no time component, a business date such as a period end) is rendered as **relative** text whenever the value is within ±7 days of today: `3天前`, `明天`, `昨天`. Outside that window it renders the calendar date. In a list this produces two visually different formats in the same column set, and the relative text hides the actual date a user needs to read (an assessment period end is a business date, not a \"how long ago\" fact).\n\n## Minimal reproduction\n\nPlatform 17.2.0 console, today = 2026-09-03.\n\nObject `kpi_plan` with `period_start: Field.date({ label: '周期开始' })` = `2026-08-01` and `period_end: Field.date({ label: '周期结束' })` = `2026-08-31`.\n\nList view columns `period_start, period_end`:\n\n```\n周期开始   8月1日      ← calendar date (34 days ago, outside the window)\n周期结束   3天前       ← relative (3 days ago, inside the window)\n```\n\nDetail page shows the same. The audit timestamps (`created_at` etc.) are datetimes and are a separate case.\n\n## Where\n\n`ui-components` chunk, date display formatter:\n\n```js\nfunction Ltt(e, t) {\n  ...\n  let o = Math.round((dateOnly(value) - dateOnly(today)) / 864e5);\n  if (o < -7 || o > 7) return k9(n, void 0, t);          // calendar date\n  if (o < -1 && t?.dueLike) return t.t('fields.relativeDate.overdue', {count: -o}) ...\n  return Itt(o, t?.locale);                               // Intl.RelativeTimeFormat(..., 'day')\n}\n```\n\nThe relative branch is unconditional for the ±7-day window; `dueLike` only changes the wording.\n\n## Expected\n\n- `date` fields render the calendar date by default, in both list cells and detail pages. A business date is a value the user reads and compares; relative wording loses the value.\n- Relative wording should be **opt-in** per field / column (e.g. `display: 'relative'`, or only when the field is flagged `dueLike`), or shown as a secondary hint (tooltip / muted suffix) next to the actual date.\n- If the default must stay relative, at least apply it consistently (both `8月1日` and `3天前` in one row is the worst of both).\n\n## Environment\n\n`@objectstack/console` 17.2.0 · `objectstack dev` · Chrome · locale zh-CN. App: objectstack-ai/kpi, object `kpi_plan`.\n"
+}

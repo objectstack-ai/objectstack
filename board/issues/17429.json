@@ -1,0 +1,29 @@
+{
+  "number": 17429,
+  "kind": "issue",
+  "title": "Bump .objectui-sha — the console pin is 584 commits behind objectui main",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T13:48:56Z",
+  "updated_at": "2026-09-10T13:48:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17429",
+  "body": "Routine pin drift, filed so it has an owner. `.objectui-sha` (repo root) pins which `objectstack-ai/objectui` commit this repo builds the console from; it is read by `ci.yml`, `cut-rc.yml`, `lint.yml`, `release.yml` and `showcase-smoke.yml`.\n\n## Measured 2026-09-10\n\n- pin: `53ded82bf`\n- objectui `origin/main`: `efead6c60`\n- **584 commits behind**\n\n## Why now rather than at the next sweep\n\n⛔ Nothing is broken. `scripts/build-console.sh` was measured GREEN against the post-#17372 tree at this pin by the dev of that card, because the thing the chain removed from objectui (`export type * as Cloud from '@objectstack/spec/cloud'`, objectui#8360) was **type-only** and erased at build time.\n\nThe one chain-specific reason to prefer sooner: objectui#8360 is among those 584 commits, so until the pin moves, this repo's console build still compiles an objectui tree that re-exports a spec subpath which no longer exists. Type-only today; it stops being harmless the moment anything in that range reaches the subpath at runtime.\n\n⚠️ **Where a regression would actually surface**: `cut-rc.yml`'s `pnpm objectui:build`. ⛔ NOT the `Console Pin Gate` — its path filter watches `.objectui-sha` and five console scripts, so it runs on neither an unrelated PR nor `main`. A green PR is not evidence here.\n\n## Doing it\n\nUse the dedicated bump script rather than editing the file by hand — the pin travels with `pnpm sdui:manifest` output and lockfile/override state, which is why ⛔ pin bumps are never riders on another PR. Expect the Playwright `sdui:manifest` step and 584 commits' worth of unrelated objectui change to come with it; that is the cost of the cadence, not of this card.\n\nRefs: #16325 (the chain), #17372 (step 3), objectui#8360 (step 2, the commit that motivates it).\n"
+}

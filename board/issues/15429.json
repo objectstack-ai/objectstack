@@ -1,0 +1,31 @@
+{
+  "number": 15429,
+  "kind": "issue",
+  "title": "A decision node with no declared `config.conditions` takes EVERY out-edge whose condition holds, in parallel — nothing enforces or warns that intended-exclusive edges partition",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:on-hold",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-04T15:27:12Z",
+  "updated_at": "2026-09-06T21:24:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15429",
+  "body": "Split out of #14945 by the triage seat (R+145). The filing `repo:hotcrm` seat named it there and asked triage to judge whether the two share a cause. **They do not**: #14945 is an *expressiveness* gap (a flow cannot author a per-record refusal), this is a *silent behavioural* hazard in decision-node evaluation. Different question, different fix, different lane risk.\n\n## What was measured\n\nA `decision` node with no declared `config.conditions` evaluates **every** out-edge and takes **all** of those whose condition holds — in parallel, not first-match.\n\nFound the hard way in `objectstack-ai/hotcrm#1555`: a `Clean` edge spelled `!= \"suspected\"` and a newly added `== \"confirmed\"` edge were **both live for a confirmed record**, so a refusal screen would have rendered *and* the conversion would have run **in the same execution**.\n\n⭐ **It was found by an ablation, not by review.** Two edges out of one decision node, each individually sensible, whose conditions silently overlap — and nothing in the platform reports it.\n\n## Why it is worth a card\n\nAn author writing a decision node almost always intends a **partition**: exactly one branch is taken. Nothing enforces that, nothing warns about it, and the failure is **silent and behavioural** — both branches simply run.\n\n⇒ This is the shape the platform's own error-proofing doctrine ranks worst: an author declares something that reads as exclusive, the runtime does something else, and there is no signal at author time, build time or run time. The repair in hotcrm was to narrow the `Clean` condition into a true partition **by hand**, which is exactly the knowledge that does not survive into the next flow anyone writes.\n\n## What a fix would decide, ⛔ not decided here\n\n- **Author-time / build-time**: a lint or `os build` diagnostic when a decision node's out-edge conditions are not provably disjoint. ⚠️ Provable disjointness over CEL is not free — establish what is decidable before promising it, and prefer a narrow, honest check over a clever one.\n- **Runtime**: report when more than one out-edge fires on a node that declared no `conditions`. Cheap and certain, but it fires after the fact.\n- **Contract**: make the exclusive case the declarable one, so an author can say \"these partition\" and be held to it.\n\n⛔ Do not assume the answer is \"first match wins\" — changing evaluation semantics on a shipped node type is a behaviour change with its own ruling, ⛔ not a bug fix.\n\n## First step\n\nEstablish the current semantics from source rather than from this card: whether \"no `config.conditions`\" is a distinct mode from \"declared conditions\", and whether the parallel take is intended or incidental. The hotcrm evidence is one reproduction on one deployment, ⛔ not a reading of the engine.\n\n`priority:p2`: no known data loss, but a silent multi-branch execution in a flow that writes records is a defect class that gets worse with every flow authored. ⇒ `domain:services` — `service-automation` owns flow execution.\n\nRefs: #14945 (where it was reported) · `objectstack-ai/hotcrm#1555` (the reproduction and the hand repair) · `objectstack-ai/hotcrm#1288` (the ruling that surfaced it)."
+}

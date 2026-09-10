@@ -1,0 +1,33 @@
+{
+  "number": 15213,
+  "kind": "issue",
+  "title": "feat(spec,objectql,cli): the template install mode — a package copied once into the environment ledger, fully editable, refused on shared-database multi-tenant postures (ADR-0131 D6)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "domain:engine",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p1",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:06:11Z",
+  "updated_at": "2026-09-04T06:50:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15213",
+  "body": "**⛔ BLOCKED — the v18 development line is not open.**\n\n`Blocked-by: #15193, #15206`\n\nPart of #15194 (ADR-0131 execution tree). ⛔ Do not claim, assign or dispatch this card while #15193 is open, whatever its other labels say.\n\n---\n\n**In one sentence.** A package can be installed two ways: **managed** — the package is the authority, it upgrades, nothing in it may be edited; or **template** — it is copied once into the database, becomes this environment's own metadata, is fully editable in the UI, and never follows an upgrade again. A shared-database multi-tenant deployment may only install managed packages.\n\nMaintainer, 2026-09-04, verbatim: 「软件包应该有两种安装方式，有一种是模版形式直接进库，那就是所有都可以修改。但是单库多租户禁止安装这种模版软件包；有一种是受管软件包，什么都以软件包中的为准，就是不让改。」\n\n**Scope.** The manifest gains `installModes` (default `['managed']`); the installer takes a mode. **Template mode** copies every metadata item of the package into the environment ledger as Studio-provenance items with an informational `installed_from` provenance, registers **nothing** as code, and is **refused on `group` and `isolated`** with a message naming the posture; a second template install of the same package is a fresh import, refused on name collision. `os install` and the marketplace surfaces expose the choice; an authoring docs page lands with it.\n\n**Acceptance.** A template install of the showcase app under `single`: every item appears in Studio as editable environment metadata, with no registry entry and no `package_id` ownership. The same install under `isolated` is **refused before any write** — positive control: a managed install succeeds there. Upgrading the package does not touch template-installed items.\n\nRefs: ADR-0131 D6, §6 Q5 · ADR-0003 · ADR-0025 · ADR-0130 (one artifact, N packages — modes apply per package).\n"
+}

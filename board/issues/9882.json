@@ -1,0 +1,30 @@
+{
+  "number": 9882,
+  "kind": "issue",
+  "title": "Decide: shrink-only delta-ratchet for check-durability-degradation-log-level — measured at 0 net decreases/month over 3,195 commits",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:on-hold",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-19T06:12:04Z",
+  "updated_at": "2026-08-19T08:22:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9882",
+  "body": "Follow-on from **#9747 / PR #9875**, filed by the `domain:devx` PM seat under ruling **Q1 → A**. The pilot was explicitly ruled **visibility-only, no new merge-blocking failure**, so PR #9875 measured this and did **not** build it. The numbers below are the whole point: this card starts **priced**, not speculative.\n\n## The measurement\n\nMethod: each commit's changed files replayed through **the gate's own recognizer** (a copy of the gate file, proved byte-identical above its CLI epilogue at build time). Window: **3,195 first-parent commits** on `origin/main`, 2026-07-19 → 2026-08-19.\n\n⚠️ That window is the *deepened* count. Agent containers start from a **63-commit shallow clone** (#9878), which is why an earlier measurement of the same window reported `269`.\n\n**`check-durability-degradation-log-level`:**\n\n| keying | commits changing the set | keys entering | keys **leaving** |\n|:---|---:|---:|---:|\n| file | 9 (0.28%) | — | — |\n| file + callee | 12 (0.38%) | 12 | **1** |\n\nThe single leave — `packages/runtime/src/http-dispatcher.ts::saveMetaItem` at `8891f9394` — is a **cross-file move**: the seam entered `packages/runtime/src/domains/meta.ts` in the same commit. Repo-wide total **1 → 1**.\n\n⇒ **0 net legitimate decreases per month.** This reproduces #9680's zero on a different rule.\n\n## What that means\n\nA shrink-only delta-ratchet on this rule is **free** — the population only grows, so the ratchet would have reddened CI **zero times** in the last month. That is the same profile that justified the ratchet in PR #9712 for `check-engine-double-contract`.\n\n## ⛔ Why this is NOT a general \"ratchet the family\" card\n\nThe sibling rule in the *same gate* measures the opposite way, and PR #9875's central finding is that **the nuisance rate is a property of the POPULATION, not of the proposal**:\n\n| rule | keys enter / leave | commit-level net losses that would redden CI |\n|:---|---:|---:|\n| durability **log-level** | 12 / 1 (a move) | **0 / month** |\n| durability **read-seam** | 25 / 15 | **10 / month** — one red every 2–7 working days |\n\nThe read-seam losses are **genuine deletions**, and their commit subjects say so: *\"remove the unreachable legacy raw-engine save path\"* (−3), *\"retire `sys_fetch_previous_delete`\"* (−1), *\"four read seams that failed no longer answer from …\"* (−1).\n\n⇒ Ratcheting must be decided **per rule, on measurement**. Do not widen this card to the read-seam rule; on today's numbers that would ship a nuisance.\n\n## The decision this card needs\n\nBuilding it means **adding a merge-blocking failure mode**, which is why it is not a dev card yet:\n\n- **A — build the shrink-only ratchet on the log-level rule.** Free on today's numbers. Cost: a new way for CI to go red, and a maintenance surface when a seam is legitimately deleted (~0×/month, but not never).\n- **B — do not build it.** The rule's population is **29 seams**, small enough to eyeball; the `UNRECOGNISED` line PR #9875 shipped already makes drift visible without blocking anything.\n- **C — re-measure in a month and decide then.** The replay method is cheap and reusable, so the cost of waiting is near zero — and one month of data on a repo doing ~3,200 first-parent commits/month is a thin base for a permanent merge-blocking rule.\n\n**My read: C, then A.** The measurement is real but single-window, and the visibility line shipped in #9875 covers the interim. Nothing is currently going undetected, so the urgency that would justify A-now is absent.\n\n⚠️ If A is chosen, keying matters: **file-only keying reports the cross-file move above as a false decrease.** Key on **file + callee** or the ratchet will redden on a refactor that changed nothing.\n\nRefs: #9747 (family) · PR #9875 (the measurement) · #9680 / PR #9712 (the same ratchet, engine doubles) · #9878 (why an earlier count said 269).\n\n---\n\n**Ruled 2026-08-19 — option C** (maintainer, via the maintainer-directed PM session; see the ruling comment for the full record). Held on the restart criterion below.\n\nRestart-when: today >= 2026-09-19 — re-run the PR #9875 replay measurement over the fresh window; if net legitimate decreases are still 0/month, promote to `pm:queue` and build the shrink-only ratchet (ruling A), keyed file + callee."
+}

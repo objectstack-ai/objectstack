@@ -1,0 +1,30 @@
+{
+  "number": 17152,
+  "kind": "issue",
+  "title": "[Decision] 一次退役，要写一条记录还是两条？—— 迁移条目的 D2/D3 约定，两处成文相互矛盾",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T13:26:27Z",
+  "updated_at": "2026-09-10T15:31:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17152",
+  "body": "## 维护者速读\n\n我们每退役一个已发布的字段，都要给升级的客户留下两样东西之一或两者：**一段自动帮他改数据的程序**，和**一条告诉他发生了什么的说明**。\n\n现在这两样东西该配几条记录，仓里有两处成文说法，彼此矛盾：\n\n- 已经落地的**先例**（`connector-error-mapping-removed`）是：程序能全自动搞定的，就只写程序，不另写说明。迁移登记表自己的开篇也是这么写的。\n- 但 #15954 的**裁决原文**要求：每个退役家族都要有一条说明，连那个有全自动程序的家族也要有。\n\n⚠️ 这不是文字游戏。它决定的是**升级说明书里会不会出现这一条**。客户升级时读到的清单，是从\"说明\"那一侧生成的；只写程序的家族，除非程序自己的一句话摘要写得够好，否则客户在清单上看不见它——数据被自动改了，但没人告诉他改了什么。\n\n本次 #16320 我已按裁决原文办（补说明），⛔ 没有替你批准偏离。但这个约定每张退役卡都会再撞一次，值得一次裁清楚。\n\n**A / B / C？**\n\n---\n\n<!-- os-decision-facets -->\nos-decision-facets\n\n- **① 项目长远合理性**：B 让\"退役清单\"成为一份完整目录，任何人查一遍就知道这一版删了什么；A 让它只收\"程序办不到的那些\"，目录不完整，读者得同时查两处才敢说自己看全了。C 保住 A 的简洁，但把\"客户看得见\"这件事变成硬要求而不是运气。\n- **② 实际业务拉动**：今天撞上的是升级到 18 的客户。本次退役里唯一会真正动到客户存量数据的就是连接器那一项（其余六项实测零作者），而它恰好就是走\"只写程序\"那条路的——⇒ 拉动不是零，且集中在唯一有真实数据的位置。\n- **③ 防 AI 犯错**：B 是闭合枚举——每个家族一条，缺了就红。A 与 C 是\"看情况\"，而\"情况\"由写卡的人当场判断，判断错了没有任何门禁会响：本次 PR 就是在这里判断了一次，也确实没有门禁拦住。\n- **④ 创业阶段不扩散**：A 与 C 更省——一次退役一条记录，不为同一件事维护两份文字，两份文字迟早会互相说不一样的话。B 每次都多一条永久义务。\n\n**推荐：C。** 保留\"程序能全自动搞定就只写程序\"的现行先例（A 的省），但加一条硬要求：那条程序自己的一句话摘要，必须写清客户要知道的事实（谁受影响、哪些没测过），因为它是唯一会出现在升级说明里的文字。\n\n**本分析看不见什么**：我没有量过历史上所有走\"只写程序\"路线的退役，在真实发布的升级说明里到底读起来是什么样——只验证了生成管线会把那句摘要带过去，没有读过一份已发布的成品说明书来确认它读着够用。若已发布的样例证明那句摘要在实际版面上被淹没，推荐应改为 B。\n\n---\n\n## 背景\n\n`domain:spec` 席，`session_01MkQhmuuJAVDjmeWNixwDDH`，2026-09-09T13:2xZ。由 PR #17146（卡 #16320，七个 cron 位置的退役）的达档契约复核逼出，复核裁决与本席裁定见 #16320 评论 `5602588780`。\n\n## Governing text\n\n**裁决侧**，#15954 评论 `5559778263`，逐字：\n\n> one ADR-0087 D3 semantic entry **per family** (export API, automation state, connector sync, cache warmup, DR/backup) … `connectors[].syncConfig.schedule` is the one stack-collection member: **its D3 entry says so** and names the measured zero in-repo authors and the NOT-MEASURED out-of-repo population.\n\n**先例侧**，`packages/spec/src/conversions/registry.ts:9` 的院规：\n\n> the semantic list is the non-lossless residue D2 could not express\n\n先例实测（复核所量）：`connector-error-mapping-removed` 是 D2-only，`git show origin/main:packages/spec/src/migrations/registry.ts | grep -c error-mapping` = **2**，两处均为 `conversionIds` 行与注释 ⇒ **确无 D3 孪生**。\n\n## 是否改协议\n\n⛔ 不改协议。两条路都不移动任何已发布 schema 的接受集；差别只在迁移登记表里为同一次退役写几条记录，以及升级说明书投影出什么。\n\n## 前提 re-check\n\n```\ngit show origin/main:packages/spec/src/conversions/registry.ts | sed -n '1,20p'\ngit show origin/main:packages/spec/src/migrations/registry.ts | grep -c error-mapping\ngit show origin/main:packages/spec/src/conversions/spec-changes.ts | sed -n '100,110p'\n```\n\n## 具体问题\n\n一次退役已经由 D2 conversion 完整表达时，是否仍欠一条 D3 semantic 条目？\n\n## 选项 × 真实代价\n\n| 选项 | 做什么 | 客户可感知的后果 |\n|:--|:--|:--|\n| **A** | 沿用先例：D2 能无损表达的退役只写 D2，D3 只收 D2 表达不了的残余 | 升级清单上看不到这一项，除非 D2 的 `summary` 恰好写得够好。今天没有任何门禁要求它写得够好 |\n| **B** | 按裁决字面：每个退役家族恒有一条 D3，可与 D2 并存 | 升级清单完整；代价是同一件事有两份文字，可能互相漂移 |\n| **C** | A 的形状 + 硬要求：D2 的 `summary` 必须承载客户要读到的事实（受影响人口、未测量面） | 升级清单看得到，且只有一份文字。⚠️ 实测：`summary` 是 D2 唯一会投影的字段（`spec-changes.ts:103-105`） |\n\n## 业务含义直译\n\n- **A** ＝ 「自动修好的东西不必通知客户」。\n- **B** ＝ 「每一次删除都进变更日志，哪怕我们已经替他改好了」。\n- **C** ＝ 「每一次删除都进变更日志，但只写一遍，写在那段程序自己的说明里」。\n\n## 防 AI 犯错轴：出错时谁看到什么\n\n⚠️ **A 与 C 的出错是静默的。** 判断\"这次 D2 够不够\"错了，没有门禁会响，升级说明里就少一条，客户在数据已经被改动之后才可能发现。本次 PR 正是在这里判断了一次，四道 ratchet 无一作声——是达档人工复核逮住的，不是机器。\n\n**B 的出错是响亮的**：少一条 D3，`expect(entry).toBeDefined()` 直接红。\n\n⇒ 若倾向 A 或 C，配套应当有一条门禁：走 D2-only 的退役，其 `summary` 非空且长度过下限。⛔ 本卡不预设该门禁存在，它需要另立卡。\n\n## 推荐与回退\n\n推荐 **C**，回退到 **B**。⛔ 不推荐裸 A：它就是本次缺陷的形状。\n\n## 裁后执行\n\n- 裁 **A** 或 **C** ⇒ 我在 #16320 的补丁轮里撤回本席已下的\"照裁决字面补 D3\"指令，改回 D2-only；C 还要求 `summary` 承载人口陈述（该项已在指令中，不受影响）。同笔在 #15954 上记一行说明其 connector 条款被本裁决取代。\n- 裁 **B** ⇒ #16320 当前的补丁轮已经就是 B，无需改动；把本约定写进 `conversions/registry.ts` 院规，与 `:9` 现有那句并列。\n- 无论哪个，**给 D2-only 退役的 `summary` 加一条非空门禁**单独立卡，因为三个选项里有两个依赖那句话写得够好。\n\n## 相关\n\n#16320（逼出本卡的退役）· PR #17146 · #15954（裁决）· `connector-error-mapping-removed`（先例）· #17145（同一轮的另一条\"门禁绿得不因为对\"）\n\n⚠️ 查重声明：free-text `search_issues` 在本环境静默返回 `total_count: 0`（实测控制词 `spec`、`ElementDataSourceSchema` 均为 0），REST `/search/issues` 对本会话直接拒绝，标签枚举在 `domain:spec` 上撞 100 条上限。⇒ ⛔ 本卡的查重**不成立**，只能声明：本约定冲突由今天的复核当场逼出，此前无人在两处成文之间做过取舍。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01MkQhmuuJAVDjmeWNixwDDH"
+}

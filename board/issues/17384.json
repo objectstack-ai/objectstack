@@ -1,0 +1,30 @@
+{
+  "number": 17384,
+  "kind": "issue",
+  "title": "docs(spec): `control-flow.test.ts`'s comment and `describe` title still say the schema and `validateControlFlow` \"do not fight\" and meet at \"exactly one seam\" — #16134 made both false",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T10:47:13Z",
+  "updated_at": "2026-09-10T14:38:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17384",
+  "body": "Found by the `os-dev` discharging **#16948** (the strictness ledger's `control-flow.zod.ts` row), while running that card's standing instruction to probe on the **claim** rather than one spelling. The ledger was not the only hand-written restatement left in the tree. ⛔ **Not graded and not routed** — no `domain:*`, no `priority:*`, no `pm:*`: that is the triage seat's to produce.\n\n## What is false\n\n`packages/spec/src/automation/control-flow.test.ts` restates **both** sentences #16835 retires and #16948 corrects — once in a block comment and once in a `describe` **title**, which is the half that reaches a test report and a `grep`.\n\nLocated by text, ⛔ not by line number (both will move):\n\n- the `describe` title `[#4001] validateControlFlow and the key gate do not fight`\n- the comment above it: *\"It does not, and the reason is that they answer different questions. The schema rejects undeclared KEYS; the analysis rejects malformed STRUCTURE … They meet at exactly one seam\"*\n\nBoth halves are false for the reason **#16134** gives (landed `21aabbc7b`, PR #16825): `FlowSchema`'s `superRefine` refuses a **duplicate node id** — a structural fact decided by the schema — over one node-id space spanning the top-level `nodes[]` and every region body. There are now **two** seams, and past `MAX_REGION_DEPTH` (32) the two guards hand off at a measured boundary. That boundary has its own pin in the sibling file: `flow.test.ts`'s `the seam at MAX_REGION_DEPTH` case.\n\n⭐ **The tests themselves are correct and pass.** Everything the block asserts is #4001 behaviour that #16134 did not move. What is stale is only the framing — which is why no gate reds on it, and why it will keep being read as current.\n\n## Measured\n\nBase `59db8a02cb`, plus #16948's own fix committed on its branch so the ledger no longer competes for the hits. Worktree clean, case-**insensitive**, `grep -oi ... | wc -l` for occurrences (⛔ not `grep -c`, which counts LINES):\n\n```\ngit grep -Ini \"do not fight\"      -- . ':!packages/spec/CHANGELOG.md'\n  -> packages/spec/src/automation/control-flow.test.ts:482   (the ONLY hit in the tree)\n\ngit grep -Ini \"exactly one seam\"  -- . ':!packages/spec/CHANGELOG.md'\n  -> packages/spec/src/automation/control-flow.test.ts:477\n     (three further hits are unrelated uses of the word \"seam\" in rest/, runtime/ and scripts/)\n\nLIT  control: \"validateControlFlow\" in that file -> 15 occurrences (the block is read)\nDARK control: \"zzqq-not-a-term\"     in that file -> 0\n```\n\nAfter **#16948**'s fix the ledger no longer carries either sentence, so this file becomes the **last** hand-written restatement in the tree. `packages/spec/CHANGELOG.md` also contains the old wording; that one is correct and must stay — it is RELEASE-OWNED and records, in the past tense, what the docblock *said* before #16947 changed it.\n\n## Scope\n\n- Re-frame the comment and the `describe` title to the post-#16134 division, following the canonical `control-flow.zod.ts` docblock as #16947 left it (`c3ce76c210`) rather than inventing a third wording. ⛔ Do not restate the boundary independently — that is how the ledger and the docblock drifted apart in the first place.\n- ⛔ Do not write a temporal promise. Name the artefact — a landed commit, a registry entry, a test — never a schedule.\n- ⛔ `packages/spec/CHANGELOG.md` is out of scope and must not be edited (RELEASE-OWNED).\n- Renaming a `describe` moves test-report text, so this carries `packages/spec`'s own test + typecheck verification face — which is precisely why #16948 did **not** fold it in: the bounded in-place-fix exemption requires *no new verification surface*.\n\n## Why it was not fixed in #16948\n\n⛔ Deliberately left alone rather than overlooked. That card's claim comment fences the file face to `docs/audits/2026-07-unknown-key-strictness-ledger.md` \"and whatever pin the fix needs\", and the in-place-fix exemption fails its fourth limb for the reason in the last bullet above.\n\n## Dup check\n\n`GET /repos/objectstack-ai/objectstack/issues?state=open&labels=documentation&per_page=100`, paged to closure — one short page, **77** open `documentation` cards read — grepped for `control-flow.test.ts` / `do not fight` / `exactly one seam`. Zero hits on the file path; the two sentence probes hit **#16948** only, which is the ledger card, not this file. LIT controls on the same corpus: `control-flow` and `#16134` each fire on #16948, so the scan reads bodies rather than returning a vacuous zero. DARK control `zzqq-fabricated-term` reads 0.\n\n⚠️ Two declared bounds on that reading. The `documentation` label was the narrowing, so a card filed without it would not appear. And the wider window — every issue and PR updated since `2026-09-08`, when #16134 landed — **would not close** within this seat's targeted-channel budget (600+ items and still paging), so it was abandoned rather than reported as a closed enumeration."
+}

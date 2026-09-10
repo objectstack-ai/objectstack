@@ -1,0 +1,30 @@
+{
+  "number": 14121,
+  "kind": "issue",
+  "title": "[finding] metadata: database-loader spells its own driver-capability predicate inline, duplicating resolveDriverExec one directory away",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:on-hold",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-01T06:00:08Z",
+  "updated_at": "2026-09-02T01:25:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14121",
+  "body": "Found while implementing #14083, which aligned the three raw-SQL resolvers in `packages/metadata-protocol` to `execute`-first. This is a fourth site that carries the same *predicate* but is deliberately **not** part of that card, and it is recorded rather than folded in.\n\n## The site\n\n`packages/metadata/src/loaders/database-loader.ts`, line 403, inside the engine branch of the schema-ready path:\n\n```ts\nif (c && (typeof c.raw === 'function' || typeof c.execute === 'function')) {\n  driver = candidate as IDataDriver;\n  break;\n}\n```\n\n## Why this is NOT the #14083 defect\n\n⛔ It is not an order divergence, and #14083 was right to leave it alone. The check is an `OR` used to pick which candidate out of `engineAny.drivers` is raw-SQL-capable; it selects a **driver**, never a **surface**. The surface decision happens one call later, inside `migrateProjectIdToEnvironmentId(driver)`, which already routes through `packages/metadata/src/migrations/driver-exec.ts` (`resolveDriverExec`, `execute`-first). Swapping the two operands here changes nothing.\n\n## What is worth recording\n\nThe predicate is spelled inline, a third time, in the same package that already owns the canonical answer. `resolveDriverExec` **is** the definition of \"this driver can run raw SQL\" — `resolveDriverExec(d) !== undefined` — and `driver-exec.ts` is one directory away from this file. Two consequences, both small today:\n\n- The two can drift. If the resolution ever grows a third surface, or tightens what counts (for example rejecting a non-callable member of the right name), this predicate keeps answering the old question and silently selects a driver the resolver will then refuse.\n- It is the last remaining inline copy in `packages/metadata`. #14083 collapsed the three copies in `metadata-protocol` into one helper and defined that package's predicate as the resolution succeeding, precisely so the two cannot disagree; the same move is available here and is a one-line change.\n\n⚠️ Deliberately not claiming a live defect: the current operands are exactly the two surfaces `resolveDriverExec` tries, so the predicate and the resolution agree today. This is a drift-risk observation, not a measured misbehaviour.\n\n## Known limitation this inherits, unchanged\n\n`typeof driver.execute === 'function'` cannot separate \"declares the surface\" from \"can actually run SQL\" — two shipped drivers satisfy the non-optional declaration and execute nothing. That is #14082's subject, is unaffected by anything above, and would be the thing to fix first if this predicate is ever revisited.\n\n## Re-run\n\n```sh\nsed -n '395,410p' packages/metadata/src/loaders/database-loader.ts\ngit grep -n \"resolveDriverExec\" -- packages/metadata/src\n```\n\nWhole-tree sweep for the dual-surface shape, which is how this was found:\n\n```sh\nfor f in $(git grep -lE \"typeof [A-Za-z_.()]*\\braw\\b[^=]*=== ?'function'\" -- packages apps examples); do\n  grep -qE \"typeof [A-Za-z_.()]*\\bexecute\\b[^=]*=== ?'function'\" \"$f\" && echo \"$f\"\ndone\n```\n\n⚠️ That sweep needs a firing pathspec. The `packages/*/src` form used in #14083's original re-run block matches **zero** files under git's pathspec rules, so it reports a clean zero whatever the tree contains; the positive control is the same regex for `execute`, which finds 327 member definitions under `packages`.\n\nAt the time of writing the dual-surface sweep returns exactly three files: this one, `packages/metadata/src/migrations/driver-exec.ts` and `packages/metadata-protocol/src/migrations/driver-exec.ts` (the two canonical helpers). The five other `raw` probes in the tree are local variables named `raw` on HTTP headers and request objects, not driver surfaces.\n\n## Dedup declaration\n\nRepo-scoped REST listing of all 282 open issues, bodies included, grepped locally for `database-loader`, `resolveDriverExec`, `driverCanRunSql`, `driver-exec` and `capability predicate`. Only `database-loader` matched, returning #14037 and #14038 — both members of the #13973 driver-`Date`-materialisation census, neither about driver-capability probing. Control: the same fetched list grepped for `metadata-protocol` returned 16 issues, so the channel was answering. No duplicate found.\n\nBacklink: #14083, where the sibling package's three copies were collapsed.\n\n_Generated by [Claude Code](https://claude.ai/code)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

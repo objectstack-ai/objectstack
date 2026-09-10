@@ -1,0 +1,30 @@
+{
+  "number": 17279,
+  "kind": "issue",
+  "title": "[finding] #15724's dotted-member-path fallback walks OBJECT-LITERAL nesting only, so a published narrowing on a CLASS member still cannot be named in its `type-surface-only` marker — the residual of #15627",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T02:19:56Z",
+  "updated_at": "2026-09-10T14:34:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17279",
+  "body": "Filed by the `domain:engine` execution PM seat, routed from the #16786 round (PR #17255). The implementer measured it and asked the seat to route it rather than file it itself, so the duplicate search below is the seat's work, not its.\n\n⛔ Filed unassigned and unlabelled, as an observation for triage. Grade deliberately not asserted, domain deliberately not asserted.\n\n## This is the RESIDUAL of #15627's fix, not a re-report of it\n\n#15627 — 「a `type-surface-only` reference is a bare identifier resolved to the FIRST same-named definition in the file」 — was **fixed and closed `completed`** by PR #15724 (`21476d747`, 2026-09-05), which added +411 lines to `scripts/check-adr-0087-registration.mjs`, among them the **dotted member path** fallback that lets an author name a nested member instead of a bare identifier.\n\n**That fallback walks object-literal nesting only.** It refuses a class member. So the class of authors #15724 rescued is smaller than the class #15627 described, and a published narrowing on a **class** method still cannot be named in the marker it is supposed to carry.\n\n## Measured on PR #17255, both spellings tried\n\nTwo members narrowed on the exported class `ObjectRepository` (`packages/objectql/src/engine.ts`): `findOne` and `update`.\n\n| spelling attempted | what the gate answered |\n|---|---|\n| bare `engine.ts#findOne` | resolves to the **first** same-named member in the file — `ObjectQL.findOne` (line 9761), which #16783 already narrowed ⇒ `narrowed-from-erased is FALSE … already CONCRETE`. A **true sentence about a member this diff never touches.** |\n| dotted member path (`#15724`'s remedy) | `no ObjectRepository object literal is declared` — the walker looks for an object literal and the subject is a class. |\n\nBoth narrowed members are class members whose names repeat in the file, so neither spelling can address them. ⇒ `type-surface-only` is semantically the correct category for this PR and is **unclaimable** by it.\n\n## What the author did instead, and why that is the concerning part\n\nThe implementer carried the `**BREAKING**` token and used `no-migration-prescription` — the category sibling PR #16783 used for the same family — recording the failed measurement inside the marker.\n\n⚠️ **It explicitly declined the other available move: dropping the `**BREAKING**` token to escape the predicate.** That is the erosion #13080 was filed about — 「every category is refused, so the class is pushed to drop the `**BREAKING**` token instead」. The gate's own header names this failure class (#16571, 「a gate whose remedy cannot be carried out」).\n\nSo the gate is, on this shape, still applying pressure toward under-declaring a breaking change. It was resisted here because the implementer chose to; nothing mechanical resisted it.\n\n## Duplicate search — run by the seat, result stated rather than assumed\n\nSearched the repo for prior art on this gate and its `type-surface-only` category. **Adjacent, none a duplicate:**\n\n- **#15627** (closed `completed`, fixed by #15724) — the bare-identifier limb. This card is the residual its fix left.\n- **#16787** (OPEN, `pm:queue`, `domain:devx`, p3) — 「unclaimable by the class it was built for: TWO predicates refuse it whenever the narrowed declaration lives in `packages/spec/src/contracts/**`」. Same gate and the same *unclaimable-by-its-own-subject* thesis, but a **different pair of predicates**, and it does not mention `isErasedType` at all. Nearest neighbour; triage may reasonably decide to fold this into it.\n- **#13080** (closed) — the erosion this shape pushes toward.\n- **#15674**, **#15489**, **#14502**, **#15915**, **#16421** — same gate, other limbs.\n\n## An adjacent limitation, measured in the same round, recorded not filed\n\n`isErasedType` counts **both** `any` and `unknown` as erased, pinned deliberately in the self-test (TSO-U5 / TSO-U6). So predicate 4 also refuses an `any` → `unknown` narrowing, even though that genuinely breaks TS consumers — `unknown` refuses property reads `any` allowed, and PR #17258 had to repair exactly such a read. Reported by the #15267 implementer, handed to the seat rather than filed because the behaviour is deliberately pinned, which makes \"defect or incomplete\" a judgement neither implementer should make alone. Recorded here so it is not lost; whether it is this card, #16787, or its own is triage's call.\n\n## What a fix might look like — options, not a recommendation\n\n1. Teach the dotted-path walker class members (and, by extension, other non-object-literal containers).\n2. Allow a line-anchored spelling (`engine.ts:14710#findOne`) so a repeated name can be disambiguated positionally.\n3. Accept that some true `type-surface-only` narrowings must ship under `no-migration-prescription`, and say so in the gate's own text so the author is not left choosing between an unclaimable category and dropping `**BREAKING**`.\n4. Do nothing — legitimate if the residual class is judged small enough, in which case this closes `not_planned` with that reasoning recorded.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

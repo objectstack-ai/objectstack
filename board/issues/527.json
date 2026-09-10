@@ -1,0 +1,33 @@
+{
+  "number": 527,
+  "kind": "pull_request",
+  "title": "[WIP] Update action run logs for better clarity",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-05T11:59:21Z",
+  "updated_at": "2026-02-05T12:05:57Z",
+  "closed_at": "2026-02-05T12:03:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-05T12:03:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/527",
+  "body": "## Fix Changeset Workspace Error ✅\n\nSuccessfully fixed the CI failure in the release workflow.\n\n### Plan:\n- [x] Investigate GitHub Actions failure\n- [x] Identify the issue: changeset references non-workspace package\n- [x] Remove `@objectstack/spec-monorepo` from the changeset file\n- [x] Validate the fix by running `pnpm run version` locally\n- [x] Commit and push the fix\n- [x] Code review completed with no issues\n- [x] Security scan completed with no issues\n\n### Root Cause:\nThe changeset file `.changeset/migrate-to-tsup.md` incorrectly referenced `@objectstack/spec-monorepo`, which is the private root package of the monorepo, not a workspace package that can be published.\n\n### Solution:\nRemoved the line `\"@objectstack/spec-monorepo\": patch` from the changeset file. The root package is marked as `\"private\": true` in `package.json` and should not be included in changesets.\n\n### Verification:\n- ✅ `pnpm run version` runs successfully without errors\n- ✅ No other changeset files have the same issue\n- ✅ Code review passed with no comments\n- ✅ Security scan passed (no code changes to analyze)\n\nThe fix is minimal and surgical - only one line removed from the changeset file.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21710479066/job/62612658763#step:9:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

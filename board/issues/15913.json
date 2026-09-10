@@ -1,0 +1,32 @@
+{
+  "number": 15913,
+  "kind": "issue",
+  "title": "A claim corrected during review still ships in history: the squash message is built from commit messages, which no review round reads",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T14:05:53Z",
+  "updated_at": "2026-09-09T02:54:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15913",
+  "body": "## The gap\n\nThe Clause-② review loop reads, and corrects, the **PR body** and the **changeset**. It never reads the **commit messages**. This repository squash-merges, and its squash message is built from the **concatenated commit messages** — not from the PR body.\n\n⇒ **A false claim caught and corrected in review still lands in `main`'s history**, in the commit message, where nothing will correct it again.\n\n## Measured, with the control that makes it mean something\n\n`9e9f03abe` — the landed squash of PR #15827:\n\n```\n$ git log -1 --format='%B' 9e9f03abe | grep -c '^\\* '\n4                                    <- four concatenated commit entries\n$ git log -1 --format='%B' 9e9f03abe | grep -c 'Generated with'\n0                                    <- the PR body's footer is ABSENT\n```\n\nFour `* <subject>` entries, each followed by that commit's full body — including a `wip(...)` subject. The PR-body footer that every PR in this repo carries is **absent from the landed message**, which is what proves the message is not body-derived.\n\n⚠️ **The single-commit case hides this.** `6c439f2b4` (PR #15826) returns **0** for the same bullet scan and its message reads like clean prose, because with one commit GitHub uses that commit's own message. Reading only that sample gives the wrong answer — I made exactly that inference before checking a second one, and it was wrong.\n\n## The instance that prompted this\n\nPR #15838 (card #15598). Its changeset claimed enforcement was *\"unchanged in both directions\"*. Review measured that false on two inputs (an envelope, and a page with a non-object element: HEAD refuses, base granted — fail-closed and unreachable on the shipped engine, but the claim was unqualified). The changeset was corrected before landing.\n\nThe **commit message** `8da648334` still carries the original blanket claim. A later commit `4cc60aa7a` qualifies it, so the landed squash will read as claim-then-correction rather than as a standing falsehood — which is why that PR was landed rather than held. But that outcome was luck of ordering, not a property of the process: had the correction been folded differently, or had the claim been in the only commit, the landed history would carry it uncorrected.\n\n## Why this is worth a card rather than a habit\n\nThree PRs this session had a claim corrected during review (#15720's rider, #15787's cost sentence, #15838's enforcement claim). ⭐ In every one, **the clause that was wrong was the clause no pin covered** — which is the argument for reading prose, not just re-running tests. The review loop already does that for the two surfaces it knows about. The commit message is a third surface carrying the same kind of claim, on the artifact with the longest life, and no one reads it.\n\n⛔ **Not proposing a specific remedy** — several are plausible and they trade off differently:\n\n- a landing-time squash-message edit (works, but manual and easy to forget, and it is the merge-queue that lands things here);\n- a gate that refuses a PR whose commit messages contain a claim the changeset contradicts (hard to specify — \"contradicts\" is not mechanically checkable);\n- a convention that the final commit's message is authored to stand alone, and reviewers read it (cheap, but relies on discipline);\n- configuring the squash message to come from the PR body instead (a repo setting, fixes it wholesale, but changes what every landed message looks like and needs a maintainer's call on whether the commit list is wanted).\n\nThe last one is a repository-settings decision, so this card is filed for a ruling rather than dispatched with a chosen fix.\n\n## Scope note\n\n⚠️ This is not specific to `domain:services` — it affects every PR in the repo. Labelled `domain:services` only because that is the seat that measured it; retag freely."
+}

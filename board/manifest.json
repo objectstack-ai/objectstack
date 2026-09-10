@@ -1,40 +1,55 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-09-10T13:45:28.654Z",
+  "generated_at": "2026-09-10T15:40:44.971Z",
+  "walk_phase": "history",
+  "walk": {
+    "open_set": {
+      "complete": true,
+      "completed_at": "2026-09-10T15:39:49.484Z",
+      "cursor": null
+    },
+    "history": {
+      "complete": false,
+      "cursor": "2026-02-05T16:54:36Z"
+    }
+  },
   "since": null,
-  "since_reason": "no previous manifest — the first run is full",
+  "since_reason": "the previous archive walked the closed history only — the open board is read first, and its cursor (2026-02-01T14:43:39Z) is kept",
   "next_since": null,
   "resume": {
-    "since": "2026-02-01T14:43:39Z",
+    "since": "2026-02-05T16:54:36Z",
+    "phase": "history",
     "stopped_by": "budget",
     "reason": "the per-run budget of 800 requests is spent"
   },
   "counts": {
-    "issues_open": 0,
+    "issues_open": 580,
     "issues_closed": 137,
-    "pulls_open": 0,
-    "pulls_closed": 268,
-    "records": 405
+    "pulls_open": 18,
+    "pulls_closed": 334,
+    "records": 1069
   },
   "board": {
-    "open_issues_count": null,
-    "open_pull_requests": null,
-    "read_at": null
+    "open_issues_count": 598,
+    "open_pull_requests": 18,
+    "read_at": "2026-09-10T15:39:50.012Z"
   },
   "count_check": {
-    "verdict": "pending",
-    "expected": 0,
-    "archived": 0,
-    "shortfall": null,
-    "surplus": null,
+    "verdict": "ok",
+    "reason": null,
+    "expected": 580,
+    "archived": 580,
+    "shortfall": 0,
+    "surplus": 0,
     "gone_ledger": 0,
-    "ok": null
+    "ok": true
   },
   "requests": 800,
   "run": {
-    "numbers_read": 405,
-    "files_written": 851,
-    "walk_complete": false
+    "numbers_read": 665,
+    "files_written": 1294,
+    "walk_complete": false,
+    "open_set_completed_here": true
   }
 }

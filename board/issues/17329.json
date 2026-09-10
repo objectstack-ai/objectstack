@@ -1,0 +1,30 @@
+{
+  "number": 17329,
+  "kind": "issue",
+  "title": "`os dev` says `✓ Server is ready` while a background seed continuation may still emit its error wall a minute later — nothing an app can observe says the boot has come to rest",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T07:25:55Z",
+  "updated_at": "2026-09-10T15:00:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17329",
+  "body": "Found while fixing `objectstack-ai/hotclm#49` (merged as `2807b3b`), on `@objectstack/*` **17.4.0**. Filed at the destination per that repo's `AGENTS.md` — *report, never patch*. ⛔ Not triaged: no `domain:*`, no priority, no assignee.\n\nAdjacent to but **distinct from** #17177: that card is about the loader's summary contradicting the database. This one is about **timing** — when the boot is actually finished.\n\n## Symptom, with the clock\n\nAn app script spawns `os dev` with `stdio: 'inherit'` and wants to print one line **after** the boot, where the terminal comes to rest. There is no signal that says when that is. Measured on one run:\n\n```\n07:03:46.862  WARN  [Seeder] Inline seed exceeded 8000ms budget … continuing in background\n07:03:48      ✓ Server is ready · Press Ctrl+C to stop\n07:05:09.768  ERROR [SeedLoader] … 120 lines, from the background continuation\n07:05:09.827  WARN  [Seeder] Seed loading completed with … dropped record(s) and … error(s)\n```\n\n**82 seconds** of silence after the banner, then 120 error lines. The same command on the base tree, held open **150 seconds** past its banner, emitted none at all while seeding the identical corpus — same code, same fixture, two different clocks, decided by whether the inline seed fits its budget on a contended box.\n\n## Why an app cannot work around it\n\nEverything that would distinguish the two cases — the `WARN` about the budget, the error wall, the completion summary — arrives in the **child's inherited stream**. A parent that only spawns and waits has no readable signal. The available workarounds are each worse than the problem:\n\n- **Pipe the child's stdout** to detect quiescence → costs the boot its TTY, and the `ERROR` lines arrive **dimmed by the very edit meant to explain them**.\n- **Poll a completion endpoint** → puts an authenticated dependency into a demo script to work around a timing quirk.\n- **Print twice** → tells the reader the same thing in two places and still guesses.\n\n`objectstack-ai/hotclm` took none of them: its note now names *which* clock puts the errors above it and which puts them below, and is the frame either way. That works, but it is a repo writing prose around a missing signal.\n\n## What is missing\n\nA readable \"the boot has finished, including deferred seeding\" signal that a parent process can wait on without owning the child's stdout. ⛔ Not claimed here: what shape it should take — an exit-coded `--wait-for-seed` mode, a line on a side channel, a health field that flips only after seeding completes, or simply making `✓ Server is ready` mean it. That is the platform's call.\n\n⚠️ Worth deciding alongside: whether `✓ Server is ready` **should** print before seeding finishes at all. It is currently true about the HTTP server and misleading about the app — a reader who sees `Press Ctrl+C to stop` reasonably believes nothing more is coming, and then 120 red lines arrive.\n\n## Reproduce\n\n```bash\ngit clone https://github.com/objectstack-ai/hotclm && cd hotclm && pnpm install\nrm -rf .objectstack dist\npnpm demo          # watch for: WARN [Seeder] … continuing in background\n                   # then hold the terminal open ≥2 minutes past the banner\n```\n\nOn a box where the inline seed fits its budget the errors precede the banner and the problem is invisible — which is why it went unnoticed until two runs on different containers disagreed.\n\n## Related\n\nhotclm#49 / hotclm PR #51 (the consumer that hit it and the prose workaround it shipped) · hotclm#45 (the dogfood pass that saw the other clock) · #17177 (the loader summary contradicting the database — same subsystem, different defect)"
+}

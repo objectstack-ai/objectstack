@@ -1,0 +1,30 @@
+{
+  "number": 17022,
+  "kind": "issue",
+  "title": "[finding] An MCP OAuth agent's writes are audited as the human's own: `sys_audit_log` records `user_id` / `actor` = the delegator and nothing names the client, so ADR-0090 D10 rule 4 「dual attribution: performed_by (agent) + on_behalf_of (user) + run id」 has no writer",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-09T02:50:08Z",
+  "updated_at": "2026-09-10T14:56:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17022",
+  "body": "Filed by the director seat (summon #18, `session_017Js5kTpTtxieBjPyScgxJ3`, 2026-09-09) while answering the maintainer's position on #16418 — 「MCP 集成人类的身份,只需要在审计日志中记录这是 AI 代替人类执行」. The first half of that sentence is the shipped model (ADR-0090 D10 `agent` + `onBehalfOf`, #2843) and the ruled model (#16549 ruling 5578140650: parity, ceiling subtractive only). The second half is declared and not built. ⛔ Not graded, no `domain:*` — triage's; landing point `packages/plugins/plugin-audit`. Class (b): a declared contract with no implementation.\n\n## The declaration\n\nADR-0090 D10, `agent` rule 4, verbatim: 「**Dual attribution**: every write records `performed_by` (agent) + `on_behalf_of` (user) + run id; explain (D6) reports both sides of the intersection.」 D10's own status note (2026-07) lists 「the agent audit-provenance gap」 as a follow-up with no card number; `search_issues` for it today returns none (queries: 「agent audit provenance performed_by on_behalf_of dual attribution」, 「sys_audit_log does not record that an AI agent acted on behalf of the user MCP OAuth client id」 → #16549, #8992, #7675, #14927, #9865, #9517, #9516, #8245 — none is this).\n\n## What is on the tree (`origin/main`, read 2026-09-09)\n\n- The envelope carries the fact: `packages/core/src/security/assemble-execution-context.ts` sets `principalKind: 'agent'` and `onBehalfOf: { userId: <human>, principalKind: 'human' }` when the verified token names a client (`azp`), and keeps `userId` = the human so owner-stamping and `current_user.*` RLS resolve to them.\n- The audit row does not: `packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts` has `user_id` (「User who performed the action (null for non-user / service actions — see actor)」), `actor` (「a user id, `svc:<name>`, or null」) and `metadata` (「JSON-serialized additional context」). No column, and no `metadata` key, names a client id, a `principalKind`, or a delegation.\n- The writer confirms it: `packages/plugins/plugin-audit/src/audit-writers.ts` derives `actor` as `userId ?? sess.actor` (line ~1160), writes `user_id: userId ?? null` (~1239) and `actor_id: userId ?? null` (~1358), and fills `metadata` with `{ old, new }` only (~1362). `git grep -n -iE \"onBehalfOf|principalKind|clientId|azp\" origin/main -- packages/plugins/plugin-audit/src` → the only hits are a docblock in `comment-access-hooks.ts`; no writer reads them.\n\n⇒ A row written by an AI client acting for `sales.manager` is byte-identical to a row `sales.manager` wrote in the Console. 「这是 AI 代替人类执行」 is not recoverable from `sys_audit_log`; the only trace is the `sys_oauth_consent` row's existence, which says the client *could* act, not that it *did* on this row.\n\n⚠️ Code reading, ⛔ not measured on a running server; the re-check below is the measurement a taker should run first.\n\n## What is asked\n\nFor triage to route; ⛔ no shape proposed as a ruling. What the declaration needs: the audit writers copy the envelope's delegation onto the row — the client (`azp` / registered `sys_oauth_application.name`) as the performer, the human as `on_behalf_of`, and the MCP request or run id — whether as two new columns in the D10 vocabulary (`performed_by`, `on_behalf_of`) or as `actor = <client>` + `user_id = <human>` + `metadata.on_behalf_of` is the taker's design question, ⛔ subject to ADR-0118 D1/D5 (system actor stays `null`; ⛔ no `actor_kind` column; 「which automation」 answered by an associated field). Read side: the audit-log browser and `read-audit.ts` (`row.actor = event.actor ?? event.userId`) present the pair. ⛔ Not asked: any change to who the write is *authorized* as (that is #16549) or to `created_by` / `owner` stamping (ADR-0073 D3: attribution ≠ ownership — the human stays the owner).\n\nRe-check: boot a server with the MCP OAuth door (#16549's recipe), write one row through an OAuth-connected client and one through the same user's session, then `SELECT user_id, actor, metadata FROM sys_audit_log` for the two — identical today. `git grep -n \"actor_id: userId\" origin/main -- packages/plugins/plugin-audit/src/audit-writers.ts` (the writer line still keys on the human).\n\nRelated: ADR-0090 D10 (rule 4; status-note follow-up), #16549 (parity ruling — the authorization half of the same sentence), #16418 (client-credentials token with no human — the refusal half), ADR-0118 D1/D5, ADR-0073 D3."
+}

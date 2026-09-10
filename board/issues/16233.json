@@ -1,0 +1,31 @@
+{
+  "number": 16233,
+  "kind": "issue",
+  "title": "check:durability-log-level cannot represent a seam that propagates a durability failure by RETURNING an outcome object — its propagation lists are keyed on callee names",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T06:53:36Z",
+  "updated_at": "2026-09-07T10:47:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16233",
+  "body": "## The gap\n\n`scripts/check-durability-degradation-log-level.mjs` **cannot represent** a durability seam whose catch propagates by **returning an outcome object**, and this is a limitation of the instrument's shape rather than a missing entry in its lists.\n\nThe seam that exposed it: `recordNotificationEventReceipt` in\n`packages/metadata/src/migrations/migrate-sys-notification-to-event.ts` (added by PR #16230).\nIt is a durability seam of exactly the `persistSeedTenancyReceiptRow` class — **the data really was\nrewritten, every other reading is clean, and the only durable record of it can be absent**.\n\nWhy the gate cannot hold it:\n\n- `DURABILITY_CRITICAL_CALLEES` does not name it — that part is merely an entry.\n- ⛔ But it **cannot be added without a second change**: this catch propagates by **RETURNING an\n  outcome object**, while both `FAILURE_PROPAGATION_CALLEES` and `FAILURE_PROPAGATION_SITES` are\n  keyed on **callee NAMES**. A returned object literal has none.\n\n⇒ Any seam in this repo that reports a durability failure **to its caller through a return value**,\nrather than by calling a named reporter, is invisible to this gate **by construction**.\n\n## What was measured, and what was not\n\n- **Measured** (by the #16100 round, on its own diff): the gate's **write-side** limb reports **29\n  seams both with and without** the new file — i.e. adding a real return-propagating durability\n  seam moves that population by **zero**.\n- **Measured, and it is the control that makes the zero above a reading**: the gate's **read-side**\n  limb moves **68 → 67** when the same file is swapped back to `origin/main`. ⇒ the file *is* in the\n  swept population; the write-side silence is the instrument's blindness, not the file's absence.\n- ⚠️ **NOT a live defect.** The seam **is** pinned per-file by that round's own `failed` receipt\n  case, so this is an **instrument-expressiveness gap**, ⛔ not an unprotected degradation. Hence\n  `finding`, not `bug`.\n- ⚠️ **NOT measured**: how many other seams in the tree propagate this way. That census is the first\n  thing a round on this card should buy, because it decides whether the fix is worth its cost — a\n  gap with one member is a note, a gap with thirty is a hole.\n\n## Why the shape of the fix is not obvious\n\nA name-keyed list cannot key on \"returns an object with a failure-shaped field\". The candidate\ndirections each cost something and none is free:\n\n- Key on the **enclosing function's** name instead of the callee's, for a declared set of seams —\n  cheap, but it moves the gate from \"what does this call do\" to \"who is asking\", which is a\n  different question and may weaken the existing 29.\n- Recognise a **declared return shape** (an outcome type carrying a failure member) — precise, but\n  it needs the gate to read types, which it currently does not.\n- Leave it name-keyed and accept the class as **out of scope**, recorded — honest, and it makes this\n  card's answer a documented boundary rather than a hole.\n\n⛔ This card proposes none of them. It records the gap, its measurement, and its control.\n\n## ⚠️ Context a maintainer may want more than this row\n\nThis is now the **third** open finding against this one script, alongside a decision and a blocked\ntriage card:\n\n| # | state | what it is about |\n|---|---|---|\n| #8897 | `pm:on-hold` | `collectLoggedLevels` only records part of what it should |\n| #12576 | `pm:on-hold` | `readInventionKey` falls back where it should not |\n| **this card** | new | return-propagating seams are unrepresentable |\n| #9882 | `pm:on-hold` | decide the shrink-only delta-ratchet for the same gate |\n| #12753 | `pm:blocked` | triage the parameterless-catch read seams, then decide the 2a criterion |\n\n⇒ Five open items on one instrument. Whether that is five small repairs or one rewrite is a\nquestion this card does not answer and probably should not be decided one row at a time.\n\n## Provenance and dedup\n\nFound by the #16100 execution round, which **could not file it itself** and said so rather than\nguessing: filing without a duplicate check is a forbidden shape, and its dedup channel was gone in\nboth directions — REST `/search/issues` is not served on that channel (a same-session control query\nthat **must** have hit #16100 came back empty, so its zero was a channel artefact, not a reading),\nand both `search_issues` MCP calls were refused by the user-level rate limit. It handed the row to\nthe PM seat instead. Its full reasoning:\nhttps://github.com/objectstack-ai/objectstack/issues/16100#issuecomment-5557569494\n\n**Dedup performed by this seat**, over a complete enumeration rather than a search: all **652** open\nissues fetched with bodies (651 of 652 carry one) and grepped locally.\n`FAILURE_PROPAGATION_CALLEES`, `FAILURE_PROPAGATION_SITES`, `persistSeedTenancyReceiptRow` and\n`recordNotificationEventReceipt` return **0** hits each; `DURABILITY_CRITICAL_CALLEES` returns 2\n(#15166, #8897) and `check-durability-degradation-log-level` returns 7 — all read, none covering\nthis shape. **Firing controls on the same command and scope**: `sys_migration` → 4 (#16194, #16185,\n#16100, #15207), `NOTIFICATION_EVENT_MIGRATION_ID` → 2, `durability` → 12. ⇒ the zeros are readings.\n\nFiled unassigned and ungraded — `domain:*` and priority are triage's.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

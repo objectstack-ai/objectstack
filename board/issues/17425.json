@@ -1,0 +1,30 @@
+{
+  "number": 17425,
+  "kind": "issue",
+  "title": "`ObjectPermissionSchema`'s retired `allowRestore`/`allowPurge`: only literal `false` parses (not a truthy/falsy split), and no post-parse guard can ever see either key",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T13:42:14Z",
+  "updated_at": "2026-09-10T14:39:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17425",
+  "body": "Split off #16277 by the dispatch brief — triage judged this measurement \"worth its own card\" but did not re-run it, so did not file it. I re-ran it and confirmed, with a more precise characterization than the original report.\n\n## Original claim (from #16277)\n\n> Measured on the installed `@objectstack/spec` 17.3.0 (`ObjectPermissionSchema.safeParse`): only `true` is refused. `allowRestore: false` / `allowPurge: false` parse successfully, and the parsed output carries neither key — the retired-default residue tolerance of #12840. Consumers writing a guard against these bits therefore need `=== true`, not a presence or truthiness check.\n\n## What I measured (origin/main @ `cef399be82`'s base, `packages/spec/src/security/permission.zod.ts`, `ObjectPermissionSchema.safeParse`, run via `pnpm --filter @objectstack/spec exec tsx` against a minimal valid base object)\n\n```\nallowRestore=false        success=true   carriesKey=false   (dropped — #12840 residue tolerance)\nallowRestore=true         success=false  code=invalid_type  (\"expected\": \"never\", ADR-0049 removal message)\nallowRestore=\"true\"       success=false  code=invalid_type  (same — NOT boolean-specific)\nallowRestore=\"false\"      success=false  code=invalid_type  (same — a string \"false\" is ALSO refused)\nallowRestore=0            success=false  code=invalid_type  (same — a falsy non-boolean is ALSO refused)\nallowRestore=1            success=false  code=invalid_type  (same)\nallowRestore=null         success=false  code=invalid_type  (same)\nkey entirely absent       success=true   carriesKey=false   (never added)\n```\n\n`allowPurge` behaves identically (spot-checked `true`/`false`).\n\n## The correction to the original framing\n\nThe original report says \"only `true` is refused\" — that undersells it. **The schema accepts exactly one value, the boolean literal `false`; every other value of any type is refused** with the same ADR-0049 removal message (`code: 'invalid_type'`, `expected: 'never'`), not just `true`. A string `\"false\"`, the number `0`, or `null` are refused exactly like `true` is — this is not a truthy/falsy check, it is a `z.literal(false)`-shaped tombstone gate (see `retiredKey()` in `packages/spec/src/shared/retired-key.ts` for the general shape).\n\n## The consumer-facing asymmetry, stated precisely\n\nA **successfully parsed** `ObjectPermissionSchema` object can *never* carry `allowRestore` or `allowPurge` at all: the only value that survives parsing (`false`) is stripped from the output, and every other value throws before a parsed object exists. So:\n\n- Post-parse, `permissions.allowRestore` is always `undefined` — a presence check (`'allowRestore' in permissions`) or truthiness check (`if (permissions.allowRestore)`) against **parsed/validated** output is not merely imprecise, it is **dead code**: the condition can never be true, on any input that survived validation.\n- The original report's suggested remedy (\"write `=== true`, not a presence/truthiness check\") does not fix this for parsed output either — `permissions.allowRestore === true` is *also* always `false` post-parse, because a raw `true` never survives `safeParse`/`parse` in the first place (it throws).\n- The distinction only has a live consumer on **pre-parse / raw author input** (e.g. a linter or migration tool reading `objectstack.json` source before validation): there, `false` (legacy no-op) and `true`/other (hard ADR-0049 violation) are different facts an author-facing tool should say different things about, and a presence/truthiness check on raw input conflates them.\n\n## Ask\n\nWhichever key's doc/prompt surface discusses this (`ObjectPermissionSchema`'s `.describe()` text, the retired-key migration guidance, or downstream consumer docs) should state the parse-time behavior precisely: *only `false` parses, and is stripped; every other value refuses at parse with the ADR-0049 message; consumers of parsed/validated data will never see either key, so no post-parse guard is meaningful — pre-parse/raw-source tooling is the only place a `false`-vs-other distinction is observable.*\n\n## Provenance\n\n- Split from #16277 (`objectstack-ai/objectstack#16277`), which cites `objectstack-ai/hotcrm#1634` as the original downstream report of the asymmetry.\n- Refs: #12497 (ADR-0049 enforce-or-remove), #12840 (retired-default residue tolerance).\n"
+}

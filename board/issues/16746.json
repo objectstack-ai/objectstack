@@ -1,0 +1,32 @@
+{
+  "number": 16746,
+  "kind": "issue",
+  "title": "[needs human decision] Setup → Connect an Agent is admin-only, but POST /api/v1/keys mints per-user keys for anyone — the \"acts as you\" self-service promise cannot be kept by non-admins",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "auth",
+    "bug",
+    "domain:engine",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T03:15:54Z",
+  "updated_at": "2026-09-10T15:21:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16746",
+  "body": "> **Needs a human decision before anyone picks this up.** This card describes a product-policy mismatch, not a crash. Two fixes are possible and they point in opposite directions (see *Decision needed*). Please do not auto-dispatch; a maintainer should choose the direction first.\n\n## Summary\n\nThe self-service page **Setup → Connect an Agent** (route `/_console/apps/com.objectstack.setup/page/connect_agent`, with the \"API keys — headless … Create key\" card at the bottom) is reachable **only by administrators**. The endpoint behind that button, `POST /api/v1/keys`, accepts **any signed-in user** and mints a key bound to the caller.\n\nSo the two halves disagree about who is allowed to connect an agent as themselves:\n\n| | non-admin (sales rep / sales manager) | admin |\n|---|---|---|\n| open Setup → Connect an Agent | ✗ app switcher shows only the business app; `/_console/apps/setup` silently redirects to the app dashboard | ✓ |\n| `POST /api/v1/keys` (session cookie) | ✓ returns an `osk_…` key bound to that user; MCP `initialize` with it → 200 | ✓ |\n\nMeasured 2026-09-07/08 on hotcrm `789a7324` / objectstack 17.3.0, accounts `na.rep@objectos.ai`, `sales.manager@objectos.ai`, `admin@objectos.ai`.\n\n## Why it matters\n\nThe end-user guide that is circulating internally for this feature (two steps: \"系统设置 → 连接智能体 → 创建密钥\", then `claude mcp add … --header \"x-api-key: …\"`) ends with the promise **\"Claude 只能看到和操作您自己有权限的数据\"** (\"Claude can only see and act on data *you* have permission for\"). The Connect-an-Agent page itself says the key \"acts as you\".\n\nA non-admin following that guide stops at step 1: the page is not there. The only ways forward today are\n\n- an admin creates the key **for** them — but then the key acts as the *admin*, and the promise above is false for that user; or\n- the user calls `POST /api/v1/keys` directly (curl/script) — which works, proving the backend already intends per-user keys, but is not a path a business user can take.\n\nMeanwhile the OAuth path, which *is* self-service for every user, is currently blocked by #16530 and narrowed by #16549, so in practice the API-key path is the one people reach for — and it is admin-only at the UI.\n\n## Decision needed (human)\n\n1. **Open the page (or just the key card) to every user** — consistent with the backend and with \"acts as you\". Then the guide is correct as written.\n2. **Keep the page admin-only and also restrict `POST /api/v1/keys` to admins** — consistent with a \"keys are an admin-managed credential\" policy. Then the guide must say keys are issued by an admin, and the \"as yourself\" promise has to be reworded, because an admin-issued key cannot act as the requesting user.\n\nEither is defensible; leaving the UI and the API disagreeing is not. Related: #16530, #16549, objectstack-ai/hotcrm#1759.\n"
+}

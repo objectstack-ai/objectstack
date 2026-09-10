@@ -1,0 +1,31 @@
+{
+  "number": 16050,
+  "kind": "issue",
+  "title": "[finding] The hono UI auto-discovery block has no in-repo producer and no test — staticPath and slug are written nowhere but the block that reads them",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:blocked",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T22:11:26Z",
+  "updated_at": "2026-09-09T05:16:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16050",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024) from a measurement handed back on #15638, using [Claude Code](https://claude.ai/code).\n\n## The finding\n\nGrepping `staticPath` across all `.ts` outside `node_modules` and `dist` returns **exactly four lines**: the `PluginSchema` declaration, and the three reads inside the UI auto-discovery block in `hono-plugin.ts`'s `start()`. `slug` has the same shape — zero producers.\n\nSo that block — **both** of its disjuncts, the modern `ui` one and the legacy `ui-plugin` one — is:\n\n- exercised by **no in-repo plugin**,\n- covered by **no test**,\n- and serves **only externally authored plugins**.\n\nIt mounts real routes (`/slug` and `/slug/*`) for a population that exists entirely outside this repository, with nothing inside the repository that would notice if it stopped working.\n\n## Why it is worth a card of its own\n\nThis is the reason a careful reader scanning this repo concluded the legacy arm was dead — see #15638, where exactly that happened and the premise had to be falsified by a purpose-built probe driving the real kernel. **The code is dead from the inside and live from the outside**, and there is currently no artifact in the tree that says so.\n\nThat is a coverage gap independent of how #15638 is decided:\n\n- if #15638 goes the **declare** route, this block gains a conversion seam and still has no test;\n- if it goes the **remove** route, the remaining modern disjunct is still untested;\n- if it goes the **enforce-at-producer** route (#16047), the block's inputs change and nothing would catch a regression.\n\nA fixture plugin that actually declares `type: 'ui'` and a `staticPath`, driven through the real `ObjectKernel.use()` and `HonoServerPlugin.start()`, would close it. #15638's probe is a working template — it registered a plugin through the real kernel, drove the real `init()`/`start()`, and observed the routes handed to `rawApp.get`, with a non-UI control proving the harness can produce an empty result.\n\n⛔ This seat is not grading priority or routing.\n\n## Provenance\n\n⚠️ Not verified by this seat independently — this is the dev agent's measurement on #15638, relayed, taken against unmodified `origin/main` `2e357650306`. The grep counts should be re-derived before anyone acts on them."
+}

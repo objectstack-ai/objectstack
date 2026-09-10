@@ -1,0 +1,30 @@
+{
+  "number": 17054,
+  "kind": "issue",
+  "title": "spec: ComponentPropsMap['object-calendar'] prescribes `calendar: { ..., allDayField }` — a shape its own CalendarConfigSchema refuses by name",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T04:52:01Z",
+  "updated_at": "2026-09-10T14:22:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17054",
+  "body": "Found while implementing objectui#8026 (making `object-calendar` honour `allDayField`); out of scope for that card, which is objectui-side only. Measured on objectstack `main` @ `881ce2b` and on the published `@objectstack/spec@17.3.0` that objectui resolves — both agree.\n\n## Measured\n\n`ComponentPropsMap['object-calendar']` refuses a flat `allDayField` and prescribes a remedy, verbatim from its own diagnostic:\n\n> Unrecognized key(s) on this `object-calendar`: `allDayField`.\n>   • Write this as a key of the `calendar` config object instead — `calendar: { startDateField, endDateField, titleField, colorField, allDayField }`. The flat spelling is the runtime handoff `ObjectView`/`ListView` emit and a stored-document fallback the renderer keeps reading; it is not a second authorable spelling (one key per concept, Prime Directive 12).\n\nThe prescribed shape is refused by the spec's own `CalendarConfigSchema` (`packages/spec/src/ui/view.zod.ts`), a `strictObject` of exactly four keys — `startDateField`, `endDateField`, `titleField`, `colorField`:\n\n```\nCalendarConfigSchema.safeParse({ startDateField: 'start_date', endDateField: 'end_date',\n                                 titleField: 'subject', colorField: 'status',\n                                 allDayField: 'is_all_day' })\n  -> REFUSED  unrecognized_keys: [\"allDayField\"]\n     \"Unrecognized key(s) on this calendar configuration: `allDayField`. Until these shapes\n      were closed an unknown key was dropped silently ...\"\n```\n\nControls on the same call, same session:\n\n| input | verdict |\n|---|---|\n| the four declared keys only | ACCEPTED |\n| four keys plus `bogusKeyXy` | REFUSED, `unrecognized_keys` |\n| four keys plus `allDayField` | REFUSED, `unrecognized_keys` |\n\nAnd through the real door an author's stored view metadata goes down, `ListViewSchema` (`calendar` lives on `ListViewShapeSchema`), the refusal is reported at `path: [\"calendar\"]`, in the same shape as the bogus-key control:\n\n```\nListViewSchema.safeParse({ type: 'calendar', name: 'my_cal', calendar: { ...four, allDayField: 'is_all_day' } })\n  -> unrecognized_keys keys=[\"allDayField\"] path=[\"calendar\"]\n```\n\n## Why it matters — class (c), a trap\n\nAn author (or an AI author, which is who reads these `.describe()` strings) hits the flat-spelling refusal, follows the remedy it prints **exactly**, and is refused a second time by a different schema with a different message. The remedy names a key its own contract does not admit. Nothing in either message says the key is not a member of the calendar config at all, so the natural next step is to assume a typo and try more spellings.\n\nThe prescription is not the only face saying the key is a member. objectui's `ObjectView` prints a dev-mode warning listing `allDayField` among the flat keys that should move into the nested config — the same instruction, the same dead end — and objectui's own `designer.ts` publishes a calendar options object of `{ startDateField, endDateField, titleField, colorField, allDayField, defaultView }`, so the metadata designer offers the author an input for it.\n\nTwo directions, and this report does not pick one — that judgement is triage's:\n\n1. **`allDayField` is a real member and `CalendarConfigSchema` is missing it.** The whole ecosystem behaves as though it is: the prescription names it, the designer offers it, objectui's renderer now honours it (objectui PR objectstack-ai/objectui#8765). Adding it is a one-line, purely additive change to a strict schema.\n2. **`allDayField` is not a member and the prescription is wrong.** Then the flat-spelling remedy text should stop naming it, and objectui's local extension is what carries the key.\n\nNote the neighbouring precedent, which is why direction 1 does not widen anything in practice: `defaultView` is refused by `CalendarConfigSchema` in exactly this shape and is nonetheless a released, honoured objectui key, declared as a sanctioned local extension in `@object-ui/types`. `allDayField` currently rides the same repo's `.passthrough()` **anonymously** — undeclared in the mirror's shape and absent from its sanctioned-local list. So a later hardening of that `.passthrough()`, the class recorded for gantt in objectstack-ai/objectstack#15469, would silently drop a shipped capability. That downstream tidy-up is deliberately not a separate card: it dissolves entirely if direction 1 lands here, and is only worth doing on its own if direction 2 is chosen.\n\nRefs: objectstack-ai/objectui#8026, objectstack-ai/objectui#8765. Filed unassigned, no labels — triage's call.\n\nReported by the ObjectStack dev seat in session `session_01611D6ZaRaMmwTNQmSbk8MH`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

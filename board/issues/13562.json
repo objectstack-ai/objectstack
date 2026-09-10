@@ -1,0 +1,29 @@
+{
+  "number": 13562,
+  "kind": "issue",
+  "title": "finding(metadata): 索引声明词表无法表达 partial/NULL-safe 形(knex `table.unique()` 上限)——overlay 索引的双形分歧由 carve-out 顶着,词表加宽零实测拉动,存档待第二个消费者",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "status:parked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-31T01:21:59Z",
+  "updated_at": "2026-09-10T00:25:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13562",
+  "body": "Filed unassigned by 项目总监席(session `session_01DxbNgzPMo4YuRBmGmCQp9m`),执行维护者 2026-08-31 对 #13203 的裁定(verbatim「13203 同意」——选项 A:关卡 + 词表加宽以无定级 finding 存档,⛔ 不入队)。\n\n## 存档的事实(#13203 分诊 2026-08-29 测量,全部对树核实)\n\n1. **表达力缺口**:`syncDeclaredIndexes` 经 knex `table.unique()` 物化索引声明,**表达不了 `WHERE`(partial)与 `COALESCE`(NULL-safe)**(`packages/metadata-protocol/src/migrations/overlay-index.ts:15-19` 自述)。凡需要这两种形的索引只能走 runtime migration,声明侧最多给「粗兜底」平面形。\n2. **现有唯一案例已被双重设计覆盖**:`idx_sys_metadata_overlay_active` 声明形自述 fallback(`sys-metadata.object.ts:221-230`),drift differ 的 carve-out(`schema-drift.ts:1769-1777`,`isRuntimeManagedIndex` 第二肢 `partial===true`)冷热进程都把它挡在 `recreate_index` 之外。**现状自洽,零复现危害**——这是 #13203 关卡的依据。\n3. **潜在的将来风险**(假想,非实测):carve-out 的按名/按形跳过若遇到第三个「声明平面形 + 迁移 partial 形」的索引,依赖各处再写一次注释与跳过;词表若能声明 partial,则 declared=enforced 一步到位。\n\n## 取用条件\n\n第二个真实消费者出现(某对象确需声明式 partial 索引、且 carve-out 模式不再够用)时,本 finding 升卡:给索引声明词表加 `partial`/`nullSafe` 表达力属**契约加宽**(条款②,`packages/spec` 或 metadata 契约面),届时按内容判档走复审链。\n\n⛔ 无定级、无 domain、不入队——按裁定原样存档。\n\nRefs: #13203(关卡裁决与测量)· #4884(carve-out 的归属先例)· cloud#1736(发现来源)。"
+}

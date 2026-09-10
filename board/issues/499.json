@@ -1,0 +1,36 @@
+{
+  "number": 499,
+  "kind": "pull_request",
+  "title": "Add comprehensive AI-optimized documentation across all packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-03T05:35:04Z",
+  "updated_at": "2026-02-03T05:54:47Z",
+  "closed_at": "2026-02-03T05:54:42Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-02-03T05:54:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/499",
+  "body": "Package READMEs lacked structured examples and AI-specific guidance, making automated code generation and understanding difficult.\n\n## Changes\n\n**Created READMEs** (2 packages)\n- `@objectstack/cli` - Command reference, configuration patterns, troubleshooting\n- `@objectstack/types` - Interface contracts, usage patterns, migration guide\n\n**Enhanced READMEs** (8 packages)\n- `@objectstack/spec` - AI Quick Reference with naming conventions (camelCase config keys, snake_case data identifiers)\n- `@objectstack/core` - Plugin lifecycle patterns, service registry examples\n- `@objectstack/client` - Error code reference table with retry strategies\n- `@objectstack/client-react` - React patterns (optimistic updates, dependent queries, debounced search)\n- `@objectstack/metadata` - Workflow examples (migration, versioning, file watching)\n- `@objectstack/objectql` - Advanced query patterns (multi-datasource, transactions, hooks)\n- `@objectstack/runtime` - 8 plugin patterns (factory, middleware, lazy loading, health checks)\n- Root README - Package navigation organized by developer role\n\n## Structure\n\nEach enhanced README now includes:\n- **AI Quick Reference** - Immediate context for code generation (naming conventions, common tasks)\n- **Practical Examples** - Real-world patterns with proper error handling\n- **Workflow Documentation** - Step-by-step processes for common operations\n\nExample from `@objectstack/client`:\n\n```typescript\n// Error code reference with retry guidance\ntry {\n  await client.data.create('todo_task', data);\n} catch (error) {\n  if (error.retryable) {\n    // 5xx errors: retry with backoff\n    await retryWithBackoff(() => client.data.create('todo_task', data));\n  } else {\n    // 4xx errors: fix request and retry\n    console.error(error.code); // 'validation_error', 'permission_denied', etc.\n  }\n}\n```\n\n## Impact\n\n- 1,600+ lines of documentation\n- 30+ actionable code examples\n- 100% package coverage\n- All packages now have clear context for AI agents and developers\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 扫描每一个软件包的代码更新readme,要求AI能够更清晰的读懂并使用对应的软件包，并对官网文档进行必要的更新。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

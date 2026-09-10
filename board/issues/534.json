@@ -1,0 +1,30 @@
+{
+  "number": 534,
+  "kind": "pull_request",
+  "title": "chore: version packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-05T16:43:11Z",
+  "updated_at": "2026-02-05T16:54:36Z",
+  "closed_at": "2026-02-05T16:54:36Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-02-05T16:54:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/534",
+  "body": "This PR was opened by the [Changesets release](https://github.com/changesets/action) GitHub action. When you're ready to do a release, you can merge this and the packages will be published to npm automatically. If you're not ready to do a release yet, that's fine, whenever you add more changesets to main, this PR will be updated.\n\n\n# Releases\n## @objectstack/hono@1.0.10\n\n### Patch Changes\n\n-   @objectstack/runtime@1.0.10\n\n## @objectstack/nestjs@1.0.10\n\n### Patch Changes\n\n-   @objectstack/runtime@1.0.10\n\n## @objectstack/nextjs@1.0.10\n\n### Patch Changes\n\n-   @objectstack/runtime@1.0.10\n\n## @objectstack/cli@1.0.10\n\n### Patch Changes\n\n-   Updated dependencies [10f52e1]\n    -   @objectstack/core@1.0.10\n    -   @objectstack/objectql@1.0.10\n    -   @objectstack/driver-memory@1.0.10\n    -   @objectstack/plugin-hono-server@1.0.10\n    -   @objectstack/runtime@1.0.10\n    -   @objectstack/spec@1.0.10\n\n## @objectstack/client@1.0.10\n\n### Patch Changes\n\n-   Updated dependencies [10f52e1]\n    -   @objectstack/core@1.0.10\n    -   @objectstack/spec@1.0.10\n\n## @objectstack/client-react@1.0.10\n\n### Patch Changes\n\n-   Updated dependencies [10f52e1]\n    -   @objectstack/core@1.0.10\n    -   @objectstack/client@1.0.10\n    -   @objectstack/spec@1.0.10\n\n## @objectstack/core@1.0.10\n\n### Patch Changes\n\n-   10f52e1: fix: silence unhandled promise rejections when checking for async services in kernel\n    -   @objectstack/spec@1.0.10\n\n## @objectstack/metadata@1.0.10\n\n### Patch Changes\n\n-   Updated dependencies [10f52e1]\n    -   @objectstack/core@1.0.10\n    -   @objectstack/spec@1.0.10\n    -   @objectstack/types@1.0.10\n\n## @objectstack/objectql@1.0.10\n\n### Patch Changes\n\n-   Updated dependencies [10f52e1]\n    -   @objectstack/core@1.0.10\n    -   @objectstack/spec@1.0.10\n    -   @objectstack/types@1.0.10\n\n## @objectstack/driver-memory@1.0.10\n\n### Patch Changes\n\n-   Updated dependencies [10f52e1]\n    -   @objectstack/core@1.0.10\n    -   @objectstack/spec@1.0.10\n\n## @objectstack/plugin-hono-server@1.0.10\n\n### Patch Changes\n\n-   Updated dependencies [10f52e1]\n    -   @objectstack/core@1.0.10\n    -   @objectstack/runtime@1.0.10\n    -   @objectstack/hono@1.0.10\n    -   @objectstack/spec@1.0.10\n    -   @objectstack/types@1.0.10\n\n## @objectstack/plugin-msw@1.0.10\n\n### Patch Changes\n\n-   Updated dependencies [10f52e1]\n    -   @objectstack/core@1.0.10\n    -   @objectstack/objectql@1.0.10\n    -   @objectstack/runtime@1.0.10\n    -   @objectstack/spec@1.0.10\n    -   @objectstack/types@1.0.10\n\n## @objectstack/runtime@1.0.10\n\n### Patch Changes\n\n-   Updated dependencies [10f52e1]\n    -   @objectstack/core@1.0.10\n    -   @objectstack/spec@1.0.10\n    -   @objectstack/types@1.0.10\n\n## @objectstack/types@1.0.10\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.10\n\n## @objectstack/spec@1.0.10\n\n\n\n## @example/app-crm@0.9.13\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.10\n\n## @example/app-host@0.9.13\n\n### Patch Changes\n\n-   @objectstack/metadata@1.0.10\n-   @objectstack/objectql@1.0.10\n-   @objectstack/driver-memory@1.0.10\n-   @objectstack/plugin-hono-server@1.0.10\n-   @objectstack/runtime@1.0.10\n-   @example/app-crm@0.9.13\n-   @example/app-todo@0.9.13\n-   @example/plugin-bi@0.9.13\n-   @objectstack/spec@1.0.10\n\n## @example/app-react-crud@0.9.13\n\n### Patch Changes\n\n-   @objectstack/client@1.0.10\n-   @objectstack/client-react@1.0.10\n-   @objectstack/metadata@1.0.10\n-   @objectstack/objectql@1.0.10\n-   @objectstack/driver-memory@1.0.10\n-   @objectstack/plugin-msw@1.0.10\n-   @objectstack/runtime@1.0.10\n-   @example/app-todo@0.9.13\n-   @objectstack/spec@1.0.10\n\n## @example/app-todo@0.9.13\n\n### Patch Changes\n\n-   @objectstack/client@1.0.10\n-   @objectstack/objectql@1.0.10\n-   @objectstack/driver-memory@1.0.10\n-   @objectstack/runtime@1.0.10\n-   @objectstack/spec@1.0.10\n\n## @example/features@0.9.13\n\n### Patch Changes\n\n-   Updated dependencies [10f52e1]\n    -   @objectstack/core@1.0.10\n    -   @objectstack/runtime@1.0.10\n    -   @objectstack/spec@1.0.10\n\n## @example/guide-cli@0.0.14\n\n### Patch Changes\n\n-   @objectstack/cli@1.0.10\n-   @example/plugin-bi@0.9.13\n-   @objectstack/spec@1.0.10\n\n## @example/metadata-demo@0.1.10\n\n### Patch Changes\n\n-   Updated dependencies [10f52e1]\n    -   @objectstack/core@1.0.10\n    -   @objectstack/metadata@1.0.10\n    -   @objectstack/spec@1.0.10\n\n## @example/plugin-bi@0.9.13\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.10\n\n## @example/plugin-crm@0.1.13\n\n### Patch Changes\n\n-   @objectstack/spec@1.0.10\n\n## @objectstack/docs@1.0.10\n\n\n"
+}

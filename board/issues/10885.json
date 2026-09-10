@@ -1,0 +1,30 @@
+{
+  "number": 10885,
+  "kind": "issue",
+  "title": "finding: area-level `fixtures` recipes carry no `revision`/`history`, so a semantic recipe edit silently re-validates every run record that depends on it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:on-hold",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-21T15:52:03Z",
+  "updated_at": "2026-08-21T16:04:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10885",
+  "body": "Observation from the #10809 work (PR #10883). Filed unassigned; recording the gap, not claiming the work.\n\n## The asymmetry\n\nThe checklist's change lifecycle (`docs/qa/platform-checklist/README.md`) pins semantic edits to a revision:\n\n> **Change** — edit the fields, bump `revision`, append a `history` entry saying what changed and why. The revision matters because run records pin the revision they ran against: a semantic edit silently re-validating old results is exactly what the validator's revision/history check exists to stop.\n\nThat mechanism is **item-scoped only**. `scripts/check-platform-checklist.mjs` enforces `revision`/`history` inside its per-item loop, and none of the four area-level recipes in the tree carries either field:\n\n| area file | recipe | has `revision` | has `history` |\n|---|---|---|---|\n| `areas/attachments-storage.json` | `qa-scratch-authz` | no | no |\n| `areas/attachments-storage.json` | `qa-media-constraints` | no | no |\n| `areas/automation.json` | `qa-flow-status-doors` | no | no |\n| `areas/search.json` | `qa-contributor-bound-member` | no | no |\n\n## Why that matters\n\nA recipe is **executable content** — `sequence` steps with expected responses, a premise guard, a teardown. Editing step 4's `expect` (say, the premise guard that distinguishes \"403 = binding did not take\" from \"12 rows = a VAMA set\") changes what a run of every consuming item actually proves. Six items currently carry a `provisioning.use`. Today that edit lands with no revision anywhere to pin it, so a run record from before the edit and one from after are indistinguishable — the precise failure the item-level mechanism exists to prevent, reachable through a door it does not cover.\n\nThe exposure scales with reuse, which is the direction the convention is moving: recipes exist *because* several items share one call sequence.\n\n## Worked instance\n\nPR #10883 had to correct a stale clause on `qa-contributor-bound-member`'s `knownGaps`. There was no recipe revision to bump, so the correction was pinned by bumping `search.rls-both-personas` (the item that `use`s the recipe) to revision 5 — an item whose own fields did not change. Its history entry says so explicitly. That workaround is legible for one consumer; it does not generalize, and it is silently wrong for `records-forms.crud-roundtrip`, which consumes the same recipe by prose cross-reference and has no `use` edge to notice.\n\n## Adjacent to #10593, not inside it\n\n#10593's two gaps are about the *reference spelling* — resolving a `use` (landed) and how cross-area reuse should be spelled (open). This is a third, independent axis: how a recipe's own **content** is versioned. Worth noting the interaction, though: if the answer to that open question relocates recipes into a shared `areas/_fixtures.json`, the versioning question changes shape with it, so sequencing this after that ruling may be cheaper.\n\n## Options worth weighing (not a recommendation)\n\n1. Give recipes their own `revision`/`history` and extend the item-scoped check to cover them.\n2. Require every consuming item to re-pin when a recipe changes — mechanical, but it multiplies edits and cannot reach prose-only consumers.\n3. Rule that recipes are immutable once referenced: a semantic change means a new recipe key, with the old one retired in place.\n\n## Not urgent\n\nNothing is known to be wrong in the current run records. The cost is that the guarantee the revision mechanism advertises does not extend to recipe content, and the recipe surface is growing.\n"
+}

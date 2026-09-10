@@ -1,0 +1,30 @@
+{
+  "number": 13559,
+  "kind": "issue",
+  "title": "The framework has no verb to DECLINE a CLI-backfilled surface — cloud expresses it with three null-object plugins carrying canonical names",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:on-hold",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-31T01:02:19Z",
+  "updated_at": "2026-09-10T10:09:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/13559",
+  "body": "Restart-when: a FOURTH hand-rolled decline stand-in exists in ANY repo — i.e. the population of null-object plugins carrying a canonical name purely to satisfy the CLI's `kernel:ready` backfill presence check grows beyond the three that exist today in `cloud` `apps/objectos-ee/objectstack.config.ts:1186-1206` (`DeclinedMarketplaceInstallLocalPlugin`, `DeclinedMarketplaceProxyPlugin`, `DeclinedCloudConnectionPlugin`).\n\n⚠️ That line is a verbatim transcription of the maintainer's 2026-08-31 ruling (comment `5479475411`) into the machine-readable key this card's `pm:on-hold` requires — 「**任何仓出现第 4 个手写 decline 空壳** ⇒ 本卡滚回决策箱，届时两个候选形状带成本呈报择一」. ⛔ It adds no judgement of its own and changes nothing the ruling decided; see the audit comment below.\n\n---\n\nFiled by the repo:cloud execution seat (objectstack#6026, session `session_01EzWYDkwr6WEwDGhMH1Jzuq`, R26) from the cloud#1331 re-measurement (full report on that card).\n\n## The gap\n\ncloud#1361 measured that OMITTING a plugin from an EE host config is not ABSENCE: the CLI backfills several surfaces (MarketplaceInstallLocal among them) after `kernel:ready`, so a config that simply does not mount the plugin still ends up serving `POST /api/v1/marketplace/install-local` — while `GET /api/v1/runtime/config` reports `features.installLocal: false`.\n\ncloud's fix (#1361/#1367 ruling A2) works and is pinned, but it is a workaround for a missing framework verb: `apps/objectos-ee/objectstack.config.ts:1186-1206` defines `DeclinedMarketplaceInstallLocalPlugin` — a null-object plugin carrying the canonical name `com.objectstack.runtime.marketplace-install-local` so the backfill's presence check is satisfied by a surface that answers nothing — plus two siblings (DeclinedMarketplaceProxyPlugin, DeclinedCloudConnectionPlugin). The cloud config's own comment at :1173-1176 names this as compensation for the missing primitive.\n\n## Suggested shape (nice-to-have, not blocking anything)\n\nA first-class decline mechanism the backfill honors — e.g. a config-level `declinedCapabilities: ['marketplace-install-local', ...]` (or a `declinePlugin(name)` helper producing the null-object under the hood), so a host config can say \"this surface deliberately does not exist here\" without hand-rolling canonical-name stand-ins. The three cloud stand-ins become the first consumers and the migration test.\n\nPriority: low — the workaround is sound and pinned. Worth having before a fourth decline gets hand-rolled.\n\nRefs: cloud#1331 (re-measurement) · cloud#1361 (the omission≠absence measurement) · cloud#1367 (ruling A2)"
+}

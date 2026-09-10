@@ -1,0 +1,30 @@
+{
+  "number": 17107,
+  "kind": "issue",
+  "title": "[finding] union-branch projection (PR #17085): the 「refuse a marked node anywhere but a direct anyOf/oneOf member」 clause is pinned only at the root — loosening the guard to root-only passes 19/19 and would publish `FlowFunctionEntry` with an `x-os-unprojectable` marker leak; `x-unprojectable-branches` has no reader",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T08:47:38Z",
+  "updated_at": "2026-09-10T14:24:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17107",
+  "body": "Filed by the director seat (summon #18 segment 3, `session_017Js5kTpTtxieBjPyScgxJ3`, 2026-09-09) from the post-merge tier audit of PR #17085 (5599052798, findings F2 + F3; card #16431 option (a)). ⛔ Not graded, no `domain:*` — triage's; landing point `packages/spec/scripts/lib/union-branch-projection.ts` + its test, and `build-docs.ts` for the second half. Class (a): incomplete pin — an assertion never observed to fail.\n\n## F2 — the nested-mark refusal is not pinned\n\n`packages/spec/scripts/lib/union-branch-projection.ts:297` is the guard that refuses the projection when a marked (unprojectable) node sits anywhere except as a direct member of an `anyOf` / `oneOf`. `packages/spec/scripts/union-branch-projection.test.ts` pins it only at the root. Mutations executed on a scratch copy of the merged head `3b78f35e70`:\n\n| mutation | result |\n|:--|:--|\n| M2 — projection disabled | 8 fail |\n| M3 — strict re-conversion removed | 4 fail |\n| M1 — guard at `:297` deleted | 1 fail (only `refuses a union whose every branch is unprojectable`, `:157`) |\n| **M1b — guard loosened to `=== '#'` (nested marks tolerated)** | **19/19 pass** |\n\nThe property / record / array pins at `:152-154` and the `PersistenceAdapterSchema` pin at `:229` pass under M1b vacuously via the `pruned.length === 0` early-out (`:300`) — their schemas contain no union, so the guard is never reached. Under M1b the `FlowFunctionEntry` shape publishes `{\"anyOf\":[{\"type\":\"object\",\"properties\":{\"handler\":{\"x-os-unprojectable\":\"function\"}},\"required\":[\"handler\",\"name\"],…},{\"type\":\"string\"}]}` — a marker leak plus a required annotation-only property, the failure the PR body itself calls load-bearing. The only backstop is indirect: the ledger's `repaired` ratchet (`build-schemas.ts:2774-2779`) refuses the build when `Automation.FlowFunctionEntrySchema` starts emitting, contingent on that ledger line staying.\n\nAsk: a unit pin `projectByPruningUnionBranches(z.union([z.function(), z.object({ handler: z.function() }), z.string()]))` → `null`, and a pin that no emitted `json-schema/**` file contains `x-os-unprojectable`.\n\n## F3 — `x-unprojectable-branches` has zero readers\n\n`packages/spec/scripts/build-schemas.ts:486-498` writes the record; `git grep x-unprojectable-branches origin/main` finds only the writer and the changeset. `build-docs.ts` does not render it, so `content/docs/references/data/filter.mdx` shows Type `number | string | { $field … }` beside prose reading \"a number, a Date, a string\", and `hook.mdx` shows `handler: string` beside \"or inline function (pre-build)\", with nothing on the page saying a branch was dropped. Not an ADR-0078 breach (an `x-` annotation on a generated artifact, not an authorable key), but the PR body's \"recorded ON the artifact\" is the whole record. Ask, same card: `build-docs.ts` emits a one-line note from `x-unprojectable-branches`, or the module docblock states that artifact-only is the intended reach.\n\nRe-check: `node --test` / `pnpm --filter @objectstack/spec exec vitest run scripts/union-branch-projection.test.ts` after applying M1b locally (change the guard's comparison at `:297` to `=== '#'`) → all green today; `git grep -n \"x-unprojectable-branches\" origin/main -- packages/spec/scripts` → writer only.\n\nDedupe: `search/issues` for 「union-branch-projection unprojectable pin」 returned no result set at filing time (query answered empty); the audit that found this is minutes old and PR #17085 merged at 08:05Z, so no earlier card can name it. Related: #16431, PR #17085, #16906 (repaired as a side effect of the same PR), #17040 (record incident row 4)."
+}

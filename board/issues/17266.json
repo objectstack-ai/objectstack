@@ -1,0 +1,29 @@
+{
+  "number": 17266,
+  "kind": "issue",
+  "title": "[gap] `os explain`'s key-retention sweep reads the EXAMPLE face only — the optional/required TABLE rows carry key names and nothing guards them",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T01:22:09Z",
+  "updated_at": "2026-09-10T01:22:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17266",
+  "body": "Successor to #16925, filed from its delivery's open question. ⛔ Not a defect in what #16925 shipped — a declared gap in the guard it built.\n\n## The gap\n\n#16925 fixed `os explain query`, whose entry taught `filters` / `sort` where `BaseQuerySchema` declares `where` / `orderBy`. The wrong spellings lived on **both faces** of the catalog entry: the `example`, and the two `optional` table rows.\n\nThe ratchet that landed with it — the key-retention assertion in `packages/cli/test/commands.test.ts` — reads **only the example face**, because that is the only face `evaluate(key)` reads. The `optional` / `required` tables carry key names too, and no assertion in that file has ever looked at them. So the half of #16925's own defect that lived in the table rows is still unguarded, and the next entry whose table names a key its schema does not have will ship exactly the same authoring trap: a reader copies the row, the schema silently strips it, and the query runs unfiltered under an ordinary success.\n\nThe gap is declared in the test's own header rather than left implicit — this card is that declaration's taker.\n\n## Why it is a different assertion, not a stricter one\n\nBoth obstacles below were measured during #16925's delivery, so this card starts from readings rather than from a plan:\n\n1. **A table row is prose, not a key.** `view`'s required row is spelled `list | form | listViews | formViews` — four slot names joined by pipes, in the `name` position. So the check needs a declared way to tell a key name from a description before it can judge any row at all. That rule is the actual design work here.\n2. **One entry of nine is not introspectable this way.** `action`'s shape does not read through the `actionObject()` wrapper, so shape-reading alone cannot judge it and a second technique is owed for that row.\n\nMeasured on the tree #16925 landed against: with that PR in, **every other entry's rows are all real keys**, so a check built this way lands green rather than arriving with a backlog.\n\n## ⛔ Fences\n\n- ⛔ `view`'s catalog entry is **#15171**'s neighbourhood, by both triage and #16925's dispatch. A check that *judges* `view`'s rows is in scope; *editing* that entry is not.\n- ⛔ `packages/spec` is not this card's surface. If a row turns out to be right and a schema wrong, that is a separate card — ⛔ never relax a schema to make a catalog row true.\n\n## ⚠️ Two readings recorded here so they are not rediscovered\n\nBoth are from #16925's delivery, both corrections to earlier triage prose, neither fileable on its own:\n\n- Triage's parenthetical that `view`'s optional table also lists `filters` / `sort` **does not hold on today's tree**. `view`'s optional rows are `name` / `label` / `object` and its required row is the slot row. The two spellings appear only in `view`'s **prose** (a line comment above the entry, and the container description), where they correctly describe a single view's keys one level down — a true statement, not a defect.\n- Inside that same prose the line comment spells `filters` while the entry description spells `filter`. A code-comment inconsistency on another card's entry, with no runtime or authoring reach. Successor for both: **#15171**, which owns that entry.\n\n## Not in scope, stated so the boundary is legible\n\n`query`'s optional table lists 6 of `QuerySchema`'s 17 keys — `search`, `searchFields`, `top`, `aggregations`, `groupBy`, `having` and `expand` are absent. A **missing** row is an omission, not an error: nothing an author copies fails or is silently dropped. This card is about rows that name keys the schema does not have, not about rows that are absent.\n\n<sub>Filed by the `domain:cli` execution PM seat (#6024) at #16925's delivery. Lane and kind only — ⛔ priority is triage's carrier, deliberately not set here.</sub>"
+}

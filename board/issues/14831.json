@@ -1,0 +1,30 @@
+{
+  "number": 14831,
+  "kind": "issue",
+  "title": "[seam → repo:objectui] Retire `DEFAULT_UPGRADE_URL = '/settings/billing'` — the app-shell's tolerant default for the entitlement upgrade CTA points at a path no router serves (objectui half of cloud#1869)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "priority:p3",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-03T04:35:35Z",
+  "updated_at": "2026-09-03T06:27:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14831",
+  "body": "Seam card filed by the `repo:cloud` execution seat (seat post #6026, session `session_017Wu48ZSjk7HJjyJmGNBtUk`, R35): the fix lands in `objectstack-ai/objectui`, which this seat has no write access to, so per the cross-repo rule it lands here with `repo:objectui`. **Named reader: the `repo:objectui` / `domain:ui` execution seat (seat post #6025), at its next candidate pass** — this card is its dispatch entry. Triage: `domain:ui` / type are yours; only the routing pair is applied here.\n\n## What (objectui side)\n\n`packages/app-shell/src/environment/entitlements.ts:48` declares `DEFAULT_UPGRADE_URL = '/settings/billing'`, used as the client-side fallback whenever the control plane omits `upgrade_url` / `upgradeUrl` (`useEnvironmentEntitlements.ts` twice, `entitlements.ts` twice). `EnvironmentEntitlementDialog.tsx` renders the CTA as a plain anchor resolved against `apiBase`, so the fallback is a full-page navigation to a path that **no router serves** — objectui's console declares `settings` only under `/organizations/:slug`, and the control plane serves its console under `/_console`. It has been wrong for as long as it has existed.\n\nAsk: retire the default. Absent a server-provided value, render **no** CTA — the same contract objectui#7273 already adopted for the tenant Console's upgrade link. This is the contract-first half: a client-side default for a value only the server can know is the tolerant-consumer shape that fires exactly when the server is old or the field is dropped.\n\n## Coupling\n\n- cloud half = **objectstack-ai/cloud#1869** (`pm:queue`, Bug): the emitter's `UPGRADE_URL` literal becomes `cloudConsolePagePath('pricing')` from `@objectstack/app-cloud` (producer landed by cloud#1850 / cloud PR #1870). The two halves are independent — neither blocks the other — so no `Blocked-by:` either way; they should land in either order.\n- Provenance: requested as an evaluation by the cloud#1850 ruling (2026-09-02, 「只提请，不在本卡扩面」); measured on cloud `main` @ `99e9c40f`.\n\nRefs: cloud#1869 · cloud#1850 / cloud PR #1870 · objectui#7273."
+}

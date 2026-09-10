@@ -1,0 +1,32 @@
+{
+  "number": 15211,
+  "kind": "issue",
+  "title": "feat(objectql,cli): inventory + migration — four fates per object, mirrors deleted only after the id→name rewrite is verified, per-table boot report (ADR-0131 D10)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:blocked",
+    "priority:p1",
+    "security",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:06:09Z",
+  "updated_at": "2026-09-04T06:06:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15211",
+  "body": "**⛔ BLOCKED — the v18 development line is not open.**\n\n`Blocked-by: #15193, #15196, #15204, #15205, #15206, #15207`\n\nPart of #15194 (ADR-0131 execution tree). ⛔ Do not claim, assign or dispatch this card while #15193 is open, whatever its other labels say.\n\n---\n\n**In one sentence.** Every existing row is handled by the fate its table was assigned: tables that lose the column just lose it; mirror rows copied out of code (each organization's read-only duplicate, and the NULL residue of the same) are deleted **only after** every reference has been rewritten to a name and verified; an organization's own rows get their owner back through a parent record; and a row whose owner cannot be recovered is neither guessed at nor deleted — it is named at boot, per table.\n\n**The migration is a manual operator ceremony, never a boot step.** Maintainer, 2026-09-04: 「我建议18.0 的主要考虑是客户数据变化比较大，而且需要手工执行升级脚本。」\n\n**Scope.** Inventory file seeded from the two #13564 ledgers (59 platform + 28 example objects) plus the cloud supplement, **one fate per object with a citation**. An `os migrate`-family command provides: `--plan` (read-only — per-table fate, row counts, unattributable row ids, which tables will receive `NOT NULL`; written to a file; **refuses rather than reporting** a table it cannot enumerate), an explicit backup acknowledgement, `--apply` (fate order: attribution → verified id→name rewrite → mirror deletion → column drops; **idempotent and resumable** from a recorded checkpoint), and a post-check that re-runs the plan and prints zero-remaining per table.\n\nThe four fates: (1) **column drop** through the ADR-0120 D4 ceremony; (2) **mirror deletion** — rows whose `managed_by` is `package` / `platform` on the catalog objects, seeded templates, seeded capabilities, and the NULL residue of the same — **gated** on C2's rewrite report showing every reference resolves by name; (3) **attribution via a parent anchor** (`childKey` / `parentObject` / `parentOrgColumn`, generalizing `backfill-sys-file-organizations.ts`, `plugin-approvals/src/backfill-platform-row-organizations.ts` and cloud's `org-id-backfill.ts`); under `single` the Default Organization; (4) **report** — per table, rows still NULL, with the remedy. **Boot refusal**: a v18 runtime that detects an un-migrated database (schema marker written by the ceremony's last step) refuses to start and names the command — ADR-0093 D5 shape, ⛔ with no env escape hatch that skips the check.\n\n**Absorbs**: #14570 (`sys_business_unit_member` unadjudicated, org-less rows) and #15086 (the NULL-org-seeded business unit unreachable from an org-stamped rule, residue of the #15030 revert) — both are populations this inventory must name a fate for. Read both before writing the inventory.\n\n**Acceptance.** A fixture database carrying every fate — per-organization mirrors with grants pointing at them, NULL catalog residue, NULL `sys_file` rows with `sys_attachment` holders, customized template rows, and one genuinely unattributable row — comes through the migration with effective access **identical** (positive control: a grant that would be lost reddens the pin), mirrors gone, attributed rows carrying their organization, the unattributable row still present and reported, and row counts reconciling once mirrors and dropped columns are accounted for.\n\n⛔ **Stop and report**: any deletion outside fate 2; any assignment of an unattributable row.\n\nRefs: ADR-0131 D10 · ADR-0093 D5 · ADR-0120 D4 · #10103 (warn-not-reap superseded) · the 2026-08-28 backfill ruling · cloud#1664 item 5 · #14570 · #15086.\n"
+}

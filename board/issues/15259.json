@@ -1,0 +1,32 @@
+{
+  "number": 15259,
+  "kind": "issue",
+  "title": "[repo:objectui] Record edit form posts every displayed field, so a user with field-level `editable:false` on any form field gets 403 「您没有权限保存这条记录」 even when editing only an allowed field — inline grid sends the dirty cell and succeeds",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p2",
+    "repo:objectui",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-04T07:26:55Z",
+  "updated_at": "2026-09-08T15:30:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15259",
+  "body": "## Summary\n\nThe record edit form (opened from a related list's row menu → 「编辑」, and the same form on the record page) submits **every field on the form**, including fields the current user is not permitted to edit under field-level security. The server correctly answers `403 PERMISSION_DENIED — Field write denied: not permitted to edit [score]`, and the console surfaces it as 「您没有权限保存这条记录。」 — so for any role whose permission set marks some form fields `editable: false`, the standard edit form is unusable even when the user only touched a field they *are* allowed to edit. The inline grid on the list view sends only the changed cell and succeeds for the same user on the same record.\n\n## Minimal reproduction\n\nPlatform 17.2.0.\n\n- Object `kpi_entry_line` with fields `actual_value` (editable), `score`, `adjusted_score` (computed, `readonly: true` on the field definition).\n- Permission set for position `reporter`: `kpi_entry_line: { allowEdit: true, ... }` plus field permissions `'kpi_entry_line.score': { readable: true, editable: false }`, `'kpi_entry_line.adjusted_score': { readable: true, editable: false }`.\n- Form view for the object lists `actual_value` and, in a second section, `score` / `adjusted_score` (display only).\n\nSteps as a `reporter` user:\n\n1. Record page or related list → row 「⋯」 → 「编辑」 → the dialog opens with all fields, computed ones rendered as (disabled-looking) inputs.\n2. Type `5000` into `实际值` only → 「更新」.\n\nObserved: red banner 「您没有权限保存这条记录。」; network: `PATCH /api/v1/data/kpi_entry_line/<id>` with the full record → `403 {\"code\":\"PERMISSION_DENIED\",\"error\":\"[Security] Field write denied: not permitted to edit [score] on 'kpi_entry_line'\"}`.\n\nControl via REST with the same session:\n\n```\nPATCH {actual_value: 5000}                       → 200\nPATCH {actual_value: 5000, indicator_name, target_value, weight}  (unchanged, no FLS deny) → 200\nPATCH {actual_value: 5000, score: 0}             → 403 Field write denied [score]\n```\n\nSo the form fails only because it posts the FLS-denied fields it merely displays.\n\n## Expected\n\n- The form should submit only **dirty** fields (or at least omit fields that are `readonly` on the field definition / not editable for the caller). A display-only field on a form must never turn a legitimate edit into a permission error.\n- Failing that, the 403 message should say which field was refused instead of the generic 「没有权限保存这条记录」, so the user (and the app author) can tell it is a form-composition problem, not a missing permission.\n- The same form should also not render FLS-`editable:false` fields as inputs, and lookup chips for `readonly` lookups should not offer a 「移除」 ✕ (a reporter can currently clear 「所属填报单」 on the sheet line in that dialog — the write would be refused, but the affordance invites it).\n\n## Environment\n\n`@objectstack/console` 17.2.0 · `objectstack dev` · Chromium 1440×900 · zh-CN. App: objectstack-ai/kpi (`kpi_entry_line`, position `kpi_dept_reporter`)."
+}

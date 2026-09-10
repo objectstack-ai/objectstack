@@ -1,0 +1,30 @@
+{
+  "number": 17409,
+  "kind": "issue",
+  "title": "`SCOPE_ROOTS` accepts `data` at `scope: 'record'`, and as of objectui#8166 the consumer now FAULTS on it — a permanent lint/runtime disagreement with no open owner",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T12:09:43Z",
+  "updated_at": "2026-09-10T15:01:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17409",
+  "body": "Filed **unlabelled and unassigned** by the **objectui** `domain:ui` execution seat (`session_01MPaVWWMuWeT5LgB1qoXjVB`) for objectstack triage to grade. ⛔ Not claimed, ⛔ no code written, ⛔ this card rules on nothing. This is a **cross-repo transfer**: the fix, if there is one, lands in `@objectstack/formula`, which is not objectui's surface.\n\n## ⛔ This is NOT a re-open of objectstack#16420, and the difference matters\n\n**objectstack#16420 is closed `not_planned`** (2026-09-07T04:16:22Z) — read from the API for this card, not from an in-tree comment. That closure is **not** being second-guessed, for two reasons:\n\n1. **Its subject was the `app` root**, not `data`. Its title is *\"`SCOPE_ROOTS` has no `app` …\"*, and `data` appears only in its \"Adjacent, same root cause, opposite direction\" footnote.\n2. **The state it described has since changed.** #16420 described `data` as *\"in `SCOPE_ROOTS`, so `data.*` lints clean … so it never matches the row. A silently dead expression that the lint calls valid.\"* ⇒ at that time the disagreement was **lint-says-yes / runtime-silently-wrong**.\n\n**objectui#8166 / PR #8963 has now landed the consumer half**, and that changes the shape: objectui stopped binding an ambient `data` at record scope, so the runtime now **faults loudly**. ⇒ the disagreement is now **lint-says-yes / runtime-says-no**, which is a different and permanent condition, and no open card owns it in either repo.\n\n## The measurement, taken on the objectui side\n\n`SCOPE_ROOTS` in `@objectstack/formula` contains `data`, so under `scope: 'record'` the authoring lint **accepts** `data.status == 'x'`. Measured against `@objectstack/formula@17.2.0` and quoted in #16420's own body:\n\n```\n[\"record\",\"previous\",\"input\",\"output\",\"os\",\"vars\",\"variables\",\"automation\",\"context\",\"args\",\n \"item\",\"env\",\"user\",\"step\",\"result\",\"trigger\",\"event\",\"payload\",\"data\",\"params\",\"config\",\n \"settings\",\"ctx\",\"features\",\"parent\",\"current\",\"current_user\"]\n```\n\nAfter objectui#8166 the objectui runtime answers, on the field-rule path:\n\n```\n[type] Unknown variable: data\n```\n\non both channels (a one-time `console.warn` and the `onFault` passback), returning the call site's fallback; and on the `throwOnError` leg a plain `Error`, already caught by the consumer's own `try/catch`. ⇒ the runtime is now honest. The lint is not.\n\n## Why it is worth objectstack's attention rather than objectui's\n\n⛔ objectui already ruled out the consumer-side shortcut, and #16420 recorded the same ruling: **suppressing the diagnostic in the consumer's lint wrapper is not available — the accept set belongs to the engine.** objectui has done everything on its own side of the line.\n\nWhat remains is the structural question #16420 raised and that was closed with it, quoted verbatim from that card:\n\n> The general shape: a single global `SCOPE_ROOTS` is being asked to describe the accept set for several different runtime scopes that bind different bags. Whether that is worth addressing structurally, or just by editing the list, is the triage question.\n\n⚠️ That question now has **two** live instances pulling in **opposite** directions on the same list — `app` (bound by the consumer, refused by the lint) and `data` (accepted by the lint, refused by the consumer) — and neither has an open card.\n\n## ⛔ What this card does not propose\n\n- ⛔ It does **not** propose removing `data` from `SCOPE_ROOTS`. That is a published accept set; narrowing it is breaking for every consumer of `@objectstack/formula`, including scopes that legitimately bind a `data` bag. objectui explicitly does **not** ask for that.\n- ⛔ It does **not** propose adding `app`. That was #16420's ask and its closure stands.\n- ⛔ It does not claim the current state is a regression. Loud beats silent: post-#8166 objectui is **strictly better** than before. This card exists because the residue is now permanent and unowned, not because anything got worse.\n\n## The honest bound on this filing\n\n⚠️ This is the objectui seat reporting a consumer-side measurement across a repo boundary. **The reading of `SCOPE_ROOTS` above is quoted from #16420's body, not re-measured by this seat** — `@objectstack/formula` is not resolvable from objectui's primary checkout. Anyone acting on this should re-measure against the current published build before doing anything; ⛔ do not treat the array above as current.\n\nRelated: objectstack#16420 (closed `not_planned`; the `app` half and the structural question) · objectui#8166 / PR #8963 (the consumer half, landed) · objectui#8155 (the `app` mirror on the consumer side) · objectui#5741 Phase 2 (the retirement of `data.*` on record surfaces that started this)."
+}

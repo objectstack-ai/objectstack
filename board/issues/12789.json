@@ -1,0 +1,29 @@
+{
+  "number": 12789,
+  "kind": "issue",
+  "title": "finding(objectql): the sibling `[Registry] Collision` warning (\"ships from package\") also double-quotes the package id",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-27T19:48:47Z",
+  "updated_at": "2026-08-29T00:29:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/12789",
+  "body": "Filed unassigned and **ungraded** while implementing #12609 (dev seat, session `session_01LZbWd2jNV1FErXTPSS4Dry`). Observation-class; severity not judged.\n\n## What was measured\n\n#12609 fixed the quote style on ONE of the two `[Registry] Collision` warnings in `packages/objectql/src/registry.ts` — the cold-boot-order guard (`is shipped by package \"...\"`). While locating that message I read the file's other `[Registry] Collision` guard, a few lines above, which describes the mirror-image event (late-registration order — the package arrives *second*, after a runtime-authored row already occupies the bare key) and double-quotes its package id too:\n\n```\npackages/objectql/src/registry.ts:2976-2985\nif (packageId && collection.has(bareKey)) {\n  const dbOnly = collection.get(bareKey) as any;\n  if (dbOnly && !dbOnly._packageId) {\n    console.warn(\n      `[Registry] Collision: ${type}/${baseName} ships from package ` +\n      `\"${packageId}\" but a runtime-authored row with the same name already ` +\n      `exists in sys_metadata. The runtime row will shadow the package value ` +\n      `(ADR-0005 overlay precedence). Rename one, or delete the sys_metadata ` +\n      `row if the package value should win.`,\n    );\n  }\n}\n```\n\nDouble quotes around `${packageId}` — the same defect class #12609 fixed one guard down, against the same package convention: measured over non-test `.ts` under `packages/objectql/src`, quoted identifiers in operator prose are single-quoted 174 times against 37 double-quoted (this line and #12609's line are both in that minority; #12609's own instrument matched the 37 exactly, and differed from the originally-reported 170 on the single-quote side by 4 — a different regex, not a different tree).\n\n## Why #12609 did not fix this one too\n\n⛔ Explicit scope boundary, twice-stated in that card's dispatch: \"Touch the one message.\" This is a **different message** (`ships from package` / \"will shadow\", not `is shipped by package` / \"now shadows\") describing the other registration order, with its own test coverage (`registry-collision-order.test.ts`'s `LATE-REGISTRATION ORDER` case). Folding it in would have been exactly the \"package-wide sweep bur[ying] the fix\" #12609's dispatch warned against, on a file with no other open-PR claim to widen unilaterally.\n\n## Not established here\n\n- Whether this is worth its own PR versus being picked up alongside a future touch of this file — not judged.\n- Whether the fix should again be a bare quote-character swap plus a literal-spelling pin (the shape #12609 used, no existing pin having been found on this message either) — likely, but not decided here.\n\n## Re-check\n\n```\ngit grep -n \"ships from package\" origin/main -- packages/objectql/src\n```\n\n⛔ Reverse-check any zero with a term known present in the same file, and never a substring of the term under test.\n\n## Refs\n\n- #12609 / the PR that closes it — where the sibling guard's quoting was fixed and this one was found while measuring it\n- #12027 — where both collision-warning guards originate (the order-asymmetry fix that added the cold-boot-order guard #12609 touched, alongside the pre-existing late-registration-order guard this finding is about)\n- ADR-0005 — the overlay precedence both warnings describe"
+}

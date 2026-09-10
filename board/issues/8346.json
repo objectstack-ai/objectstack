@@ -1,0 +1,31 @@
+{
+  "number": 8346,
+  "kind": "issue",
+  "title": "export: PDF / print document generation — re-planned for v18, superseding the #1301 NOT_PLANNED closure",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:on-hold",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-13T06:49:41Z",
+  "updated_at": "2026-09-04T07:03:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/8346",
+  "body": "## Status\n\n**Maintainer decision (2026-08-13): PDF document generation is re-planned and scheduled for v18.** This supersedes the #1301 `NOT_PLANNED` closure (2026-06-27).\n\n## Ruling history (what this issue reverses)\n\n- #1301 — \"[P1] export: no print / PDF export\" was closed `NOT_PLANNED`.\n- #8010 — `'pdf'` was subsequently **removed** from `view.exportOptions` formats in `@objectstack/spec` 17.0.0; the enum's error map now carries a retirement prescription and `os migrate meta --from 16` rewrites existing sources (`packages/spec/src/ui/view.zod.ts:1239-1264`). Surviving formats: `csv` / `xlsx` / `json`.\n\nRe-introducing the capability therefore has a spec-side unwind cost, not just a renderer cost: the retired enum value, its error-map prescription, and the corresponding removal-registry entry all need to be walked back deliberately (and the migration story for metadata authored against 17 decided).\n\n## Why it came back\n\nSolution scoping for an overseas port/terminal customer (2026-08) — and previously the template gap audit (`docs/PLATFORM_GAPS_FROM_TEMPLATES.md` gap #9, the origin of #1301) — keeps hitting the same wall: statutory / paper deliverables are non-negotiable for billing- and government-adjacent customers. Concrete artifacts in the port scenario alone: invoices, weighbridge tickets, delivery orders, official correspondence, monthly operation reports. Browser `Ctrl+P` (Console chrome, no pagination) and per-project Puppeteer side-services are the only workarounds today, and every implementation reinvents the latter.\n\n## Suggested scope (starting point: the M1–M4 sketch from #1301)\n\n1. **M1 — declarative print templates** in spec (header/footer, pagination, tables, related-record blocks).\n2. **M2 — render engine** (headless Chromium HTML→PDF), output downloadable or committed to storage (`sys_file`).\n3. **M3 — row/detail action integration** (\"Export PDF\", template picker).\n4. **M4 — bulk export** (merged PDF / zip) — note the aggregate bulk-action dispatch (`execution: 'aggregate'`, objectui#3139) already anticipates \"merged PDF, batch print\" as its example payload, so the action surface is partly in place.\n5. Spec unwind: restore a `'pdf'` (or successor) export format value and retire the #8010 retirement prescription cleanly.\n\n## Related\n\n- #1301 (superseded), #8010 (enum removal to unwind)\n- #8345 (FX conversion — same customer scoping batch, also v18)"
+}

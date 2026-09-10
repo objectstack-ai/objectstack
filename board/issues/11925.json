@@ -1,0 +1,31 @@
+{
+  "number": 11925,
+  "kind": "issue",
+  "title": "A fifth client-SDK erasure spelling no grep in #8140's census counted: 38 methods with NO return annotation, typed from `unwrapResponse&lt; …any… &gt;`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:blocked"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-25T01:18:58Z",
+  "updated_at": "2026-09-09T01:53:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11925",
+  "body": "Found while implementing #8140. **Out of its declared scope and deliberately not fixed there** —\nrecording it because it is larger than the population that card worked from, and it is invisible to\nevery grep either the card or its census used.\n\nMeasured at `1f6d04703`, in `packages/client/src/index.ts`.\n\n## The four spellings #8140 worked from, and the one underneath them\n\n#8140's census enumerated four spellings of return-type erasure, all of which put the `any`\n**in a `Promise< … >` return annotation** where a grep can see it:\n\n| spelling | count at head |\n|---|---:|\n| `): Promise< any > =>` | 32 |\n| `): Promise< any[] > =>` | 5 |\n| `): Promise< { …: any[]; … } > =>` | 4 |\n| `< T = any >(…)` on fixed-shape methods | 14 |\n\nA **fifth** population has no return annotation at all. The method's public return type is\n*inferred* from the type argument handed to the private unwrap helper:\n\n```ts\nlist: async (filters?: { status?: string; type?: string; enabled?: boolean }) => {\n    // …\n    return this.unwrapResponse< { packages: any[]; total: number } >(res);\n},\n```\n\nThat method's published type is `Promise< { packages: any[]; total: number } >`, exactly as erased\nas the annotated siblings — but it matches no `Promise< … >` grep, because the text `Promise` never\nappears in it.\n\n**Count: 38 methods.** Commands and raw output:\n\n```\n$ grep -cE '(unwrapResponse|_unwrap)<[^>]*\\bany\\b' packages/client/src/index.ts\n68\n```\n\n68 sites total; 30 of them sit inside methods that DO carry an annotation (those are #8140's\npopulation, now bound). The remaining **38** carry none. Reproducer for the split — it finds each\nsite's enclosing `name: async (` declaration and asks whether the signature contains `): Promise<`:\n\n```\n$ python3 - <<'PY'\nimport re\nlines = open('packages/client/src/index.ts').read().split('\\n')\nsites = [i+1 for i,l in enumerate(lines) if re.search(r'(unwrapResponse|_unwrap)<[^>]*\\bany\\b', l)]\ndef decl_start(n):\n    for j in range(n-1, max(0,n-120), -1):\n        if re.match(r'\\s*[A-Za-z_][A-Za-z0-9_]*\\s*:\\s*async\\s*(?:<[^>]*>)?\\s*\\(', lines[j]): return j\n    return None\nnoann = []\nfor s in sites:\n    d = decl_start(s)\n    if d is None: continue\n    sig = '\\n'.join(lines[d:s]); head = sig.split('=> {')[0] if '=> {' in sig else sig\n    if not re.search(r'\\)\\s*:\\s*Promise<', head):\n        noann.append((s, re.match(r'\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*:', lines[d]).group(1)))\nprint('unwrap-any sites total       :', len(sites))\nprint('…with NO Promise< annotation :', len(noann))\nPY\nunwrap-any sites total       : 68\n…with NO Promise< annotation : 38\n```\n\n## Which families, and why they were not swept into #8140\n\n| family | n | notes |\n|---|---:|---|\n| `meta.*` history / diagnostics — `getPublished`, `listDrafts`, `migrateStored`, `getDiagnostics`, `getReferences`, `getBookTree`, `getAudit`, `rollbackItem`, `diffItem` | 9 | bare `unwrapResponse< any >` |\n| `packages.*` — `list`, `get`, `install`, `enable`, `disable`, `update`, `publish`, `discardDrafts`, `listCommits`, `revertCommit`, `rollback`, `export`, `adoptOrphans`, `duplicate` | 14 | mostly `{ package: any }` / `{ packages: any[]; total }` / `{ commits: any[] }` |\n| cloud `projects.*` — `list`, `create`, `update`, `activate`, `rotateCredential`, `updateHostname`, `updateVisibility`, `retryProvisioning` | 8 | `{ project: any }`, `{ project: any; database: any }`, `{ credential: any }` |\n| environment-scoped packages — `list`, `install`, `get`, `enable`, `disable`, `upgrade` | 6 | `{ package: any }` / `{ packages: any[]; total }` |\n| `ScopedProjectClient.packages.get` | 1 | `{ package: any }` |\n\n#8140's dispatch scoped it to the four annotated spellings, and its clause-② narrowing analysis was\nanswered against those. Widening mid-card would have shipped a narrowing nobody had reasoned about.\n⭐ Note one of these was reachable and **is** now bound —\n`ScopedProjectClient.packages.list` carried BOTH an annotation and the type argument, so it fell in\nscope and became `{ packages: InstalledPackage[]; total: number }`. Its immediate neighbour\n`packages.get` did not, purely because it lacks the annotation. That asymmetry inside one object\nliteral is the clearest statement of the problem.\n\n## Why it is worth its own card\n\n- **Reachability looks good.** `InstalledPackage` (`@objectstack/spec/kernel`) already types the\n  `packages.*` rows — #8140 bound it for the one method in scope, so 20 of the 38 plausibly land on\n  a type that exists today. The `projects.*` cloud family is the one that likely needs contracts\n  authored first (same class as #11924).\n- **Same clause-② narrowing** as #8140: published return types get narrower, no runtime change,\n  and the risk sits with external SDK consumers.\n- **It is exactly the class the census warned about.** #8140's census closed with *\"whoever scopes\n  the implementation half must work from 49, not 32, or they will 'finish' the card with 17 sites\n  still erased.\"* The same sentence applies one level out: an audit anchored on the word `Promise`\n  cannot see a method that never writes it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019siH5jDmk5hrayvfyojUqR)_\n"
+}

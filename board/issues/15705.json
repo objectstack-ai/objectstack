@@ -1,0 +1,33 @@
+{
+  "number": 15705,
+  "kind": "issue",
+  "title": "MCP `run_action` on a screen flow dead-ends: the screen pauses even when every input is bound, and `list_actions` never surfaces flow input variables",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:on-hold",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T03:36:27Z",
+  "updated_at": "2026-09-06T15:36:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15705",
+  "body": "## Summary\n\nAn `ai.exposed` action whose target is a **screen flow** cannot be completed through MCP. `run_action` starts the flow, the screen node suspends the run and returns the form definition, and the MCP tool set has no way to resume it. The agent can press the button but never finish. Two independent causes, both in the platform:\n\n1. **`service-automation` screen executor pauses whenever the node has fields**, without checking whether those fields are already bound as flow variables. `runtime`'s `seedFlowActionParams` *does* merge the MCP `params` into the flow's variables, so correctly-named params bind — and the screen still pauses.\n2. **`runtime`'s `summarizeActionParams` only reads `action.params`** (script-action declarations). A flow's `isInput` variables are never surfaced, so `list_actions` returns no `params` for any flow-typed action even though the tool description promises \"its input parameters\". The agent has no way to learn the input names it would need for (1) to matter.\n\n## Environment\n\n- `@objectstack/mcp`, `runtime`, `service-automation`, `spec` — all **17.2.0**\n- App: `objectstack-ai/hotcrm` @ `5e08628f`, dev server on `http://localhost:4001`\n- Client: Claude Code (desktop) → `http://localhost:4001/api/v1/mcp` with `x-api-key` (principal: human, no onBehalfOf)\n\n## Reproduction\n\nhotcrm's `schedule_followup` action (`src/actions/lead.actions.ts`) is `type: 'flow'`, `target: 'schedule_followup'`, `ai.exposed: true`. The target flow (`src/flows/schedule-followup.flow.ts`) is `type: 'screen'` and declares `subject`, `dueDate`, `activityType`, `priority`, `notes` as `isInput: true` variables; its first node after `start` is `screen_1` with the same five fields.\n\n1. `list_actions` → \n\n```json\n{ \"name\": \"schedule_followup\", \"objectName\": \"crm_lead\", \"type\": \"flow\",\n  \"requiresRecord\": true, \"requiresConfirmation\": false }\n```\nNo `params` key, so the caller cannot know the input names.\n\n2. `run_action({ actionName: \"schedule_followup\", objectName: \"crm_lead\", recordId: \"<lead id>\", params: { subject: \"…\", due_date: \"2026-09-09\" } })` →\n\n```json\n{ \"ok\": true, \"result\": { \"success\": true, \"status\": \"paused\",\n  \"runId\": \"run_a618315c-…\", \"durationMs\": 2,\n  \"screen\": { \"nodeId\": \"screen_1\", \"title\": \"Schedule Follow-up\",\n              \"fields\": [ {\"name\":\"subject\",…}, {\"name\":\"dueDate\",…}, … ] } } }\n```\n\n3. Verify: no `crm_task` with `related_to_lead = <lead id>`; the lead's `next_followup_date` and `updated_at` are unchanged. The run is parked on `screen_1` with nothing able to resume it — the 11 registered MCP tools (`list_objects … run_action`) include no resume / submit-screen verb.\n\nPassing the *correct* names (`dueDate` instead of `due_date`) does not change the outcome: the variables bind, the screen node still suspends.\n\n## Where it happens\n\n- `@objectstack/service-automation` screen node `execute()`:\n  `shouldPause = cfg.waitForInput === true || (hasFields && cfg.waitForInput !== false)` — the only inputs to the decision are \"does the node have fields\" and the author-level `waitForInput` flag. Whether every `required` field already has a bound variable is never consulted. `waitForInput: false` is not a fix: it also skips the form for interactive users.\n- `@objectstack/runtime` `summarizeActionParams(deps, action, obj)`: iterates `action.params` only. For a flow-typed action the flow's `variables.filter(v => v.isInput)` (and/or the first screen node's `fields`) are the real input contract and are not consulted.\n- `@objectstack/runtime` `seedFlowActionParams`: **works as intended** — returns `{ ...record, recordId, <objectName>Id, ...params }`, so this is not where the values are lost.\n- `@objectstack/mcp` `registerActionTools`: `run_action` just forwards to `bridge.runAction` and returns the result verbatim, so the paused envelope reaches the agent but there is nothing it can do with `runId`.\n\n## Expected\n\nEither (or both):\n\n- **Headless satisfaction of a screen**: when a run is started with `params` and every `required` field of the screen node is already bound (and optional ones default), the executor should treat the screen as satisfied and continue instead of suspending. Interactive runs (no params supplied) keep the current behaviour.\n- **A resume verb on the MCP surface**: e.g. `resume_run({ runId, values })` that posts screen values into a paused run — mirroring what the console's screen runner does — so an agent that receives `status: \"paused\"` + `screen` can complete it.\n\nAnd independently:\n\n- `list_actions` should surface a flow action's inputs (`isInput` variables, with the screen field's `label`/`type`/`required`/`options` where available) as `params`, matching the tool description.\n\n## Why it matters\n\n`ai.exposed` today means \"the agent can invoke this\", not \"the agent can complete this\". Every screen-typed flow action is a dead end for MCP clients, and the agent has no signal telling it so — `list_actions` looks identical for a script action that will run to completion and a screen flow that will park. In hotcrm both AI-exposed actions (`schedule_followup`, `convert_lead`) are screen flows, so the action layer is 0-for-2 over MCP while the generic CRUD tools work fully. The fallback an agent ends up taking (`create_record` + `update_record` to re-implement the flow's tail by hand) bypasses whatever business rules the flow encapsulated.\n\nRelated: #2849 established invoke-time as the only agent boundary for actions; this issue is about the other half — once invoked, the action must be completable.\n"
+}

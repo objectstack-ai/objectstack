@@ -1,0 +1,33 @@
+{
+  "number": 11753,
+  "kind": "issue",
+  "title": "The Clone dialog for a permission set now offers five raw JSON blobs as editable inputs — `defaultFromRow` has no non-editable carry-over",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:blocked",
+    "priority:p1",
+    "security",
+    "target:v18",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-24T15:13:09Z",
+  "updated_at": "2026-09-04T06:13:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11753",
+  "body": "Blocked-by: #15193, objectstack-ai/objectui#7611\n\nFound while implementing #11703. ⛔ Deliberately **not** fixed there — that card's split ruling (comment 5396313132, clause ③) named this as its own card in the objectui lane and ruled that it must not hold the server-side fix.\n\n## What\n\n`clone_permission_set` in `packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts` declares its carried facets as `defaultFromRow` params. Per `ActionParamSchema` (`packages/spec/src/ui/action.zod.ts`), such a param is rendered by objectui's `ActionParamDialog` as an ordinary **editable field**, seeded from the row and submitted verbatim.\n\n#11703 took that list from two facets to five. So the Clone dialog now presents, under two ordinary text inputs, five prefilled textareas holding raw JSON — `description`, `object_permissions`, `field_permissions`, `system_permissions`, `row_level_security`, `tab_permissions`. `row_level_security` on the platform's own `member_default` is a JSON array of **17+ policy objects** in one input.\n\nThat is not a regression #11703 introduced so much as one it made unmissable: two blobs read as \"advanced, leave it alone\", five read as a form the admin is expected to fill in.\n\n## Why it is worth a card rather than a shrug\n\nThe clone path is now the platform's **sanctioned** way to customize a package-declared permission set — the save door refuses the in-place edit and its refusal message sends the admin here (#11513 / PR #11702). So this dialog is on the main road, not a corner.\n\nThe failure it invites is not fail-closed. A hand-edited RLS blob that is still valid JSON but wrong — a dropped policy, a mangled `using` clause — produces a clone that grants **more** or **differently** than the base, and the data door will accept it: `permissionSetBodyFromRow()` parses whatever arrives, and `PermissionSetSchema` validates shape, not intent. Compare #11703's own failure direction, which the ruling tolerated precisely because it was fewer grants.\n\n## The shape the ruling preferred\n\n> prefer a **non-editable carry-over** if surfacing three more JSON blobs in the dialog is the alternative\n\nThere is no such knob today. `ActionParamSchema` has `visible` (a CEL predicate that omits the param **entirely** — which would also stop it being sent, so it is not the answer), `defaultValue`, `helpText`, and the widget knobs; nothing expresses \"carry this value through, show it as a read-only summary, do not invite an edit.\"\n\nOptions, for whoever rules on this:\n\n- **A. A `readonly` / `carryOver` flag on `ActionParam`** — declared in `packages/spec`, honoured by objectui's `ActionParamDialog`. Cross-repo, and it widens an authorable surface, so it is contract-first work rather than a patch.\n- **B. Keep the params editable but render a JSON-typed field-backed param as a collapsed summary** — objectui-only, no spec change; the affordance improves for every action with a JSON column param, not just this one.\n- **C. Move the carry-over server-side** — the action stops declaring these params at all and a dedicated clone endpoint copies the facets from the source row, leaving the dialog at its original two inputs. Narrowest dialog, but it takes the clone off the generic data door, which is what makes it work under `managedBy: 'config'` today.\n\nNot measured here: which of the three the objectui renderer can actually carry, and whether any other shipped action already hits this (a sweep of `defaultFromRow` params bound to JSON-serialized columns would answer it).\n\n## Not measured\n\nNo test pins what the Clone dialog *renders*; #11703's pin 6 asserts what the action **sends**, which is a different question and stays green under all three options above.\n\nRelated: #11703 (the facets now carried), #11513 / PR #11702 (the ruling that made clone the sanctioned path).\n"
+}

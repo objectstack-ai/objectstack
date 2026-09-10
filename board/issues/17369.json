@@ -1,0 +1,29 @@
+{
+  "number": 17369,
+  "kind": "issue",
+  "title": "verify's cross-tenant proofs are skipped for a reason ADR-0132 falsified — but the obvious fix is pinned shut by the entitlement boundary",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "needs-user-decision"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T09:45:45Z",
+  "updated_at": "2026-09-10T11:03:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17369",
+  "body": "Split out of #16718, which dispatched this half as report-only: it is a capability question, not a wording one.\n\n## The stale reason\n\n`packages/verify/src/harness.ts` and its three sibling test files skip or fake their cross-tenant proofs, and the reason they state is that **\"the enterprise package is not installable in this workspace\"**:\n\n- `harness.ts:45` — `[#5261] Stand-in for the cloud-private @objectstack/organizations runtime, mounted by bootStack({ multiTenant: 'posture-only' })`\n- `harness.ts:569` — `verify: multiTenant=true requires the enterprise @objectstack/organizations package (migrated from plugin-org-scoping, ADR-0105 D12)`\n- `harness.posture.test.ts:9` — `The enterprise package is not installable in this workspace, so a fake stands in for it ... the proof that the REAL plugin walls tenants lives in cloud's security-enterprise multi-org integration test`\n- `harness.posture-only.test.ts:12`, `harness.host-resolution.test.ts:24` — same premise\n- `packages/cli/test/serve-organizations-host-resolution.e2e.test.ts:24` and two dogfood files state it too\n\nADR-0132 made that reason obsolete as stated. Measured at `076f1d54e`:\n\n- `packages/plugins/organizations/package.json` → `\"license\": \"Apache-2.0\"`, not private\n- `npm view @objectstack/organizations version license` → `17.4.0`, `Apache-2.0` — it really is on the public registry\n- `packages/plugins/organizations/src/organizations-plugin.ts:194` → `readonly supportedPostures = ['group', 'isolated']`\n- `packages/plugins/organizations/src/index.ts:31` → \"This package carries NO licence check of any kind\"\n\n## ⚠️ But the effect is still true, for a NEW reason — and this is the part that makes it a card\n\nThe obvious fix (give `packages/verify` a devDependency on `@objectstack/organizations` and run the real proofs) is **mechanically forbidden**, and deliberately so. `packages/plugins/organizations/src/no-framework-dependents.pin.test.ts` — \"the mechanical half of ADR-0132's entitlement boundary\" — asserts that **no workspace package under `packages/**` declares `@objectstack/organizations` in any of the four dependency fields**, and says why: the commercial repo consumes the framework by `link:`, so such a dependency would install the *ungated* class inside the framework tree a commercial app links against, reachable by a bare `import()` that never consults the app's manifest.\n\nIts own words on the remedy:\n\n> ⛔ So: no workspace package may declare `@objectstack/organizations`, in any of the four dependency fields, ever. Apps declare it; packages do not. Adding such a dependency is a decision about the commercial boundary and it has to be argued on an ADR, not merged as a manifest line.\n\nVerified at `076f1d54e`: `git grep -l '\"@objectstack/organizations\"' -- '**/package.json'` returns exactly one file, the package's own manifest. `packages/verify`, `packages/qa/dogfood` and `packages/cli` declare it nowhere.\n\nSo the prose in those files is **stale in its reason but still correct in its effect**, which is exactly why #16718 left it alone rather than rewriting it — \"it is installable now\" would have been newly false.\n\n## What this card has to decide\n\nThe pin excludes `apps/*` and `examples/*` on purpose: \"those ARE hosts, and a host declaring the runtime it wants to mount is the supported wiring\". That is the route, and it is the shape `packages/cli/test/serve-organizations-host-resolution.e2e.test.ts` already builds — a temp host app with a real package in a real `node_modules`, except it installs a *fixture* today.\n\nOptions, roughly:\n\n1. **Host-app fixture installing the real npm copy.** Turn the verify harness's cross-tenant proofs on against a temp host app that declares and installs `@objectstack/organizations` from the registry (or from a `pnpm pack` of the workspace build). Respects the pin. Costs: a registry/pack step inside a test, and version skew between the packed copy and the workspace.\n2. **Argue an exemption on an ADR** for a test-only, non-published package. The pin's own text says this needs an ADR, not a manifest line — so this option is a decision request, not an implementation.\n3. **Leave the stand-ins, and correct only the stated reason** — rewrite the six sites to say the effect (a framework package may not declare it, ADR-0132's entitlement boundary) rather than the obsolete cause (it is closed-source). Cheapest, changes no behaviour, and removes the false premise a reader meets.\n\n⛔ Whatever is chosen, the prose and the behaviour must move together — #16718 deliberately did not split them.\n\n## Acceptance\n\n- the six sites no longer state a reason that is false\n- if the proofs are turned on, `no-framework-dependents.pin.test.ts` is still green, or its change is carried by an ADR\n- no unlicensed path to the ungated class is opened in the framework tree\n\nRefs: ADR-0132 · ADR-0105 D12 (as amended) · #16718 (the prose sweep this was split out of) · PR #16215\n"
+}

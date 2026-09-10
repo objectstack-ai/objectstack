@@ -1,0 +1,31 @@
+{
+  "number": 2714,
+  "kind": "issue",
+  "title": "tracking: BYO-AI distribution — shells, Connect surface, verifications, listings (#2698 follow-ups)",
+  "state": "open",
+  "state_reason": "reopened",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p0",
+    "tracking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-09T06:43:42Z",
+  "updated_at": "2026-08-03T09:47:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2714",
+  "body": "Umbrella tracker for everything that makes the open edition's BYO-AI capability (#2698) reachable by real users and agents. Core protocol work is **done and merged**: OAuth 2.1 self-serve connect (#2709) + default-on MCP surface (#2712) — every deployment is now a connectable MCP endpoint out of the box. What remains is distribution: shells, product surfaces, verifications, and listings.\n\n**Principle** (keep us honest): the MCP server *is* the product. Ecosystem integrations are thin shells over one single source — `renderSkillMarkdown()` in `packages/mcp/src/skill.ts` (ADR-0036 Amendment C: ONE generic skill, schema discovered live, no per-app artifacts). Anything that looks like a heavy per-ecosystem SDK is out of scope by design.\n\n## Phase 0 — prerequisite fix\n\n- [x] **SKILL.md documents only 7 of 9 tools** (fixed in #2715, merged): `list_actions` / `run_action` (business actions, #2307) are missing from the generated skill's tool list — agents won't know they can run approvals/conversions directly. Small `skill.ts` PR; land before any shell repo copies the content.\n\n## Phase 1 — product surface + first shell (near term)\n\n- [x] objectstack-ai/objectui#2363 — Setup **\"Connect an agent\"** page (merged: objectui#2372 + framework#2741; skill endpoint #2728): env MCP URL, per-client connect cards, API-key minting, SKILL.md download; includes the framework dependency `GET /api/v1/mcp/skill` (renderSkillMarkdown has no HTTP outlet today)\n- [x] #2713 — **official Claude Code plugin** (shipped: objectstack-ai/claude-plugin, drift-guard green) (thin repo `objectstack-ai/claude-plugin`: plugin.json + `.mcp.json` with `${OBJECTSTACK_MCP_URL}` + SKILL.md + `/objectstack:connect`; CI drift-guard against skill.ts)\n- [x] **One-click install buttons** on the Connect page (Cursor deeplink + VS Code/Codex snippets shipped inside the widget) + docs: \"Add to Cursor\" deeplink (base64 config) and \"Install in VS Code\" badge — links, not plugins (extend objectui#2363)\n- [ ] **ChatGPT connectors compatibility verification**: our remote MCP + OAuth/DCR against the OpenAI client; fix or document any gaps; add the Connect card\n- [ ] **Codex CLI verification**: remote HTTP MCP + OAuth maturity check; document `config.toml` snippet; fallbacks = `x-api-key` header or `npx mcp-remote` bridge. No shell repo — Codex has no marketplace mechanism; it reuses the same Agent Skills SKILL.md\n\n## Phase 2 — more shells + listings (after Phase 1 lands)\n\n- [x] **Gemini CLI extension** (shipped: objectstack-ai/gemini-extension, drift-guard green): thin repo (`gemini-extension.json` + GEMINI.md reusing the same skill content; same drift-guard)\n- [ ] **MCP registry / directory submissions** (batch, metadata-only): official MCP registry (`server.json`, can live in this repo), mcp.so, Smithery, PulseMCP\n- [ ] objectstack-ai/cloud#786 — **Anthropic connector directory**: decide the multi-tenant entry shape (account-routed gateway vs docs-first; RFC 8707 `aud` across hosts), then submit\n- [ ] **Agent-framework recipes** in `content/docs`: ~10-line connect examples for LangChain/LangGraph, Vercel AI SDK, Microsoft agent framework — docs pages, NOT maintained SDK packages\n\n## Phase 3 — demand-gated\n\n- [ ] **n8n community node** (`n8n-nodes-objectstack`, own repo + npm): only real development in the list — typed dropdowns from `list_objects`/`describe_object` beat the generic MCP client node for the low-code audience. Start when Phase 1 shows user signal\n- [ ] Zapier / Make: watch — their native MCP support is evolving; likely free coverage\n\n## Repo topology (settled)\n\n| Item | Home |\n|---|---|\n| skill single source, `/api/v1/mcp/skill`, registry `server.json`, recipes | framework (existing) |\n| Connect page + one-click buttons + client cards | objectui (existing) |\n| Directory entry decision + submission | cloud (existing) |\n| Claude Code plugin / Gemini extension | 2 new thin repos (clone-to-install mechanics require it) |\n| n8n node | 1 new repo + npm, demand-gated |\n\nRefs #2698, #2709, #2712.\n\n\n\n"
+}

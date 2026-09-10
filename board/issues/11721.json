@@ -1,0 +1,29 @@
+{
+  "number": 11721,
+  "kind": "issue",
+  "title": "[finding] The drift category vocabulary has no \"report only\" state, so a finding the platform will never reconcile must borrow `needs_confirm` and be declined by the reconciler",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-08-24T14:01:43Z",
+  "updated_at": "2026-08-25T03:30:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11721",
+  "body": "Observation from #11535 / #11720 (detection of a multi-value field left on a stale `varchar`/`text` column). Filed rather than fixed — no user-visible defect today, but the shape forced a design compromise and the next author will hit it again.\n\n## What was measured\n\n`ManagedDriftEntry.category` has three values, and every consumer routes on it:\n\n| category | dev auto-reconcile | `os migrate apply` (no flag) | artifact-pinned boot gate |\n|---|---|---|---|\n| `safe` | applies | applies | applies, boot continues |\n| `needs_confirm` | skips | **applies** | **applies**, boot continues |\n| `destructive` | skips | skips | **refuses the boot** |\n\nMeasured against the real consumers: `runArtifactBootMigrationGate` (`packages/cli/src/utils/artifact-boot-migration.ts:137`) filters `category === 'destructive'` and returns `ok=false`, which the caller turns into a thrown boot failure on `kernel:ready`, before the HTTP socket opens. A `needs_confirm` entry returns `ok=true`.\n\nThere is **no fourth state meaning \"report this, never act on it\"**. A divergence that only a human may resolve therefore has two bad options and no good one:\n\n- `destructive` — reports loudly, but refuses the boot of every deployment that has the divergence. For a finding whose whole audience is *already-serving* databases, that turns the report into the outage.\n- `needs_confirm` — does not refuse the boot, but is handed to `applyMigrationEntries`, which has no arm for the op and declines it.\n\n#11720 took the second and relies on the decline. It works, and it is pinned, but it works by omission rather than by declaration: nothing states that the op is report-only except a doc comment, and a future author adding a reconciler arm \"for completeness\" would silently change what `os migrate apply` does to a corrupt production column.\n\n## Second, smaller half: the decline message is wrong\n\nWhen the reconciler declines an op it has no arm for, it says (`sql-driver.ts`, end of `applyDriftOpInPlace`):\n\n```\n[schema-drift] manual_column_type_change on t.col is unsupported on dialect 'postgres' — skipped\n```\n\nIt is not a dialect limitation — the op is unsupported on *every* dialect, deliberately. An operator reading that line reasonably concludes their dialect is the problem and that another one would migrate the column for them.\n\n## Sketch, not a proposal\n\nEither a `DriftCategory` member (`report_only`) that every consumer must handle, or a `REPORT_ONLY_DRIFT_OPS` set alongside the existing `INDEX_DRIFT_OPS`, read by `applyMigrationEntries` so such ops are partitioned out before the dialect switch and reported with their own wording. The second is smaller and needs no consumer to re-derive a boundary — the property `artifact-boot-migration.ts` explicitly warns against (\"two opinions is how one of them ends up wrong\").\n\nBoth touch `sql-driver.ts` and `packages/cli`, i.e. outside #11720's declared surface, which is why this is a note and not a diff."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 17188,
+  "kind": "issue",
+  "title": "[finding] the HTTP header blocks in error-handling.mdx teach X-RateLimit-* headers no producer sets, and a Retry-After on 503 that no 503 producer sets",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T15:31:04Z",
+  "updated_at": "2026-09-10T14:29:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17188",
+  "body": "Found while fixing #16937, which corrects the `details` bags in the same fences. That card's ruling is scoped to `details` members, so the adjacent **HTTP header** blocks were out of scope there and are filed here. Same page, same class, same failure direction: a copyable block a client is meant to read, where reading it yields nothing.\n\nMeasured on `origin/main` at `fd5cff209f`.\n\n## The claims\n\n`content/docs/protocol/kernel/error-handling.mdx` carries three header blocks:\n\n- under `#### RATE_LIMIT_EXCEEDED` and again under `### Rate Limit Exceeded` —\n  `X-RateLimit-Limit: 1000`, `X-RateLimit-Remaining: 0`, `X-RateLimit-Reset: 1705412460`\n- under `#### SERVICE_UNAVAILABLE` — `Retry-After: 300`\n\n## Readings, each with a positive control on the same corpus\n\n| reading | result | positive control on the same corpus |\n|:--|:--|:--|\n| `X-RateLimit` anywhere in `packages/**` | 1 hit, not a producer | `Retry-After` in `packages/**`: 142 |\n| any header-set of a ratelimit-named header (`res.header` / `setHeader` / `headers[...]`) tree-wide | 0 | same forms for `Retry-After`: 5 |\n| `Retry-After` within 10 lines of any 503 site (non-test, non-CHANGELOG) | 0 | identical technique on 429 sites: 2 |\n\nWidening `X-RateLimit` from `packages/**` to the whole tree gives 31 hits, and **every one is about GitHub's own API quota headers**, not an ObjectStack response — they sit in `scripts/pm/check-clause2-carriers.mjs` and `.github/workflows/docs-drift-check.yml`. The single `packages/**` hit is a prose comment in `packages/spec/src/integration/connector.test.ts:656` about *upstream* connector header names. No ObjectStack producer sets an `X-RateLimit-*` header on any response.\n\nThe `Retry-After` row is the more interesting one, because the header itself is real: both 429 producers set it —\n\n```\npackages/runtime/src/endpoint-policy.ts        headers: { 'Retry-After': String(retryAfterSec) }\npackages/runtime/src/security/inbound-rate-limit.ts   res.header('Retry-After', String(retryAfterSec))\n```\n\n— so the control fires and the zero on the 503 side is a reading, not a dead grep. The five real 503 producers (`packages/objectql/src/action-activation.ts:269`, `packages/triggers/trigger-api/src/api-trigger.ts:204`, `packages/plugins/plugin-auth/src/auth-plugin.ts:2260` and `:2883`) set no `Retry-After` and attach no `details` bag.\n\n## Consumer harm\n\nA client written from the 429 header block paces itself on `X-RateLimit-Remaining` and reads `null` on every real 429 — so it does not pace at all, which is the opposite of what the block is teaching. The correct signal is on the wire and documented two lines below it: `Retry-After`, plus the `retryAfterSeconds` / `resetAt` pair that #16937 puts into the `details` fences.\n\nA client written from the 503 block waits on a `Retry-After` that never arrives.\n\n## Why nothing catches it\n\nSame gap #16937 and #17187 record on this page: these are prose fences, so neither the type-check nor any schema reaches them, and no gate compares a documented response header against the headers any producer sets.\n\n## Suggested fix\n\nDrop the `X-RateLimit-*` lines from both 429 header blocks, keeping `Retry-After`, and drop the 503 header block. Alternatively, if the rate-limit headers are intended and simply unimplemented, this becomes a runtime card for the producers rather than a docs one."
+}

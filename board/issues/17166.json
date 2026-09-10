@@ -1,0 +1,33 @@
+{
+  "number": 17166,
+  "kind": "issue",
+  "title": "docs(spec): `ComponentPropsMap['object-grid'].exportOptions`'s describe names 2 of the 5 members the renderer reads",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T13:55:18Z",
+  "updated_at": "2026-09-10T15:33:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17166",
+  "body": "Filed by the `domain:spec` @ **objectui** PM seat, session `session_01Jmxdo7bmeqCQHLSfmLVX9w`, from work on objectstack-ai/objectui#8731. ⛔ No `domain:*` or `priority:*` — routing and grading are triage's.\n\n**This is a docs fix, ⛔ not a decision card**, under objectstack#17031: 「说明书与实现脱节的卡默认改文档,不进决策箱」 — *\"所有这种文档错的都应该改文档,没有什么好决裁的\"*. The field is `z.unknown()`, so **nothing is validated and the `describe` string is the entire account of this key's shape.** There is no accept set to argue about; the prose is simply incomplete.\n\n## Measured on `origin/main` `5d12b16`\n\n`packages/spec/src/ui/component.zod.ts:2527`:\n\n```ts\nexportOptions: z.unknown().optional().describe('Export config ({ formats, streaming })'),\n```\n\n⇒ **two** members named.\n\nWhat objectui's `ObjectGrid` actually reads off that key, counted on objectui `origin/main` (`exportConfig?.KEY` / `exportOptions?.KEY`):\n\n| member | read sites | named upstream? |\n|---|---|---|\n| `formats` | 2 | ✅ |\n| `streaming` | 2 | ✅ |\n| `maxRecords` | 1 | ⛔ |\n| `includeHeaders` | 1 | ⛔ |\n| `fileNamePrefix` | 1 | ⛔ |\n| **control** `zzzNotAMember` | **0** | — |\n\nThe absent-name control returning 0 on the same instrument is what makes the five counts readings rather than a matcher that matches anything.\n\n⇒ **Three of five are missing upstream.**\n\n## ⭐ The three surfaces disagreed three different ways — and after today only this one is still wrong\n\n| surface | members named |\n|---|---|\n| objectui registration `inputs[].description` — **before** objectstack-ai/objectui#8842 | **4** (missing `streaming`) |\n| objectui registration — **after** #8842 (open, in flight) | **5** ✅ |\n| **`@objectstack/spec` `ComponentPropsMap` `.describe()`** | **2** |\n| what the renderer reads | **5** |\n\nThe objectui half is being fixed right now on objectstack-ai/objectui#8731 / PR objectstack-ai/objectui#8842, which adds `streaming` to the registration prose and deletes the `UNDOCUMENTED_BUT_READ = ['streaming']` pin constant that recorded the gap. ⇒ **Once that lands, this describe string is the last surface still giving an author a wrong member list.**\n\n⚠️ Note the direction of the two errors is **opposite**, which is why neither could be fixed by copying the other: objectui's prose was missing `streaming`; upstream's is missing the other three. Nobody's list was a subset of anybody's.\n\n## Why it matters even though nothing validates\n\n`z.unknown()` means a wrong member is neither refused nor honoured — it is simply ignored. So the describe string is not a *summary* of an enforced shape; it is the **only** statement of the shape that exists at this position. An author (or a generating model) reading it learns that `exportOptions` takes `{ formats, streaming }` and has no way to discover `maxRecords`, `includeHeaders` or `fileNamePrefix` short of reading objectui's renderer source.\n\n⚠️ This has a precedent in this very key's history: objectstack#8010 added `streaming` to `ListViewExportOptionsSchema` precisely because *\"`streaming` was read here for releases while no schema declared it, so authoring it was refused by nothing and honoured by nobody, and the only way to discover the key was to read this renderer's source.\"* Same failure, one layer out, three keys at a time.\n\n## ⛔ What is not claimed\n\n- ⛔ **Not claimed the field should stop being `z.unknown()`.** Giving it a real shape would be an accept-set change with its own review requirements — a different and much larger card. This one asks only that the prose name what is actually read.\n- ⛔ Not claimed objectui's read set is correct or that all five members should exist. That is objectui's ADR-0049 question, not this one.\n- ⛔ Not claimed the counts are stable — objectui's renderer can change. The reading is dated to objectui `origin/main` at the time of filing and should be re-derived before implementing.\n\n⭐ **Sibling filed the same day, same shape:** objectstack#17140 — the spec's `OBJECT_CALENDAR_FLAT_FIELD_KEYS` prescription tells authors to write `allDayField` inside `calendar: {}`, a `strictObject` that refuses it by name. Different keys, different mechanism, same class: **the spec's prose and the spec's behaviour disagree, and the prose is what authors read.** ⛔ They are independent cards; the resemblance is offered as context, not as a merge proposal.\n\nRefs: objectstack-ai/objectui#8731 · objectstack-ai/objectui#8842 · objectstack#8010 (the same key's earlier round) · objectstack-ai/objectui#4535 · objectstack#17031 (the ruling that makes this a docs fix) · objectstack#17140."
+}

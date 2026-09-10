@@ -1,0 +1,31 @@
+{
+  "number": 15233,
+  "kind": "issue",
+  "title": "[finding] `Governed Surface Queue Guard` is required on `main` but pinned by no REQUIRED_CONTEXTS row — renaming its job detaches the governed-surface gate silently",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-04T06:44:47Z",
+  "updated_at": "2026-09-10T08:10:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15233",
+  "body": "Filed unassigned and **ungraded** by an `os-dev` seat while running the derived gate family for #12771 (PR #15224). ⛔ Not graded, not routed, severity not judged. Out of scope for that card and deliberately not fixed there.\n\n## What was measured\n\n`node scripts/check-required-contexts.mjs --verify-required-set`, run 2026-09-04 against the live ruleset, exit **0** (report-only by design, #9642). Its own verdict lines:\n\n```\nrequired-set sweep: 7 live required context(s) on main, 0 registered-but-not-required, 1 required-but-unpinned.\n  read 1 ruleset(s); 1 active and covering the default branch; strict_required_status_checks_policy: false\n    - ruleset main (id 12119582, Repository-sourced - objectstack-ai/objectstack)\n\n  direction B - required in the live set, pinned by NO registry row (1). Renaming the job\n     that publishes one of these detaches its gate silently - the defect this whole file exists for. The remedy\n     is a REQUIRED_CONTEXTS row naming the workflow, job id and authorizing ruling; no settings change.\n       - Governed Surface Queue Guard - from main (active)\n```\n\nConfirmed repo-side: `REQUIRED_CONTEXTS` in `scripts/check-required-contexts.mjs` carries six rows — `Lint & Repo Gates`, `TypeScript Type Check`, `Test Core`, `Dogfood Regression Gate`, `Build Core`, `Temporal Conformance (live PG + MySQL)`. The seventh live required context, `Governed Surface Queue Guard`, is absent from it.\n\n## Why it is worth a card\n\nThis is precisely the failure mode that file's own docblock exists for: a required status check is matched **by the check-run name**, and a job's check-run name is its `name:` value. Nothing in a workflow file says \"this string is load-bearing\". The registry is what makes it load-bearing in a machine-checked way — and the one gate that governs the governed surface is the one context that registry does not name.\n\n⚠️ **The remedy the gate names is repo-side only** — a `REQUIRED_CONTEXTS` row naming the workflow, job id and the authorizing ruling. No settings change, so this is not blocked on a maintainer settings pass.\n\n## ⛔ Not the same as #12427\n\n#12427 (closed) was **direction A**: the guard was *not in the required set at all*, so its refusal ran as advisory and a zero-review governed PR merged. That was fixed — the sweep now reads it as required and active. This is **direction B**: it *is* required, and nothing pins the name it is required under. The two directions fail differently and neither implies the other; the sweep reports them as separate counts for that reason.\n\n## Dedup\n\nTargeted search over this repo's issues for the guard and the registry: four hits (#12427, #9533, #12750, #13034), all **closed**, none naming direction B for this context. #9533 is the mirror-image case (registry rows pinning contexts that are *not* required). No open twin.\n\n## Re-check\n\n```\nNODE_OPTIONS=--use-env-proxy node scripts/check-required-contexts.mjs --verify-required-set\n```\n\n⚠️ Without `--use-env-proxy` this exits **2 — NOT VERIFIED** rather than reporting anything, because Node's fetch bypasses the session proxy and GitHub answers HTTP 401. The gate says so itself and names the flag; reading that 401 as \"no credential\" is the inference #9642 records."
+}

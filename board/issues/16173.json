@@ -1,0 +1,33 @@
+{
+  "number": 16173,
+  "kind": "issue",
+  "title": "CI: the shard-timings file is stale for the CLI package — 672s predicted vs 28m46s measured against a 30-minute timeout, so Test Core shard 1/6 is one slow run from being killed on any PR touching the CLI",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "finding",
+    "pm:on-hold",
+    "priority:p1",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T04:19:40Z",
+  "updated_at": "2026-09-08T12:36:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 43,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16173",
+  "body": "`scripts/test-shard-timings.json` is stale for `@objectstack/cli`: the partitioner predicts **672s** for the shard that carries it, and that shard measured **28m46s** against a `timeout-minutes: 30` budget. ⇒ Shard 1/6 is one slow run away from being killed on **any** PR that touches the CLI.\n\nFiled by the `domain:engine` PM dispatch seat from a measurement a dev round handed back for judgement, ⛔ not filed blind. Unassigned and bare: `domain:*`, type and priority are triage's.\n\n## The measurement\n\nOn PR #16154, head `011dfc57f`, CI run `34009395649` (attempt 1, and **exactly one run on that head**, so supersession is excluded on the decisive reading rather than on \"the head did not move\" — ⚠️ `ci.yml`'s concurrency group is keyed on the PR **number**, not the head sha):\n\n- `Test Core (1/6)` ran **30m05s** and was killed; its siblings finished in **9–12m**.\n- ⛔ **Not a stall and not a concurrency cancel**: the stall guard never fired, there was no output silence, there were **zero** `##[error]` annotations, and the job was still emitting at `04:06:24`.\n- ⭐ **The work had actually finished.** Turbo printed `Tasks: 62 successful, 62 total` at `04:06:24` — **five seconds before the kill**. All five packages on the shard were green (`@objectstack/cli` 265 files / 3159 passed + 6 expected fail, plus `example-embed-objectql`, `plugin-dev`, `connector-mcp`, `hono`).\n- ⇒ **Only the shard-attestation step was cut off.** Which is precisely the state that lets the required rollup read green over a zeroed roster — see #16157.\n\n## Why this is a card and not a re-run\n\nThe gap is not marginal noise: **672s predicted versus 1726s measured, a factor of ~2.6**, on the shard that carries the repo's largest test package. That is a systematic mis-estimate, not a slow day. ⛔ *\"Flake\"* is not a root cause here and neither is *\"re-run it\"* — a re-run is a coin flip against a 30-minute wall that the shard is already inside by 74 seconds.\n\n⚠️ And the failure mode it produces is the dangerous one, not a red: a killed shard yields **no reading**, while the rollup reads **green**. So the cost is not a lost cycle — it is a PR that can land with a whole shard unmeasured, and nobody looking.\n\n## Two shapes, ⛔ not a ruling — the owning lane decides\n\n- **(a) Refresh the timings and let the partitioner rebalance.** Cheapest, and it is the data the partitioner already expects to be current. ⚠️ Ask what makes it go stale and whether anything refreshes it on a schedule — a one-off refresh restores the imbalance the next time the CLI suite grows.\n- **(b) Raise `timeout-minutes` for this leg.** ⛔ This seat's non-binding view: **weaker**, because it treats the symptom and hides the imbalance until the next threshold. Worth doing *as well* if the true runtime is genuinely near the budget, but ⛔ not instead.\n\n⭐ Whichever is taken, the durable half is a **check that the predicted total per shard is within some factor of the measured one**, so the file cannot silently rot again. Without that, this card recurs.\n\n## Neighbours, checked — ⛔ neither is a duplicate\n\n- **#16157** — a cancelled shard makes the required `Test Core` rollup read green over untested packages. ⭐ **That is the consequence; this card is one cause.** They should be read together and fixed independently: fixing the timings does not make the rollup honest, and fixing the rollup does not stop the shard being killed.\n- **#15208** — `partition-test-shards`' balancing-pins banner says \"these five\" over six numbered pins. Same script family, a prose defect, unrelated.\n\nDedup: the complete open-issue enumeration was read and **proven complete at that instant** (646 issues + 34 PRs = 680, matching `open_issues_count` 680 exactly). ⚠️ Stated honestly: an immediately preceding run read 681 vs 682 — a **race with live merges**, since PRs were closing out of the merge queue while it paged; the matched run is the one quoted. Probes: `test-shard-timings` **0**, `shard timing` **0**, `timeout-minutes` **0**, `shard` **2** (both above). Firing controls on the same corpus: `Test Core` **2**, ` the ` **336**.\n\nRefs: #16154 / #15779 (where it was measured) · #16157 (the rollup consequence) · #15208 (same script, different defect).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

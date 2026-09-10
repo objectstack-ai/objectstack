@@ -1,0 +1,32 @@
+{
+  "number": 16612,
+  "kind": "issue",
+  "title": "[finding] Once system-context.mdx carries no line numbers, the os-regen `mixed: 'line-anchors'` comparator is the IDENTITY — the routing's stated safety argument, and three prose blocks, go stale together",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-07T12:30:49Z",
+  "updated_at": "2026-09-10T14:32:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16612",
+  "body": "Filed unassigned by the execution seat working #15921. Ungraded and unrouted — `domain:*`, priority and type are triage's.\n\n`Blocked-by: #15921` — nothing here is true on `origin/main` today. It becomes true the moment #15921's branch lands, so the card exists before the landing rather than after it.\n\n## The mechanism\n\n`content/docs/permissions/system-context.mdx` is routed `merge=os-regen` in `.gitattributes`, and it is the ONE row carrying a `mixed` field (`scripts/regen-artifacts.mjs`, `mixed: 'line-anchors'`). The comparator that field names is `blankAnchorLineNumbers` in `scripts/doc-line-anchors.mjs`, wired through `MIXED_COMPARATORS` in `scripts/git-merge-regen.mjs`. Its job (#14064) is to decide whether two revisions differ ONLY in the half a generator re-derives — if so the driver may defer, and if not it must not, because dropping a side would delete hand-written prose.\n\nThat comparator blanks `file:line` anchors. #15921 removes every one of them.\n\nMeasured in the #15921 worktree, on the same two revisions of the page:\n\n```\nbase f2f6684cd5   | line anchors: 141 | blankAnchorLineNumbers is the identity: false\nissue-15921 head  | line anchors:   0 | blankAnchorLineNumbers is the identity: true\n```\n\nAn identity comparator makes \"equal modulo the generated half\" mean \"byte-identical\". So after #15921 lands, this row defers essentially never and falls back to a text merge or a loud conflict.\n\n## Why this is a finding and not a bug\n\nThe behaviour change is in the SAFE direction and is not a regression to repair by reverting anything: silent prose deletion (the whole of #14064) becomes unreachable, because the driver can no longer conclude \"lossless\" on a page whose two revisions differ at all. What is lost is the #13646 convenience — 24 of the last 25 `main` commits to this page were pure anchor renumberings the driver absorbed for free, and none of those commits can exist any more either, because there are no numbers left to renumber.\n\nWhat is left behind is stale text and an inert declaration, and both are the kind that read as current forever:\n\n1. **`scripts/regen-artifacts.mjs`** — the row's comment block argues at length from \"the merged tree's correct anchors are on NEITHER side (measured on #13625 — five conflicted anchors resolve to 4408/5771/6019/6382/6575 …)\". That measurement is about line numbers this page no longer has. The `mixed: 'line-anchors'` value itself is now a comparator that can never say yes.\n2. **`.gitattributes`** — the paragraph above the row calls the page \"a generated `file:line` anchor table\" and says the census gate \"catches the stale anchors a merge leaves behind\". There are no stale anchors of that kind to catch.\n3. **`scripts/doc-line-anchors.mjs`** — its module header opens on this page (\"Measured on `content/docs/permissions/system-context.mdx` over 19 days, 101 of its 111 anchors rotted\") and describes itself as the one reader of line anchors in docs prose. After #15921 the module has exactly one consumer left, `scripts/git-merge-regen.mjs`, and the page it was built for is not in its population any more.\n\n## What the decision actually is\n\nNot for this seat. Stated as options rather than a recommendation, because the routing is the merge driver's territory and #15921 was explicitly fenced out of it:\n\n- **Keep the routing, retire `mixed`.** The row stays routed and simply stops claiming a lossless-deferral case, which is what the identity comparator already does in practice. Cheapest, and `NOT_DRIVER_MANAGED`'s reasoning may then apply instead.\n- **Move the row to `NOT_DRIVER_MANAGED`.** #14064 declined this because a page that conflicts hourly would land on a human who could not resolve the anchors correctly. That objection is now weaker: symbol anchors ARE hand-resolvable, since neither side's value depends on a position.\n- **Leave it exactly as it is and only fix the three prose blocks.** Defensible — the identity comparator is not wrong, only vacuous — but it leaves a `mixed` field whose stated purpose no reader can verify.\n\n`pnpm check:merge-driver` reconciles `.gitattributes` against `regen-artifacts.mjs` in both directions and is green on the #15921 branch, so nothing mechanical will raise this.\n\n## Re-check\n\n```\ngit show origin/main:scripts/regen-artifacts.mjs | grep -n \"line-anchors\"\ngit show origin/main:scripts/git-merge-regen.mjs | grep -n \"MIXED_COMPARATORS\" \nnode -e \"import('./scripts/doc-line-anchors.mjs').then(m=>{const t=require('fs').readFileSync('content/docs/permissions/system-context.mdx','utf8');console.log(m.extractLineAnchors(t).length, m.blankAnchorLineNumbers(t)===t)})\"\n```\n\n## What is deliberately NOT claimed\n\n- No claim that #15921 should have changed any of this. The dispatch fenced the merge driver off by name, and this seat kept that fence.\n- No claim that the fallback to a text merge is harmful. It is measured to be the safer half of the trade; only the convenience is lost.\n- No design proposed. The three options above are the shape of the choice, not a recommendation.\n\nRelated: #14064 (the ruling that created the `mixed` field) · #13646 (the routing) · #13625 (the five-anchor measurement it argues from) · #15921 (the migration that makes the comparator vacuous)."
+}

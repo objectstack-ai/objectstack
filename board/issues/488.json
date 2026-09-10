@@ -1,0 +1,36 @@
+{
+  "number": 488,
+  "kind": "pull_request",
+  "title": "Align client with spec API protocol and add metadata discovery methods",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-02T08:48:51Z",
+  "updated_at": "2026-02-02T09:36:12Z",
+  "closed_at": "2026-02-02T09:04:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-02-02T09:04:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/488",
+  "body": "Client's discovery interface used custom `routes` object incompatible with spec's `GetDiscoveryResponseSchema`. Missing metadata discovery methods exposed by server.\n\n## Changes\n\n**Discovery interface alignment**\n- Replace custom `DiscoveryResult.routes` with spec-compliant `version`, `apiName`, `capabilities`, `endpoints`\n- Use `GetDiscoveryResponse` type from `@objectstack/spec/api`\n- Remove dynamic route resolution; client now uses conventional paths (`/api/v1/data`, `/api/v1/meta`, `/api/v1/ui`)\n\n**Metadata discovery methods**\n- Add `meta.getTypes()` - list available metadata types\n- Add `meta.getItems(type)` - list items of specific type\n- Add `meta.getItem(type, name)` - get specific metadata item\n- Deprecate `meta.getObject()` in favor of `getItem('object', name)`\n\n**Type exports**\n- Export `GetDiscoveryResponse`, `GetMetaTypesResponse`, `GetMetaItemsResponse` from spec\n\n## Before/After\n\n```typescript\n// Before: Custom discovery format\nconst discovery = await client.connect();\n// { routes: { data: '/api/v1/data', ... }, capabilities: { ... } }\n\n// After: Spec-compliant format\nconst discovery = await client.connect();\n// { version: 'v1', apiName: 'ObjectStack', capabilities: [...] }\n\n// New: Metadata discovery\nconst types = await client.meta.getTypes();        // { types: ['object', 'plugin', ...] }\nconst items = await client.meta.getItems('object'); // { type: 'object', items: [...] }\nconst item = await client.meta.getItem('object', 'customer'); // object definition\n```\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 按照最新的plugin-hono-server改动和spec api规范，调整 @objectstack/client\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

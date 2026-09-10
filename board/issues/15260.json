@@ -1,0 +1,31 @@
+{
+  "number": 15260,
+  "kind": "issue",
+  "title": "[repo:objectui] Inline-edit grid: Enter neither commits nor moves to the next row, Tab does not move, and single-click can open the editor unfocused (keystrokes lost, cell commits as 0)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p3",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-04T07:26:56Z",
+  "updated_at": "2026-09-08T15:30:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15260",
+  "body": "## Summary\n\nIn the list view's inline-edit grid, **Enter does not commit the cell and does not move to the next row**; the editor simply stays open until the user clicks elsewhere. Tab does not move to the next cell either. For the \"fill one numeric column down a list\" task (a KPI reporter typing actual values for N indicator rows) this means every row costs a mouse click plus, if the user presses Enter expecting Excel behaviour, a confused moment. Single-click sometimes opens the editor without focusing the input, so the first keystrokes are lost and the cell commits as `0` (observed twice out of six cells in a scripted run; a double-click + select-all always works).\n\n## Reproduction\n\nPlatform 17.2.0 console, any grid with `inlineEdit: true` and a numeric column.\n\n1. Click a numeric cell → editor opens.\n2. Type `85`, press Enter → the editor remains open with `85` in it; no \"N 行已修改\" bar until focus leaves the cell.\n3. Press Tab → nothing moves.\n4. Click another cell → the previous one commits (row marked modified), the new one opens.\n\nVariant: single-click a cell and start typing immediately (within ~1 s) → the digits are not captured; the cell later commits as `0.0000`.\n\n## Expected (spreadsheet conventions, which is what an inline grid promises)\n\n- Enter commits and moves focus to the same column in the next row; Shift+Enter moves up; Tab / Shift+Tab move right / left; Esc cancels.\n- The editor input must be focused (and its content selected) the moment the editor opens, so typing on single-click never loses keystrokes.\n- Optional: an explicit \"fill-down\" affordance is not needed — Enter-to-next-row covers the KPI case.\n\n## Environment\n\n`@objectstack/console` 17.2.0 · `objectstack dev` · Chromium 1440×900 · zh-CN. App: objectstack-ai/kpi (`kpi_entry_line` list, column `actual_value`)."
+}

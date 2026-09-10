@@ -1,0 +1,30 @@
+{
+  "number": 10572,
+  "kind": "issue",
+  "title": "finding: lint.yml's \"must stay immediately above the re-measure\" ordering contract is prose-only, and violating it is currently SILENT",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:on-hold",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-21T03:45:35Z",
+  "updated_at": "2026-08-27T17:01:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/10572",
+  "body": "Observation-class finding, filed unassigned from #8331's implementation (PR #10568). Nothing is broken today. Recording it so it is not rediscovered.\n\n## What\n\n`.github/workflows/lint.yml`'s aggregator comment declares an ordering contract in prose:\n\n> - `Build the ledgered packages' dependencies` must stay immediately above the re-measure — both are in `typecheck-debt`.\n\nNothing enforces it, and — this is the part worth recording — **violating it would not fail loudly either.** #8331's implementation measured why:\n\n- `pnpm check:type-check-debt` (`--re-measure`) calls `unbuiltClosure()` **before** `refreshBuiltClosure()`, and refuses rather than building from nothing. So the workflow step really is load-bearing *in principle*: the gate cannot rescue a closure member no earlier step built.\n- But of the **55** workspace packages in the ledgered dependency closure, the step *above* it (`Build workspace packages`, `--filter='./packages/*' --filter='./examples/*^...'`) already covers **all 55** on the current tree. Measured with turbo's own `--dry=json` package sets against the gate's own closure enumeration.\n\n⇒ Move the build step to another lane, or delete it, and the refusal does **not** fire; `refreshBuiltClosure()` quietly does the work instead and the lane stays green. The prose contract is unenforced *and* self-healing, which is the combination that lets it rot unnoticed until the day the coverage accident stops holding.\n\nThe margin is one package: `@objectstack/service-knowledge` (`packages/services/`, pulled into the closure by the ledgered `@objectstack/knowledge-ragflow`) is reached by that preceding step **only** through `./examples/*^...`, i.e. because `examples/app-todo` happens to depend on it — the same accident `lint.yml` already records one step above for #3037. `C \\ (./packages/* alone)` = exactly that one package.\n\n## Why it is filed rather than fixed\n\nPR #10568 deliberately stayed comment-only. A mechanical pin is cheap and would not need a new gate or a new `lint.yml` step, which is why this is worth recording rather than dropping: `scripts/check-type-check-coverage.mjs`'s `observed()` **already reads `.github/workflows/lint.yml`** and already derives CI-wiring facts from it (`ciInvokesTask`, `ciInvokesRoot`) that its `evaluate()` asserts. A third derived fact — \"the step immediately before the one running `pnpm check:type-check-debt` runs the closure build with the same filters `refreshBuiltClosure()` uses\" — would ride the existing `--self-test`, which two jobs already invoke, and would let the filters be single-sourced in the script instead of hand-copied.\n\n## Why it may not be worth doing\n\nPost-#8330 the drift this would catch is already **loud** in the direction that matters: the gate refreshes with its own filters before measuring, so a narrower workflow filter ends in the `unbuiltClosure()` refusal and a wider one costs cache hits. Neither can make CI measure a different world than a local run, which is what #8271 was. What a pin buys is protection of the *ordering* claim itself — currently resting on a set inclusion that no test asserts and that one manifest edit in `examples/app-todo` can break.\n\nWhoever picks this up should decide against that trade, not assume it."
+}

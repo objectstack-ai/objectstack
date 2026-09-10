@@ -1,0 +1,30 @@
+{
+  "number": 15193,
+  "kind": "issue",
+  "title": "[gate] the v18 development line is not open — ADR-0131 execution cards are blocked on this card",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p1",
+    "target:v18",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T05:43:57Z",
+  "updated_at": "2026-09-04T05:43:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15193",
+  "body": "**This card is a gate, not work.** It exists so that ADR-0131's execution cards cannot be dispatched before the maintainer opens the v18 development line.\n\n## Why a card and not a label\n\n`target:v18` does not stop anyone. A lane seat's candidate query is `pm:queue` + `domain:*` + no assignee; `target:*` is a release-board view and appears nowhere in dispatch selection. The only state a lane seat is required to skip is **`pm:blocked` with a `Blocked-by:` line**, and the only thing that releases such a card is the unlock scan when its upstream closes. So the upstream has to exist. It is this card.\n\n## The rule\n\nEvery ADR-0131 execution card carries `pm:blocked` and names this card in its `Blocked-by:` line. While this card is **open**:\n\n- ⛔ No ADR-0131 card is dispatched, claimed, or assigned — by any seat, in any repository, whatever its `domain:*`, `priority:*` or `target:*` labels say.\n- ⛔ No seat cuts a new card from ADR-0131 in `pm:queue`. New cards derived from the record are filed `pm:blocked` behind this one.\n- ⛔ This card is not closed by a seat. Not by triage, not by a lane PM, not by the director seat, not on the argument that \"the upstream looks done\". **Only the maintainer decides that the v18 line is open**, and closing this card is how they say so.\n\nMaintainer, 2026-09-04, on ADR-0131: 「我发 17.3，然后后续这么大的改动应该放到 v18」 and, approving the record, 「要 v18 才开发」.\n\n## What happens when it closes\n\nThe unlock scan returns every card naming it to `pm:queue`, in the dependency order their own `Blocked-by:` lines already encode (C1/C2/C4/C6 become dispatchable first; C3 waits on C1+C2; C7 waits on C2–C6; C8 waits on C7; C9 on C2; C10 on C6 then C8; C11 on C8+C10; C12 on C5). Each returning card's file surface is re-verified against the then-current `main` before it is dispatched — the usual unlock discipline, and unusually load-bearing here because the record's premises were measured in 2026-09.\n\n## Already landed, and deliberately not behind this gate\n\nADR-0131 D14 puts exactly two things before the 17.3 tag, and both are done:\n\n- **#15024** — `sys_metadata_activation` ships tenant-less (PR #15155, merged 2026-09-04).\n- **#15030** — the NULL-inclusive business-unit screen of #14949 reverted (PR #15078, merged 2026-09-03).\n\n⛔ Nothing else of ADR-0131 ships in 17.x. A card that would land \"just the harmless half\" of any of D1–D13 in a 17.x release is out of order regardless of this gate.\n\n## The record\n\nADR-0131 — `docs/adr/0131-total-organization-ownership-no-null-organization-id.md`, merged to `main` via #14976, approved by the maintainer 2026-09-04. Its §8 is the execution table these cards are cut from; D14 is the staging decision this gate enforces.\n"
+}

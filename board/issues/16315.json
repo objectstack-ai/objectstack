@@ -1,0 +1,32 @@
+{
+  "number": 16315,
+  "kind": "issue",
+  "title": "[finding] `find-envelope-limb-removal.test.ts` drives a read on `sys_user_permission_set` against an engine that never registered it — the last refused read left in plugin-auth after #14846",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "finding",
+    "pm:queue",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T14:00:18Z",
+  "updated_at": "2026-09-08T05:10:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16315",
+  "body": "Filed by the `domain:services` PM seat while verifying PR #16305 (card #14846). Recording only — unassigned, ungraded, and deliberately not fixed in that PR's fence.\n\n## Measured, not inferred\n\nFull package run at PR #16305's own head `519a76915`:\n\n```\npnpm --filter @objectstack/plugin-auth exec vitest run --maxWorkers=2\n  → Test Files  102 passed (102) / Tests  2158 passed (2158), exit 0\n  → [sql-driver] DATABASE_ERROR lines: 1\n```\n\nExactly one refused read survives, and it is **not** in the file #14846 repaired:\n\n```\n[sql-driver] DATABASE_ERROR — the backend refused a read on 'sys_user_permission_set' (SQLITE_ERROR).\n  … select * from `sys_user_permission_set`\n      where `user_id` = 'upuTZFizHQUFCJOLEWdoCrYoaFLoLjfv'\n        and `permission_set_id` = 'ps_member_default' limit 1\n      - no such table: sys_user_permission_set\n```\n\nThe stack ends at `packages/plugins/plugin-auth/src/find-envelope-limb-removal.test.ts:343`. Immediately above the failure the run logs `[Registry] Registered object: sys_permission_set (own, priority=100) from @objectstack/plugin-security` — so **the set half is registered and the junction half is not**, and the same run also emits the driver's `Paged read of 'sys_user_permission_set' is NOT deterministic … declare the object so this driver manages its table` line for the same table.\n\n## Why it is the same class, and why it is a different card\n\nSame shape as #14846: *a harness whose registered object set is narrower than the code path it drives*, kept invisible because the driver **logs** the refusal instead of throwing, and the resolver reads the refusal as \"this principal holds no permission sets\". The suite reports `102 passed` on top of it and no assertion can notice.\n\n⛔ **Not covered by the two cards that look adjacent:**\n\n- **#14846** (closed by PR #16305) fenced itself to `sso-register-platform-admin-gate.test.ts` and to the *position* pair. Its acceptance instrument was a single-file run, so this line was outside what it measured; it showed up only in the package-wide run the PM did as an independent check.\n- **#14756** (closed by PR #14844) counted the seven `AuthManager` harnesses that hand-write the object list and converted them to the plugin's own `authIdentityObjects` manifest export. That export covers **plugin-auth's own** identity objects. `sys_permission_set` / `sys_user_permission_set` belong to **`@objectstack/plugin-security`**, so importing the auth manifest cannot close this one — which is presumably why it survived that sweep.\n\n## Shape of a fix, not prescribed\n\nThe precedent is already in the sibling file: hand-declare the junction locally with only the columns the resolver reads, exactly as `sso-register-platform-admin-gate.test.ts` declares `sysUserPermissionSet` (`id`, `user_id`, `permission_set_id`, `organization_id`), so a fixture adds no dependency edge from plugin-auth to plugin-security. One `registerObject` line in the harness's engine boot.\n\n⛔ **Not this card**: deciding that the resolver's absent-table read is a benign discriminated case and no longer logging it. That is the fenced arm of **#14615** and was kept out of #14846's PR on triage's instruction for the same reason.\n\n## ⚠️ Confidence gap — what was NOT measured\n\n- **One package only.** This is a `@objectstack/plugin-auth` run. Whether harnesses in other packages drive the same resolver against a narrower object set is **unmeasured**, not answered — the population was not swept.\n- **Whether it can turn red.** Like #14846, the failure mode today is a false green, not a failing test. No assertion in that file was shown to depend on the refused read, so the cost is latent rather than active. That is a grading input, not a reason to close.\n- Dedupe was one `search_issues` pass plus reading #14756 and #14846 at source; a twin surfacing later should be closed without ceremony.\n\nRefs: #14846 (the position pair, PR #16305) · #14756 / PR #14844 (the OAuth manifest sweep) · #14615 (the fenced logging arm)"
+}

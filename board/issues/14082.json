@@ -1,0 +1,29 @@
+{
+  "number": 14082,
+  "kind": "issue",
+  "title": "driver-memory / driver-mongodb `execute()` answer without running the command and without refusing — a declared, NON-optional contract member that no caller can tell apart from \"ran and found nothing\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-01T03:36:23Z",
+  "updated_at": "2026-09-01T04:31:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14082",
+  "body": "Found while implementing #14023 (binding the `@objectstack/metadata` migrations to `IDataDriver.execute`). Filed separately: different package, different defect, and #5499's standing rule applies to it rather than to that card.\n\n## The mismatch\n\n`IDataDriver` declares `execute` **NON-optionally**:\n\n```ts\n// packages/spec/src/contracts/data-driver.ts\nexecute(command: unknown, parameters?: unknown[], options?: DriverOptions): Promise<unknown>;\n```\n\nTwo shipped drivers satisfy that declaration with an implementation that never runs the command and never says so:\n\n```ts\n// packages/drivers/driver-memory/src/memory-driver.ts\nasync execute(command: any, params?: any[]) {\n  this.logger.warn('Raw execution not supported in InMemory driver', { command });\n  return null;                      // every command, always\n}\n\n// packages/drivers/driver-mongodb/src/mongodb-driver.ts\nasync execute(command: unknown, _parameters?: unknown[], options?: DriverOptions): Promise<unknown> {\n  const session = this.getSession(options);\n  if (typeof command === 'object' && command !== null) {\n    return await this.db.command(command as Document, { session });\n  }\n  return command;                   // a string command is handed straight back\n}\n```\n\nNeither refuses. `MemoryDriver` returns `null` for everything; `MongoDbDriver` returns a string command back verbatim, and its `_parameters` are never read on either branch, so bindings are dropped silently even where the command IS executed.\n\n## Why this is worth a card rather than a shrug\n\nA caller cannot distinguish \"ran and found nothing\" from \"did not run\". Probing for the method is the only capability test available — `DriverCapabilities` carries no member for raw-SQL support — so every consumer that resolves a raw-SQL entry point by `typeof driver.execute === 'function'` selects these drivers and then reads their silence as data. Measured consequence in the code that prompted this: `dropProjectionTables(memoryDriver)` reports `status: 'dropped'` for all five deprecated tables, because `DROP TABLE IF EXISTS` \"succeeded\" — five successful drops of tables that were never touched. The column-probing migrations degrade more gently, reporting `not_applicable` or `table_missing`, which is plausible-looking and equally untrue.\n\nRefusing loudly, the way an unimplemented escape hatch should, is one of the two shapes this could take. The other is a declared capability flag that separates \"implements the escape hatch\" from \"can run SQL\" — which is a contract question, not something a consumer can guess at with a driver-name sniff.\n\n## Boundary\n\nSame class as #13878 (`InMemoryDriver.update()` returning a value its declared return type forbids) but a different member and a different mechanism: that one was invisible to `tsc` behind an inferred `any`, this one type-checks cleanly and is only visible at run time. Not a duplicate; backlinked because a repair of either should look at the other.\n\n`SqlDriver` (and therefore `SqliteWasmDriver`) and the Turso remote transport implement `execute` honestly — they run the command and carry `parameters` positionally. They are not in scope here.\n\n## Routing\n\nPer #5499 (maintainer ruling, 2026-08-05), new `driver-memory` / `driver-mongodb` cards get `domain:engine` and go straight to `pm:on-hold` referencing that anchor rather than into `pm:queue`. Labelled that way. I did **not** measure this against #5499's escalation exception (a driver defect that makes CI go falsely green or red): nothing in this repo's suites drives these migrations through `MemoryDriver`, and I did not look for other consumers whose tests could be affected. If triage wants that exception considered, the measurement is still owed.\n\n## Re-run\n\n```sh\ngit grep -n \"Raw execution not supported\" -- packages/drivers/driver-memory/src\ngit grep -n \"_parameters\" -- packages/drivers/driver-mongodb/src\ngit grep -n \"execute(command\" -- packages/spec/src/contracts/data-driver.ts\n```\n\n## Dedup declaration\n\nRepo-scoped REST listing of the 62 open `domain:engine` issues plus a local keyword grep (`MemoryDriver`, `driver-memory`, `MongoDb`, `execute()`, `no-op`, `silently`). Control: grepping the same fetched list for `driver.raw` returned #14023 and #14025, so the channel was answering. Nearest neighbours are #13878 (different member, above) and #5499 (the freeze anchor, not a defect card). No duplicate found.\n\nBacklinks: #14023 (where this was found), #13878, #5499.\n\n_Generated by [Claude Code](https://claude.ai/code)_\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 9591,
+  "kind": "issue",
+  "title": "feat(cli): `os migrate meta --write` — the AST codemod that rewrites authored sources for the mechanical `applied` set (v18)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "pm:on-hold",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-18T12:29:30Z",
+  "updated_at": "2026-08-20T01:59:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/9591",
+  "body": "Commissioned by maintainer ruling on #9529 (2026-08-18, live PM chat with the triage seat, session `session_01EUZUjvnLsqwHVkXkTv8TKQ`; verbatim: 「其他接受你的建议」— Option 2 now, Option 1 as a v18 Feature). This card is Option 1.\n\n## Scope\n\nImplement the in-place rewrite that the retirement prescriptions promise: an AST codemod (`ts-morph` is already a `packages/cli` dependency) over `objectstack.config.ts` and per-artifact authored modules (`defineView` / `defineAgent` / `defineFlow` shapes), covering **the mechanical `applied` set only** — the chain's semantic TODOs stay manual, exactly as #9529 records. Suggested flag shape: `--write` (in-place) alongside the existing `--out` snapshot; dry-run remains the default.\n\nWhen this lands, the shared retirement sentence in `packages/spec/src/shared/retired-key.ts` (reworded to the honest replay-and-print statement by #9529's Option-2 half) may be restored to the automatic-rewrite claim it then honestly makes — that restoration belongs to this card's PR, in lockstep with the class-wide pin.\n\n## Scheduling\n\nDeliberately **not** current-cycle work.\n\n`Restart-when: the v18 major development cycle opens (first v18 changeset-major accepted on main), or a maintainer instruction pulls it forward`\n\n## Refs\n\n#9529 (the promise-vs-tool gap and its measurement) · #9418 (the load-refusal half this builds on) · #6856 (the 2026-08-09 sentence ruling)."
+}

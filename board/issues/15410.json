@@ -1,0 +1,33 @@
+{
+  "number": 15410,
+  "kind": "issue",
+  "title": "finding — the repo mandates `--self-test`, gates that it is wired, and documents nothing about its shape: 168 hand-rolled assertion helpers, and only 20 of 170 can be shown to fail on zero cases",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T14:40:57Z",
+  "updated_at": "2026-09-05T03:10:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15410",
+  "body": "Recording only — unassigned, no claim, no code change proposed here. Raised by the maintainer from a reading of recent PRs (\"你们经常把 fixture 里面已经存在的方法加到 self test 里面,而且没有在文档中提到 self test 中的方法\"), then measured.\n\n## The measurement\n\nOn `origin/main`:\n\n| | count |\n|:--|--:|\n| scripts carrying `--self-test` | **170** |\n| of those, scripts defining their own assertion helper(s) | **116** |\n| assertion helpers so defined, in total | **168** |\n| entries in `scripts/fixtures/` | **1** (`merge-queue-triage/`) |\n| scripts importing anything from `scripts/fixtures/` | **5** |\n\nAnd the documentation half:\n\n| where | what it says about writing a self-test |\n|:--|:--|\n| `AGENTS.md` | two mentions of `--self-test`, both *\"add a case\"* instructions (`:121`, `:384`) — nothing on shape |\n| `CLAUDE.md` | one, about re-running a hook's selftest |\n| `skills/**`, `.claude/skills/**` | **zero** hits for how to write one |\n| `scripts/check-self-test-wired.mjs` | enforces that a self-test is **wired into CI**. Existence, not shape. |\n\n**So the convention is mandatory, mechanically enforced for existence, and written down nowhere.** Every author re-derives it, and 116 re-derivations produced 168 different helpers.\n\n## The part that is a correctness problem, not a style problem\n\nClassified by whether the script's own text anchors its self-test against running **zero** cases — a case-count floor, a pinned battery roster, or an explicit expected count:\n\n| | count |\n|:--|--:|\n| carries an anti-vacuity anchor | **20** |\n| decides success solely on \"no failures were recorded\" | **37** |\n| matched neither pattern — needs a human reading | **96** |\n\n⚠️ **The limit of this reading, stated rather than buried:** it is a grep over source text, not an analysis. The 37 are *candidates*, not confirmed defects, and the 96 could fall either way. The only claim this measurement supports is the conservative one:\n\n> **Of 170 self-tests, 20 can be shown from their own text to go red if they run zero cases. The other 150 have not been shown to.**\n\n### Why that matters more than the duplication\n\n`check-self-test-wired.mjs`'s own header states the property the mechanism exists for:\n\n> A gate whose defect class is its MATCHING RULE — \"do these two strings correspond?\" — cannot detect its own regression on a clean tree. Green means the finding set is empty; weakening the rule can only SHRINK that set; and the empty set is the fixed point of shrinking. So the production verdict is identical before and after the rule breaks. `--self-test` … is the only instrument watching the rule.\n\n**A self-test that passes vacuously is that same failure one level up: the instrument watching the gate can itself stop measuring, and its verdict does not change.** `failures.length === 0` as the sole success condition makes \"every case passed\" and \"no case ran\" print identically.\n\nThis is not hypothetical in this repo. It is the defect class that produced, in one working day: a release check that read 1 of 69 packages and reported failure; an anti-vacuity floor that decayed to `rows.length >= 0` when the ledger it referenced reached zero (#15261, caught in review); a gate-sweep report listing eight package families as green that the sweep had filtered out and never run (#15332, caught by its own author); and a card asserting a lint rule that does not exist anywhere in the tree (#15325).\n\n## ⛔ What this card does NOT propose\n\n**Not a shared assertion library.** Self-containment looks deliberate and defensible: each self-test runs standalone as `node scripts/<x>.mjs --self-test`, so a shared helper module would be a single point of failure for all 170 instruments at once. Deduplicating 168 helpers into one import edge trades a diffuse cost for a concentrated risk, and it is the opposite of the direction `check-self-test-wired` was built in.\n\n**The cost is not the duplication. It is the dispersion in rigour.** 20 authors thought of anti-vacuity; the rest did not — because nothing tells them to.\n\n## Two directions worth weighing (⛔ not adjudicated here)\n\n1. **Write the shape down**, in the conventions file, as a required contract rather than a suggestion: a self-test declares what it ran (a case count, or a named battery roster) and fails when that declaration is not met. Each script satisfies it independently — self-containment preserved, dispersion removed.\n2. **Give `check-self-test-wired.mjs` a second assertion** — it already reads every self-test to check wiring, so it is the one place that could also check that each declares its own population. ⚠️ Weigh: that gate would then have two subjects, and its own self-test would have to cover both.\n\nThe 96 unclassified scripts should be read before either direction is costed — the true split between \"already fine\" and \"can pass vacuously\" is the number that sizes this, and this card does not have it.\n\n## Provenance\n\nMeasured on `origin/main` at `a56baa2bd`, `2026-09-04`. Related, same defect class: #15373 (no gate reads the CLI transcripts in `content/docs`, four published pages carried a stale number), #15357 (a gating rule shipped claiming \"0 findings over the corpus\" against a corpus that is not the app it names)."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 16023,
+  "kind": "issue",
+  "title": "service-datasource still reads the retired turso `config.timeout`, so a datasource authored with the canonical `timeoutMs` is dropped at the seam that builds the driver config",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T19:51:58Z",
+  "updated_at": "2026-09-06T15:26:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16023",
+  "body": "Surfaced while implementing #15682 (stack card 6/6 of #14478). Not in that card's scope — it lands in `packages/services/service-datasource`, and the card owns the gate's population plus `@objectstack/driver-turso`. Filed bare for triage.\n\n## What was measured\n\n`packages/services/service-datasource/src/turso-driver-config.ts:170`:\n\n```ts\n  timeout: ({ config }) => (typeof config.timeout === 'number' ? config.timeout : undefined),\n```\n\nThis is the reader table that turns a `DatasourceConnectionSpec` into a libSQL driver config — the ONE place both loaders go through since #7314. It reads the authored key `config.timeout`.\n\n#15680 (stack card 5/6) renamed that authored key: `packages/spec/src/data/driver/turso.zod.ts` now declares **`timeoutMs`**, and `timeout` is a `retiredKey()` tombstone. So the spelling this reader consults is the one the authoring contract now refuses, and the canonical spelling is the one it does not read.\n\n## Why nothing catches it\n\nThree things, each of which would normally have:\n\n1. **No typecheck.** `TursoConfigSource.config` is declared as a bare string-keyed bag (`Record`, values `unknown`) at `:94`, \"narrowed to a bag so each reader can type-test its own key\" — so `config.timeout` compiles whatever the schema says.\n2. **The test authors the retired spelling.** `src/__tests__/turso-driver-config.test.ts` passes `config: { … timeout: 9000 }` at `:47` and `timeout: 0` at `:100`, and asserts it flows through. It is green, and it stays green for exactly the behaviour that is now wrong — a canonical `timeoutMs` has no case at all.\n3. **The ADR-0087 conversion makes it worse, not better.** `turso-config-timeout-to-timeout-ms` (protocol 18, registered on the same stack) rewrites a stored `config.timeout` to `timeoutMs` on load. So after the conversion replays, the bag holds `timeoutMs` and this reader finds nothing — the conversion and the reader now disagree by construction.\n\n## Blast radius today\n\nBounded, and worth stating precisely rather than overstating: `TursoDriverConfig.timeout` is itself never forwarded to `@libsql/client` (a separate finding, filed alongside this one), so no operation changes its timeout as a result. What is broken is the seam: the reader table's whole design property — \"read every key, enforced by a mapped type over `Required` of the config\" — is true of the KEY LIST and silent about the SPELLING each reader consults, and this is the first spelling to move.\n\n## Suggested repair\n\nRead `config.timeoutMs`, and give the test a case authored the canonical way. Whether the retired spelling should still be read as a fallback for stored rows that never met the conversion is the actual decision here — the sibling `authToken` reader keeps a legacy arm on purpose and documents why (#8152), so this is not obvious either way and belongs to whoever owns the seam.\n\nRelated: #14478 · #15680 · #15682\n"
+}

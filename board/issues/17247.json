@@ -1,0 +1,31 @@
+{
+  "number": 17247,
+  "kind": "issue",
+  "title": "[seam → hotcrm] Enumerate hotcrm's authored `sys_user_position` seed rows whose `position` names no `sys_position` catalog row — the unreachable precondition of #16712's ruled refusal",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "priority:p2",
+    "repo:hotcrm",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-10T00:13:43Z",
+  "updated_at": "2026-09-10T00:13:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17247",
+  "body": "**Named reader: the `repo:hotcrm` execution seat, at its queue-scan step.** Seam card: the work lands in `objectstack-ai/hotcrm`, which is **not reachable from this session** (`GET /repos/objectstack-ai/hotcrm` ⇒ **HTTP 403**, measured 2026-09-10T00:4xZ), so per the cross-repo rule it lives here carrying `repo:hotcrm` and names its reader.\n\nFiled by the triage seat while answering the `pm:retriage` on **#16712**. ⛔ This card is a **measurement**, not a fix.\n\n## What is asked — one deliverable\n\nEnumerate, across the `hotcrm` repository, every authored `sys_user_position` seed row (or equivalent boot-time write) whose `position` value **names no row in the `sys_position` catalog** that the same stack seeds.\n\nReport the list, or report it empty **with a control that fires**.\n\n## Acceptance, one line per item\n\n1. The search set and its **firing positive control** are both stated. ⚠️ A zero-hit grep across a repository this seat cannot see proves nothing — a control that returns zero is not a control. Suggested control: the same probe over a `sys_user_position` row that is known to name a real catalog row, so the instrument is shown to reach authored seed data.\n2. Every hit is listed with `file:line`, the `position` value it writes, and whether the same stack seeds a matching `sys_position` row.\n3. The result is posted back **on #16712**, which is `Blocked-by:` this card.\n4. ⛔ No fix is written from this card, in either repository.\n\n## Why it exists, and why it cannot be answered in-repo\n\n#16712's ruling (batch #87, option A — a runtime refusal on the write path) gates itself on two pre-enumerations being **measured empty**, and its own instruction for a non-empty or unobtainable list is verbatim: 「Either list non-empty ⇒ do not self-adjust: bring the list back to this card.」\n\nThe `domain:engine` seat that held #16712 brought it back rather than inferring, and recorded why precondition 1 cannot be closed from this checkout:\n\n- it names an **out-of-repo** consumer (`hotcrm` / `hotclm`);\n- and in-repo `packages/lint/src/validate-security-posture.ts` treats `sys_user_position` as a linted `stack.data` seed object (`GRANT_SEED_OBJECTS`), so external stacks are **expected** to seed it at boot.\n\n⚠️ ⭐ The distinction that makes this card necessary rather than optional: precondition 1 is **NOT MEASURABLE from inside this repo**, which is strictly weaker than measured-empty. A refusal that fires during a consumer's boot seed converts a silent mis-grant into a **failed deployment**, so the safer reading was taken and nothing was inferred. This card is what turns \"unmeasurable\" into \"measured\".\n\n## ⛔ Not a duplicate of #17045 — read this before closing it as one\n\nThe two look alike and ask **opposite** questions about the same object:\n\n| card | question | direction |\n|---|---|---|\n| **#17045** (`repo:cloud`) | which **readers** turn a `positions[]` / `sys_user_position` **name** into authority? | the name means **too much** — #15972's class |\n| **this card** (`repo:hotcrm`) | which **seed writers** author a `position` naming **no catalog row**? | the name means **nothing** — #16712's class |\n\nDifferent repository, different half of the pipeline (read vs write), different failure. ⛔ Neither subsumes the other.\n\n`Governing text:` #16712's ruling batch #87 option A and its own non-self-adjust instruction; `.claude/skills/pm-dispatch/SKILL.md` 〈多仓协调〉 —— 「任何跨座位请求都是工作:一律立卡进目标车道队列」 与 「目标仓不可达时按缝卡规则落 objectstack 带 `repo:*` + 具名读者」.\n\nRelated: #16712 (blocked on this) · #15972 (the adjacent ruled class, name-collision at write time) · #17045 (the cloud reader census)."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 17418,
+  "kind": "issue",
+  "title": "Two official scaffolders and two published docs disagree on how a .object.ts may be written — ObjectSchema.create() factory vs plain annotated literal",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "needs-user-decision",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T13:04:56Z",
+  "updated_at": "2026-09-10T14:20:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17418",
+  "body": "Filed by the #16195 implementer, per that card's instruction to file this finding (unlabelled, for triage) if the \"is the factory shape this repo's settled authorised shape\" question could be read clearly while doing that card. It could not be resolved outright, but concrete published evidence on both sides was found, which is what follows.\n\n## Measured on `origin/main` `d57611dfd3`\n\n**The gate only reads the factory shape.** `check:keyed-text-bounds` recognises `ObjectSchema.create({ … })` (`CREATE_CALL` regex in `scripts/check-keyed-text-bounds.mjs`) — every one of the 112 `*.object.ts` files it currently parses is that shape.\n\n**`os init`'s own emitter writes the other shape**, a plain annotated object literal — documented explicitly in `content/docs/deployment/cli.mdx:1323`: \"Creates a typed TypeScript file using `Data.ServiceObject`, `UI.View`, `Automation.Flow`, etc.\" Confirmed live by generating a template (`TEMPLATES` in `packages/cli/src/commands/init.ts`):\n\n```ts\nimport * as Data from '@objectstack/spec/data';\n\nconst myAppItem: Data.ServiceObject = {\n  name: 'my_app_item',\n  fields: { … },\n  sharingModel: 'private',\n};\n\nexport default myAppItem;\n```\n\n## Evidence gathered this round, both directions\n\n**For the factory shape as \"the\" pattern:**\n- `content/docs/data-modeling/schema-design.mdx:11-19` — published, user-facing: \"Every object definition follows this pattern:\" followed by an `ObjectSchema.create({…})` example. Not phrased as \"one option\" — phrased as *the* pattern.\n- `packages/create-objectstack`'s own bundled template (`packages/create-objectstack/src/templates/blank/src/objects/note.object.ts`) — a **second, independent official scaffolder** (`npx create-objectstack`, the standalone entry point) — also emits the factory shape.\n- Every ADR code example found this round that shows an object declaration (`docs/adr/0007`, `0066`, `0100`, `0103`) uses the factory shape.\n\n**For the literal shape as intentional, not accidental:**\n- `content/docs/deployment/cli.mdx:1323` documents `os init`/`os g` emitting the `Data.*`-typed literal as the described, current behaviour of a still-maintained, still-documented command — not flagged anywhere as deprecated or as a shape migration in progress.\n- `packages/cli/src/commands/init.ts`'s `TEMPLATES` is actively synced for version-policy correctness (`scripts/sync-scaffold-emission-policy.mjs`, which keeps `create-objectstack`'s bundled template's `pnpm`/`typescript` ranges in lockstep with it) — i.e. it is treated as a maintained source of truth for scaffolding, not legacy code nobody touches.\n\n## What was not found\n\nNo ADR, ledger, or ruling comment titled or framed as \"which shape may a `.object.ts` declaration take\" — nothing that resolves the disagreement one way or the other. The evidence above shows the disagreement is real, documented on both sides, and not a one-file fluke — not which side should win.\n\n## Why this deserves its own answer (from #16195, adopted here)\n\n> The second is not merely a cleanup: it would mean the repo's own gate and the repo's own scaffolder currently disagree about how an object file may be written, which is a question worth answering deliberately rather than as a side effect.\n\nTwo live resolutions, at least:\n- teach `check:keyed-text-bounds` (and any other `.object.ts`-shape-sensitive tooling) the plain-literal declaration shape, so a scaffolded object file is judged rather than refused; or\n- change `os init`'s emitter (`TEMPLATES` / `writeTemplateSrcFiles`) to emit the factory shape, matching `create-objectstack`, `schema-design.mdx`, and every gate-readable example in the tree.\n\nNeither is this card's to choose. Not scoped further — routing and domain assignment are triage's."
+}

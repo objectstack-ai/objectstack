@@ -1,0 +1,30 @@
+{
+  "number": 16245,
+  "kind": "issue",
+  "title": "finding(metadata-protocol): 30 refusal messages open with a bracketed tag that restates the code the same throw declares — the shape #12975 rules out, and it reaches the wire",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T07:29:22Z",
+  "updated_at": "2026-09-08T23:30:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16245",
+  "body": "Found while removing `[unanswerable_target]` for #16145; recorded rather than fixed, because the remedy needs a ruling this seat may not make.\n\n## What is there\n\n`packages/metadata-protocol` opens many refusal messages with a bracketed lowercase tag. Pairing every such throw site in `protocol.ts` and `sys-metadata-repository.ts` with the `code` that site declares:\n\n| tag | declared `code` | status |\n|---|---|---|\n| `[invalid_request]` | `INVALID_REQUEST` | 400 |\n| `[item_locked]` | `ITEM_LOCKED` | 403 |\n| `[not_overridable]` | `NOT_OVERRIDABLE` | 403 |\n| `[no_draft]` | `NO_DRAFT` | 404 |\n| `[commit_not_found]` | `COMMIT_NOT_FOUND` | 404 |\n| `[metadata_conflict]` | `METADATA_CONFLICT` | 409 |\n| `[version_not_restorable]` | `VERSION_NOT_RESTORABLE` | 409 |\n| `[invalid_metadata]` | `INVALID_METADATA` | 422 |\n| `[writable_package_required]` | `WRITABLE_PACKAGE_REQUIRED` | 422 |\n| … and the rest | … | … |\n\n**Every one of them is the lowercase restatement of the code the very same throw declares.** Measured: of the 31 tagged throw sites across those two files that declare a `code`, **30** restate it this way. (The 31st was `[unanswerable_target]`, whose code was `NOT_IMPLEMENTED` — that mismatch is exactly why it was in scope for #16145 and these are not.)\n\n## Why this is a row and not just a style note\n\nThe ruling behind #12975 (maintainer, 2026-08-29) on the `/data` door shipping `FORBIDDEN:` in front of a localized refusal is: ONE envelope semantics — `error` is HUMAN LANGUAGE, `code` is the MACHINE TOKEN — and a prefix is removed **because** the same fact already rides the `code` axis. These 30 tags are that condition exactly, by construction: each restates its own declared code.\n\nThey are not invisible. `withoutDeclaredCodePrefix` (`packages/rest/src/error-response.ts`) strips a prefix only when the message opens with the producer's declared code followed by a colon — `INVALID_REQUEST: …`. The bracketed lowercase spelling matches neither the casing nor the separator, so it is **not** stripped and reaches the caller in `error.message`.\n\n## Why it is a ruling and not a cleanup\n\n⛔ Unlike #16145's single outlier, this family is **documented**, so removing it is a contract question rather than tidying:\n\n- `packages/spec/src/api/protocol.zod.ts` describes behaviour in these terms — e.g. the promotion field's text says the lookup \"answers 404 `[no_draft]`\", with the brackets.\n- That text is generated into `content/docs/references/api/protocol.mdx`, so the bracketed spelling is published documentation.\n- `ADR-0010` and `ADR-0112` both use this vocabulary, and `sys_metadata_audit` persists a `code` column whose documented example value is `item_locked` — a genuinely machine-readable axis using the same words.\n\nSo there is a real question underneath, and it is not \"are these redundant\" (measured: they are) but **\"is the bracketed opener load-bearing for any consumer, given the audit-row `code` column shares its vocabulary?\"** Three routes, none of them obviously right:\n\n1. Drop all 30 openers, exactly as #12975 rules and as #16145 did for the outlier, and correct the `.describe()` text that spells them.\n2. Keep them and declare the convention somewhere, accepting the duplication as deliberate operator affordance.\n3. Keep them only where the tag is NOT a restatement — which is the empty set after #16145.\n\n## Scope note\n\n⛔ This was deliberately not ridden along on #16145's PR: that card's diff is one string literal at the single site whose tag was not a restatement, and folding 30 documented sites plus their spec descriptions and generated docs into it would have made a one-line prose fix into a contract change.\n\n## Measurement provenance\n\nDerived at `origin/main` `cbca47d09`, in a dedicated worktree, with `git grep` using plain directory pathspecs and no `**` globs. The pairing was produced by walking each bracketed-tag line and reading the nearest following `code` assignment within the same throw; one apparent extra mismatch was checked by hand and is a docblock line, not a throw. Firing controls on the same command and scope returned 5, 6 and 140 files, so the counts are readings rather than a broken pattern.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

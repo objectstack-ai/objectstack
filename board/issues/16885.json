@@ -1,0 +1,30 @@
+{
+  "number": 16885,
+  "kind": "issue",
+  "title": "List view `navigation.view` is declared in spec but resolves no form view — its only read lands it in the `onNavigate` navigation-MODE argument",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T14:09:35Z",
+  "updated_at": "2026-09-10T14:54:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16885",
+  "body": "Measured on `@objectstack/spec` 17.3.0 and the pinned `@objectstack/console` 17.3.0 bundle, from a real app (`objectstack-ai/hotcrm`, issue #1716).\n\n## The key\n\n`ListViewSchema.navigation` declares `view` alongside the keys that describe navigation *behaviour*:\n\n```\nnode_modules/@objectstack/spec/dist/environment-artifact.zod-Bx9Mh1T2.d.ts\n\n  mode: z.ZodOptional<z.ZodEnum<{ page, split, none, modal, drawer, popover, new_window }>>;\n  view: z.ZodOptional<z.ZodString>;\n  preventNavigation: z.ZodDefault<z.ZodBoolean>;\n  openNewTab: z.ZodDefault<z.ZodBoolean>;\n  size: z.ZodDefault<z.ZodEnum<{ full, md, auto, sm, lg, xl }>>;\n```\n\n`mode` and `size` carry closed vocabularies. `view` is an unconstrained string with no vocabulary and no resolution step, so **any** value authors clean and validates clean.\n\n## What it actually does\n\nIts only read in the shipped console is the record-navigation hook, which puts it in the **second argument of `onNavigate`** — the slot that otherwise carries the literal navigation-mode string:\n\n```\nframework-BfSv4Kb0.js\n\n  function wc(e){ let {navigation:t, objectName:n, onNavigate:r, onRowClick:i}=e,\n    l = t?.mode ?? `page`,\n    d = t?.view,\n    …\n    if (l === `page`) { let t = e.id||e._id; r && t != null && r(t, d ?? `view`); return }\n```\n\nSo an authored `view` does not select a view — it *substitutes for the mode token*. And at least one consumer in the same bundle reads that argument against a closed two-value vocabulary:\n\n```\nindex-BU-FzlQ6.js\n\n  onNavigate: (e,t) => { if (t === `edit`) … else if (t === `view`) { navigate to the record page } }\n```\n\nAny authored value other than `edit` or `view` matches neither branch there. Other consumers in the bundle take one argument and ignore the second, which is why the effect is invisible on some grids and would be a dead row click on others.\n\nThe original finding enumerated the bundle rather than sampling it: **every** `.view` property read (exactly three — this one, one on a dataSource, one in mermaid) and **every** `formViews` read (`formViews?.default` in `RecordFormPage`, `useActionModal` and `RecordDetailView` subforms, plus one write in the stored-view normalizer). **No read anywhere is keyed by an authored view name.** So there is no path by which `navigation.view` could resolve a named form view, and none by which any other key could either.\n\n## Why this is worth a card rather than a doc fix\n\nThe name is the trap. `view`, sitting in a bag next to `mode` / `size` / `width`, reads as \"which view to open\" — that is exactly how the downstream app authored it, with the comment `// Use named form view` beside it. It validated, it built, and it selected nothing. This is the ADR-0049 declared-but-unenforced shape, with the extra sharpness that the key is not merely ignored: it is consumed, in a slot that means something else.\n\nSame class as #14108 (app navigation `viewName` never resolved against the target object's `listViews`), which shipped a fix in #14286 by extending `lintViewRefs`. That precedent is why this is filed rather than absorbed: navigation is the well-travelled reference into a view namespace, and this is a second door into it that nothing checks.\n\n## What the downstream app did, and did not do\n\n`objectstack-ai/hotcrm` deleted its one occurrence — a browser reading confirmed the row click was unaffected there, so the key was inert on that grid rather than breaking it. The app has **not** compensated for the platform behaviour in any other way, and should not: this is a platform surface.\n\n## Suggested disposition — enforce or remove\n\nEither honest treatment closes it:\n\n- **Enforce** — resolve `navigation.view` against the target object's `formViews` at lint/build time (the #14286 shape), and give the runtime a real read for it, so the key means what its name says.\n- **Remove** — retire `navigation.view` from `ListViewSchema.navigation` under ADR-0049. If the mode slot genuinely wants an author-supplied override, it wants a key named for what it does and a closed vocabulary, not a free string named `view`.\n\nWhichever is chosen, the current state — an unconstrained string whose name promises view selection and whose only read feeds the mode argument — is the one state that teaches authors something false."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 519,
+  "kind": "pull_request",
+  "title": "Add changeset for infrastructure and tooling setup",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-05T03:53:02Z",
+  "updated_at": "2026-02-05T04:15:52Z",
+  "closed_at": "2026-02-05T04:15:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-05T04:15:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/519",
+  "body": "Documents infrastructure additions for the next patch release across all 13 monorepo packages.\n\n## Changes\n\n- **Changeset file** (`.changeset/infrastructure-setup.md`): Captures version bump metadata for:\n  - Changeset configuration and GitHub Actions workflows (CI, CodeQL, lint, release automation)\n  - Development tooling (.cursorrules, prompt engineering configs)\n  - Repository documentation (ARCHITECTURE.md, CONTRIBUTING.md, workflow guides)\n  - Package.json test script updates and CLI devDependency addition\n\nThe changeset follows standard format (YAML frontmatter + markdown) and will generate CHANGELOG entries automatically during `pnpm changeset version`.\n\n```yaml\n---\n\"@objectstack/spec\": patch\n\"@objectstack/cli\": patch\n# ... (all 13 packages)\n---\n\nInfrastructure and development tooling improvements\n- Add changeset configuration for automated version management\n- Add comprehensive GitHub Actions workflows (CI, CodeQL, linting, releases)\n# ...\n```\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 发一个补丁\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

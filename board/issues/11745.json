@@ -1,0 +1,30 @@
+{
+  "number": 11745,
+  "kind": "issue",
+  "title": "i18n: `translateFlow` walks `flow.nodes` flat — a screen node inside an ADR-0031 region is never overlaid, in the fourth pass of a class three earlier cards each fixed once",
+  "state": "open",
+  "state_reason": "reopened",
+  "draft": null,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-24T14:51:50Z",
+  "updated_at": "2026-09-07T01:59:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/11745",
+  "body": "Filed unassigned by the `domain:devx` seat while implementing #11608 (the `packages/lint` `flows` leg). `packages/spec` is outside that card's declared file surface, so this is its own card, not a rider.\n\n## Measured\n\n`packages/spec/src/system/i18n-resolver.ts`, `translateFlow`:\n\n```ts\nconst nodes = Array.isArray(flow.nodes)\n  ? flow.nodes.map((node) => { … translateScreenNode(node, name, bundle, opts) … })\n  : undefined;\n```\n\nIt reads the flat `flow.nodes` array only. But `FlowNode.config` carries ADR-0031 regions — `loop.config.body`, `parallel.config.branches[].nodes`, `try_catch.config.try` / `.catch`, each holding a full `nodes: z.array(FlowNodeSchema)`, nesting arbitrarily. A `type: 'screen'` node in any of them is a real screen: the executor pauses on it and the client receives its `ScreenSpec.nodeId`.\n\nSo for a nested screen, `flows.<name>.screens.<node_id>.{title,fields.*}` is authored, parses (the schema is keyed by node id and knows nothing about depth), and `translateFlow` walks straight past it. The wizard step renders its source-locale heading and field labels while the sibling screens one level up are translated — the same invisible hole the `flows` group was added to close (#7646).\n\n## Why this is worth a card rather than a note\n\nThis is the **fourth** pass in this repo to be written against the flat one-liner, and the first three were each filed and fixed separately:\n\n| card | pass | outcome |\n|:---|:---|:---|\n| #4347 | `applyConversionsToFlow` | conditions inside a `loop` never converted to CEL |\n| #4380 | flow lint rules | two gating errors silently inert, a third downgraded |\n| #5383 | `flow-inert-node-condition` | 8 real inert conditions shipped |\n\n`packages/spec/src/automation/region-slots.ts` exists precisely so this fact has **one** declaration (`FLOW_REGION_SLOTS`), and its header names the four passes that need it. `translateFlow` is a fifth consumer that needs it and does not read it.\n\nNote the asymmetry that makes this easy to miss: the **client-side** resolver path is already correct. `resolveFlowScreenTitle` / `lookupFlowScreenCopy` take a bare `flowName` + `nodeId`, so a paused nested screen resolves fine. Only the **document-overlay** path (`translateFlow`) is depth-blind — so whether this ships as a user-visible bug depends on which of the two the runner wiring picks, which #11287's docblock explicitly defers to a downstream card.\n\n## Shape of the fix\n\nWalk regions via `FLOW_REGION_SLOTS_BY_TYPE` (or reuse the region-aware walk) inside `translateFlow`, preserving its reference-identity discipline: a node that resolved nothing must come back as the same reference, or `nodesChanged` starts reporting untouched documents as changed.\n\n## Not blocking #11608\n\nThe lint leg landing there collects its universe with `walkFlowNodes`, so it already resolves nested screens and does not report them as orphans — deliberately the safe direction for a `warning`. That means the lint rule and `translateFlow` currently disagree about which keys are live, and this card is what closes the gap.\n\nRefs: #11608 · #11287 · #7646 · #4380 · #5383 · #4347\n"
+}

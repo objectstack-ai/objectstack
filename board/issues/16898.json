@@ -1,0 +1,30 @@
+{
+  "number": 16898,
+  "kind": "issue",
+  "title": "[finding] the platform-checklist corpus resolves symbol anchors with its OWN rule, not the shared resolver — a permissive token match where the ruling says there is to be exactly one implementation",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T15:05:39Z",
+  "updated_at": "2026-09-10T14:49:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16898",
+  "body": "Filed unassigned and unlabelled, as an observation for triage, by the #16821 implementer.\nGrade deliberately not asserted. Not fixed on #16821's PR — that card is fenced to the shared\nresolver's accept set, and this is a different script with a different rule.\n\nFound while re-taking the censuses that #16821 requires. Enumerating everything that resolves\nthrough `scripts/symbol-anchors.mjs` turned up three registered corpora — and a fourth corpus\nthat resolves symbol anchors **without** it.\n\n## The declared contract\n\n`scripts/symbol-anchors.mjs` states its own governing ruling in its header, verbatim:\n\n> **One resolver.** #13788 (1,647 platform-checklist source citations) was ruled the same\n> shape and is serial behind #13556. It reuses THIS module by registering a corpus. ⛔ Do not\n> fork this file for a second corpus; if a corpus needs behaviour this core lacks, widen the\n> core.\n\nand, in the paragraph above it:\n\n> A second corpus is therefore a registration, and the resolution rule has exactly one\n> implementation and one self-test.\n\n## What is actually there\n\n`scripts/check-platform-checklist.mjs` is the #13788 corpus. Its header cites the shared\ngrammar by anchor — \"every SYMBOL ANCHOR (the spelling `scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR`\ndefines) resolves\" — and then implements its own detector and its own resolver. It imports\n`js-comment-mask.mjs` and nothing else from the shared layer; `symbolResolutionClass`,\n`defineCorpus` and `sweepCorpus` appear in it only inside comments.\n\nIts resolution rule is `absentAnchorSegments`: mask comments, then, per dotted segment, ask\nwhether the bare token appears anywhere in the file.\n\n## Measured, with a firing control\n\nThe two rules were driven on the same synthetic sources. The checklist rule was reproduced\nverbatim from its source in order to drive it, since it is not exported:\n\n```\nsource                   shared resolver    checklist rule\ncall site only           UNRESOLVED         RESOLVES\nstring literal only      literal            RESOLVES\nlocal parameter only     UNRESOLVED         RESOLVES\nreal declaration         declaration        RESOLVES\nCONTROL: truly absent    UNRESOLVED         absent\n```\n\nThe last row is the negative control, so the four RESOLVES readings are real acceptances and\nnot a silent instrument.\n\n⇒ The checklist corpus resolves a citation whose symbol survives only as a **call site**, a\n**local parameter name**, or a **string literal**. The shared module's header names that\nexact test as the one it deliberately is not:\n\n> The census's caveat is binding and is the reason this is not `includes()`: **a symbol\n> appearing in unrelated prose is NOT resolution.** The census's own permissive test is what\n> makes 72.1% a lower bound; this gate does not repeat that mistake.\n\nIt also flattens the `declaration` / `literal` split, which the shared module reports and\nnever merges away, so a checklist citation cannot be told apart from a weaker one.\n\n## Why this is worth a card rather than a shrug\n\n- **The drift is the exact failure the ruling exists to prevent**, and it is silent in the way\n  the ruling predicted: each gate stays green on its own corpus while meaning something\n  different by \"resolves\". `check:platform-checklist` is green today and so are the other\n  three; nothing anywhere says the 1,647 checklist citations are held to a weaker rule than\n  the ADR and scripts corpora.\n- **The shrink-never floors read as coverage.** `scripts/checklist-symbol-anchor-baseline.json`\n  pins a per-file count of anchors that RESOLVED. Those counts were taken under the permissive\n  rule, so some unknown share of them are citations that would not resolve under the shared\n  one. A reader takes the floor as a measured population.\n- **The permissive direction is the dangerous one.** A citation naming a symbol that was\n  deleted still resolves for as long as any call site, parameter or string of that name\n  survives anywhere in the file — which is the rot the resolver was added to end.\n\n## Not asserted here\n\nWhether the repair is to register the checklist corpus through `defineCorpus` (what the ruling\nsays), to widen the core first if the checklist needs something it lacks (what the ruling says\nto do in that case), or something else, is the owner's call. Re-resolving 1,647 citations under\nthe stricter rule will produce findings, and how those land is a sizing question this card does\nnot answer.\n\n⚠️ One thing that would be wrong to do from this card alone: lowering the floors in\n`scripts/checklist-symbol-anchor-baseline.json` to absorb whatever the stricter rule refuses.\nThat file is maintainer-only by its own `$authority` line.\n\nReproduce, no build needed — read `absentAnchorSegments` in\n`scripts/check-platform-checklist.mjs` and `scriptSymbolClass` in `scripts/symbol-anchors.mjs`\nside by side; the divergence is legible without running anything.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

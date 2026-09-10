@@ -1,0 +1,31 @@
+{
+  "number": 15385,
+  "kind": "issue",
+  "title": "`MetadataManager.loadManyKeyed` lands as a public member with no `IMetadataService` declaration — its two siblings `loadMany?` and `loadDiagnosed?` are declared, and the call site narrows with a local structural type instead",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T13:47:10Z",
+  "updated_at": "2026-09-06T02:21:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15385",
+  "body": "Follow-up filed by the `domain:engine` execution seat as the recorded discharge of an open question the #14423 dev raised and correctly refused to answer itself (PR #15378 report; seat answer `5541301933`, **Q2 = B**). ⛔ Nothing is being asked of the engine lane here — this card exists because the surface belongs to another lane and the decision is theirs.\n\nBlocked-by: #14423\n\n## What lands, and what does not\n\nPR #15378 (card #14423, ruled **D+B** by 总监批 #31, comment `5537057614`, maintainer verbatim 「同意」) adds a **new public member** `MetadataManager.loadManyKeyed(type)` to `packages/metadata`. The ruling names that landing site explicitly — 「`MetadataManager.loadManyKeyed(type)` beside `loadMany`」 — and its enumerated scope for the engine seat does not include `packages/spec`.\n\nSo the member ships **undeclared on the contract its two siblings are declared on.**\n\n## Measured on `origin/main` @ `638ea042d`\n\n`IMetadataService` is `packages/spec/src/contracts/metadata-service.ts:216`. Its plural-read family:\n\n| member | declared? | where |\n|---|---|---|\n| `loadMany?<T = unknown>(type, options?): Promise<T[]>` | ✅ | `:675` |\n| `loadDiagnosed?<T = unknown>(…)` | ✅ | `:861` |\n| `loadManyKeyed` | ❌ | **absent from every file under `packages/spec/src/`** |\n\nNegative control fires: the same sweep over `packages/spec/src/**` returns 13 hits for the two sibling names across 3 files, so the zero for `loadManyKeyed` is a real absence and not a broken pattern.\n\n⭐ **This is a position the same interface has been in before, and it was resolved by declaring.** `loadDiagnosed`'s own docblock at `:832` records it: `[#4127 batch 4] Declared alongside {@link loadDiagnosed}, which the same …`. The #14423 dev spotted the parallel unprompted and named it in its report.\n\n## What the PR does instead, and why that is the right terminal state for the engine lane\n\nThe dev hit the lane wall and neither crossed it nor stopped. `packages/objectql/src/plugin.ts` declares a local structural type beside the single call site, so the lookup stays typed (⛔ not `any` — `check:slot-lookup` stays green), and its docblock names the remedy for whoever takes this card:\n\n> `packages/spec` is a contract surface owned by another lane, and widening it is its own decision with its own review. … the same remedy applies when that lane takes it: delete this and read the contract.\n\nThat is a correct terminal state, not a placeholder that rots — but it does mean a **published member the contract does not mention**, which is the thing worth a card.\n\n## Why the engine seat did not fold this into #14423's contract review\n\nThe #14423 dev's own option A was to let the Clause-② review that PR already carries cover the declaration too, \"since that review is looking at this exact surface anyway\". The seat ruled **B** on three grounds, recorded in full at `5541301933`:\n\n1. The operative ruling enumerates the engine seat's scope and `IMetadataService` is not in it.\n2. **A contract reviewer's PASS on that PR is a review of that diff, not a lane authorization.** The reviewer would be approving a widening of `packages/spec` that the owning lane never saw. Review tier and lane ownership are different permissions; the first does not confer the second.\n3. Seat precedent is to *request* a pre-authorisation, not assume one — #15161 shipped against a three-file pre-auth the spec seat granted in advance, and a fourth path was reported to that seat as a deviation rather than absorbed (`#6017` comment `5539211563`).\n\n## For triage to weigh — ⛔ not pre-empted here\n\nThe shape is not obvious and this seat is deliberately not picking it:\n\n1. **Declare it**, `loadManyKeyed?<T = unknown>(type: string, options?: Record<string, unknown>): Promise<Array<{ name: string; data: T }>>`, alongside its two siblings, and delete the local type in `plugin.ts`. This is what #4127 batch 4 did for `loadDiagnosed`.\n2. **Leave it undeclared on purpose**, on the reading that `loadManyKeyed` is an implementation detail of the action-governance audit rather than a service capability any consumer should reach for — in which case the local structural type is the *intended* shape and this card closes with one sentence saying so.\n\n⚠️ One input that bears on the choice and is easy to miss: the name `loadManyKeyed` and its `MetadataKeyedItem` return type are **already published on `MetadataLoader`**. What is new in #15378 is the member on `MetadataManager`, not the vocabulary — so option 2 is not as strained as it would be for a wholly novel name.\n\n## Also note\n\n⚠️ `content/docs/kernel/contracts/metadata-service.mdx` is **not** stale today — the engine seat measured it and posted the reading on PR #15378 (`5541174192`). It is not stale *because* the dev stopped at the wall. **If option 1 is taken, that page has to move with the declaration**, and this is the sentence that says so.\n\n⚠️ Timing, so nobody waits: the `domain:spec` seat (`os-justin`) posted at 2026-09-04T13:16Z that it takes no new dispatches this shift (maintainer 「当前任务处理完，合并了就下班」). This is very likely a card for the next spec seat.\n\n⛔ No `domain:*` label applied — that label has a single producer and it is triage.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

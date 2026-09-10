@@ -1,0 +1,30 @@
+{
+  "number": 15292,
+  "kind": "issue",
+  "title": "finding(plugin-dev): `DevPlugin` degrades a malformed stack at the metadata door but the option-B readers want to refuse it — which posture is it?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T08:57:19Z",
+  "updated_at": "2026-09-04T08:57:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15292",
+  "body": "Related #14122 · surfaced by the isolated contract review of #15282 (PR comment 5538108541). Filed rather than decided: the answer changes `DevPlugin`'s documented boot posture, which is above any single reader card.\n\n## The measured fact\n\n`DevPlugin.init` currently handles **the same defect on the same object** two different ways, twenty lines apart.\n\n`dev-plugin.ts:505` — `new AppPlugin(this.options.stack)` is inside a `try` whose catch calls `reportOptionalLoadFailure` (`:512`). The source comment there states the intent outright:\n\n> `new AppPlugin(stack)` parses the stack definition, so a malformed stack throws HERE\n\nMeasured end-to-end with `{ manifest: {...}, packages: [{ id, name, version, type }] }` — an entry inlined instead of wrapped under `manifest:`, the archetypal AI-authoring mistake:\n\n```\n=== DevPlugin.init outcome ===\nthrew? true { code: 'INVALID_ARTIFACT_PACKAGE_ENTRY', status: 422, … }\nlog lines mentioning app metadata: [ 'error   ✘ … failed to initialize — skipping app metadata …' ]\n```\n\nSo the app's whole metadata registration degrades to a log line and the dev server boots. Every child `init()` failure is likewise caught (`dev-plugin.ts:856+`), with exactly one deliberate exception (#5301, organizations).\n\nMeanwhile the ADR-0130 D4 reader cards want the opposite: `resolveArtifactPackageOrder` is both the platform's one traversal **and** its one gate, so #15005, #15006, #15007 and #15232 all deliberately let its ADR-0112 refusal propagate — \"the gate travels with the read\". That argument is sound for a **library** reader. `DevPlugin` is not one.\n\n## The question\n\nLeft open by #15232 and answered there only locally (that card catches and degrades, matching `:505`, so it no longer makes the i18n detector stricter than the metadata door — but that is a consistency fix, not a ruling):\n\n1. Should `DevPlugin` **stop** degrading a malformed stack at `:505` and refuse the boot? An `os dev` that starts on metadata the platform will refuse at registration is arguably worse than one that will not start — and #6664/#7926's history is about mis-attributed, quiet failures exactly like this.\n2. Or is degrade-and-boot the deliberate `os dev` contract, in which case **every** reader inside `DevPlugin` should catch, and the reader cards' \"the gate travels with the read\" rule needs an explicit carve-out for plugin `init` boundaries.\n\nNot a both-ways answer: today the file carries both, and which one you get depends on which of two adjacent blocks happens to reach the malformed `packages[]` first.\n\n## Not to be decided by folding it into a reader card\n\nThat is how it got here. #15232 took (2) locally because taking (1) would have meant changing `AppPlugin`'s handling from inside an i18n card. Whichever way this goes, it is one edit to `dev-plugin.ts`'s posture plus the prose that documents it, and it should name #5301 as the existing exception.\n\n## Note for whoever takes it\n\n⛔ `reportOptionalLoadFailure` is **not** the vehicle for the refusal half: its message says \"PACKAGE is installed but failed to initialize\", which names a package for a metadata-shape defect — the precise mis-attribution #7926 removed from this file. If the answer is \"refuse\", it needs its own diagnostic; if \"degrade\", the log line must name the metadata defect and not a package."
+}

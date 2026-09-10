@@ -1,0 +1,31 @@
+{
+  "number": 15632,
+  "kind": "issue",
+  "title": "[finding] the `{ success, error: { code, message, details } }` envelope published across content/docs/protocol/kernel/error-handling.mdx matches no route's response body",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T00:53:57Z",
+  "updated_at": "2026-09-09T05:22:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15632",
+  "body": "Recorded while fixing #15362, which corrected one entry's error CODE on this page. #15362's body explicitly recorded the envelope question as **not measured** (\"the whole section may predate the current envelope; this card records only the code spelling\"), so it is filed rather than fixed there.\n\n## What the page says\n\n`content/docs/protocol/kernel/error-handling.mdx` on `origin/main` `6b8c67778`, section `## Standard Error Response` (line 55 onward):\n\n```json\n{\n  \"success\": false,\n  \"error\": {\n    \"code\": \"error_code\",\n    \"message\": \"Human-readable description\",\n    \"details\": { },\n    \"requestId\": \"req_abc123\",\n    \"timestamp\": \"2024-01-16T14:30:00Z\"\n  }\n}\n```\n\nEvery per-code example below it repeats that nesting — `UNAUTHENTICATED`, `INVALID_FIELD`, `RESOURCE_NOT_FOUND`, `DELETE_RESTRICTED` and the rest.\n\n## What the routes emit\n\nFlat, with the code at the body's top level and no `details` object. From `packages/rest/src/rest-duplicate-record-arm.test.ts`, which asserts the whole body key-for-key:\n\n```ts\nexpect(mapDataError(env, 'duly_note').body).toEqual({\n    error: CURATED_NAMED,\n    code: 'UNIQUE_VIOLATION',\n    developerMessage: env.message,\n    field: 'email',\n    object: 'duly_note',\n});\n```\n\nThe same flat shape is what `content/docs/protocol/kernel/http-protocol.mdx:757-762` publishes and what ADR-0112's `ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`) describes. The structured context this page puts inside `details` is carried as top-level siblings instead (`field`, `object`, `dependentObject`, `dependentCount`, `currentVersion`, `developerMessage`), and no arm in `structuredCodeAnswer` emits `success`, `details`, `requestId` or `timestamp` at all.\n\nThe #15362 PR replaced ONE example with the real body and said so in prose, which leaves the page internally inconsistent until this is graded — deliberately, because rewriting a dozen examples and the envelope section is a different change from correcting a code spelling.\n\n## Suggested disposition\n\nDocs-only, but page-wide: decide whether `## Standard Error Response` should be rewritten to the ADR-0112 body (and every per-code example with it), or whether the page describes an aspirational envelope that should be removed rather than corrected. Whoever takes it should read `packages/rest/src/error-response.ts` (`structuredCodeAnswer` and `resolveErrorResponse`) for the real terminals, not this page.\n\n## Not measured here\n\nWhether `requestId` / `timestamp` are emitted anywhere at all, and whether any client or the Console reads the nested shape."
+}

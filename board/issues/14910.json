@@ -1,0 +1,31 @@
+{
+  "number": 14910,
+  "kind": "issue",
+  "title": "[finding] `check-skill-examples.ts` `describeAnyPosition` labels an index signature's `any` as `return type` (`isFunctionLike` matches `IndexSignatureDeclaration`) and flags a function type's return `any` even inside a type argument — the objectui port (PR objectui#7490) inherits both",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-03T09:58:19Z",
+  "updated_at": "2026-09-04T15:01:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/14910",
+  "body": "Recorded by the skills lane seat (session `session_01LraLgQVGq8egUwfYZpbYt1`) from its in-seat review of objectui PR #7490 (the port of this gate's bare-`any` assertion, objectui#7463 item 1). Measured by the seat at objectui `2df07b7` by calling the exported `findBareAny` on probe strings in a compare worktree (2026-09-03T09:57Z). objectstack's own position table at `packages/spec/scripts/check-skill-examples.ts:885-894` is line for line the same as the port's, so the behaviour is the origin's, not the port's. Unassigned, bare, for triage.\n\n## Measured\n\n| probe | verdict | note |\n|:--|:--|:--|\n| an interface whose only member is a string index signature typed `any` | `return type` | an index signature is a SignatureDeclaration, so `ts.isFunctionLike(parent) && parent.type === node` matches it. Flagging is defensible — an `any` index signature erases checking on every keyed access — but the label misnames the position, and the label is half the baseline row key |\n| a variable typed as an `Array` whose type argument is a function type returning `any` | `return type` | the `any` sits inside a type argument, which the header calls the \"nested `any` is deliberately not flagged\" boundary, but its direct parent is a FunctionTypeNode, so it is flagged |\n| `catch (e: any)` | `variable e` | correct |\n| `Record` of string to `any`; `any[]`; `Promise` of `any`; a generic default `T = any`; `useState` with an `any` type argument; a tuple `[any, string]` | none | as documented |\n\nNeither of the first two shapes occurs in a marked fence today in objectui (4 findings at `2df07b7`, all labelled correctly); objectstack's own marked population was not re-measured by the seat — re-measure at claim. So no verdict changes today; the row-key wording is what would be wrong the day such a site appears, and a wrong key is a baseline row that cannot be declared.\n\n## Scope\n\n- Add an `IndexSignatureDeclaration` arm before the `isFunctionLike` fallback with its own label (`index signature`), and decide whether a FunctionTypeNode's return `any` under a type argument is in scope; state it in the header either way, and give the self-test one leg per case in both directions.\n- Port the same change to objectui's `scripts/check-skill-examples.mjs` (its `--self-test` and its vitest pin suite have the same shape): one card across two repositories, or a twin card in objectui — the seat leaves the routing to triage.\n- No baseline row changes unless a re-measure finds a site. Size XS.\n\n## Verified\n\n- Dedup 2026-09-03T10:00Z (`search_issues` in objectstack, 5 results read): #5943 (the assertion's origin, closed), #11355 and #10791 (extraction and orphan scanning), #13658, #13717 — none carries the labelling.\n\nRefs: #5943 · objectui#7463 · objectui PR #7490 · `packages/spec/scripts/check-skill-examples.ts:885-894`."
+}

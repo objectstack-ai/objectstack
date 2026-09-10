@@ -1,0 +1,30 @@
+{
+  "number": 16284,
+  "kind": "issue",
+  "title": "[finding] `convention/label-case` reaches 5 of the 9 schemas that carry a label — page, dashboard, chart, report, action, bulk-action and component labels are never linted at all",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-06T10:51:02Z",
+  "updated_at": "2026-09-09T11:08:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16284",
+  "body": "⛔ **Recorded for triage; no severity asserted, no `domain:*`, no type** — routing and grading are triage's. Filed by the `domain:cli` execution PM seat (#6024) from a measurement handed back on #15880, where the implementer was asked to enumerate the rule's call sites rather than trust the card's sweep. This is what the enumeration turned up, and it is **not** a defect PR #16280 introduces or should fix.\n\n## The gap\n\n`lintConfig` walks **five** collections — `objects`, `views`, `apps`, `flows`, `agents` — and reaches `checkLabelCase` from **four** call sites covering **five** authoring paths. Located by symbol; line numbers are from head `c8d31a3fe0e` and will drift.\n\n| call site | authoring path | label type |\n|:--|:--|:--|\n| `lint.ts:202` | `objects[].label` | `z.string()` |\n| `lint.ts:229` | `objects[].fields.*.label` | `z.string()` |\n| `lint.ts:254` (via `getViewLabel`) | `views[].list.label` **or** `views[].listViews.*.label` | `I18nLabelSchema` |\n| `lint.ts:268` | `apps[].label` | `I18nLabelSchema` |\n\nBut `I18nLabelSchema` is imported by **nine** `ui/` schemas: `app`, `view`, `page`, `dashboard`, `chart`, `report`, `action`, `bulk-action`, `component`.\n\n⇒ **`convention/label-case` never reaches `page`, `dashboard`, `chart`, `report`, `action`, `bulk-action` or `component` labels — before this change or after it.** The rule's coverage is narrower than the schema surface it nominally governs, and nothing says so.\n\n## Why it is worth a card rather than a shrug\n\n⭐ **The card that found the crash reported \"exactly two hits\" and that number was an artefact of its fixture, not a property of the class.** #15880's mutation sweep (15,728 mutations, 3,064 schema-valid survivors) found exactly two crash sites — `apps.0.label` and `views.0.list.label` — and its second sweep over the four bundled eval-corpus fixtures found **zero**, correctly explained at the time as \"those fixtures declare no `apps` and no `views`.\"\n\nBoth readings are honest and both are about the **fixtures**. The class is the **call-site set**, and the call-site set is four. A sweep can only find what its fixture reaches, so a sweep is evidence of presence and never of absence — which is exactly why the dispatch asked for the enumeration instead of taking the two.\n\nThat matters beyond this rule: a mutation sweep reporting a small hit count reads like a measured blast radius, and here it would have understated the class by more than half.\n\n## What is and is not claimed\n\n- **Measured**: the four call sites, the five collections `lintConfig` walks, and the nine `ui/` schemas importing `I18nLabelSchema`.\n- ⛔ **Not measured**: whether any of the seven unreached carriers is *authored* often enough for the silence to matter, and whether the rule was ever *intended* to reach them. This card records a coverage gap; it does not assert the gap is a bug.\n- ⛔ **Not a regression.** The silence predates PR #16280 and is unchanged by it. That PR's guard makes the rule silent on **localized** labels on the two carriers it does reach — a separate, deliberate, pinned silence.\n\n## Related, and deliberately separate\n\n**#16282** — the two label carriers accept different types (`objects[].label` is `z.string()`, `apps[].label` is `I18nLabelSchema`). That is a *contract* question about what may be authored. This card is a *coverage* question about what gets checked. They interact — widening the string carriers would enlarge this rule's blind area — but they are decided by different people on different surfaces.\n\nRefs: #15880 (where the enumeration was made) · PR #16280 · #16282 · `packages/spec/src/ui/i18n.zod.ts`."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 17348,
+  "kind": "issue",
+  "title": "driver-memory answers a text operator over a DECLARED temporal column by matching its canonical ISO text — the opposite of #15683's declared-type answer, and the existing pin passes for the wrong reason (a millisecond mismatch)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T08:09:12Z",
+  "updated_at": "2026-09-10T14:43:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17348",
+  "body": "Filed unassigned by the #15683 dev while landing the SQL half of that ruling. Dedup: one targeted MCP `search_issues` (2026-09-10) returned no card on this cell; a control query in the same session hit its target, so the empty result is a reading.\n\n⚠️ This card is the JS-face half of #15683's ruling. `driver-memory` production code is under #5499's investment freeze; the PIN half was already carried out under that freeze's own `例外升级通道` clause (false green), and is described below. What remains here is production behaviour, so the freeze applies to it and this card is expected to sit on hold until the freeze lifts or triage escalates it by name.\n\n## Measured\n\nProbe on `InMemoryDriver`'s live `find()` path, `driver-memory` at `origin/main` + the #15683 branch. One object declared through `syncSchema` with `made_at: { type: 'datetime' }`, two rows written in the two stored forms a caller can produce:\n\n```ts\nawait d.create('probe_t', { id: 'D', made_at: new Date('2026-01-05T00:00:00Z') });\nawait d.create('probe_t', { id: 'S', made_at: '2026-01-05T00:00:00.000Z' });\n```\n\n| read | answer |\n|:--|:--|\n| every row's stored `made_at`, as `typeof` | **`string`** for BOTH rows — `'2026-01-05T00:00:00.000Z'` |\n| `{ made_at: { $contains: '2026' } }` | **`['D','S']`** — both rows |\n| `{ made_at: { $startsWith: '2026' } }` | **`['D','S']`** — both rows |\n| `{ made_at: { $notContains: '2026' } }` | **`[]`** |\n\nTwo facts, and the first is the one that is not written down anywhere:\n\n1. **A declared temporal column does NOT store \"whatever the caller wrote\".** The `Date` object went in and an ISO STRING came back. The driver resolves the declared field kind on write (#4047) and canonicalises, so the stored form of a declared `datetime` is canonical ISO text on this face exactly as it is on SQLite.\n2. ⇒ **A text operator MATCHES it**, which is the exact opposite of the answer #15683's maintainer ruling declares for a column whose DECLARED type is temporal («the positive operators match no row, `$notContains` matches every valued row, on every face — SQL family, memory driver, formula, having — keyed on the **declared** field type, not on the stored representation»).\n\n## The false green this also uncovers\n\n`packages/drivers/driver-memory/src/memory-driver-filter-logic-conformance.test.ts` carries two rows that read as if they pinned the no-match answer:\n\n```\n['$contains does not rewrite its pattern into a datetime storage form',\n  { made_at: { $contains: '2026-01-01T00:00:00Z' } }, []],\n['$notContains does not rewrite its pattern either',\n  { made_at: { $notContains: '2026-01-01T00:00:00Z' } }, ['1', '2', '3']],\n```\n\nThey pass — and NOT because anything type-gates. The fixture stores `new Date('2026-01-01T00:00:00Z')`, which canonicalises to `'2026-01-01T00:00:00.000Z'`, and the comparand is spelled **without the milliseconds**. `'2026-01-01T00:00:00Z'` is not a substring of `'2026-01-01T00:00:00.000Z'`, so the answer is `[]` for a string reason. Change the comparand to `'2026'` and the same rows answer every row.\n\nThose two rows are what the card body of #15683 cited as \"already pins the JS side for a `Date`-valued column\". That citation is **measured false**: what they pin is the #4047 no-pattern-rewrite property, not a type gate, and #15683's PR re-anchors their prose and adds a characterisation row so the divergence is named instead of implied. ⛔ That PR does not change this behaviour — only the pins.\n\n## What the fix would be, and why it is not a one-liner\n\nThe other faces decide this at COMPILE time from the declared type, which they can read. `driver-memory`'s live path evaluates a predicate over a stored value and has the schema available at `find()` (it is what canonicalises the write), so the declared type IS reachable here — unlike `formula`'s `matchesFilterCondition(record, filter)`, which takes a bare record, and `objectql`'s `matchesHaving`, which filters aggregated rows carrying no field declaration (both measured on #15683 and reported there). So this face is the one JS evaluator that COULD be brought onto the declared-type answer without a new plumbing decision — which is exactly why it should be a deliberate change and not a rider.\n\n## Related\n\n#15683 (the ruling and the SQL half) · #14079 (the non-string-column row it extends) · #5499 (the `driver-memory` investment freeze and its `例外升级通道` clause) · #4047 (the field-kind resolution that canonicalises the write)\n"
+}

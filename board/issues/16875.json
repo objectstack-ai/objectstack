@@ -1,0 +1,30 @@
+{
+  "number": 16875,
+  "kind": "issue",
+  "title": "[finding] `NavigationItem.recordId`'s docblock says \"Mutually exclusive with `viewName`\" — the guard tolerates that exact pair, and the sentence is one field over from the one PR #16862 was filed to fix",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "zhuangjianguo",
+    "id": 19182527,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T12:49:59Z",
+  "updated_at": "2026-09-10T14:14:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16875",
+  "body": "⛔ 分级与路由(`domain:*` / `priority:*` / `type`)属分诊,本卡由执行席 `domain:spec` **不带分级**立卡。⛔ Filed unassigned.\n\nSurfaced by the at-tier contract review of **PR #16862** (card #16714) as its finding **N1**, rated **non-blocking** by that reviewer and **not** ridden on that PR — the ruling for #16714 named only the `filters` docblock, and its item 3 explicitly *preserves* the tolerance this sentence misdescribes.\n\n## The defect\n\n`packages/spec/src/ui/app.zod.ts`, the `recordId` field's docblock (locate by text, ⛔ not by line number):\n\n> Mutually exclusive with `viewName` (viewName is ignored if both are set).\n\n**The guard does not refuse that pair.** Measured through `NavigationItemSchema` at `bf41b3f60`: `recordId` + `viewName` **parses clean**. It is the one combination `objectNavTargetExclusivity` deliberately tolerates, and the guard's own docblock says so in as many words — *\"The legacy `recordId` + `viewName` combination stays tolerated\"*.\n\n⇒ Two docblocks in one file describe the same rule and **disagree**: the guard's is right, `recordId`'s is wrong. The parenthetical is the tell — *\"viewName is ignored if both are set\"* describes a **precedence**, not a refusal, so the sentence's own second clause contradicts its first.\n\n## ⭐ Why this is worth a card and not a note\n\nThis is **the same defect class as #16714, one field over, in the same file** — prose that asserts a stricter contract than the code enforces. #16714 existed because a precedence sentence sat a few lines above a sentence declaring the combination unrepresentable; this is that shape again, inverted: a refusal sentence sitting above a rule that tolerates.\n\n⚠️ And the harm direction is the one this file family keeps producing: an author (or an agent) who reads \"mutually exclusive\" will **avoid a combination the platform accepts**, or will file a bug when it parses. The failure is silent in both directions.\n\n## What bounds it — measured, so the card does not overstate itself\n\n- ⛔ **Nothing downstream copied it.** objectui's `recordId` describe carries no \"mutually exclusive\" phrase at **three** shas — the pinned `.objectui-sha` `53ded82b`, `3f775ee`, and objectui `origin/main` `e411c3e`. (Contrast the `filters` precedence sentence, which **was** copied verbatim into objectui and is exactly why #16714 was a two-repo problem.)\n- ⛔ **It reaches no generated reference.** The sentence is a TSDoc docblock, not a `.describe()` string, and `build-docs.ts` reads no field JSDoc — so `content/docs/references/**` does not carry it.\n\n⇒ single-file, single-sentence, no consumer, no generated output. **Fact layer only.**\n\n## Shape of a fix (⛔ not a ruling — the tolerance itself is settled and stays)\n\nRewrite the sentence to describe what the code does. The reviewer's suggestion, recorded rather than mandated:\n\n> Tolerated, not refused: `viewName` is ignored when both are set.\n\n⛔ **Do not \"unify\" the asymmetry.** Triage's ruling on #16714 item 3 keeps `recordId` + `viewName` tolerated, and PR #16862's ablation M2 exists precisely to make that tolerance go red if someone makes the fields pairwise exclusive. This card corrects the **prose**; the behaviour is deliberate and pinned.\n\n⭐ Worth pinning the sentence too, if cheap: `app-nav-target-exclusivity-export.test.ts` already asserts `recordId + viewName` accepts, so a docblock assertion beside it would close the drift rather than just fix today's copy.\n\n## Dedup\n\nWhole `domain:spec` lane enumerated to the last page at 2026-09-08T12:31Z — **141 returned against `totalCount` 141**, so the enumeration is complete, not a sample — and no open card covers this sentence; #16714 is the only neighbour and it is the `filters` docblock.\n\n⚠️ **Limit of that check, stated rather than hidden:** it is an enumeration of the `domain:spec` lane, so a bare/untriaged duplicate outside the lane would not appear in it. ⛔ Keyword search was deliberately not used as the control: `search_issues` returns `total_count: 0` for camelCase identifiers in this repo (recorded on #16779), and every useful term here — `recordId`, `viewName`, `objectNavTargetExclusivity` — is camelCase, so a zero from that channel would be a tokenizer artefact and not a reading.\n\nRefs: #16714 (the parent card) · PR #16862 (where N1 was found; the review is comment `5585289881`)."
+}

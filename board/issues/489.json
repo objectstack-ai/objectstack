@@ -1,0 +1,36 @@
+{
+  "number": 489,
+  "kind": "pull_request",
+  "title": "docs: Document Client SDK and React hooks packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-02T09:04:50Z",
+  "updated_at": "2026-02-02T09:43:19Z",
+  "closed_at": "2026-02-02T09:22:36Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-02-02T09:22:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/489",
+  "body": "Recent additions of `@objectstack/client` and `@objectstack/client-react` packages were undocumented. Updated documentation to cover new features.\n\n## Changes\n\n### New Documentation\n- **client-sdk/react-hooks.mdx** - Complete React hooks reference (391 lines)\n  - Data hooks: `useQuery`, `useMutation`, `usePagination`, `useInfiniteQuery`\n  - Metadata hooks: `useObject`, `useView`, `useFields`\n  - Context management and TypeScript patterns\n\n### Enhanced Documentation\n- **client-sdk/index.mdx** - Added missing features:\n  - Batch operations with transaction support (`client.data.batch`)\n  - ETag-based metadata caching (`client.meta.getCached`)\n  - View storage and sharing (`client.views.*`)\n  - Standardized error codes and handling\n\n### Integration Points\n- **README.md** - Quick start for application developers\n- **ARCHITECTURE.md** - Detailed client package architecture\n- **PROTOCOL-QUICK-REFERENCE.md** - Client SDK reference section\n\n## Example\n\n```typescript\n// Batch operations with transaction control\nconst result = await client.data.batch('todo_task', {\n  operation: 'update',\n  records: [\n    { id: '1', data: { status: 'active' } },\n    { id: '2', data: { status: 'active' } }\n  ],\n  options: { atomic: true, returnRecords: true }\n});\n\n// React hooks with type safety\nconst { data, isLoading } = useQuery<Task>('todo_task', {\n  filters: ['status', '=', 'active'],\n  sort: ['-priority']\n});\n```\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 扫描最近的修改，对文档进行必要的更新\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 15937,
+  "kind": "issue",
+  "title": "[finding] `ToolExecutionContext.confirmedBlueprintIdentity` now authorizes the largest metadata write in the product, but it is declared only on cloud's augmented context — the protocol's `ToolExecutionContext` (`contracts/ai-service.ts`) does not carry it, unlike `userMessageText`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T15:24:15Z",
+  "updated_at": "2026-09-06T12:36:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15937",
+  "body": "Filed by the director seat (#12708, summon #15, `session_01TezFG8ZMrNH6n5VTNpPpdH`) while auditing cloud#1954's landing against the maintainer's 2026-09-05 principle, verbatim: 「本项目以协议为基准。所以开发应该对其协议，协议有问题应该立卡修改协议」. Observation class; `domain:*` / type / priority are triage's. Not a defect in the landed fix — a question of where a contract field is declared.\n\n**Governing text.** `packages/spec/src/contracts/ai-service.ts`, `interface ToolExecutionContext` (`origin/main` `6c439f2`): declares `actor`, `isSystem`, `conversationId`, `turnId`, `messageId`, `environmentId`, `agentId`, the UI-context block, **`userMessageText`** (\"Forwarded so a tool can detect intent — e.g. an explicit confirm/approval … Populated by whichever layer owns the agent route (cloud, post-ADR-0025)\"), `traceId`, `onProgress`. No `confirmedBlueprintIdentity`.\n\n## Measured\n\n- cloud PR #2005 (MERGED 2026-09-05T13:41Z, closes cloud#1954, product-owner ruling ① recorded 11:41Z on that card): `AIService.runApprovedProposalReplay` (cloud `packages/service-ai/src/ai-service.ts:1835`) stamps `execCtx.confirmedBlueprintIdentity = identity`; the field is declared on **cloud's augmented** `ToolExecutionContext` in `packages/service-ai/src/tools/tool-registry.ts:45`; `service-ai-studio`'s `confirm-gate.ts:123-127` reads it off `exec` by structural cast; `authorizeApply` (`blueprint-tools.ts`) makes it clause 3 of the authorization of `apply_blueprint`.\n- The PR body states the choice explicitly: *\"Claim clause-② is NO: no `@objectstack/spec` change. `confirmedBlueprintIdentity` is added to cloud's own augmented `ToolExecutionContext` in `@objectstack/service-ai`, alongside `userMessageText` and `systemInvocation`.\"* — but `userMessageText` **is** in the spec's interface (quoted above), so the two fields are not alike in where they are declared.\n- `git grep confirmedBlueprintIdentity origin/main -- packages` in objectstack: zero hits.\n\n## The question (for triage / the spec seat; the director seat does not rule it)\n\nThe protocol declares the tool-execution context a handler may rely on. A consent field that decides whether a whole app is built is now read by a handler but declared only in one consumer's augmentation. Two readings, and the protocol-baseline principle says which is default:\n\n1. **Declare it in the protocol**: add `confirmedBlueprintIdentity?: string` to `ToolExecutionContext` with the same provenance note `userMessageText` carries (\"populated by the layer that owns the agent route; set only by in-process code, never from a request body\"). Spec minor; Clause-② yes (public surface widens by one optional field); contract-review tier. Cloud's augmentation then becomes redundant and is deleted.\n2. **Rule the augmentation the intended extension point**: then the spec's `ToolExecutionContext` docblock should say so (\"route-owning layers may augment; handlers read augmented fields structurally\") — a docs-only spec change, and `userMessageText` arguably should have stayed out of the protocol by the same rule.\n\nDefault under the principle: **1** — the protocol is the baseline; a field a published handler authorizes on belongs in the declared contract, not in a cast. The seat records this as the likely direction, not as a ruling.\n\n## Not claimed\n\nThat the landed behaviour is wrong (S3/S6 closed, S2 residual tracked as cloud#2006), or that any consumer breaks today — the cast reads `undefined` on any context that lacks the field and authorizes nothing from its absence.\n\nRefs: cloud#1954 · cloud PR #2005 · cloud#2006 (blind-route residual) · cloud#1912 (kept `collectPendingBlueprint` module-local) · #15929 (skills finding: protocol-baseline rule for decision cards)."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 15212,
+  "kind": "issue",
+  "title": "feat(spec,drivers,objectql,plugin-security): `organization_id` NOT NULL per cleared table; one predicate for Layer 0 and every driver; both `orWhereNull` arms, the `__global__` sentinel and the #13491 ledger retire (ADR-0131 D1/D8/D9) — protocol 18",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:engine",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p1",
+    "security",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-04T06:06:10Z",
+  "updated_at": "2026-09-04T06:50:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15212",
+  "body": "**⛔ BLOCKED — the v18 development line is not open.**\n\n`Blocked-by: #15193, #15196, #15204, #15205, #15206, #15207`\n\nPart of #15194 (ADR-0131 execution tree). ⛔ Do not claim, assign or dispatch this card while #15193 is open, whatever its other labels say.\n\n---\n\n**In one sentence.** Once the data is clean, the database itself forbids an ownerless row; both walls compute the same predicate; and the driver rule that let an unlabelled row through retires, taking the #13491 classification ledger with it.\n\n⚠️ **Blocked-by C7** (the migration) in addition to the gate — the `NOT NULL` constraint is applied **per table, only on tables C7's report shows clear**. A table still reporting NULL rows does not receive the constraint and stays red.\n\n**Scope.** DDL emits `NOT NULL` for `organization_id` on every cleared table (per-table gate). The engine computes **one** tenant scope — `= :tenant` / `IN accessible_org_ids` / none under `single` — and threads it to `computeTenantLayer0Filter` and to `DriverOptions`; `applyTenantScope` drops **both** `orWhereNull` arms. `driver-memory` / `driver-mongodb` / `driver-turso` / `driver-sqlite-wasm` are audited to the same predicate. `check-tenant-chokepoint.mjs` refuses an `IS NULL` arm. `GLOBAL_TENANT` and ADR-0120 D3's `COALESCE` are removed through the D4 ceremony. `platform-object-tenancy.ts`, `isPlatformObjectOutOfTenantAuditScope`, the tenant-audit `unclassified` branch, `reportLegacyPlatformAdminGrant`, and the NULL readings in `resolve-authz-context.ts` / `sharing-rule-service.ts` / `settings-service.ts` / `meta-write-org-scope.ts` / `bootstrap-system-capabilities.ts` all retire. The id columns C2 left beside the name columns are dropped here. Tests pinning NULL semantics are rewritten (`deal_p1`, `sql-driver-tenant-scope`, `memory-tenancy-guard`, `rule-criteria-org-scope`).\n\n**Acceptance.** An unstamped write is refused in every posture; a tenant read returns own rows only (`isolated`) or the membership union (`group`); `single` is unchanged end to end (showcase dogfood: Setup lists a non-empty declared catalog through the registry, organization-created items work). **Ablation**: re-adding one arm reddens exactly the predicate pin. A table still reporting NULL rows does not receive the constraint and stays red.\n\nProtocol 18. Clause-②: **yes** — this changes the accept set.\n\nRefs: ADR-0131 D1, D8, D9, D13, D14 · ADR-0105 D2 · ADR-0120 D3/D4/D7 · #2734 · #10103 cause 1 · #13491.\n"
+}

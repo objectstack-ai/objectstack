@@ -1,0 +1,32 @@
+{
+  "number": 16045,
+  "kind": "issue",
+  "title": "[finding] @objectstack/spec pins 5309 exports by name-and-kind but only 27 by signature — 99.5% of the ratified surface passes green through a shape change",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T21:42:37Z",
+  "updated_at": "2026-09-09T01:00:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16045",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024) from a measurement handed back by the dev agent on #15630, using [Claude Code](https://claude.ai/code). Not dispatched: the fix is a design decision about a much larger surface, not a mechanical repair.\n\n## The finding\n\n`@objectstack/spec` carries the same defect class that #15630 repaired in `@objectstack/cli`'s `./hook-body` pin, at a very different scale:\n\n- `api-surface/*.json` pins **5309 exports across 17 entry points** by **name and kind**.\n- `api-surface-signatures.json` pins **27 of them** by **signature hash** — **0.5%**.\n\nA signature change, a renamed interface field, or a dropped union member moves neither the name nor the kind. So for the other **5282** exports, the surface behaves exactly like the one #15630 repaired: the pin is green through a breaking shape change to a ratified public type.\n\n## Why this is worth a decision rather than a patch\n\n#15630 established the shape of a real fix and what it costs. Its repair compiles a real consumer fixture with a real `tsc`, from the consumer directory, against the **packed** `.d.ts` reached through the `exports` map — chosen over a signature snapshot deliberately, on the grounds that a compile asks *whether a dependent can still build* while a snapshot only asks *whether the shipped bytes moved*, and that a snapshot's known failure mode is that a red one gets accepted rather than investigated.\n\nThat reasoning does not obviously scale from 4 exports to 5309. Which of these is right for `@objectstack/spec` is a design call:\n\n- widen `api-surface-signatures.json` toward full coverage (cheap to run, weak instrument, accept-the-snapshot failure mode at scale);\n- a consumer-compile conformance fixture per entry point (strong instrument, 17 fixtures, real build cost);\n- something scoped — e.g. signature pins only for types ADR-0087 treats as ratified.\n\n⛔ This seat is not grading which. Filing so the choice is made deliberately rather than by the gap persisting.\n\n## Two neighbouring surfaces, measured in the same pass\n\n- **`@objectstack/console` does NOT share the gap** — this answers a question #15630's card itself left as NOT MEASURED. It exports `./package.json` and nothing else, declares no types, and has no type surface behind any name. The spelling is identical; there is nothing there to widen.\n- **`@objectstack/cli`'s own `./console` subpath has no surface pin at all** — neither names nor shapes — and it points straight at an internal barrel with 13 exports, so every export that module gains is published the moment it lands. The existing pin asserts only that `./console` is a declared subpath. Filed separately as its own card.\n\nTaken together: for the surfaces #15630's card named, its repair is **one fix, not a family** — but `@objectstack/spec` is a genuinely separate and much larger instance.\n\n## Provenance\n\nMeasured on the `#15630` worktree at the head that became PR #16043; handed back rather than acted on, per that dispatch's instruction to return out-of-scope findings with their measurement.\n\n⚠️ Not verified by this seat independently — this is the dev agent's measurement, relayed. The counts (5309 / 17 / 27) should be re-derived before anyone acts on them."
+}

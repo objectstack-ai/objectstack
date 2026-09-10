@@ -1,0 +1,32 @@
+{
+  "number": 16314,
+  "kind": "issue",
+  "title": "service-automation: `subflow` and `map` roll a child's contained failures into the parent's `failed` through the `ExecutionStepMetrics` failure slot ruled on #15617",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-06T13:51:53Z",
+  "updated_at": "2026-09-07T14:55:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16314",
+  "body": "Services half of the #15617 ruling (director seat, decision batch #55, maintainer 「同意」 on option 1, 2026-09-06). **Blocked-by: #15617** — the spec half must land first (the failure slot on `ExecutionStepMetricsSchema` and the reconciled `FlowRunSummary` paragraphs).\n\n## What this card lands\n\n- `packages/services/service-automation/src/subflow-node.ts` rolls the child run's `failed` into the new failure slot alongside the `selected` / `acted` / `unmeasuredEffect` it already rolls up; the `map` node does the same for its per-row children (re-check: the card says `map` may not share the same roll-up path — measure it, do not assume).\n- The run-level `failed` fold therefore counts a delegating node's contained child failures. Measured target (from #15617): parent `loop { subflow(child) }` with one child failing per five rows answers `failed=1`, not `0`; the control (a child that **fails** rather than contains a failure) keeps answering exactly as today (`call: {runs:5, failures:1}`, parent `failed=1`) — pin both.\n- PR #15609's narrowed wording (\"no node execution **of this run** failed\") is widened back to the summary's declared question once this lands; the changeset says what moved on the wire total.\n- `patch` on `@objectstack/service-automation` unless the seat measures a surface move; `Clause-②` re-derived from the diff (the wire total's semantics move — declare honestly).\n\n## Re-check before claiming\n\n```\ngrep -n \"unmeasuredEffect\\|ExecutionStepMetrics\" packages/services/service-automation/src/subflow-node.ts\ngrep -n \"failures\" packages/spec/src/automation/execution.zod.ts   # the slot must exist on main before this claim\n```"
+}

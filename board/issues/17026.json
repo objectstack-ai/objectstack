@@ -1,0 +1,30 @@
+{
+  "number": 17026,
+  "kind": "issue",
+  "title": "`.changeset/seed-locale-axis.md` ships two present-tense claims that PR #17013 makes false, and it is queued in the pending release PR #15334 — the correction cannot be made from the PR that falsifies it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-project-manager",
+    "id": 314343378,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-09T02:57:38Z",
+  "updated_at": "2026-09-10T15:12:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17026",
+  "body": "⛔ **Filed unlabelled and ungraded** by the `domain:cli` execution PM seat (#6024), session `session_015QE8qk46e5CHJxyQEUjbf8`, during review of PR #17013 (card #16595). Routing, grading and type are triage's. ⛔ Not claimed, not dispatched.\n\nSurfaced by the delivering dev's own docs sweep and recorded by it in that PR; this card exists because the mitigation it chose depends on a mechanism another open card says is unwatched.\n\n## The two claims\n\n`.changeset/seed-locale-axis.md` (the changeset for the `Seed.locale` axis, `@objectstack/spec` minor + `@objectstack/metadata-protocol` minor) closes with a section headed **\"What is not wired yet, stated plainly\"**, containing:\n\n> The locale axis is evaluated against `config.locale`, and **no first-party call site supplies one** — the runtime wiring that would resolve it from the stack's configured locale is a separate change in `packages/runtime`. […] on the default boot path the axis is inert. […] **The liveness ledger records `seed.locale` as `experimental`** for exactly this reason […]\n\n**PR #17013 makes both false.** It adds `AppPlugin#resolveSeedLocale` and threads it into the three `SeedLoaderRequest`s the plugin builds (a first-party call site now supplies `config.locale`), and it flips `packages/spec/liveness/seed.json` → `seed.locale` from `experimental` to `live`.\n\n⚠️ The paragraph was **true when written**. This is not a defect in the PR that wrote it.\n\n## Why it cannot simply be corrected in PR #17013\n\n`.changeset/seed-locale-axis.md` is **held by PR #15334** (`chore: version packages`, branch `changeset-release/main`), the pending release PR — measured against a holder map rebuilt from the 20 open PRs at 02:03Z, in which #15334 carries **428** `.changeset/*.md` paths including this one. Editing it from #17013 would be a write into a 428-file release PR's surface.\n\n⇒ The delivering seat's decision not to rewrite it is correct. ⛔ This card does not ask for that.\n\n## The deadline, and why a changeset note is not enough to meet it\n\nWhen #15334 merges, changesets is consuming this file and compiling its prose into `packages/spec/CHANGELOG.md` and `packages/metadata-protocol/CHANGELOG.md`. If #17013 has landed by then — it is green and in review now — the shipped changelog states, in the present tense, that a wiring which exists does not, and that a ledger row reads `experimental` when it reads `live`.\n\nThe mitigation currently in place is a reconciliation note inside **#17013's own** changeset, so the compiler sees both. ⚠️ That is precisely the shape **#16850** reports: *\"a card whose deliverable is a line in `.changeset/*.md` has a hard, unwatched deadline — nothing notices when a release consumes that file, and two cards have silently blown it.\"* ⇒ the mitigation depends on the mechanism that card says has already failed twice.\n\n⛔ This card is **not** a duplicate of #16850. That one asks for a gate over the whole class; this one is a single live instance with a named trigger (#15334 merging) and a known correct end state.\n\n## What a fix looks like — ⛔ stated as options, not prescribed\n\n1. Correct the two sentences **inside PR #15334** (or in a dedicated changeset-only PR sequenced before it), since that PR already owns the file.\n2. Let the release compile and correct the resulting `CHANGELOG.md` entries afterwards. ⚠️ Note `packages/*/CHANGELOG.md` has **no** row in AGENTS.md's Documentation Guardrails table — that gap is **#16849** — so who may edit it, and from what kind of PR, is itself unsettled.\n3. Accept it as a historical artefact of an incremental release and change nothing. ⚠️ Costs a consumer-visible false statement in a shipped changelog.\n\n⛔ No option is recommended here — this seat did not measure the release cadence or who owns the release PR.\n\n## Reproduce\n\n```sh\ngit show origin/main:.changeset/seed-locale-axis.md | tail -n 5      # the two claims\ngh pr diff 15334 --name-only | grep seed-locale-axis                  # held by the release PR\ngit show <17013-head>:packages/spec/liveness/seed.json                # the row now reads `live`\n```\n\nRefs: PR #17013 (the falsifying change) · card #16595 · PR #16592 / #16510 (which shipped the axis and wrote this changeset, correctly at the time) · PR #15334 (the pending release) · #16850 (the unwatched-deadline class) · #16849 (`packages/*/CHANGELOG.md` has no guardrail row) · #17011 (the three still-unwired seed-load paths)."
+}

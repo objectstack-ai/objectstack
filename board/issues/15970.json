@@ -1,0 +1,32 @@
+{
+  "number": 15970,
+  "kind": "issue",
+  "title": "approvals: a `recall` whose resume strands reports it as an ordinary non-failure — no `repairable` discriminator, where the identical strand through `decide` carries one",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T16:48:27Z",
+  "updated_at": "2026-09-07T09:33:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15970",
+  "body": "Found while implementing #15389 (PR #15966); **out of scope there and deliberately not fixed in it**. No assignee, no lane label — left for triage.\n\n## Measured\n\nReal `AutomationEngine` + real `ApprovalService`, one live process, in-memory ObjectQL double for the approvals tables only. A flow parks at an `approval` node; the reject branch's downstream node throws. The submitter then **recalls** the request, which resumes the run down the `reject` edge — and that resume strands it.\n\nWhat `ApprovalService.recall` answers:\n\n| read | result |\n|---|---|\n| the call | **no throw** — returns normally |\n| `result.resumed` | `false` |\n| `result.resumeError` | `resume of run 'run_2cfd…' failed: downstream blew up` — **prose only** |\n| `result.request.status` | `recalled` — the withdrawal is durable |\n| `strandedDecisionDetails(result)` | **`null`** — no machine-readable envelope at all |\n| `engine.hasSuspendedRun(runId)` | `false` — the run really is stranded |\n| `engine.restoreConsumedSuspension(runId)` | **`restored: true`** — and it really is repairable |\n\n**Control, same harness, same strand, different door:** the identical downstream failure reached through `decide` throws `RESUME_FAILED` carrying `{ finalized: true, decision, runId, repairable: true }` (this is #13807's batch #37 landing, pinned in `decision-strand-envelope.test.ts`). So the difference is the door, not the strand.\n\n## The mechanism\n\n`decide` / `sendBack` / `resubmit` route their resume through `ApprovalService.resumeRecordedOutcome`, which reads the engine's `AutomationResult.status` discriminator and derives `repairable` from `status === 'stranded'`.\n\n`recall` does not. It calls `serviceResume` directly inside its own `try` / `catch` (`approval-service.ts`, the non-revise-window arm of `recall`), and that catch keeps only `err.message` — the `resumeCode` / `resumeStatus` the error already carries are discarded one line before the result is built. So the repairability signal has a producer and, on this door, no consumer — the same shape #13807 found and fixed one door over.\n\n## Why it matters more now than when `recall`'s tolerance was written\n\n`recall`'s decision **not to throw is correct and should stay**: the withdrawal and the record-lock release are the point, and they have already landed. This is not a request to make `recall` fail.\n\nWhat changed is that the information is now actionable. Before #15389 there was nothing an operator could do with \"this run is repairable\" for an `approval` suspension — `restoreConsumedSuspension` re-armed the pause and no approvals door could continue it. PR #15966 adds that issuer (`continueRestoredRun`), so `repairable: true` now names a repair that exists and completes. On the `recall` path a caller still cannot learn it, and the run's downstream work is silently abandoned.\n\n## ⚠️ Contract adjacency — flagged, not decided\n\nThe natural repair is for `ApprovalRecallResult` to carry the discriminator beside `resumeError`. That is a **public result-shape change**, and it sits close to the open maintainer ruling on #15556 about whether a resume failure must reach the caller in an actionable shape (options A/B/C/D). ⛔ This card does not pick a shape and should not be actioned as an ordinary lane fix without that ruling being consulted — it may simply be an instance of it. A same-shape alternative that avoids the contract question is to log the discriminator at `error` the way `resumeRecordedOutcome` already does, which would at least make the fact recoverable from the trace; that is stated as an option, not a recommendation.\n\n## Not a duplicate\n\n- **vs #15389** — that is the missing *issuer* for a restored approval suspension (fixed by #15966). This is a door that never reports the run is repairable in the first place. Different half of the same recovery story: #15389 asks \"can it be continued\", this asks \"is the operator ever told it can be\".\n- **vs #15556** — that is the subflow up-bubble the decision door is told nothing about. This is a direct, non-subflow strand where the engine DID report `stranded` and this door dropped it.\n- **vs #13807** — that ruling landed the envelope on `resumeRecordedOutcome`'s doors. `recall` was not among them, and no card records that gap.\n\nReproduction harness: extend `packages/plugins/plugin-approvals/src/restored-approval-continuation.test.ts`'s fixture and call `recall` on the pending request with a throwing `mark_rejected`."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 16659,
+  "kind": "issue",
+  "title": "A schedule-triggered flow's `notify` delivers nothing on a multi-organization install: the run carries no organization, so the tenant-scoped inbox/delivery writes are refused (#8844) while the run reads healthy",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sam",
+    "id": 318158314,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T16:29:58Z",
+  "updated_at": "2026-09-10T15:16:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 18,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16659",
+  "body": "Measured on `@objectstack/cli` 17.3.0 (`objectstack dev --fresh`, memory AND sqlite drivers), in an app that seeds 12 employer organizations plus the platform one (objectstack-ai/ats, card F5/F6 — objectstack-ai/ats#7).\n\n## What happens\n\nA `type: 'schedule'` flow (`runAs: 'system'`, start node `config.schedule: { type: 'cron', expression: '* * * * *' }`) whose loop body ends in a `notify` node (`channels: ['inbox']`, recipients = user ids) runs on every tick, selects the right rows, and its `update_record` steps land. The notifications do not:\n\n- `ScheduleTrigger` launches the run with `{ event: 'schedule', params: { jobId, flowName, schedule } }` and no `tenantId` (`trigger-schedule/src/schedule-trigger.ts`; the time-relative trigger threads none either).\n- `notify` therefore logs `[notify] no organization in scope for topic '…'` (the #11303 fail-loud limb) and emits with no `organizationId`.\n- `sys_notification` lands with `organization_id = NULL`, but the tenant-scoped rows below it do not: after two ticks on sqlite a direct read of the datastore shows `sys_inbox_message` EMPTY, every recipient's `GET /api/v1/notifications` is empty, and the run summary reports `unmeasured=0` (the notify node's `enqueued` was 0), where the same flow triggered through `POST /api/v1/automation/:name/trigger` under a session reports `unmeasured=4` and every recipient sees the row.\n- The same tick logs the mechanism for the run-history row, verbatim: `Insert on 'sys_automation_run' was REFUSED: a system-context write on a tenant-scoped object must carry an organization, and this install declares the 'single' tenancy posture but holds 2 organizations, so which one owns the row is not derivable` — the #8844 Option 1 ruling (`objectql/src/tenancy/system-write-organization.ts`), whose own header names \"every cron tick\" as the producer it guards.\n\nSo on any install with more than one `sys_organization`, a scheduled flow that notifies is a green run that delivers nothing, and its history never persists. Record-change flows are unaffected (the triggering session's organization is threaded, and delivery works on both drivers).\n\n## Why the app cannot route around it\n\n- `NotifyConfigSchema` is `strictObject` and has no organization key, so a flow cannot hand `notify` the record's `organization_id` (an interview row carries one; a platform-global object such as a candidate credential — `tenancy: { enabled: false }` — carries none at all).\n- The run context is built by the trigger; a `runAs: 'system'` flow has no session to borrow from.\n- A `defineJob` handler receives `{ jobId, data, bundle, ql, logger }` — no messaging handle — so moving the work to a job does not reach the inbox either.\n\n## Reproduction\n\n1. Any stack with `requires: ['automation', 'triggers', 'approvals', 'messaging']` and ≥ 2 organizations in `sys_organization`.\n2. A `schedule` flow: `get_record` → `loop` → `notify` (inbox, user-id recipients). Cron `* * * * *` for the test.\n3. Wait one tick; read `GET /api/v1/notifications` as a recipient (empty), and the boot log (`no organization in scope` + the `REFUSED` line for `sys_automation_run`).\n4. Trigger the same flow via `POST /api/v1/automation/<name>/trigger` under a session: the recipient now sees the row.\n\n## Options seen from the app side (not a recommendation)\n\n- Let a scheduled trigger carry an acting organization (a start-node key, or a per-organization fan-out of the sweep).\n- Let `notify` accept an organization from the record (`organizationId: '{record.organization_id}'`).\n- Declare the user-keyed inbox objects (`sys_inbox_message`, `sys_notification_delivery`, `sys_notification_receipt`) platform-global, since an inbox row belongs to a user, not to an organization — the refusal message itself suggests this route for rows that \"belong to no organization\".\n\nRelated, closed: #11303 (threaded the run's organization into `notify` — this is the trigger family that has none to thread), #14501, #10673."
+}

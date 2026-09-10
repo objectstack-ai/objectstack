@@ -1,0 +1,32 @@
+{
+  "number": 15943,
+  "kind": "issue",
+  "title": "showcase 的 cascading-select 用 `'admin' in current_user.positions` 收敛选项，而 `admin` 从来不在服务端的 positions 轴上（membership `admin` 被映射成 `org_admin`）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-warren",
+    "id": 318460043,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-05T15:41:26Z",
+  "updated_at": "2026-09-06T07:00:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/15943",
+  "body": "## 现象\n\n`examples/app-showcase/src/data/objects/cascading-select.object.ts:85` 用\n\n```\nvisibleWhen: P`'admin' in current_user.positions`\n```\n\n收敛 `tier` 字段的 `restricted` 选项，且该文件的文档注释（`:23-27`）声称：\n\n> `tier` carries one ROLE-GATED option: `restricted` is offered only when `'admin' in current_user.positions`. **The same rule-validator rejects a non-admin who submits it anyway**\n\n但 `'admin'` **不是**服务端 `positions` 轴上的名字。\n\n## 实测\n\n服务端 positions 由 `resolveUserAuthzGrants` 派生，membership 角色经 `mapMembershipRole` 规范化后才进入 `positions`（`packages/core/src/security/resolve-authz-context.ts:821`）。对着已构建的 `packages/spec/dist/index.mjs` 实测该函数：\n\n```\n\"admin\"        -> \"org_admin\"\n\"owner\"        -> \"org_owner\"\n\"member\"       -> \"org_member\"\n\"sales_manager\"-> \"sales_manager\"\n```\n\n⇒ 一个 `sys_member.role = 'admin'` 的用户，服务端 `positions` 里是 `org_admin`，**没有** `admin`。而 `positions.mdx:80-90` 列出的内建名也只有 `platform_admin` / `org_owner` / `org_admin` / `org_member` —— 同样没有 `admin`。除非部署里恰好建了一条名为 `admin` 的 `sys_position` 行，该谓词在服务端恒为假。\n\n## 为什么这条独立于 #15136\n\n方向相反,且是**先前就存在**的:\n\n- #15136 修的是 **session 载荷**少了安全岗位 —— 客户端判假、服务端判真。\n- 这一条是**客户端判真、服务端判假**:修好 #15136 之前,客户端 `positions` 装的是 better-auth 的 `user.role` 标量,若该标量是 `admin`,选项**显示**;而服务端 rule-validator 按 `org_admin` 判,提交会被拒。\n\n⚠️ 注意 #15136 落地后这条**不会自愈**,只是换了个形状:客户端也改用安全轴之后,两侧就一致地判假 —— 选项对**所有人**隐藏,而注释仍声称它对 admin 可见。\n\n## 建议\n\n二选一,择其一即可:\n\n1. 谓词改成 `'org_admin' in current_user.positions`(与内建名一致),或\n2. 在 showcase 的 seed 里建一条名为 `admin` 的 `sys_position` 并做真实指派 —— 但那会让 showcase 示范一个与内建名极易混淆的岗位名,不推荐。\n\n同时修正 `:23-27` 的注释,它目前断言了一个未成立的服务端行为。\n\n## 出处\n\n由 #15136 的 dev 席在做 `current_user.positions` 全仓普查时测到,顺路发现,未在该 PR 内修复(范围外)。"
+}

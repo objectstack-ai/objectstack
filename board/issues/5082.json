@@ -1,0 +1,31 @@
+{
+  "number": 5082,
+  "kind": "issue",
+  "title": "ADR-0120 协议 18 项:D2 conversion(声明索引 unique: true → 'global')+ 裸 true 硬拒 + synonym pin 退役 —— 挂 18 列车,现在勿动工",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:on-hold",
+    "protocol:breaking",
+    "target:v18"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T02:55:59Z",
+  "updated_at": "2026-08-31T17:10:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5082",
+  "body": "**⛔ 挂起至协议 18 列车开启,现在勿认领勿动工**(维护者裁定,ADR-0120 D7:现在写会随 18 的其它变更 bitrot)。**不入 pm:queue。**\n\nADR-0120(`docs/adr/0120-unique-scope-vocabulary-and-null-safe-tenant-uniqueness.md`,Accepted 2026-08-04)刻意延后到协议 18 的三项,届时照 ADR 执行:\n\n## D2 — 转换层条目\n- 新增 ADR-0087 D2 conversion `declared-index-unique-scope`(`toMajor: 18`):存量/加载元数据中声明索引的 `unique: true` 一律改写为 `unique: 'global'` —— 语义逐字相同,物理索引零漂移;\n- 覆盖 ADR-0087 定义的全部 seam,含 `applyConversionsToStoredItem`(sys_metadata 存量行);\n- fixture 用 S4/S5 形状;**九个 engine-owned 幂等/去重键作为回归语料**:转换前后 expected-index 输出逐字节相等(清单见 ADR §Context / #4986 停工上报第四节);\n- 字段级 `unique: true` **不**转换(D1:永久合法)。\n\n## 裸 `true` 硬拒\n- 协议 18 起,声明索引上的裸 `unique: true` 在 validate/publish 期拒绝,报错文案照 D5a(指明 `'global'` / `'organization'` 两个替代);17.x 的警告规则同步升级为 error。\n\n## pin 退役\n- `sql-driver-unique-tenancy.test.ts` 中「`'global'` is a synonym of `true`」的 pin 随裸 `true` 一起退役。\n\n## 再生成\n- `gen:spec-changes` / `gen:upgrade-guide` 携带该 conversion 条目,`check:spec-changes` / `check:upgrade-guide` 绿。\n\n## 关联\n- ADR-0120 D2/D7 及 §Resolved review questions #3;#4986 / #5030 / #5081(17.x 波);#5054(ADR PR)"
+}
