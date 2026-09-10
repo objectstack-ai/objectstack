@@ -362,10 +362,15 @@ const VALIDATE_SITE_MAP: Record<string, { role: FieldRole; scope: 'record' | 'fl
  * rule; the answer to that is one posture, stated in one sentence, on every
  * door — not eleven bespoke ones.
  */
+// ⛔ No tracker id in this string. It is RUNTIME prose — it reaches an MCP
+// client, an agent transcript and any log that captures a tool error, and none
+// of those readers can resolve `#NNNN` (`pnpm check:doc-authoring`). The anchor
+// belongs in a comment, where the reader who can resolve it is already looking:
+// the card is #16913, and the campaign it extends is #4001.
 const UNKNOWN_ARG_HISTORY =
-  'Until #16913 an undeclared argument was dropped silently and the call still succeeded, '
-  + 'so a mis-guessed parameter name answered a differently filtered or differently ordered '
-  + 'set with no way for the caller to tell.';
+  'This argument used to be dropped silently and the call still succeeded, so a mis-guessed '
+  + 'parameter name answered a differently filtered or differently ordered set with no way for '
+  + 'the caller to tell.';
 
 /**
  * Close an MCP tool's argument shape against keys it does not declare.
