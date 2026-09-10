@@ -51,7 +51,7 @@
  *
  *   - DETERMINISM. A ratchet's numbers are pinned constants. A tokenizer's
  *     output is a function of its vocabulary version, so a dependency bump
- *     would silently re-price all eleven ceilings — a ratchet that moves when
+ *     would silently re-price every ceiling — a ratchet that moves when
  *     nobody edited a file is not a ratchet.
  *   - NO DEPENDENCY. The workspace carries no tokenizer today (checked at
  *     landing: no `tiktoken` / `gpt-tokenizer` / `gpt-3-encoder` in any
@@ -768,8 +768,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the internal-id-strip basis sha is recorded': 1,
   'the re-measure lowered the SKILL.md subtotal': 1,
   'the #12392 extension basis sha is recorded': 1,
-  'the extension priced more than the eleven SKILL.md files': 1,
+  'the extension priced more than the SKILL.md files alone': 1,
   'every SKILL.md still carries its own ceiling': 1,
+  'the catalog has SKILL.md files to price, so the pin above is not vacuous': 1,
   'the report prints a whole-bundle total': 1,
   'the report prints a per-file net delta against the ceiling': 1,
   'the report names the counting convention': 1,
@@ -812,6 +813,12 @@ function selfTest() {
   }
 
   const skillMdCeilings = [...CEILINGS.entries()].filter(([p]) => p.endsWith('/SKILL.md'));
+  // The catalog's SKILL.md population, read off the REAL tree the way the gate
+  // reads it — never a typed count. A literal here (it was 11) turns a skill
+  // deleted by ruling into a self-test red that names no file, and a skill
+  // added without a row into a green: the walk is what says how many there are,
+  // and the case below asks only that every one of them is priced.
+  const skillMdOnDisk = discoverBundleFiles().filter((p) => /^skills\/[^/]+\/SKILL\.md$/.test(p)).length;
 
   const cases = [
     // ── ratchet semantics ────────────────────────────────────────────────
@@ -968,8 +975,9 @@ function selfTest() {
     // The extension's whole point, as a number: the priced population is no
     // longer one file per skill. If a future edit collapses it back, this is
     // the case that says so out loud.
-    ['the extension priced more than the eleven SKILL.md files', CEILINGS.size > 11, true],
-    ['every SKILL.md still carries its own ceiling', skillMdCeilings.length, 11],
+    ['the extension priced more than the SKILL.md files alone', CEILINGS.size > skillMdCeilings.length, true],
+    ['every SKILL.md still carries its own ceiling', skillMdCeilings.length, skillMdOnDisk],
+    ['the catalog has SKILL.md files to price, so the pin above is not vacuous', skillMdOnDisk > 0, true],
 
     // ── the report line ──────────────────────────────────────────────────
     ['the report prints a whole-bundle total',
