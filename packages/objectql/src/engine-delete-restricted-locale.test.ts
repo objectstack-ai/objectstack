@@ -220,14 +220,28 @@ describe('#7307 DELETE_RESTRICTED — user copy vs developer guidance', () => {
         });
 
         it('reaches the SERVER LOG, so a zh-CN deployment does not log its operator half in Chinese', async () => {
+            // [#17052] The delete door reports at `warn` now — its catch ends in
+            // `throw e`, so the caller was told and the entry is not a
+            // degradation report. What #7307 holds is unchanged and is what is
+            // asserted below: the operator half reaches the server log, in
+            // English, in the entry's meta. Only the channel moved, and with it
+            // the meta's ARGUMENT POSITION — `warn(message, meta)` has no
+            // `Error` slot in front of it, so meta is the second argument.
+            // Both levels are captured, so this stays a statement about the log
+            // rather than about one method: if the entry ever moves again, or
+            // is emitted twice, this still sees it.
             const logged: Array<Record<string, unknown>> = [];
-            const original = (engine as any).logger.error.bind((engine as any).logger);
-            (engine as any).logger.error = (msg: string, err: unknown, meta: Record<string, unknown>) => {
-                logged.push(meta ?? {});
-                return original(msg, err, meta);
+            const capture = (level: 'warn' | 'error') => {
+                const original = (engine as any).logger[level].bind((engine as any).logger);
+                (engine as any).logger[level] = (...args: unknown[]) => {
+                    logged.push((level === 'warn' ? args[1] : args[2]) as Record<string, unknown> ?? {});
+                    return original(...args);
+                };
             };
+            capture('warn');
+            capture('error');
             await refuseDelete(engine, 'zh-CN');
-            expect(logged.some((m) => typeof m.developerMessage === 'string'
+            expect(logged.some((m) => typeof m?.developerMessage === 'string'
                 && (m.developerMessage as string).includes("deleteBehavior:'cascade'"))).toBe(true);
         });
     });

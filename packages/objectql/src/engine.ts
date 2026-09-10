@@ -471,6 +471,60 @@ interface IssuedAutonumber {
   /** `object.field.<scope>` key in {@link ObjectQL.autonumberCounters}. */
   readonly counterKey: string;
 }
+/**
+ * [#17052] The write doors' failure META, assembled at the call site because
+ * the level moved off `error`.
+ *
+ * ## Why the level moved
+ *
+ * `insert` / `update` / `delete` each end in a `catch` whose next statement is
+ * `throw e`. AGENTS.md → *Degradation log levels* calls that shape out by name:
+ * "a failure handed to the CALLER is not a degradation at all … Do not bolt a
+ * `logger.error` onto such a site". The requester IS told — the throw is the
+ * answer — so an `error` line is a second, louder report of a fact the caller
+ * already has, and nothing downstream can tell it apart from a real one. The
+ * measured cost was a healthy first boot of every fresh project printing
+ * `ERROR Insert operation failed` while `@better-auth/oauth-provider` seeded
+ * `sys_oauth_resource` and treated the UNIQUE collision as the no-op its own
+ * docblock declares it to be.
+ *
+ * ## Why the diagnosis needs this helper to survive the move
+ *
+ * The `Logger` contract (`packages/spec/src/contracts/logger.ts`) gives an
+ * `Error` slot to `error` and `fatal` ONLY: `warn(message, meta?)` has two
+ * parameters, not three. Handing the redacted driver error to `warn` as `meta`
+ * does not merely lose the slot — `Error.message` and `Error.stack` are
+ * NON-ENUMERABLE, so every logger that renders meta by spreading it would
+ * serialize `{}` and the entry would arrive carrying nothing at all. That is
+ * exactly the loss #14095 refused (the failing column, MySQL's index name, the
+ * driver's own frames) arriving one level down.
+ *
+ * So the two shaped-by-ruling properties are preserved by building the meta the
+ * way `ObjectLogger.write()` builds it from the slot — `{ …meta, error: {
+ * message, stack } }` — rather than by handing over the Error:
+ *
+ *   - **#8682** the value redaction still runs: callers pass
+ *     `redactBoundStatement(...)`, and it is that result's `message`/`stack`
+ *     that are read here.
+ *   - **#14095** the log still takes the driver's error (the envelope's
+ *     `cause`), not the envelope: callers still choose which value to hand in.
+ *
+ * The non-Error branch mirrors `ObjectLogger.writeErrorLike()`'s own fallback
+ * (`{ ...errorOrMeta, ...meta }`, the later argument winning), so a thrown
+ * non-Error — or a `DuplicateRecordError` with no `cause` — renders as it did.
+ *
+ * @param logged The value to report — already redacted by the caller.
+ * @param meta   The entry's own meta (`object`, and `developerMessage` on the
+ *               delete door).
+ */
+function writeFailureLogMeta(
+  logged: unknown,
+  meta: Record<string, unknown>,
+): Record<string, unknown> {
+  return logged instanceof Error
+    ? { ...meta, error: { message: logged.message, stack: logged.stack } }
+    : { ...(logged as Record<string, unknown> | undefined), ...meta };
+}
 
 /**
  * Read the counter out of ONE stored autonumber value, under #6468's anchoring
@@ -9714,10 +9768,16 @@ export class ObjectQL implements IObjectQLEngine {
    * move this noise rather than remove it. What the demotion drops is the
    * duplicate and its stack; the classification survives in the meta.
    *
-   * ⛔ Deliberately READS only. `insert`/`update`/`delete` keep their
-   * unconditional `error`: a write to a table that does not exist is not a
-   * normal answer for any caller — nothing landed, and the row the caller
-   * believes it stored is gone.
+   * ⛔ Deliberately READS only — and the write doors have since moved for a
+   * DIFFERENT reason, so this fence still holds but its old sentence does not.
+   * #17052 dropped `insert`/`update`/`delete` to `warn` because each of those
+   * catches rethrows: the caller IS told, which is AGENTS.md's third legal
+   * answer ("a failure handed to the CALLER is not a degradation at all"), and
+   * "the row the caller believes it stored is gone" was never true of a
+   * rethrowing door. That argument is about DELIVERY and applies to this frame
+   * too — `find`'s catch also rethrows — but the level here was set by a
+   * separate ruling that weighed the driver's own surviving `warn` against a
+   * second line, so moving it is its own card rather than a rider on #17052.
    */
   private reportFindFailure(object: string, error: unknown): void {
     if (isMissingTableError(error, object)) {
@@ -10970,8 +11030,19 @@ export class ObjectQL implements IObjectQLEngine {
         // column, MySQL's index name, the driver's own frames. So the log takes
         // the `cause`; the caller's answer does not move, because `e` is what
         // is rethrown one line down, with that same error still on it.
+        //
+        // [#17052] …and the LEVEL is `warn`, not `error`. The next statement is
+        // `throw e`: the requester was told, so AGENTS.md's third legal answer
+        // applies — "a failure handed to the CALLER is not a degradation at
+        // all". Both properties above survive the move, because
+        // `writeFailureLogMeta` rebuilds the `{ error: { message, stack } }`
+        // context the `error` slot used to build (see its header: `warn` has no
+        // slot, and an Error's fields are non-enumerable).
         const logged = e instanceof DuplicateRecordError ? e.cause : e;
-        this.logger.error('Insert operation failed', redactBoundStatement(logged) as Error, { object });
+        this.logger.warn(
+          'Insert operation failed',
+          writeFailureLogMeta(redactBoundStatement(logged), { object }),
+        );
         throw e;
       }
     });
@@ -12338,8 +12409,14 @@ export class ObjectQL implements IObjectQLEngine {
           // only, so logging the envelope would silently drop the failing
           // column and the driver's own frames. The log takes the `cause`;
           // `e` is what is rethrown one line down, unchanged.
+          //
+          // [#17052] The insert door's twin here too: the level is `warn`,
+          // because `throw e` on the next line IS the answer to the caller.
           const logged = e instanceof DuplicateRecordError ? e.cause : e;
-          this.logger.error('Update operation failed', redactBoundStatement(logged) as Error, { object });
+          this.logger.warn(
+            'Update operation failed',
+            writeFailureLogMeta(redactBoundStatement(logged), { object }),
+          );
           throw e;
        }
      });
@@ -13788,11 +13865,18 @@ export class ObjectQL implements IObjectQLEngine {
           // `developerMessage` is read off the ORIGINAL error: it is written by
           // our own throw sites (#7307), never by a driver, so it carries no
           // statement and the redaction has no opinion about it.
+          // [#17052] The third write door, moved with its two siblings: this
+          // catch also ends in `throw e`, so the caller is told and the entry
+          // is not a degradation report. `developerMessage` keeps its place in
+          // the meta and the redaction is unchanged.
           const devDetail = (e as any)?.developerMessage;
-          this.logger.error('Delete operation failed', redactBoundStatement(e) as Error, {
-            object,
-            ...(typeof devDetail === 'string' && devDetail.length > 0 ? { developerMessage: devDetail } : {}),
-          });
+          this.logger.warn(
+            'Delete operation failed',
+            writeFailureLogMeta(redactBoundStatement(e), {
+              object,
+              ...(typeof devDetail === 'string' && devDetail.length > 0 ? { developerMessage: devDetail } : {}),
+            }),
+          );
           throw e;
       }
     });
