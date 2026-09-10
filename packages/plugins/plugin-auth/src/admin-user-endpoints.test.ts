@@ -460,6 +460,129 @@ describe('runAdminCreateUser', () => {
     expect(data.membershipCreated).toBe(true);
   });
 
+  // ── ADR-0093 D1: the deployment membership policy governs THIS path too ──
+  //
+  // The endpoint used to hand the reconciler a literal `policy: 'auto'`, so an
+  // `invite-only` deployment — where the `user.create.after` reconciler and the
+  // D6 backfill both correctly bound nobody — got the membership bound anyway
+  // by this belt-and-suspenders call, and a `membershipCreated: true` that read
+  // as success. The failure direction was OPEN: it GRANTED what the policy is
+  // set to withhold. Nothing pinned either direction before these tests, which
+  // is why the literal survived.
+
+  it("invite-only: creates the account and binds NO membership (ADR-0093 D1)", async () => {
+    const m = makeDepsWithOrgs({ orgs: [{ id: 'org_only' }] });
+    m.deps.getMembershipPolicy = () => 'invite-only';
+    const res = await runAdminCreateUser(
+      m.deps,
+      makeRequest({ email: 'a@b.co', generatePassword: true }),
+      ACTOR,
+    );
+
+    // The ACCOUNT is still created — `invite-only` withholds the membership,
+    // not the login. That distinction is the whole ruling.
+    expect(res.status).toBe(200);
+    expect(m.createUser).toHaveBeenCalledTimes(1);
+
+    const data = res.body.data as any;
+    expect(data.user.id).toBe('user-9');
+    expect(data.membershipCreated).toBe(false);
+    expect(data.organizationId).toBeUndefined();
+    expect(m.engineInsert.mock.calls.some((c) => c[0] === 'sys_member')).toBe(false);
+
+    // `policy-skip` is decided BEFORE any target-org resolution, so the org
+    // lookup never runs. This separates "policy said no" from "no target org
+    // was found" — two outcomes that would both show membershipCreated:false.
+    expect(m.find.mock.calls.some((c) => c[0] === 'sys_organization')).toBe(false);
+
+    // The audit row records the refusal, so the trail shows the account was
+    // created member-less on purpose rather than by a failed bind.
+    const auditRow = m.engineInsert.mock.calls.find((c) => c[0] === 'sys_audit_log')![1];
+    const meta = JSON.parse(auditRow.metadata);
+    expect(meta.membershipCreated).toBe(false);
+    expect(meta.organizationId).toBeUndefined();
+  });
+
+  it('invite-only in multi-org mode: also binds nothing (both reasons hold)', async () => {
+    const m = makeDepsWithOrgs({
+      orgs: [{ id: 'org_default', slug: 'default' }, { id: 'org_tenant_b' }],
+    });
+    m.deps.getTenancy = () => ({ defaultOrgId: async () => null });
+    m.deps.getMembershipPolicy = () => 'invite-only';
+    const res = await runAdminCreateUser(
+      m.deps,
+      makeRequest({ email: 'a@b.co', generatePassword: true }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    const data = res.body.data as any;
+    expect(data.membershipCreated).toBe(false);
+    expect(data.organizationId).toBeUndefined();
+    expect(m.engineInsert.mock.calls.some((c) => c[0] === 'sys_member')).toBe(false);
+  });
+
+  it('auto (explicit): still binds — the default posture is untouched', async () => {
+    const m = makeDepsWithOrgs({ orgs: [{ id: 'org_only' }] });
+    m.deps.getMembershipPolicy = () => 'auto';
+    const res = await runAdminCreateUser(
+      m.deps,
+      makeRequest({ email: 'a@b.co', generatePassword: true }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    const data = res.body.data as any;
+    expect(data.organizationId).toBe('org_only');
+    expect(data.membershipCreated).toBe(true);
+    expect(m.engineInsert.mock.calls.some((c) => c[0] === 'sys_member')).toBe(true);
+  });
+
+  /**
+   * NEGATIVE CONTROL (the ruling requires it, and it is not decorative).
+   *
+   * Under `auto` the behaviour must be BYTE-IDENTICAL to the pre-change
+   * literal. A green `invite-only` assertion alone would also be green if the
+   * endpoint had been changed to "never bind": that mistake passes the pin
+   * above and silently breaks every default deployment. So compare the whole
+   * observable surface — response body and every engine write — across the
+   * three ways `auto` can be reached: an explicit `'auto'`, no policy dep at
+   * all (unwired host: the accessor's own `?? 'auto'` default), and a dep that
+   * is present but returns `undefined`.
+   *
+   * `sys_member.id` is a fresh random id per run, so it is normalized out;
+   * everything else, including the audit metadata JSON, is compared verbatim.
+   * The password is passed explicitly so no random temporary one is minted.
+   */
+  async function autoPathSurface(
+    policyDep: undefined | (() => any),
+  ): Promise<{ body: string; writes: string }> {
+    const m = makeDepsWithOrgs({ orgs: [{ id: 'org_only' }] });
+    if (policyDep) m.deps.getMembershipPolicy = policyDep as any;
+    const res = await runAdminCreateUser(
+      m.deps,
+      makeRequest({ email: 'a@b.co', password: 'Sup3rSecret!x' }),
+      ACTOR,
+    );
+    const writes = m.engineInsert.mock.calls.map(([object, doc]: any[]) => [
+      object,
+      object === 'sys_member' ? { ...doc, id: '<generated>' } : doc,
+    ]);
+    return { body: JSON.stringify(res.body), writes: JSON.stringify(writes) };
+  }
+
+  it('auto: byte-identical across explicit / unwired / undefined policy deps', async () => {
+    const explicitAuto = await autoPathSurface(() => 'auto');
+    const unwired = await autoPathSurface(undefined);
+    const returnsUndefined = await autoPathSurface(() => undefined);
+
+    expect(unwired).toEqual(explicitAuto);
+    expect(returnsUndefined).toEqual(explicitAuto);
+
+    // And the shared surface is the BINDING one — a suite that agreed on
+    // "nothing happened" three times would satisfy the equalities above.
+    expect(explicitAuto.body).toContain('"membershipCreated":true');
+    expect(explicitAuto.writes).toContain('sys_member');
+  });
+
   it('no-ops the bind (no throw) when the engine has no find surface', async () => {
     // Default makeDeps engine exposes only update/insert — the bind must be a
     // clean no-op, leaving exactly the audit insert.
