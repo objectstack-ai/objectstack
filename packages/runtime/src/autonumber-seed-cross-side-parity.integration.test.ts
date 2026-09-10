@@ -144,7 +144,10 @@ async function sqlDriverIssues(format: string | undefined, stored: string[]): Pr
 
   const created = await driver.create('rec', { title: 'next' });
   await driver.disconnect();
-  return created.rec_no;
+  // [#15267] `SqlDriver.create()` declares the contract's
+  // `Record<string, unknown>` now, so the record number is read as the string
+  // this parity probe compares — it was reached through an `any` before.
+  return String(created.rec_no);
 }
 
 interface Fixture {
