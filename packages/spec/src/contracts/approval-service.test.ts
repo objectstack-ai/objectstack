@@ -228,7 +228,7 @@ describe('[#15389] continueRestoredRun — the approvals operator repair verb, d
         // The sibling this was ruled to copy, named where a later author reads it.
         expect(doc).toContain('#16495');
         // What the engine verb leaves undone, which is the whole reason this exists.
-        expect(doc).toMatch(/the continuation must be[\s*]+re-issued/);
+        expect(doc).toMatch(/the[\s*]+continuation[\s*]+must[\s*]+be[\s*]+re-issued/);
         // ⛔ It replays a recorded outcome; it does not re-decide.
         expect(doc).toMatch(/does not re-open, re-decide or rewrite the request row/);
         expect(doc).toMatch(/does not relax the node's `resumeAuthority: 'service'`/);
