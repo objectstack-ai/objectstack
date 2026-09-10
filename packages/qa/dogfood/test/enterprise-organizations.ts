@@ -96,7 +96,7 @@
 import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
 
 /**
- * The enterprise multi-org package (ADR-0105 D12) these gates need.
+ * The multi-org package (ADR-0105 D12 as amended by ADR-0132) these gates need.
  *
  * ⚠️ #16539: no longer cloud-private — ADR-0132 / #16215 brought it back to open core as
  * `packages/plugins/organizations`. It stays the SUBJECT of this probe (the app

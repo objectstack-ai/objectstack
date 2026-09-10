@@ -790,10 +790,12 @@ function anchorServedApp(configArg: string): { configPath: string; configExists:
  * Node ESM resolves a bare `import(pkg)` against the IMPORTER's own realpath.
  * The CLI is reached through a workspace/`link:` dependency, so that realpath is
  * inside the FRAMEWORK workspace: a bare import can only see what the framework
- * itself installed. A package supplied by the app being served — a cloud-private
- * one such as `@objectstack/organizations`, a distribution one such as
- * `@objectstack/service-cluster`, or anything a customer installs into their own
- * project — is invisible to it no matter what the host app declares.
+ * itself installed. A package supplied by the app being served — an app-declared
+ * one such as `@objectstack/organizations` (open core since ADR-0132; a
+ * commercial deployment resolves that same name to its own private build), a
+ * distribution one such as `@objectstack/service-cluster`, or anything a customer
+ * installs into their own project — is invisible to it no matter what the host
+ * app declares.
  *
  * #4719: "resolve from the host root" means "resolve what the host root
  * DECLARES". The host lookup was a CJS require, CJS honours NODE_PATH, and the
@@ -815,7 +817,7 @@ function anchorServedApp(configArg: string): { configPath: string; configExists:
  *
  *   • cloud#1013 — the binding sat below the AUTH block, so the enterprise
  *     organizations load resolved in the framework workspace, never found the
- *     cloud-private package, and every walled-posture deployment hit the
+ *     then-cloud-private package, and every walled-posture deployment hit the
  *     ADR-0093 D5 fail-fast and exited 1.
  *   • #10645 — the binding sat below the CLUSTER block, so `serve` could not load
  *     an app-declared `@objectstack/service-cluster*` at all: on the published EE
@@ -3731,18 +3733,20 @@ export default class Serve extends Command {
               // ── Stage 1: import. Failure here = the package is ABSENT. ──
               try {
                 // Resolve from the HOST APP (cloud#1013). This package is
-                // cloud-private: it is installed in the served app's
-                // node_modules, never in the framework workspace the CLI's own
-                // realpath points at, so a bare import here could never find it
-                // — `objectstack serve` failed the fail-fast below on EVERY
-                // self-hosted walled-posture deployment, and the only way past
-                // it was OS_ALLOW_DEGRADED_TENANCY=1, i.e. exactly the unwalled
-                // state D5 exists to prevent. The host app declares the package;
-                // this resolves it from there.
+                // APP-DECLARED (ADR-0132 D3 — which build of the name a
+                // deployment gets is the host manifest's call, not `serve`'s):
+                // it is installed in the served app's node_modules, never in
+                // the framework workspace the CLI's own realpath points at, so a
+                // bare import here could never find it — `objectstack serve`
+                // failed the fail-fast below on EVERY self-hosted walled-posture
+                // deployment, and the only way past it was
+                // OS_ALLOW_DEGRADED_TENANCY=1, i.e. exactly the unwalled state D5
+                // exists to prevent. The host app declares the package; this
+                // resolves it from there.
                 orgMod = await importFromHost(organizationsPkg);
               } catch (orgErr) {
                 // ADR-0093 D5 — degraded tenancy fails fast. Multi-org was
-                // requested but the enterprise package can't provide tenant
+                // requested but the organizations package can't provide tenant
                 // isolation: `tenant_isolation` RLS would be stripped and every
                 // org boundary inert. A deployment that asked for isolation must
                 // NOT serve traffic pretending to have it (ADR-0049 at the
