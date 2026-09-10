@@ -60,7 +60,7 @@ const sysMetadataObject = {
         name: { name: 'name', label: 'Name', type: 'text' as const, required: true },
         organization_id: { name: 'organization_id', label: 'Org', type: 'text' as const },
         package_id: { name: 'package_id', label: 'Package', type: 'text' as const },
-        metadata: { name: 'metadata', label: 'Body', type: 'longtext' as const },
+        metadata: { name: 'metadata', label: 'Body', type: 'textarea' as const },
         checksum: { name: 'checksum', label: 'Checksum', type: 'text' as const, maxLength: 71 },
         state: { name: 'state', label: 'State', type: 'text' as const },
         version: { name: 'version', label: 'Version', type: 'number' as const },
