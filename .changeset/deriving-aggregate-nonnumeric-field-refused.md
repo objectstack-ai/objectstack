@@ -71,9 +71,22 @@ end to end by the same shared fixture as the string rows. One dataset compiles e
 measure in that fixture, so one refused pair reds the whole section. ⇒ `min` / `max` is
 one question, and it is the table-amendment card's.
 
-## Upgrading
+## Upgrading — FROM → TO
 
-No shipped dataset in this repository pairs `sum` or `avg` with a non-numeric field —
-every one of the eleven shipped dataset measures resolves to `number`, `currency`,
-`summary` or `progress`. If your own dataset declares such a pair, the refusal names the
-accepted set; store the quantity as a numeric field and aggregate that, or count instead.
+Nothing an author writes is removed or renamed: `DatasetMeasure.aggregate` and
+`DatasetMeasure.field` keep their spellings and their types. What narrows is which PAIRS of
+values are accepted. The one-line fix, per shape:
+
+| FROM (compiled before, refused now) | TO |
+|---|---|
+| `{ aggregate: 'sum', field: <a text / select / lookup / user / autonumber field> }` | `{ aggregate: 'count_distinct', field: <the same field> }` — counting reads no arithmetic off the value |
+| `{ aggregate: 'sum' | 'avg', field: <a json / file / location / vector / composite field> }` | store the quantity you meant as its own numeric field and aggregate that |
+| `{ aggregate: 'sum', field: <a formula field> }` | aggregate the formula's numeric INPUT column; a `formula` is virtual in SQL storage, so no arithmetic aggregate can be lowered to it |
+| `{ aggregate: 'sum', field: <a percent field> }` | `{ aggregate: 'avg', field: <the same field> }` — a rate averages, it does not add |
+| `{ aggregate: 'sum' | 'avg', field: <a date / datetime / time field> }` | unchanged from #16778: use `min` / `max` for a real instant, or store a duration as a number and aggregate that |
+
+`min` / `max` are **not** affected by this change at all, over any field type.
+
+No shipped dataset in this repository declares a newly-refused pair — every one of the
+eleven shipped dataset measures resolves to `number`, `currency`, `summary` or `progress`.
+The refusal names the accepted set for the aggregate, read off the table.
