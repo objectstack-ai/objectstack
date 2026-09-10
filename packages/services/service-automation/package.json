@@ -32,6 +32,7 @@
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/driver-memory": "workspace:*",
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/objectql": "workspace:*",
