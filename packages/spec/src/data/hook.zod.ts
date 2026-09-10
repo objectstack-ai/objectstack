@@ -455,11 +455,23 @@ export const HookContextSchema = lazySchema(() => z.object({
    * decision batch #87, 2026-09-08)
    *
    * On the UPDATE verb `input.data` is **the record the engine intends to
-   * persist**, not the caller's submission. A statically `readonly` field the
-   * caller supplied a value for is stripped from it BEFORE the before phase is
+   * persist**, not the caller's submission. A `readonly` field the caller
+   * supplied a value for is stripped from it BEFORE the before phase is
    * dispatched, so no hook can derive a persisted column from a value the row
    * will never contain. What a hook that needs the caller's own words reads is
    * {@link HookContext.submitted} — the same payload as sent, diagnostics only.
+   *
+   * WHICH fields, exactly: the subject set is the update strip's own
+   * (`stripReadonlyFields`), which is author-declared `readonly: true` AND the
+   * types whose value the runtime owns end to end — `autonumber` today
+   * (#5503), implicitly read-only whether or not the author wrote the flag.
+   * Deliberately the same set rather than a second opinion: a pass that hid a
+   * different set from the one enforced below would put the two out of step,
+   * which is the whole failure this ordering exists to remove.
+   *
+   * ⛔ NOT `readonlyWhen`. A conditional lock is judged against the prior
+   * record, per row on the predicate path, and #9107 leaves it hook-writable
+   * on purpose.
    *
    * Two things this deliberately does NOT change: a hook's OWN write to a
    * read-only column still lands (#5591 / #14088 — the enforcement pass stays
@@ -659,11 +671,21 @@ export const HookContextSchema = lazySchema(() => z.object({
    *
    * Assigning to this record, or to a key on it, changes NOTHING about the
    * write — the engine reads `input.data` and nothing else on the way to the
-   * driver. The object is FROZEN by the producer, so an assignment throws in
-   * strict mode rather than silently editing a record of what a caller sent. A
-   * handler that wants to change what is written writes `input.data`; a
-   * handler that wants to REFUSE a write throws; a handler that wants to know
-   * what the caller asked for reads this.
+   * driver. The object is SHALLOW-frozen by the producer, so an assignment to
+   * one of ITS OWN keys throws in strict mode rather than silently editing a
+   * record of what a caller sent. A handler that wants to change what is
+   * written writes `input.data`; a handler that wants to REFUSE a write
+   * throws; a handler that wants to know what the caller asked for reads this.
+   *
+   * ⚠️ SHALLOW is the honest word and the depth matters. The snapshot is a
+   * shallow spread of the caller's payload, so a NESTED object reached through
+   * a key here is the caller's own reference and is mutable — `Object.freeze`
+   * does not travel. That is not a laundering route (a nested mutation on a
+   * hidden read-only key is handed back and stripped; the recorder never saw a
+   * hook write), but it is not a deep guarantee either, and a handler must not
+   * treat a nested read from here as tamper-proof. Deep-freezing was not
+   * chosen: it costs a full walk of every payload on every update, to harden a
+   * face documented as diagnostics-only.
    *
    * ⚠️ A value HERE and no matching key in `input.data` means precisely one
    * thing: the engine refused that field. It does not mean the field is
