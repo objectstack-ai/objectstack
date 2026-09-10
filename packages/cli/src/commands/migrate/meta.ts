@@ -328,12 +328,17 @@ export default class MigrateMeta extends Command {
         await emitJson({
               from: result.fromMajor,
               to: result.toMajor,
-              // Deliberately NOT relabelled alongside the human line below:
-              // this is a machine-readable key on a published payload, so
-              // moving it is a contract change owing a reader census and a
-              // deprecation window of its own (#15585, option C). The value is
-              // the protocol major padded to a semver, not a package version.
-              runtime: PROTOCOL_VERSION,
+              // The key names what the value IS. `PROTOCOL_VERSION` is the
+              // protocol major padded to a semver ('17.0.0') and is never the
+              // installed package version -- emitted under the key `runtime`,
+              // as it was until this release, a machine consumer read it as
+              // the runtime's own version with no prose to disambiguate, which
+              // is the half of #15585 that the human-line repair could not
+              // reach. `runtime` is gone outright: no alias, no dual-key
+              // window. The pin in `test/migrate-meta.e2e.test.ts` asserts BOTH
+              // halves -- the new key carries the value AND the old spelling is
+              // absent -- so a future silent rename reddens instead of passing.
+              protocolVersion: PROTOCOL_VERSION,
               applied: result.applied,
               todos: result.todos,
               hops: flags.step
