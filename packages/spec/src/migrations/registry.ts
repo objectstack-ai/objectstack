@@ -5402,7 +5402,20 @@ const step18: MigrationStep = {
     'loader — so `cache: { enabled: false }` switched nothing off. All three are retiredKey ' +
     'tombstones registered in RETIRED_KEYS_BY_MAJOR[18] with one D3 semantic entry and no D2 ' +
     'conversion (a manager config is no stack collection member); the rename is folded into ' +
-    'the removal, so `cache.ttl` now prescribes deletion rather than a hop to a retired key.',
+    'the removal, so `cache.ttl` now prescribes deletion rather than a hop to a retired key. ' +
+    'It also retires the `type: \'page\'` LIST-VIEW mount and its `pageName` binding (#17063, ' +
+    'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-09 「撤」). The member was added so a ' +
+    'view could render nothing of its own and delegate to an already-published page, but only ' +
+    'the spec half landed: no renderer ever routed it — objectui\'s list-view switch shares its ' +
+    'default arm with `grid` — so a page view drew an empty table where the page belonged, and ' +
+    'the three parse refusals policing the binding policed a mount that never mounted anything. ' +
+    'The enum VALUE carries its prescription on the `type` enum\'s own error map (an enum-value ' +
+    'narrowing has no tombstone to hang one on, the `exportOptions` \'pdf\' precedent); ' +
+    '`pageName` is a retiredKey tombstone on both list-view doors. The D2 conversion STRIPS ' +
+    'both keys rather than rewriting `type` to `\'grid\'`: `type` defaults to `grid` in the ' +
+    'schema, so deleting it lands the row on exactly what it already rendered without this ' +
+    'registry guessing a view type. The surviving page mount is the app navigation item ' +
+    '(`PageNavItem.pageName`), untouched.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5427,6 +5440,7 @@ const step18: MigrationStep = {
     'connector-health-and-trigger-durations-unit-in-key',
     'memory-persistence-auto-save-interval-to-ms',
     'turso-config-timeout-to-timeout-ms',
+    'view-page-mount-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -12730,6 +12744,17 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `element-input-target-variable-removed` (a page component IS a stack
     // collection member, unlike the `kernel/Manifest:loading` family).
     'ui/ElementTextInputProps:targetVariable',
+    // #17063 (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-09, decision
+    // batch #107 item 1, verbatim 「撤」). `ListView.pageName` named the published
+    // page a `type: 'page'` view was to mount. Only the spec half of #13216 ever
+    // landed: no renderer read the key, so the named page was never reached and the
+    // view drew an empty grid. Tombstoned with `retiredKey()` beside the
+    // `virtualScroll` tombstone already on this shape; the enum VALUE `'page'` went
+    // with it, carrying its own prescription on the `type` enum's error map. The
+    // surviving page mount is the app navigation item (`PageNavItem.pageName`),
+    // which is a different key on a different surface and has always rendered. D2:
+    // `view-page-mount-removed`.
+    'ui/ListView:pageName',
     // #11805 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-25,
     // decision-inbox batch 4: 「#11805 退役 defaultSort,不需要major」; the producer
     // half of objectui#5861, under the objectui#4869 「接受所有」 direction).
@@ -12753,6 +12778,17 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (wrap-and-rename to `sort: [pair]` when `sort` is absent; a pure lossless
     // delete when `sort` is present, since the fallback was never read then).
     'ui/ObjectGridProps:defaultSort',
+    // #17063 (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-09, decision
+    // batch #107 item 1, verbatim 「撤」). `ObjectListView.pageName` named the published
+    // page a `type: 'page'` view was to mount. Only the spec half of #13216 ever
+    // landed: no renderer read the key, so the named page was never reached and the
+    // view drew an empty grid. Tombstoned with `retiredKey()` beside the
+    // `virtualScroll` tombstone already on this shape; the enum VALUE `'page'` went
+    // with it, carrying its own prescription on the `type` enum's error map. The
+    // surviving page mount is the app navigation item (`PageNavItem.pageName`),
+    // which is a different key on a different surface and has always rendered. D2:
+    // `view-page-mount-removed`.
+    'ui/ObjectListView:pageName',
     // #11027 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-22, ruled B:
     // retire + repair the redirect texts in the same change). The LAST carrier of
     // the `ResponsiveConfig` layout block, and the destination the

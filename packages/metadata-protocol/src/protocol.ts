@@ -4856,7 +4856,7 @@ export class ObjectStackProtocolImplementation implements
         // `sys_metadata` read and they do not depend on one another, so the
         // store leg costs one round trip of latency for the whole context
         // instead of five.
-        const [objects, permissions, books, datasets, pages] = await Promise.all([
+        const [objects, permissions, books, datasets] = await Promise.all([
             listCollection('object', 'objects'),
             listCollection('permission', 'permissions'),
             listCollection('book', 'books'),
@@ -4864,11 +4864,12 @@ export class ObjectStackProtocolImplementation implements
             // dashboard publish — without it every legitimate board reads as
             // dangling (see RuntimeStackContext.datasets).
             listCollection('dataset', 'datasets'),
-            // [#13216] The resolution universe validateViewPageRefs needs for a
-            // `type: 'page'` view publish — without it every legitimate page mount
-            // reads as dangling (see RuntimeStackContext.pages). Gathered on the
-            // same terms as the four above: per write, on an `active` publish only.
-            listCollection('page', 'pages'),
+            // [#17063] A fifth read, `listCollection('page', 'pages')`, stood
+            // here for `validateViewPageRefs`. Both it and the `type: 'page'`
+            // view mount it resolved were retired under ADR-0049
+            // enforce-or-remove, so no runtime-crossed rule reads `stack.pages`
+            // and this publish no longer pays a `sys_metadata` round trip for a
+            // collection nothing would consult.
         ]);
 
         // [#9612] The closure this write is judged against. Resolved from the
@@ -4885,8 +4886,7 @@ export class ObjectStackProtocolImplementation implements
             permissions,
             books,
             datasets,
-            pages,
-            // [#10377] The batch's own pending drafts join the five
+            // [#10377] The batch's own pending drafts join the
             // collections above. Absent on every non-batch door.
             ...(evt.pending !== undefined ? { pending: evt.pending } : {}),
             ...(packageScope !== undefined ? { packageScope } : {}),
@@ -17375,13 +17375,15 @@ export class ObjectStackProtocolImplementation implements
         // the third place the collection set is written down, and the only one
         // that could fall behind SILENTLY: a key added to `RuntimeStackContext`
         // and routed by `CLOSURE_CONTEXT_KEY_BY_TYPE` would simply never be
-        // accumulated here, so a package publishing a page beside the view that
-        // mounts it would keep being refused for the sibling in its own batch —
-        // the `shyx_customer_ds` shape #10377 was filed for. `-?` makes every
-        // key REQUIRED, so the next widening is a compile error at this line
-        // instead.
+        // accumulated here, so a package publishing a dataset beside the
+        // dashboard that binds it would keep being refused for the sibling in
+        // its own batch — the `shyx_customer_ds` shape #10377 was filed for.
+        // `-?` makes every key REQUIRED, so the next widening is a compile error
+        // at this line instead — and [#17063]'s NARROWING was one too, which is
+        // how `pages` left this literal in the same edit it left
+        // `RuntimeStackContext`.
         const pending: { [K in keyof RuntimePendingDeclarations]-?: unknown[] } = {
-            objects: [], permissions: [], books: [], datasets: [], pages: [],
+            objects: [], permissions: [], books: [], datasets: [],
         };
         let any = false;
         for (const d of drafts) {

@@ -61,7 +61,6 @@ import {
     assertEngineFindOnePredicate,
     assertEngineUpdateDispatch,
 } from '@objectstack/metadata-core';
-import { VIEW_PAGE_UNRESOLVED } from '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const WIDGET_DATASET_UNKNOWN = 'widget-dataset-unknown';
@@ -107,16 +106,6 @@ const threeWidgetBoard = (dataset: string) => ({
             chartConfig: { type: 'donut', series: [{ name: 'order_count' }] },
         },
     ],
-});
-
-/** A standalone list overlay mounting a page, as `saveMetaItem` stores one. */
-const pageMountView = (pageName: string) => ({
-    name: 'orders.dashboard',
-    object: 'orders',
-    viewKind: 'list',
-    type: 'page',
-    pageName,
-    columns: [],
 });
 
 interface Row {
@@ -333,32 +322,14 @@ describe('#15950 — the authoring gate resolves against runtime-authored metada
         expect(result.success).toBe(true);
     });
 
-    it('folds the store into EVERY context collection, not just `datasets`', async () => {
-        // The gather is one helper serving five collections, so the repair is
-        // one helper too. `pages` is the arm triage asked for a reading on:
-        // same shape, lower severity — `validateViewPageRefs` reports at
-        // `warning`, so the phantom rode in `advisories` instead of 422-ing the
-        // write. Measured both ways here.
-        const { protocol } = makeHarness();
-
-        const unknownMount = await protocol.saveMetaItem({
-            type: 'view', name: 'orders.dashboard', item: pageMountView('never_authored_page'),
-        });
-        expect(
-            (unknownMount.advisories ?? []).map((a: any) => a.rule),
-            'the control: an unresolvable page mount is still reported',
-        ).toContain(VIEW_PAGE_UNRESOLVED);
-
-        await protocol.saveMetaItem({
-            type: 'page', name: 'sales_dashboard', item: { name: 'sales_dashboard', label: 'Sales' },
-        });
-        const authoredMount = await protocol.saveMetaItem({
-            type: 'view', name: 'orders.dashboard', item: pageMountView('sales_dashboard'),
-        });
-        expect(authoredMount.success).toBe(true);
-        expect(
-            (authoredMount.advisories ?? []).map((a: any) => a.rule),
-            'a page saved through `PUT /meta/page` is a live page',
-        ).not.toContain(VIEW_PAGE_UNRESOLVED);
-    });
+    // [#17063] A second arm of this test measured the SAME repair on `pages`:
+    // `validateViewPageRefs` reported an unresolvable `type: 'page'` list-view
+    // mount at `warning`, so the phantom rode in `advisories` rather than
+    // 422-ing the write, and the fold was measured both ways. That rule and the
+    // mount it resolved were retired under ADR-0049 enforce-or-remove
+    // (maintainer ruling 2026-09-09 「撤」), the live page universe left
+    // `RuntimeStackContext` with them, and the arm left with the universe. The
+    // `datasets` arm above is unchanged and still measures the helper — the
+    // fold is one helper serving the surviving collections, which is what made
+    // this a single repair in the first place.
 });

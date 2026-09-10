@@ -248,15 +248,14 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  * express without inventing a binding key the schema does not have.
  * Recorded, not enforced.
  *
- * ⛔ [#13216] `page` does NOT belong in this table, and completing the map with
- * it would be a regression in two independent ways. Its binding is `pageName`,
- * a STRING — the check below asks `isRec(view[block])`, so a correct
- * declaration would be read as a missing block and warned about on every page
- * view. And the premise of this table does not hold for it: a `page` view with
- * no binding does not degrade to a wrong-but-visible list, it renders nothing,
- * so it is refused outright at parse by `checkListViewPageMount`
- * (`packages/spec/src/ui/view.zod.ts`) — an error where this table can only
- * advise, and already spent before a completeness pass ever runs.
+ * ⛔ [#17063] `page` is not in this table because there is no longer a `page`
+ * view type: the member and its `pageName` binding were retired under ADR-0049
+ * enforce-or-remove (maintainer ruling 2026-09-09 「撤」 — the delegating mount
+ * was declared on the spec side and never built). The list-view `type` enum
+ * refuses the value by name (`packages/spec/src/ui/view.zod.ts`). ⛔ Do not
+ * re-add a row for it here if it ever returns: its binding was a STRING, and
+ * the check below asks `isRec(view[block])`, so a correct declaration would be
+ * read as a missing block and warned about on every page view.
  */
 const VIEW_BINDING_BLOCKS: Readonly<Record<string, string>> = {
   kanban: 'kanban',

@@ -3754,22 +3754,28 @@ describe('ViewSchema → JSON Schema derivation (Studio inspector path)', () => 
 });
 
 // ============================================================================
-// [#13216] `type: 'page'` — mounting an already-published page on an object view
+// [#17063] The RETIRED `type: 'page'` mount — `'page'` and `pageName` are gone
 // ============================================================================
 
 /**
- * The three doors a list view is judged by. Named ONE place because the binding
- * check is attached at three separate points (zod 4 refuses `.omit()` and
- * key-overwriting `.extend()` on a refined object, so the overlay and
- * object-scoped shapes are built from the unrefined shape and re-attach it) —
- * and a missing re-attachment is invisible: the door keeps accepting, which
- * reads as "no rule violated" rather than "no rule ran".
+ * The three doors a list view is judged by. Named ONE place because the
+ * object-level binding check is attached at three separate points (zod 4
+ * refuses `.omit()` and key-overwriting `.extend()` on a refined object, so the
+ * overlay and object-scoped shapes are built from the unrefined shape and
+ * re-attach it) — and a missing re-attachment is invisible: the door keeps
+ * accepting, which reads as "no rule violated" rather than "no rule ran".
  *
  * The overlay entry is the one that matters most and is the easiest to lose:
  * it is `PUT /api/v1/meta/view`, the only door a Studio tenant or an MCP/AI
  * author has.
+ *
+ * [#17063] Renamed from `viewDoorsCarryingPageMountCheck`: the page-mount check
+ * that named it was retired with its mount, and the list is now used by the
+ * calendar-binding block below AND by the retirement pins directly under it —
+ * a retired VALUE and a retired KEY have to be refused at every door too, or a
+ * door that kept accepting them would be the same invisible hole one level up.
  */
-const viewDoorsCarryingPageMountCheck = [
+const viewDoorsCarryingObjectLevelChecks = [
   ['ListViewSchema', (body: Record<string, unknown>) => ListViewSchema.safeParse(body)],
   ['ObjectListViewSchema', (body: Record<string, unknown>) => ObjectListViewSchema.safeParse(body)],
   [
@@ -3779,72 +3785,106 @@ const viewDoorsCarryingPageMountCheck = [
   ],
 ] as const;
 
-describe("ListViewSchema — the `page` view type (#13216)", () => {
-  it('accepts a page mount: `type: page` + `pageName` + empty columns', () => {
-    const parsed = ListViewSchema.parse({ type: 'page', pageName: 'sales_dashboard', columns: [] });
-    expect(parsed.type).toBe('page');
-    expect(parsed.pageName).toBe('sales_dashboard');
-  });
+/**
+ * The retirement's whole value is that the old spelling now FAILS, carrying the
+ * prescription — so these pins assert the refusal at every door, and assert the
+ * message rather than only the boolean. A bare `.success === false` would stay
+ * green if the value were refused with zod's default "invalid option" text,
+ * which teaches nothing.
+ *
+ * `'page'` was an enum VALUE and `pageName` a KEY, and the two refusals travel
+ * on different mechanisms (an `error` map keyed on `issue.input` vs a
+ * `retiredKey()` tombstone), so each is pinned on its own.
+ */
+describe("ListViewSchema — the RETIRED `page` view type (#17063)", () => {
+  /**
+   * Walk `invalid_union` wrappers and return every issue, nested arms included
+   * — the same helper the calendar block below needs, for the same reason.
+   *
+   * ⚠️ The flatten is load-bearing at the OVERLAY door and nowhere else: on
+   * `ViewMetadataSchema` a shape-level refusal is raised inside a union BRANCH,
+   * so the top-level message is zod's "Invalid input" and the prescription sits
+   * one level down. Measured to be the pre-existing behaviour of EVERY
+   * `retiredKey()` tombstone on this shape (`virtualScroll`, `striped`,
+   * `bordered` all read identically), so it is the house behaviour of the door
+   * rather than anything this retirement introduces — the union-level dispatch
+   * that lifts such a message to the top (`exportOptionsPdfUnionError`, this
+   * file) is a per-case decision, and widening it to the whole tombstone family
+   * is its own question with its own measurement.
+   */
+  const flatten = (issues: z.ZodIssue[]): z.ZodIssue[] =>
+    issues.flatMap((i) => {
+      const nested = (i as unknown as { errors?: z.ZodIssue[][] }).errors;
+      return i.code === 'invalid_union' && Array.isArray(nested)
+        ? [i, ...flatten(nested.flat())]
+        : [i];
+    });
 
-  it('keeps every pre-existing view type accepting exactly as before', () => {
+  it('keeps every surviving view type accepting exactly as before', () => {
     const types = ['grid', 'kanban', 'gallery', 'calendar', 'timeline', 'gantt', 'map', 'chart', 'tree'] as const;
     for (const type of types) {
       expect(ListViewSchema.safeParse({ type, columns: ['name'] }).success, type).toBe(true);
     }
   });
 
-  // The refusal that makes the enum member worth adding. Every OTHER view type
-  // degrades to a wrong-but-visible list when its binding is missing (which is
-  // why `checkViewCompleteness` only warns about those); a `page` view with no
-  // `pageName` has no rows to fall back to and renders nothing at all.
-  describe.each(viewDoorsCarryingPageMountCheck)('%s', (_label, parse) => {
-    it('REFUSES `type: page` with no `pageName`', () => {
+  describe.each(viewDoorsCarryingObjectLevelChecks)('%s', (_label, parse) => {
+    it("REFUSES `type: 'page'` by name, with the removal prescription", () => {
       const r = parse({ type: 'page', columns: [] });
       expect(r.success).toBe(false);
-      const issue = (r as { error: z.ZodError }).error.issues
-        .find((i) => i.path.join('.').endsWith('pageName'));
+      const issue = flatten((r as { error: z.ZodError }).error.issues)
+        .find((i) => i.message.includes("'page' was removed from the list-view `type` enum"));
       expect(issue, JSON.stringify((r as { error: z.ZodError }).error.issues)).toBeDefined();
-      expect(issue!.message).toContain('needs to say WHICH page');
+      // The prescription names the surviving mount, not just the removal.
+      expect(issue!.message).toContain("`{ type: 'page', pageName: '<page_name>' }`");
     });
 
-    it('REFUSES `pageName` on a view that is not `type: page` — the inert-key direction', () => {
+    it('REFUSES `pageName` with the tombstone prescription, not a bare unknown-key report', () => {
       const r = parse({ type: 'grid', pageName: 'sales_dashboard', columns: ['name'] });
       expect(r.success).toBe(false);
-      const issue = (r as { error: z.ZodError }).error.issues
-        .find((i) => i.path.join('.').endsWith('pageName'));
-      expect(issue).toBeDefined();
-      expect(issue!.message).toContain("only read by a `type: 'page'` view");
+      const issue = flatten((r as { error: z.ZodError }).error.issues)
+        .find((i) => i.message.includes('`view.pageName` was removed'));
+      expect(issue, JSON.stringify((r as { error: z.ZodError }).error.issues)).toBeDefined();
+      expect(issue!.path.join('.')).toBe('pageName');
     });
 
-    it('REFUSES a page mount that also declares columns — they are never read', () => {
-      const r = parse({ type: 'page', pageName: 'sales_dashboard', columns: ['name'] });
-      expect(r.success).toBe(false);
-      const issue = (r as { error: z.ZodError }).error.issues
-        .find((i) => i.path.join('.').endsWith('columns'));
-      expect(issue).toBeDefined();
-      expect(issue!.message).toContain('columns: []');
-    });
-
-    it('accepts a well-formed page mount', () => {
-      expect(parse({ type: 'page', pageName: 'sales_dashboard', columns: [] }).success).toBe(true);
+    it('an ordinary grid view still parses — the lit control for the two refusals above', () => {
+      expect(parse({ type: 'grid', columns: ['name'] }).success).toBe(true);
     });
   });
 
-  // `pageName` carries `SnakeCaseIdentifierSchema` — the SAME grammar
-  // `PageSchema.name` is declared with — so the accepted set is exactly the set
-  // of strings that could name a page. A value outside it names nothing that
-  // can exist, and no collection lookup is needed to say so.
-  it('REFUSES a `pageName` outside the page-name grammar', () => {
-    const r = ListViewSchema.safeParse({ type: 'page', pageName: 'SalesDashboard', columns: [] });
+  // An UNRELATED bad value must keep zod's own message: the error map is keyed
+  // on `issue.input` precisely so only the value that used to be legal gets the
+  // "was removed" text. Without this, a map that returned the prescription
+  // unconditionally would pass every pin above and mislead every other typo.
+  it('does not hand the removal prescription to an unrelated invalid `type`', () => {
+    const r = ListViewSchema.safeParse({ type: 'gridd', columns: ['name'] });
     expect(r.success).toBe(false);
-    expect(r.success === false && r.error.issues.some((i) => i.path.join('.') === 'pageName')).toBe(true);
+    const messages = (r as { error: z.ZodError }).error.issues.map((i) => i.message).join('\n');
+    expect(messages).not.toContain('was removed from the list-view `type` enum');
+  });
+
+  // The prescription is the migration doc for whoever hits it, so it closes
+  // with the house `os migrate meta` sentence — pinned class-wide for the
+  // tombstone by `retired-key-migrate-sentence.test.ts`, and pinned here for
+  // the enum-value half, which that scanner also judges.
+  it('both prescriptions carry the pinned migrate sentence', () => {
+    const collect = (body: Record<string, unknown>): string => {
+      const r = ListViewSchema.safeParse(body);
+      return r.success ? '' : r.error.issues.map((i) => i.message).join('\n');
+    };
+    for (const body of [{ type: 'page', columns: [] }, { type: 'grid', pageName: 'p', columns: [] }]) {
+      expect(collect(body)).toContain(
+        'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+      );
+    }
   });
 
   // `columns` stays REQUIRED on the list arm. The union tells its list and form
   // overlay members apart by "no required `columns`, disjoint `type` enum" with
-  // the list arm tried first, so relaxing it to spare a page view the `[]`
-  // would let a flattened FORM overlay match the list arm and have its
-  // `sections` stripped. This pins the property the relaxation would break.
+  // the list arm tried first, so relaxing it would let a flattened FORM overlay
+  // match the list arm and have its `sections` stripped. The page mount was the
+  // one view type that made `columns: []` look like a wart worth relaxing; it
+  // is gone, and the property it would have broken is pinned here regardless.
   it('still tells a flattened FORM overlay apart from a list overlay', () => {
     const form = ViewMetadataSchema.safeParse({
       name: 'crm_lead.edit',
@@ -3857,9 +3897,8 @@ describe("ListViewSchema — the `page` view type (#13216)", () => {
     expect((form as { data: { sections?: unknown[] } }).data.sections).toHaveLength(1);
   });
 
-  // `page` is deliberately NOT a visualization users can switch to: the
-  // switcher offers alternative ways to draw the same ROWS, and a page draws
-  // none. Pinned so the omission reads as a decision rather than an oversight.
+  // `page` was never a visualization users could switch to, and it must not
+  // become one on the way out either.
   it('does NOT add `page` to the visualization switcher whitelist', () => {
     expect(VisualizationTypeSchema.safeParse('page').success).toBe(false);
   });
@@ -3880,12 +3919,12 @@ describe("ListViewSchema — calendar in `appearance.allowedVisualizations` requ
         : [i];
     });
 
-  // The same three doors the page-mount check runs at — the check is attached
-  // at three separate points for the same zod-4 reason, and a missing
-  // re-attachment is invisible (the door keeps accepting, which reads as "no
-  // rule violated" rather than "no rule ran"). The overlay door is
+  // The same three doors, and since #17063 this is the ONLY object-level check
+  // they carry — it is attached at three separate points for the zod-4 reason,
+  // and a missing re-attachment is invisible (the door keeps accepting, which
+  // reads as "no rule violated" rather than "no rule ran"). The overlay door is
   // `PUT /api/v1/meta/view`, the one a Studio tenant or an MCP/AI author has.
-  describe.each(viewDoorsCarryingPageMountCheck)('%s', (_label, parse) => {
+  describe.each(viewDoorsCarryingObjectLevelChecks)('%s', (_label, parse) => {
     it("REFUSES 'calendar' in allowedVisualizations with no `calendar:` block, naming `calendar.startDateField`", () => {
       const r = parse({
         type: 'grid',
