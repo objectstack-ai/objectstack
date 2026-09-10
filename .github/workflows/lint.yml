@@ -3676,6 +3676,27 @@ jobs:
       - name: Live-server database isolation
         run: pnpm check:live-db-isolation
 
+      # Nightly-tier file adoption (#16494). `scripts/nightly-tiers.mjs` moved
+      # the `e2e` and `live` tiers off the per-PR and merge-queue runs onto a
+      # nightly, gated by OS_TEST_TIERS — and a package that adopts its first
+      # `*.e2e.test.*` or `*.live.test.*` file WITHOUT reading that switch runs
+      # the file in the merge queue (nothing excludes it) and its WHOLE suite
+      # under the nightly (nothing narrows it), both silently. That drift was
+      # already loud on the NIGHTLY: `nightly-tiers.mjs --check` refuses to run
+      # past such a package — but the refusal blocks the whole tier run for one
+      # package's omission, one nightly after the PR that introduced it landed.
+      # This is the per-PR half, and it is deliberately the STATIC one: --check
+      # boots vitest twice per tier-owning package to measure what it collects,
+      # which is the right instrument for a nightly and the wrong one for every
+      # PR. This gate spawns nothing and shares --check's own tier-file
+      # predicate and package walk, so the two cannot disagree about which
+      # files are tier files. It is a SPELLING gate (the config routes through
+      # the one reader), never a claim the partition is right — its header
+      # carries that boundary and the measurement behind the detector.
+      # Reads ~80 manifests and a handful of configs; sub-second.
+      - name: Nightly-tier file adoption
+        run: pnpm check:tier-file-adoption
+
       # LAYER C of the gate above (#10379). That gate verifies two of the three
       # layers a cross-package declaration has: it finds the escaping tests
       # itself, and `--verify` makes turbo.json hash every declared glob so the
