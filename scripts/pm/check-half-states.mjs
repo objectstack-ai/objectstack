@@ -17081,8 +17081,14 @@ async function selfTest() {
   t('H4 prose: the DIRECTIVE is not prose — its hyphen is not a space', proseNums('Blocked-by: #9612'), '');
   t('H4 prose: `pm:blocking` being discussed is not a block being stated (#16184)', proseNums('- 建议保持 `priority:p2`;`pm:blocking` 我倾向**也撤**,理由见 #16183'), '');
   t('H4 prose: an HTML numeric entity is not a card number', proseNums('blocked on the same page&#8203;'), '');
-  t('H4 prose: a cross-repo ref keeps its qualifier', proseBlockerRefs('blocked on objectstack-ai/objectui#4356')[0].repo, 'objectstack-ai/objectui');
-  t('H4 prose: `PR#N` names this repo, not a repo called PR', proseBlockerRefs('blocked on PR#17438')[0].repo, null);
+  // `.map(...).join()` rather than `[0].repo`, for the reason stated at the
+  // `blockedByTargets` cases above and MEASURED on this very block: the
+  // ablation leg that empties the anchor set made the indexed form THROW,
+  // which aborts the whole self-test and hides every case after it — exactly
+  // what a regression in this reader produces.
+  const proseRepos = (text) => proseBlockerRefs(text).map((r) => r.repo ?? 'LOCAL').join(',');
+  t('H4 prose: a cross-repo ref keeps its qualifier', proseRepos('blocked on objectstack-ai/objectui#4356'), 'objectstack-ai/objectui');
+  t('H4 prose: `PR#N` names this repo, not a repo called PR', proseRepos('blocked on PR#17438'), 'LOCAL');
   // Candidate gathering — both channels, deduped, self-reference dropped.
   const proseCard = { number: 17069, labels: [{ name: 'pm:blocked' }], body: 'blocked on #17438' };
   t('H4 prose: the union of both channels, deduped', proseBlockerCandidatesFor(proseCard, ['also blocked on #17438 and #16049'], REPO4).map((c) => c.number).join(','), '17438,16049');
