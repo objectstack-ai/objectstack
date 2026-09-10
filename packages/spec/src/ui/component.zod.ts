@@ -2523,7 +2523,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * array shape and not the string.
    */
   sort: z.array(SortItemSchema).optional()
-    .describe('Initial row order — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — objectui#8221 decision batch #77, option B, retired it'),
+    .describe('Initial row order — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
   /**
    * REMOVED (#11805, maintainer ruling 2026-08-25, decision-inbox batch 4:
    * 「#11805 退役 defaultSort,不需要major」 — the ADR-0049 enforce-or-remove
@@ -2892,7 +2892,7 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * no `sort` input at all, so nothing on the registry side moves.
    */
   sort: z.array(SortItemSchema).optional()
-    .describe('Row order for the fetched events — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — objectui#8221 decision batch #77, option B, retired it'),
+    .describe('Row order for the fetched events — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
   data: z.array(z.unknown()).optional().describe('Pre-fetched records — skips the internal fetch'),
   staticData: z.array(z.unknown()).optional().describe('Static inline records'),
   locale: z.string().optional().describe('Locale override for the calendar chrome'),
