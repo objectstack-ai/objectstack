@@ -362,17 +362,34 @@ export async function runAdminImportUsers(
     // to `{}` stops constraining anything, so the duplicate probe matches rows
     // it was given no key for and the upsert updates the WRONG user. One
     // dialect, read straight — a request that arrives without a `query` is a
-    // caller defect and costs a loud TypeError, not a silent match-everything.
-    async findData(args: any) {
-      const where = args.query.where;
-      const limit = args.query.limit;
+    // caller defect and is refused loudly, not softened into match-everything.
+    //
+    // [#17422] The parameter is deliberately UNANNOTATED: `ImportProtocolLike`
+    // types it, and an explicit annotation here would win over that contextual
+    // type and opt this implementor back out of the contract (the runner's own
+    // docblock says so). `FindDataRequest` declares `query` OPTIONAL, so the
+    // contract makes this file write its refusal down instead of leaving it as
+    // an incidental TypeError from a property read on `undefined`.
+    // ⛔ Not `args.query ?? {}` and ⛔ not `args.query?.where`: both spell
+    // match-everything, which is the exact regression this protocol's history
+    // is about.
+    async findData(args) {
+      const query = args.query;
+      if (!query) {
+        throw Object.assign(
+          new Error('import-users: findData was called without a query — refusing to match every user'),
+          { code: 'INVALID_REQUEST' },
+        );
+      }
+      const where = query.where;
+      const limit = query.limit;
       return engine.find(args.object, { where, limit, context: SYSTEM_CTX } as any);
     },
 
     // One better-auth create per row — hashing + credential sys_account.
     // Deliberately NO createManyData: there is no safe bulk primitive for
     // identities, and scrypt dominates the cost anyway.
-    async createData(args: any) {
+    async createData(args) {
       const data: Record<string, any> = args?.data ?? {};
       const email: string = typeof data.email === 'string' && data.email.length > 0
         ? data.email
@@ -431,7 +448,7 @@ export async function runAdminImportUsers(
 
     // Upsert updates touch PROFILE fields only — never email, never anything
     // credential- or system-managed. An empty filtered patch is a no-op.
-    async updateData(args: any) {
+    async updateData(args) {
       const patch: Record<string, any> = {};
       for (const [k, v] of Object.entries(args?.data ?? {})) {
         if (UPDATE_ALLOWED_FIELDS.has(k) && v !== undefined && v !== null && v !== '') patch[k] = v;
