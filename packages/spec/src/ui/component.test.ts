@@ -2033,8 +2033,11 @@ describe('`object-grid` / `object-calendar` `sort` — one sort orthography, the
     // `z.unknown()` echoed every one of these back with `success: true`.
     const spelledOut = door(type).safeParse({ objectName: 'showcase_task', sort: [{ field: 'created_at', order: 'descending' }] });
     expect(issuesAtPath(spelledOut, 'sort.0.order').map((i) => i.code)).toEqual(['invalid_value']);
+    // Same code as the misspelling above, and deliberately so: `order` is a
+    // required enum, so an ABSENT direction and a wrong one are one verdict at
+    // one path — the pair is what the schema asks for.
     const noDirection = door(type).safeParse({ objectName: 'showcase_task', sort: [{ field: 'created_at' }] });
-    expect(issuesAtPath(noDirection, 'sort.0.order').map((i) => i.code)).toEqual(['invalid_type']);
+    expect(issuesAtPath(noDirection, 'sort.0.order').map((i) => i.code)).toEqual(['invalid_value']);
     const noField = door(type).safeParse({ objectName: 'showcase_task', sort: [{ order: 'asc' }] });
     expect(issuesAtPath(noField, 'sort.0.field').map((i) => i.code)).toEqual(['invalid_type']);
   });
