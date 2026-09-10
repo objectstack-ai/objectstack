@@ -207,7 +207,13 @@ export async function probeAccountIdentityCollisions(
     for (const row of page) {
       const providerId = String(row.provider_id ?? '');
       const accountId = String(row.account_id ?? '');
-      const key = `${providerId} ${accountId}`;
+      // The composite key is JSON, not a delimited string. A delimiter has to
+      // be a byte the values cannot contain, and the usual answer -- a raw
+      // U+0000 -- is a byte `check:nul-bytes` refuses on sight, for the reason
+      // its header gives: it renders as NOTHING, so a load-bearing separator
+      // reads in grep and in review as an empty string. JSON.stringify has no
+      // such ambiguity and no such byte.
+      const key = JSON.stringify([providerId, accountId]);
       const bucket = groups.get(key);
       if (bucket) bucket.push(row);
       else groups.set(key, [row]);
@@ -226,7 +232,7 @@ export async function probeAccountIdentityCollisions(
   const collisions: AccountIdentityCollision[] = [];
   for (const [key, rows] of groups) {
     if (rows.length < 2) continue;
-    const [providerId, accountId] = key.split(' ');
+    const [providerId, accountId] = JSON.parse(key) as [string, string];
     const userIds = [...new Set(rows.map((r) => String(r.user_id ?? '')))].sort();
     collisions.push({
       providerId: providerId ?? '',
