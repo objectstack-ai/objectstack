@@ -19,6 +19,14 @@
  * A door that refuses too much is a worse defect than the one being fixed.
  */
 
+// The dynamic `import()`s below are paid HERE, at module scope, so the
+// transform lands during collection rather than inside a clocked window
+// (`pnpm check:test-source-alias`; this package resolves both specifiers
+// through `dist/`). The dynamic calls stay where they are — this only decides
+// where the first load is paid.
+import '@objectstack/spec/api';
+import '@objectstack/spec/data';
+
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
 import {
