@@ -2524,12 +2524,21 @@ function renderPair(pair, repo, pairs = null) {
       return EXIT_INCOMPLETE;
     }
     for (const note of notes) console.error(`ℹ️  ${note.code} — ${note.text}`);
+    // Each note is keyed by its CODE, never by count: the sibling reading and
+    // the review-of-record reading are two different facts about the pair, and
+    // a second note kind must not put the first one's sentence in its mouth.
+    const sibling = notes.some((n) => n.code === 'C2-SIBLING');
+    const record = notes.some((n) => n.code === 'C6-RECORD');
     console.log(
       `✓ check-clause2-carriers: PR #${pair.pr} / card #${pair.card} — the clause-② declaration is ` +
-        (notes.length > 0
+        (sibling
           ? 'readable in the fixed spelling on a SIBLING card this same PR delivers rather than on ' +
             'this card (the reading above names which, and what it says), and both carriers agree'
           : 'readable in the fixed spelling and both carriers agree') +
+        (record
+          ? ', and a review of record names this head (the note above says which comment to cite; ' +
+            'existence, not the verdict)'
+          : '') +
         (widening.state === 'clean'
           ? ', and its diff carries no widening tell. ⚠️ A tell is not a proof and its absence is not one either.'
           : '.'),
