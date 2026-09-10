@@ -27,6 +27,21 @@ import { routePath } from 'hono/route';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { matchesRoutePattern } from './route-pattern';
+// The ADR-0112 wire vocabulary, read as DATA rather than restated: `ErrorCode`
+// is the closed union (`StandardErrorCode` ∪ `ERROR_CODE_LEDGER`) a registered
+// code must be a member of, and `HttpStatusErrorCodeMap` IS the set of statuses
+// ADR-0112 declares — the same table `standardErrorCodeForHttpStatus` derives
+// from, so "a declared ADR-0112 status" needs no second list here.
+import { ErrorCode, HttpStatusErrorCodeMap } from '@objectstack/spec/api';
+// The ONE rule for "what HTTP answer does a THROWN error declare?" (#8016), and
+// the 5xx disclosure filter every door that emits a thrown message already runs
+// (#3867 / #8086). Both are CALLED, never restated — a second ladder here is
+// how the `/api/v1/packages` two-door divergence arose in the first place.
+import {
+    resolveThrownHttpError,
+    looksLikeInternalErrorLeak,
+    INTERNAL_ERROR_MESSAGE,
+} from '@objectstack/types';
 
 /**
  * Request headers allowed on preflight, by default.
@@ -164,6 +179,116 @@ function toLoggableError(thrown: unknown): Error {
 }
 
 /**
+ * The declared ADR-0112 envelope an escaped throw CARRIES, or `undefined` when
+ * it carries none (#16545, the `domain:cli` half of the #15999 ruling).
+ *
+ * ## What the ruling asked for
+ *
+ * > **Shared half** (`domain:cli`, hono adapter / registrar wrapper): an
+ * > escaped throw carrying a declared ADR-0112 `status` + registered `code` is
+ * > rendered by them, not as a bare `500 INTERNAL_ERROR "No response from
+ * > handler"`. This changes what an escaped throw means for every direct-mount
+ * > route; the PR pins that an escaped **non**-envelope throw still answers 500
+ * > with no cause in the body.
+ *
+ * The measured motivating path: `service-datasource`'s `requireDatasourceAdmin`
+ * re-raises `AuthzStoreUnavailableError` (declared `status: 503` / `code:
+ * SERVICE_UNAVAILABLE`) on an unreadable authorization store, deliberately and
+ * per the #13279 ruling — and the caller was told `500 INTERNAL_ERROR "No
+ * response from handler"`. The declared code never reached the caller and the
+ * message named the wrong component. Only the RENDERING moves here; #13279's
+ * discipline (an unreadable authz store licenses no verdict) is untouched.
+ *
+ * ## Why this is a GATE and not `sendThrownError`
+ *
+ * `packages/rest`'s `sendThrownError` maps EVERY throw through
+ * `resolveThrownHttpError`, so an undeclared fault arrives as `500
+ * INTERNAL_ERROR` carrying the thrown message. That is right for a REST
+ * registrar, whose bodies are parsed against `BaseResponseSchema` by its own
+ * conformance suite. It is NOT what this seam may do: the ruling pins that a
+ * non-envelope throw keeps today's behaviour EXACTLY — 500, and no cause in the
+ * body — so the fallback arm must stay byte-identical rather than gain the
+ * thrown message. Hence a gate that answers `undefined` for everything the
+ * ruling did not name, and `wrap`'s existing literal for that arm.
+ *
+ * ## The two conditions, both read off the ONE rule
+ *
+ * `resolveThrownHttpError` reports the DECLARATION it read — `declaredStatus`
+ * is absent exactly when the throw declared no status (its docblock states the
+ * distinction and why `status` cannot answer it), and `declaredCode` is the
+ * producer's own spelling. So neither condition re-spells that function's
+ * precedence chain here; a second chain is the divergence #8016 removed.
+ *
+ *  1. **a declared ADR-0112 status** — a key of `HttpStatusErrorCodeMap`. That
+ *     table is ADR-0112's own status list, so the vocabulary has one home. A
+ *     producer that declares `418` or `599` is NOT naming an ADR-0112 status
+ *     and takes the fallback arm.
+ *  2. **a registered code** — a member of `ErrorCode`, i.e. `StandardErrorCode`
+ *     ∪ `ERROR_CODE_LEDGER`. ⛔ No code is minted here and no ledger row is
+ *     added; a code this path carries that is NOT registered is a ledger gap
+ *     under the #16404 ruling and takes the fallback arm rather than being
+ *     registered in passing.
+ *
+ * ⚠️ **Blast radius, stated because it is wider than the motivating path.**
+ * `resolveThrownHttpError` treats the validation SHAPE as a declaration too
+ * (`err.name === 'ValidationError'` ⇒ `400` / `VALIDATION_FAILED`), so a bare
+ * `ValidationError` escaping a direct-mount handler now answers `400
+ * VALIDATION_FAILED` with its `fields[]` instead of a bare 500. That is the one
+ * rule's own semantics, and second-guessing one of its limbs at this door is
+ * precisely how two doors start disagreeing — so it is accepted and recorded,
+ * not carved out.
+ *
+ * ⛔ `declaredCode` is deliberately NOT forwarded. Under this gate the
+ * producer's spelling IS the registered member sitting in `code`, so
+ * `demotedDeclaredCode` returns `undefined` by construction — forwarding it
+ * would put two spellings of one fact on every envelope this seam renders.
+ */
+function declaredEnvelopeForThrow(thrown: unknown): {
+    status: number;
+    body: { success: false; error: Record<string, unknown> };
+} | undefined {
+    const resolved = resolveThrownHttpError(thrown);
+
+    // Condition 1 — the throw DECLARED a status, and it is one ADR-0112 names.
+    if (resolved.declaredStatus === undefined) return undefined;
+    if (!Object.prototype.hasOwnProperty.call(HttpStatusErrorCodeMap, resolved.declaredStatus)) {
+        return undefined;
+    }
+    // Condition 2 — the producer's OWN code is a member of the closed union.
+    if (resolved.declaredCode === undefined) return undefined;
+    if (!ErrorCode.safeParse(resolved.declaredCode).success) return undefined;
+
+    // The 5xx disclosure filter every door emitting a thrown message runs
+    // (`HttpDispatcher.error` since #3867, `packages/rest`'s registrars since
+    // #8086). This seam becomes such a door with this change, so it owes the
+    // rule from its first day: without it a driver dump reaching a declared
+    // 5xx would newly travel to the client, where the old bare 500 disclosed
+    // nothing. Scoped to 5xx, like the twins: a 4xx message is a
+    // caller-facing answer by design.
+    const message = resolved.status >= 500 && looksLikeInternalErrorLeak(resolved.message)
+        ? INTERNAL_ERROR_MESSAGE
+        : resolved.message;
+
+    return {
+        status: resolved.status,
+        body: {
+            success: false,
+            error: {
+                code: resolved.code,
+                message,
+                // The producer's structured context and its END-USER-addressed
+                // refusal text (#9934), forwarded exactly as the REST twin
+                // forwards them. Both are absent unless the producer declared
+                // them, so a throw that carried neither renders the same two
+                // keys it always did.
+                ...(resolved.details ? { details: resolved.details } : {}),
+                ...(resolved.userMessage !== undefined ? { userMessage: resolved.userMessage } : {}),
+            },
+        },
+    };
+}
+
+/**
  * The matched route's path parameters, or `{}` when there is no matched route.
  *
  * `c.req.param()` reads the router's match result, and in the `notFound` hook
@@ -296,7 +421,18 @@ export class HonoHttpServer implements IHttpServer {
     // internal helper to convert standard handler to Hono handler
     private wrap(handler: RouteHandler) {
         return async (c: any) => {
-            const { response } = await this.runHandler(c, handler);
+            // `renderDeclaredEnvelope` is the #16545 opt-in, and it is opt-IN
+            // rather than the default because the OTHER caller of `runHandler`
+            // — the `notFound` seam — must keep answering `Fallback handler
+            // failed`: a fallback that threw is a broken consumer, not a
+            // refusal the consumer declared. The ruling names direct-mount
+            // ROUTES, which is exactly this call site.
+            const { response } = await this.runHandler(c, handler, {
+                renderDeclaredEnvelope: true,
+            });
+            // Unchanged, and pinned byte-for-byte: a throw that declared no
+            // ADR-0112 envelope, and a handler that simply wrote nothing, both
+            // still answer 500 with no cause in the body.
             return response ?? c.json(
                 {
                     success: false,
@@ -332,6 +468,15 @@ export class HonoHttpServer implements IHttpServer {
     private async runHandler(
         c: any,
         handler: RouteHandler,
+        opts: {
+            /**
+             * Render an escaped throw that carries a declared ADR-0112 status
+             * and a registered code as THAT envelope (#16545). Off by default
+             * — see {@link declaredEnvelopeForThrow} for the rule and
+             * {@link wrap} for why only the route caller opts in.
+             */
+            renderDeclaredEnvelope?: boolean;
+        } = {},
     ): Promise<{ response: Response | null; failed: boolean }> {
         let body: any = {};
 
@@ -465,7 +610,7 @@ export class HonoHttpServer implements IHttpServer {
 
         // Create a streaming response wrapper — if handler calls res.write(),
         // we return a ReadableStream; otherwise fall back to capturedResponse.
-        const streamPromise = new Promise<{ response: Response | null; failed: boolean }>((resolve) => {
+        const streamPromise = new Promise<{ response: Response | null; failed: boolean; thrown?: unknown }>((resolve) => {
             const stream = new ReadableStream({
                 start(controller) {
                     streamController = controller;
@@ -506,21 +651,37 @@ export class HonoHttpServer implements IHttpServer {
             }).catch((err) => {
                 _endHandler?.();
                 closeStream();
-                // The ONE place an escaping throw is reported (#5848). Both
-                // callers turn `failed: true` into a 500 that says nothing
-                // about the cause — `wrap`'s `No response from handler` and
-                // the `notFound` seam's `Fallback handler failed` — so if the
-                // diagnosis is not emitted here it does not exist anywhere.
-                this.reportHandlerFailure(c, err);
-                resolve({ response: null, failed: true });
+                // [#16545] The throw is CARRIED OUT rather than reported here.
+                // Reporting moved below so the diagnosis can name the answer
+                // that was actually sent: since this seam may now render a
+                // declared envelope, a line hard-coding "answered 500 with no
+                // cause" would be false for exactly the requests the render
+                // exists to fix. Still reported exactly once per escaped
+                // throw, and still the ONLY place it is reported (#5848).
+                resolve({ response: null, failed: true, thrown: err });
             });
         });
 
         const outcome = await streamPromise;
-        return {
-            response: outcome.response ?? capturedResponse ?? null,
-            failed: outcome.failed,
-        };
+        // A handler that WROTE and then threw keeps what it wrote — unchanged,
+        // and the reason the render decision is taken here rather than in the
+        // `catch`: `capturedResponse` is not visible from inside the executor's
+        // rejection path, so deciding there would have let a declared envelope
+        // overwrite a response the handler had already produced.
+        let response = outcome.response ?? capturedResponse ?? null;
+        let rendered: { status: number; code: unknown } | undefined;
+
+        if (outcome.failed && response === null && opts.renderDeclaredEnvelope) {
+            const envelope = declaredEnvelopeForThrow(outcome.thrown);
+            if (envelope) {
+                response = c.json(envelope.body, envelope.status);
+                rendered = { status: envelope.status, code: envelope.body.error.code };
+            }
+        }
+
+        if (outcome.failed) this.reportHandlerFailure(c, outcome.thrown, rendered);
+
+        return { response, failed: outcome.failed };
     }
 
     /**
@@ -567,14 +728,39 @@ export class HonoHttpServer implements IHttpServer {
      * likely place for credentials and PII to sit, and `message` + `stack`
      * already locate the failure in the code.
      */
-    private reportHandlerFailure(c: any, thrown: unknown): void {
+    private reportHandlerFailure(
+        c: any,
+        thrown: unknown,
+        /**
+         * [#16545] What the caller actually answered, when the throw carried a
+         * declared ADR-0112 envelope and this seam rendered it. Absent for
+         * every throw that took the unchanged bare-500 arm.
+         *
+         * The log line branches on it because the old sentence is a factual
+         * CLAIM about the response — "answered 500 with no cause in the body"
+         * — and it stops being true for precisely the requests this card
+         * repairs. An operator reading `503 SERVICE_UNAVAILABLE` on the wire
+         * beside a log line insisting the caller got an opaque 500 would be
+         * debugging the seam instead of the outage.
+         */
+        rendered?: { status: number; code: unknown },
+    ): void {
         try {
             const method = typeof c?.req?.method === 'string' ? c.req.method : undefined;
             const path = typeof c?.req?.path === 'string' ? c.req.path : undefined;
+            // Still `error`, in BOTH arms. A rendered envelope makes the answer
+            // honest; it does not make the escape intentional — a handler that
+            // throws its refusal past its own `catch` is still a server-side
+            // defect, and the AGENTS.md "handed to the CALLER" exemption does
+            // not apply to a throw nobody caught.
             this.logger.error(
-                '[hono] route handler threw — request answered 500 with no cause in the body',
+                rendered
+                    ? '[hono] route handler threw — request answered with the throw\'s declared ADR-0112 envelope'
+                    : '[hono] route handler threw — request answered 500 with no cause in the body',
                 toLoggableError(thrown),
-                { method, path },
+                rendered
+                    ? { method, path, status: rendered.status, code: rendered.code }
+                    : { method, path },
             );
         } catch {
             // Reporting the failure must never become a second failure: a

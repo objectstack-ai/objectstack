@@ -1259,6 +1259,13 @@ only.
 
 Generates properly typed metadata files with barrel index management.
 
+`<name>` is held to the charset `@objectstack/spec` declares for an object
+`name` — lowercase letters, digits and `_`, never starting with a digit. A name
+outside it is refused before anything is derived or written, naming the value
+and the rule; it is **never** rewritten into one that fits, so the name you
+write is the name that lands in the file (`os g object order_line`, not
+`order-line`).
+
 ```bash
 os g object customer        # Generate a Customer object
 os g view customer          # Generate a Customer list view
@@ -1266,7 +1273,7 @@ os g action approve         # Generate an action
 os g flow customer          # Generate an automation flow
 os g dashboard sales        # Generate a dashboard
 os g app crm                # Generate an app definition
-os g skill lead-qual        # Generate an AI skill
+os g skill lead_qual        # Generate an AI skill
 
 os g object task -d lib/    # Override target directory
 os g object task --dry-run  # Preview without writing
@@ -1894,7 +1901,7 @@ os g object contact
 os g object opportunity
 
 # 3. Add business logic
-os g flow lead-qualification
+os g flow lead_qualification
 
 # 4. Validate everything
 os validate
