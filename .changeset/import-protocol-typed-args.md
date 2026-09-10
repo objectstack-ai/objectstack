@@ -50,4 +50,4 @@ async findData(args) {
 
 ⚠️ The `?? {}` shape in the "before" is the mechanism that made a dialect mismatch silent rather than loud: an unrecognised query does not throw, it degrades into a filter that constrains nothing, so a duplicate probe stops discriminating and an upsert updates the wrong record. Prefer a read that throws.
 
-<!-- adr-0087: not-required (runtime-interface-only packages/rest/src/import-runner.ts#ImportProtocolLike) probe -->
+<!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed: `packages/spec` is untouched, no metadata key changes its name, type or optionality, and no stored `sys_metadata` shape moves — every request body and every authored file parses byte-identically to before, so `objectstack migrate meta`, `spec-changes.json` and the generated upgrade guide have nothing to rewrite. What narrows is a TypeScript parameter annotation on one exported interface, so the affected party is a source-code implementor and the delivery channel is the compiler at their own call site. The FROM/TO block in this body is a prescription for THAT reader, not for a metadata upgrader. -->
