@@ -7,7 +7,12 @@ import {
     TIME_RELATIVE_DEFAULT_MAX_RECORDS,
 } from '@objectstack/spec/automation';
 import type { TimeRelativeTrigger as TimeRelativeDescriptor } from '@objectstack/spec/automation';
-import { normalizeSchedule, reportBindFailure } from './schedule-trigger.js';
+import {
+    normalizeSchedule,
+    reportBindFailure,
+    refuseMissingOrganization,
+    resolveBindingOrganization,
+} from './schedule-trigger.js';
 import type { FlowTrigger, FlowTriggerBinding, JobServiceSurface, TriggerLogger } from './schedule-trigger.js';
 
 /**
@@ -239,6 +244,26 @@ export class TimeRelativeTrigger implements FlowTrigger {
         }
         const desc = parsed.data;
 
+        // [#16659] A time-relative sweep launches from a clock, exactly as a
+        // plain schedule flow does, so it owes the same declaration and takes
+        // the same refusal. It is NOT the weaker case for carrying an
+        // organization, it is the stronger one: the sweep queries with
+        // `context: { isSystem: true }` — deliberately, so a background sweep
+        // sees all rows rather than RLS-scoped ones — so without a declared
+        // organization it selects across every tenant and then launches a run
+        // that can write into none of them.
+        const organization = resolveBindingOrganization(binding);
+        if (organization === null) {
+            // Drop any prior sweep FIRST: a hot re-publish that removes the key
+            // must not leave the previous, still-armed job sweeping org-less
+            // behind an error saying it was refused. The call below throws, so
+            // the engine's catch records the refusal instead of marking this
+            // flow bound — see `refuseMissingOrganization`'s header for why a
+            // logged-and-returned refusal is invisible to every audit surface.
+            this.stop(binding.flowName);
+            refuseMissingOrganization(this.logger, 'time-relative', binding.flowName, binding);
+        }
+
         // Cadence: the flow's start-node schedule descriptor, or a daily default.
         // A daily sweep is the whole point (evaluate the window every day so a
         // threshold day is never missed), so an omitted schedule means "daily",
@@ -282,7 +307,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
 
         const handler: JobHandler = async () => {
             try {
-                await this.sweep(binding.flowName, desc, maxRecords, callback);
+                await this.sweep(binding.flowName, desc, maxRecords, organization, callback);
             } catch (err) {
                 // Error isolation: a sweep failure must not crash the job
                 // runner / ticker. Log and swallow.
@@ -321,6 +346,12 @@ export class TimeRelativeTrigger implements FlowTrigger {
         flowName: string,
         desc: TimeRelativeDescriptor,
         maxRecords: number,
+        /**
+         * [#16659] The acting organization every run this sweep launches
+         * executes as. Required, not optional: `start()` refuses the binding
+         * without one, so a sweep can never be reached with nothing to pass.
+         */
+        organization: string,
         callback: (ctx: AutomationContext) => Promise<void>,
     ): Promise<void> {
         const engine = this.getDataEngine();
@@ -385,6 +416,15 @@ export class TimeRelativeTrigger implements FlowTrigger {
                     record,
                     object: desc.object,
                     event: 'time_relative',
+                    // [#16659] The declared acting organization — the same key
+                    // a record-change run inherits from its triggering session,
+                    // and the one `notify-node.ts` and the run-history writer
+                    // already read. ⛔ Never derived from the swept RECORD's
+                    // own `organization_id`: the sweep runs elevated and can
+                    // match rows in any tenant, so keying on the row would let
+                    // one flow write into organizations it never declared —
+                    // the cross-organization scheduled task the ruling forbids.
+                    tenantId: organization,
                     // Expose the record as params too, so flows with named `isInput`
                     // variables matching record fields get them seeded (parity with
                     // the record-change trigger).

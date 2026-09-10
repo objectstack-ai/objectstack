@@ -352,12 +352,27 @@ export const TaskCompletedSlackFlow = defineFlow({
  * A `type: 'schedule'` flow whose start node carries an interval descriptor.
  * The automation engine parses that into a schedule binding; the schedule
  * trigger plugin (`@objectstack/trigger-schedule`, paired with the job
- * service) registers a job that fires this flow every interval. Each tick runs
- * the `notify` node, dropping a fresh `sys_inbox_message` row — so the
- * scheduled fire is observable end-to-end with no manual `engine.execute()`.
+ * service) registers a job that fires this flow every interval, and each tick
+ * runs the `notify` node.
  *
- * Install `requires: ['automation', 'triggers', 'job', 'messaging']` and this
- * flow auto-launches on the interval.
+ * ⛔ AS SHIPPED, THIS FLOW DOES NOT FIRE. Since #16659 a time-triggered flow
+ * must declare the organization it runs as (`config.organization`, a
+ * `sys_organization.id`), and a flow that declares none is REFUSED at bind:
+ * the trigger logs the reason at `error` and throws, the engine records the
+ * flow as not bound, and it is listed in the startup summary's
+ * trigger-binding audit. A package-shipped flow has no legal value to write
+ * there — organization ids are minted at runtime, per install — so this
+ * example cannot declare one and ⛔ a placeholder id must NOT be invented: a
+ * value matching no row is silently authoritative, which is strictly worse
+ * than the refusal.
+ *
+ * ⇒ What a package-shipped scheduled flow should do instead is an open
+ * maintainer decision, tracked in #17150. Until it is settled this flow is a
+ * worked example of the SHAPE, and running it end-to-end means registering it
+ * at runtime with an `organization` your install actually holds.
+ *
+ * Install `requires: ['automation', 'triggers', 'job', 'messaging']` for the
+ * binding machinery this example demonstrates.
  */
 export const ScheduledDigestFlow = defineFlow({
   name: 'showcase_scheduled_digest',

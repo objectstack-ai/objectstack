@@ -2077,6 +2077,9 @@ importers:
       '@objectstack/trigger-record-change':
         specifier: workspace:*
         version: link:../../triggers/trigger-record-change
+      '@objectstack/trigger-schedule':
+        specifier: workspace:*
+        version: link:../../triggers/trigger-schedule
       '@objectstack/types':
         specifier: workspace:*
         version: link:../../types

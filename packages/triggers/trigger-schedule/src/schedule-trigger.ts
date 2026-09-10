@@ -3,6 +3,12 @@
 import { Cron } from 'croner';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { JobSchedule, JobHandler } from '@objectstack/spec/contracts';
+import {
+    SCHEDULE_ORGANIZATION_KEY,
+    ScheduleOrganizationSchema,
+    findScheduleOrganizationNearMissInConfig,
+    describeMissingScheduleOrganization,
+} from '@objectstack/spec/automation';
 
 /**
  * Structural mirror of the automation engine's `FlowTriggerBinding`
@@ -18,6 +24,21 @@ export interface FlowTriggerBinding {
     readonly event?: string;
     readonly condition?: string | { dialect?: string; source?: string; ast?: unknown };
     readonly schedule?: unknown;
+    /**
+     * [#16659] The ACTING ORGANIZATION a time-triggered flow declares on its
+     * start node (`config.organization`), lifted onto the binding by the
+     * engine's `resolveTriggerBinding` the same way `schedule` is.
+     *
+     * Optional on this interface and REQUIRED by the two time triggers — the
+     * split is deliberate. The interface is the structural mirror of the
+     * engine's binding, which is shared with `record_change` and `api` flows
+     * that legitimately carry none (their trigger threads the firing session's
+     * own tenant). "Absent" is therefore a real state the type must be able to
+     * express; what must not exist is a time-triggered run that PROCEEDS
+     * without it, and that verdict is {@link resolveBindingOrganization}'s,
+     * one layer down.
+     */
+    readonly organization?: string;
     readonly config?: Record<string, unknown>;
 }
 
@@ -223,6 +244,103 @@ export interface TriggerLogger {
 const JOB_PREFIX = 'flow-schedule';
 
 /**
+ * Resolve the acting organization of a time-triggered binding (#16659), or
+ * `null` when the flow declared none.
+ *
+ * Reads the binding's lifted `organization` first and the raw start-node
+ * `config` second. The second read is not redundancy for its own sake: the
+ * binding is a STRUCTURAL mirror of the engine's type, so a host running an
+ * engine that predates the lift hands this trigger a binding with no
+ * `organization` field and a `config` that still carries the author's
+ * declaration. Reading only the lifted field there would report a correctly
+ * declared flow as organization-less and refuse it — turning an engine-version
+ * skew into an authoring error, which is the wrong diagnosis pointed at the
+ * wrong person.
+ *
+ * A present-but-unusable value (empty string, a number) resolves to `null` and
+ * takes the refusal path, exactly as {@link resolveScheduleOrganization} does
+ * at validation: this trigger and the validator must agree about what counts
+ * as declared, or a flow refused by one and admitted by the other is the
+ * silent hole again.
+ */
+export function resolveBindingOrganization(binding: FlowTriggerBinding): string | null {
+    const lifted = ScheduleOrganizationSchema.safeParse(binding.organization);
+    if (lifted.success) return lifted.data;
+    const raw = binding.config?.[SCHEDULE_ORGANIZATION_KEY];
+    const declared = ScheduleOrganizationSchema.safeParse(raw);
+    return declared.success ? declared.data : null;
+}
+
+/**
+ * Refuse to bind a time-triggered flow that declares no acting organization
+ * (#16659): say why at `error`, then THROW so the engine records the refusal.
+ *
+ * ## Why it throws, and does not merely log and return
+ *
+ * `FlowTrigger.start` returns `void`, so a trigger that logs and returns is
+ * indistinguishable — to the engine — from one that armed successfully. The
+ * engine's `activateFlowTrigger` then runs `boundFlowTriggers.set(flowName, …)`
+ * and logs `Flow '<name>' bound to trigger 'schedule'` one line after this
+ * function said NOT BOUND, and every structured surface built for exactly this
+ * state reports the opposite of it: `getFlowRuntimeStates()` (Studio's status
+ * badge) answers `bound: true`, and `getTriggerBindingAudit()` — the silent-miss
+ * audit the automation plugin warns from at `kernel:bootstrapped` and the CLI
+ * prints in its startup summary — skips the flow because it is in
+ * `boundFlowTriggers`. A refusal only an operator reading stderr can see, in a
+ * repo that built three machine-readable channels to say "declared but not
+ * armed", is the same silent-miss shape this card exists to close.
+ *
+ * Throwing is the engine's DESIGNED path for this: `activateFlowTrigger` wraps
+ * `trigger.start(...)` in a `try/catch` whose `catch` logs the plugin-supplied
+ * thrown text and — because the `set` is inside the `try`, after the call — never
+ * marks the flow bound. The audit then lists it with `binding failed — see
+ * earlier warnings`, which points at the `error` line this function already
+ * emitted. The message is the same sentence both times, so the loud channel and
+ * the structured channel cannot drift.
+ *
+ * ## Why this REFUSES rather than binding and degrading
+ *
+ * The whole defect this closes is a run that looked healthy while delivering
+ * nothing: the tick selected its rows, landed its `update_record` steps,
+ * reported `unmeasured=0`, and every tenant-scoped write beneath it — the
+ * inbox rows and the `sys_automation_run` history row — was refused one layer
+ * down where nothing summarised it. Binding such a flow and warning once at
+ * boot would reproduce exactly that shape: a flow that is armed, listed, and
+ * inert. So the flow is NOT bound, and the reason names it.
+ *
+ * ## Why `error` and not `warn`
+ *
+ * The repo's degradation-log-level rule asks one question: after the
+ * degradation, does the system still look normal from the outside while
+ * something it claims is in place has not landed? It does, completely — the
+ * flow stays published and active in `sys_metadata`, Studio lists it, the
+ * metadata API serves it and `verify_build` passes — which is the same
+ * reasoning {@link reportBindFailure} records for its own branch, and the same
+ * `error` class.
+ *
+ * ⛔ There is deliberately no limb here that picks an organization. Not the
+ * install's only one, not the platform organization, not the first row of
+ * `sys_organization`. A wrong `organization_id` is worse than a refusal: a
+ * refusal is visible at boot and names its flow, while a wrong value is
+ * silently authoritative to every report, export and cleanup script that
+ * filters by organization.
+ */
+export function refuseMissingOrganization(
+    logger: TriggerLogger,
+    tag: 'schedule' | 'time-relative',
+    flowName: string,
+    binding: FlowTriggerBinding,
+): never {
+    const sentence = describeMissingScheduleOrganization(flowName, {
+        kind: tag === 'time-relative' ? 'time_relative' : 'schedule',
+        nearMiss: findScheduleOrganizationNearMissInConfig(binding.config),
+    });
+    const report = logger.error?.bind(logger) ?? logger.warn.bind(logger);
+    report(`[${tag}] NOT BOUND — ${sentence}`);
+    throw new Error(sentence);
+}
+
+/**
  * Report a scheduled flow that failed to bind to the job service.
  *
  * **Why this is `error` and not `warn`** — the repo's degradation-log-level
@@ -403,6 +521,21 @@ export class ScheduleTrigger implements FlowTrigger {
             return;
         }
 
+        // [#16659] The acting organization is part of the BINDING, so it is
+        // checked before the job service is even resolved: a flow that cannot
+        // legally run must not be reported as "not scheduled because the job
+        // service is missing", which is a different defect with a different
+        // remedy.
+        const organization = resolveBindingOrganization(binding);
+        if (organization === null) {
+            // Drop any prior binding for this flow FIRST. A hot re-publish that
+            // REMOVES the organization must not leave the previous, still-armed
+            // job firing org-less ticks behind an error that says it was
+            // refused — and the throw below leaves this method immediately.
+            this.stop(binding.flowName);
+            refuseMissingOrganization(this.logger, 'schedule', binding.flowName, binding);
+        }
+
         const jobService = this.getJobService();
         if (!jobService || typeof jobService.schedule !== 'function') {
             this.logger.warn(
@@ -442,6 +575,21 @@ export class ScheduleTrigger implements FlowTrigger {
             try {
                 const ctx: AutomationContext = {
                     event: 'schedule',
+                    // [#16659] The run executes AS this organization. This is
+                    // the one line the whole card is about: `tenantId` is the
+                    // acting run's organization, and every consumer already
+                    // reads it — `notify-node.ts` threads it onto the
+                    // notification it emits (#11303), and the engine copies it
+                    // onto the `sys_automation_run` history row (#10101). The
+                    // producer was simply never supplying a value, so both
+                    // consumers resolved NULL and the tenancy guard refused the
+                    // rows beneath them.
+                    //
+                    // ⛔ Never conditional. `organization` is non-null here by
+                    // construction — the bind above refused the flow otherwise
+                    // — and spelling this `...(organization ? {…} : {})` would
+                    // re-open the org-less run as a silent state.
+                    tenantId: organization,
                     params: {
                         jobId,
                         flowName: binding.flowName,

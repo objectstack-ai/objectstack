@@ -1922,6 +1922,9 @@ export const contractExpirationCheck: Flow = {
       config: {
         triggerType: 'schedule',
         schedule: { type: 'cron', expression: '0 0 * * *', timezone: 'UTC' },
+        // REQUIRED on every time-triggered flow — see "The acting
+        // organization" below. A flow that omits it is refused at bind.
+        organization: '<sys_organization.id>',
       },
     },
     { id: 'find_expiring', type: 'get_record', label: 'Find Expiring Contracts' },
@@ -1963,6 +1966,9 @@ export const renewalReminder: Flow = {
           offsetDays: [60, 30, 7], // — or — withinDays: 30 (negative = overdue lookback)
           filter: { status: 'active' }, // optional, ANDed with the date window
         },
+        // REQUIRED, and for a stronger reason than a plain schedule flow —
+        // see "The acting organization" below.
+        organization: '<sys_organization.id>',
         // schedule: { type: 'cron', expression: '0 8 * * *' } // optional; defaults to daily 08:00 UTC
       },
     },
@@ -1980,6 +1986,55 @@ Exactly one of `offsetDays` (discrete T-minus days) or `withinDays` (a range) is
 required. Requires the `triggers` **and** `job` capabilities. The record is on
 the flow context (`record.*`), so the start `condition` and `{record.*}`
 interpolation work as in a record-change flow.
+
+### The acting organization
+
+A `record_change` or `api` flow inherits its organization from whoever triggered
+it: the caller's session rides into the run and every tenant-scoped write below
+resolves the same organization a normal write would. A **time-triggered** flow
+has no such caller — a job tick carries no identity at all.
+
+So a `schedule` or `timeRelative` flow **declares the organization it runs as**,
+on the start node's `config`, beside the cadence it scopes:
+
+```typescript
+config: {
+  schedule: { type: 'cron', expression: '0 8 * * *' },
+  organization: 'org_msokm9oaz0cal87q', // a sys_organization.id
+}
+```
+
+The run then executes as that organization: `tenantId` carries it, the
+notifications a `notify` node emits land in that organization's inboxes, and the
+`sys_automation_run` history row is stamped with it.
+
+**A time-triggered flow that declares none is a declaration error**, refused at
+bind:
+
+- the trigger logs the reason at `error`, naming the flow;
+- the flow is recorded as **not bound** — it is listed by
+  `getTriggerBindingAudit()`, warned at `kernel:bootstrapped`, printed in the
+  `os dev` / `os start` startup summary, and `getFlowRuntimeStates()` reports
+  `bound: false`;
+- nothing fires it.
+
+There is deliberately **no fallback** — not the platform organization, not "the
+install's only one". Without the declaration the run would reach every
+tenant-scoped write with nothing to offer, and on an install holding more than
+one `sys_organization` each of those writes is refused one layer below anything
+that summarises the run: the tick reports itself healthy and delivers nothing.
+A wrong `organization_id` is worse still, because it is silently authoritative
+to every report, export and cleanup script that filters by organization.
+
+**No fan-out.** A single flow belongs to one organization. A sweep wanted in
+several organizations is declared once per organization.
+
+<Callout type="warn">
+The start node's `config` is an open record, so a near-miss spelling —
+`organizationId`, `organization_id`, `orgId`, `org_id`, `tenantId` — parses
+happily and is then ignored. The bind-time refusal names the spelling you
+actually wrote.
+</Callout>
 
 ### Update-triggered flow
 

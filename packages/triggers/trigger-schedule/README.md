@@ -14,13 +14,15 @@ engine baseline, a different event source.
 
 ## What it does
 
-A flow whose `start` node declares a schedule:
+A flow whose `start` node declares a schedule **and the organization it runs
+as**:
 
 ```ts
 {
   type: 'start',
   config: {
     schedule: { type: 'cron', expression: '0 1 * * *', timezone: 'UTC' },
+    organization: '<sys_organization.id>', // REQUIRED — see below
     condition: "...", // optional start-condition gate
   },
 }
@@ -28,8 +30,29 @@ A flow whose `start` node declares a schedule:
 ```
 
 auto-launches on that schedule — no manual `engine.execute()`. When it fires,
-the flow runs with `event: 'schedule'` and `params: { jobId, flowName, schedule }`
-in its context.
+the flow runs with `event: 'schedule'`, `tenantId` set to the declared
+organization, and `params: { jobId, flowName, schedule }` in its context.
+
+### The acting organization is required
+
+A scheduled run has no session to inherit a tenant from, so it carries no
+organization unless the flow declares one. Without it every tenant-scoped write
+beneath the run — the inbox rows a `notify` node emits, the
+`sys_automation_run` history row — is refused on any install holding more than
+one `sys_organization`, while the tick still reports itself healthy.
+
+So `config.organization` is **required on every `schedule` and `timeRelative`
+flow**, and a flow that omits it is **refused at bind**: the trigger logs the
+reason at `error` naming the flow, and throws, so the engine records the flow as
+NOT bound — it appears in `getTriggerBindingAudit()` and in the CLI's startup
+summary, and `getFlowRuntimeStates()` reports `bound: false`. There is
+deliberately no fallback: no platform organization, no "the install's only one".
+A sweep wanted in several organizations is declared once per organization; a
+single flow is never fanned out across them.
+
+⚠️ The start node's `config` is an open record, so a near-miss spelling
+(`organizationId`, `org_id`, `tenantId`, …) parses and is then ignored. The
+refusal names the spelling you wrote.
 
 ### Schedule shapes
 
@@ -89,11 +112,18 @@ schedule and launched **once per matching record**:
       filter: { status: 'active' },  // optional, ANDed with the date window
       maxRecords: 1000,              // optional per-sweep cap (default 1000)
     },
+    organization: '<sys_organization.id>', // REQUIRED — same refusal as above
     schedule: { type: 'cron', expression: '0 8 * * *' }, // optional; defaults to daily 08:00 UTC
     condition: '...',                // optional per-record start-condition gate
   },
 }
 ```
+
+The sweep owes the acting organization for a **stronger** reason than a plain
+schedule flow does: it queries with `context: { isSystem: true }` on purpose, so
+that without a declared organization it would select rows across every tenant
+and then launch a run able to write into none of them. A `timeRelative` flow
+that declares none takes the same bind-time refusal.
 
 The matched record rides on the automation context (`event: 'time_relative'`,
 `record`, `params`), so the start-node `condition` gate and `{record.<field>}`

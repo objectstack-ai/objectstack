@@ -1,0 +1,89 @@
+---
+title: Schedule Organization
+description: Schedule Organization protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+The ACTING ORGANIZATION of a time-triggered flow — the one start-node key
+that says which organization a scheduled run executes as.
+
+## Why the key exists
+
+A record-change flow inherits its organization from the write that fired it:
+the triggering session's `tenantId` rides the `AutomationContext` into
+the run, so every tenant-scoped write below it — `sys_inbox_message`,
+`sys_notification_delivery`, `sys_automation_run` — resolves an organization
+the way a session write does. A TIME-triggered flow has no such session. The
+schedule trigger and the time-relative sweep launch their runs from a job
+tick, and a job tick carries no identity at all, so the run reached the
+tenancy guard (`system-write-organization.ts`) with nothing to offer it. On
+an install holding more than one `sys_organization` that guard refuses,
+correctly and by design — and the refusal landed on rows the run never
+reported: the notification wrote with `organization_id = NULL`, every
+tenant-scoped row beneath it was refused, and the tick still summarised
+itself as healthy.
+
+## The ruling this key implements
+
+Maintainer, 2026-09-08, verbatim:
+
+> 多组织定时任务本来只能在组织内运行，应该带组织ID，不允许跨组织的定时任务。
+
+A time-triggered flow is **organization-scoped by construction**: it names
+one organization and the run executes as that organization. There is
+deliberately no fan-out — a tenant that wants the same sweep in N
+organizations declares it N times — and there is deliberately no fallback: a
+flow that names none is a DECLARATION ERROR, not a run that quietly picks
+one. Guessing is the failure this key exists to prevent, and the platform
+organization is not a safe guess: a wrong `organization_id` is worse than a
+null, because a null is visibly missing while a wrong value is silently
+authoritative to every report, export and cleanup script that filters by
+organization.
+
+## Where it lives, and why there
+
+On the flow's START node `config`, beside the cadence it scopes:
+
+```ts
+config: {
+  schedule: { type: 'cron', expression: '0 8 * * *' },
+  organization: 'org_msokm9oaz0cal87q',
+}
+```
+
+The start node is where every other trigger-binding fact already lives —
+`FlowSchema` refuses a top-level `schedule` in as many words ("a schedule
+flow declares its cron/interval as `config.schedule` on the START node, not
+at the flow top level"), and `resolveTriggerBinding` hands the whole start
+`config` to the trigger. Putting the organization at the flow top level would
+split one binding across two layers; putting it inside the `schedule`
+descriptor would make it invisible to the time-relative sweep, which carries
+its cadence in the same slot but binds through a different descriptor. One
+key, one layer, both time triggers.
+
+<Callout type="info">
+**Source:** `packages/spec/src/automation/schedule-organization.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { ScheduleOrganizationSchema } from '@objectstack/spec/automation';
+import type { ScheduleOrganization } from '@objectstack/spec/automation';
+
+// Validate data
+const result = ScheduleOrganizationSchema.parse(data);
+```
+
+---
+
+## ScheduleOrganization
+
+Organization id (sys_organization.id) this scheduled/time-relative flow runs as. Required: a time-triggered run has no session to inherit a tenant from.
+
+**Type:** `string`
+
+
+---
+

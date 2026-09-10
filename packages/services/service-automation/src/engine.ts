@@ -24,7 +24,7 @@ import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlo
 // shared with `defineStack`'s trigger-capability refusal and `@objectstack/lint`'s
 // `validate-flow-trigger-readiness`, so the runtime cannot drift from what
 // authoring accepted. See `resolveTriggerBinding`.
-import { resolveFlowTriggerKind } from '@objectstack/spec/automation';
+import { resolveFlowTriggerKind, resolveScheduleOrganization } from '@objectstack/spec/automation';
 import { predicateSlotRefusal, resolveFlowNodeExpressions, structuralConditionRefusal } from '@objectstack/spec/automation';
 // [#15137] The `value`-role half of the ledger. Both halves of "is this envelope
 // well-formed?" are IMPORTED, never re-spelled here: the shape rule is
@@ -427,6 +427,25 @@ export interface FlowTriggerBinding {
     readonly condition?: string | { dialect?: string; source?: string; ast?: unknown };
     /** schedule: cron/interval descriptor (parsed but not yet acted on here). */
     readonly schedule?: unknown;
+    /**
+     * [#16659] schedule / time_relative: the ACTING ORGANIZATION the flow
+     * declares on its start node (`config.organization`), resolved through
+     * `@objectstack/spec`'s {@link resolveScheduleOrganization} so authoring,
+     * this lift and the triggers cannot disagree about what counts as declared.
+     *
+     * Populated only for the two time-triggered kinds. `record_change` and
+     * `api` bindings leave it `undefined` BY CONSTRUCTION rather than by
+     * omission: both are fired by a caller who already carries an organization,
+     * and lifting a declared one onto them would let a flow overrule the tenant
+     * of the very write that triggered it.
+     *
+     * `undefined` here is a REFUSAL condition for the trigger that receives it,
+     * never a default to be filled in downstream: the time triggers THROW from
+     * `start()` on it, so {@link activateFlowTrigger}'s catch records the flow
+     * as unbound and {@link getTriggerBindingAudit} lists it — see the schedule
+     * trigger's `refuseMissingOrganization`.
+     */
+    readonly organization?: string;
     /** The raw start-node `config`, for trigger-specific fields not modeled above. */
     readonly config?: Record<string, unknown>;
 }
@@ -3046,6 +3065,13 @@ export class AutomationEngine implements IAutomationService {
                                   ? config.objectName
                                   : undefined,
                         schedule: config.schedule,
+                        // [#16659] Lifted beside `schedule`, for the same
+                        // reason `schedule` is lifted: it is a BINDING fact the
+                        // trigger acts on, not a config value it interprets.
+                        // `config` still carries it verbatim below, so a
+                        // trigger built against the older binding shape reads
+                        // the same declaration from the same place.
+                        organization: resolveScheduleOrganization(flow),
                         condition,
                         config,
                     },
@@ -3055,7 +3081,16 @@ export class AutomationEngine implements IAutomationService {
             case 'schedule':
                 return {
                     triggerType: kind,
-                    binding: { flowName, schedule: config.schedule, condition, config },
+                    // [#16659] `organization` rides beside `schedule`: the two
+                    // together ARE a scheduled flow's binding — when it fires,
+                    // and which organization it fires as.
+                    binding: {
+                        flowName,
+                        schedule: config.schedule,
+                        organization: resolveScheduleOrganization(flow),
+                        condition,
+                        config,
+                    },
                 };
 
             // Inbound HTTP (ADR-0041 Tier 1): an `api` flow waits for an external
