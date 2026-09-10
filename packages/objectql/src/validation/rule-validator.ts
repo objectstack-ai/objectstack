@@ -1502,7 +1502,7 @@ export function stripRuntimeOwnedFields(
  *
  * 81 object declarations in this tree carry `managedBy`; **0** of them carry a
  * name outside the `sys_` namespace. So the `sys_` test below keeps every
- * SHIPPED object exempt exactly as before — 21 of them in the three judging
+ * SHIPPED object exempt exactly as before — 20 of them in the three judging
  * buckets, holding 64 static `readonly` columns between them — and this
  * narrowing reaches only APP-AUTHORED objects, which is the population the
  * ruling is about.
