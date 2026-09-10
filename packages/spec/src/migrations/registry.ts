@@ -6947,7 +6947,14 @@ const step18: MigrationStep = {
         + 'doors (`my-work.page.ts`, `index.ts`: four records on `object-metric`, one AST tuple '
         + 'array on `object-grid`) and three lint fixtures — every one rewritten to the rule array '
         + 'in the same change, and zero outside those files; this entry carries the prescription '
-        + 'for authors outside the repo.',
+        + 'for authors outside the repo. '
+        + '⚠️ Metadata AT REST is deliberately NOT rewritten, and this disposition adds no D2 '
+        + 'conversion — a SemanticMigration converts nothing by its own type, and no author runs '
+        + '`os migrate meta` over `sys_metadata`. The read path does not re-validate stored rows '
+        + '(`applyConversionsToStoredItem` replays the full chain without validating, by its own '
+        + 'contract), so a stored page or block carrying the record form keeps loading unchanged '
+        + 'and is still rendered by objectui at the pinned `.objectui-sha`; what changes is that '
+        + 'RE-SAVING it is refused at the `filter` door, on its next save and not before.',
       acceptanceCriteria:
         '`ElementDataSourceSchema.safeParse({ object, filter: [{ field: \'status\', operator: '
         + '\'equals\', value: \'active\' }] })` succeeds and the parsed `filter` is the same rule '
