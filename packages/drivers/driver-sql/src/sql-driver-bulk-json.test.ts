@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, assert } from 'vitest';
 import { SqlDriver } from '../src/index.js';
 
 /**
@@ -51,6 +51,7 @@ describe('SqlDriver bulkCreate JSON marshaling (#2735)', () => {
 
     // Read-back parity: JSON columns decode to objects, same as single insert.
     const v1 = await driver.findOne('venue', { where: { id: 'v1' } });
+    assert(v1 !== null, 'findOne answered the not-found arm for a seeded id');
     expect(v1.location).toEqual({ lat: 47.6062, lng: -122.3321 });
     expect(v1.tags).toEqual(['a', 'b']);
     expect(v1.meta).toEqual({ tier: 1 });
