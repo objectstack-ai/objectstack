@@ -639,7 +639,7 @@ Record grouping configuration — SERVER-SIDE: the set of groups and every numbe
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group) |
+| **field** | `string` | ✅ | Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group). NO leading or trailing whitespace: the name is compiled into the aggregate query verbatim, so a padded spelling buckets every row into one empty group instead of grouping them. |
 | **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order — applied by the consumer over the header rows (the aggregate query carries no orderBy) |
 | **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default (presentation only) |
 
@@ -652,7 +652,7 @@ Record grouping configuration — SERVER-SIDE: the set of groups and every numbe
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group) |
+| **field** | `string` | ✅ | Field name to group by — one `groupBy` column of the group header query; the header row carries its raw stored value (null for the empty group). NO leading or trailing whitespace: the name is compiled into the aggregate query verbatim, so a padded spelling buckets every row into one empty group instead of grouping them. |
 | **order** | `Enum<'asc' \| 'desc'>` | optional (default: `"asc"`) | Group sort order — applied by the consumer over the header rows (the aggregate query carries no orderBy) |
 | **collapsed** | `boolean` | optional (default: `false`) | Collapse groups by default (presentation only) |
 
