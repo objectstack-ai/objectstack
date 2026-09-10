@@ -2463,8 +2463,26 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
     .describe('Columns: field names or column definition objects'),
   fields: z.array(z.unknown()).optional()
     .describe('Field list fallback used when `columns` is absent'),
-  filter: z.unknown().optional()
-    .describe('Base query filter (ObjectQL filter array/AST) — lowered to the wire `$filter`. THE key, singular — not the plural misspelling'),
+  /**
+   * Base query filter — the `ViewFilterRule` ARRAY form,
+   * `[{ field, operator, value }, ...]`, the one filter orthography every
+   * `filter` door in this map shares (ui#6206-B; reached the four `object-*`
+   * doors and the binding-level `dataSource.filter` on #15442 / #15449,
+   * decision batch #55, verbatim 「同意」, option A: family-wide). The
+   * `z.unknown()` this door carried was a read-point record written twelve
+   * days before that ruling (#7751), not an exception to it: it accepted the
+   * MongoDB-style record, the AST tuple array and the rule array alike, so
+   * an author following the showcase and an author following the manifest
+   * each got a silent success receipt for a different shape. Measured at the
+   * objectui pin `53ded82b` before the declaration moved: `ObjectGrid.tsx`
+   * lowers `schema.filter` through `toFilterNode`, whose rule-array arm maps
+   * each rule to an AST node before `$filter` — the door every saved view's
+   * stored rules already take. The record and tuple forms are refused at
+   * `filter`; the migration prescription is the
+   * `element-data-source-and-object-block-filter-rule-array` semantic entry.
+   */
+  filter: z.array(ViewFilterRuleSchema).optional()
+    .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   defaultFilters: z.unknown().optional()
     .describe('Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter`'),
   sort: z.unknown().optional().describe('Initial sort (array of { field, order })'),
@@ -2621,7 +2639,25 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
     .optional().describe('Icon container color variant'),
   aggregate: z.unknown().optional()
     .describe('Aggregation config ({ field, function, groupBy? }) run against the object'),
-  filter: z.unknown().optional().describe('Filter the aggregation is scoped by'),
+  /**
+   * Filter the aggregation is scoped by — the `ViewFilterRule` ARRAY form,
+   * the one filter orthography every `filter` door in this map shares (#15449,
+   * the family entry above on `object-grid` carries the ruling). This door was
+   * the one the family had to be sequenced behind: with `aggregate` the widget
+   * posts the filter as the `where` of `POST /analytics/query`, whose request
+   * schema takes only a `FilterCondition`, and at the pin `a472b07` the adapter
+   * posted an array verbatim — a 400 on every array form (#15828). At the pin
+   * this repo builds against (`53ded82b`, objectui#7754) the adapter lowers an
+   * authored array through `translateFilterArray` and the spec's own
+   * `parseFilterAST` sink before the wire (`lowerAnalyticsFilterForWire`), so
+   * the rule array reaches the analytics door as the condition it declares;
+   * `resolveFilterPlaceholders` walks arrays and objects alike, so the date
+   * macros and `{current_user_id}` still resolve. The record form is refused
+   * at `filter`; see migration
+   * `element-data-source-and-object-block-filter-rule-array`.
+   */
+  filter: z.array(ViewFilterRuleSchema).optional()
+    .describe('Filter the aggregation is scoped by — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   format: z.string().optional().describe("Number format pattern (e.g. '0,0', '$0,0', '0%')"),
   currency: z.string().optional().describe("ISO currency code (e.g. 'USD') — enables currency formatting"),
   prefix: z.string().optional().describe('Static prefix before the formatted value'),
@@ -2636,6 +2672,14 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectMetricProps = z.input<typeof ObjectMetricPropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state on exactly one
+ * key — `filter` carries `z.array(ViewFilterRuleSchema)` (the ui#6206-B family
+ * convergence, #15449), whose own input ≠ infer (`operator` is normalized on
+ * parse). So `object-metric` leaves the type-alias convention pin's default-free
+ * family the way `object-grid` did, taking the `ObjectGridPropsParsed` route.
+ */
+export type ObjectMetricPropsParsed = z.infer<typeof ObjectMetricPropsSchema>;
 
 /**
  * `object-kanban` (objectui `plugin-kanban/src/ObjectKanban.tsx` +
@@ -2669,7 +2713,19 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   groupBy: z.string().optional().describe('Field whose values become the board columns'),
   columns: z.array(z.unknown()).optional()
     .describe('Swimlane definitions ({ id, title } per `groupBy` value, or bare value strings) — NOT a field projection'),
-  filter: z.unknown().optional().describe('Base query filter, handed to the wire `$filter`'),
+  /**
+   * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
+   * orthography every `filter` door in this map shares (#15449; the family
+   * entry on `object-grid` carries the ruling). Measured at the objectui pin
+   * `53ded82b` before the declaration moved: `ObjectKanban.tsx` hands
+   * `schema.filter` verbatim to `$filter`, and `ObjectStackAdapter.convertQueryParams`
+   * lowers a rule array through `translateFilterArray` — the same door every
+   * list view's stored rule array takes. The record form is refused at
+   * `filter`; see migration
+   * `element-data-source-and-object-block-filter-rule-array`.
+   */
+  filter: z.array(ViewFilterRuleSchema).optional()
+    .describe('Base query filter, handed to the wire `$filter` — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   /**
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
    * 2026-09-07, option A: the contract declares the capability that already
@@ -2718,6 +2774,14 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectKanbanProps = z.input<typeof ObjectKanbanPropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state on exactly one
+ * key — `filter` carries `z.array(ViewFilterRuleSchema)` (the ui#6206-B family
+ * convergence, #15449), whose own input ≠ infer (`operator` is normalized on
+ * parse). So `object-kanban` leaves the type-alias convention pin's default-free
+ * family the way `object-grid` did, taking the `ObjectGridPropsParsed` route.
+ */
+export type ObjectKanbanPropsParsed = z.infer<typeof ObjectKanbanPropsSchema>;
 
 /**
  * The flat per-field spellings `ObjectCalendar` keeps reading as a
@@ -2760,7 +2824,18 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
   calendar: z.unknown().optional()
     .describe('Calendar field config: { startDateField, endDateField?, titleField?, colorField?, allDayField? }'),
   defaultView: z.enum(['month', 'week', 'day']).optional().describe('Initial view mode'),
-  filter: z.unknown().optional().describe('Base query filter'),
+  /**
+   * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
+   * orthography every `filter` door in this map shares (#15449; the family
+   * entry on `object-grid` carries the ruling). Measured at the objectui pin
+   * `53ded82b` before the declaration moved: `ObjectCalendar.tsx` hands
+   * `schema.filter` verbatim to `$filter` and the adapter lowers a rule array
+   * exactly as it does for the kanban. The record form is refused at
+   * `filter`; see migration
+   * `element-data-source-and-object-block-filter-rule-array`.
+   */
+  filter: z.array(ViewFilterRuleSchema).optional()
+    .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   sort: z.unknown().optional().describe('Sort for the fetched events'),
   data: z.array(z.unknown()).optional().describe('Pre-fetched records — skips the internal fetch'),
   staticData: z.array(z.unknown()).optional().describe('Static inline records'),
@@ -2769,6 +2844,14 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
 export type ObjectCalendarProps = z.input<typeof ObjectCalendarPropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state on exactly one
+ * key — `filter` carries `z.array(ViewFilterRuleSchema)` (the ui#6206-B family
+ * convergence, #15449), whose own input ≠ infer (`operator` is normalized on
+ * parse). So `object-calendar` leaves the type-alias convention pin's default-free
+ * family the way `object-grid` did, taking the `ObjectGridPropsParsed` route.
+ */
+export type ObjectCalendarPropsParsed = z.infer<typeof ObjectCalendarPropsSchema>;
 
 /**
  * `object-form` (objectui `plugin-form/src/ObjectForm.tsx` @ `eb7f586b`, plus
