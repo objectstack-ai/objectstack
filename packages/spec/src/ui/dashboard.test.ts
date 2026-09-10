@@ -14,7 +14,9 @@ import {
   GlobalFilterOptionsFromSchema,
   DATE_RANGE_PRESETS,
   DATE_RANGE_DEFAULT_RANGES,
+  DashboardWidgetOptionsSchema,
 } from './dashboard.zod';
+import { ChartTypeSchema } from './chart.zod';
 import { dashboardForm } from './dashboard.form';
 
 /**
@@ -794,5 +796,83 @@ describe('#16458 — DashboardHeaderAction fields carry an item-level `title`', 
     const parsed = DashboardSchema.parse({ name: 'dash_x', label: 'D', widgets: [] });
     expect(parsed.columns).toBeUndefined();
     expect('columns' in parsed).toBe(false);
+  });
+});
+
+
+/**
+ * `options.stageOrder` documented a chart type that cannot be built.
+ *
+ * The shipped prose is the whole surface here: `stageOrder` is an ungated
+ * member of the open `options` bag, so the one sentence an author reads before
+ * writing it is the only thing standing between them and a key that parses and
+ * does nothing. That sentence named `funnel` / `pyramid` "stages above all",
+ * and `pyramid` was removed from `ChartTypeSchema` as a variant that only ever
+ * rendered as `funnel` — so its headline example could not be authored at all,
+ * and its plural framing read as a promise about ordered marks generally.
+ *
+ * These pin the corrected prose against BOTH ways it can rot:
+ *  - the vocabulary moving under it (a `pyramid` re-admitted to the taxonomy
+ *    would make the sentence false in the other direction), and
+ *  - the sentence being trimmed back to the plural framing.
+ *
+ * The renderer half is deliberately NOT pinned here: which chart types consult
+ * the forwarded order is objectui's fact, measured against this repo's
+ * `.objectui-sha` pin and reported on the issue, not something `packages/spec`
+ * can assert.
+ */
+describe('DashboardWidgetOptions.stageOrder — the shipped doc string', () => {
+  const description = () => {
+    const d = (DashboardWidgetOptionsSchema as unknown as {
+      shape: { stageOrder: { description?: string } };
+    }).shape.stageOrder.description;
+    expect(typeof d).toBe('string');
+    return d as string;
+  };
+
+  it('names `funnel` and never `pyramid`', () => {
+    const d = description();
+    expect(d).toMatch(/funnel/);
+    expect(d).not.toMatch(/pyramid.*(is|are) (a|the) (chart|widget) type/i);
+    // The word may only appear as the correction that it does NOT exist.
+    expect(d).toMatch(/no `?pyramid`? widget type/i);
+  });
+
+  it('states plainly that no other widget type reads the key', () => {
+    const d = description();
+    expect(d).toMatch(/only widget type that reads it/);
+    // and points the other types at the keys that DO order them
+    expect(d).toMatch(/sortBy/);
+    expect(d).toMatch(/sortOrder/);
+  });
+
+  it('CONTROL — the taxonomy behind that prose: `funnel` parses, `pyramid` does not', () => {
+    expect(ChartTypeSchema.safeParse('funnel').success).toBe(true);
+    expect(ChartTypeSchema.safeParse('pyramid').success).toBe(false);
+    // dark control: a type that never existed refuses the same way, so the
+    // `pyramid` refusal above is not an artifact of how the probe is written
+    expect(ChartTypeSchema.safeParse('ziggurat').success).toBe(false);
+  });
+
+  it('CONTROL — a `funnel` widget carrying `stageOrder` still parses unchanged', () => {
+    const w = DashboardWidgetSchema.parse({
+      id: 'stage_funnel', type: 'funnel', dataset: 'contracts',
+      dimensions: ['status'], values: ['count'],
+      layout: { x: 0, y: 0, w: 6, h: 4 },
+      options: { stageOrder: ['draft', 'submitted', 'approved'] },
+    });
+    expect(w.options?.stageOrder).toEqual(['draft', 'submitted', 'approved']);
+  });
+
+  it('CONTROL — the key is still UNGATED: a non-funnel widget carrying it parses too', () => {
+    // This is finding 1 of the card, recorded as a fact rather than fixed:
+    // gating the key is a published-surface narrowing and is not this PR.
+    const w = DashboardWidgetSchema.parse({
+      id: 'stage_bars', type: 'horizontal-bar', dataset: 'contracts',
+      dimensions: ['status'], values: ['count'],
+      layout: { x: 0, y: 0, w: 6, h: 4 },
+      options: { stageOrder: ['draft', 'submitted', 'approved'] },
+    });
+    expect(w.options?.stageOrder).toEqual(['draft', 'submitted', 'approved']);
   });
 });
