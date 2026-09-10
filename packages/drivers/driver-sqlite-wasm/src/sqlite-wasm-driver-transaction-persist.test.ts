@@ -91,7 +91,9 @@ describe('SqliteWasmDriver on-write persistence + transactions (#1494)', () => {
     const out: string[] = [];
     for (let i = 0; i < 10; i++) {
       const r = await driver.create('acct', { name: `R${i}` });
-      out.push(r.num);
+      // [#15267] `create()` resolves to `Record<string, unknown>` now, so the
+      // record number is read as the string this array collects.
+      out.push(String(r.num));
     }
     expect(out[0]).toBe('A-0001');
     expect(out[9]).toBe('A-0010');

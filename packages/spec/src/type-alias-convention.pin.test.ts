@@ -275,7 +275,7 @@ import type * as M184 from './shared/value-domain.zod.js';
 import type * as M185 from './shared/epoch.zod.js';
 
 // ---------------------------------------------------------------------------
-// 815 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 811 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1333,7 +1333,11 @@ export type Iso692 = Assert<Eq< z.input< typeof M162.NotificationPositionSchema 
 
 // ui/page.zod.ts
 export type Iso693 = Assert<Eq< z.input< typeof M163.PageTypeSchema >, z.infer< typeof M163.PageTypeSchema > >>;
-export type Iso694 = Assert<Eq< z.input< typeof M163.ElementDataSourceSchema >, z.infer< typeof M163.ElementDataSourceSchema > >>;
+// `ElementDataSourceSchema` (Iso694) left the family on #15442 — the ui#6206-B
+// filter orthography reaching the binding-level `dataSource.filter`: it now
+// carries `z.array(ViewFilterRuleSchema)`, whose own input ≠ infer (`operator`
+// is normalized on parse), so `ElementDataSourceParsed` is declared and this
+// pin deleted.
 
 // ui/report.zod.ts
 export type Iso695 = Assert<Eq< z.input< typeof M164.JoinedReportBlockSchema >, z.infer< typeof M164.JoinedReportBlockSchema > >>;
@@ -1587,9 +1591,11 @@ export type Iso849 = Assert<Eq< z.input< typeof M170.RecordHistoryProps >, z.inf
 // `ObjectGridPropsSchema` (Iso839) left the family exactly that way on the
 // ui#6207 convergence: its `data` now carries `ViewDataSchema`, whose own
 // input ≠ infer, so `ObjectGridPropsParsed` is declared and the pin deleted.
-export type Iso840 = Assert<Eq< z.input< typeof M170.ObjectMetricPropsSchema >, z.infer< typeof M170.ObjectMetricPropsSchema > >>;
-export type Iso841 = Assert<Eq< z.input< typeof M170.ObjectKanbanPropsSchema >, z.infer< typeof M170.ObjectKanbanPropsSchema > >>;
-export type Iso842 = Assert<Eq< z.input< typeof M170.ObjectCalendarPropsSchema >, z.infer< typeof M170.ObjectCalendarPropsSchema > >>;
+// `ObjectMetricPropsSchema` (Iso840), `ObjectKanbanPropsSchema` (Iso841) and
+// `ObjectCalendarPropsSchema` (Iso842) left the same way on #15449 — the
+// ui#6206-B filter orthography reaching the four `object-*` `filter` doors:
+// each now carries `z.array(ViewFilterRuleSchema)` (input ≠ infer), so the
+// three `XParsed` aliases are declared and the three pins deleted.
 export type Iso843 = Assert<Eq< z.input< typeof M170.ObjectFormPropsSchema >, z.infer< typeof M170.ObjectFormPropsSchema > >>;
 export type Iso844 = Assert<Eq< z.input< typeof M170.ObjectMasterDetailFormPropsSchema >, z.infer< typeof M170.ObjectMasterDetailFormPropsSchema > >>;
 
@@ -1686,7 +1692,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 815 isomorphic pins', () => {
+  it('still declares all 811 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2172,7 +2178,17 @@ describe('ADR-0122 type-alias convention', () => {
     // `AnalyticsDateRangeSchema` (its union with `z.array(z.string())`) — no
     // default, no transform on either arm, two new pins (`Iso869` / `Iso870`).
     // +2 added.
-    expect(pins).toHaveLength(815);
+    //
+    // 815 -> 811 is the ui#6206-B filter-orthography family convergence
+    // (#15442 + #15449, decision batch #55, option A): `ElementDataSourceSchema`
+    // (the binding-level `dataSource.filter`) and `ObjectMetricPropsSchema` /
+    // `ObjectKanbanPropsSchema` / `ObjectCalendarPropsSchema` (three of the four
+    // `object-*` `filter` doors; `object-grid` had already left on ui#6207) now
+    // carry `z.array(ViewFilterRuleSchema)`, whose own input ≠ infer, so each
+    // left the isomorphic family the way ADR-0122 prescribes: the `XParsed`
+    // alias declared, the pin deleted. -4 converted to `XParsed` pairs; the
+    // Iso numbers stay vacant (ids are claims about pins, not positions).
+    expect(pins).toHaveLength(811);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

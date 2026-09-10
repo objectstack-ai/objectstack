@@ -936,6 +936,39 @@ describe('LifecycleService.sweep — Archiver (P3)', () => {
     expect(report.skipped).toEqual([]);
   });
 
+  it('[#16729] carries the tenancy declaration through to the cold store', async () => {
+    // The Archiver hands the cold driver the object it was given, and every
+    // driver resolves a UNIQUENESS PARTITION from `tenancy`:
+    // `enabled: false` is one row per install, its absence one row per
+    // organization. A `LifecycleObjectLike` that could not SPELL the key would
+    // reach `syncSchema` as the `{ name, fields }` shape — the partial
+    // re-registration a driver's sticky opt-out record exists to survive — so
+    // this pins the key on the published type and on the call in one assertion.
+    const GLOBAL_OBJ: LifecycleObjectLike = {
+      name: 'sys_license',
+      fields: { key: { type: 'string', unique: true }, organization_id: { type: 'string' } },
+      tenancy: { enabled: false },
+      lifecycle: {
+        class: 'audit',
+        retention: { maxAge: '90d' },
+        archive: { after: '90d', to: 'archive', keep: '7y' },
+      } as any,
+    };
+    const cold = coldStore();
+    const hot = hotStore([{ id: 'a', created_at: '2020-01-01T00:00:00.000Z' }]);
+    const { engine } = captureEngine([GLOBAL_OBJ], {
+      driver: hot.driver,
+      datasources: { archive: cold.driver },
+    });
+
+    await service(engine).sweep();
+
+    expect(cold.driver.syncSchema).toHaveBeenCalledWith(
+      'sys_license',
+      expect.objectContaining({ tenancy: { enabled: false } }),
+    );
+  });
+
   it('retains everything and reports archive-pending when the archive datasource is missing', async () => {
     const hot = hotStore([{ id: 'a', created_at: '2020-01-01T00:00:00.000Z' }]);
     const { engine, deletes } = captureEngine([AUDIT_OBJ], { driver: hot.driver });

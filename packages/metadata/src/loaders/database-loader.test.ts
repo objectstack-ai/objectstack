@@ -1529,10 +1529,14 @@ describe('MetadataManager auto-configuration', () => {
  * `driver-sql` hands an INVALID `Date` through unchanged ([ADR-0053 D-F3]),
  * and non-SQL drivers materialise their own.
  *
- * ⚠️ `rowToRecord` reaches `createdAt` / `updatedAt` through an unchecked
- * `row.created_at as string | undefined` cast, so the `string` in
- * `MetadataRecord` is an assertion about a driver row and never a measurement
- * of one — which is why tsc reported nothing.
+ * ⚠️ `rowToRecord` USED to reach `createdAt` / `updatedAt` through an
+ * unchecked `row.created_at as string | undefined` cast, so the `string` in
+ * `MetadataRecord` was an assertion about a driver row and never a measurement
+ * of one — which is why tsc reported nothing. #16422 replaced that cast with
+ * `canonicalIsoInstant`, whose return type IS `string | undefined`, so the
+ * shape reaching `stat()` from that adapter is measured now. The cases below
+ * are unaffected: a valid `Date` and an already-canonical string were never
+ * shapes the two spellings disagreed on.
  *
  * ## Why the double is overridden rather than replaced
  *

@@ -1210,8 +1210,16 @@ const translationDataShape = () => ({
    *   metadataForms.<type>.fields.<field_path>.placeholder
    *
    * `field_path` uses dot-notation for nested composite/repeater fields,
-   * e.g. `"name"`, `"capabilities.trackHistory"`,
-   * `"fields.items.label"` (a repeater "fields" → row → "label" sub-field).
+   * e.g. `"name"`, `"capabilities.trackHistory"`, and a repeater ROW property
+   * is `"<repeater>.<property>"` with no `items` segment —
+   * `"header.actions.label"` names the `label` column of each
+   * `dashboard.header.actions[]` row (`"fields.items.label"` addresses a
+   * declared child that happens to be named `items`).
+   *
+   * A row property is rendered from the JSON Schema (`items.properties[k].title`),
+   * not from a form-field spec, so its `label` here is applied by
+   * `resolveMetadataFormSchemaTitles` as the schema node's `title`; the zod
+   * item schema's own `.meta({ title })` is the English name it overlays.
    *
    * @example
    * ```ts

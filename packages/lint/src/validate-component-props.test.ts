@@ -480,12 +480,16 @@ describe('validateComponentProps — object-* blocks are dispatched (#7751)', ()
           properties: {
             objectName: 'showcase_task',
             columns: ['title', 'project', 'status', 'priority', 'due_date'],
-            filter: [['owner_id', '=', '{current_user_id}']],
+            // The rule-array form the four `object-*` doors declare since
+            // #15449 (ui#6206-B, one filter orthography); the AST tuple this
+            // pin used to carry is refused at `filter.0` now, so the corpus
+            // shape it mirrors (`my-work.page.ts`) moved with it.
+            filter: [{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }],
           },
         },
         {
           type: 'object-metric',
-          properties: { objectName: 'showcase_task', label: 'Open Tasks', icon: 'list-checks', colorVariant: 'blue', description: 'not done', aggregate: { field: 'id', function: 'count' }, filter: { status: { $ne: 'done' } } },
+          properties: { objectName: 'showcase_task', label: 'Open Tasks', icon: 'list-checks', colorVariant: 'blue', description: 'not done', aggregate: { field: 'id', function: 'count' }, filter: [{ field: 'status', operator: 'not_equals', value: 'done' }] },
         },
         {
           type: 'object-metric',

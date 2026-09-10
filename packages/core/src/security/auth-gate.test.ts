@@ -27,6 +27,128 @@ describe('auth-gate (ADR-0069 session gate)', () => {
       expect(isAuthGateAllowlisted('/api/v1/auth/sign-out/?x=1')).toBe(true);
       expect(isAuthGateAllowlisted('/api/v1/data/x/')).toBe(false);
     });
+
+    // ── [#16839] The allow-list is ANCHORED ────────────────────────────────
+    //
+    // It used to match unanchored: `path.includes('/auth/')` at ANY position
+    // and an `endsWith` suffix test at ANY depth. So a segment whose VALUE
+    // spelled an allow-listed token carried the exemption, and object names
+    // and record ids are TENANT-CONTROLLED. Both seams hand this predicate a
+    // data-plane path directly — `HttpDispatcher.enforceAuthGate(context,
+    // cleanPath)` and `RestServer.enforceAuth` (`req.path`) — so a tenant that
+    // declared an object named `auth`, or held a record whose id is `health`,
+    // handed a password-expired / MFA-required session a bypass on that
+    // object's data routes.
+    //
+    // ⛔ These pin the DECISION for the exact paths the card measured, not the
+    // spelling of the predicate, so they survive a rewrite of it.
+    describe('[#16839] a tenant-controlled segment cannot buy the exemption', () => {
+      it('gates the four paths that were falsely exempt', () => {
+        for (const p of [
+          '/data/auth/123',       // an object named `auth`
+          '/meta/auth/objects',   // an object named `auth`
+          '/data/x/health',       // a record whose id is `health`
+          '/data/xyz/me/apps',
+        ]) {
+          expect(isAuthGateAllowlisted(p), p).toBe(false);
+        }
+      });
+
+      it('gates the same shapes under the REST mount, where the seam sees the base', () => {
+        for (const p of [
+          '/api/v1/data/auth/123',
+          '/api/v1/meta/auth/objects',
+          '/api/v1/data/health',                 // `/data/:object` with object = `health`
+          '/api/v1/data/x/health',               // `/data/:object/:id` with id = `health`
+          '/api/v1/data/contacts/me/apps',
+          '/api/v1/data/environments/x/health',  // a scope-shaped OBJECT name, mid-path
+        ]) {
+          expect(isAuthGateAllowlisted(p), p).toBe(false);
+        }
+      });
+
+      // ⭐ The card's own two control rows. Without them the block above would
+      // read the same for a predicate that had simply started refusing
+      // everything.
+      it('CONTROL — the genuinely-exempt path stays exempt and the protected one stays gated', () => {
+        expect(isAuthGateAllowlisted('/auth/me')).toBe(true);
+        expect(isAuthGateAllowlisted('/data/contacts/1')).toBe(false);
+      });
+
+      // The other direction, at full width: every mount shape a real
+      // remediation / bootstrap route arrives in must still be exempt. An
+      // anchoring that is too strict fails HERE rather than in production.
+      it('keeps every genuinely-exempt route shape exempt', () => {
+        for (const p of [
+          // dispatcher shape — the hono adapter strips the app prefix
+          '/auth/sign-out', '/auth/two-factor/enable', '/auth/me/localization',
+          '/auth', '/health', '/ready', '/discovery',
+          // REST + better-auth mounts
+          '/api/auth', '/api/auth/sign-in',
+          '/api/v1/auth', '/api/v1/auth/change-password', '/api/v1/auth/me/permissions',
+          '/api/v1/health', '/api/v1/ready', '/api/v1/discovery',
+          '/api/v1/me/apps', '/api/v1/me/localization',
+          // environment-scoped mount — the dispatcher evaluates the gate
+          // BEFORE its scoped-URL strip, so this spelling reaches the predicate
+          '/api/v1/environments/env_1/auth/sign-out',
+          '/environments/env_1/auth/sign-out',
+          '/api/v1/environments/env_1/discovery',
+          // the legacy `projects` spelling of the same scope (ADR-0006)
+          '/api/v1/projects/env_1/auth/sign-out',
+        ]) {
+          expect(isAuthGateAllowlisted(p), p).toBe(true);
+        }
+      });
+
+      // ⭐ CLAUSE ② DISCHARGE — the repair only ever REMOVES exemptions.
+      //
+      // The dispatch declared "nothing is newly accepted"; this measures it
+      // instead of asserting it. `preAnchoringAllowlisted` is the predicate
+      // this file's subject replaced, transcribed verbatim from `origin/main`
+      // cf6e0a193b, and the corpus is every path of up to four segments drawn
+      // from the vocabulary the two spellings can disagree on. A single
+      // `new && !old` row means a path became NEWLY exempt, which is a
+      // widening and is not this card's to make.
+      it('is a strict SUBSET of the pre-anchoring allow-list — nothing becomes newly exempt', () => {
+        const OLD_PREFIXES = ['/api/v1/auth/', '/api/auth/', '/auth/'];
+        const OLD_SUFFIXES = ['/health', '/ready', '/discovery', '/me/apps', '/me/localization'];
+        const preAnchoringAllowlisted = (rawPath: string | undefined | null): boolean => {
+          if (!rawPath) return true;
+          let path = rawPath.split('?')[0] || '/';
+          let end = path.length;
+          while (end > 1 && path.charCodeAt(end - 1) === 47) end--;
+          path = path.slice(0, end) || '/';
+          if (path.includes('/auth/')) return true;
+          for (const p of OLD_PREFIXES) if (path.startsWith(p) || path === p.replace(/\/$/, '')) return true;
+          for (const s of OLD_SUFFIXES) if (path.endsWith(s)) return true;
+          return false;
+        };
+
+        const SEG = ['api', 'v1', 'auth', 'health', 'ready', 'discovery', 'me', 'apps',
+          'localization', 'data', 'meta', 'ui', 'environments', 'projects', 'env1', 'x'];
+        const corpus: string[] = ['/', ''];
+        for (const a of SEG) {
+          corpus.push(`/${a}`);
+          for (const b of SEG) {
+            corpus.push(`/${a}/${b}`);
+            for (const c of SEG) {
+              corpus.push(`/${a}/${b}/${c}`);
+              for (const d of SEG) corpus.push(`/${a}/${b}/${c}/${d}`);
+            }
+          }
+        }
+
+        const widened = corpus.filter((p) => isAuthGateAllowlisted(p) && !preAnchoringAllowlisted(p));
+        expect(widened).toEqual([]);
+        // Anti-vacuity: the corpus really does exercise both predicates, and
+        // the repair really did remove exemptions — a corpus that narrowed
+        // nothing would satisfy the line above without measuring anything.
+        const narrowed = corpus.filter((p) => !isAuthGateAllowlisted(p) && preAnchoringAllowlisted(p));
+        expect(corpus.length).toBeGreaterThan(10_000);
+        expect(narrowed.length).toBeGreaterThan(0);
+        expect(narrowed).toContain('/data/x/health');
+      });
+    });
   });
 
   describe('evaluateAuthGate', () => {

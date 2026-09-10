@@ -3223,8 +3223,9 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
     'scripts/symbol-anchors.mjs --self-test',
     'a shared grammar-and-extractor LIBRARY, invoked by CI only as its own self-test; its `git ls-files` runs over a '
       + 'corpus its caller passes in. The corpus walk it lends is exercised by its registrations — '
-      + 'check-adr-symbol-anchors.mjs, which declares ROOT_DIR_WATCH_HINTS = [docs/adr/**], and '
-      + 'check-scripts-symbol-anchors.mjs, which declares [scripts/**] — and each is placed by its own.',
+      + 'check-adr-symbol-anchors.mjs, which declares ROOT_DIR_WATCH_HINTS = [docs/adr/**], '
+      + 'check-scripts-symbol-anchors.mjs, which declares [scripts/**], and '
+      + 'check-spec-docblock-symbol-anchors.mjs, which declares [packages/spec/src/**] — and each is placed by its own.',
   ],
 ];
 
@@ -10510,15 +10511,24 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  *   - clause ①, encoded below: a card editing the PM lane's PROTOCOL-SEMANTIC
  *     surfaces is `CONTRACT_REVIEW_TIER` — the pm-dispatch SKILL.md main file, every
  *     file carrying an enforced copy of the decision frame (the COPIES table
- *     of check:skill-frame-sync), and the dev-agent definition. Narrowed from
- *     "the whole skill tree, references included" by the maintainer's
- *     2026-08-20 ruling (「接受你的建议」— fable 当审计师用,不当施工队用):
- *     references-only surfaces carry NO path mandate any more (opus execution,
- *     compensated by the skill-face review at CONTRACT_REVIEW_TIER). Still a
- *     file-surface predicate, and exactly what this script takes as argv;
+ *     of check:skill-frame-sync), the dev-agent definition, and — since the
+ *     maintainer's 2026-09-10 ruling (「必须 fable的还包括对外发布的skills」) —
+ *     the whole published catalog `skills/**`, which ships verbatim to third
+ *     parties (`npx skills add objectstack-ai/objectstack/skills`,
+ *     `npm create objectstack`). Narrowed from "the whole skill tree,
+ *     references included" by the maintainer's 2026-08-20 ruling
+ *     (「接受你的建议」— fable 当审计师用,不当施工队用): references-only
+ *     surfaces carry NO path mandate any more (default-tier execution,
+ *     compensated by the skills seat's review at CONTRACT_REVIEW_TIER). Still
+ *     a file-surface predicate, and exactly what this script takes as argv;
  *   - clause ②, NOT encoded and deliberately not: a card that changes contract
- *     accept/reject behaviour or widens the public surface is also
- *     `CONTRACT_REVIEW_TIER`. That is judged from the card's CONTENT — what the change
+ *     accept/reject behaviour or widens the public surface is built at the
+ *     default tier and REVIEWED at `CONTRACT_REVIEW_TIER` — in the spec seat
+ *     only, since the 2026-09-10 ruling; every other lane's clause-② review is
+ *     that lane's own default-tier review plus the gates, and neither the
+ *     triage seat nor the maintainer-summoned director spawns a
+ *     contract-review-tier subagent for anything. That is judged from the
+ *     card's CONTENT — what the change
  *     does to the contract — and a path cannot answer it. An ordinary-looking
  *     surface (one package's source file) is the NORMAL shape of a clause-②
  *     card. The closest a path can honestly get is SUSPICION:
@@ -10537,7 +10547,12 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  * exemption (fable unavailable ⇒ opus, never lower) and the proactive
  * low-headroom downgrade — are claim-time judgments, not properties of the
  * file surface. This tool states the mandate; the seat records any exit and
- * its reason in the claim comment.
+ * its reason in the claim comment. ONE exit is path-shaped, and so it IS
+ * encoded: the one-line-class downgrade does not exist for a surface under
+ * `skills/**` — the 2026-09-10 ruling's 必须, because a closed enumeration
+ * beats a per-line "is this mechanical" call on a catalog third parties
+ * install — so that entry carries `oneLineExit: false` and `tierLines`
+ * refuses to offer the exit for any card whose surface hits it.
  *
  * ## Why the globs are matched with `hintCovers`, asymmetry included
  *
@@ -10571,7 +10586,10 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  * suspect glob below — are watch hints of this file's own source. Re-measured
  * on c48d46d70a over 6840 tracked files: `extractWatchHints` yields 9 hints
  * here, and the four globs of these two tables cover 1026 files between them
- * (1023 of that is the suspect glob's contract surface).
+ * (1023 of that is the suspect glob's contract surface). The `skills/**`
+ * entry (2026-09-10) adds one hint and the 47 tracked files under `skills/`
+ * (`git ls-files skills` on ebf9a489), one of which — the published PM
+ * skill — the table already covered.
  *
  * They stay inert against a gate that RESOLVES to this file, because no check
  * family does — `check:pm-dispatch-gates` resolves to `check-dispatch-gates.mjs`
@@ -10591,7 +10609,8 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  *
  * The authority for the policy is the maintainer ruling quoted in the PM
  * dispatch skill (2026-08-10 three-tier ruling, clause ① of its 强制条款, as
- * narrowed to protocol semantics by the 2026-08-20 ruling quoted there).
+ * narrowed to protocol semantics by the 2026-08-20 ruling quoted there, and
+ * widened to the published `skills/**` catalog by the 2026-09-10 ruling).
  * This table is a machine-readable copy of ONE predicate from it, not a second
  * statement of the policy: when they disagree, the skill wins and this table is
  * the thing to fix. The frame-copy half of the predicate is DEFINED by another
@@ -10614,6 +10633,15 @@ export const MANDATORY_TIER_GLOBS = [
     glob: 'skills/objectstack-pm-dispatch/SKILL.md',
     tier: CONTRACT_REVIEW_TIER,
     why: 'clause ① (2026-08-20 narrowing): the published PM skill carries one enforced copy of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
+  },
+  {
+    glob: 'skills/**',
+    tier: CONTRACT_REVIEW_TIER,
+    why: 'clause ① (2026-09-10 ruling, verbatim 「必须 fable的还包括对外发布的skills」): the published catalog ships verbatim to third parties by `npx skills add objectstack-ai/objectstack/skills` and `npm create objectstack`, so a wrong edit is installed elsewhere before anyone here reads it — and no one-line exemption applies under this root',
+    // The one-line-class mechanical-edit exit is a card-CONTENT judgment
+    // everywhere else; here the ruling closes it by PATH (a closed enumeration
+    // beats a per-line call on an installed catalog), so it is data, not prose.
+    oneLineExit: false,
   },
 ];
 
@@ -10660,7 +10688,7 @@ export function deriveTier(paths, globs = MANDATORY_TIER_GLOBS, suspectGlobs = S
   const suspects = [];
   for (const p of paths) {
     for (const g of globs) {
-      if (hintCovers(g.glob, p)) hits.push({ path: p, glob: g.glob, tier: g.tier, why: g.why });
+      if (hintCovers(g.glob, p)) hits.push({ path: p, glob: g.glob, tier: g.tier, why: g.why, oneLineExit: g.oneLineExit !== false });
     }
     for (const g of suspectGlobs) {
       if (hintCovers(g.glob, p)) suspects.push({ path: p, glob: g.glob, why: g.why });
@@ -10692,7 +10720,8 @@ export function tierLines(result) {
   }
   const clause2 =
     '  Clause ② is NOT reachable from paths: a card that changes contract accept/reject behaviour or widens the public' +
-    ' surface is fable-mandatory too, judged from the card CONTENT. This line is a FLOOR, never a clearance.';
+    ' surface owes a contract-review-tier REVIEW too (spec seat; default-tier build), judged from the card CONTENT.' +
+    ' This line is a FLOOR, never a clearance.';
   // The suspicion tail prints only on a hit — unlike the clause-② note above,
   // which prints always: "no suspicion" and "no suspect table" must not share a
   // spelling, and the note is what keeps silence from reading as a clearance.
@@ -10700,7 +10729,8 @@ export function tierLines(result) {
     ? []
     : [
         `  Clause ② SUSPECT surface — a hint, not a verdict: judge the tier from the card CONTENT as best you can` +
-          ` (a card changing contract accept/reject behaviour or widening the public surface is ${CONTRACT_REVIEW_TIER});` +
+          ` (a card changing contract accept/reject behaviour or widening the public surface is reviewed at ${CONTRACT_REVIEW_TIER}` +
+          ' in the spec seat, built at the default tier);' +
           ` whichever tier is dispatched, the PR's actual diff passes the clause-② enqueue gate before the card may enqueue.`,
         ...suspects.map((s) => `    - ${s.path} ⇢ '${s.glob}' — ${s.why}`),
       ];
@@ -10712,13 +10742,23 @@ export function tierLines(result) {
       ...suspicion,
     ];
   }
+  // The one-line-class exit is a card-CONTENT judgment for every mandated
+  // surface but one: a glob declared with `oneLineExit: false` (the published
+  // catalog, 2026-09-10 ruling) closes it by PATH, and one such hit closes it
+  // for the WHOLE card — the exit is taken per card, not per file.
+  const oneLineBarred = [...new Set(hits.filter((h) => h.oneLineExit === false).map((h) => h.glob))];
+  const oneLineExit =
+    oneLineBarred.length === 0
+      ? 'a one-line-class mechanical governed edit drops to opus execution (sonnet floor for pure one-liners at PM' +
+        ` discretion, compensated by the skill-face review at ${CONTRACT_REVIEW_TIER}) — judged from the card CONTENT,` +
+        ' never from paths'
+      : `the one-line-class mechanical-edit downgrade is ⛔ NOT available for this surface — ${oneLineBarred.map((g) => `'${g}'`).join(', ')}` +
+        ' carries no one-line exemption (the published catalog, 2026-09-10 ruling), and one such path closes the exit for the whole card';
   return [
     `Model tier — MANDATORY: ${tier} (derived from the file surface, not recalled).`,
     ...hits.map((h) => `  - ${h.path} ⇢ '${h.glob}' — ${h.why}`),
-    '  Exits, each recorded with its reason in the claim comment\'s `Container & model` line: a one-line-class' +
-      ' mechanical governed edit drops to opus execution (sonnet floor for pure one-liners at PM discretion,' +
-      ` compensated by the skill-face review at ${CONTRACT_REVIEW_TIER}) — judged from the card CONTENT, never from` +
-      ' paths; the measured quota exemption (fable unavailable ⇒ opus, never lower); the proactive low-headroom downgrade.',
+    `  Exits, each recorded with its reason in the claim comment's \`Container & model\` line: ${oneLineExit};` +
+      ' the measured quota exemption (fable unavailable ⇒ opus, never lower); the proactive low-headroom downgrade.',
     clause2,
     ...suspicion,
   ];
@@ -20972,6 +21012,24 @@ function selfTest() {
   t('a surface declared as an ANCESTOR of a mandatory file IS mandated — the safe direction here', fableOf(['.claude/skills']).mandatory === true);
   t('the pm-dispatch DIRECTORY (ancestor of its SKILL.md) is mandated — a card declaring the directory may touch the main file', fableOf(['.claude/skills/pm-dispatch']).mandatory === true);
   t('another skill under the same parent is not mandated', fableOf(['.claude/skills/verify/SKILL.md']).mandatory === false);
+  // The published catalog (2026-09-10 ruling): the whole `skills/` root is
+  // mandated as data, it does not leak into the internal `.claude/skills` tree,
+  // and it is the one surface whose one-line-class exit is closed by path.
+  const catalogHit = fableOf(['skills/objectstack-data/SKILL.md']);
+  t('a published catalog SKILL.md is mandated, by the skills/** entry', catalogHit.tier === CONTRACT_REVIEW_TIER && catalogHit.hits.some((h) => h.glob === 'skills/**'));
+  t('a second published catalog file is mandated the same way', fableOf(['skills/objectstack-ai/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
+  t('a generated references file under a published skill is mandated too — the mandate is the ROOT, not the SKILL.md files', fableOf(['skills/objectstack-data/references/_index.md']).mandatory === true);
+  const pmCopyHit = fableOf(['skills/objectstack-pm-dispatch/SKILL.md']);
+  t('the published PM skill is covered by its own entry AND skills/**, at ONE tier — no ambiguity refusal', pmCopyHit.hits.length === 2 && pmCopyHit.tier === CONTRACT_REVIEW_TIER);
+  t('skills/** does NOT reach the internal .claude/skills tree — a pm-dispatch references file still carries no mandate', fableOf(['.claude/skills/pm-dispatch/references/core-rules.md']).mandatory === false);
+  t('the skills/** entry is declared with its one-line exit switched off, as data', MANDATORY_TIER_GLOBS.some((g) => g.glob === 'skills/**' && g.oneLineExit === false && g.tier === CONTRACT_REVIEW_TIER));
+  t('every other mandatory entry keeps the one-line exit open (the flag is an opt-out, absent by default)', MANDATORY_TIER_GLOBS.filter((g) => g.glob !== 'skills/**').every((g) => g.oneLineExit === undefined) && catalogHit.hits.every((h) => h.glob !== 'skills/**' || h.oneLineExit === false));
+  const catalogLines = tierLines(catalogHit).join('\n');
+  t('the published-catalog rendering refuses the one-line-class exit, in those words', catalogLines.includes('one-line-class') && catalogLines.includes('NOT available') && catalogLines.includes('no one-line exemption'));
+  t('and does not offer the opus-execution drop the other mandated surfaces get', !catalogLines.includes('drops to opus execution'));
+  t('while still naming the two exits that survive, so a downgrade needs a stated reason', catalogLines.includes('quota exemption') && catalogLines.includes('opus, never lower') && catalogLines.includes('proactive low-headroom'));
+  const mixedCatalog = tierLines(fableOf(['.claude/skills/pm-dispatch/SKILL.md', 'skills/objectstack-ai/SKILL.md'])).join('\n');
+  t('a mixed surface with ONE published-catalog path loses the one-line exit for the whole card', !mixedCatalog.includes('drops to opus execution') && mixedCatalog.includes('closes the exit for the whole card'));
   // The rendering is where the invariant is actually delivered: the claim
   // comment quotes THESE lines.
   const mandLines = tierLines(mixed).join('\n');
@@ -21787,6 +21845,17 @@ function selfTest() {
   t('and pointing the flag at a checkout refuses instead of retargeting', wrongShapeRun.status === 2 && (wrongShapeRun.stdout ?? '').trim() === '');
   const valuelessRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG]);
   t('a valueless assertion refuses rather than deriving as though it were absent', valuelessRun.status === 2);
+  // The published catalog on the real CLI (2026-09-10 ruling): the mandate
+  // prints for a catalog file and stays absent for an internal references
+  // file — the two acceptance paths, measured end to end rather than on the
+  // pure function alone.
+  const catalogCli = runCli(['--tier', 'skills/objectstack-data/SKILL.md']);
+  t('⭐ --tier on a published catalog SKILL.md prints the MANDATE, naming the skills/** entry', catalogCli.status === 0 && (catalogCli.stdout ?? '').includes('MANDATORY') && (catalogCli.stdout ?? '').includes("'skills/**'"));
+  t('and refuses the one-line-class exit on stdout, where the claim comment reads it', (catalogCli.stdout ?? '').includes('NOT available') && !(catalogCli.stdout ?? '').includes('drops to opus execution'));
+  const catalogAiCli = runCli(['--tier', 'skills/objectstack-ai/SKILL.md']);
+  t('⭐ a second catalog SKILL.md prints the same mandate', catalogAiCli.status === 0 && (catalogAiCli.stdout ?? '').includes('MANDATORY') && (catalogAiCli.stdout ?? '').includes("'skills/**'"));
+  const internalRefsCli = runCli(['--tier', '.claude/skills/pm-dispatch/references/core-rules.md']);
+  t('⭐ --tier on an internal pm-dispatch references file still prints NO mandate', internalRefsCli.status === 0 && (internalRefsCli.stdout ?? '').includes('no path-derived mandate') && !(internalRefsCli.stdout ?? '').includes('MANDATORY'));
 
   // ── The entry guard (#9757) ───────────────────────────────────────────────
   //

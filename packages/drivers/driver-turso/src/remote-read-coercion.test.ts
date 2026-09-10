@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, assert } from 'vitest';
 import { TursoDriver } from './turso-driver.js';
 
 /**
@@ -88,7 +88,11 @@ describe('TursoDriver remote read coercion', () => {
   it('findOne() applies the same coercion', async () => {
     const driver = await makeRemoteDriver();
     const row = await driver.findOne('widgets', { where: { id: '1' } });
-    expect(row).not.toBeNull();
+    // [#15267] `findOne()` declares its not-found arm now, and
+    // `expect(...).not.toBeNull()` is not a narrowing assertion — this is the
+    // positive control, so it asserts the row arm before reading it (a
+    // narrowing assertion, not a `!` and not a cast).
+    assert(row !== null, 'findOne answered the not-found arm for a seeded id');
     expect(row.active).toBe(true);
     expect(row.meta).toEqual({ k: 1 });
   });

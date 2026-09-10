@@ -12,6 +12,13 @@
  *   node scripts/pm/check-widening-tells.mjs --declaration no --files /tmp/files.json
  *   git diff origin/main...HEAD | node scripts/pm/check-widening-tells.mjs --declaration no --diff -
  *
+ * To judge a diff from the sibling repo, name the board in the environment —
+ * ⛔ there is no `--repo` flag, deliberately (see "What the verdict SAYS it
+ * looked at" below):
+ *
+ *   PM_SWEEP_REPO=objectstack-ai/objectui \
+ *     node scripts/pm/check-widening-tells.mjs --declaration no --diff /tmp/objectui-pr.diff
+ *
  * ## Why this file exists at all
  *
  * Clause ② used to be judged as a two-sided question ("does this card touch
@@ -157,6 +164,59 @@
  * new claim-line syntax exist because of this file — #16448 forbids both, and
  * the reader it uses is the sibling's existing `Clause-②:` reader.
  *
+ * ## The third accidental variable #16943 removed — a REPLACED line
+ *
+ * Both refinements above read a hunk's bytes and still judged one added line at
+ * a time, so neither could see the commonest thing a diff does: put a line back
+ * where an equivalent one stood. Two live pairs reproduced that independently,
+ * on different tells and different file kinds — PR #16941, a form's
+ * `description:` prose rewritten (T2, on a file containing no `z.enum`, no
+ * union and no `as const` at all, members 4 -> 4 and 7 -> 7), and PR #16968, a
+ * Zod key whose `.describe()` text grew (T1, keys 32 -> 32, the declared type
+ * unchanged). Neither diff moved an accept set, and neither row could be
+ * CLEARED: `c5WideningTell(pair, repo)` reads only the pair and the repo, so
+ * "explain in the claim" moves no exit code and the single input that flips the
+ * number is a `Clause-②: yes` that is false. ⚠️ A gate whose green is reachable
+ * only by lying is worse than one that is merely wrong — and #16822's own note
+ * above already says where a demonstrated false positive is repaired: HERE, in
+ * the matcher.
+ *
+ * ⛔ The fix is NOT a wider tolerance for string literals. That was the card's
+ * own prohibition and it is the right one: a tell that stopped firing on real
+ * closed-set additions would be the more expensive failure, and tightening T2's
+ * pattern could not have stopped T1 anyway — two tells, one root. The reading
+ * added instead is a NET DELTA, per change block, per tell kind: every removed
+ * line that carried a member or a key of kind K buys ONE added line of kind K
+ * the right not to be reported, spent in patch order, so a block that adds more
+ * than it removed still reports the SURPLUS with its own file:line. A genuine
+ * addition has no removal to pay for it; that is the whole sensitivity
+ * guarantee, and it is a property of the arithmetic rather than of a pattern.
+ *
+ * The unit is the change BLOCK — a maximal run of consecutive non-context lines
+ * inside one hunk, which is git's own spelling of "these lines replaced those".
+ * ⛔ Never the hunk: a hunk carries three context lines each side and routinely
+ * holds an unrelated removal at one end and a real addition at the other. The
+ * `FILE_SCHEMA_KEY` fixture in `--self-test` is exactly that shape and must
+ * keep firing — pairing across it would buy silence with the wrong coin.
+ *
+ * Two things deliberately do not pay: a closed-set OPENER (it declares no
+ * member — #16822 established that, and `rewritesExistingOpener` is the reading
+ * that judges an opener), and a removed line #16822 already declines on the OLD
+ * side, since deleted prose is not a member either.
+ *
+ * ⚠️ The quiet direction this buys, stated rather than left to be discovered: a
+ * one-for-one member RENAME inside an existing set now declines. Nothing in a
+ * hunk distinguishes a renamed member from a reworded string, and the ruling
+ * this implements is replacement-vs-net-addition, not spelling. Measured over
+ * the 82 commits touching these surfaces in this tree's history: of 715 change
+ * blocks that add a member or key line, 674 pay nothing and are untouched, 7
+ * are partly paid and still report their surplus, and 34 now decline — 22 of
+ * those keep the identifier of the key they rewrote and all 12 of the rest are
+ * prose / `.describe()` rewrites. Not one is a member rename. What still
+ * catches a rename that slips past: `check:api-surface` on any exported name it
+ * moves, `check:authorable-surface` on any authorable key, and the ADR-0087
+ * registries — instruments a rename must move and a rewording cannot.
+ *
  * ## Where the surfaces come from — imported, never hand-copied
  *
  * The contract SOURCE surface is `SUSPECT_TIER_GLOBS`, imported from
@@ -201,6 +261,68 @@
  * guard only runs over rows applicable to the local tree, and porting the gate
  * is a data edit rather than a rewrite. ⛔ The mirror row is not a claim that
  * anything runs this gate in objectui today; nothing does.
+ *
+ * ⚠️ That disclaimer was read, until #17217, as covering a second thing it does
+ * not cover: a seat in THIS repo running THIS CLI against an objectui diff,
+ * which is the only way an objectui seat can run it at all. That run judged the
+ * diff as objectstack's and said so nowhere. The row is still inert for a run
+ * whose board is this repo — nothing about the scoping moved — but the board is
+ * now a resolved input the verdict states, so an objectui diff is judgeable and
+ * a run that could not judge one says which repo could.
+ *
+ * ## What the verdict SAYS it looked at — #17112 and #17217, one output line
+ *
+ * The two cards above are one defect wearing two faces, and both faces live on
+ * the sentence this file prints when it finds nothing. It used to read:
+ *
+ *     ✓ check-widening-tells: N changed file(s) READ, no widening tell on any
+ *       declared surface. ⚠️ A tell is not a proof …
+ *
+ * Every clause of that was TRUE and the sentence as a whole was not, because a
+ * COUNT beside a QUALIFIED negative reads as coverage in a way the qualifier
+ * does not undo. The declared surfaces are seven rows, six of them inside
+ * `packages/spec/**`; a published symbol in `packages/services/**`,
+ * `packages/plugins/**`, `packages/drivers/**` or the rest of
+ * `packages/runtime/**` is invisible here BY CONSTRUCTION, and that silence is
+ * byte-identical to a clean look. #17112's filing seat had already been misled
+ * by it once, in a live citation on another card, which is why the card exists.
+ *
+ * ⛔ Not repaired by widening any surface, and ⛔ not by deleting the count. The
+ * scoping is #16448's and the false negatives it buys are #16349's accepted
+ * cost — both stand, untouched, and the ⚠️ caveat is still printed. What
+ * changes is that the count is SPLIT: `judged` is the only number exit 0 is
+ * evidence about, and every other changed file is NAMED under the reason it
+ * could not be examined. This file's own exit register already said as much in
+ * words — "an unread diff is NOT a clean diff", with a dedicated exit for it —
+ * so this is the register's own principle applied to the one population that
+ * escaped it.
+ *
+ * #17217 is the second face and it is why the two could not land apart. The
+ * objectui mirror row is repo-keyed, every judging function threads `repo`, and
+ * `main()` passed none — so through the documented CLI the row was permanently
+ * inert and an objectui diff could only ever come back clean, INCLUDING one
+ * that really adds a key to `packages/types/src/zod/**`. Fixing only the count
+ * would have printed such a file under "no declared surface covers it", which
+ * is FALSE: a row covers it and the run merely could not say so. The census
+ * therefore keeps "no row covers this" and "a row covers this, for a repo this
+ * run is not" apart, and names the repo that could judge it.
+ *
+ * The board itself is resolved by `resolveSweepRepo`, IMPORTED from
+ * `check-half-states.mjs` — `PM_SWEEP_REPO`, else `GITHUB_REPOSITORY`, else
+ * this repo. ⛔ Not a `--repo` flag: `check-clause2-carriers` deliberately
+ * refuses a positional board and points at the same variable, and two entry
+ * points in one directory disagreeing about how a run is told its repo would be
+ * its own trap. `--repo` is REFUSED with the variable named, so a seat that
+ * reaches for it is answered instead of ignored. The default is unchanged
+ * (`THIS_REPO`), so no existing caller changes meaning, and every exported
+ * function still defaults the same way — `check-clause2-carriers` passes its
+ * own `repo` and is untouched.
+ *
+ * ⛔ No verdict and no exit code moves for either card. Whether a diff nothing
+ * examinable covers should REFUSE rather than pass is a new refusal class on
+ * the enqueue path — #16349's chain to rule on, and both filings put it outside
+ * themselves. This makes the instrument's self-description honest; it does not
+ * make the instrument stricter.
  *
  * ## Exit codes — one register, shared with the sibling
  *
@@ -276,11 +398,14 @@
 // well over 540s to reach (#16448 patch round 2).
 
 import process from 'node:process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import { SUSPECT_TIER_GLOBS, hintCovers } from './dispatch-gates.mjs';
 import { REGEN_ARTIFACTS } from '../regen-artifacts.mjs';
+import { DEFAULT_SWEEP_REPO, SWEEP_REPO_SHAPE, resolveSweepRepo } from './check-half-states.mjs';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -302,6 +427,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'T1 — a new key on a Zod object schema': 14,
   'T2 — a new member of a closed set': 13,
   '#16822 — the two accidental variables, and the evidence each one needs': 15,
+  '#16943 — the net member/key delta: a replaced line is not a net addition': 23,
   'T3 — a new row in a published entry point': 8,
   'T4 — a new registration in a registry': 10,
   '#16448 acceptance: the four positive controls, each with its file:line': 8,
@@ -309,11 +435,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the refusal sentence, and the two prohibitions it must keep': 8,
   'the exit register is distinct in every direction it must be': 6,
   'the declared registry rows still exist in this tree': 4,
+  '#17112 — the count is split: examined is not examinable': 23,
+  '#17217 — the CLI can be told which board it judges': 22,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -341,8 +469,17 @@ export const REFUSAL_SENTENCE =
 // The surfaces
 // ---------------------------------------------------------------------------
 
-/** This repo, as a surface row names it. Rows with no `repo` mean this one. */
-export const THIS_REPO = 'objectstack-ai/objectstack';
+/**
+ * This repo, as a surface row names it. Rows with no `repo` mean this one.
+ *
+ * Imported rather than retyped, for the reason the surfaces above are: the
+ * board a run reads is resolved by `resolveSweepRepo`, whose own fallback is
+ * this constant, and a second spelling here would let the default surface row
+ * and the default board disagree about the same repo on the day one moved.
+ * The value is byte-identical to the literal it replaced; `--self-test` pins
+ * the equality so the import cannot quietly become a redirection.
+ */
+export const THIS_REPO = DEFAULT_SWEEP_REPO;
 
 /**
  * The contract SOURCE surface — T1 and T2 live here.
@@ -429,6 +566,102 @@ export function surfaceCovers(surfaces, filename, repo = THIS_REPO) {
 /** A source file the tells read — ⛔ never a test, which declares no contract. */
 export function isContractSourceFile(filename) {
   return /\.(?:ts|mts|cts)$/.test(filename) && !/\.(?:test|spec|pin\.test)\.[cm]?ts$/.test(filename);
+}
+
+/**
+ * The three surface flags one file carries, for a run against `repo`.
+ *
+ * ⭐ ONE reader, because three callers need the same answer and a census that
+ * disagrees with the matcher about which files were judged is the very defect
+ * #17112 filed, one layer up. `tellsInFile` decides what to read with these
+ * flags, `unreadFiles` decides what owes a patch with them, and
+ * `fileCoverage` REPORTS them; before #17112 the expression was written out
+ * three times and could have drifted between any two of them.
+ */
+export function surfaceFlags(filename, repo = THIS_REPO) {
+  return {
+    onContractSource: surfaceCovers(CONTRACT_SOURCE_SURFACES, filename, repo) && isContractSourceFile(filename),
+    onPublished: surfaceCovers(PUBLISHED_SURFACES, filename, repo),
+    onRegistry: surfaceCovers(REGISTRATION_SURFACES, filename, repo),
+  };
+}
+
+/**
+ * Every OTHER repo whose declared rows cover `filename` — the reading that
+ * tells "no surface covers this" apart from "a surface covers this, and this
+ * run is not the repo it names" (#17217).
+ *
+ * ⛔ This is not a widening of any tell: it moves no verdict and no exit code.
+ * It exists so a run that structurally could not look at a path says which
+ * repo could, instead of filing it under a sentence that is false about it.
+ */
+export function surfaceReposElsewhere(filename, repo = THIS_REPO) {
+  const out = new Set();
+  for (const s of ALL_SURFACES) {
+    if (s.repo == null || s.repo === repo) continue;
+    if (hintCovers(s.glob, filename)) out.add(s.repo);
+  }
+  return [...out].sort();
+}
+
+/**
+ * Why one changed file was, or was not, examined for tells.
+ *
+ * The five states are exhaustive over a changed-file row and each names a
+ * DIFFERENT fact, because the whole finding is that one sentence used to cover
+ * all of them:
+ *
+ *   `judged`             read for tells — the only state exit 0 is evidence about.
+ *   `deleted`            the file was removed; a deletion adds nothing, so this
+ *                        is a measurement, not a gap.
+ *   `not-contract-source` a declared glob covers it but the file kind declares
+ *                        no contract (a test, a `.md`) — `isContractSourceFile`.
+ *   `other-repo`         a declared row covers it, for a repo this run is not.
+ *   `unmatched`          no declared row covers it at all — #17112's population.
+ *
+ * ⚠️ `not-contract-source` and `unmatched` are kept apart on purpose. Reporting
+ * a `packages/spec/src/x.test.ts` as "no declared surface covers it" would be
+ * false in exactly the way #17217 says the parent's remedy would be false about
+ * the objectui mirror — a surface DOES cover it; the run declined it for its
+ * kind.
+ */
+export function fileCoverage(file, { repo = THIS_REPO } = {}) {
+  const filename = String(file?.filename ?? '');
+  if (filename === '') return { filename, state: 'unmatched', repos: [] };
+  if (file?.status === 'removed') return { filename, state: 'deleted', repos: [] };
+  const flags = surfaceFlags(filename, repo);
+  if (flags.onContractSource || flags.onPublished || flags.onRegistry) {
+    return { filename, state: 'judged', repos: [] };
+  }
+  if (surfaceCovers(CONTRACT_SOURCE_SURFACES, filename, repo)) {
+    return { filename, state: 'not-contract-source', repos: [] };
+  }
+  const elsewhere = surfaceReposElsewhere(filename, repo);
+  if (elsewhere.length > 0) return { filename, state: 'other-repo', repos: elsewhere };
+  return { filename, state: 'unmatched', repos: [] };
+}
+
+/** Every changed file's coverage, bucketed by state, in file order. */
+export function coverageCensus(files, { repo = THIS_REPO } = {}) {
+  const census = {
+    total: 0,
+    judged: [],
+    deleted: [],
+    'not-contract-source': [],
+    'other-repo': [],
+    unmatched: [],
+  };
+  for (const file of files ?? []) {
+    const row = fileCoverage(file, { repo });
+    census.total += 1;
+    census[row.state].push(row);
+  }
+  return census;
+}
+
+/** The files this run could not examine — every state but `judged`/`deleted`. */
+export function notMeasured(census) {
+  return [...census['not-contract-source'], ...census['other-repo'], ...census.unmatched];
 }
 
 // ---------------------------------------------------------------------------
@@ -713,6 +946,73 @@ const REGISTRATION_ROW =
   /^[ \t]*(?:'[^']*'|"[^"]*")[ \t]*,[ \t]*(?:\/\/.*)?$|^[ \t]*(?:'[^']+'|"[^"]+"|[A-Za-z_$][\w$]*)[ \t]*:[ \t]*\S/;
 
 /**
+ * The MEMBER or KEY shape one line carries on these surfaces, or `null`.
+ *
+ * The same shapes `tellsInFile` reads, in the same precedence order, extracted
+ * so ONE classifier answers for an added line and for a removed one. #16943's
+ * net-delta reading is a comparison between the two sides, and a comparison
+ * whose sides are classified by two different code paths is a comparison of two
+ * different questions — the drift this family punishes one register over.
+ *
+ * ⛔ A closed-set OPENER is deliberately NOT a member here. An opener-only line
+ * declares no member (#16822 established that and dropped the tell it used to
+ * carry), so counting it would let a `z.union([` -> `z.enum([` rewrite pay for a
+ * member the same block really did add.
+ */
+export function memberTellKind(text, { onContractSource = false, onPublished = false, onRegistry = false } = {}) {
+  const s = String(text ?? '');
+  if (COMMENT_LINE.test(s)) return null;
+  if (onRegistry && REGISTRATION_ROW.test(s)) return 'T4';
+  if (onContractSource && SCHEMA_PROPERTY.test(s)) return 'T1';
+  if (onContractSource && (BARE_STRING_ELEMENT.test(s) || BARE_SCHEMA_ARM.test(s))) return 'T2';
+  if (onPublished && JSON_STRING_ROW.test(s)) return 'T3';
+  return null;
+}
+
+/**
+ * The CHANGE BLOCKS of one `patchLines` reading — maximal runs of consecutive
+ * non-context lines inside one hunk.
+ *
+ * ⭐ This is git's own spelling of "these lines replaced those": a unified diff
+ * emits a contiguous edit as one removed run followed by its added run, and a
+ * context line between two edits means the file keeps a line between them, so
+ * they are two edits and not one replacement.
+ *
+ * ⛔ The block, never the HUNK, is the unit — and the difference is not
+ * cosmetic. A hunk carries three lines of context on each side, so it routinely
+ * holds an unrelated removal at one end and a real addition at the other; the
+ * `FILE_SCHEMA_KEY` fixture in `--self-test` is exactly that shape (a key ADDED
+ * at :44 and a DIFFERENT key removed two lines later, with context between) and
+ * it must keep firing. Pairing across a hunk would pay for the new key with a
+ * removal that has nothing to do with it — a silence bought with the wrong
+ * coin, which is the failure direction this file refuses.
+ *
+ * Blocks never span hunks: `patchLines` carries a hunk index precisely so no
+ * adjacency reading can cross a boundary where the real file's lines are
+ * missing.
+ *
+ * @param {{ kind: string, hunk: number }[]} lines — a `patchLines` reading
+ * @returns {number[][]} each block's indices INTO `lines`, in patch order
+ */
+export function changeBlocks(lines) {
+  const blocks = [];
+  let current = null;
+  for (let i = 0; i < (lines?.length ?? 0); i += 1) {
+    const r = lines[i];
+    if (r.kind === 'context') {
+      current = null;
+      continue;
+    }
+    if (current === null || current.hunk !== r.hunk) {
+      current = { hunk: r.hunk, indices: [] };
+      blocks.push(current);
+    }
+    current.indices.push(i);
+  }
+  return blocks.map((b) => b.indices);
+}
+
+/**
  * Every tell one file's added lines carry.
  *
  * @param {{ filename?: string, status?: string, patch?: string|null }} file
@@ -725,9 +1025,28 @@ export function tellsInFile(file, { repo = THIS_REPO } = {}) {
   if (file?.status === 'removed') return []; // a deleted file adds nothing.
   const rows = [];
   const lines = patchLines(file?.patch);
-  // The NEW file's lines, in order — added and context, which is what
-  // "the line before / after this one" means to the author who opens the file.
-  const newFile = lines.filter((r) => r.kind !== 'removed');
+  // The two SIDES of the patch, each in file order. The new file's lines are
+  // added + context — "the line before / after this one" as the author who
+  // opens the file means it — and the old file's are removed + context, the
+  // same reading taken against the file the diff replaced. Both sides are built
+  // because #16822's fragment rule must judge a removed line by its OWN
+  // neighbours: a prose fragment on the old side is not a member either, and
+  // counting it would let deleted prose pay for an added member.
+  const newFile = [];
+  const oldFile = [];
+  const newAt = new Map();
+  const oldAt = new Map();
+  for (let i = 0; i < lines.length; i += 1) {
+    const r = lines[i];
+    if (r.kind !== 'removed') {
+      if (r.kind === 'added') newAt.set(i, newFile.length);
+      newFile.push(r);
+    }
+    if (r.kind !== 'added') {
+      if (r.kind === 'removed') oldAt.set(i, oldFile.length);
+      oldFile.push(r);
+    }
+  }
   // What each hunk REPLACED, keyed by hunk so no reading crosses a boundary.
   const removedByHunk = new Map();
   for (const r of lines) {
@@ -735,16 +1054,38 @@ export function tellsInFile(file, { repo = THIS_REPO } = {}) {
     if (!removedByHunk.has(r.hunk)) removedByHunk.set(r.hunk, []);
     removedByHunk.get(r.hunk).push(r.text);
   }
-  const neighbour = (i, step) => {
-    const n = newFile[i + step];
-    return n && n.hunk === newFile[i].hunk ? n.text : null;
+  const neighbourOn = (side, idx, step) => {
+    const n = side[idx + step];
+    return n && n.hunk === side[idx].hunk ? n.text : null;
   };
-  const onContractSource = surfaceCovers(CONTRACT_SOURCE_SURFACES, filename, repo) && isContractSourceFile(filename);
-  const onPublished = surfaceCovers(PUBLISHED_SURFACES, filename, repo);
-  const onRegistry = surfaceCovers(REGISTRATION_SURFACES, filename, repo);
-  for (let i = 0; i < newFile.length; i += 1) {
-    if (newFile[i].kind !== 'added') continue;
-    const { line, text } = newFile[i];
+  const fragmentOn = (side, idx) =>
+    typeof idx === 'number' && isConcatenationFragment(neighbourOn(side, idx, -1), neighbourOn(side, idx, 1));
+  const surfaces = surfaceFlags(filename, repo);
+  const { onContractSource } = surfaces;
+  // #16943 — the REPLACEMENT budget, one per change block, per tell kind.
+  //
+  // Every removed line in the block that carried a member or a key of kind K
+  // buys ONE added line of kind K the right not to be reported: that added line
+  // did not grow the accept set, it took the place of something that was
+  // already in it. The budget is spent in patch order, so when a block adds
+  // MORE than it removed the SURPLUS lines — the ones no removal paid for —
+  // still fire, with their own file:line. That surplus is the whole sensitivity
+  // guarantee: a genuine addition has no removal to pay for it.
+  const budgetOfLine = new Map();
+  for (const block of changeBlocks(lines)) {
+    const budget = new Map();
+    for (const i of block) {
+      const r = lines[i];
+      if (r.kind !== 'removed') continue;
+      if (BARE_STRING_ELEMENT.test(r.text) && fragmentOn(oldFile, oldAt.get(i))) continue;
+      const kind = memberTellKind(r.text, surfaces);
+      if (kind !== null) budget.set(kind, (budget.get(kind) ?? 0) + 1);
+    }
+    for (const i of block) budgetOfLine.set(i, budget);
+  }
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i].kind !== 'added') continue;
+    const { line, text, hunk } = lines[i];
     if (COMMENT_LINE.test(text)) continue;
     // #16822 — a line that is one FRAGMENT of a multi-line string
     // concatenation is not a bare element of anything: not a member of a
@@ -753,29 +1094,43 @@ export function tellsInFile(file, { repo = THIS_REPO } = {}) {
     // of a continuation operator; the header states the one quiet direction
     // this buys. ⛔ Only the bare-STRING shape is declined — a keyed line
     // (`reason: 'prose ' +`) is a different reading and keeps its own tells.
-    if (BARE_STRING_ELEMENT.test(text) && isConcatenationFragment(neighbour(i, -1), neighbour(i, 1))) continue;
+    if (BARE_STRING_ELEMENT.test(text) && fragmentOn(newFile, newAt.get(i))) continue;
     const at = { file: filename, line, text: text.trim().slice(0, 160) };
+    const kind = memberTellKind(text, surfaces);
+    // #16943 — a member or key this block REPLACED is not a net addition.
+    //
+    // ⛔ A line that DECLARES a closed set is never spent against the budget,
+    // however it also reads: an opener carries a declaration, not a member, and
+    // #16822's `rewritesExistingOpener` is the reading that judges it.
+    if (kind !== null && !CLOSED_SET_OPENER.test(text)) {
+      const budget = budgetOfLine.get(i);
+      const paid = budget?.get(kind) ?? 0;
+      if (paid > 0) {
+        budget.set(kind, paid - 1);
+        continue;
+      }
+    }
     // A DECLARED registry is read as a registry first. Its files also sit on
     // the contract source surface (two of the three live under
     // `packages/spec/src/**`), and a ledger code read as "a member of a closed
     // set" would be true but less useful than the reading that names the
     // register it was added to. One line is one row, never one per surface.
-    if (onRegistry && REGISTRATION_ROW.test(text)) {
+    if (kind === 'T4') {
       rows.push({ tell: 'T4', ...at, why: 'a new registration in a registry / catalog — what the runtime accepts grows with no schema file moving' });
       continue;
     }
-    if (onContractSource && SCHEMA_PROPERTY.test(text)) {
+    if (kind === 'T1') {
       rows.push({ tell: 'T1', ...at, why: 'a new key on a Zod object schema — the accept set gains a spelling an author may now write' });
       continue;
     }
     // #16822 — an opener that re-declares a set the same hunk removed adds no
     // member; the members are read below, one line each.
-    const opener = CLOSED_SET_OPENER.test(text) && !rewritesExistingOpener(text, removedByHunk.get(newFile[i].hunk));
-    if (onContractSource && (opener || BARE_STRING_ELEMENT.test(text) || BARE_SCHEMA_ARM.test(text))) {
+    const opener = CLOSED_SET_OPENER.test(text) && !rewritesExistingOpener(text, removedByHunk.get(hunk));
+    if (onContractSource && (opener || kind === 'T2')) {
       rows.push({ tell: 'T2', ...at, why: 'a new member of a closed set (z.enum / union / an `as const` array) — the accept set gains a value' });
       continue;
     }
-    if (onPublished && JSON_STRING_ROW.test(text)) {
+    if (kind === 'T3') {
       rows.push({ tell: 'T3', ...at, why: 'a new row in a published entry point\'s export listing — the public surface grows (ADR-0059)' });
       continue;
     }
@@ -822,11 +1177,8 @@ export function unreadFiles(files, { repo = THIS_REPO } = {}) {
     if (filename === '' || file?.status === 'removed') continue;
     if (addedNothing(file)) continue;
     if (typeof file?.patch === 'string' && file.patch !== '') continue;
-    const onSurface =
-      (surfaceCovers(CONTRACT_SOURCE_SURFACES, filename, repo) && isContractSourceFile(filename)) ||
-      surfaceCovers(PUBLISHED_SURFACES, filename, repo) ||
-      surfaceCovers(REGISTRATION_SURFACES, filename, repo);
-    if (!onSurface) continue;
+    const flags = surfaceFlags(filename, repo);
+    if (!flags.onContractSource && !flags.onPublished && !flags.onRegistry) continue;
     gaps.push(filename);
   }
   return gaps;
@@ -901,6 +1253,149 @@ export function refusalLines(verdict) {
 }
 
 // ---------------------------------------------------------------------------
+// What this run judged, and on what board — the honest half of the verdict
+// ---------------------------------------------------------------------------
+
+/**
+ * WHICH repo this run judges, and ON WHAT BASIS (#17217).
+ *
+ * The sibling's `boardProvenanceLine` is the precedent and the wording follows
+ * it deliberately, including the action that changes the answer. It is
+ * re-rendered rather than imported for one reason only: `check-clause2-carriers`
+ * imports THIS file, so importing it back would be a cycle. The RESOLUTION —
+ * the part that could drift into a second convention — is imported
+ * (`resolveSweepRepo`); only the sentence is local.
+ *
+ * ⚠️ It goes to stdout beside the verdict, where the sibling puts its own on
+ * stderr. That divergence is deliberate and this file's case is the opposite of
+ * the sibling's: the sibling has a `--json` mode whose stdout is contractually
+ * the machine-readable ANSWER, so a provenance line there would travel into a
+ * round report as though it were a finding. This file has no such mode — its
+ * stdout IS the prose verdict — and #17217's whole finding is that the verdict
+ * line does not say whose diff it thought it was reading. Splitting the two
+ * across streams would let a seat keep the sentence and lose the board, which
+ * is the state the card measured.
+ */
+export function boardProvenanceLine({ repo, source }) {
+  const detail = source === 'default'
+    ? 'source: default — set PM_SWEEP_REPO to judge another repo'
+    : `source: ${source}`;
+  return `  board: this run judges ${repo} (${detail}).`;
+}
+
+/** The listing one NOT-MEASURED bucket contributes, capped so it cannot swamp. */
+function bucketLines(heading, rows, cap) {
+  if (rows.length === 0) return [];
+  const shown = rows.slice(0, cap);
+  const lines = [`    ${heading} (${rows.length}):`];
+  for (const r of shown) lines.push(`      ${r.filename}`);
+  if (rows.length > shown.length) lines.push(`      … and ${rows.length - shown.length} more`);
+  return lines;
+}
+
+/**
+ * The success sentence, split so a count can never again read as coverage.
+ *
+ * ⭐ This is #17112's whole fix, and the shape of it is the point. The line the
+ * card measured said `N changed file(s) READ, no widening tell on any declared
+ * surface` — a COUNT of files beside a QUALIFIED negative. The qualifier was
+ * true and the count was true, and together they said something neither says
+ * alone, because a count reads as coverage in a way a qualifier does not undo.
+ * A file no declared surface covers was never read for tells: no tell could
+ * have fired on it whatever it contained, so its inclusion in that count made
+ * exit 0 evidence about surfaces this instrument cannot see.
+ *
+ * So the count is SPLIT, never deleted — a reader still needs to know what WAS
+ * judged, and an instrument that reports nothing about its own reach is not an
+ * improvement on one that over-reports it. `judged` is the only number exit 0
+ * is evidence about; every other file is named under the reason it could not be
+ * examined.
+ *
+ * ⛔ No verdict and no exit code moves here. Whether an unexaminable population
+ * should REFUSE rather than pass is #16349's chain to answer, not this
+ * function's: it would be a new refusal class on a gate whose enqueue path
+ * #17217 measured as sound, and both cards' filings put that question outside
+ * themselves. This prints what was true all along.
+ */
+export function coverageLines(census, { cap = 10 } = {}) {
+  const gaps = notMeasured(census);
+  const lines = [];
+  if (gaps.length === 0) return lines;
+  lines.push(
+    '  ⛔ NOT MEASURED is not a clean reading — no tell could have fired on these files whatever they contain:',
+  );
+  lines.push(...bucketLines('no declared surface covers it', census.unmatched, cap));
+  for (const repo of [...new Set(census['other-repo'].flatMap((r) => r.repos))].sort()) {
+    const rows = census['other-repo'].filter((r) => r.repos.includes(repo));
+    lines.push(
+      ...bucketLines(
+        `a declared surface covers it, but for ${repo} — re-run with PM_SWEEP_REPO=${repo}`,
+        rows,
+        cap,
+      ),
+    );
+  }
+  lines.push(
+    ...bucketLines(
+      'on a declared surface, but not a contract source file — a test declares no contract',
+      census['not-contract-source'],
+      cap,
+    ),
+  );
+  return lines;
+}
+
+/** The success sentence itself, counts split. */
+export function cleanVerdictLine(census) {
+  const judged = census.judged.length;
+  const gaps = notMeasured(census).length;
+  const parts = [
+    `${judged} judged against a declared surface (no widening tell)`,
+    `${gaps} NOT MEASURED`,
+  ];
+  if (census.deleted.length > 0) parts.push(`${census.deleted.length} deleted (a deletion adds nothing)`);
+  const nothing = judged === 0 && census.total > 0
+    ? ' ⛔ NOTHING on this diff was examined for widening tells, so this exit 0 is evidence about no surface at all.'
+    : '';
+  return `✓ check-widening-tells: ${census.total} changed file(s) — ${parts.join(', ')}.${nothing}`;
+}
+
+/**
+ * The whole CLI decision, as data — exit code plus the lines each stream gets.
+ *
+ * Pure on purpose: `--self-test` drives THIS, so the printed sentence and the
+ * board threading are assertions rather than something a reader has to run the
+ * binary to see. `main` is then argv parsing, one file read, and printing.
+ */
+export function verdictLines({ declaration, files, board }) {
+  const out = [];
+  const err = [];
+  if (declaration !== 'no') {
+    out.push(
+      `✓ check-widening-tells: the claim declares \`Clause-②: ${declaration}\`, which this gate never ` +
+        'blocks — a `yes` already routes to contract review, so a tell on top of it decides nothing.',
+    );
+    return { exit: EXIT_OK, out, err };
+  }
+  const verdict = wideningRefusal({ declaration, files, repo: board.repo });
+  if (verdict.state === 'clean') {
+    const census = coverageCensus(files, { repo: board.repo });
+    out.push(cleanVerdictLine(census));
+    out.push(boardProvenanceLine(board));
+    out.push(...coverageLines(census));
+    out.push(
+      '  ⚠️ A tell is not a proof and its absence is not one either — false negatives are the ' +
+        'cost the #16349 ruling accepted.',
+    );
+    return { exit: EXIT_OK, out, err };
+  }
+  for (const line of refusalLines(verdict)) err.push(`✗ ${line}`);
+  err.push(`check-widening-tells: ${verdict.text}`);
+  err.push(boardProvenanceLine(board));
+  return { exit: exitForRefusal(verdict), out, err };
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
@@ -916,7 +1411,7 @@ function argValue(argv, flag) {
   return typeof v === 'string' && !v.startsWith('--') ? v : '';
 }
 
-function main(argv) {
+function main(argv, env = process.env) {
   if (argv.includes('--self-test')) {
     const code = selfTest();
     if (!selfTestReachedVerdict) {
@@ -928,6 +1423,33 @@ function main(argv) {
       return 1;
     }
     return code;
+  }
+
+  // ⭐ The board, and the argument that is NOT how you name it — both answered
+  // before any input is read, so a refusal is about what the caller typed
+  // rather than about a board nobody asked for (the sibling's argv order).
+  //
+  // ⛔ `--repo` is refused rather than honoured, and that is the whole reason it
+  // now appears in this file. `check-clause2-carriers` deliberately reads no
+  // positional board and points at `PM_SWEEP_REPO`; two entry points in the
+  // same directory disagreeing about how a run is told its repo would be its
+  // own trap, and #17217 names that trap in its own filing. One convention.
+  if (argv.includes('--repo')) {
+    console.error(
+      'check-widening-tells: the board is not an argument. Set PM_SWEEP_REPO — e.g. ' +
+        "PM_SWEEP_REPO=objectstack-ai/objectui node scripts/pm/check-widening-tells.mjs --declaration no --diff - " +
+        '— which is the same convention `check-clause2-carriers.mjs` reads, and ⛔ never a second one.',
+    );
+    return EXIT_USAGE;
+  }
+  const board = resolveSweepRepo(env);
+  if (!board.valid) {
+    console.error(
+      `check-widening-tells: ${board.source}=${JSON.stringify(board.repo)} is not an \`owner/repo\` ` +
+        `(${SWEEP_REPO_SHAPE.source}). ⛔ Refused rather than silently replaced by the default — judging ` +
+        'a diff against a board the caller did not name is how a clean reading about the wrong repo gets written.',
+    );
+    return EXIT_USAGE;
   }
 
   const declaration = argValue(argv, '--declaration');
@@ -972,25 +1494,10 @@ function main(argv) {
     return EXIT_USAGE;
   }
 
-  const verdict = wideningRefusal({ declaration, files });
-  if (verdict.state === 'not-applicable') {
-    console.log(
-      `✓ check-widening-tells: the claim declares \`Clause-②: ${declaration}\`, which this gate never ` +
-        'blocks — a `yes` already routes to contract review, so a tell on top of it decides nothing.',
-    );
-    return EXIT_OK;
-  }
-  if (verdict.state === 'clean') {
-    console.log(
-      `✓ check-widening-tells: ${files.length} changed file(s) read, no widening tell on any declared ` +
-        'surface. ⚠️ A tell is not a proof and its absence is not one either — false negatives are the ' +
-        'cost the #16349 ruling accepted.',
-    );
-    return EXIT_OK;
-  }
-  for (const line of refusalLines(verdict)) console.error(`✗ ${line}`);
-  console.error(`check-widening-tells: ${verdict.text}`);
-  return exitForRefusal(verdict);
+  const rendered = verdictLines({ declaration, files, board });
+  for (const line of rendered.out) console.log(line);
+  for (const line of rendered.err) console.error(line);
+  return rendered.exit;
 }
 
 // ---------------------------------------------------------------------------
@@ -1209,6 +1716,80 @@ export function selfTest() {
   t('⛔ an opener carrying its members INLINE is not an opener-only line, so it is never suppressed', tells(rewrite('export const X = z.enum([', "export const X = z.enum(['a', 'b']);"))[0]?.tell === 'T2');
   t('⛔ a removed opener in ANOTHER hunk does not pair — the evidence must be where the reader can see it', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -3,1 +3,0 @@\n-export const X = z.union([\n@@ -90,0 +90,1 @@\n+export const X = z.discriminatedUnion('type', [" })[0]?.tell === 'T2');
 
+  // -- #16943: the net member/key delta -------------------------------------
+  //
+  // Both live instances the card measured, each reduced to the shape that made
+  // it fire and nothing else, plus the surplus case that is the whole
+  // sensitivity guarantee. ⭐ The two fixtures below are the two RECORDED
+  // pairs' own bytes (prose abridged, structure verbatim): PR #16941 on a form
+  // `description:` value, PR #16968 on a Zod key whose `.describe()` moved.
+  battery('#16943 — the net member/key delta: a replaced line is not a net addition');
+  const LIVE_T2_PAIR = {
+    filename: 'packages/spec/src/security/permission.form.ts',
+    status: 'modified',
+    patch: [
+      '@@ -21,7 +27,7 @@ export const permissionForm = defineForm({',
+      '     {',
+      "       label: 'Identity',",
+      '       description:',
+      "-        'Permission Sets stack on top of a Profile to grant additional access. …',",
+      "+        'Permission sets are the only capability container: a user gets the union of every set they hold. …',",
+      '       columns: 2,',
+      '       fields: [',
+    ].join('\n'),
+  };
+  const LIVE_T1_PAIR = {
+    filename: 'packages/spec/src/ui/dashboard.zod.ts',
+    status: 'modified',
+    patch: [
+      '@@ -800,8 +800,29 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({',
+      ' ',
+      '-  /** Field name to filter on */',
+      "-  field: z.string().describe('Field name to filter on'),",
+      '+  /**',
+      '+   * Field name to filter on — at the authoring layer it resolves against',
+      "+   * the object behind each bound widget's dataset (`dataset.object`).",
+      '+   */',
+      "+  field: z.string().describe('Field name to filter on — at the authoring layer it resolves …'),",
+      ' ',
+    ].join('\n'),
+  };
+  t('⭐ the live T2 pair — a `description:` VALUE replaced in place is not a new member of a closed set', tells(LIVE_T2_PAIR).length === 0);
+  t('⭐ the live T1 pair — a key whose `.describe()` was rewritten is not a new key on the schema', tells(LIVE_T1_PAIR).length === 0);
+  t('…and the two together read CLEAN end to end, which is the exit code the card could not reach', wideningRefusal({ declaration: 'no', files: [LIVE_T2_PAIR, LIVE_T1_PAIR] }).state === 'clean');
+  const surplus = {
+    filename: 'packages/spec/src/kernel/plugin.zod.ts',
+    status: 'modified',
+    patch: "@@ -95,3 +95,4 @@\n   'core',\n-  'legacy',\n+  'legacy_renamed',\n+  'workflow',\n   'ui',",
+  };
+  t('⭐ a block that removes ONE member and adds TWO reports exactly one — the surplus is the net addition', tells(surplus).length === 1);
+  t('…and the row it reports is the line no removal paid for', at(surplus)[0] === 'packages/spec/src/kernel/plugin.zod.ts:97');
+  t('⛔ a member added with NO removal in its block still fires — a genuine addition has nothing to pay with', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+  'workflow',") })[0]?.tell === 'T2');
+  t('⛔ a removal in a DIFFERENT change block does not pay — a context line between two edits means two edits', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -95,4 +95,4 @@\n-  'legacy',\n   'core',\n   'ui',\n+  'workflow'," }).length === 1);
+  t('⛔ nor a removal in another HUNK — the file\'s lines between them are not shown', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -95,1 +95,0 @@\n-  'legacy',\n@@ -300,0 +299,1 @@\n+  'workflow'," }).length === 1);
+  t('⛔ the budget is per KIND — a removed closed-set member does not pay for an added schema KEY', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -95,2 +95,2 @@\n-  'legacy',\n+  extra: z.string()," })[0]?.tell === 'T1');
+  t('⛔ a removed COMMENT pays for nothing — it was never a member', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -95,2 +95,2 @@\n-  // 'legacy',\n+  'workflow'," }).length === 1);
+  t('⛔ #16822 is read on the OLD side too: a removed prose FRAGMENT pays for nothing', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -95,3 +95,2 @@\n-  'half a sentence '\n-  + 'and the rest',\n+  'workflow'," }).length === 1);
+  t('⛔ an OPENER is not a member: a `z.union([` → `z.enum([` rewrite cannot pay for the arm it adds', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -207,3 +207,4 @@\n-export const X = z.union([\n+export const X = z.enum([\n+  'workflow',\n   ArmSchema," }).length === 1);
+  t('⭐ FILE_SCHEMA_KEY still fires — its removal sits across a context line, so it is a different edit', at(FILE_SCHEMA_KEY)[0] === 'packages/spec/src/kernel/manifest.zod.ts:44');
+  t('a replaced REGISTRY row is not a new registration — the T4 half of the same root cause', tells({ filename: 'packages/spec/src/api/error-code-ledger.zod.ts', patch: "@@ -140,2 +140,2 @@\n-    reason: 'the wording this row carried before',\n+    reason: 'the wording it carries now'," }).length === 0);
+  t('…and a replaced row in a published listing is not a new export — the T3 half', tells({ filename: 'packages/spec/api-surface/kernel.json', patch: '@@ -14,2 +14,2 @@\n-    "PluginSchema (const)",\n+    "PluginSchema (type)",' }).length === 0);
+  t('⛔ but a published listing that removes one row and adds two still reports the surplus', tells({ filename: 'packages/spec/api-surface/kernel.json', patch: '@@ -14,3 +14,4 @@\n-    "Gone (const)",\n+    "Renamed (const)",\n+    "WorkflowPluginSchema (const)",\n     "Kept (const)",' }).length === 1);
+  // ⚠️ The quiet direction, asserted rather than described so the next reader
+  // meets it here instead of discovering it. A one-for-one member RENAME inside
+  // an existing set now declines: the block's member count did not move, and
+  // nothing in the hunk distinguishes a renamed member from a reworded string.
+  // What still catches it: `check:api-surface` on any exported type it moves,
+  // `check:authorable-surface` on any authorable key, and the ADR-0087
+  // registries — all three of which a rename must move and a rewording cannot.
+  t('⚠️ QUIET DIRECTION — a one-for-one member rename declines; this case exists so the cost is read, not discovered', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -95,2 +95,2 @@\n-  'legacy',\n+  'legacy_renamed'," }).length === 0);
+  t('`changeBlocks` splits on a context line — two edits, never one replacement', changeBlocks(patchLines("@@ -95,4 +95,4 @@\n-  'a',\n   ctx\n+  'b',")).length === 2);
+  t('…and never spans a hunk boundary', changeBlocks(patchLines("@@ -95,1 +95,0 @@\n-  'a',\n@@ -300,0 +299,1 @@\n+  'b',")).length === 2);
+  t('…while one removed run and its added run are ONE block', changeBlocks(patchLines("@@ -95,3 +95,3 @@\n-  'a',\n-  'b',\n+  'c',")).length === 1);
+  t('`memberTellKind` reads a schema key as T1 and a bare element as T2 on the contract surface', memberTellKind('  extra: z.string(),', { onContractSource: true }) === 'T1' && memberTellKind("  'workflow',", { onContractSource: true }) === 'T2');
+  t('⛔ …and an OPENER as neither — an opener-only line declares no member', memberTellKind('export const X = z.union([', { onContractSource: true }) === null);
+  t('⛔ …and nothing at all off every surface', memberTellKind('  extra: z.string(),', {}) === null);
+
   // -- T3 --------------------------------------------------------------------
   battery('T3 — a new row in a published entry point');
   t('a new export row is a tell', tells(FILE_API_SURFACE)[0]?.tell === 'T3');
@@ -1296,6 +1877,138 @@ export function selfTest() {
   t('every surface row carries a `why`, so a reader can tell what it is protecting', ALL_SURFACES.every((s) => typeof s.why === 'string' && s.why.length > 10));
   t('every surface row names the repo it applies to', ALL_SURFACES.every((s) => typeof s.repo === 'string' && s.repo.includes('/')));
 
+  // -- #17112: the count is split -------------------------------------------
+  //
+  // The line these cases pin used to read `N changed file(s) READ, no widening
+  // tell on any declared surface`, with N counting files no declared surface
+  // covers — files on which no tell could have fired whatever they contained.
+  // Every case below fails if that conflation comes back, and the two controls
+  // (a judged file, and the same diff still exiting 0) are here so a green
+  // reading cannot come from a census that stopped classifying anything.
+  battery('#17112 — the count is split: examined is not examinable');
+  const OFF_SURFACE = 'packages/services/service-analytics/src/index.ts';
+  const ON_SURFACE = 'packages/spec/src/api/error-code-ledger.zod.ts';
+  const censusOf = (files, repo) => coverageCensus(files, repo ? { repo } : {});
+  const offRow = { filename: OFF_SURFACE, status: 'modified', patch: patchOf(11, '+export type { AnalyticsDimensionLabel } from \'./labels.js\';') };
+  const onRow = { filename: ON_SURFACE, status: 'modified', patch: patchOf(140, "+    'ALREADY_THERE': 1,") };
+  t('a file no declared surface covers is NOT judged', censusOf([offRow]).judged.length === 0);
+  t('…and the census names WHY it was not', fileCoverage(offRow).state === 'unmatched');
+  t('a covered file IS judged — the control, so the census is not simply blind', censusOf([onRow]).judged.length === 1);
+  const mixedCensus = censusOf([offRow, onRow]);
+  t('⛔ the word that carried the defect is gone — a count of files is no longer "read"', !says(cleanVerdictLine(mixedCensus), 'changed file(s) read'));
+  t('the total is still stated — ⛔ the fix is not deleting the count', says(cleanVerdictLine(mixedCensus), '2 changed file(s)'));
+  t('…and what WAS judged is stated, which is what a reader needs', says(cleanVerdictLine(mixedCensus), '1 judged against a declared surface'));
+  t('…beside what was not', says(cleanVerdictLine(mixedCensus), '1 NOT MEASURED'));
+  const blindCensus = censusOf([offRow]);
+  t('⭐ a diff with nothing examinable says so in the sentence itself', says(cleanVerdictLine(blindCensus), 'NOTHING on this diff was examined'));
+  t('…and says the exit is evidence about no surface at all', says(cleanVerdictLine(blindCensus), 'evidence about no surface at all'));
+  t('⛔ a diff that DID judge something does not say that', !says(cleanVerdictLine(mixedCensus), 'NOTHING on this diff was examined'));
+  t('the unexaminable file is NAMED, so the reader can act on it', says(coverageLines(blindCensus).join('\n'), OFF_SURFACE));
+  t('…under a heading that states the non-measurement', says(coverageLines(blindCensus).join('\n'), 'no declared surface covers it'));
+  const many = Array.from({ length: 14 }, (_, i) => ({ filename: `packages/plugins/p${i}/src/index.ts`, status: 'modified', patch: patchOf(1, '+  a: 1,') }));
+  t('the listing is CAPPED — a 300-file diff must not drown the verdict', coverageLines(censusOf(many)).filter((l) => l.includes('packages/plugins/')).length === 10);
+  t('…and says how many it did not list, so the cap is not a second silence', says(coverageLines(censusOf(many)).join('\n'), '… and 4 more'));
+  t('⛔ a DELETED file is not filed as NOT MEASURED — a deletion adds nothing, which is a measurement', censusOf([{ filename: OFF_SURFACE, status: 'removed' }])['deleted'].length === 1 && notMeasured(censusOf([{ filename: OFF_SURFACE, status: 'removed' }])).length === 0);
+  t('⛔ a TEST on the contract surface is not reported as "no declared surface covers it" — a surface does', fileCoverage({ filename: 'packages/spec/src/a.test.ts', status: 'modified' }).state === 'not-contract-source');
+  t('…and it is listed under the reason that is true of it', says(coverageLines(censusOf([{ filename: 'packages/spec/src/a.test.ts', status: 'modified' }])).join('\n'), 'not a contract source file'));
+  t('⛔ NO verdict moved: an unexaminable diff still exits 0', verdictLines({ declaration: 'no', files: [offRow], board: { repo: THIS_REPO, source: 'default' } }).exit === EXIT_OK);
+  t('⛔ and a real tell still REFUSES — the census is not a softening of the gate', verdictLines({ declaration: 'no', files: [FILE_REGISTRY], board: { repo: THIS_REPO, source: 'default' } }).exit === EXIT_REFUSED);
+  t('a refusal prints no clean sentence on stdout to be mistaken for one', verdictLines({ declaration: 'no', files: [FILE_REGISTRY], board: { repo: THIS_REPO, source: 'default' } }).out.length === 0);
+  t('⭐ ONE reader answers "was this judged" for the matcher and for the census', (() => {
+    const f = surfaceFlags(ON_SURFACE, THIS_REPO);
+    return (f.onContractSource || f.onPublished || f.onRegistry) === (fileCoverage(onRow).state === 'judged');
+  })());
+  t('…and it agrees with the matcher on a file the matcher declines for its KIND', (() => {
+    const f = surfaceFlags('packages/spec/src/a.test.ts', THIS_REPO);
+    return !f.onContractSource && !f.onPublished && !f.onRegistry && tellsInFile({ filename: 'packages/spec/src/a.test.ts', patch: patchOf(3, '+  k: z.string(),') }).length === 0;
+  })());
+  t('the honesty caveat #16349 ruled is still printed, verbatim in substance', says(verdictLines({ declaration: 'no', files: [offRow], board: { repo: THIS_REPO, source: 'default' } }).out.join('\n'), 'false negatives are the cost the #16349 ruling accepted'));
+
+  // -- #17217: the CLI can be told which board it judges ---------------------
+  //
+  // ⭐ These cases must be driven through `main` and not through
+  // `wideningRefusal`, because the defect was never in the judge: every judging
+  // function already threaded `repo`, and the self-test already pinned the
+  // objectui row live when a run names objectui. What no invocation could reach
+  // was the CLI. A case that calls the judge directly would have passed on the
+  // broken tree — that is the failure mode this battery exists against.
+  battery('#17217 — the CLI can be told which board it judges');
+  const OBJECTUI = 'objectstack-ai/objectui';
+  const MIRROR = 'packages/types/src/zod/objectql.zod.ts';
+  const mirrorAdds = [
+    `diff --git a/${MIRROR} b/${MIRROR}`,
+    `--- a/${MIRROR}`,
+    `+++ b/${MIRROR}`,
+    '@@ -20,3 +20,4 @@',
+    '   limit: z.number().optional(),',
+    '   offset: z.number().optional(),',
+    '   sort: z.string().optional(),',
+    '+  cursor: z.string().optional(),',
+  ].join('\n');
+  const mirrorRemovesOnly = [
+    `diff --git a/${MIRROR} b/${MIRROR}`,
+    `--- a/${MIRROR}`,
+    `+++ b/${MIRROR}`,
+    '@@ -20,4 +20,3 @@',
+    '   limit: z.number().optional(),',
+    '   offset: z.number().optional(),',
+    '   sort: z.string().optional(),',
+    '-  legacyCursor: z.string().optional(),',
+  ].join('\n');
+  const scratch = mkdtempSync(join(tmpdir(), 'widening-tells-selftest-'));
+  const runMain = (argv, env) => {
+    const realLog = console.log;
+    const realError = console.error;
+    const out = [];
+    const err = [];
+    console.log = (...a) => out.push(a.join(' '));
+    console.error = (...a) => err.push(a.join(' '));
+    try {
+      const exit = main(argv, env);
+      return { exit, out: out.join('\n'), err: err.join('\n') };
+    } finally {
+      console.log = realLog;
+      console.error = realError;
+    }
+  };
+  try {
+    const addsPath = join(scratch, 'mirror-adds.diff');
+    const removesPath = join(scratch, 'mirror-removes.diff');
+    writeFileSync(addsPath, `${mirrorAdds}\n`);
+    writeFileSync(removesPath, `${mirrorRemovesOnly}\n`);
+    const cliArgs = (p) => ['--declaration', 'no', '--diff', p];
+    const onObjectui = runMain(cliArgs(addsPath), { PM_SWEEP_REPO: OBJECTUI });
+    const onDefault = runMain(cliArgs(addsPath), {});
+    const realOnObjectui = runMain(cliArgs(removesPath), { PM_SWEEP_REPO: OBJECTUI });
+    const onRunner = runMain(cliArgs(addsPath), { GITHUB_REPOSITORY: OBJECTUI });
+    t('⭐ THE FINDING: a key added to the objectui mirror is REFUSED through the CLI', onObjectui.exit === EXIT_REFUSED);
+    t('…at the mirror file, so the refusal is navigable', says(onObjectui.err, `${MIRROR}:23`));
+    t('…and it is the CLI that was told, not a caller reaching past it', says(onObjectui.out + onObjectui.err, OBJECTUI));
+    t('⭐ the SAME diff on the default board does not refuse — the defect, in one assertion', onDefault.exit === EXIT_OK);
+    t('…and no longer reads as clean: it names the repo that COULD judge it', says(onDefault.out, `re-run with PM_SWEEP_REPO=${OBJECTUI}`));
+    t('⛔ …and does NOT say "no declared surface covers it", which would be false about the mirror', !says(onDefault.out, 'no declared surface covers it'));
+    t('the objectui board is not merely refusing everything: a removal-only mirror diff is clean', realOnObjectui.exit === EXIT_OK);
+    t('…and that clean reading says the file WAS judged', says(realOnObjectui.out, '1 judged against a declared surface'));
+    t('GITHUB_REPOSITORY is honoured too — a runner needs no second wiring', onRunner.exit === EXIT_REFUSED);
+    t('⛔ the default is unchanged, so no existing caller changes meaning', runMain(cliArgs(addsPath), {}).exit === EXIT_OK && resolveSweepRepo({}).repo === THIS_REPO);
+    const repoFlag = runMain(['--repo', OBJECTUI, ...cliArgs(addsPath)], {});
+    t('⛔ `--repo` is REFUSED, not silently ignored — one convention, the sibling\'s', repoFlag.exit === EXIT_USAGE);
+    t('…and the refusal names the variable that does work', says(repoFlag.err, 'PM_SWEEP_REPO'));
+    const badBoard = runMain(cliArgs(addsPath), { PM_SWEEP_REPO: 'not-a-repo' });
+    t('a malformed board is refused, ⛔ never replaced by the default', badBoard.exit === EXIT_USAGE && says(badBoard.err, 'owner/repo'));
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+  t('THIS_REPO is the resolver\'s own default — the import is a pin, ⛔ not a redirection', THIS_REPO === DEFAULT_SWEEP_REPO && THIS_REPO === 'objectstack-ai/objectstack');
+  t('the board line names the repo', says(boardProvenanceLine({ repo: OBJECTUI, source: 'PM_SWEEP_REPO' }), OBJECTUI));
+  t('…and the source it came from', says(boardProvenanceLine({ repo: OBJECTUI, source: 'PM_SWEEP_REPO' }), 'source: PM_SWEEP_REPO'));
+  t('…and the fallback is named AS a fallback, with the action that changes it', says(boardProvenanceLine({ repo: THIS_REPO, source: 'default' }), 'set PM_SWEEP_REPO'));
+  t('⭐ a deliberate target and the fallback are DIFFERENT lines', boardProvenanceLine({ repo: THIS_REPO, source: 'default' }) !== boardProvenanceLine({ repo: THIS_REPO, source: 'PM_SWEEP_REPO' }));
+  t('the line is fed by the imported resolver, so the two cannot disagree', says(boardProvenanceLine(resolveSweepRepo({ PM_SWEEP_REPO: OBJECTUI })), OBJECTUI));
+  t('⛔ the objectui row is STILL inert for a THIS_REPO run — the scoping is unchanged', !surfaceCovers(CONTRACT_SOURCE_SURFACES, MIRROR, THIS_REPO) && surfaceCovers(CONTRACT_SOURCE_SURFACES, MIRROR, OBJECTUI));
+  t('…and the census reports that as "covered, for another repo", never as uncovered', fileCoverage({ filename: MIRROR, status: 'modified' }).state === 'other-repo');
+  t('…naming which repo, so the reader knows what to re-run', fileCoverage({ filename: MIRROR, status: 'modified' }).repos.join(',') === OBJECTUI);
+
   // -- the floor -------------------------------------------------------------
   const floorFailures = [];
   const floorFailure = (text) => {
@@ -1341,10 +2054,14 @@ export function selfTest() {
   console.log(
     `✓ check-widening-tells self-test: ${cases.length} cases pass (the patch reader with its ` +
       'line-number directions, the unified-diff splitter, the three imported/declared surfaces, the ' +
-      'four tells, the two accidental variables #16822 removed and the evidence each declines on, ' +
+      'four tells, the two accidental variables #16822 removed and the evidence each declines on, '
+      + 'the #16943 net member/key delta with its surplus rule and the quiet direction it buys, ' +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
-      'to end so a binary change to a tell surface cannot read as clean — and the exit register).',
+      'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +
+      'its unexaminable populations named rather than counted as read, #17217\'s board driven ' +
+      'through the CLI itself so an objectui diff is judgeable and the same diff on the default ' +
+      'board says which repo could judge it — and the exit register).',
   );
 
   selfTestReachedVerdict = true;

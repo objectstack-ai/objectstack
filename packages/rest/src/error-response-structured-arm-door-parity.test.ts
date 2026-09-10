@@ -521,6 +521,66 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             expect(bulk.body).not.toHaveProperty('dependentObject');
         });
 
+        /**
+         * [#15071] The crash sibling of the case above — CONVERGED where the
+         * producer declared no status, and named as a DIVERGENCE where it did.
+         *
+         * The maintainer ruling (2026-09-04, batch #27, option B) moved the
+         * crash terminal above `classifyDataError`'s code-gated arms, so the
+         * single door answers a sandboxed CRASH with the sanitised 500 whatever
+         * code it declares. The bulk door never reached those arms for a
+         * sandbox producer (#14541's `isSandboxOrigin` guard), so nothing the
+         * ruling names moved there — its answer for a crash comes from
+         * `resolveErrorResponse`'s declared-status passthrough, which
+         * `sandboxBusinessMessage` declines a crash for and which therefore
+         * ships the QuickJS wrapper at the declared status.
+         *
+         * ⚠️ That passthrough gap is NOT this card's, and it is not new: it is
+         * pinned as MEASURED AND NOT REPAIRED in
+         * `rest-hook-refusal-message-parity.test.ts` §7 for the same crash
+         * carrying no code, with the reason ("making the two agree means moving
+         * the STATUS the passthrough decided, which is a contract question").
+         * What this card does is WIDEN that population — the shape below used
+         * to agree at both doors and no longer does — so it is stated here
+         * rather than left for someone to rediscover, and carried to the
+         * contract-review tier as an open question on the PR.
+         */
+        it('CONVERGED (#15071): a sandboxed CRASH with NO declared status is the fault terminal at both doors', () => {
+            const err: any = new Error("hook 'guard' threw: TypeError: x is not a function");
+            err.innerMessage = 'TypeError: x is not a function';
+            err.code = 'DELETE_RESTRICTED';
+            err.object = 'account';
+            err.dependentObject = 'contact';
+            const bulk = bulkDoor(err, 'account');
+            const single = singleDoor(err, 'account');
+            expect(single.status).toBe(500);
+            expect(bulk.status).toBe(500);
+            expect(bulk.body).toEqual(single.body);
+            expect(bulk.body.code).toBe('INTERNAL_ERROR');
+            expect(String(bulk.body.error)).not.toContain('threw:');
+            expect(bulk.body).not.toHaveProperty('dependentObject');
+        });
+
+        it('ACCEPTED DIVERGENCE (#15071 widens it): a sandboxed CRASH that DECLARED a 4xx status', () => {
+            const err: any = new Error("hook 'guard' threw: TypeError: x is not a function");
+            err.innerMessage = 'TypeError: x is not a function';
+            err.code = 'DELETE_RESTRICTED';
+            err.status = 409;
+            err.object = 'account';
+            const bulk = bulkDoor(err, 'account');
+            const single = singleDoor(err, 'account');
+            // The single door: what this card ruled — a crash is a fault.
+            expect(single.status).toBe(500);
+            expect(single.body.code).toBe('INTERNAL_ERROR');
+            expect(String(single.body.error)).not.toContain('threw:');
+            // The bulk door: unchanged by this card, and still the shape §7 of
+            // `rest-hook-refusal-message-parity.test.ts` records. ⛔ Green on
+            // both sides of the fix: it documents the gap, it does not bless it.
+            expect(bulk.status).toBe(409);
+            expect(bulk.body.code).toBe('DELETE_RESTRICTED');
+            expect(String(bulk.body.error)).toContain('threw:');
+        });
+
         it('ACCEPTED DIVERGENCE (guard 1): a producer-declared 5xx keeps the passthrough on the bulk door', () => {
             const err: any = new Error('Cannot delete: dependent records exist');
             err.code = 'DELETE_RESTRICTED';

@@ -543,10 +543,14 @@
  *       ⛔ Not a judgement that the block is wrong — waiting on a deferred card
  *       is sometimes right; the row says the wait has no releasing mechanism,
  *       which is a fact a human should be handed rather than discover.
- *       Deliberately NOT reported: a target labelled `pm:queue` while titled
- *       `[Decision]` (one of the six). That is a mislabelling, not a fact in
- *       the labels, and a title heuristic would make this sweeper guess at
- *       intent.
+ *       NOT reported BY THIS ROW: a target labelled `pm:queue` while titled
+ *       `[Decision]` (one of the six). The reason is unchanged and this row is
+ *       ⛔ NOT widened to chase it — H26 reads LABELS, and inferring a BLOCK's
+ *       fate from its target's title would make this sweeper guess at intent.
+ *       What changed is that the shape has a row of its own since #16688:
+ *       H54 reports the title/label disagreement itself, on the card that
+ *       carries it, and hands it to the triage seat — ⛔ still never reading a
+ *       prefix as a state.
  *
  * ## H27 — the claim is perfect and the claimant is dead
  *
@@ -1296,7 +1300,7 @@ function stripMatchingDecoration(value, opener) {
  * cause with.
  *
  * @param {string} text
- * @param {'Blocked-by'|'Restart-when'} key
+ * @param {'Blocked-by'|'Restart-when'|'Maintainer-action'} key
  * @returns {string[]}
  */
 export function directiveValues(text, key) {
@@ -2298,11 +2302,18 @@ export function h11ImportantParked(issue, nowMs = Date.now()) {
   // `pm:awaiting-maintainer` has no machine exit BY CONSTRUCTION (that is why
   // it exists), and prescribing a `Restart-when:` re-check for it would send
   // the reader to look for a line the state is defined by not having.
+  // ⚖️ Reconciled with H55: the state now has an ENTRY predicate — the
+  // `Maintainer-action: ACTION — done when EVIDENCE` line a card owes on
+  // entering — and STILL no machine exit. The line names the act and its
+  // completion so a human can check it; nothing fires on that completion, so
+  // this ager's remedy stays a re-ask, now carrying the completion check.
   const exit =
     state === AWAITING_MAINTAINER_LABEL
       ? `This state has NO machine exit by construction — the release is the maintainer action the ` +
         `card names — so an important card in it ages out of sight unless a human is re-asked. ` +
-        `Re-surface it to the maintainer in the triage round.`
+        `Re-surface it to the maintainer in the triage round, reading the card's \`Maintainer-action:\` ` +
+        `line first (H55 reports an entry without one): its \`done when\` half is the completion the ` +
+        `re-ask should check, so the age is not the only thing the round carries.`
       : `Re-check the card's \`Blocked-by:\` / \`Restart-when:\` liveness in the triage round.`;
   return (
     `important card parked: ${signals.join(' + ')} sitting in \`${state}\`, ${age} ` +
@@ -4810,10 +4821,13 @@ export function h24QueuedWithAssignee(issue) {
 //                            is owed. Both at once inflates the inbox with a
 //                            question nobody has to answer.
 //
-// ⛔ Deliberately NOT here, and deferred rather than dropped: any requirement
-// that the card NAME the awaited action. That is a grammar for a protocol face
-// the SKILL.md state-model row has not been written for yet, and inventing one
-// in the sweeper would make the sweeper the author of the protocol it audits.
+// ⛔ Deliberately NOT here: any requirement that the card NAME the awaited
+// action. When this row was written that was a grammar for a protocol face the
+// SKILL.md state-model row had not been written for, and inventing one in the
+// sweeper would have made the sweeper the author of the protocol it audits.
+// ⚖️ That face exists now — `references/state-machine.md` specifies the
+// `Maintainer-action:` entry line — and H55 reads it. H25 stays the EXCLUSIVITY half
+// and H55 is the ENTRY half; neither is widened into the other.
 // ---------------------------------------------------------------------------
 
 /** The states `pm:awaiting-maintainer` must never coexist with. */
@@ -5213,11 +5227,15 @@ export function h31ContractReviewCarrierSplit(issue, openPrs) {
 //   objectos#75, #135      -> objectos#68    (`needs-user-decision`)
 //   cloud#1332             -> cloud#1331     (`pm:queue`, titled `[Decision]`)
 //
-// The last row is deliberately NOT reported by this predicate: a decision card
-// wearing a work label is a mislabelling to fix, not a fact readable from the
-// labels this row reads, and inventing a title heuristic would make the sweeper
-// guess at intent. Two of the rows are one repo's ENTIRE blocked inventory
-// waiting on its one unanswered decision card — one ruling clears the repo.
+// The last row is not reported by THIS predicate, and the reason has not moved:
+// this row reads LABELS, and inferring a BLOCK's fate from its target's title
+// would make the sweeper guess at intent — so it is ⛔ not widened to chase it.
+// The shape is no longer unread, though, and this note would otherwise say the
+// file leaves it to nobody: since #16688 it has a row of its own —
+// H54 reports the title/label disagreement on the card that carries it and
+// hands it to the triage seat, ⛔ never reading a prefix as a state. Two of the
+// rows are one repo's ENTIRE blocked inventory waiting on its one unanswered
+// decision card — one ruling clears the repo.
 //
 // ## The second leg: the stale chain
 //
@@ -10467,6 +10485,379 @@ export function h53CarrierWithoutIncrement(issue, commentRows, openPrs, mergedPr
 }
 
 // ---------------------------------------------------------------------------
+// H54 — a `[Decision]`-titled card sitting in the DISPATCH pool (#16688).
+//
+// ## The shape, and the acceptance criterion that names it
+//
+// `pm:queue` is the dispatch pool: a PM seat reads it as CAPACITY and picks
+// from it. A card whose title opens `[Decision]` declares that its deliverable
+// is a RULING — and 「⛔ PM 席不得裁决契约或产品决定」, so the one act the pool
+// invites is the one act forbidden on this card. The filing card measured the
+// cost on one lane, twice: 8 cards read as dispatchable and 1 was (2026-09-07),
+// then 21 read and at most 3 were (2026-09-09) — the ratio did not improve, the
+// set grew and the over-read grew with it. Each of the others cost a full read,
+// body AND comments, to establish that it could not be picked up, and the next
+// seat pays it again because nothing writes the reading back.
+//
+// Triage's acceptance criterion asks for exactly this shape and no more (its
+// §验收口径 2 on the filing card): 「一张标题以 `[Decision]` 开头的卡带着
+// `pm:queue`」 — 「这是今天唯一一个"约束只由标题前缀表达、而无查询会读"的地方,
+// 也是最便宜的一道网」.
+//
+// ## ⛔ The prefix is NOT the state, and this row never treats it as one
+//
+// The same ruling fences the row in the same breath: 「⛔ 不要把闸门做成"标题前缀
+// 即状态":前缀是作者写的,状态是分诊判的,让前者决定后者就是把分诊席的职责交给了
+// 立卡人」. So this row reports a DISAGREEMENT between two carriers and hands it
+// to the seat that owns the second one. It does not say the card is
+// mislabelled, does not say the prefix is right, and — like every row in this
+// file — writes nothing. Which carrier is wrong is triage's judgement, and the
+// remedy sentence says so rather than prescribing a relabel.
+//
+// ⛔ And no new label, by the same ruling: 「不要新增标签。你已经证明词汇表够用」.
+// `needs-user-decision` is live on cards and PRs and `pm:awaiting-maintainer`
+// is live on cards, so the state the remedy points at already exists and the
+// deliverable triage ruled for is 逐卡改判, not a new state.
+//
+// ## Why the row is worth its line, given that a reader can see the title
+//
+// A seat sizing a round reads a LISTING. The over-read is not that the title is
+// unreadable — it is that nothing QUERIES it: the constraint 「this card needs a
+// decision, not a developer」 lives only in a prefix the state machine never
+// consults, which is the filing card's own thesis (「A constraint that lives
+// only in prose is invisible to a seat reading labels」). This row is that
+// query, and it is the whole of what a title can honestly buy.
+//
+// ⚠️ Deliberately the CHEAP net and not the complete one. The filing thread
+// records three further readings this row does NOT attempt, every one of them
+// true: a ruled card and a never-ruled card look identical from the body, so a
+// `[Decision]` title outlives its own ruling and this row will fire on a card
+// whose question was answered days ago; the same lane's largest bucket turned
+// out to be contract-review-TIER starvation rather than rulings (8 cards
+// against 2); and a hot-file hold releases on MERGE, so its answer changes
+// under the reader on a timescale of hours. None of those is readable from a
+// title or a label, ⛔ so none of them is claimed here. This row answers one
+// question — do the title and the state label disagree — and its remedy names
+// the reader who can answer the rest.
+//
+// ## Quota
+//
+// Free, and the population is covered BY CONSTRUCTION for H45's reason: the
+// carrier holds `pm:queue`, which is a label page this sweep's loop already
+// consumes, and the title rides in on that same payload. Nothing here adds a
+// request, and no card outside the listing can reach the row.
+// ---------------------------------------------------------------------------
+
+/**
+ * The title prefix by which a card declares its deliverable is a RULING.
+ *
+ * Anchored at the START, after optional leading whitespace, and never a
+ * substring: `[Decision]` occurring later in a title is an ordinary mention
+ * (「rename the [Decision] prefix convention」), and reporting that would be the
+ * intent-guessing the ruling forbids. All nine live carriers measured on
+ * 2026-09-09 open with it, so the anchor costs no coverage.
+ *
+ * Case-insensitive on the WORD and exact on the brackets. `[decision]` and
+ * `[Decision]` are one author's one intent, and this file's standing doctrine
+ * is that an unknown reading must never present as a clean one (#4690) — a
+ * carrier missed on its capitalisation would read as a clean queue. The closing
+ * bracket is required immediately after the word, so `[Decisions log]` and
+ * `[Decision-log]` are NOT this prefix; and `[finding]` — the 80-strong prefix
+ * that must never be caught — differs in the word itself, not in its case.
+ */
+export const DECISION_TITLE_PREFIX = /^\s*\[decision\]/iu;
+
+/**
+ * Does H54 speak about this card at all?
+ *
+ * ⛔ ISSUES only, never a PR. Every listing feeding this sweep already filters
+ * `!i.pull_request`, so the guard is defence in depth rather than a live
+ * filter — but the row's subject is the DISPATCH POOL and a PR is not in it, so
+ * a predicate that COULD fire on one would have a population that is an
+ * accident of its caller rather than a property of the row.
+ *
+ * A CLOSED card is out, on H24's gate in mirror image: `pm:queue` on a closed
+ * card is residue, counted into the closed census since #14072, and a card
+ * nobody can dispatch is a card nothing over-reads as capacity.
+ *
+ * An unreadable `labels` is out and is never read as "unlabelled" — the
+ * three-input-states discipline (#4690) applied to the one field that decides
+ * membership.
+ */
+export function h54SpeaksAbout(issue) {
+  if (issue?.pull_request) return false;
+  if (issue?.state === 'closed') return false;
+  if (!Array.isArray(issue?.labels)) return false;
+  return labelNames(issue).includes('pm:queue');
+}
+
+/**
+ * H54 — null when clean, else the finding sentence.
+ *
+ * @param {object} issue — a card from a listing this sweep already holds.
+ */
+export function h54DecisionTitledQueueCard(issue) {
+  if (!h54SpeaksAbout(issue)) return null;
+  if (!DECISION_TITLE_PREFIX.test(String(issue?.title ?? ''))) return null;
+  return (
+    '`pm:queue` while the TITLE opens `[Decision]` — the two carriers disagree about what this ' +
+    'card is for. The label puts it in the DISPATCH pool, which a PM seat reads as capacity and ' +
+    'picks from; the prefix declares the deliverable is a RULING, and 「⛔ PM 席不得裁决契约或产品' +
+    '决定」 — so the one act the pool invites is the one act forbidden here. Measured on one lane, ' +
+    'twice: 8 cards read as dispatchable and 1 was, then 21 read and at most 3 were. The others ' +
+    'each cost a full read — body AND comments — to establish they could not be picked up, and ' +
+    'the next seat pays it again, because nothing writes the reading back. ' +
+    '⛔ This row does NOT say which carrier is wrong: 「前缀是作者写的,状态是分诊判的,让前者决定' +
+    '后者就是把分诊席的职责交给了立卡人」, so it reports the disagreement and names the reader. ' +
+    'Remedy, and it belongs to the TRIAGE seat, who re-judges the card: if the decision has ' +
+    'already been RULED, the title is the last thing still advertising an open question — drop ' +
+    'the prefix, or point the body at the ruling comment, and `pm:queue` stands as it is (a ruled ' +
+    'card and a never-ruled card look identical from the body, which is exactly why the title ' +
+    'must stop saying otherwise); if it is genuinely UNRULED it belongs in the decision inbox — ' +
+    '`needs-user-decision`, carrying its four-facet analysis at the moment the label lands, ⛔ not ' +
+    'left for the maintainer to fill in on arrival. ⛔ No new label is needed or wanted: the ' +
+    'vocabulary already carries the state (`needs-user-decision` on cards and PRs, ' +
+    '`pm:awaiting-maintainer` on cards), and the ruled deliverable is 逐卡改判 rather than a new ' +
+    'state. Report-only: this row writes no label, relabels nothing, and its verdict is a ' +
+    'disagreement between two carriers — ⛔ never a finding that the card is mislabelled. ' +
+    '⚠️ It is the cheapest net and not the complete one: a hot-file hold releases on MERGE, a ' +
+    'contract-review-tier wait shows in no carrier at all, and a ruled card keeps its prefix ' +
+    'until someone edits the title. ⛔ None of those is readable here, and none is claimed.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H55 — `pm:awaiting-maintainer` entered WITHOUT its `Maintainer-action:` line
+// (#17017): the ENTRY half of the awaiting state, beside H25's exclusivity half.
+//
+// ## The defect this row reads
+//
+// Every other parked state carries a mandatory machine-readable line — a
+// `pm:blocked` card owes `Blocked-by:` (H4), a `pm:on-hold` card owes
+// `Restart-when:` (H9) — and `pm:awaiting-maintainer` owed nothing: anyone
+// could apply it and no reader could falsify it. The filing card measured the
+// cost on 2026-09-09 over the three multi-lane boards: 55 open cards carried
+// the label, ~49 of them waiting for a JUDGEMENT (the definition of
+// `needs-user-decision`, 决定待做) or for nothing at all (bookkeeping), not
+// for the one action a seat cannot perform (the definition of this state,
+// 决定已做). The state was the only one on the board that did not move —
+// 55 → 55 across ~14h while `pm:queue` moved −84 — because a wrong entry had
+// exactly one reviewer, the director seat, and no machine could notice it:
+// the state has no machine EXIT by construction (H11's note says so, and it
+// is right) and, until this row, no machine ENTRY either. H25 and H29–H31
+// read the label's SHAPE and the important-parked ager reads its TIME;
+// nothing read its MEANING.
+//
+// ## What the protocol now says, and what this row checks
+//
+// `references/state-machine.md` §`pm:awaiting-maintainer`: a card entering
+// the state carries a line-anchored, case-sensitive
+// `Maintainer-action: <one action a seat cannot perform> — done when
+// <checkable evidence>` in the body OR a comment (the `Blocked-by:` /
+// `Restart-when:` channel contract), and 「写不出即决定待做」 — a card that
+// cannot write the line because it is asking for a ruling belongs in
+// `needs-user-decision`. This row reads exactly that: an open card carrying
+// the label whose body and thread carry no such line is a half-state. Both
+// halves are required — a value without its `done when` half names an act with
+// no completion, which is what leaves the ager (H11) holding only an age.
+//
+// ⛔ NOT a machine exit. H11's note stays true — the state has no machine exit
+// BY CONSTRUCTION — and this row adds none: it never fires on the act being
+// DONE, only on the act being UNNAMED. Report-only like every row in this
+// file: it writes no label and relabels nothing.
+//
+// ## Population — scoped so the landing day is not red on the healthy case
+//
+// The filing card's own sequencing is rule first, then a bounded
+// reclassification worklist as a SEPARATE act (⛔ no backfill in the landing
+// PR), and a row that rendered every legacy entry as a finding on the day it
+// landed would be the red-on-healthy shape already ruled against. So entries
+// are split at `MAINTAINER_ACTION_LINE_SINCE`, the instant from which an entry
+// owes the line: a card last touched BEFORE it is a legacy entry and is
+// COUNTED in the summary census (count + oldest), never a row; a card touched
+// ON/AFTER it is judged and can be a row.
+//
+// ⚠️ The split reads `updated_at`, not the `labeled` event. This sweep makes no
+// per-card timeline fetch (H35's header carries the reasoning; the repo-wide
+// event stream it reads instead keeps only gate-semantic labels), so the entry
+// instant is in no payload this loop already holds. `updated_at` is the
+// cheapest HONEST proxy and its error runs one way: `updated_at` is never
+// earlier than the labelling, so a card last touched before the pin certainly
+// entered before it — the census can never hide a post-pin entry — while a
+// legacy entry TOUCHED after the pin lands among the judged and can render as
+// a row. That over-read costs one cheap, idempotent act (write the line, or
+// reclassify) on a card someone is already handling. Measured on the live
+// board at authoring (2026-09-09T17:4xZ): the filing card's 55 had become 7
+// open carriers across the three repos — a seat's reclassification pass moved
+// the rest that morning (objectui: 15 `unlabeled` at 02:56–03:04Z; the
+// objectstack specimens at 02:29–05:12Z, five closed, one back to `pm:queue`)
+// — and of the 7, five have `updated_at` within 3 s of their `labeled` event;
+// the other two were touched 2 h and 25 h after entering. An unreadable
+// `updated_at` is judged, never counted as legacy — an unknown reading must
+// not present as a clean one (#4690).
+//
+// ## Quota
+//
+// The label page is one this sweep's loop already consumes, so membership is
+// free. The thread is bought ONLY for a judged card whose body does not already
+// carry a complete line — `needsRestartWhenComments`'s gate, one field over —
+// and it rides the shared comment cache, so a card another row already fetched
+// costs nothing here. Legacy entries buy nothing.
+// ---------------------------------------------------------------------------
+
+/** The key of the line a card owes on entering `pm:awaiting-maintainer`. */
+export const MAINTAINER_ACTION_KEY = 'Maintainer-action';
+
+/**
+ * The half of the line that names the act's COMPLETION. Read inside the value
+ * on a word boundary rather than as the exact `— done when` spelling, so an
+ * author who typed `-` or `--` for the dash still wrote the line; the KEY stays
+ * byte-exact like `Blocked-by:`.
+ */
+export const MAINTAINER_ACTION_DONE_WHEN = /\bdone when\b/;
+
+/**
+ * The instant from which an entry into the state owes the line — the UTC day
+ * after the rule was written (2026-09-09), so everything the board did before
+ * the rule existed is legacy. Pinned as data rather than derived from the tree:
+ * the PR lands later than it is written, and a legacy card touched between this
+ * instant and the landing is the bounded, stated over-read in the header.
+ */
+export const MAINTAINER_ACTION_LINE_SINCE = '2026-09-10T00:00:00Z';
+
+/** Every `Maintainer-action:` value in this text, decoration removed. */
+export function maintainerActionValues(text) {
+  return directiveValues(text, MAINTAINER_ACTION_KEY);
+}
+
+/** Does this text carry a COMPLETE line — an action AND its `done when` half? */
+export function hasMaintainerActionLine(text) {
+  return maintainerActionValues(text).some((v) => MAINTAINER_ACTION_DONE_WHEN.test(v));
+}
+
+/**
+ * Does H55 speak about this card at all? ISSUES only, never a PR; a CLOSED
+ * card is out (the label on it is residue — H22/H39's reading, not an entry);
+ * an unreadable `labels` is out and never read as unlabelled (#4690).
+ */
+export function h55SpeaksAbout(issue) {
+  if (issue?.pull_request) return false;
+  if (issue?.state === 'closed') return false;
+  if (!Array.isArray(issue?.labels)) return false;
+  return labelNames(issue).includes(AWAITING_MAINTAINER_LABEL);
+}
+
+/**
+ * Where a card falls against the pin, read from `updated_at` (see the header):
+ * `'legacy'` (last touched before it — census), `'judged'` (on/after — a row
+ * candidate), `'undated'` (unreadable — judged, never silently legacy).
+ */
+export function h55EntryClass(issue, since = MAINTAINER_ACTION_LINE_SINCE) {
+  const at = Date.parse(issue?.updated_at ?? '');
+  if (!Number.isFinite(at)) return 'undated';
+  return at < Date.parse(since) ? 'legacy' : 'judged';
+}
+
+/**
+ * Which cards are worth a thread fetch — H55's gathering policy, exported and
+ * pinned for `needsRestartWhenComments`'s reason: a policy that decides what
+ * gets READ AT ALL is where a silent hole would live. Gated on membership, on
+ * NOT being legacy (a census entry buys nothing), then on the body not already
+ * answering.
+ */
+export function needsMaintainerActionComments(issue) {
+  if (!h55SpeaksAbout(issue)) return false;
+  if (h55EntryClass(issue) === 'legacy') return false;
+  return !hasMaintainerActionLine(issue?.body);
+}
+
+/**
+ * H55 — null when clean (or legacy, or out of scope), else the finding sentence.
+ *
+ * Three input states for the thread, never two (#4690) — H4/H9's contract:
+ * `undefined` unconsulted (the sentence claims nothing about comments), `null`
+ * consulted and UNREADABLE (the row still fires and says the second channel is
+ * unjudged, not empty), `string[]` read.
+ *
+ * ⛔ No angle-bracket placeholder in the sentence: it is rendered into a GitHub
+ * issue body, and the platform mutates less-than fragments — the placeholders
+ * are spelled as words (ACTION, EVIDENCE) and the self-test pins the absence.
+ */
+export function h55AwaitingWithoutMaintainerAction(issue, commentBodies) {
+  if (!h55SpeaksAbout(issue)) return null;
+  const entry = h55EntryClass(issue);
+  if (entry === 'legacy') return null;
+  if (hasMaintainerActionLine(issue.body)) return null;
+  const commentsRead = Array.isArray(commentBodies);
+  if (commentsRead && commentBodies.some((b) => hasMaintainerActionLine(b))) return null;
+  const values = [
+    ...maintainerActionValues(issue.body),
+    ...(commentsRead ? commentBodies : []).flatMap((b) => maintainerActionValues(b)),
+  ];
+  const shape =
+    values.length > 0
+      ? `a \`${MAINTAINER_ACTION_KEY}:\` line that names an act but never its completion — no \`done when\` ` +
+        'half — so the act has no checkable end and the ager (H11) is left holding only an age'
+      : commentsRead
+        ? `no \`${MAINTAINER_ACTION_KEY}:\` line in EITHER channel — not in the body, and not in any comment ` +
+          'on the thread (both were read)'
+        : `no \`${MAINTAINER_ACTION_KEY}:\` body line this scan could read`;
+  const unreadable =
+    commentBodies === null
+      ? ` And this card's comment thread could NOT be read this sweep — the second channel (the line parked ` +
+        'in the transition comment, which is where a seat most often writes it) is unjudged, not empty. Read ' +
+        'the thread by hand before acting: an unreadable channel is not an absent one (#4690).'
+      : '';
+  const dated =
+    entry === 'undated'
+      ? ' ⚠️ Its `updated_at` could not be read, so it is judged rather than counted as a legacy entry — an ' +
+        'unknown reading must not present as a clean one.'
+      : '';
+  return (
+    `\`${AWAITING_MAINTAINER_LABEL}\` with ${shape} — the state is 决定已做: the one remaining act is the ` +
+    `maintainer's and outside GitHub, and the entry owes the line \`${MAINTAINER_ACTION_KEY}: ACTION — done when ` +
+    'EVIDENCE` (ACTION = the one action a seat cannot perform, EVIDENCE = what a reader can check) in the body or ' +
+    'a comment — line-anchored and case-sensitive like `Blocked-by:` / `Restart-when:`; a mention mid-sentence is ' +
+    'prose. Without it the label is unfalsifiable: nothing can tell a card waiting for a HAND from one waiting ' +
+    `for a JUDGEMENT.${unreadable}${dated} Remedy, for the seat that applied the label: write the line if the ` +
+    'act exists — an act only the maintainer can perform, and evidence a reader can check. ⚠️ If the line cannot ' +
+    'be written because the card is asking for a RULING, the state is `needs-user-decision` (决定待做), the entry ' +
+    'was misfiled, and the card belongs in the decision inbox carrying its four-facet block. The line is what the ' +
+    "director seat's 职责三 (维护者动作台账) renders, so the 台账 reader is that seat, not this row. ⛔ Not a " +
+    "machine exit: the state still has none by construction (the ager's note stands) — this row judges the ENTRY " +
+    'only and never fires on the act being done. Report-only: it writes no label and relabels nothing. ' +
+    `Population: entries judged by \`updated_at\` on/after ${MAINTAINER_ACTION_LINE_SINCE} — the sweep makes ` +
+    'no per-card timeline fetch, so a legacy entry touched after that instant lands here too, and costs one ' +
+    'idempotent act, never a missed post-pin entry; earlier entries are COUNTED in the summary census and filed ' +
+    'as no row, pending the separate reclassification worklist.'
+  );
+}
+
+/**
+ * The census over legacy entries — count, the oldest by last touch, and how
+ * many carriers had no readable date (those are JUDGED, never counted here).
+ * Pure over the cards the loop already holds; buys nothing.
+ */
+export function h55LegacyCensus(issues, since = MAINTAINER_ACTION_LINE_SINCE) {
+  let count = 0;
+  let undated = 0;
+  let oldest = null;
+  for (const issue of issues ?? []) {
+    if (!h55SpeaksAbout(issue)) continue;
+    const entry = h55EntryClass(issue, since);
+    if (entry === 'undated') {
+      undated += 1;
+      continue;
+    }
+    if (entry !== 'legacy') continue;
+    count += 1;
+    const at = Date.parse(issue.updated_at);
+    if (!oldest || at < oldest.at) oldest = { number: issue.number, at, updatedAt: String(issue.updated_at) };
+  }
+  return { count, undated, oldest };
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -10590,6 +10981,14 @@ export const SWEEP_COUNT_KEYS = [
   'fallbackProbed',
   'restartCandidates',
   'restartProbed',
+  // H55's census and coverage pair (#17017). `awaitingLegacyOldest` is a STRING
+  // (or null), not a counter — it names the oldest legacy entry so the clause
+  // renders `oldest #N (last touched …)` rather than a bare count.
+  'awaitingLegacy',
+  'awaitingLegacyOldest',
+  'awaitingUndated',
+  'maintainerActionCandidates',
+  'maintainerActionProbed',
   'blockerTargets',
   'blockerResolved',
   'dispatchRefTargets',
@@ -10778,6 +11177,16 @@ export function summaryLine(counts, findingCount) {
   // all answered from the body (#4690).
   const rwProbed = counts.restartProbed ?? 0;
   const rwCandidates = counts.restartCandidates ?? 0;
+  // H55's census and pair (#17017). The census is a COUNT rather than rows by
+  // design — legacy entries predate the line they would now owe — so this
+  // clause is the only place a reader can see them at all, which is why it
+  // renders on every run, oldest named, beside the pair that says how many
+  // judged threads were actually read.
+  const awaitingLegacy = counts.awaitingLegacy ?? 0;
+  const awaitingLegacyOldest = counts.awaitingLegacyOldest ?? null;
+  const awaitingUndated = counts.awaitingUndated ?? 0;
+  const maProbed = counts.maintainerActionProbed ?? 0;
+  const maCandidates = counts.maintainerActionCandidates ?? 0;
   // The fourth pair, and the one whose shortfall is NOT silent: an unresolved
   // `Blocked-by:` target fires its own H19 row on the card that names it, so
   // this number is a total rather than the only place the gap is visible. It
@@ -10929,6 +11338,13 @@ export function summaryLine(counts, findingCount) {
     `${fbProbed < fbCandidates ? " — H14's stale direction is SUSPENDED for this sweep (the index is known incomplete)" : ''}. ` +
     `\`Restart-when:\` hold comments read on ${rwProbed} of ${rwCandidates} H9 candidate(s)` +
     `${rwProbed < rwCandidates ? " — each unread thread fires its own card's H9 row, never dropped" : ''}. ` +
+    `Awaiting-maintainer entries (H55): ${awaitingLegacy} open \`${AWAITING_MAINTAINER_LABEL}\` card(s) last ` +
+    `touched before ${MAINTAINER_ACTION_LINE_SINCE} — COUNTED here and filed as no row (they entered before the ` +
+    `\`Maintainer-action:\` line was owed; the bounded reclassification worklist is a separate act)` +
+    `${awaitingLegacyOldest ? `, oldest ${awaitingLegacyOldest}` : ''}; ${awaitingUndated} with no readable ` +
+    `\`updated_at\`, judged rather than counted; \`Maintainer-action:\` threads read on ${maProbed} of ` +
+    `${maCandidates} judged candidate(s)` +
+    `${maProbed < maCandidates ? " — each unread thread fires its own card's H55 row, never dropped" : ''}. ` +
     `Blocker liveness (H19): targets resolved on ${btResolved} of ${btTargets} distinct \`Blocked-by:\` ` +
     `target(s) named by open \`pm:blocked\` card(s)` +
     `${
@@ -11183,6 +11599,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h17Holds', 'Hold comments read on '],
   ['h14Fallback', '`Blocked-by:` comment fallback read on '],
   ['h9Restart', '`Restart-when:` hold comments read on '],
+  ['h55Awaiting', 'Awaiting-maintainer entries (H55): '],
   ['h19Blockers', 'Blocker liveness (H19): '],
   ['h20Dispatch', 'Dispatch liveness (H20 + H27): '],
   ['h32Seats', 'Seat liveness (H32): '],
@@ -11593,6 +12010,35 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // ⛔ Not `inventory` either: it alarms about one card, not a population, even
   // though the first census found fourteen at once.
   H53: 'state',
+
+  // H54 is a `state`, and each of the other three bands is refused for its own
+  // stated criterion. ⛔ Not `gate`: that band exists for the row that can tell
+  // a STRIPPED gate from an ungated card — an ABSENCE reading as a green light
+  // — and here both carriers are present and legible; nothing was removed.
+  // ⛔ Not `stall`: whether any of these cards is actually STOPPED is UNMEASURED
+  // by this row, and the filing thread's own correction found the lane's binding
+  // constraint to be contract-review-tier headroom rather than rulings — so the
+  // row claims no card is halted. ⛔ Not `inventory`: it alarms about one card,
+  // not a population, even though the first census found nine at once. What is
+  // left is `state`'s definition exactly — two carriers on one LIVE card
+  // contradicting each other, the whole repair on the board, in one seat's
+  // judgement.
+  H54: 'state',
+
+  // H55 is a `state` (#17017), and the other three bands are refused on their
+  // own criteria. ⛔ Not `gate`: that band is for an ABSENCE reading as a green
+  // light on a gate that may have been stripped; here nothing was stripped — a
+  // line the state now owes was never written, and its absence reads as a
+  // half-written label, not as clearance. ⛔ Not `stall`: the awaiting state is
+  // parked BY DEFINITION, line or no line, so this row claims nothing about the
+  // card being stopped — H4 is `stall` because a blocked card without its line
+  // is one the unlock scan can never free, and no scan frees this state either
+  // way. ⛔ Not `inventory`: the row alarms about one card; the legacy CENSUS
+  // is a summary clause and never a row, so it takes no band at all (H39's
+  // shape). What is left is `state`'s definition exactly — a half-written
+  // label on a live card, the repair on the board — and it is H9's band, the
+  // row this one is the awaiting-state twin of.
+  H55: 'state',
 
   // H52 is a `stall` and not a `state` (#16662): the board is not contradicting
   // itself — every label on the card is correct — and no later sweep frees the
@@ -12928,6 +13374,14 @@ async function sweep(options = {}) {
     // channel could change, and how many threads were actually read (#10403).
     restartCandidates: 0,
     restartProbed: 0,
+    // H55's census and coverage pair (#17017) — legacy awaiting entries counted
+    // rather than filed, and how many judged threads were read. Initialised so a
+    // sweep that throws early still renders numbers, never `undefined`.
+    awaitingLegacy: 0,
+    awaitingLegacyOldest: null,
+    awaitingUndated: 0,
+    maintainerActionCandidates: 0,
+    maintainerActionProbed: 0,
     // H19's coverage pair — distinct `Blocked-by:` targets seen, and how many
     // got a definite open/closed answer.
     blockerTargets: 0,
@@ -14533,6 +14987,28 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   const restartFor = (issue) =>
     restart.unreadable.has(issue.number) ? null : restart.comments.get(issue.number);
 
+  // The `Maintainer-action:` thread read (#17017) — H55's one purchase, the
+  // same gated-fallback pattern as H9's over the same shared cache, so an
+  // awaiting card another row already fetched costs no second request. Its
+  // stats pair is separate because it answers for a different candidate set,
+  // and nothing goes quiet on a failure: an unreadable thread fires its own
+  // card's H55 row, saying the second channel is unjudged rather than empty.
+  const maintainerAction = { comments: new Map(), unreadable: new Set() };
+  const gatherMaintainerActionComments = async (issue) => {
+    if (maintainerAction.comments.has(issue.number) || maintainerAction.unreadable.has(issue.number)) return;
+    stats.maintainerActionCandidates = (stats.maintainerActionCandidates ?? 0) + 1;
+    try {
+      const bodies = await commentsFor(issue);
+      stats.maintainerActionProbed = (stats.maintainerActionProbed ?? 0) + 1;
+      maintainerAction.comments.set(issue.number, bodies);
+    } catch {
+      maintainerAction.unreadable.add(issue.number);
+    }
+  };
+  /** What H55 gets for a card: `undefined` unconsulted, `null` unreadable, else the bodies. */
+  const maintainerActionFor = (issue) =>
+    maintainerAction.unreadable.has(issue.number) ? null : maintainerAction.comments.get(issue.number);
+
   // H32's gathered seat markers (#11706), judged after the label pages finish:
   // the predicate needs the LANE INVENTORY, and that is a count over the
   // `pm:queue`/`pm:dispatched` listings which are only complete once this loop
@@ -14561,6 +15037,13 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
           "still the epic's.",
       ]);
     }
+    // H54 — the same free read one field further: a label AND a title, both of
+    // them fields of a payload this loop already paid for. Its population is
+    // covered BY CONSTRUCTION for H45's reason — the carrier holds `pm:queue`,
+    // which is a page this loop consumes, so the row can never be about a card
+    // the sweep did not list.
+    const decisionInQueue = h54DecisionTitledQueueCard(issue);
+    if (decisionInQueue) findings.push([issue, 'H54', decisionInQueue]);
     // H24 + H25 — two field/label intersections over cards this loop already
     // holds, so neither costs a request. H24's population is the `pm:queue`
     // listing; H25's carriers are all listed too, either by the awaiting label
@@ -14569,6 +15052,14 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (queuedAndTaken) findings.push([issue, 'H24', queuedAndTaken]);
     const doubleState = h25AwaitingMaintainerExclusivity(issue);
     if (doubleState) findings.push([issue, 'H25', doubleState]);
+    // H55 (#17017) — the ENTRY half of the awaiting state, H25 above being the
+    // exclusivity half. Membership is free (the awaiting label page is one this
+    // loop consumes); the thread is bought only for a judged, body-clean card
+    // (`needsMaintainerActionComments`); legacy entries are counted into the
+    // summary census after this loop and buy nothing.
+    if (needsMaintainerActionComments(issue)) await gatherMaintainerActionComments(issue);
+    const unnamedAct = h55AwaitingWithoutMaintainerAction(issue, maintainerActionFor(issue));
+    if (unnamedAct) findings.push([issue, 'H55', unnamedAct]);
     // H29 + H30 — the same free reads, one label-set and one timestamp. Their
     // populations are covered here BY CONSTRUCTION: every H29 pair contains at
     // least one label this loop lists (the ONE-OF vocabulary is the label pages
@@ -14707,6 +15198,18 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       if (releaseDesync) findings.push([issue, 'H47', releaseDesync]);
     }
   }
+
+  // H55's census (#17017) — the legacy half of the awaiting population, counted
+  // rather than filed: entries last touched before `MAINTAINER_ACTION_LINE_SINCE`
+  // predate the line they would now owe, and rendering them as rows on the day
+  // the rule landed would be the red-on-healthy shape ruled against. Pure over
+  // the cards this loop already holds; buys nothing.
+  const awaitingCensus = h55LegacyCensus([...seen.values()]);
+  stats.awaitingLegacy = awaitingCensus.count;
+  stats.awaitingUndated = awaitingCensus.undated;
+  stats.awaitingLegacyOldest = awaitingCensus.oldest
+    ? `#${awaitingCensus.oldest.number} (last touched ${awaitingCensus.oldest.updatedAt.slice(0, 10)})`
+    : null;
 
   // …but if NO hold comment could be read at all, the index would render as
   // "no open hold names a trigger file" — which is the 0-for-19 silence with a
@@ -22571,6 +23074,239 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H53 summary: …and names the merged-window bound on its PR leg', saidBy('h53Carrier', summaryLine({}, 0)).includes('a landing older than that window is as invisible here as it is to H8'), true);
   t('H53 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h53Carrier', summaryLine({}, 0)).includes('0 of 0'), true);
   t('H53 summary: a bare line renders numbers, never `undefined`', saidBy('h53Carrier', summaryLine({}, 0)).includes('undefined'), false);
+
+  // -- H54 — a `[Decision]`-titled card sitting in the DISPATCH pool (#16688) -
+  // The fixtures are SYNTHETIC (⛔ the self-test never touches GitHub); their
+  // shapes come from the nine live carriers measured 2026-09-09 and from the
+  // two prefixes that must stay apart on this board — `[Decision]` (9 live) and
+  // `[finding]` (80 live), which is the one that must NOT be caught.
+  const card54 = (extra = {}) => ({
+    number: 15071,
+    state: 'open',
+    labels: [{ name: 'pm:queue' }],
+    assignees: [],
+    body: '',
+    title: '[Decision] sandboxed CRASH vs the unwrap door',
+    ...extra,
+  });
+  const h54 = (extra = {}) => h54DecisionTitledQueueCard(card54(extra));
+
+  // ⭐ The positive control, then SIX negatives — each differing from the
+  // positive in exactly ONE feature, so a case can only be answered by the
+  // feature its name claims. The table is length-pinned and then driven whole:
+  // a fixture that stops being exercised fails here rather than going quiet.
+  t('H54 fires: a `[Decision]`-titled open card carrying `pm:queue`', typeof h54(), 'string');
+  const NEGATIVES54 = [
+    ['`pm:queue` with no prefix — the ordinary dispatchable card', { title: 'client SDK `organizations.invite` accepts no `role?`' }],
+    ['a `[finding]` prefix — the 80-strong prefix that must NOT be caught', { title: '[finding] `domain:cli`\'s `pm:queue` reads as 8 dispatchable cards and is 1' }],
+    ['`[Decision]` carrying `needs-user-decision` and NOT `pm:queue` — already in the inbox', { labels: [{ name: 'needs-user-decision' }] }],
+    ['a CLOSED card — nothing over-reads it as capacity', { state: 'closed' }],
+    ['a PULL REQUEST — the dispatch pool is cards, ⛔ never PRs', { pull_request: { url: 'x' } }],
+    ['`[Decision]` LATER in the title — a mention, not the prefix', { title: 'rename the [Decision] title convention' }],
+  ];
+  t('H54 controls: the negative table is exercised WHOLE — six fixtures, none quietly dropped', NEGATIVES54.length, 6);
+  for (const [why, extra] of NEGATIVES54) t(`H54 silent: ${why}`, h54(extra), null);
+
+  // The anchor, read from both sides.
+  t('H54 anchor: leading whitespace still opens the title', typeof h54({ title: '  [Decision] rename `specVersionGap` to `protocolVersionGap`' }), 'string');
+  t('H54 anchor: a lowercase spelling is one author\'s one intent, not a clean queue', typeof h54({ title: '[decision] does a declared 5xx on a polled route log per request' }), 'string');
+  t('H54 anchor: ⛔ `[Decisions log]` is not this prefix — the bracket closes on the word', h54({ title: '[Decisions log] the batch' }), null);
+  t('H54 anchor: ⛔ nor `[Decision-log]`', h54({ title: '[Decision-log] the batch' }), null);
+  t('H54 anchor: ⛔ nor the bare word without brackets', h54({ title: 'Decision: rename the field' }), null);
+  t('H54 anchor: a card with no title at all is clean, never a crash', h54({ title: undefined }), null);
+
+  // Population — the same three-input-states care every row here takes.
+  t('H54 population: an open `pm:queue` card is in', h54SpeaksAbout(card54()), true);
+  t('H54 population: a closed one is out', h54SpeaksAbout(card54({ state: 'closed' })), false);
+  t('H54 population: a PR is out', h54SpeaksAbout(card54({ pull_request: { url: 'x' } })), false);
+  t('H54 population: an unreadable `labels` is out, never read as unlabelled', h54SpeaksAbout(card54({ labels: undefined })), false);
+  t('H54 population: a missing card is out, never a crash', h54SpeaksAbout(undefined), false);
+  t('H54: …and the predicate itself does not crash on one either', h54DecisionTitledQueueCard(undefined), null);
+
+  // Adjacency — ⛔ this row restates no neighbour's verdict on its own specimen.
+  t('H54 adjacency: H24 is silent — the card is UNASSIGNED, which is correct for `pm:queue`', h24QueuedWithAssignee(card54()), null);
+  t('H54 adjacency: H3 is silent — one pm state label, not two', h3QueueAndDispatched(card54()), false);
+  t('H54 adjacency: H45 is silent — `pm:epic` is not in play', h45EpicAndQueued(card54()), false);
+
+  // The row's own sentence — the halves triage's acceptance criterion requires.
+  t('H54 row: it reports a DISAGREEMENT rather than a verdict', h54().includes('the two carriers disagree'), true);
+  t('H54 row: …and quotes the prohibition that makes the pool dangerous here', h54().includes('⛔ PM 席不得裁决契约或产品决定'), true);
+  t('H54 row: ⛔ the prefix is NOT the state, in the ruling\'s own words', h54().includes('让前者决定后者就是把分诊席的职责交给了立卡人'), true);
+  t('H54 row: the remedy names the reader — the TRIAGE seat, who re-judges the card', h54().includes('belongs to the TRIAGE seat, who re-judges the card'), true);
+  t('H54 row: …the RULED branch drops the prefix and leaves `pm:queue` standing', h54().includes('`pm:queue` stands as it is'), true);
+  t('H54 row: …the UNRULED branch names the inbox AND its four-facet block', h54().includes('`needs-user-decision`, carrying its four-facet analysis'), true);
+  t('H54 row: ⛔ no new label — the vocabulary already carries the state', h54().includes('⛔ No new label is needed or wanted'), true);
+  t('H54 row: report-only — it writes nothing and relabels nothing', h54().includes('writes no label, relabels nothing'), true);
+  t('H54 row: it declares what it CANNOT see, so a reader does not over-trust it', h54().includes('the cheapest net and not the complete one'), true);
+  t('H54 row: not a loud finding', isLoudFinding(h54()), false);
+
+  // Band + registry.
+  t('H54 band: registered as a STATE row — the repair is on the board', familyBand('H54'), 'state');
+  t('H54 band: ⛔ NOT `stall` — this row claims no card is stopped', familyBand('H54') === 'stall', false);
+  t('H54 band: ⛔ NOT `gate` — both carriers are PRESENT, so no absence reads as a green light', familyBand('H54') === 'gate', false);
+  t('H54 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H54'), true);
+  t('H54 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H54 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H54 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H54 band: a gate row still outranks it, so H31/H35 survive the trim longer', familyRank('H31') < familyRank('H54'), true);
+
+  // ⚖️ The reconciliation half. H26's deferred-target note said this shape was
+  // 「deliberately NOT reported … a title heuristic would make this sweeper guess
+  // at intent」. That stance was about H26 inferring a BLOCK's fate from its
+  // TARGET's title and it stands — ⛔ H26 is not widened, and both sites still
+  // carry its criterion. What changed is that both now point at the row that
+  // does read the shape, so the file no longer contradicts itself. Pinned on the
+  // source, because a pointer nobody checks is the declared-not-enforced shape
+  // this file spends its length refusing. The needles are ASSEMBLED at runtime
+  // so these two cases cannot satisfy themselves out of their own source text.
+  const SELF54 = readFileSync(SELF_PATH, 'utf8');
+  t('H54 reconciliation: BOTH deferred-target prose sites point at this row', SELF54.split(['H54 reports the title', 'label disagreement'].join('/')).length - 1, 2);
+  t('H54 reconciliation: ⛔ and both keep H26\'s own criterion — the row is NOT widened', SELF54.split(['guess at', 'intent'].join(' ')).length - 1, 2);
+
+  // -- H55 — `pm:awaiting-maintainer` entered without its `Maintainer-action:` line (#17017)
+  // Fixtures are SYNTHETIC (⛔ the self-test never touches GitHub); their shape
+  // is the live carriers measured 2026-09-09 (7 open across three repos), and
+  // the dates sit on either side of the pin on purpose.
+  const AFTER55 = '2026-09-12T08:00:00Z';
+  const BEFORE55 = '2026-09-08T14:01:58Z';
+  const card55 = (extra = {}) => ({
+    number: 16737,
+    state: 'open',
+    labels: [{ name: AWAITING_MAINTAINER_LABEL }],
+    assignees: [],
+    body: 'Ruled: the repository variable is set by hand.',
+    title: 'ops: `OS_ROUTING_MODE` must be set on the live deployment',
+    updated_at: AFTER55,
+    ...extra,
+  });
+  const LINE55 = 'Maintainer-action: set repository variable `OS_ROUTING_MODE=strict` on objectstack-ai/cloud — done when `gh variable list` shows it';
+  const h55 = (extra = {}, comments) => h55AwaitingWithoutMaintainerAction(card55(extra), comments);
+  const h55row = (extra = {}, comments) => String(h55(extra, comments) ?? '');
+
+  t('H55 pin: the since-instant is a fixed, parseable ISO instant', Number.isFinite(Date.parse(MAINTAINER_ACTION_LINE_SINCE)), true);
+  t('H55 pin: …and it is the UTC day after the rule was written', MAINTAINER_ACTION_LINE_SINCE, '2026-09-10T00:00:00Z');
+
+  // ⭐ The positive control, then the negatives — each differing from the
+  // positive in exactly ONE feature. The table is length-pinned and driven whole.
+  t('H55 fires: an open awaiting card on the judged side of the pin, no line anywhere', typeof h55(), 'string');
+  const NEGATIVES55 = [
+    ['the line in the BODY — the card discharged its duty there', { body: `Context.\n${LINE55}\n` }],
+    ['`needs-user-decision` instead of the awaiting label — the inbox owes a ruling, not this line', { labels: [{ name: 'needs-user-decision' }] }],
+    ['a CLOSED card — the label on it is residue, not an entry', { state: 'closed' }],
+    ['a PULL REQUEST — the state is on cards, ⛔ never PRs', { pull_request: { url: 'x' } }],
+    ['a LEGACY entry — last touched before the pin, counted in the census instead', { updated_at: BEFORE55 }],
+  ];
+  t('H55 controls: the negative table is exercised WHOLE — five fixtures, none quietly dropped', NEGATIVES55.length, 5);
+  for (const [why, extra] of NEGATIVES55) t(`H55 silent: ${why}`, h55(extra), null);
+  t('H55 silent: the line in a COMMENT — either channel discharges the duty', h55({}, ['ack', LINE55]), null);
+
+  // The line is a LINE, like `Blocked-by:` — anchored, case-sensitive, both halves.
+  t('H55 fires: the spelling mid-sentence is prose, not the line', typeof h55({ body: 'the Maintainer-action: here is to set the variable — done when it shows' }), 'string');
+  t('H55 fires: …and so is a comment that only mentions it', typeof h55({}, ['someone should add a Maintainer-action: line — done when they do']), 'string');
+  t('H55 fires: a lowercase key is a line the scan cannot see', typeof h55({ body: 'maintainer-action: set the variable — done when it shows' }), 'string');
+  t('H55 fires: a valueless key is not a line', typeof h55({ body: 'Maintainer-action:' }), 'string');
+  t('H55 fires: an action WITHOUT its `done when` half is half a line', typeof h55({ body: 'Maintainer-action: set the repository variable' }), 'string');
+  t('H55 row: …and the sentence says which half is missing', h55row({ body: 'Maintainer-action: set the repository variable' }).includes('never its completion'), true);
+  t('H55 silent: a decorated line still counts (backticks)', h55({ body: `\`${LINE55}\`` }), null);
+  t('H55 silent: a decorated line still counts (bullet + bold key)', h55({ body: '- **Maintainer-action:** set it — done when shown' }), null);
+  t('H55 silent: the dash spelling is not the contract — `--` still carries the `done when` half', h55({ body: 'Maintainer-action: set it -- done when it shows' }), null);
+  t('H55 values: the shared reader strips the decoration it opened with', maintainerActionValues(`\`${LINE55}\``)[0]?.endsWith('shows it'), true);
+
+  // Three input states for the thread (#4690).
+  t('H55 unconsulted: fires on the body alone and claims nothing about comments', h55row({}, undefined).includes('body line this scan could read'), true);
+  t('H55 unreadable: fires and says the thread is UNJUDGED, not empty', h55row({}, null).includes('could NOT be read this sweep'), true);
+  t('H55 read: both channels judged, and the sentence says so', h55row({}, ['no line here']).includes('both were read'), true);
+
+  // Population and the pin.
+  t('H55 population: an open awaiting card is in', h55SpeaksAbout(card55()), true);
+  t('H55 population: a closed one is out', h55SpeaksAbout(card55({ state: 'closed' })), false);
+  t('H55 population: a PR is out', h55SpeaksAbout(card55({ pull_request: { url: 'x' } })), false);
+  t('H55 population: an unreadable `labels` is out, never read as unlabelled', h55SpeaksAbout(card55({ labels: undefined })), false);
+  t('H55 population: a missing card is out, never a crash', h55SpeaksAbout(undefined), false);
+  t('H55: …and the predicate does not crash on one either', h55AwaitingWithoutMaintainerAction(undefined, []), null);
+  t('H55 entry class: last touched before the pin is legacy', h55EntryClass(card55({ updated_at: BEFORE55 })), 'legacy');
+  t('H55 entry class: touched on/after the pin is judged', h55EntryClass(card55()), 'judged');
+  t('H55 entry class: exactly AT the pin is judged, not legacy', h55EntryClass(card55({ updated_at: MAINTAINER_ACTION_LINE_SINCE })), 'judged');
+  t('H55 entry class: an unreadable date is undated — never silently legacy', h55EntryClass(card55({ updated_at: undefined })), 'undated');
+  t('H55 fires: an undated card is judged rather than counted', typeof h55({ updated_at: 'not a date' }), 'string');
+  t('H55 row: …and says so', h55row({ updated_at: 'not a date' }).includes('judged rather than counted as a legacy entry'), true);
+
+  // Gathering policy — what buys a thread.
+  t('H55 gate: a judged, body-clean awaiting card buys its thread', needsMaintainerActionComments(card55()), true);
+  t('H55 gate: a body that already carries the line buys nothing', needsMaintainerActionComments(card55({ body: LINE55 })), false);
+  t('H55 gate: a LEGACY entry buys nothing — the census is free', needsMaintainerActionComments(card55({ updated_at: BEFORE55 })), false);
+  t('H55 gate: a card outside the population buys nothing', needsMaintainerActionComments(card55({ labels: [{ name: 'pm:queue' }] })), false);
+  t('H55 gate: an undated card buys its thread (judged, not legacy)', needsMaintainerActionComments(card55({ updated_at: undefined })), true);
+
+  // The census — count + oldest, legacy only.
+  const census55 = h55LegacyCensus([
+    card55({ number: 1, updated_at: '2026-09-09T10:29:19Z' }),
+    card55({ number: 2, updated_at: '2026-08-29T06:46:28Z' }),
+    card55({ number: 3 }),
+    card55({ number: 4, updated_at: undefined }),
+    card55({ number: 5, state: 'closed', updated_at: BEFORE55 }),
+    { number: 6, state: 'open', labels: [{ name: 'pm:queue' }], updated_at: BEFORE55 },
+  ]);
+  t('H55 census: counts the legacy carriers only', census55.count, 2);
+  t('H55 census: names the OLDEST by last touch', census55.oldest?.number, 2);
+  t('H55 census: …with its date', census55.oldest?.updatedAt, '2026-08-29T06:46:28Z');
+  t('H55 census: undated carriers are counted apart, never as legacy', census55.undated, 1);
+  t('H55 census: an empty board is a zero census, never a crash', h55LegacyCensus([]).count, 0);
+  t('H55 census: …and a missing list is too', h55LegacyCensus(undefined).oldest, null);
+
+  // Adjacency — ⛔ this row restates no neighbour's verdict on its own specimen.
+  t('H55 adjacency: H25 is silent — one pm state label, not two', h25AwaitingMaintainerExclusivity(card55()), null);
+  t('H55 adjacency: H29 is silent for the same reason', h29PmStateExclusivity(card55()), null);
+  t('H55 adjacency: H11 is silent — no importance signal on the specimen', h11ImportantParked(card55({ created_at: '2026-08-01T00:00:00Z' })), null);
+
+  // The row's own sentence — the halves the ruling requires.
+  t('H55 row: names the line, both halves', h55row().includes('done when EVIDENCE'), true);
+  t('H55 row: the remedy routes an unwritable line to the decision inbox', h55row().includes('the state is `needs-user-decision` (决定待做)'), true);
+  t('H55 row: …and names the entry state in the state model\'s own words', h55row().includes('决定已做'), true);
+  t('H55 row: the 台账 reader is the director seat\'s 职责三', h55row().includes('职责三'), true);
+  t('H55 row: ⛔ not a machine exit — the ager\'s note stands', h55row().includes('Not a machine exit'), true);
+  t('H55 row: report-only — it writes nothing and relabels nothing', h55row().includes('writes no label and relabels nothing'), true);
+  t('H55 row: it names the channel contract', h55row().includes('line-anchored and case-sensitive'), true);
+  t('H55 row: it declares the `updated_at` proxy and its one-way error', h55row().includes('no per-card timeline fetch'), true);
+  t('H55 row: ⛔ no angle-bracket placeholder reaches the anchor body', /[<>]/.test(h55row()), false);
+  t('H55 row: not a loud finding', isLoudFinding(h55()), false);
+
+  // Band + registry.
+  t('H55 band: registered as a STATE row — a half-written label, repairable from the board', familyBand('H55'), 'state');
+  t('H55 band: ⛔ NOT `stall` — the state is parked by definition, line or no line', familyBand('H55') === 'stall', false);
+  t('H55 band: ⛔ NOT `gate` — no absence here reads as a green light', familyBand('H55') === 'gate', false);
+  t('H55 band: ⛔ NOT `inventory` — the row alarms per card; the census is a clause, not a row', familyBand('H55') === 'inventory', false);
+  t('H55 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H55'), true);
+  t('H55 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H55 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H55 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H55 band: a gate row still outranks it', familyRank('H31') < familyRank('H55'), true);
+
+  // Summary clause — the census renders on EVERY run, never `undefined`.
+  const oldest55 = '#5828 (last touched 2026-08-29)';
+  t('H55 summary: the clause renders its own census', saidBy('h55Awaiting', summaryLine({ awaitingLegacy: 7, awaitingLegacyOldest: oldest55 }, 0)).includes(`7 open \`${AWAITING_MAINTAINER_LABEL}\` card(s) last touched before`), true);
+  t('H55 summary: …names the oldest', saidBy('h55Awaiting', summaryLine({ awaitingLegacyOldest: oldest55 }, 0)).includes('oldest #5828'), true);
+  t('H55 summary: …and no oldest when the census is empty', saidBy('h55Awaiting', summaryLine({}, 0)).includes('oldest'), false);
+  t('H55 summary: …says the census is filed as NO ROW', saidBy('h55Awaiting', summaryLine({}, 0)).includes('filed as no row'), true);
+  t('H55 summary: …and that the worklist is a separate act', saidBy('h55Awaiting', summaryLine({}, 0)).includes('separate act'), true);
+  t('H55 summary: the coverage pair is reported', saidBy('h55Awaiting', summaryLine({ maintainerActionCandidates: 3, maintainerActionProbed: 2 }, 0)).includes('2 of 3 judged candidate(s)'), true);
+  t('H55 summary: …and a shortfall says each unread thread fires its own row', saidBy('h55Awaiting', summaryLine({ maintainerActionCandidates: 3, maintainerActionProbed: 2 }, 0)).includes("fires its own card's H55 row"), true);
+  t('H55 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h55Awaiting', summaryLine({}, 0)).includes('0 open'), true);
+  t('H55 summary: a bare line renders numbers, never `undefined`', saidBy('h55Awaiting', summaryLine({}, 0)).includes('undefined'), false);
+  t('H55 summary: every count rides the enumerated forwarding contract', ['awaitingLegacy', 'awaitingLegacyOldest', 'awaitingUndated', 'maintainerActionCandidates', 'maintainerActionProbed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+
+  // ⚖️ The reconciliation half, pinned on the SOURCE (H54's discipline): the
+  // two prose sites that deferred or denied an ENTRY grammar for this state
+  // now point at this row, and BOTH keep the exit claim — the state has no
+  // machine exit BY CONSTRUCTION — because that claim is still true. Needles
+  // ASSEMBLED at runtime so these cases cannot satisfy themselves out of their
+  // own text.
+  const SELF55 = readFileSync(SELF_PATH, 'utf8');
+  t('H55 reconciliation: the ager\'s note still says the state has no machine EXIT by construction', SELF55.includes(['has no machine exit', 'BY CONSTRUCTION'].join(' ')), true);
+  t('H55 reconciliation: …and now says the state has an ENTRY predicate', SELF55.split(['now has an', 'ENTRY predicate'].join(' ')).length - 1, 1);
+  t('H55 reconciliation: H25\'s deferral points at this row instead of deferring', SELF55.split(['H25 stays the', 'EXCLUSIVITY half'].join(' ')).length - 1, 1);
+  t('H55 reconciliation: …and the ager\'s remedy reads the line before re-asking', h11row(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes('Maintainer-action'), true);
+  t('H55 reconciliation: …without prescribing the re-check this state cannot have', h11row(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes('Restart-when'), false);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.

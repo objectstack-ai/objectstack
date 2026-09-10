@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import {
   ErrorCategory,
   StandardErrorCode,
@@ -159,6 +160,48 @@ describe('EnhancedApiErrorSchema', () => {
       message: 'refused',
     });
     expect('userMessage' in unmarked).toBe(false);
+  });
+
+  // [#16335] Same field, same semantics as `ApiErrorSchema.refusal` — the
+  // producer-side refusal declaration of decision batch #58 (option C).
+  it('carries a producer-declared `refusal`, stays absent when undeclared, and refuses `false`', () => {
+    const declared = EnhancedApiErrorSchema.parse({
+      code: 'NOT_IMPLEMENTED',
+      message: 'References to a `field` item cannot be computed. Ask the owning object instead.',
+      httpStatus: 501,
+      refusal: true,
+    });
+    expect(declared.refusal).toBe(true);
+    expect(declared.message).toBe('References to a `field` item cannot be computed. Ask the owning object instead.');
+
+    const undeclared = EnhancedApiErrorSchema.parse({
+      code: 'NOT_IMPLEMENTED',
+      message: 'withheld as a fault',
+      httpStatus: 501,
+    });
+    expect('refusal' in undeclared).toBe(false);
+
+    const rejected = EnhancedApiErrorSchema.safeParse({
+      code: 'NOT_IMPLEMENTED',
+      message: 'x',
+      httpStatus: 501,
+      refusal: false,
+    });
+    expect(rejected.success).toBe(false);
+    expect(rejected.error?.issues[0]?.path).toEqual(['refusal']);
+  });
+
+  // [#16335] Same pin as `ApiErrorSchema`'s: the shipped
+  // `json-schema/api/EnhancedApiError.json` carries the value rule as
+  // `const: true`, on the generator's own `toJSONSchema` options.
+  it('ships `refusal` as `{ type: boolean, const: true }` in the JSON Schema the tarball carries', () => {
+    const json = z.toJSONSchema(EnhancedApiErrorSchema, { target: 'draft-2020-12' }) as {
+      properties?: Record<string, { type?: unknown; const?: unknown }>;
+    };
+    expect(json.properties?.refusal).toMatchObject({ type: 'boolean', const: true });
+    // Lit control on a neighbour: `retryable` is a plain boolean, no `const`.
+    expect(json.properties?.retryable).toMatchObject({ type: 'boolean' });
+    expect(json.properties?.retryable?.const).toBeUndefined();
   });
 
   it('should accept rate limit error with retry info', () => {
