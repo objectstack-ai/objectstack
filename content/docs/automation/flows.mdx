@@ -2005,8 +2005,33 @@ config: {
 ```
 
 The run then executes as that organization: `tenantId` carries it, the
-notifications a `notify` node emits land in that organization's inboxes, and the
-`sys_automation_run` history row is stamped with it.
+notifications a `notify` node emits land in that organization's inboxes, the
+`sys_automation_run` history row is stamped with it, and every record the run
+reads, updates or deletes is confined to it.
+
+**For a `timeRelative` sweep the declaration also bounds the QUERY.** A sweep
+runs elevated on purpose — a background sweep must see every row rather than the
+RLS-scoped subset an absent user would see — so nothing else keeps its selection
+inside one organization. The declared id rides the sweep's own query, and the
+driver scopes the read: a sweep declared for one organization matches that
+organization's rows and launches a run per match. Elevation and tenancy are
+independent axes, and a sweep carrying only the first is a cross-organization
+scheduled task however its runs are stamped.
+
+<Callout type="warn">
+Two cases where a declaration cannot deliver containment, and both say so rather
+than going quiet. A store with no row-level tenant isolation
+(`@objectstack/driver-memory`) **refuses** a scoped sweep instead of answering it
+unscoped, and the failure is logged at `error` naming the flow — multi-organization
+deployments use `@objectstack/driver-sql`. And on a platform-global object
+(`tenancy: { enabled: false }`) or a federated one, the engine applies no tenant
+scope at all, so the sweep still selects across every organization while its runs
+act as the declared one; the trigger warns at bind, naming the object.
+</Callout>
+
+`os lint`, `os validate` and `objectstack build` report a missing declaration as
+a warning (`flow-schedule-organization-missing`) so it is visible at authoring
+time rather than only in a server log at boot.
 
 **A time-triggered flow that declares none is a declaration error**, refused at
 bind:
