@@ -25206,16 +25206,24 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
     return { calls, rows, st };
   };
   const PASS57 = await runPass();
+  // ⚠️ Row access goes through this, never through `PASS57.rows[0][…]`. An
+  // ABLATION that removes the filter makes the spy refuse, the pass counts one
+  // unread runs read, and the row list is EMPTY — and a bare index would then
+  // throw while evaluating a `t()` argument, aborting the suite before it
+  // prints a single verdict (`selfTest`'s own row-wrapper note). The whole
+  // point of these cases is to be readable when they go red.
+  const firstRow57 = (pass) => pass.rows[0] ?? [{}, '', ''];
   t('H57 pass: the spy saw a runs read and did not throw', PASS57.calls.some((p) => p.includes('/runs?')), true);
   t('H57 pass: …and every runs read it saw carried the filter', PASS57.calls.filter((p) => p.includes('/runs?') && !p.includes('event=schedule')).length, 0);
   t('H57 pass: ⛔ and not one carried a `status=` filter', PASS57.calls.filter((p) => p.includes('status=')).length, 0);
+  t('H57 pass: …so no runs read was refused by the spy', PASS57.st.scheduledUnreadRuns ?? 0, 0);
   t('H57 pass: the failing scheduled run becomes ONE row', PASS57.rows.length, 1);
-  t('H57 pass: …filed under H57', PASS57.rows[0][1], 'H57');
-  t('H57 pass: …naming the workflow the ruling names', PASS57.rows[0][2].includes('check-links.yml'), true);
-  t('H57 pass: …and linked to the run, not to a card', PASS57.rows[0][0].html_url, 'https://x/runs/900');
+  t('H57 pass: …filed under H57', firstRow57(PASS57)[1], 'H57');
+  t('H57 pass: …naming the workflow the ruling names', String(firstRow57(PASS57)[2]).includes('check-links.yml'), true);
+  t('H57 pass: …and linked to the run, not to a card', firstRow57(PASS57)[0].html_url ?? null, 'https://x/runs/900');
   t('H57 pass: the PR-gating workflow bought no runs read', PASS57.st.scheduledGating, 1);
   t('H57 pass: the disabled workflow bought none either', PASS57.st.scheduledInactive, 1);
-  t('H57 pass: …and is NAMED, because a disabled schedule is a death too', PASS57.st.scheduledInactiveNames.includes('disabled_inactivity'), true);
+  t('H57 pass: …and is NAMED, because a disabled schedule is a death too', String(PASS57.st.scheduledInactiveNames ?? '').includes('disabled_inactivity'), true);
   t('H57 pass: three workflow files declare a schedule', PASS57.st.scheduledDeclared, 3);
   t('H57 pass: exactly one of them was judged', PASS57.st.scheduledJudged, 1);
   t('H57 pass: the request bound is one listing plus one read per judged workflow', PASS57.st.scheduledRequests, 2);
