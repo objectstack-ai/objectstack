@@ -16,6 +16,8 @@
     "EpochMs (const)",
     "EpochMs (type)",
     "EvaluatedExpression (type)",
+    "EvaluatedExpressionInput (type)",
+    "EvaluatedExpressionInputSchema (const)",
     "EvaluatedExpressionParsed (type)",
     "EvaluatedExpressionSchema (const)",
     "Expression (type)",

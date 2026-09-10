@@ -21,10 +21,11 @@
  * declared `z.string()`. Neither structural slot is, and the difference was
  * measured rather than assumed:
  *
- *  - `FlowEdgeSchema.condition` is `ExpressionInputSchema`, whose string arm
- *    TRANSFORMS into `{ dialect: 'cel', source }` — so after `FlowSchema.parse`
- *    every authored edge condition is an envelope. The ledger rule applied here
- *    would refuse every conditional edge in every flow.
+ *  - `FlowEdgeSchema.condition` is `EvaluatedExpressionInputSchema` (#15807;
+ *    `ExpressionInputSchema` before), whose string arm TRANSFORMS into
+ *    `{ dialect: 'cel', source }` — so after `FlowSchema.parse` every authored
+ *    edge condition is an envelope. The ledger rule applied here would refuse
+ *    every conditional edge in every flow.
  *  - `FlowNodeSchema.config` is an open `z.record`, so an envelope written at
  *    `config.condition` is passed through verbatim by the parse and evaluated
  *    correctly by `evaluateCondition` (#4336's ruling: the dialect is decided
@@ -34,6 +35,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { STRUCTURAL_CONDITION_SHAPE_REFUSAL } from '@objectstack/spec/automation';
+import { EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
 
 import { AutomationEngine } from './engine.js';
 
@@ -212,6 +214,9 @@ const REFUSED_AT_EVALUATION: Array<[label: string, value: unknown, arm: string]>
     ['an array', ['a'], 'B'],
     ['an object that is neither', {}, 'B'],
     ['an envelope with no source and no ast', { dialect: 'cel' }, 'B'],
+    // Arm B too, since #15807 — admitted by #15792 on purpose while the spec
+    // still admitted the shape, and answering `false` off the empty-source arm.
+    ['an `ast`-only envelope (the #15792 admission, revisited by #15807)', { dialect: 'cel', ast: { kind: 'const', value: true } }, 'B'],
 ];
 
 describe('#16038 — evaluation refuses the same shapes registration does', () => {
@@ -263,11 +268,12 @@ describe('#16038 — evaluation refuses the same shapes registration does', () =
             expect(evaluate({ dialect: 'cel', source: 'record.rating >= 4' })()).toBe(true);
         });
 
-        it('an `ast`-only envelope still answers `false` — that population is #15430/#15807', () => {
-            // `structuralConditionRefusal` admits an `ast`, so this must fall
-            // through to the empty-source arm exactly as before. If this ever
-            // throws, the guard swallowed a different card's population.
-            expect(evaluate({ dialect: 'cel', ast: { kind: 'const' } })()).toBe(false);
+        it('an `ast` BESIDE a string `source` still evaluates — the engine reads `source`', () => {
+            // FLIPPED from "an `ast`-only envelope still answers `false`": that
+            // population was #15430/#15807's, and #15807 closed it (see the
+            // block below). What stays admitted is the envelope the engine can
+            // run: a string `source`, with or without an `ast` next to it.
+            expect(evaluate({ dialect: 'cel', source: 'record.rating >= 4', ast: { kind: 'const' } })()).toBe(true);
         });
 
         it('a WELL-FORMED non-predicate dialect still answers `false`, not a refusal', () => {
@@ -292,6 +298,83 @@ describe('#16038 — evaluation refuses the same shapes registration does', () =
                 .toThrow(/template braces|failed to evaluate as CEL/);
             expect(evaluate({ dialect: 'cel', source: '{record.rating} >= 4' }))
                 .not.toThrow(STRUCTURAL_CONDITION_SHAPE_REFUSAL);
+        });
+    });
+});
+
+/**
+ * #15807 — the edge condition is an EVALUATED slot, and the `ast`-only
+ * admission #15792 left in `structuralConditionRefusal` is revisited with it.
+ *
+ * Measured on #15430 (comment 5550509137): `{ dialect: 'cel', ast: { kind:
+ * 'const', value: true } }` through `evaluateCondition` answered `false` — the
+ * engine reads `expression.source ?? ''`, never `ast`, so an `ast`-only
+ * envelope landed in the empty-source arm and the branch quietly never fired;
+ * registration said nothing. A whitespace-only `source` was the same seam
+ * through the other key.
+ *
+ * Two doors close it, and they close different populations on purpose:
+ *
+ *  - `FlowEdgeSchema.condition` now composes `EvaluatedExpressionInputSchema`,
+ *    so on an EDGE both spellings are refused by `FlowSchema.parse` inside
+ *    `registerFlow`, before the structural pass ever sees the edge — with the
+ *    spec's own sentence (`EVALUATED_EXPRESSION_SOURCE_REQUIRED`).
+ *  - `config.condition` is an open record with no schema in front of it, so
+ *    there the structural pass IS the producer-side gate: the
+ *    `rec.ast !== undefined` admission is gone, and an `ast`-only envelope on
+ *    a start node's trigger gate or a decision node's predicate is refused at
+ *    `registerFlow` and at `evaluateCondition` with ONE
+ *    `STRUCTURAL_CONDITION_SHAPE_REFUSAL`. The whitespace-only STRING ruling
+ *    on that slot is untouched (it is #15662's, and consistent on both sides).
+ */
+describe('#15807 — the edge condition is an evaluated slot; the ast-only admission is gone', () => {
+    const AST_ONLY = { dialect: 'cel', ast: { kind: 'const', value: true } };
+
+    describe('on an EDGE — refused by the schema, at registerFlow, with the evaluated-slot sentence', () => {
+        it('refuses an `ast`-only envelope', () => {
+            expect(register(flowWith({ edgeCondition: AST_ONLY }))).toThrow(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+            // The schema refuses it BEFORE the structural pass runs on the parsed
+            // flow, so the refusal is the spec's, not the structural sentence.
+            expect(register(flowWith({ edgeCondition: AST_ONLY }))).not.toThrow(STRUCTURAL_CONDITION_SHAPE_REFUSAL);
+        });
+
+        it('refuses a `source` that is blank after trimming — envelope and bare-string spellings alike', () => {
+            expect(register(flowWith({ edgeCondition: { dialect: 'cel', source: '   ' } }))).toThrow(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+            expect(register(flowWith({ edgeCondition: '   ' }))).toThrow(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+        });
+
+        it('locates the refusal at the edge the author wrote', () => {
+            expect(register(flowWith({ edgeCondition: AST_ONLY }))).toThrow(/edges.*0.*condition/s);
+        });
+
+        it('CONTROL — an `ast` beside a string `source`, and the bare-string shorthand, still register', () => {
+            expect(register(flowWith({ edgeCondition: { dialect: 'cel', source: '1 == 1', ast: { kind: 'const' } } }))).not.toThrow();
+            expect(register(flowWith({ edgeCondition: '1 == 1' }))).not.toThrow();
+        });
+    });
+
+    describe('on `config.condition` — the revisited admission, one refusal at both doors', () => {
+        const evaluate = (value: unknown) => () =>
+            new AutomationEngine(silentLogger).evaluateCondition(value as never, new Map<string, unknown>([['record', { rating: 5 }]]));
+
+        it('refuses an `ast`-only envelope on the decision predicate and on the START trigger gate', () => {
+            for (const site of ['decisionCondition', 'startCondition'] as const) {
+                expect(register(flowWith({ [site]: AST_ONLY })), site).toThrow(STRUCTURAL_CONDITION_SHAPE_REFUSAL);
+                expect(register(flowWith({ [site]: AST_ONLY })), site).toThrow('Found an object carrying an `ast` but no string `source`');
+            }
+        });
+
+        it('refuses it at evaluation with the SAME sentence — no silent `false` any more', () => {
+            // The measured defect: this answered `false`. It now throws, and the
+            // error names what was found and what the engine evaluates.
+            expect(evaluate(AST_ONLY)).toThrow(STRUCTURAL_CONDITION_SHAPE_REFUSAL);
+            expect(evaluate(AST_ONLY)).toThrow('the engine evaluates `source`, never `ast`');
+            expect(evaluate({ ast: { kind: 'const', value: true } })).toThrow(STRUCTURAL_CONDITION_SHAPE_REFUSAL);
+        });
+
+        it('CONTROL — the whitespace-only STRING ruling on this slot is untouched (#15662)', () => {
+            expect(register(flowWith({ decisionCondition: '   ' }))).not.toThrow();
+            expect(evaluate('   ')()).toBe(false);
         });
     });
 });

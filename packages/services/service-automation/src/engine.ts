@@ -8003,13 +8003,19 @@ export class AutomationEngine implements IAutomationService {
          *
          * ⚠️ Not `predicateSlotRefusal`, the ledger arm's rule, and the
          * difference is measured rather than assumed: `FlowEdgeSchema.condition`
-         * is `ExpressionInputSchema`, whose string arm transforms into
-         * `{ dialect: 'cel', source }`, so after `FlowSchema.parse` EVERY
-         * authored edge condition is an envelope — the ledger rule here would
-         * refuse every conditional edge in every flow. An envelope written at a
-         * node's `config.condition` is likewise passed through verbatim by the
-         * open `z.record` and evaluated correctly (#4336). Both are legitimate;
-         * `structuralConditionRefusal` admits them.
+         * is `EvaluatedExpressionInputSchema` (#15807), whose string arm
+         * transforms into `{ dialect: 'cel', source }`, so after
+         * `FlowSchema.parse` EVERY authored edge condition is an envelope — the
+         * ledger rule here would refuse every conditional edge in every flow.
+         * An envelope written at a node's `config.condition` is likewise passed
+         * through verbatim by the open `z.record` and evaluated correctly
+         * (#4336). Both are legitimate; `structuralConditionRefusal` admits them
+         * — an envelope carrying a string `source`, that is. Since #15807 an
+         * `ast`-only envelope is NOT admitted on either slot: the edge schema
+         * refuses it one step earlier at `FlowSchema.parse`, and on
+         * `config.condition` (an open record, so no schema stands in front) this
+         * pass is the producer-side gate, refusing what `evaluateCondition`
+         * would otherwise read as an empty condition.
          *
          * What it refuses is the value that is neither text nor an expression.
          * `evaluateCondition` reads `expression?.source ?? ''` and the
@@ -9151,9 +9157,12 @@ export class AutomationEngine implements IAutomationService {
      * What it does NOT refuse is what the constructor admits, and those are
      * controls, not oversights: every string (a malformed one still earns the
      * #1491 brace trap or the §1c CEL fault below), absent/`null`, and an
-     * envelope carrying a string `source` or an `ast` — the `ast`-only arm
-     * still falls through to `false`, since that population is #15430/#15807's
-     * and not this ruling's.
+     * envelope carrying a string `source`. The `ast`-only envelope used to be
+     * admitted too, and fell through to a silent `false` here — that population
+     * was #15430/#15807's, not #16038's, and #15807 closed it: the edge schema
+     * refuses it at authoring, and `structuralConditionRefusal` refuses it on
+     * both structural slots, so it is refused here as well, through the same
+     * shared constructor rather than a second rule.
      */
     evaluateCondition(expression: string | { dialect?: string; source?: string; ast?: unknown }, variables: Map<string, unknown>): boolean {
         const shapeRefusal = structuralConditionRefusal(expression);
