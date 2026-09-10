@@ -343,13 +343,15 @@ describe('validateReadonlyHookWrites - GREEN: what a create is NOT judged on', (
   // be false in exactly the way the sudo() hint used to be (#14010). Since
   // #16249 the shape does not arrive at all: the ledger no longer advertises it
   // and the build refuses `.create(` at lowering.
-  // The engine's create-side strip does not judge a PLATFORM object at all
-  // (`staticReadonlyInsertSubject`: `managedBy` set, or a `sys_` name — its
-  // own 403 write guard governs it); the UPDATE path applies no such
-  // exclusion. Pinned in both directions per object shape.
+  // The engine's create-side strip does not judge a PLATFORM-INTERNAL object at
+  // all (`staticReadonlyInsertSubject`: a `sys_` name, or one of the three
+  // `managedBy` buckets whose own 403 write guard governs it); the UPDATE path
+  // applies no such exclusion. Pinned in both directions per object shape.
   it.each([
     ['a sys_ object', { name: 'sys_activity', fields: { verdict: { type: 'text', readonly: true } } }],
-    ['a managedBy object', { name: 'activity', managedBy: 'append-only', fields: { verdict: { type: 'text', readonly: true } } }],
+    ['an append-only object', { name: 'activity', managedBy: 'append-only', fields: { verdict: { type: 'text', readonly: true } } }],
+    ['an engine-owned object', { name: 'run_row', managedBy: 'engine-owned', fields: { verdict: { type: 'text', readonly: true } } }],
+    ['a better-auth object', { name: 'identity_row', managedBy: 'better-auth', fields: { verdict: { type: 'text', readonly: true } } }],
   ])('never flags insert() into %s — outside the create-side strip; the same update() is still flagged', (_label, platformObject) => {
     const hook = (source: string) => ({
       objects: [platformObject],
@@ -360,6 +362,24 @@ describe('validateReadonlyHookWrites - GREEN: what a create is NOT judged on', (
     expect(control).toHaveLength(1);
     expect(control[0].rule).toBe(HOOK_API_UPDATE_READONLY_FIELD);
   });
+
+  // [#15719] The other half: a USER-WRITABLE bucket on an app-authored name is
+  // judged on create now, so the insert() write is a real finding.
+  it.each([['platform'], ['config'], ['system-data']])(
+    'DOES flag insert() into a `managedBy: %s` object — the strip reaches it',
+    (bucket) => {
+      const userWritable = { name: 'deal_row', managedBy: bucket, fields: { verdict: { type: 'text', readonly: true } } };
+      const findings = validateReadonlyHookWrites({
+        objects: [userWritable],
+        hooks: [{
+          name: 'log', object: 'crm_case', events: ['afterInsert'],
+          body: { language: 'js', source: "await ctx.api.object('deal_row').insert({ verdict: 'ok' });" },
+        }],
+      });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].rule).toBe(HOOK_API_UPDATE_READONLY_FIELD);
+    },
+  );
 
   it('never flags create() — the shape cannot reach this rule at all since #16249', () => {
     expect(
