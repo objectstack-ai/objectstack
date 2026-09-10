@@ -2287,6 +2287,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/run-status-liveness.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/run-status-liveness.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/stranded-run-repairability.test.ts",
       "verb": "delete",
       "pinned": 1

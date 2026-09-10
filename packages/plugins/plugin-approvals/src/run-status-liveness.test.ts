@@ -40,6 +40,18 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+// [#4434 / `pnpm check:engine-double-contract`] A fake looser than `ObjectQL`
+// is how a dead REST route once shipped with its suite green, so this double's
+// write verbs route through the REAL dispatch predicates rather than
+// hand-copying an id/multi check. `metadata-core` is where they live (#5619)
+// and this package's vitest config aliases it to SOURCE, so the pin is a
+// verdict about the checkout rather than about build state.
+import {
+  assertEngineDeleteDispatch,
+  assertEngineUpdateDispatch,
+  type EngineDeleteDispatchInput,
+  type EngineUpdateDispatchInput,
+} from '@objectstack/metadata-core';
 import { ExecutionStatus } from '@objectstack/spec/automation';
 import { APPROVAL_STATUSES } from '@objectstack/spec/contracts';
 import {
@@ -63,6 +75,12 @@ function makeFakeEngine() {
   const matches = (row: FakeRow, filter: unknown): boolean => {
     if (!filter || typeof filter !== 'object') return true;
     for (const [k, v] of Object.entries(filter as Record<string, unknown>)) {
+      // ⛔ REFUSE a combinator rather than read it as a field name
+      // (`pnpm check:where-matcher`). This double implements no `$or`/`$and`,
+      // and a matcher that silently treats `$or` as a column is how a double
+      // reports a filter it never applied. `$in` below is a VALUE operator,
+      // which it does implement.
+      if (k.startsWith('$')) throw new Error(`fake engine: unsupported filter combinator ${k}`);
       const rv = row[k];
       if (v != null && typeof v === 'object' && '$in' in (v as Record<string, unknown>)) {
         if (!((v as { $in: unknown[] }).$in).includes(rv)) return false;
@@ -79,13 +97,24 @@ function makeFakeEngine() {
       return rows.slice(0, options?.limit ?? 1000);
     },
     async insert(object: string, data: FakeRow) { ensure(object).push({ ...data }); return { ...data }; },
-    async update(object: string, data: FakeRow) {
+    async update(object: string, data: FakeRow, options?: EngineUpdateDispatchInput) {
+      const dispatch = assertEngineUpdateDispatch(data, options);
       const table = ensure(object);
-      const i = table.findIndex(r => r.id === data.id);
-      if (i >= 0) table[i] = { ...table[i]!, ...data };
-      return table[i];
+      const targets = dispatch.kind === 'by-id'
+        ? table.filter(r => r.id === dispatch.id)
+        : table.filter(r => matches(r, options?.where));
+      for (const r of targets) Object.assign(r, data);
+      return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
     },
-    async delete() { return {}; },
+    async delete(object: string, options?: EngineDeleteDispatchInput) {
+      const dispatch = assertEngineDeleteDispatch(options);
+      const table = ensure(object);
+      const targets = dispatch.kind === 'by-id'
+        ? table.filter(r => r.id === dispatch.id)
+        : table.filter(r => matches(r, options?.where));
+      tables[object] = table.filter(r => !targets.includes(r));
+      return dispatch.kind === 'by-id' ? targets.length > 0 : targets.length;
+    },
     registerHook() {}, unregisterHooksByPackage() { return 0; }, async fire() {},
   };
 }
