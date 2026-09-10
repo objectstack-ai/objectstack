@@ -7,6 +7,7 @@
  *   node scripts/check-closing-keyword-parity.mjs             # judge the shipped parsers
  *   node scripts/check-closing-keyword-parity.mjs --self-test # prove the battery can go red
  *   node scripts/check-closing-keyword-parity.mjs --list      # the registry
+ *   node scripts/check-closing-keyword-parity.mjs --body FILE # what binds in ONE body ("-" reads stdin)
  *
  * ## The seam
  *
@@ -50,6 +51,40 @@
  * differ on purpose in REFERENCE SCOPE (qualified-only / same-repo / bare-only),
  * and those differences are asserted too, so that a widening of the separator
  * cannot quietly widen the scope with it.
+ *
+ * ## The body mode -- the same three parsers, one body
+ *
+ * `--body FILE` (or `-` for stdin) asks a different question of the SAME
+ * parsers: not "do the three agree" but "which of them binds what in THIS
+ * text". It is a pre-flight instrument for a PR body, runnable BEFORE the PR
+ * exists -- otherwise the only enforcement that reads a body is the blocking
+ * gate behind partof-closing-keyword-guard.yml, which fires after the body is
+ * already written.
+ *
+ * It adds NO grammar. It calls `loadParsers()` and runs whatever that returns,
+ * because a fourth spelling transcribed into a body checker is precisely the
+ * defect the sweep below exists to catch. Nor does it collapse the answer: the
+ * three differ on purpose in REFERENCE SCOPE, so a bare reference binding in
+ * two of them and not the third IS the answer, per parser, not noise.
+ *
+ * The case it exists for is prose written to PREVENT a close that arms one.
+ * A sentence of the shape `Merging this must not <verb> #N` binds in every
+ * parser scoped to the bare form, because none of them reads negation -- and
+ * neither does GitHub's own parser (the #10241 specimen below was closed out of
+ * a sentence saying it was not). The safe spelling is zero verbs beside the
+ * number. This mode makes that visible; it decides nothing and blocks nothing.
+ *
+ * Exit register -- three answers, deliberately distinct:
+ *
+ *   0  No registered parser binds anything in the body.
+ *   2  At least one parser binds. NOT a failure: it is the report, and the
+ *      caller decides. It is 2 and not 1 because 1 already means this gate
+ *      could not do its job, and "your body declares a close" must never read
+ *      as "the instrument broke".
+ *   1  The instrument did not run: no path given, an unreadable file, or a
+ *      parser that could not be extracted -- #4690 again, a harness that could
+ *      not find its subject has verified nothing. Never a quiet zero-hit
+ *      answer.
  *
  * ## What is asserted
  *
@@ -98,7 +133,8 @@
 // dispatch-gates: whole-tree-population -- the sweep reads every tracked file (node_modules and dist aside) hunting the closing-keyword grammar, so a card adding prose or a workflow anywhere implicates it; the literals below are the parsers it grades.
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { requireDependency } from './import-prerequisite.mjs';
 const { parseDocument } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
@@ -335,12 +371,73 @@ export function judge(parsers, swept) {
   return failures;
 }
 
+/**
+ * Every hit the registered parsers bind in ONE body, in registry order.
+ *
+ * The answer stays per parser and is never collapsed: the three differ on
+ * purpose in REFERENCE SCOPE, so WHICH one binds is the whole point -- a bare
+ * reference is invisible to the cross-repo closer and decisive to H7, and an
+ * author needs to know which of those two facts they are looking at.
+ *
+ * Parsers carrying a `problem` are skipped here and reported by the caller: an
+ * extraction failure is exit 1, never a zero-hit answer (#4690).
+ */
+export function judgeBody(parsers, body) {
+  const hits = [];
+  for (const p of parsers) {
+    if (p.problem) continue;
+    for (const m of body.matchAll(p.make())) hits.push({ id: p.id, scope: p.scope, text: m[0] });
+  }
+  return hits;
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 function list() {
   for (const p of PARSERS) console.log(`${p.id.padEnd(28)} ${p.scope.padEnd(11)} ${p.file}`);
   for (const n of NON_PARSERS) console.log(`${'(not a parser)'.padEnd(28)} ${''.padEnd(11)} ${n.file}`);
   console.log(`\n${PARSERS.length} parsers + ${NON_PARSERS.length} known non-parser(s)`);
+}
+
+/** `--body <FILE|->`: run the loaded parsers over one body. See the header. */
+function bodyMode(pathOrDash) {
+  if (!pathOrDash) {
+    console.error(`usage: node ${SELF} --body <FILE>   ("-" reads the body from stdin)`);
+    console.error('No body was read, so nothing was verified.');
+    return 1;
+  }
+  const where = pathOrDash === '-' ? 'stdin' : pathOrDash;
+  let body;
+  try {
+    body = readFileSync(pathOrDash === '-' ? 0 : pathOrDash, 'utf8');
+  } catch (err) {
+    console.error(`check-closing-keyword-parity --body: cannot read ${where} -- ${err.message}`);
+    return 1;
+  }
+
+  const parsers = loadParsers(repoRoot());
+  const hits = judgeBody(parsers, body);
+  for (const h of hits) console.log(`${h.id.padEnd(28)} ${`(${h.scope})`.padEnd(13)} ${h.text}`);
+
+  const broken = parsers.filter((p) => p.problem);
+  if (broken.length > 0) {
+    console.error(`\ncheck-closing-keyword-parity --body: ${broken.length} of ${parsers.length} parser(s) could not be extracted, so ${where} was NOT fully read:\n`);
+    for (const p of broken) console.error(`  • [${p.id}] ${p.problem}`);
+    console.error(`\nRegistry: node ${SELF} --list`);
+    return 1;
+  }
+
+  if (hits.length === 0) {
+    console.log(`check-closing-keyword-parity --body: OK (no registered parser binds a closing declaration in ${where}; ${parsers.length} parsers consulted).`);
+    return 0;
+  }
+  const ids = new Set(hits.map((h) => h.id));
+  console.log(
+    `\ncheck-closing-keyword-parity --body: ${hits.length} closing declaration(s) in ${where}, `
+    + `bound by ${ids.size} of ${parsers.length} registered parser(s). Merging a PR with this body acts on them; `
+    + 'the safe spelling for a reference you do NOT want acted on is zero verbs beside the number.',
+  );
+  return 2;
 }
 
 function run() {
@@ -472,6 +569,59 @@ function selfTest() {
     'X7: a registered file that stopped carrying the grammar is caught',
   );
 
+  // 5. The BODY MODE, on the fixtures sections 2-4 already grade. The
+  //    references come from `REFS` and the refusals from `SCOPES`, so a case
+  //    here cannot drift away from what this file asserts about the same three
+  //    parsers -- and each expectation is the parser SET, because the per-parser
+  //    scope split is the answer the mode exists to show.
+  const loaded = loadParsers(root);
+  const bound = (text) => [...new Set(judgeBody(loaded, text).map((h) => h.id))].sort().join(',');
+
+  //    The negation trap, the case the mode exists for: prose written to PREVENT
+  //    a close still binds, in every parser scoped to the bare form.
+  const negation = `Merging this must not close ${REFS.bare}`;
+  assert(
+    bound(negation) === 'duplicate-fix-guard,h7-partof-closing-keyword',
+    `X8: the negation body binds in both bare-scoped parsers and not the qualified one, got: ${bound(negation) || 'nothing'}`,
+  );
+  //    `Part of` is a reference, not a close -- 4b above asserts the same thing
+  //    about the same string, from the parser side.
+  assert(bound(`Part of ${REFS.bare}`) === '', `X9: a \`Part of\` body binds nothing, got: ${bound(`Part of ${REFS.bare}`)}`);
+  //    The colon spelling, on the qualified reference: the two parsers that take
+  //    a qualified ref bind it, H7 does not.
+  const colon = `${KEYWORDS[4]}: ${REFS.qualified}`;
+  assert(
+    bound(colon) === 'cross-repo-issue-closer,duplicate-fix-guard',
+    `X10: the colon spelling on a qualified ref binds in the two qualified-capable parsers, got: ${bound(colon) || 'nothing'}`,
+  );
+
+  // 6. The mode END TO END -- argv switch, input read, exit register. The
+  //    assertions above drive `judgeBody` directly and would stay green if
+  //    `bodyMode` handed it the wrong text (an empty string, say), so this leg
+  //    runs a real process over a real input and grades the exit code. Both
+  //    input spellings and both non-error exits are covered.
+  const dir = mkdtempSync(join(tmpdir(), 'closing-keyword-body-'));
+  try {
+    const drive = (args, input) => {
+      try {
+        return { status: 0, out: execFileSync(process.execPath, [join(root, SELF), ...args], { cwd: root, encoding: 'utf8', input: input ?? '', stdio: ['pipe', 'pipe', 'pipe'] }) };
+      } catch (err) {
+        return { status: err.status, out: `${err.stdout ?? ''}${err.stderr ?? ''}` };
+      }
+    };
+
+    const file = join(dir, 'negation.md');
+    writeFileSync(file, negation);
+    const hit = drive(['--body', file]);
+    assert(hit.status === 2, `X11: \`--body FILE\` exits 2 on the negation body, got ${hit.status}`);
+    assert(hit.out.includes('h7-partof-closing-keyword'), `X11: the exit-2 report names the parser that binds, got: ${hit.out.trim() || 'nothing'}`);
+
+    const clean = drive(['--body', '-'], `Part of ${REFS.bare}`);
+    assert(clean.status === 0, `X12: \`--body -\` exits 0 on a body that declares no close, got ${clean.status}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
   if (failures.length === 0) {
     console.log(`✓ check-closing-keyword-parity --self-test: ${checked} assertions, ${MUTATIONS.length} mutations of the shipped parsers each driven to red.`);
     selfTestReachedVerdict = true;
@@ -486,6 +636,7 @@ function selfTest() {
 if (isEntrypoint(import.meta.url)) {
   const arg = process.argv[2];
   if (arg === '--list') list();
+  else if (arg === '--body') process.exit(bodyMode(process.argv[3]));
   else if (arg === '--self-test') {
     const code = selfTest();
     if (!selfTestReachedVerdict) {
