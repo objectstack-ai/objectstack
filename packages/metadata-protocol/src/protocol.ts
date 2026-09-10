@@ -4827,8 +4827,9 @@ export class ObjectStackProtocolImplementation implements
         };
         // [#15950] …and the STORED half folded on top of it. The registry is
         // only ONE of the two homes live metadata has; see
-        // {@link foldStoredCollection} for the measured disagreement and for
-        // why the fold is additive.
+        // {@link foldStoredCollection} for the measured disagreement, and
+        // [#16224] for why the fold is the read API's own merge rather than a
+        // second account of it.
         const listCollection = (singularType: string, pluralType: string): Promise<unknown[]> =>
             this.foldStoredCollection(
                 listRegisteredCollection(singularType, pluralType),
@@ -4912,20 +4913,42 @@ export class ObjectStackProtocolImplementation implements
      * same word, and the side that was wrong is this one: the lint contract
      * says "live", and the registry alone is not that.
      *
-     * ## The fold is ADDITIVE, deliberately
+     * ## The fold is the READ API's own merge — [#16224]
      *
-     * A stored row contributes a name the registry half does not already carry;
-     * it never displaces a registry entry. That is not caution for its own
-     * sake — the registry's copy of an `object` is the RESOLVED schema
-     * (ADR-0029 D9.2: a base layer with its `extend` contributors folded on),
-     * while a `sys_metadata` row is the base layer alone, which is exactly why
-     * {@link getMetaItems} runs {@link foldObjectExtendersFromRegistry} when its
-     * own merge lets an overlay win. Letting a raw row displace the resolved
-     * body here would trade this card's phantom for a subtler one — a field
-     * reference that resolves today reading as dangling — so the universe grows
-     * and nothing in it is rewritten. The residual is stated rather than
-     * hidden: where an org overlay REDEFINES a code-package item, the gate
-     * still judges that item's CONTENT from the registry's version.
+     * #15950's repair contributed store-only NAMES and never displaced a
+     * registry entry, and it wrote the residual that left into this docblock:
+     * where an overlay REDEFINES a code-package item, the gate still judged
+     * that item's CONTENT from the registry's version. #16224 measured that
+     * residual end to end and it is worse than one phantom. A code package
+     * ships `dataset/D` with measure `m`; an env-wide overlay redefines `D`
+     * without `m`. In ONE instant the gate ACCEPTED a widget bound to `m`,
+     * which the runtime cannot serve, and REFUSED a widget bound to the measure
+     * the overlay does declare, which it can — an acceptance that should have
+     * been a refusal and a refusal that should have been an acceptance, from
+     * one cause: a body nobody serves.
+     *
+     * So the additive merge is gone and {@link mergePackageAwareOverlay} — the
+     * merge {@link getMetaItems} performs, with the transform it performs it
+     * with — is what runs here. Two readers of the word "live" now read through
+     * one function.
+     *
+     * ⛔ That is NOT the reversal it can look like. The argument against
+     * additivity's alternative was never "an overlay must not win"; it was
+     * "an UNRESOLVED body must not win" — the registry's copy of an `object` is
+     * the RESOLVED schema (ADR-0029 D9.2: a base layer with its `extend`
+     * contributors folded on) while a `sys_metadata` row is the base layer
+     * alone, so a raw row displacing the resolved body would make a field
+     * reference that resolves today read as dangling. That argument names its
+     * own remedy in the same breath, and {@link getMetaItems} has always
+     * applied it: run {@link foldObjectExtendersFromRegistry} on the winner.
+     * The distinction is therefore kept by FOLDING rather than by declining,
+     * and it is pinned as such — `protocol.runtime-gate-stored-universe.test.ts`
+     * asserts that an `object` overlay wins on its own columns AND keeps the
+     * registry's `extend` contributors.
+     *
+     * The universe still only ever grows a NAME: for a name the registry does
+     * not carry, this is byte-for-byte #15950's additive contribution, and that
+     * arm is pinned alongside the redefinition arm in the same process.
      *
      * ## What the read is scoped to
      *
@@ -5003,15 +5026,14 @@ export class ObjectStackProtocolImplementation implements
         }
         if (rows.length === 0) return registered;
 
-        const seen = new Set<string>();
-        for (const item of registered) {
-            const name = (item as { name?: unknown } | null | undefined)?.name;
-            if (typeof name === 'string') seen.add(name);
-        }
-        const merged = [...registered];
+        // Every readable row, in the shape {@link mergePackageAwareOverlay}
+        // consumes: the converted body plus the row's own package provenance.
+        // Reading a row is the only thing that can fail here, so it is the only
+        // thing this loop does.
+        const overlays: Array<{ data: unknown; packageId: string | undefined }> = [];
         for (const row of rows) {
             const name = row.name;
-            if (typeof name !== 'string' || seen.has(name)) continue;
+            if (typeof name !== 'string') continue;
             let body: unknown;
             try {
                 const raw = row.metadata;
@@ -5033,14 +5055,39 @@ export class ObjectStackProtocolImplementation implements
                 continue;
             }
             if (!body || typeof body !== 'object') continue;
-            const packageId = row.package_id;
-            if (typeof packageId === 'string' && (body as { _packageId?: unknown })._packageId === undefined) {
-                (body as { _packageId?: unknown })._packageId = packageId;
-            }
-            seen.add(name);
-            merged.push(body);
+            overlays.push({
+                data: body,
+                packageId: typeof row.package_id === 'string' ? row.package_id : undefined,
+            });
         }
-        return merged;
+        if (overlays.length === 0) return registered;
+
+        // [#16224] The read API's OWN merge, with the read API's own transform
+        // — not a second implementation of it. `mergePackageAwareOverlay` keys
+        // by ADR-0048 package slot rather than by bare name, so an overlay
+        // shadows the entry it actually overrides and two installed packages
+        // shipping one `type/name` are still two entries; the transform is the
+        // #8027 fold that keeps a winning `object` body at its RESOLVED shape.
+        // Together they are the two lines {@link getMetaItems} runs, which is
+        // the point: the gate's universe is now the same universe the platform
+        // answers `GET /meta/:type` from, by construction rather than by
+        // agreement.
+        const merged = mergePackageAwareOverlay(singularType, registered, overlays, (data) =>
+            this.foldObjectExtendersFromRegistry(
+                singularType, (data as { name?: unknown } | null)?.name, data,
+            ),
+        );
+
+        // A registry entry with no `name` is not addressable by any reference,
+        // so the merge above has no slot for it and drops it. It is carried
+        // through anyway: the rules that judge a collection's own coherence
+        // (`measure-aggregate-incoherent` and its siblings) walk the list by
+        // index and would lose a finding, and this method's contract is that
+        // the universe GROWS. Empty in every ordinary deployment.
+        const unaddressable = registered.filter(
+            (item) => !(item && typeof item === 'object' && 'name' in item),
+        );
+        return unaddressable.length > 0 ? [...merged, ...unaddressable] : merged;
     }
 
     /**
