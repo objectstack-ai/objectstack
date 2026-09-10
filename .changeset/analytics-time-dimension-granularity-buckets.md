@@ -8,7 +8,7 @@ fix(driver-memory)!: an analytics time dimension buckets by its declared `granul
 
 <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed. `packages/spec` is untouched: `TimeUpdateInterval` still declares all eight intervals, `AnalyticsQuery.timeDimensions[].granularity` keeps its name, its type and its optionality, and every analytics request body parses byte-identically to before — so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions. What narrows is one BACKEND's accept set at request time: `driver-memory`'s analytics face refuses the three sub-day granularities it cannot label, where it previously accepted them and produced an ungrouped answer. The remedy is a coarser granularity in the request itself, which is data a caller holds rather than an authored artifact with a stored representation; the spec-side narrowing of `TimeUpdateInterval` is filed separately as issue #17296, a `domain:spec` question under ADR-0049, and is deliberately not performed here. The other two packages add exports and relocate an implementation, both additive. -->
 
-**BREAKING** in two senses, both on `driver-memory`'s analytics face, landing in
+**BREAKING** in three senses, all on `driver-memory`'s analytics face, landing in
 the launch window as `minor` under the lockstep convention this cluster's
 siblings already use:
 
