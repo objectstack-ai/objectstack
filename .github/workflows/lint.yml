@@ -1103,6 +1103,45 @@ jobs:
       - name: Widening-tell gate self-test
         run: pnpm check:pm-widening-tells
 
+      # Prior-ruling reader self-test (#17009) — same family and the same split
+      # as every step around it. The LIVE read takes a card number over REST and
+      # searches this checkout's `origin/main`, so it is a tool a seat runs
+      # against the card in front of it, not a verdict about the PR that happens
+      # to run CI next. Only the offline self-test runs here.
+      #
+      # ⛔ Do not "promote" the live read into a gate. It is REPORT-ONLY by the
+      # ruling that admitted it: it ranks candidate rulings and names them, and
+      # WHICH candidate governs is a seat's reading and the maintainer's ruling
+      # (SKILL.md 〈升级与决策〉③). A blocking context over that judgement would
+      # be a required-set change, and the required set is the maintainer's.
+      #
+      # What the self-test instruments is the set of rules a clean tree cannot
+      # exercise: the term derivation's length floor, stopwords and code-span
+      # splitting (a backticked CLAUSE must not become a term); the
+      # governing-text carrier in both shapes the live board uses, plus the
+      # ABSENT case, which is 23 of its 27 open decision cards; word-boundary
+      # matching against the substring noise `git grep -iE` would drag in; the
+      # two decision shapes and the prose bullets the separator rule rejects;
+      # and status classification, which reads the FIRST status word rather than
+      # scanning for a retirement word anywhere in the line — two live accepted
+      # ADRs mention a later supersession/withdrawal of a sub-part, and
+      # precedence-scanning hides both from the pasted reading. Weakening any of
+      # them leaves an ordinary run just as green — it would simply surface
+      # fewer rulings, which is indistinguishable from a card that has none —
+      # and that is the shape `check:self-test-wired` requires this step for.
+      #
+      # It also carries ONE live-tree leg: the ADR-0131 D8 heading must still
+      # parse at the shape the reader expects, so a heading-format drift reds
+      # here instead of quietly shrinking every future candidate set. That leg
+      # reports `skipped` where no `origin/main` exists rather than passing —
+      # "could not check" is never rendered as "checked and clean".
+      #
+      # It imports `check-half-states.mjs` for the board resolver and the proxy
+      # re-exec plan — one source each, so this reader and the patrol cannot
+      # come to disagree about which board is read or how it is reached.
+      - name: Prior-ruling reader self-test
+        run: pnpm check:pm-prior-rulings
+
       # Stamped-post helper self-test (#17314) — the WRITE half of the rule that
       # a timestamp a seat writes into GitHub comes from a clock read by the act
       # that writes it. This tool POSTS: its live path mutates a card, so it is
