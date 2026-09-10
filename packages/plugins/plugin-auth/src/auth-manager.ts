@@ -1129,6 +1129,41 @@ async function smsQuotaExceededApiError(message: string): Promise<Error> {
 
 export class AuthManager {
   private auth: Auth<any> | null = null;
+  /**
+   * [#17176] The build currently in flight, so `getOrCreateAuth()` is
+   * single-flight.
+   *
+   * `this.auth` alone cannot serialise the build: it is assigned only AFTER
+   * `createAuthInstance()` resolves, and that function awaits a dynamic
+   * `import('better-auth')`, `buildPluginList()`, `resolvePasswordHasher()`
+   * and finally better-auth's own `$context`. Every caller that arrives inside
+   * that window still reads `this.auth === null` and starts its own build, so
+   * N overlapping callers construct N better-auth instances — measured, three
+   * concurrent `getAuthInstance()` calls returned three distinct instances.
+   *
+   * The boot has such callers: `auth-plugin.ts` fires
+   * `registerOidcDiscoveryRoutes()` with `void` from its route-mounting
+   * `kernel:ready` hook (that hook returns while the call is still pending)
+   * and a later `kernel:ready` hook reads the instantiated social providers
+   * off the instance for the account-issuer backfill.
+   *
+   * Duplicate instances are not merely wasteful. Each one runs every
+   * better-auth plugin's `init`, and `@better-auth/oauth-provider` seeds the
+   * RFC 8707 `sys_oauth_resource` row from there. Its seed is already
+   * check-then-insert (`findOne` by `identifier`, then `create` only on a
+   * miss) with the UNIQUE refusal caught as its documented
+   * concurrent-process fallback — so on a warm database every instance finds
+   * the row and inserts nothing, but on a FRESH one all N miss together and
+   * all N insert, and the unique index refuses N - 1 of them. That refusal is
+   * the `Insert operation failed {object: sys_oauth_resource}` line on the
+   * first boot of a fresh project.
+   *
+   * ⛔ The cure is not a quieter log and not an upsert: it is not doing the
+   * work twice. Holding the in-flight promise makes the seed run once per
+   * process on every driver, because there is only ever one plugin `init` to
+   * run it.
+   */
+  private authBuild: Promise<Auth<any>> | null = null;
   private config: AuthManagerOptions;
   /**
    * [#3653] The auth secret, resolved ONCE per manager. `generateSecret()`'s
@@ -1229,13 +1264,36 @@ export class AuthManager {
   }
 
   /**
-   * Get or create the better-auth instance (lazy initialization)
+   * Get or create the better-auth instance (lazy, and single-flight).
+   *
+   * Concurrent callers share ONE build — see {@link AuthManager.authBuild} for
+   * why an `if (!this.auth)` guard cannot serialise an async initializer and
+   * what the duplicate builds cost at boot. A rejected build is not cached:
+   * the slot is cleared so the next caller retries, which is the pre-existing
+   * behaviour of the un-serialised form.
    */
   private async getOrCreateAuth(): Promise<Auth<any>> {
-    if (!this.auth) {
-      this.auth = await this.createAuthInstance();
-    }
-    return this.auth;
+    if (this.auth) return this.auth;
+    if (this.authBuild) return this.authBuild;
+    // `build` is only read from callbacks that run after this statement
+    // completes, so comparing against it inside them is safe. The comparison
+    // is what makes `applyConfigPatch()`'s invalidation stick: a build the
+    // patch disowned must not install itself over the new configuration.
+    const build: Promise<Auth<any>> = this.createAuthInstance().then(
+      (auth) => {
+        if (this.authBuild === build) {
+          this.auth = auth;
+          this.authBuild = null;
+        }
+        return auth;
+      },
+      (e) => {
+        if (this.authBuild === build) this.authBuild = null;
+        throw e;
+      },
+    );
+    this.authBuild = build;
+    return build;
   }
 
   /**
@@ -3908,7 +3966,11 @@ export class AuthManager {
    * a warning is emitted.
    */
   setRuntimeBaseUrl(url: string): void {
-    if (this.auth) {
+    // [#17176] A build already IN FLIGHT counts as created: it has read (or is
+    // about to read) the standing config, and it is now the one instance every
+    // later caller receives. Reporting only on `this.auth` would let this
+    // silently no-op instead of saying so.
+    if (this.auth || this.authBuild) {
       console.warn(
         '[AuthManager] setRuntimeBaseUrl() called after the auth instance was already created — ignoring. ' +
         'Ensure this method is called before the first request.',
@@ -3975,8 +4037,14 @@ export class AuthManager {
     }
 
     this.config = next;
-    if (this.auth && !patch.authInstance) {
+    // [#17176] An in-flight build is discarded alongside a materialised one:
+    // it was composed from the pre-patch config, so adopting it would serve
+    // the superseded configuration to every later caller. `getOrCreateAuth()`
+    // checks its own identity before installing, so the disowned build resolves
+    // to its callers and installs nothing.
+    if ((this.auth || this.authBuild) && !patch.authInstance) {
       this.auth = null;
+      this.authBuild = null;
     }
   }
 
