@@ -43,15 +43,28 @@ name: Board Snapshot
 # cursor and exits non-zero with the reset time. A loop against a spent budget
 # starves every other automated caller in the repository for the rest of the hour.
 #
-# ## No `pull_request` trigger, deliberately
+# ## The `pull_request` trigger, and what it is allowed to do
 #
-# The sibling patrol proves itself on a real runner at PR time. This one does
-# not, because its live run reads the whole update window and would spend the
-# repository's shared request budget on every push to every branch. The half CI
-# can hold for free is the offline one, and it is held: `check:pm-board-snapshot`
-# runs the script's 70-case `--self-test` inside the required `Lint & Repo Gates`
-# job, which has no paths filter (`check:self-test-wired` is what requires that
-# step to exist). This job runs the same self-test again before it touches the
+# Every patrol in this tree exercises itself on the pull requests that change
+# it, and that is not a style preference: `check:pm-dispatch-gates` pins that NO
+# discovered gate family is reachable only through a schedule, so a workflow
+# whose script CI never runs at PR time reddens that gate by existing. A first
+# draft of this file omitted the trigger to keep PR-time cost at zero and was
+# refused by exactly that pin.
+#
+# So a pull_request run DOES execute the snapshot on a real runner — the
+# transport, the flags, the page walk and the rendering, proven where they will
+# actually run — and it writes NOTHING: no archive branch is checked out, the
+# run is `--dry-run` into the runner's temp dir, and the commit step is skipped.
+# It is also capped hard (`--limit`, `--max-requests` below), because the
+# repository's request budget is shared with the half-state patrol and the
+# closed-card sweep and must not be spent per push. ⛔ A pull request must never
+# write to the board OR to the archive.
+#
+# The offline half is held for free beside it: `check:pm-board-snapshot` runs the
+# script's 70-case `--self-test` inside the required `Lint & Repo Gates` job,
+# which has no paths filter (`check:self-test-wired` is what requires that step
+# to exist). This job runs the same self-test again before it touches the
 # archive, so a broken tool fails loudly instead of committing a broken backup.
 #
 # ## Adopting this in a sibling repo
@@ -80,6 +93,18 @@ on:
     # nothing cheaper than a webhook closes that, which is a different card.
     - cron: '37 1,7,13,19 * * *'
   workflow_dispatch: {}
+  # Changes to the archiver itself get exercised before they merge. The paths
+  # name every file the run actually loads — the archiver, the module it imports
+  # its proxy plan and repo resolver from, the entry-guard helper both import,
+  # and this file. An undeclared dependency is one a change can break without
+  # this trigger firing, which is the same defect the adopt list above warns
+  # about, one layer along.
+  pull_request:
+    paths:
+      - 'scripts/pm/board-snapshot.mjs'
+      - 'scripts/pm/check-half-states.mjs'
+      - 'scripts/invoked-as.mjs'
+      - '.github/workflows/board-snapshot.yml'
 
 # Least privilege. `contents: write` is for the archive BRANCH and nothing else;
 # the two read scopes are what the snapshot reads. ⛔ This job never writes to
@@ -122,6 +147,7 @@ jobs:
       # checkout of it carries the archive and nothing else. First run creates it
       # locally; the push below is what publishes it.
       - name: Check out or create the archive branch
+        if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
           git fetch --depth=1 origin '+refs/heads/board-archive:refs/remotes/origin/board-archive' || true
@@ -151,9 +177,15 @@ jobs:
           # in, always. A copy of this file cannot end up archiving the repo it
           # was copied FROM, and the script refuses to guess when this is unset.
           PM_SWEEP_REPO: ${{ github.repository }}
+          # A pull_request run PROVES the tool on a runner and writes nothing:
+          # the temp dir has no manifest, so it is a full read, capped to a
+          # handful of numbers and a budget the shared quota will not notice.
+          # ⛔ The two spellings differ in WHERE they write and in nothing else,
+          # so what a PR exercises is the path a schedule takes.
+          SNAPSHOT_ARGS: ${{ github.event_name == 'pull_request' && '--out=board --dry-run --limit=5 --max-requests=25' || '--out=archive/board' }}
         run: |
           set +e
-          node scripts/pm/board-snapshot.mjs --out=archive/board \
+          node scripts/pm/board-snapshot.mjs $SNAPSHOT_ARGS \
             > "$RUNNER_TEMP/snapshot.md" 2> "$RUNNER_TEMP/snapshot.err"
           code=$?
           set -e
@@ -171,6 +203,7 @@ jobs:
       # check never costs the records the same run archived.
       - name: Commit and push the archive
         id: commit
+        if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
           if [ -z "$(git -C archive status --porcelain)" ]; then

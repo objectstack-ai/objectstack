@@ -809,7 +809,10 @@ export function renderRun(result, options) {
 
   const check = m.count_check;
   if (check.verdict === 'pending') {
-    lines.push(`  count check  PENDING — the snapshot is incomplete, so its census is no reading about the board (expected ${check.expected}, archived ${check.archived}).`);
+    const board = m.board.open_issues_count === null
+      ? 'the board\'s own count was not read this run'
+      : `the board reports ${check.expected}`;
+    lines.push(`  count check  PENDING — the snapshot is incomplete, so its census is no reading about the board (archived ${check.archived}; ${board}).`);
   } else if (check.ok) {
     lines.push(`  count check  ok — ${check.archived} open issue(s) archived, board says ${check.expected} (open_issues_count ${m.board.open_issues_count} minus ${m.board.open_pull_requests} open pull request(s)).`);
   } else if (check.verdict === 'shortfall') {
@@ -1336,7 +1339,12 @@ if (isEntrypoint(import.meta.url)) {
     }
     process.exit(code);
   } else {
-    const rearmed = rearmThroughProxy(process.argv.slice(2));
+    // ⛔ --restore is not re-exec'd: it reads the archive directory and makes no
+    // request at all, so routing its transport would spawn a child to prove a
+    // route nothing in that mode uses. The absence of the re-exec line is part
+    // of what "prints, never posts, reads nothing but the directory" looks like.
+    const restoring = process.argv.some((a) => a === '--restore' || a.startsWith('--restore='));
+    const rearmed = restoring ? null : rearmThroughProxy(process.argv.slice(2));
     if (rearmed !== null) process.exit(rearmed);
     main(process.argv.slice(2)).then((code) => process.exit(code));
   }
