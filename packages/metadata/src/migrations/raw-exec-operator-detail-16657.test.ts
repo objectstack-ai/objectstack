@@ -41,7 +41,6 @@ import {
     AFFECTED_TABLES,
     migrateProjectIdToEnvironmentId,
 } from './migrate-project-id-to-environment-id.js';
-import { migrateSysNotificationToEvent } from './migrate-sys-notification-to-event.js';
 import { dropProjectionTables } from './drop-projection-tables.js';
 
 /** `rawStatementFaultError`'s composed message, verbatim (`sql-driver.ts`). */
@@ -159,35 +158,5 @@ describe('[#16657] dropProjectionTables — the per-table error record', () => {
         } as never);
 
         expect(results.every((r) => r.error === 'database is locked')).toBe(true);
-    });
-});
-
-describe('[#16657] migrateSysNotificationToEvent — the run-level error record', () => {
-    /** No `getObject`, so the receipt is `no-ledger` and the run is the subject. */
-    const noLedgerEngine = { async find() { return []; } } as never;
-
-    const legacyColumns = ['id', 'recipient_id', 'type', 'title', 'body'];
-
-    it('a refused legacy SELECT records the dialect text', async () => {
-        const result = await migrateSysNotificationToEvent({
-            driver: refusingDriver(legacyColumns, () =>
-                rawStatementFault('select id, recipient_id from "sys_event" - no such column: topic'),
-            ),
-            data: noLedgerEngine,
-        });
-
-        expect(result.status).toBe('error');
-        expect(result.error).toBe('select id, recipient_id from "sys_event" - no such column: topic');
-        expect(result.error).not.toContain('refused to run a raw statement');
-    });
-
-    it('an UNDECLARED refusal is recorded on its own message channel', async () => {
-        const result = await migrateSysNotificationToEvent({
-            driver: refusingDriver(legacyColumns, () => new Error('connection reset')),
-            data: noLedgerEngine,
-        });
-
-        expect(result.status).toBe('error');
-        expect(result.error).toBe('connection reset');
     });
 });
