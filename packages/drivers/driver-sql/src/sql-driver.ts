@@ -229,20 +229,49 @@ export interface AutoNumberReservation {
  * the drift between them is exactly what let array-valued fields (multiselect/
  * checkboxes/tags/repeater/vector) reach the SQLite binder un-serialized and
  * crash with "SQLite3 can only bind numbers, strings, bigints, buffers, and
- * null" (#field-zoo). `image`/`file`/`avatar`/`video`/`audio` hold structured
- * upload metadata; `composite`/`address`/`location`/`record` are objects; the
- * rest are arrays.
+ * null" (#field-zoo). `composite`/`address`/`location`/`record` are objects;
+ * the rest are arrays.
+ *
+ * ⚠️ The FILE family (`image`/`file`/`avatar`/`video`/`audio`) was a member
+ * until the ADR-0104 addendum ruled that its physical column holds the BARE
+ * `sys_file` id in a STRING column rather than a JSON-quoted id in a JSON
+ * column. Its membership is no longer a constant: a SINGLE-VALUE media field
+ * is a JSON column on a deployment that has not moved its columns and a string
+ * column on one that has, so the question is asked per driver instance through
+ * {@link SqlDriver.mediaColumnIsJson} rather than of this set. A
+ * `multiple: true` media field is unaffected — its value is a LIST of ids, it
+ * is a JSON column on every deployment, and `!!field.multiple` already says so
+ * above every type check.
+ *
+ * ⛔ Do not re-add the family here. Every reader of this set treats membership
+ * as deployment-independent, which is exactly what the family stopped being.
  */
 const JSON_COLUMN_TYPES = new Set<string>([
-  // Spec value-shape classes (ADR-0104 D1): structured JSON payloads, the
-  // (pre-D3) inline file metadata objects, and the inherently-array option
-  // types. Membership is owned by @objectstack/spec — a type added there
-  // becomes a JSON column here without touching this file.
-  ...STRUCTURED_JSON_TYPES, ...FILE_REFERENCE_TYPES, ...MULTI_OPTION_TYPES,
+  // Spec value-shape classes (ADR-0104 D1): structured JSON payloads and the
+  // inherently-array option types. Membership is owned by @objectstack/spec —
+  // a type added there becomes a JSON column here without touching this file.
+  ...STRUCTURED_JSON_TYPES, ...MULTI_OPTION_TYPES,
   // Driver-internal aliases (external/introspected columns) — not authorable
   // FieldTypes, so they stay a local extra.
   'object', 'array',
 ]);
+
+/**
+ * The `varchar(n)` width a moved single-value media column gets.
+ *
+ * ⚠️ NOT a taste: it is the width `os generate migration --format sql` already
+ * emits for the family (`VARCHAR(2048)` in `packages/cli/src/commands/
+ * generate.ts`), and the maintainer ruling on #15041 is that the GENERATOR
+ * states the ruled end-state and does not move — the driver is the side that
+ * moves to meet it. A driver that created knex's default `varchar(255)` here
+ * would open a fresh divergence between the two producers of the same column
+ * on the very change that closes the old one.
+ *
+ * Mirrored by {@link SqlDriver.varcharColumnChars}, which is what the drift
+ * detector asks rather than restating the width; the two are pinned equal by
+ * `sql-driver-11565-row-byte-budget.test.ts` for every declared `FieldType`.
+ */
+const MEDIA_ID_VARCHAR_CHARS = 2048;
 
 /**
  * Field types whose value is a numeric scalar. SINGLE SOURCE for the DDL
@@ -2363,6 +2392,17 @@ const CROSS_FIELD_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
  * reference), every JSON-stored shape (`multiple: true` and the
  * {@link JSON_COLUMN_TYPES} classes — element-wise semantics SQL comparison
  * operators do not have), and anything else without a scalar stored form.
+ *
+ * ⚠️ The FILE family is refused BY NAME rather than by its old
+ * {@link JSON_COLUMN_TYPES} membership, and the refusal is deployment-
+ * independent on purpose. Once the family left that set its stored form became
+ * a scalar string on a moved deployment — which would have made it `'text'`
+ * here and newly ADMITTED a comparison this function has never emitted. During
+ * the ADR-0104 dual-encoding window one media column can hold a bare id and
+ * another the JSON-quoted form of the same id, so no column-to-column
+ * comparison against the family is provably the memory evaluator's answer.
+ * Refusing a shape that would have agreed costs a caller an error message,
+ * which is the trade this function already states above.
  */
 function crossFieldComparisonClass(
   decl: Record<string, unknown>,
@@ -2370,7 +2410,7 @@ function crossFieldComparisonClass(
   if (decl.multiple) return null;
   const type = String((decl as { type?: unknown }).type || 'string');
   if (type === 'formula') return null;
-  if (JSON_COLUMN_TYPES.has(type)) return null;
+  if (JSON_COLUMN_TYPES.has(type) || FILE_REFERENCE_TYPES.has(type)) return null;
   if (NUMERIC_SCALAR_TYPES.has(type)) return 'numeric';
   if (type === 'boolean' || type === 'toggle') return 'boolean';
   if (type === 'date') return 'date';
@@ -4308,6 +4348,38 @@ export type SqlDriverConfig = Knex.Config & {
    * @see {@link SqlDriver.sqliteOpenedEmptyInMemory}
    */
   sqliteAbsentFile?: SqliteAbsentFileMode;
+  /**
+   * Has THIS deployment completed the ADR-0104 column move for the file family
+   * — the step that retypes the media columns and rewrites the values they
+   * hold into the bare-id encoding (`sys_migration.columns_moved_at`)?
+   *
+   * ⛔ This is NOT the `adr-0104-file-references` flag and must never be wired
+   * to it alone. Every creation-attested store since 17.0 — including every
+   * dogfood boot — and every deployment that ran `os migrate
+   * files-to-references --apply` before the column step existed carries that
+   * flag AND JSON-quoted ids in a JSON column. The flag alone therefore cannot
+   * key the write arm; `columns_moved_at` is the evidence that the columns
+   * themselves moved, written by the same act that moves them.
+   *
+   * ## Absence is the JSON arm, and that is the whole safety property
+   *
+   * Omitted, `false`, a resolver that throws, a resolver that never runs — all
+   * four answer "not moved", so the driver keeps today's JSON encoding. Every
+   * row that exists in the world today lacks `columns_moved_at`, and a host
+   * that has not been threaded this option at all is indistinguishable from
+   * one whose deployment has not moved. That is the required direction: a
+   * driver that guessed "moved" would write bare ids into a JSON column.
+   *
+   * A function is resolved ONCE per driver instance, at {@link
+   * SqlDriver.initObjects}, and memoized — the flag lives in `sys_migration`,
+   * which does not exist until schema sync has run, so it cannot be read at
+   * construction time. A host outside that path (`skipSchemaSync`,
+   * `registerObjectMetadata`-only) simply never resolves it and stays on the
+   * JSON arm, which is again the correct fail-toward.
+   *
+   * @see {@link SqlDriver.setFileColumnsMoved}
+   */
+  fileColumnsMoved?: boolean | (() => boolean | Promise<boolean>);
 };
 
 // ── SQL Driver ───────────────────────────────────────────────────────────────
@@ -4385,6 +4457,35 @@ export class SqlDriver implements IDataDriver {
   protected knex: Knex;
   protected config: Knex.Config;
   protected jsonFields: Record<string, string[]> = {};
+  /**
+   * SINGLE-VALUE file-family columns per table (`image` / `file` / `avatar` /
+   * `video` / `audio`), filled at the same two registration sites as
+   * {@link jsonFields} and on BOTH arms of the ADR-0104 window.
+   *
+   * ## Why a second registry rather than a narrower first one
+   *
+   * `jsonFields` freezes {@link isJsonField}'s answer at REGISTRATION time and
+   * is read by `formatInput` / `formatOutput` on every row. The media arm is a
+   * DEPLOYMENT fact that is not knowable then — `sys_migration` does not exist
+   * until schema sync has run — so keying the codec off `jsonFields` alone
+   * would have frozen the wrong answer on every cold boot. This registry names
+   * the media columns unconditionally and the codec asks {@link
+   * fileColumnsMoved}, a live boolean, at call time. One registry, one
+   * question, and the answer can arrive after registration.
+   *
+   * ⚠️ `multiple: true` media is deliberately NOT here. Its value is a LIST of
+   * ids, it stays a JSON column on every deployment, and it is already covered
+   * by `jsonFields` through `!!field.multiple`.
+   */
+  protected mediaFields: Record<string, string[]> = {};
+  /**
+   * Has this deployment moved its media columns to the bare-id encoding?
+   * `false` until something says otherwise — see
+   * {@link SqlDriverConfig.fileColumnsMoved} for why absence must mean JSON.
+   */
+  protected fileColumnsMoved = false;
+  /** The unresolved resolver from config, cleared once it has been asked. */
+  private fileColumnsMovedResolver?: () => boolean | Promise<boolean>;
   protected booleanFields: Record<string, string[]> = {};
   protected numericFields: Record<string, string[]> = {};
   /**
@@ -5078,7 +5179,16 @@ export class SqlDriver implements IDataDriver {
     // `schemaMode` / `autoMigrate` / `sqliteJournalMode` / `sqliteAbsentFile`
     // are ObjectStack concerns, not Knex options — strip them before handing
     // the config to Knex.
-    const { schemaMode, autoMigrate, sqliteJournalMode, sqliteAbsentFile, ...knexConfig } = config;
+    const { schemaMode, autoMigrate, sqliteJournalMode, sqliteAbsentFile, fileColumnsMoved, ...knexConfig } = config;
+    if (typeof fileColumnsMoved === 'function') {
+      this.fileColumnsMovedResolver = fileColumnsMoved;
+    } else if (fileColumnsMoved === true) {
+      // A literal is an assertion by the host, taken as given — it is the
+      // spelling a test cell and an already-resolved caller both want, and it
+      // needs no seam of its own. Anything else (false, undefined) is the
+      // JSON arm the field already holds.
+      this.fileColumnsMoved = true;
+    }
     this.schemaMode = schemaMode ?? 'managed';
     this.autoMigrate = autoMigrate ?? 'off';
     this.declaredJournalMode = sqliteJournalMode;
@@ -9723,6 +9833,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected aliasShardBookkeeping(base: string, shard: string): void {
     this.jsonFields[shard] = this.jsonFields[base] ?? [];
+    this.mediaFields[shard] = this.mediaFields[base] ?? [];
     this.booleanFields[shard] = this.booleanFields[base] ?? [];
     this.numericFields[shard] = this.numericFields[base] ?? [];
     this.numericValueFields[shard] = this.numericValueFields[base] ?? [];
@@ -9850,6 +9961,7 @@ export class SqlDriver implements IDataDriver {
     }
 
     const jsonCols: string[] = [];
+    const mediaCols: string[] = [];
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
     const numericValueCols: string[] = [];
@@ -9863,6 +9975,9 @@ export class SqlDriver implements IDataDriver {
       for (const [name, field] of Object.entries<any>(schema.fields)) {
         const type = field.type || 'string';
         if (this.isJsonField(type, field)) jsonCols.push(name);
+        // Unconditional, on BOTH arms — see {@link mediaFields}. The read-side
+        // legacy-encoding repair runs on a deployment that has not moved too.
+        if (!field.multiple && FILE_REFERENCE_TYPES.has(type)) mediaCols.push(name);
         if (type === 'boolean' || type === 'toggle') booleanCols.push(name);
         if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) numericCols.push(name);
         // [#16318] The authorable half only — see {@link numericValueFields}.
@@ -9877,6 +9992,7 @@ export class SqlDriver implements IDataDriver {
       }
     }
     this.jsonFields[key] = jsonCols;
+    this.mediaFields[key] = mediaCols;
     this.booleanFields[key] = booleanCols;
     this.numericFields[key] = numericCols;
     this.numericValueFields[key] = numericValueCols;
@@ -9924,6 +10040,7 @@ export class SqlDriver implements IDataDriver {
     this.physicalKeyIndexes.delete(tableName);
 
     const jsonCols: string[] = [];
+    const mediaCols: string[] = [];
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
     const numericValueCols: string[] = [];
@@ -9937,6 +10054,11 @@ export class SqlDriver implements IDataDriver {
         const type = field.type || 'string';
         if (this.isJsonField(type, field)) {
           jsonCols.push(name);
+        }
+        // Unconditional, on BOTH arms — see {@link mediaFields}. The read-side
+        // legacy-encoding repair runs on a deployment that has not moved too.
+        if (!field.multiple && FILE_REFERENCE_TYPES.has(type)) {
+          mediaCols.push(name);
         }
         // `toggle` shares boolean storage/affinity, so it needs the same
         // read coercion (stored 1/0 → JS true/false) or it leaks back as a
@@ -9974,6 +10096,7 @@ export class SqlDriver implements IDataDriver {
       }
     }
     this.jsonFields[tableName] = jsonCols;
+    this.mediaFields[tableName] = mediaCols;
     this.booleanFields[tableName] = booleanCols;
     this.numericFields[tableName] = numericCols;
     this.numericValueFields[tableName] = numericValueCols;
@@ -10077,6 +10200,12 @@ export class SqlDriver implements IDataDriver {
   async initObjects(
     objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>,
   ): Promise<void> {
+    // The ADR-0104 media arm, resolved BEFORE registration because
+    // `registerObjectMetadata` below freezes `isJsonField`'s answer into
+    // `jsonFields` for every media column it sees. Memoized, and every failure
+    // path lands on the JSON arm — see {@link resolveFileColumnsMoved}.
+    await this.resolveFileColumnsMoved();
+
     // In-memory registration FIRST, and deliberately ahead of the DDL gate
     // below: being refused permission to alter a schema is not a reason to stay
     // ignorant of the objects we were just told about. On a datasource we are a
@@ -11156,6 +11285,9 @@ export class SqlDriver implements IDataDriver {
       dialect: this.dialectName,
       keyedColumns,
       varcharColumnChars: (field, keyed) => this.varcharColumnChars(field, keyed),
+      // ADR-0104: the media family's column shape is this deployment's fact,
+      // not the type's — the differ must ask the arm the emitter just used.
+      fileColumnsMoved: this.fileColumnsMoved,
     });
     out.push(...(await this.detectTableIndexDrift(tableName, fields, declaredIndexes, new Set(cols.map((c) => c.name)))));
     return out;
@@ -16102,6 +16234,15 @@ export class SqlDriver implements IDataDriver {
         // `createColumn`'s catch-all, spelled the same way so the two cannot
         // disagree about which types are JSON: everything else is
         // `table.string(name)` at knex's default width.
+        //
+        // ⚠️ The FILE family first, and by the same deployment question the
+        // emitter asks — this mirror is what the drift detector consults
+        // INSTEAD of restating the emitter's cases, so a mirror that answered
+        // `null` for a moved media column would tell the detector no varchar
+        // exists where the emitter had just built one.
+        if (FILE_REFERENCE_TYPES.has(type)) {
+          return this.mediaColumnIsJson() ? null : MEDIA_ID_VARCHAR_CHARS;
+        }
         return JSON_COLUMN_TYPES.has(type) ? null : SqlDriver.DEFAULT_STRING_VARCHAR_CHARS;
     }
   }
@@ -16755,6 +16896,21 @@ export class SqlDriver implements IDataDriver {
         //
         // A type that genuinely wants the bound belongs in the string-family
         // case above, named — never acquired by falling through to here.
+        //
+        // ⚠️ The FILE family is asked separately, because its answer is a
+        // DEPLOYMENT fact rather than a property of the type (ADR-0104
+        // addendum): a json column until this deployment's columns have moved,
+        // and then a `varchar` at the width the SQL generator already emits for
+        // it ({@link MEDIA_ID_VARCHAR_CHARS}) — not knex's default 255, which
+        // would be a new divergence between the two producers of this column.
+        // `multiple: true` media never reaches here: `createColumn`
+        // short-circuits on `multiple` above the type switch.
+        if (FILE_REFERENCE_TYPES.has(type)) {
+          col = this.mediaColumnIsJson()
+            ? this.jsonColumn(table, name)
+            : table.string(name, MEDIA_ID_VARCHAR_CHARS);
+          break;
+        }
         col = JSON_COLUMN_TYPES.has(type) ? this.jsonColumn(table, name) : table.string(name);
     }
 
@@ -16982,7 +17138,51 @@ export class SqlDriver implements IDataDriver {
     }
   }
 
+  /**
+   * Ask {@link SqlDriverConfig.fileColumnsMoved} once, and never again.
+   *
+   * Called from {@link initObjects} — the one async seam every schema-syncing
+   * posture passes through, and the only place late enough for the flag row to
+   * exist (it lives in `sys_migration`, a table schema sync itself creates) and
+   * early enough to precede `registerObjectMetadata`, which freezes
+   * {@link isJsonField}'s answer for every media column.
+   *
+   * ⛔ EVERY failure lands on the JSON arm, and none of them is reported as an
+   * error: no resolver, a resolver that throws, a resolver that rejects, a
+   * resolver that answers a non-`true` value. Not knowing whether this
+   * deployment moved its columns is the ordinary state of every deployment
+   * that exists today, so it must read as "not moved" in silence — a driver
+   * that guessed the other way would write bare ids into a JSON column.
+   *
+   * The resolver reference is dropped after the first call, which is what makes
+   * this memoized without a second boolean: a repeat `initObjects` (the batched
+   * and deferred-DDL paths both call it more than once) finds nothing to ask.
+   */
+  protected async resolveFileColumnsMoved(): Promise<void> {
+    const resolver = this.fileColumnsMovedResolver;
+    if (!resolver) return;
+    this.fileColumnsMovedResolver = undefined;
+    try {
+      this.fileColumnsMoved = (await resolver()) === true;
+    } catch {
+      this.fileColumnsMoved = false;
+    }
+  }
+
+  /**
+   * Is a SINGLE-VALUE media column a JSON column on THIS deployment?
+   *
+   * The one place the ADR-0104 dual-encoding window is asked about, so the DDL
+   * switch, the read-side deserializer registry, the `varchar` mirror and the
+   * drift detector cannot answer it differently. `multiple: true` media is not
+   * this question — it is a list of ids and a JSON column on every deployment.
+   */
+  protected mediaColumnIsJson(): boolean {
+    return !this.fileColumnsMoved;
+  }
+
   protected isJsonField(type: string, field: any): boolean {
+    if (!field.multiple && FILE_REFERENCE_TYPES.has(type)) return this.mediaColumnIsJson();
     return JSON_COLUMN_TYPES.has(type) || !!field.multiple;
   }
 
@@ -17128,6 +17328,35 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
+    // ── ADR-0104: the MOVED media arm ───────────────────────────────────────
+    //
+    // On a deployment whose media columns have moved, a single-value media
+    // field is NOT in `jsonFields` (see {@link isJsonField}), so the loop above
+    // did not touch it and the id reaches the wire BARE — which is the whole
+    // point of the ruling: the column holds the actual `sys_file` id.
+    //
+    // What is left to do is the one value shape the moved column cannot hold.
+    // A legacy INLINE metadata object can still be handed to a write on a
+    // deployment that admits lax media values (`OS_ALLOW_LAX_MEDIA_VALUES`),
+    // and binding a plain object to a `varchar` column is a raw driver-level
+    // TypeError on SQLite and an unusable `[object Object]` on the server
+    // dialects. Serialising it degrades that write to a stored string — the
+    // SAME safety-net posture the SQLite arm below has always taken, applied
+    // on every dialect because after the move every dialect holds this family
+    // in a character column. `formatOutput`'s media pass reads it straight back
+    // as the object it was, so the round trip is unchanged for that population.
+    if (this.fileColumnsMoved) {
+      const mediaFields = this.mediaFields[object];
+      if (mediaFields && mediaFields.length > 0) {
+        for (const field of mediaFields) {
+          const v = copy[field];
+          if (v === undefined || v === null || typeof v === 'string') continue;
+          if (!copied) { copy = { ...copy }; copied = true; }
+          copy[field] = JSON.stringify(v);
+        }
+      }
+    }
+
     if (!this.isSqlite) return copy;
 
     // Safety net: better-sqlite3 can only bind numbers/strings/bigints/buffers/
@@ -17207,6 +17436,52 @@ export class SqlDriver implements IDataDriver {
         }
       }
 
+    }
+
+    // ── ADR-0104: the media family reads BOTH encodings, on every dialect ────
+    //
+    // The addendum's dual-encoding window requires the driver to read a bare id
+    // and a legacy JSON-quoted id throughout, on every dialect. SQLite already
+    // did — its `jsonFields` pass above parses a quoted cell and its `catch`
+    // keeps a bare one, which is why the gap was never a three-dialect one —
+    // but Postgres and MySQL had no arm at all: MEASURED on live PG 16.13, a
+    // JSON-quoted id sitting in a `varchar` column reads back WITH ITS QUOTES.
+    // That column is not hypothetical: `os generate migration --format sql`
+    // emits `VARCHAR(2048)` for this family, so a generator-built deployment on
+    // a server dialect has been storing `"file_01HXYZ"` and handing it back
+    // verbatim (#15771's silent corruption, reproduced on a live cell).
+    //
+    // ⚠️ Runs on BOTH arms, and it is a REPAIR rather than an arm:
+    //
+    //   - moved deployment  — the cell is bare, no leading delimiter, no-op;
+    //     a cell step 3 has not converted yet still reads correctly.
+    //   - unmoved, json column — the client (or the pass above) already parsed
+    //     it, so the value here is not a string, no-op.
+    //   - unmoved, character column — the corrupt population above. THIS is
+    //     the only place the pass changes an answer, and the answer it changes
+    //     it to is the id that was written.
+    //
+    // ⛔ The delimiter test is load-bearing and must not be relaxed to "try
+    // parsing everything": a `sys_file` id is word characters and `-`
+    // (`isFileIdToken`), so an all-digit id would `JSON.parse` to a NUMBER and
+    // `null` / `true` / `false` to non-strings. Only a leading `"`, `{` or `[`
+    // can be a JSON encoding of a media value, and none of the three can begin
+    // an id, a resolver URL (`https:` / `/api/` / `data:` / `blob:`) or a
+    // `data:` URI. A cell that starts with one and does NOT parse keeps its raw
+    // string, exactly as the SQLite arm above does.
+    const mediaFields = this.mediaFields[object];
+    if (mediaFields && mediaFields.length > 0) {
+      for (const field of mediaFields) {
+        const v = data[field];
+        if (typeof v !== 'string' || v.length === 0) continue;
+        const head = v[0];
+        if (head !== '"' && head !== '{' && head !== '[') continue;
+        try {
+          data[field] = JSON.parse(v);
+        } catch {
+          // Not an encoding after all — the raw string IS its value.
+        }
+      }
     }
 
     // Numeric scalars handed back as STRINGS are coerced to numbers, on EVERY
