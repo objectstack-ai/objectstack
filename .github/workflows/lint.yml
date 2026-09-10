@@ -4378,6 +4378,25 @@ jobs:
           node packages/lint/scripts/check-reference-carrier-shape.mjs --self-test
           node packages/lint/scripts/check-reference-carrier-shape.mjs
 
+      # #15149. Grep-level guard for the defect this very repo just shipped: an
+      # unquoted `- name:` step name containing ` #` is silently truncated by
+      # YAML at that point (a space + hash starts a comment inside a plain
+      # scalar), so the step's real parsed name is not the text an author
+      # wrote -- the CI log names the step something else entirely, and
+      # anything that resolves a step by its name text (scripts/pm/ci-failure.mjs)
+      # cannot find it. This repo names issue numbers in step names as a
+      # matter of style, so the shape is likely to recur. Deliberately NOT a
+      # YAML-parser-level name comparison -- see the header of
+      # scripts/check-workflow-step-name-quoting.mjs for why grep-level is
+      # sufficient (triage ruling, #15149). Reads .github/workflows/*.yml as
+      # plain text; no build, sub-second. Placed BEFORE the duration-unit-keys
+      # step below on purpose: that step's own comment says it is placed LAST
+      # so that nothing behind it is masked by its red -- appending after it
+      # would defeat exactly that, so this step goes immediately above it
+      # instead (#10572: no existing step's relative order moves).
+      - name: 'Unquoted workflow step names do not silently truncate at " #" (#15149)'
+        run: pnpm check:workflow-step-name-quoting
+
       # #14478 (maintainer ruling 2026-09-02, "ruled B"): a duration-shaped
       # `z.number()` key in packages/spec/src/** whose `.describe()` names a
       # time unit must carry that unit in its NAME (`Ms` / `Seconds` /
@@ -4395,21 +4414,6 @@ jobs:
       # the package script as `check:self-test-wired` requires.
       - name: Duration-shaped spec keys carry their unit in the key name
         run: pnpm --filter @objectstack/spec check:duration-unit-keys
-
-      # #15149. Grep-level guard for the defect this very repo just shipped: an
-      # unquoted `- name:` step name containing ` #` is silently truncated by
-      # YAML at that point (a space + hash starts a comment inside a plain
-      # scalar), so the step's real parsed name is not the text an author
-      # wrote -- the CI log names the step something else entirely, and
-      # anything that resolves a step by its name text (scripts/pm/ci-failure.mjs)
-      # cannot find it. This repo names issue numbers in step names as a
-      # matter of style, so the shape is likely to recur. Deliberately NOT a
-      # YAML-parser-level name comparison -- see the header of
-      # scripts/check-workflow-step-name-quoting.mjs for why grep-level is
-      # sufficient (triage ruling, #15149). Reads .github/workflows/*.yml as
-      # plain text; no build, sub-second.
-      - name: 'Unquoted workflow step names do not silently truncate at " #" (#15149)'
-        run: pnpm check:workflow-step-name-quoting
 
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the

@@ -22,10 +22,11 @@
 // the step `The`, and anything that resolves a step by its name text against
 // the workflow source (scripts/pm/ci-failure.mjs) cannot find it.
 //
-// This repo names issue numbers in step names as a matter of style (667
-// `- name:` lines across `.github/workflows/` as of this gate landing), so the
+// This repo names issue numbers in step names as a matter of style, so the
 // keystroke that produces this is available to every future author and
-// nothing red-flags it. The fix is one line -- quote the scalar:
+// nothing red-flags it (run `--list`, or read this gate's own OK line, for
+// the current census -- transcribing it here would go stale the next time
+// anyone adds a step). The fix is one line -- quote the scalar:
 //
 //     - name: 'The #13419 name-fold fixture has no non-test loader'
 //
