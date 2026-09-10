@@ -54,10 +54,12 @@
  *
  * Ordinary direction, no inversion and no count movement: the change ADDS
  * resolutions that were absent and narrows no rule, so restoring the two-member
- * subset must turn RED exactly the cases whose dimension is `user` / `tree` /
- * `master_detail`, and leave GREEN every `lookup`, `select`, unresolved-id,
- * no-display-field and fail-closed case — those pin behaviour this change
- * converges ON. The measured run is quoted in the PR body.
+ * subset must turn RED exactly the cases that depend on a `user` or `tree` axis,
+ * and leave GREEN every `lookup`, `master_detail`, `select`, unresolved-id,
+ * no-display-field and fail-closed case — `master_detail` was already inside the
+ * old subset, so it is a control here, not a casualty. Predicted on that reading:
+ * 7 red in this file and 3 in the `dimension-labels` sibling. Measured exactly
+ * that (10 red / 33 green over the two files); the run is quoted in the PR body.
  */
 
 import { describe, it, expect } from 'vitest';
