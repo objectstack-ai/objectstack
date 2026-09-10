@@ -55,6 +55,8 @@
  * here.
  */
 
+import { mapFlowNodeList } from '../conversions/walk.js';
+
 import type { TranslationBundle, TranslationData } from './translation.zod';
 
 /**
@@ -3478,6 +3480,27 @@ export function resolveFlowScreenTitle(
  * `help`) is ignored, never overlaid (the negative `translatePage` pins for
  * the retired `submitLabel`).
  *
+ * **Every screen node, at any DEPTH.** `FlowNode.config` carries ADR-0031
+ * regions — `loop.config.body`, `parallel.config.branches[]`,
+ * `try_catch.config.try`/`.catch` — each holding a full `nodes` array, nesting
+ * arbitrarily, and a `type: 'screen'` node inside one is a real screen: the
+ * executor pauses on it and the client receives its `ScreenSpec.nodeId`. So
+ * `flows.<name>.screens.<node_id>` is authored for it, parses (the bundle
+ * schema is keyed by node id and knows nothing about depth) and must be
+ * overlaid. A flat `flow.nodes.map(…)` walked straight past those, accepting
+ * the translation and silently never applying it — the fourth pass in this
+ * repo to be written against the flat one-liner. The descent is
+ * {@link mapFlowNodeList}'s, which reads `FLOW_REGION_SLOTS_BY_TYPE`: WHERE a
+ * region lives is declared once (`automation/region-slots.ts`) and walked by
+ * one function per unit, so this resolver is not a fifth hand-rolled reader of
+ * that table.
+ *
+ * That helper is also what preserves the identity discipline through the
+ * descent: it returns the SAME `nodes` array when no node under it resolved
+ * anything, and every container `config` on the way down is copied only when a
+ * descendant actually changed — so `nodesChanged` below stays a true reading
+ * and an untouched document still comes back as the same reference.
+ *
  * ⚠️ Deliberately NOT registered in {@link translateMetadataDocument}'s
  * dispatch table: that table reaches the REST metadata boundary by itself
  * (`TRANSLATABLE_METADATA_TYPES` drives `@objectstack/rest`, #3786), which
@@ -3497,14 +3520,14 @@ export function translateFlow<T extends FlowLike>(
 
   const label = lookupFlowLabel(bundle, name, opts);
 
-  let nodesChanged = false;
   const nodes = Array.isArray(flow.nodes)
-    ? flow.nodes.map((node) => {
-        const next = translateScreenNode(node, name, bundle, opts);
-        if (next !== node) nodesChanged = true;
-        return next;
-      })
+    ? mapFlowNodeList(
+        flow.nodes,
+        `flows.${name}.nodes`,
+        (node) => translateScreenNode(node as FlowNodeLike, name, bundle, opts) as Record<string, unknown>,
+      ) as FlowNodeLike[]
     : undefined;
+  const nodesChanged = nodes !== undefined && nodes !== flow.nodes;
 
   if (label === undefined && !nodesChanged) return flow;
   return {
