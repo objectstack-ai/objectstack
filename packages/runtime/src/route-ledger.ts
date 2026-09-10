@@ -374,27 +374,22 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'GET /share-links/:token/messages', domain: '/share-links', disposition: 'public', note: 'unauthenticated shared-conversation messages' },
 
   // ── packages ──────────────────────────────────────────────────────────────
-  // [#16781] NO `responseSchema`, and the blank is a MEASURED verdict rather
-  // than an unvisited row. `ListInstalledPackagesResponseSchema` now describes
-  // the envelope this door serves — the missing `hasMore` (#16628 contract
-  // review F2) was added — but it types each row as `InstalledPackageSchema`,
-  // whose `manifest` is the AUTHORING-stage `ManifestSchema` (`objects` = glob
-  // patterns). This door serves the ASSEMBLED body, where `objects` carries
-  // object DEFINITIONS: the #14242 stage mismatch, whose maintainer ruling
-  // (2026-09-02, quoted at `ArtifactPackageSchema` in spec `stack.zod.ts`) was
-  // to declare the assembled stage rather than widen the authoring one. Until
-  // an assembled-stage counterpart exists in `@objectstack/spec/api`, a name
-  // here would promise conformance the door keeps only for glob-authored
-  // packages and breaks for every `defineStack()` host — the "declared but
-  // unverified" surface this field's header forbids. Both directions of that
-  // boundary are pinned in `domains/packages-read-delete-response-conformance.test.ts`,
-  // so the row becomes fillable against a RED test, never against a guess.
-  { route: 'GET /packages', domain: '/packages', disposition: 'sdk', client: 'packages.list' },
+  // [#17431] The `/packages` READ rows carry a `responseSchema` again: the
+  // #14242 authoring-vs-assembled manifest stage mismatch that kept `GET
+  // /packages` blank through #16781 is declared rather than widened, and both
+  // directions are covered in
+  // `domains/packages-read-delete-response-conformance.test.ts`. Each row's
+  // note records what its declaration does NOT carry.
+  { route: 'GET /packages', domain: '/packages', disposition: 'sdk', client: 'packages.list',
+    responseSchema: 'ListInstalledPackagesResponseSchema',
+    note: 'The schema names the WHOLE BODY here, envelope included (`BaseResponseSchema.extend({ data })`), not the `data` alone its lifecycle siblings above declare. This row was blank until now as a MEASURED verdict: an earlier contract review had added `hasMore`, but every row was still typed `InstalledPackageSchema`, whose `manifest` is the AUTHORING-stage `ManifestSchema` (`objects` = glob patterns), while a `defineStack()` host installs the ASSEMBLED body (`objects` = object definitions) — the stage mismatch the comment above names. It is filled by following that ruling one layer up: `@objectstack/spec/api` declares `AssembledInstalledPackageSchema` and binds both read responses to `InstalledPackageAtEitherStageSchema`, a union over the two whole CLOSED stage declarations — neither stage widened, and a row belonging to neither still refused. Fillable because `domains/packages-read-delete-response-conformance.test.ts` drives THIS handler and parses the payload it answers on BOTH authoring paths. ⚠️ The declaration is a strict SUBSET of the wire: each row also carries `writable`, this door\'s own computed verdict and not a declared record field, which a declared parse therefore strips — asserted by name in the same file rather than fixed' },
   { route: 'POST /packages', domain: '/packages', disposition: 'sdk', client: 'packages.install' },
-  { route: 'GET /packages/:id', domain: '/packages', disposition: 'sdk', client: 'packages.get' },
+  { route: 'GET /packages/:id', domain: '/packages', disposition: 'sdk', client: 'packages.get',
+    responseSchema: 'GetInstalledPackageResponseSchema',
+    note: 'Same schema shape as the list row above (WHOLE BODY, envelope included) over the same projection — `toPackageResponse` + `withWritableVerdict`, one expression serving two doors. Bound to the same two-stage declaration and covered in `domains/packages-read-delete-response-conformance.test.ts`, which drives THIS handler on both authoring paths. ⚠️ Same measured residue: the door also serves `writable`, which the schema does not carry and a declared parse strips — asserted by name' },
   { route: 'DELETE /packages/:id', domain: '/packages', disposition: 'sdk', client: 'packages.uninstall',
     responseSchema: 'UninstallPackageApiResponseSchema',
-    note: 'The schema names the WHOLE BODY here, envelope included (`BaseResponseSchema.extend({ data })`), not the `data` alone its lifecycle siblings above declare. Fillable because `domains/packages-read-delete-response-conformance.test.ts` drives THIS handler and parses the payload it answers, on both authoring paths — the row carries no manifest, so the authoring-vs-assembled manifest stage mismatch that keeps `GET /packages` blank cannot reach it. ⚠️ The declaration is a strict SUBSET of the wire: the door also serves `registryRemoved` and `persisted`, which the schema does not carry and a declared parse therefore strips. That residue is asserted by name in the same file rather than fixed — deleting live keys from a published payload is a wire removal, and widening the schema is a `packages/spec` change. See the comment above the `GET /packages` row for the stage mismatch and its ruling' },
+    note: 'The schema names the WHOLE BODY here, envelope included (`BaseResponseSchema.extend({ data })`), not the `data` alone its lifecycle siblings above declare. Fillable because `domains/packages-read-delete-response-conformance.test.ts` drives THIS handler and parses the payload it answers, on both authoring paths — the row carries no manifest, so the authoring-vs-assembled manifest stage mismatch that kept `GET /packages` blank never reached it. ⚠️ The declaration is a strict SUBSET of the wire: the door also serves `registryRemoved` and `persisted`, which the schema does not carry and a declared parse therefore strips. That residue is asserted by name in the same file rather than fixed — deleting live keys from a published payload is a wire removal, and widening the schema is a `packages/spec` change. See the `GET /packages` row above for the stage mismatch and its ruling' },
   { route: 'PATCH /packages/:id/enable', domain: '/packages', disposition: 'sdk', client: 'packages.enable' },
   { route: 'PATCH /packages/:id/disable', domain: '/packages', disposition: 'sdk', client: 'packages.disable' },
   { route: 'PATCH /packages/:id', domain: '/packages', disposition: 'sdk', client: 'packages.update' },

@@ -30,31 +30,30 @@
  * payload. So the parses below are handed `body`, not `body.data`, and a
  * regression in the envelope reddens here too.
  *
- * ## ⚠️ The list row's remaining gap is the #14242 STAGE mismatch, not F2
+ * ## ⚠️ The list row's remaining gap WAS the #14242 STAGE mismatch — closed [#17431]
  *
  * F2 was not the only thing standing between `GET /packages` and its declared
- * schema, and this file measures the rest rather than declaring past it.
- * `ListInstalledPackagesResponseSchema` types each row as
+ * schema. `ListInstalledPackagesResponseSchema` typed each row as
  * `InstalledPackageSchema`, whose `manifest` is `ManifestSchema` — the
  * AUTHORING-stage manifest, where `objects` is an array of GLOB PATTERNS. What
- * the registry stores, and therefore what this door serves, is the ASSEMBLED
- * body: `ObjectQL.registerApp` is handed `manifest.objects` as object
- * DEFINITIONS and `SchemaRegistry.installPackage` records what it was given.
+ * the registry stores, and therefore what this door serves, is whatever it was
+ * installed with: `ObjectQL.registerApp` hands `manifest.objects` over as
+ * object DEFINITIONS, `POST /packages` hands over the authoring manifest its
+ * own declared request schema describes, and `SchemaRegistry.installPackage`
+ * records what it was given either way.
  *
  * That is the mismatch #14242 identified one layer down, whose maintainer
  * ruling (2026-09-02, quoted in `stack.zod.ts` at `ArtifactPackageSchema`) was
- * to «declare the assembled stage rather than widen the authoring one». No
- * assembled-stage counterpart of `InstalledPackageSchema` exists in
- * `@objectstack/spec/api` yet, and authoring one is a `packages/spec` change
- * this card is explicitly routed away from.
+ * to «declare the assembled stage rather than widen the authoring one». #17431
+ * followed that ruling one layer up: `@objectstack/spec/api` now declares
+ * `AssembledInstalledPackageSchema`, and both read responses are bound to
+ * `InstalledPackageAtEitherStageSchema` — a union over the two whole, closed
+ * stage declarations. ⛔ Neither stage was widened; a row belonging to NEITHER
+ * is still refused, and that is asserted below rather than assumed.
  *
- * ⇒ The `GET /packages` ledger row is deliberately left WITHOUT a
- * `responseSchema`. Writing one would be exactly the "declared but unverified"
- * surface the ledger header exists to prevent: it would read as a promise the
- * door keeps only for glob-authored packages and breaks for every
- * `defineStack()` host, which is the shipped open-core path. The boundary is
- * pinned below in BOTH directions, so whoever declares the assembled stage
- * gets a red test telling them the row has become fillable.
+ * ⇒ Both `GET /packages` and `GET /packages/:id` now carry a `responseSchema`,
+ * legitimate because THIS file drives those handlers and parses what they
+ * answer on both authoring paths.
  *
  * ## The residue on the delete row, PINNED rather than hidden
  *
@@ -78,8 +77,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
 import {
     ListInstalledPackagesResponseSchema,
+    GetInstalledPackageResponseSchema,
     UninstallPackageApiResponseSchema,
 } from '@objectstack/spec/api';
+import { InstalledPackageSchema } from '@objectstack/spec/kernel';
 import { HttpDispatcher, type HttpDispatcherResult } from '../http-dispatcher.js';
 
 const PREFIX = '/api/v1';
@@ -232,23 +233,96 @@ describe('#16781 — GET /packages: the F2 gap is closed on EVERY authoring path
     });
 
     /**
-     * ⭐ THE BOUNDARY, and the reason the `GET /packages` ledger row carries no
+     * ⭐ THE BOUNDARY, and the reason both `/packages` READ rows now carry a
      * `responseSchema`.
      *
-     * This asserts a CURRENT FAILURE on purpose. On the shipped `defineStack()`
-     * path the served row still does not parse — and the surviving issue is
-     * `manifest.objects` ALONE, the #14242 authoring-vs-assembled stage
-     * mismatch, with `data.hasMore` gone from the issue list because this card
-     * closed it. When someone declares the assembled stage (the ruled remedy),
-     * this test goes red and tells them the row has become fillable.
+     * This asserted a CURRENT FAILURE until #17431: on the shipped
+     * `defineStack()` path the served row did not parse, and the surviving
+     * issue was `manifest.objects` ALONE — the #14242 authoring-vs-assembled
+     * stage mismatch — with `data.hasMore` gone from the list because #16781
+     * closed it. Declaring the assembled stage is what turned it green, which
+     * is the pickup path that pin was written to signal.
      */
-    it('the assembled row does NOT yet parse, and the ONLY surviving issue is the #14242 stage mismatch', async () => {
+    it('the assembled row parses END TO END — the #14242 stage mismatch is closed', async () => {
         const r = await send('GET', `${PREFIX}/packages`, [CODE_PKG]);
         const verdict = ListInstalledPackagesResponseSchema.safeParse(r.body);
 
+        expect(verdict.error?.issues.map((i) => i.path.join('.')) ?? []).toEqual([]);
+        expect(verdict.success).toBe(true);
+        expect(verdict.data!.data.packages).toHaveLength(1);
+    });
+
+    /**
+     * ⛔ ADMITTING BOTH STAGES IS NOT ADMITTING ANYTHING.
+     *
+     * `InstalledPackageAtEitherStageSchema` is a union over two whole CLOSED
+     * declarations, not a widened `objects` key (#14242's rejected road C). A
+     * row whose `objects` MIXES a glob with a definition belongs to neither
+     * stage and parses through neither branch — measured here through the real
+     * door, so «it accepts both» cannot quietly become «it accepts anything».
+     */
+    it('a row at NEITHER stage is still refused by the declared response', async () => {
+        const MIXED_PKG = {
+            ...CODE_PKG, id: 'com.acme.mixed', namespace: 'mixed', name: 'Mixed',
+            objects: ['./src/objects/*.object.yml', { name: 'mixed_lead', fields: { title: { type: 'text' } } }],
+        };
+        const r = await send('GET', `${PREFIX}/packages`, [MIXED_PKG]);
+        expect(r.status).toBe(200);
+
+        const verdict = ListInstalledPackagesResponseSchema.safeParse(r.body);
         expect(verdict.success).toBe(false);
-        expect(verdict.error!.issues.map((i) => i.path.join('.')))
-            .toEqual(['data.packages.0.manifest.objects.0']);
+        // Lit control: the same door, the same parse, one stage-clean row.
+        expect(ListInstalledPackagesResponseSchema
+            .safeParse((await send('GET', `${PREFIX}/packages`, [CODE_PKG])).body).success).toBe(true);
+    });
+
+    /**
+     * ⚠️ The declaration is a strict SUBSET of the wire on this row too, and
+     * the residue is named rather than hidden — the disposition its `DELETE`
+     * sibling already carries below.
+     */
+    it('the UNDECLARED per-row residue is exactly `writable`', async () => {
+        const r = await send('GET', `${PREFIX}/packages`, [CODE_PKG]);
+        const parsed: any = ListInstalledPackagesResponseSchema.parse(r.body);
+        // `writable` is this door's own computed verdict (#14375), not a
+        // declared record field, so a declared parse drops it. Deleting it from
+        // the wire is a payload removal; declaring it is a separate decision
+        // about what the response promises.
+        expect(strippedKeys(r.body.data.packages[0], parsed.data.packages[0])).toEqual(['writable']);
+    });
+});
+
+describe('#17431 — GET /packages/:id serves the same row, and parses on BOTH authoring paths', () => {
+    const get = (pkg: any) => send('GET', `${PREFIX}/packages/${pkg.id}`, [pkg]);
+
+    for (const [label, pkg] of [['glob-authored', GLOB_PKG], ['assembled / defineStack', CODE_PKG]] as const) {
+        it(`${label}: the served body parses END TO END`, async () => {
+            const r = await get(pkg);
+            expect(r.status).toBe(200);
+
+            const verdict = GetInstalledPackageResponseSchema.safeParse(r.body);
+            expect(verdict.error?.issues.map((i) => i.path.join('.')) ?? []).toEqual([]);
+            expect(verdict.success).toBe(true);
+            expect((verdict.data!.data as any).manifest.id).toBe(pkg.id);
+        });
+    }
+
+    it('the assembled row was refused before the stage was declared — the same one issue', async () => {
+        // Built by DEGRADING the served body to what the authoring-stage
+        // declaration alone could describe, so this is a statement about the
+        // fix rather than about a hand-written literal: with the assembled
+        // branch removed, `objects` is the single surviving reason.
+        const r = await get(CODE_PKG);
+        const verdict = InstalledPackageSchema.safeParse(r.body.data);
+
+        expect(verdict.success).toBe(false);
+        expect(verdict.error!.issues.map((i) => i.path.join('.'))).toEqual(['manifest.objects.0']);
+    });
+
+    it('the UNDECLARED residue is exactly `writable` — named, not hidden', async () => {
+        const r = await get(CODE_PKG);
+        const parsed: any = GetInstalledPackageResponseSchema.parse(r.body);
+        expect(strippedKeys(r.body.data, parsed.data)).toEqual(['writable']);
     });
 });
 
