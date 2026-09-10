@@ -9,13 +9,23 @@
 // `sys_organization` ids and the recipient's `sys_user` id. A fixture that
 // baked either one in would assert against a row that does not exist.
 
-/** Object the tick touches, so a run has a data write of its own to land. */
+/**
+ * Object the tick touches, so a run has a data write of its own to land.
+ *
+ * `due_date` is what the `time_relative` sweep selects on (#16659 F2). It is a
+ * `datetime` rather than a `date` deliberately: the window the trigger computes
+ * is a pair of ISO-8601 instants, and comparing them against a column the
+ * driver truncates to `YYYY-MM-DD` puts a per-driver truncation rule between
+ * the fixture and the property under test, which is WHICH ORGANIZATION's rows
+ * came back.
+ */
 const SweepTargetObject = {
   name: 'sched_org_target',
   label: 'Sweep Target',
   fields: {
     name: { type: 'text', label: 'Name', required: true },
     touched: { type: 'checkbox', label: 'Touched' },
+    due_date: { type: 'datetime', label: 'Due' },
   },
 };
 
@@ -93,4 +103,76 @@ export function organizationLessScheduleFlow(recipientId: string): unknown {
     return { ...n, config };
   });
   return { ...declared, name: 'sched_org_undeclared', nodes };
+}
+
+/**
+ * [#16659 F2] The `time_relative` twin: a sweep that declares its acting
+ * organization, selects `sched_org_target` rows whose `due_date` falls in the
+ * next week, and — once per matched record — notifies and writes.
+ *
+ * Both trailing nodes are load-bearing and they measure DIFFERENT halves:
+ *
+ *  - `notify` produces one tenant-scoped inbox row per LAUNCHED run, so the
+ *    count of those rows is the count of records the sweep SELECTED. That is
+ *    the F2 property: an unscoped sweep selects the other organization's rows
+ *    too and posts about them into the declared organization's inbox.
+ *  - `update_record` is the data-plane half the branch previously left unpinned
+ *    (the fixture flow was `start → notify → end`). The run is scoped to the
+ *    declared organization, so a write aimed at another organization's row
+ *    matches nothing — silently. Asserting WHICH rows got `touched` is what
+ *    makes that narrowing observable instead of assumed.
+ */
+export function declaringTimeRelativeFlow(organizationId: string, recipientId: string): unknown {
+  return {
+    name: 'sched_org_sweep',
+    label: 'Time-relative sweep (organization declared)',
+    type: 'schedule',
+    status: 'active',
+    runAs: 'system',
+    nodes: [
+      {
+        id: 'start',
+        type: 'start',
+        label: 'Daily sweep',
+        config: {
+          timeRelative: {
+            object: 'sched_org_target',
+            dateField: 'due_date',
+            withinDays: 7,
+          },
+          organization: organizationId,
+        },
+      },
+      {
+        id: 'notify',
+        type: 'notify',
+        label: 'Due soon',
+        config: {
+          topic: 'sched.due',
+          recipients: [recipientId],
+          title: 'Due soon: {record.name}',
+          message: '{record.name} is due.',
+          channels: ['inbox'],
+          sourceObject: 'sched_org_target',
+          sourceId: '{record.id}',
+        },
+      },
+      {
+        id: 'touch',
+        type: 'update_record',
+        label: 'Mark touched',
+        config: {
+          objectName: 'sched_org_target',
+          filter: { id: '{record.id}' },
+          fields: { touched: true },
+        },
+      },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'notify' },
+      { id: 'e2', source: 'notify', target: 'touch' },
+      { id: 'e3', source: 'touch', target: 'end' },
+    ],
+  };
 }
