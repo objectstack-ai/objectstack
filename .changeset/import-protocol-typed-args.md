@@ -50,4 +50,4 @@ async findData(args) {
 
 ⚠️ The `?? {}` shape in the "before" is the mechanism that made a dialect mismatch silent rather than loud: an unrecognised query does not throw, it degrades into a filter that constrains nothing, so a duplicate probe stops discriminating and an upsert updates the wrong record. Prefer a read that throws.
 
-<!-- adr-0087: not-required (no-migration-prescription) probe -->
+<!-- adr-0087: not-required (runtime-interface-only packages/rest/src/import-runner.ts#ImportProtocolLike) probe -->
