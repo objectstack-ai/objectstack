@@ -142,6 +142,7 @@
     "check:node-version": "node scripts/check-node-version.mjs",
     "check:pnpm-acquisition": "node scripts/check-pnpm-acquisition.mjs --self-test && node scripts/check-pnpm-acquisition.mjs",
     "check:workflow-status-functions": "node scripts/check-workflow-status-functions.mjs --self-test && node scripts/check-workflow-status-functions.mjs",
+    "check:workflow-step-name-quoting": "node scripts/check-workflow-step-name-quoting.mjs --self-test && node scripts/check-workflow-step-name-quoting.mjs",
     "check:select-shard-packages": "bash scripts/ci/select-shard-packages.selftest.sh",
     "check:select-gate-families": "bash scripts/ci/select-gate-families.selftest.sh",
     "check:shard-attestation": "node scripts/check-shard-attestation.mjs --self-test && node scripts/check-shard-attestation.mjs",
