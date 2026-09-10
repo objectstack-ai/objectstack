@@ -1057,6 +1057,57 @@ const baseDefaultPermissionSets: PermissionSet[] = [
   // to a position or an audience anchor — the producer
   // (`resolve-execution-context`) injects them onto the agent principal's
   // context directly — so the anchor high-privilege gate does not apply.
+  //
+  // ── WHAT EACH SCOPE STILL SUBTRACTS ─────────────────────────────────────
+  // [maintainer ruling 2026-09-08, issue #16549, option 1] The ruling widened
+  // exactly ONE axis — record-visibility DEPTH — and required the remaining
+  // subtractions to be written down, because "a subtraction nobody wrote down
+  // is the next card". These sets declare no `readScope` / `writeScope` and no
+  // `viewAllRecords` / `modifyAllRecords`, which the D10 fold now reads as
+  // NO OPINION on depth (`PermissionEvaluator.getDeclaredScope` →
+  // `intersectDelegatedScope`): the delegator's own depth stands, so
+  // `agent ∩ user = user` for visibility and the Setup page's promise —
+  // "every call runs under the caller's own permissions and row-level
+  // security" — is true rather than rewritten. ⛔ Everything below is what the
+  // ceiling still removes, and none of it moved:
+  //
+  //   `data:read` → `mcp_agent_data_read`
+  //     · NO write of any kind. `allowCreate` / `allowEdit` / `allowDelete` are
+  //       absent, so the CRUD gate refuses insert/update/delete for ANY
+  //       delegator, including a platform admin. (The tool surface is narrowed
+  //       too — `registerObjectTools` does not register the write tools without
+  //       `data:write` — but the DATA-LAYER refusal here is the enforced one.)
+  //     · NO `allowTransfer`: an ownership transfer is refused even where the
+  //       delegator holds it (`security-plugin.ts` transfer gate — BOTH sides
+  //       must grant it).
+  //     · NO `allowExport`.
+  //     · NO `systemPermissions`, so every capability-gated object stays denied
+  //       regardless of the delegator's capabilities.
+  //     · `private`-posture objects are NOT covered: a `'*'` wildcard without a
+  //       superuser bit does not reach them (`resolveObjectPermission`), so the
+  //       agent is denied outright — a loud refusal, never a narrowed count.
+  //
+  //   `data:write` → `mcp_agent_data_write`
+  //     · Everything above except the write bits, PLUS:
+  //     · `sys_*` / better-auth-managed identity tables stay READ-ONLY via
+  //       `denyWritesOnManagedObjects()` — the one arm that survives even an
+  //       admin delegator.
+  //     · NO `allowTransfer` (unchanged: the write ceiling never carried it).
+  //     · NO `allowExport`.
+  //
+  //   neither scope → `mcp_agent_restricted`
+  //     · `objects: {}` — no object reaches the agent at all; the resolved list
+  //       is non-empty only so enforcement fails CLOSED.
+  //
+  //   ALL scopes, on every path
+  //     · The delegator's own grants still bound everything: CRUD, FLS masks,
+  //       Layer 0 tenant wall, Layer 1 RLS and record sharing are each AND-ed
+  //       across both principals (`security-plugin.ts`, ADR-0090 D10).
+  //     · A dangling delegator (`sys_user` gone) fails CLOSED.
+  //     · Share-MANAGEMENT authority is not delegated: `ISecurityService`'s
+  //       `hasWriteBypass` → `false` and `resolveWriteScope` → `'own'` for any
+  //       on-behalf-of context, so `ISharingService.canManageShares` refuses.
+  //       ⛔ Deliberately left in place by the ruling, which names visibility.
   PermissionSetSchema.parse({
     name: MCP_AGENT_PERMISSION_SET_READ,
     label: 'MCP Agent — Read Only',

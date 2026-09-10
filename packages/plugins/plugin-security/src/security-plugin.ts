@@ -28,6 +28,8 @@ import {
   buildContextForUser,
   resolveDelegatorContext,
   intersectFieldMasks,
+  intersectDelegatedScope,
+  d10NarrowingStatement,
 } from './explain-engine.js';
 import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/security';
 import type { II18nService, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -105,6 +107,7 @@ import {
   type SharingWriteVerdict,
   type AuthoredRowWriteVerdict,
   type AuthoredRowWriteOperation,
+  type DelegationNarrowing,
 } from '@objectstack/spec/contracts';
 import { matchesFilterCondition } from '@objectstack/formula';
 import { FieldMasker } from './field-masker.js';
@@ -1573,6 +1576,58 @@ export class SecurityPlugin implements Plugin {
             return 'own';
           }
         },
+        // [ADR-0090 D10 — maintainer ruling 2026-09-08, consequence 2] The
+        // delegated-read diagnostic. NOT an enforcement path: it decides
+        // nothing, narrows nothing, and never throws outward. It answers the
+        // one question a transport serving a delegated read owes its caller —
+        // "is this count a fact about the object, or about the ceiling?" —
+        // because the caller is an AI that will otherwise report `total: 0` as
+        // an answer (the measured failure on #16549).
+        //
+        // Resolved from the SAME two evaluator calls the CRUD middleware makes
+        // when it stashes `__readScope` (step 2.6), folded by the SAME
+        // `intersectDelegatedScope`. That is what stops it becoming a phantom
+        // check: it cannot report a narrowing the query did not have, and it
+        // cannot miss one the query did.
+        describeDelegationNarrowing: async (object: string, context?: any): Promise<DelegationNarrowing> => {
+          const none: DelegationNarrowing = { narrowed: false };
+          if (context?.isSystem) return none;
+          const delegatorId = context?.onBehalfOf?.userId;
+          if (!context?.userId || !delegatorId) return none;
+          try {
+            const del = await resolveDelegatorContext(this.ql, context);
+            // A dangling delegator is a fail-CLOSED DENIAL upstream, not a
+            // narrowing — the read never returns rows for this to describe.
+            if (del.kind !== 'resolved') return none;
+            const meta = await this.getObjectSecurityMeta(object);
+            const sets = await this.resolvePermissionSetsForContext(context);
+            const delegatorSets = await this.resolvePermissionSetsForContext(del.context);
+            const delegatorScope = this.permissionEvaluator.getEffectiveScope('read', object, delegatorSets, { isPrivate: meta.isPrivate });
+            const declared = this.permissionEvaluator.getDeclaredScope('read', object, sets, { isPrivate: meta.isPrivate });
+            const folded = intersectDelegatedScope(declared, delegatorScope);
+            if (!folded.narrowedByCeiling) return none;
+            return {
+              narrowed: true,
+              statement: d10NarrowingStatement({
+                object,
+                delegatorId: String(delegatorId),
+                effectiveScope: folded.agentLegScope,
+                delegatorScope,
+              }),
+              effectiveScope: folded.agentLegScope as DelegationNarrowing['effectiveScope'],
+              delegatorScope,
+            };
+          } catch (e) {
+            // ⛔ A diagnostic must never fail a read. Silence is the only safe
+            // direction: it degrades to exactly the behaviour that shipped
+            // before this method existed.
+            this.logger.warn?.(
+              `[security] describeDelegationNarrowing failed for object '${object}' — reporting no narrowing`,
+              e instanceof Error ? e : new Error(String(e)),
+            );
+            return none;
+          }
+        },
         // [#5493 / ADR-0105 D3] Authored-row-write evidence: does an
         // APP-AUTHORED (non-floor) RLS policy admit this row for this write,
         // with the platform's `created_by` ownership floor taken out by
@@ -2247,10 +2302,31 @@ export class SecurityPlugin implements Plugin {
       //      (plugin-sharing), so we pass the scope STRING, not the resolved set.
       if (permissionSets.length > 0) {
         const sc: any = opCtx.context;
+        // [ADR-0090 D10 — maintainer ruling 2026-09-08, option 1] The DELEGATED
+        // principal's own depth is its ceiling's DECLARED depth, and a ceiling
+        // that declares none says nothing about visibility — so the delegator's
+        // depth stands (`intersectDelegatedScope`). Before this, the ceiling's
+        // silence was read as `own` by `getEffectiveScope`'s owner-only default
+        // and every `viewAllRecords` manager collapsed to `own + shares` the
+        // moment an OAuth MCP client asked on their behalf.
+        //
+        // ⛔ VISIBILITY DEPTH only. The ceiling's CRUD bits (step 2.5 above),
+        // its `allowTransfer` refusal (step 2.9), its managed-object write
+        // denies and its private-object exclusion are all decided elsewhere and
+        // are untouched — see the subtraction table on the ceiling sets.
+        const depthFor = (opClass: 'read' | 'write'): { agentLegScope: string; delegatorScope: string } | null => {
+          if (!delegatorSets) return null;
+          const delegatorScope = this.permissionEvaluator.getEffectiveScope(opClass, opCtx.object, delegatorSets, { isPrivate: secMeta.isPrivate });
+          const declared = this.permissionEvaluator.getDeclaredScope(opClass, opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
+          return { agentLegScope: intersectDelegatedScope(declared, delegatorScope).agentLegScope, delegatorScope };
+        };
         // The AGENT's own depth drives plugin-sharing's owner-match for the
         // agent identity (unchanged on the non-delegated path).
         if (['find', 'findOne', 'count', 'aggregate'].includes(opCtx.operation)) {
-          sc.__readScope = this.permissionEvaluator.getEffectiveScope('read', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
+          const delegated = depthFor('read');
+          sc.__readScope = delegated
+            ? delegated.agentLegScope
+            : this.permissionEvaluator.getEffectiveScope('read', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
           // [ADR-0090 D10] Stash the DELEGATOR's own read depth SEPARATELY (not a
           // min of the two). The OWD/sharing owner-match is identity-scoped:
           // plugin-sharing re-runs the owner filter under the delegator's
@@ -2258,14 +2334,13 @@ export class SecurityPlugin implements Plugin {
           // intersection. Narrowing __readScope alone would wrongly scope the
           // AGENT's identity to the delegator's depth (owner_id = agentId),
           // hiding the very rows the delegator legitimately owns.
-          if (delegatorSets) {
-            sc.__delegatorReadScope = this.permissionEvaluator.getEffectiveScope('read', opCtx.object, delegatorSets, { isPrivate: secMeta.isPrivate });
-          }
+          if (delegated) sc.__delegatorReadScope = delegated.delegatorScope;
         } else if (['update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation)) {
-          sc.__writeScope = this.permissionEvaluator.getEffectiveScope('write', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
-          if (delegatorSets) {
-            sc.__delegatorWriteScope = this.permissionEvaluator.getEffectiveScope('write', opCtx.object, delegatorSets, { isPrivate: secMeta.isPrivate });
-          }
+          const delegated = depthFor('write');
+          sc.__writeScope = delegated
+            ? delegated.agentLegScope
+            : this.permissionEvaluator.getEffectiveScope('write', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
+          if (delegated) sc.__delegatorWriteScope = delegated.delegatorScope;
         }
       }
 
