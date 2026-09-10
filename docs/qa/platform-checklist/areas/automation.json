@@ -426,7 +426,7 @@
         {
           "clause": "suspending types (screen, wait, approval, approval_revise — and subflow/map when the child pauses) park the run status=paused and resume to completed",
           "oracle": "api",
-          "verify": "run detail shows status paused while parked and completed after the screen resume / timer elapse / approval decision / resubmit (ExecutionStatus vocabulary: pending|running|paused|completed|failed|cancelled|timed_out|retrying)",
+          "verify": "run detail shows status paused while parked and completed after the screen resume / timer elapse / approval decision / resubmit (see the ExecutionStatus vocabulary declared in packages/spec/src/automation/execution.zod.ts)",
           "evidence": "before/after run-detail reads per suspending type"
         },
         {
