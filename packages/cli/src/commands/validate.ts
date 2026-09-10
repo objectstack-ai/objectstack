@@ -14,6 +14,7 @@ import {
 } from '@objectstack/spec';
 import { loadConfig } from '../utils/config.js';
 import { lowerCallables } from '../utils/lower-callables.js';
+import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveSduiManifest } from '../utils/sdui-manifest.js';
 import { preflightRequiredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
@@ -300,9 +301,25 @@ export default class Validate extends Command {
       //    is declared in `lint/authoring-rules.ts`. Do not add a call site here.
       const registered = authoringRulesFor('validate');
       if (!flags.json) printStep(`Running author-time rules (${registered.length})...`);
+      //    [ADR-0130 D4 / option B, #17069] Judged on the SAME folded stack
+      //    `os build` judges (`compile.ts` step 3b), through the one helper
+      //    both doors call. Under option B every definition lives in
+      //    `packages[]` and the top level carries none, so this run's input
+      //    was an EMPTY stack: `os validate` printed `✓ Validation passed` and
+      //    exited 0 having judged nothing, on a stack `os build` refuses. That
+      //    is the weakest-gate class #4409 was filed for, and the direction it
+      //    arrived in here is the worst one — the fast inner-loop check is
+      //    what an author runs BEFORE shipping, so its clean bill of health is
+      //    the strongest false assurance the three commands can give.
+      //
+      //    Rule INPUT only, exactly as in `compile.ts`: this command emits no
+      //    artifact at all, and the folded stack reaches neither the metadata
+      //    stats below nor the `--json` payload. A stack that still carries
+      //    its collections is returned by identity, so every single-package
+      //    project is unaffected by construction.
       const findings = runAuthoringRules('validate', {
-        normalized: normalized as Record<string, unknown>,
-        parsed: result.data as Record<string, unknown>,
+        normalized: authoringRuleUnionStack(normalized as Record<string, unknown>),
+        parsed: authoringRuleUnionStack(result.data as Record<string, unknown>),
         sduiManifest: resolveSduiManifest(),
         // [#16546] Same ref set `os build` / `os lint` compute — keeps this
         // door's hook write-set findings at the same `path` as the other two.
