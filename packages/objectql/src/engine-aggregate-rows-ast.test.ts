@@ -55,7 +55,9 @@ import { ObjectQL } from './engine.js';
 // 88 applications, 15 of them rejected — the #16642 measurement's own numbers
 // (`rejected_count` = 15, and 15/88 = 0.1704… is the `ratio` the card says is
 // blocked outright on the memory driver).
-const APPLICATIONS = Array.from({ length: 88 }, (_, i) => ({
+type Row = Record<string, unknown>;
+
+const APPLICATIONS: Row[] = Array.from({ length: 88 }, (_, i) => ({
   id: `a${i}`,
   stage: i < 15 ? 'rejected' : i < 40 ? 'applied' : 'screening',
   score: i,
@@ -118,18 +120,21 @@ function makeAggregatingDriver(seen: Seen) {
       }
       if (!query.groupBy && aggs.length === 0) return APPLICATIONS.slice();
       // Group on the raw value, then aggregate — the driver's own face.
-      const buckets = new Map<string, any[]>();
+      // `dateGranularity` is deliberately NOT read: it is an engine concept,
+      // and no driver aggregation face reads it. That is what makes the
+      // double-aggregation case below reproduce.
+      const groupFields: string[] = (query.groupBy ?? []).map(
+        (g: string | { field: string }) => (typeof g === 'string' ? g : g.field),
+      );
+      const buckets = new Map<string, Row[]>();
       for (const row of APPLICATIONS) {
-        const key = (query.groupBy ?? []).map((g: any) => String(row[typeof g === 'string' ? g : g.field])).join('|');
+        const key = groupFields.map((f) => String(row[f])).join('|');
         if (!buckets.has(key)) buckets.set(key, []);
         buckets.get(key)!.push(row);
       }
       return [...buckets.entries()].map(([, rows]) => {
         const out: Record<string, unknown> = {};
-        for (const g of query.groupBy ?? []) {
-          const field = typeof g === 'string' ? g : g.field;
-          out[field] = rows[0][field];
-        }
+        for (const field of groupFields) out[field] = rows[0][field];
         for (const agg of aggs) if (agg.function === 'count') out[agg.alias] = rows.length;
         return out;
       });
