@@ -11916,12 +11916,43 @@ export class ObjectStackProtocolImplementation implements
             // It is folded in anyway because that makes the scope a DECLARED
             // property of the validator instead of an emergent property of the
             // body. Two orgs whose documents are byte-identical today share a
-            // validator by coincidence, not by statement; and any future path
-            // that resolves an org row but falls back to the env-wide body
-            // would answer a 304 pinning the caller to a wrong-scope document
-            // with nothing in the validator to show it. Prepended, and ONLY
+            // validator by coincidence, not by statement. Prepended, and ONLY
             // when present, so an org-less caller's validator stays byte-for-
             // byte the one it is issued today.
+            //
+            // [#16525] ⚠️ The paragraph above used to argue from "any FUTURE
+            // path that resolves an org row but falls back to the env-wide
+            // body". THAT PATH IS PRESENT, and reading it as future is how a
+            // later author concludes the risk has not arrived yet:
+            // `getMetaItem` resolves `(orgId ? findOverlay(orgId) : undefined)
+            // ?? findOverlay(null)`, so an organization with no row of its own
+            // is served the env-wide document under an org-named validator.
+            //
+            // ⭐ AND `request.organizationId` IS THE SUPPLIED MEMBER, not the
+            // effective scope: {@link organizationIdForMetaRead} reduces it to
+            // `undefined` for a type declaring `allowOrgOverride: false`, and
+            // that reduction happens BELOW this line, inside `getMetaItem`. So
+            // a caller that hands this verb a raw organization gets a validator
+            // naming a scope its body was never resolved under.
+            //
+            // ⛔ Neither is a correctness fault, and the reason is the ONE
+            // invariant this block depends on: `content` — the bytes actually
+            // being sent — is inside the hash below. A 304 is therefore
+            // answered only on an exact match over those bytes, so a caller is
+            // only ever pinned to the representation IT received; the cost is
+            // validator FRAGMENTATION (N orgs, one env-wide document, N
+            // validators), which is waste, not error. ⇒ Hashing anything
+            // cheaper than the document — a version marker, the scope alone —
+            // destroys that argument silently. `get-meta-item-cached-etag-
+            // scope.test.ts` §3 is the pin; measured, removing `content` here
+            // reddens exactly one assertion and leaves the rest green.
+            //
+            // ⛔ Do NOT "repair" this by folding the effective value without
+            // reading #16525: it changes every published ETag that carries an
+            // organization, and buys nothing at the only production door —
+            // `@objectstack/rest` computes `organizationIdForMetaRead` BEFORE
+            // it calls (pinned by `rest-server-meta-cached-etag-door-scope.
+            // test.ts`), so supplied and effective already agree there.
             const content = JSON.stringify(item);
             const scope = [
                 request.organizationId ? `org:${request.organizationId}` : undefined,
