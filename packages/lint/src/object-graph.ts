@@ -38,16 +38,37 @@
  *      compiling plugin-auth alone genuinely cannot see them.
  *   2. An object that declares no readable field map — ADR-0015 `external` and
  *      datasource-introspected schemas whose columns resolve at runtime.
- *   3. Registry-injected system columns, which exist at runtime and never
- *      appear in authored `fields`. Resolved per object through
+ *   3. A relationship HOP through a registry-injected system column. The
+ *      columns themselves are not a skip — they exist at runtime, never
+ *      appear in authored `fields`, and resolve per object through
  *      {@link injectedColumnsFor}, never the object-independent
- *      `SYSTEM_FIELDS` union — the two differ exactly where it matters (on
+ *      `SYSTEM_FIELDS` union (the two differ exactly where it matters: on
  *      `ownership: 'none'` the platform injects no `owner_id`, so a reference
  *      to it there is a real defect). The shipped
- *      `showcase_task_metrics.created_at` dimension is skip 3's live case.
+ *      `showcase_task_metrics.created_at` dimension is that live case.
+ *
+ * ## An injected leaf carries its type (#16340)
+ *
+ * Skip 3 used to be wider: an injected leaf resolved by NAME alone, with no
+ * `meta`, so every caller asking a second question about it — is it temporal?
+ * is it a relationship? — had to treat it as unanswerable. That silence was
+ * invisible to authors and it landed on the two most-filtered columns in the
+ * platform: `filter-preset-comparand`'s field-typed arm refused
+ * `close_date: 'last_30_days'` on an authored `date` column while
+ * `created_at: 'last_30_days'` on the same widget passed the linter and the
+ * runtime publish gate, only to be refused by the engine with a 400 on first
+ * render.
+ *
+ * {@link GraphObject.injected} therefore carries each injected column's own
+ * definition, DERIVED from `injectedColumnDefsFor` — the spec tables
+ * `applySystemFields` spreads at registration — so lint never hand-copies
+ * "`created_at` is a datetime" and cannot drift from the registry that
+ * provisions it. The one column with no definition behind it is `id`: the
+ * DRIVER provisions the primary key, so its `GraphField` is empty and a
+ * second question about it is still unanswered — truthfully, and only there.
  */
 
-import { injectedColumnsFor } from './system-fields.js';
+import { injectedColumnDefsFor, injectedColumnsFor } from './system-fields.js';
 
 /** Any plain metadata record. */
 type AnyRec = Record<string, unknown>;
@@ -108,8 +129,19 @@ export interface GraphObject {
   names: ReadonlySet<string>;
   /** name → the slice above. */
   fields: ReadonlyMap<string, GraphField>;
-  /** Registry-injected columns addressable on THIS object (skip 3). */
-  injected: ReadonlySet<string>;
+  /**
+   * Registry-injected columns addressable on THIS object, each mapped to the
+   * registry's own definition of it (#16340).
+   *
+   * A MAP rather than a name set because a caller that resolves a reference
+   * asks two questions, not one: does the column exist, and what is it? Both
+   * halves are derived — membership from `injectedColumnsFor`, the slice from
+   * `injectedColumnDefsFor` — so neither can drift from `applySystemFields`.
+   * `.has(name)` answers the first question exactly as the old set did; `id`
+   * maps to an empty slice because the driver, not the injection pass,
+   * provisions the primary key and no definition table describes it.
+   */
+  injected: ReadonlyMap<string, GraphField>;
 }
 
 /** object name → its resolvable surface, or `null` (skip 2). */
@@ -190,6 +222,23 @@ function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
+/**
+ * Read one field DEFINITION — authored or registry-injected — into the slice
+ * this module exposes.
+ *
+ * One reader for both sources on purpose: an injected `created_at` and an
+ * authored `close_date` are the same kind of answer to the same question, and
+ * a second reader here would be free to disagree with this one about what
+ * `type` means.
+ */
+function graphFieldOf(def: AnyRec): GraphField {
+  return {
+    type: typeof def.type === 'string' ? def.type : undefined,
+    reference: strName(def.reference),
+    multiple: def.multiple === true ? true : undefined,
+  };
+}
+
 /** Read one object's declared field map into the graph slice, or `null`. */
 function graphObjectOf(obj: AnyRec): GraphObject | null {
   const declared = obj.fields;
@@ -200,14 +249,20 @@ function graphObjectOf(obj: AnyRec): GraphObject | null {
     const n = strName(f.name);
     if (!n) continue;
     names.add(n);
-    fields.set(n, {
-      type: typeof f.type === 'string' ? f.type : undefined,
-      reference: strName(f.reference),
-      multiple: f.multiple === true ? true : undefined,
-    });
+    fields.set(n, graphFieldOf(f));
   }
   if (names.size === 0) return null;
-  return { names, fields, injected: injectedColumnsFor(obj) };
+
+  // WHICH columns are injected and WHAT each one is are two derivations over
+  // one plan (`resolveInjectedSystemColumns`), so they cannot disagree about
+  // membership. `id` is in the first and not the second — the driver's primary
+  // key has no definition table — and lands on an empty slice.
+  const defs = injectedColumnDefsFor(obj);
+  const injected = new Map<string, GraphField>();
+  for (const name of injectedColumnsFor(obj)) {
+    injected.set(name, graphFieldOf(defs.get(name) ?? {}));
+  }
+  return { names, fields, injected };
 }
 
 /**
@@ -228,12 +283,21 @@ export function indexObjectGraph(stack: unknown): ObjectGraph {
 export type FieldPathVerdict =
   /**
    * Every hop and the leaf resolved. `object` is the object the LEAF lives on.
-   * `injected` marks a leaf resolved through skip 3 — a registry-injected
-   * column, real at runtime, whose TYPE and relationship target are
-   * registry-owned and invisible here. A caller asking a second question about
-   * the leaf (is it a relationship? is it materialised?) must treat an
-   * `injected` leaf as unanswerable rather than assume the absence of a
-   * declared type means the absence of the property.
+   * `injected` marks a leaf the object does not author — a registry-injected
+   * column, real at runtime.
+   *
+   * `meta` is populated for BOTH kinds (#16340): an injected leaf carries the
+   * registry's own definition, so a caller asking a second question about it
+   * ("is it temporal?") reads `meta.type` exactly as it does on an authored
+   * field. The marker remains because "authored" and "injected" are still
+   * different facts — the #8116 provenance question is asked only of injected
+   * leaves, and an author-DECLARED column of the same name is one the author
+   * vouches for.
+   *
+   * The one leaf with an EMPTY `meta` is `id`: the driver provisions the
+   * primary key, so no definition describes it and a second question about it
+   * genuinely has no answer here. ⛔ Do not read an absent `meta.type` as the
+   * absence of the property — read it as "not answerable for this column".
    */
   | { kind: 'ok'; object: string; field: string; meta?: GraphField; injected?: true }
   /**
@@ -296,10 +360,13 @@ export function resolveFieldPath(
     const meta = obj.fields.get(segment);
     if (!meta) {
       // An injected system column is REAL and some of them are relationships
-      // (`owner_id` is a lookup at the registry), but their type and target are
-      // registry-owned and invisible here — so `owner.name` is unanswerable,
-      // not a miss. Reporting it would be the false positive skip 3 exists to
-      // avoid; assuming it resolves would be the fail-open on the other side.
+      // (`owner_id` is a `lookup` to `sys_user` at the registry). Reporting the
+      // hop would be the false positive skip 3 exists to avoid, so it stays a
+      // SKIP — deliberately, not for want of a target: since #16340 the slice
+      // carries `reference`, and traversing it would newly JUDGE every path
+      // through a platform anchor (`owner_id.name` and its siblings) wherever
+      // `sys_user` is compiled into the stack. That is a widening with its own
+      // findings to measure, and it is not this seam's to make silently.
       if (obj.injected.has(segment)) {
         return { kind: 'unknowable', reason: 'injected-hop', object: current };
       }
@@ -320,7 +387,8 @@ export function resolveFieldPath(
 
   const leaf = segments[segments.length - 1];
   if (obj.names.has(leaf)) return { kind: 'ok', object: current, field: leaf, meta: obj.fields.get(leaf) };
-  if (obj.injected.has(leaf)) return { kind: 'ok', object: current, field: leaf, injected: true };
+  const injectedMeta = obj.injected.get(leaf);
+  if (injectedMeta) return { kind: 'ok', object: current, field: leaf, meta: injectedMeta, injected: true };
   return { kind: 'field-unknown', object: current, field: leaf, candidates: obj.names };
 }
 
