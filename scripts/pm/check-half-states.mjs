@@ -10858,6 +10858,233 @@ export function h55LegacyCensus(issues, since = MAINTAINER_ACTION_LINE_SINCE) {
 }
 
 // ---------------------------------------------------------------------------
+// H56 — a stamp a seat WROTE that the platform's own clock contradicts (#17314).
+//
+// ## The defect this row reads
+//
+// H44 above reads a seat artefact stating a board reading with NO time on it.
+// This row is its twin one field over: the artefact HAS a stamp, the stamp is
+// well formed, and it is wrong — because it came from the seat's sense of
+// elapsed time rather than from a clock read by the act that wrote the text.
+// The two failures are one class and the second is the more dangerous half: an
+// untimestamped reading announces itself as malformed and a reader is told to
+// treat it as untaken, while an estimated one reads as a measurement and is
+// believed.
+//
+// It is filed as MECHANICAL rather than as discipline because the discipline
+// remedy is already spent. The triage seat post records the same failure twice
+// — R+164 (「轮次计时全靠感觉,错了约 4 倍」) and then R+165, ~70 minutes off
+// with roughly fifteen audit comments carrying the estimate — with a
+// "measure it next time" note written BETWEEN them that did not hold.
+//
+// ## What the row compares, and the two positions it trusts
+//
+// A comment carries two clocks: the one the seat typed into the text, and the
+// `created_at` the platform stamped when it stored that text. Where the first
+// disagrees with the second by more than `H56_STAMP_TOLERANCE_MIN`, the typed
+// one was not read by the act that wrote it.
+//
+// Which typed stamps are the ACT'S OWN is a question about meaning, and this
+// row refuses to answer it. It reads two POSITIONS instead, both of which the
+// protocol assigns to the writing act itself:
+//
+//   - the OPENING line — where a claim, a dispatch, a verdict and a round
+//     report each put their `YYYY-MM-DDThh:mmZ`; and
+//   - a SUBSCRIPT reading-time line — the seat post's small-print stamp.
+//
+// A line carrying MORE THAN ONE stamp is held out and counted, never judged: a
+// line that quotes another reading beside its own is exactly the meaning
+// question above, and answering it by guessing would file a row against a
+// correctly-stamped artefact. That is the bounded, stated over-read's opposite
+// direction, and it is the safe one — this row's silence is a lower bound.
+//
+// ## Granularity and the EDIT window — the two false-positive sources, closed
+//
+// The protocol stamp is minute-grained, so `2026-09-10T06:37Z` names the whole
+// minute `06:37:00`–`06:38:00` and a `created_at` of `06:37:48` is INSIDE it,
+// not 48 seconds outside. `stampSpan` widens the stamp to its own grain before
+// any comparison, so a perfectly stamped comment reads as zero drift rather
+// than as one rounded minute.
+//
+// An EDITED comment keeps its original `created_at` while its text — stamp
+// included — may legitimately have been rewritten at `updated_at`. So the
+// comparison is against the WINDOW `created_at`..`updated_at`, and a stamp
+// anywhere inside it is on time. Where a comment was edited long after it was
+// posted that window is wide and this row goes quiet: a stated under-read,
+// declared in the census clause, and the honest direction for a report-only
+// patrol whose input is somebody else's artefact.
+//
+// ## Corpus and quota — it buys NOTHING
+//
+// The corpus is exactly the threads `commentCache` holds when H44 has finished
+// reading it, so this row makes no request of its own and adds nothing to the
+// cache. Its placement in `sweepInto` is load-bearing for that: it sits
+// immediately after H44's loop and BEFORE H46, whose leg (b) widens the cache
+// — reading after H46 would give this row a corpus H44 never saw, and the two
+// counts in the summary would stop describing the same population.
+//
+// ## ⛔ Report-only, and no gate
+//
+// Like every row in this file it writes no label, relabels nothing and is not
+// a verdict. The remedy it names has two halves: an EDIT of the offending
+// comment, and — for the NEXT artefact — the token route, where
+// `scripts/pm/post-stamped.mjs` substitutes a clock read in the same
+// invocation that posts the text, so an estimated stamp has no spelling at
+// all. This row is what sees the artefacts that did not come through it.
+// ---------------------------------------------------------------------------
+
+/**
+ * The protocol's stamp shape — `YYYY-MM-DDThh:mmZ`, seconds optional.
+ *
+ * ⛔ NOT global. A `g`-flagged regex carries `lastIndex` across calls, and this
+ * one is exported and read by a second module (`scripts/pm/post-stamped.mjs`),
+ * where a shared cursor would make one caller's scan depend on another's. Use
+ * `protocolStamps` for the sweep.
+ */
+export const PROTOCOL_STAMP_RE = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?Z\b/;
+
+/** Every protocol stamp in this text, in order. */
+export function protocolStamps(text) {
+  const re = new RegExp(PROTOCOL_STAMP_RE.source, 'g');
+  const out = [];
+  let m;
+  while ((m = re.exec(String(text ?? '')))) out.push(m[0]);
+  return out;
+}
+
+/**
+ * How far a typed stamp may sit from the write that stored it before it stops
+ * being a reading. Fifteen minutes: long enough for a seat to compose a long
+ * artefact around a stamp it really did read, short enough that the recorded
+ * ~70-minute failure is loud. Exported because the WRITE side reads it too —
+ * one number for the tool that substitutes the stamp and the patrol that
+ * audits it, never two.
+ */
+export const H56_STAMP_TOLERANCE_MIN = 15;
+
+/** The subscript opener a seat post's small-print reading-time line carries. */
+export const H56_READING_LINE_OPENER = /<sub>/;
+
+/**
+ * The instant-SPAN a stamp names, in ms: minute-grained unless it spells
+ * seconds. `null` when the text is not a stamp this scan can parse.
+ */
+export function stampSpan(stamp) {
+  const at = Date.parse(String(stamp ?? ''));
+  if (!Number.isFinite(at)) return null;
+  const grain = /\d{2}:\d{2}:\d{2}Z$/.test(String(stamp)) ? 1000 : 60000;
+  return { from: at, to: at + grain };
+}
+
+/**
+ * Minutes between the stamp's span and the write window `createdAt`..`updatedAt`
+ * — `0` when they overlap, `null` when either side is unreadable, and never a
+ * rounded `0` for a gap that exists.
+ */
+export function stampDriftMinutes(stamp, createdAt, updatedAt = createdAt) {
+  const span = stampSpan(stamp);
+  const from = Date.parse(String(createdAt ?? ''));
+  if (!span || !Number.isFinite(from)) return null;
+  const edited = Date.parse(String(updatedAt ?? ''));
+  const hi = Number.isFinite(edited) && edited > from ? edited : from;
+  if (span.from <= hi && span.to > from) return 0;
+  const gap = span.from > hi ? span.from - hi : from - span.to;
+  return Math.max(1, Math.round(gap / 60000));
+}
+
+/**
+ * The stamps this row is willing to read as the writing act's OWN, by position:
+ * the opening line, and any subscript reading-time line. A line carrying more
+ * than one stamp contributes nothing — see `h56AmbiguousLines`.
+ */
+export function h56StampedReadings(text) {
+  const lines = String(text ?? '').split('\n');
+  const opening = lines.findIndex((line) => line.trim().length > 0);
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const isOpening = i === opening;
+    const isReading = H56_READING_LINE_OPENER.test(lines[i]);
+    if (!isOpening && !isReading) continue;
+    const stamps = protocolStamps(lines[i]);
+    if (stamps.length !== 1) continue;
+    out.push({ stamp: stamps[0], where: isOpening ? 'the opening line' : 'a subscript reading-time line' });
+  }
+  return out;
+}
+
+/** How many of those positions were HELD OUT for carrying more than one stamp. */
+export function h56AmbiguousLines(text) {
+  const lines = String(text ?? '').split('\n');
+  const opening = lines.findIndex((line) => line.trim().length > 0);
+  let held = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (i !== opening && !H56_READING_LINE_OPENER.test(lines[i])) continue;
+    if (protocolStamps(lines[i]).length > 1) held += 1;
+  }
+  return held;
+}
+
+/**
+ * H56 — `null` when the comment is clean, unstamped or unjudgeable, else the
+ * WORST reading on it: `{ stamp, where, drift }`.
+ *
+ * An unreadable `created_at` returns `null` and is COUNTED as unjudged by the
+ * caller rather than presenting as clean (#4690): a comment with no platform
+ * clock has nothing to contradict its text.
+ */
+export function h56EstimatedStamp(comment, tolerance = H56_STAMP_TOLERANCE_MIN) {
+  const body = comment?.body;
+  if (typeof body !== 'string' || body.length === 0) return null;
+  if (!Number.isFinite(Date.parse(String(comment?.created_at ?? '')))) return null;
+  let worst = null;
+  for (const reading of h56StampedReadings(body)) {
+    const drift = stampDriftMinutes(reading.stamp, comment.created_at, comment.updated_at);
+    if (drift === null || drift <= tolerance) continue;
+    if (!worst || drift > worst.drift) worst = { ...reading, drift };
+  }
+  return worst;
+}
+
+/**
+ * The row. Report-only, and it names the comment so the remedy is an EDIT of a
+ * known artefact rather than a hunt.
+ *
+ * @param {object} hit — `h56EstimatedStamp`'s result.
+ * @param {object} comment — the REST comment row (id, created_at, updated_at).
+ * @param {number} total — how many comments on this carrier carry the defect.
+ */
+export function h56EstimatedStampRow(hit, comment, total = 1) {
+  if (!hit) return null;
+  const id = String(comment?.id ?? 'an unread id');
+  const created = String(comment?.created_at ?? 'an unread instant');
+  const edited =
+    comment?.updated_at && comment.updated_at !== comment.created_at
+      ? ` (edited, so the whole window to ${comment.updated_at} was allowed)`
+      : '';
+  const more =
+    total > 1
+      ? ` ${total - 1} further comment(s) on this carrier carry a stamp their own write time contradicts; this is the WIDEST.`
+      : '';
+  return (
+    `${hit.where} of comment \`${id}\` states \`${hit.stamp}\`, and the platform stored that comment at ` +
+    `${created}${edited} — ${hit.drift} minute(s) apart, beyond the ${H56_STAMP_TOLERANCE_MIN}-minute ` +
+    'tolerance. A stamp on a seat artefact is a READING, and the protocol has readers treat it as the ' +
+    'instant the board was looked at; one that disagrees with its own write by this much was not read by ' +
+    'the act that wrote it — it was ESTIMATED, and every decision taken downstream on that line is dated ' +
+    'to a board nobody looked at then.' +
+    more +
+    ' Remedy has two halves. This artefact: an EDIT of that comment carrying the time actually read — ' +
+    '⛔ never a fresh measurement written as if it were the original, which dates the artefact to a board ' +
+    'it never read. The NEXT artefact: post it through `scripts/pm/post-stamped.mjs`, which substitutes a ' +
+    'clock read in the same invocation that writes the text, so an estimated stamp has no spelling to ' +
+    'reach for. ⚠️ Only two POSITIONS are read — the opening line and a subscript reading-time line — and ' +
+    'a line carrying more than one stamp is held out rather than guessed at, so this row is a LOWER ' +
+    'BOUND. Report-only patrol INPUT, not a verdict and not a gate: nothing is blocked by this row and no ' +
+    'gate reads it.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -11005,6 +11232,12 @@ export const SWEEP_COUNT_KEYS = [
   'readingComments',
   'readingSeatCandidates',
   'readingSeatRead',
+  // H56's census (#17314). `stampComments` is the judged half of H44's own
+  // corpus — same threads, one field over — and the other two are the two ways
+  // a comment leaves this row unjudged rather than clean.
+  'stampComments',
+  'stampUnjudged',
+  'stampAmbiguous',
   // H46's coverage pair. `claimlessCandidates` is how many BOUND, non-`pm:queue`
   // open cards leg (b) had to read a thread for, and `claimlessProbed` how many
   // of them it got — the pair that keeps a row that judged nothing separable
@@ -11465,6 +11698,19 @@ export function summaryLine(counts, findingCount) {
     'PULL REQUEST is NOT in this corpus: no listing here fetches a PR comment page, so this row\'s ' +
     'silence about PRs is an unread surface and never a clean one, and every count above is a LOWER ' +
     'BOUND. ' +
+    // H56's census (#17314). UNCONDITIONAL like every other window's, and it is
+    // the ONLY place the two silences of this row are visible: a comment with
+    // no readable `created_at` has nothing to contradict its text, and a line
+    // carrying two stamps is a meaning question this row refuses to guess at.
+    // Both are held out, so the rows are a LOWER BOUND and this clause says by
+    // how much.
+    `Estimated stamps (H56): ${counts.stampComments ?? 0} of the comment(s) above carried a platform ` +
+    `\`created_at\` to judge a typed stamp against, ${counts.stampUnjudged ?? 0} did not and are ` +
+    `UNJUDGED rather than clean, and ${counts.stampAmbiguous ?? 0} stamped line(s) carried more than one ` +
+    `stamp and were held out rather than guessed at. Tolerance ${H56_STAMP_TOLERANCE_MIN} min, measured ` +
+    'against the whole `created_at`..`updated_at` window, so a stamp legitimately refreshed by a later ' +
+    'EDIT never fires and a comment edited long after posting is judged against a wide window — a stated ' +
+    'under-read, and the safe direction for a patrol reading somebody else\'s artefact. ' +
     // H46's coverage pair. UNCONDITIONAL like every other window's: a `0 of 0`
     // reading is a run where no open PR bound a closing keyword to a
     // non-`pm:queue` open card, never a row that went quiet.
@@ -11609,6 +11855,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h37Folds', 'Family folds (H37): '],
   ['h40References', 'Dangling references (H40): '],
   ['h44Readings', 'Untimestamped readings (H44): '],
+  ['h56Stamps', 'Estimated stamps (H56): '],
   ['h46Claimless', 'Claim-less implementations (H46): '],
   ['h45EpicParents', 'Epic parent reads (H45): '],
   ['h47Release', 'Release records (H47): '],
@@ -12039,6 +12286,19 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // label on a live card, the repair on the board — and it is H9's band, the
   // row this one is the awaiting-state twin of.
   H55: 'state',
+
+  // H56 is a `state` (#17314), and it is H44's band for H44's reason — the two
+  // are one class, a seat artefact whose reading cannot be dated (H44) and one
+  // whose date is wrong (H56). ⛔ Not `gate`: nothing was stripped and no
+  // absence reads as clearance; the artefact is present and says something
+  // false. ⛔ Not `stall`: no card is stopped by a wrong stamp and no scan is
+  // waiting on it — the cost is a decision dated to a board nobody looked at,
+  // not motion that never happens. ⛔ Not `inventory`: the row alarms about ONE
+  // comment on one carrier; the population reading — how many comments were
+  // judged, and the two ways one is held out — is a summary clause and takes no
+  // band at all (H39's shape). What is left is `state` exactly: a live artefact
+  // contradicting itself, the repair an edit on the board.
+  H56: 'state',
 
   // H52 is a `stall` and not a `state` (#16662): the board is not contradicting
   // itself — every label on the card is correct — and no later sweep frees the
@@ -13382,6 +13642,12 @@ async function sweep(options = {}) {
     awaitingUndated: 0,
     maintainerActionCandidates: 0,
     maintainerActionProbed: 0,
+    // H56's census (#17314) — how many of the comments H44 already read carry
+    // a platform clock to judge a typed stamp against, and the two ways one
+    // does not. Initialised so a sweep that throws early renders numbers.
+    stampComments: 0,
+    stampUnjudged: 0,
+    stampAmbiguous: 0,
     // H19's coverage pair — distinct `Blocked-by:` targets seen, and how many
     // got a definite open/closed answer.
     blockerTargets: 0,
@@ -15851,6 +16117,45 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   }
   stats.readingThreads = commentCache.size;
   stats.readingComments = h44Read;
+
+  // H56 (#17314) — the estimated-stamp patrol, H44's twin one field over and
+  // reading the SAME corpus: the threads already in `commentCache`. It buys
+  // nothing and puts nothing in the cache.
+  //
+  // Placed HERE — after H44's loop, BEFORE H46 — deliberately, and the reason is
+  // H46's own header in reverse: leg (b) below widens the cache, so judging this
+  // row after it would give H56 a corpus H44 never saw and the two census
+  // clauses would stop describing one population.
+  //
+  // One row per CARRIER, naming the WIDEST drift rather than the oldest offender
+  // (H44's choice): every offending comment needs its own edit, so the single
+  // row a reader gets should name the one whose date is furthest from the truth.
+  let h56Judged = 0;
+  let h56Unjudged = 0;
+  let h56Held = 0;
+  for (const [number, rows] of commentCache) {
+    const carrier = seen.get(number) ?? seenUnscoped.get(number);
+    if (!carrier) continue;
+    let worst = null;
+    let total = 0;
+    for (const row of rows ?? []) {
+      if (typeof row?.body !== 'string') continue;
+      h56Held += h56AmbiguousLines(row.body);
+      if (!Number.isFinite(Date.parse(String(row?.created_at ?? '')))) {
+        h56Unjudged += 1;
+        continue;
+      }
+      h56Judged += 1;
+      const hit = h56EstimatedStamp(row);
+      if (!hit) continue;
+      total += 1;
+      if (!worst || hit.drift > worst.hit.drift) worst = { hit, row };
+    }
+    if (worst) findings.push([carrier, 'H56', h56EstimatedStampRow(worst.hit, worst.row, total)]);
+  }
+  stats.stampComments = h56Judged;
+  stats.stampUnjudged = h56Unjudged;
+  stats.stampAmbiguous = h56Held;
 
   // H46 — the claim-less implementation. Placed HERE, AFTER H44, deliberately:
   // leg (b) adds threads to `commentCache`, and H44's corpus is whatever the
@@ -23307,6 +23612,121 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H55 reconciliation: H25\'s deferral points at this row instead of deferring', SELF55.split(['H25 stays the', 'EXCLUSIVITY half'].join(' ')).length - 1, 1);
   t('H55 reconciliation: …and the ager\'s remedy reads the line before re-asking', h11row(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes('Maintainer-action'), true);
   t('H55 reconciliation: …without prescribing the re-check this state cannot have', h11row(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes('Restart-when'), false);
+
+  // -- H56 — a stamp whose own write time contradicts it (#17314) ------------
+  // Fixtures are SYNTHETIC (⛔ the self-test never touches GitHub). The pair the
+  // filing card names is here first: an on-time stamp and the recorded ~70-minute
+  // miss, the same magnitude as the triage seat post's R+165 failure.
+  const C56 = '2026-09-10T06:37:48Z';
+  const comment56 = (over = {}) => ({
+    id: 5614267277,
+    body: 'Claim: skills seat, session `session_x`, 2026-09-10T06:37Z — dispatched into the round.',
+    created_at: C56,
+    updated_at: C56,
+    ...over,
+  });
+  const h56 = (over = {}) => h56EstimatedStamp(comment56(over));
+  const OFF56 = comment56({ body: 'Claim: skills seat, session `session_x`, 2026-09-10T05:27Z — dispatched into the round.' });
+
+  // ⭐ The fixture pair the card asks for, in both directions.
+  t('H56 pair: an ON-TIME stamp is silent', h56(), null);
+  t('H56 pair: …and the ~70-minute miss fires', typeof h56EstimatedStamp(OFF56), 'object');
+  t('H56 pair: …with the drift measured, not guessed', h56EstimatedStamp(OFF56).drift, 70);
+  t('H56 pair: …and the offending stamp echoed verbatim', h56EstimatedStamp(OFF56).stamp, '2026-09-10T05:27Z');
+  t('H56 pair: …named by POSITION, never by meaning', h56EstimatedStamp(OFF56).where, 'the opening line');
+
+  // Granularity: a minute-grained stamp names a MINUTE, so seconds inside it are
+  // zero drift rather than one rounded minute. This is the false positive that
+  // would fire on every correctly stamped comment in the corpus.
+  t('H56 grain: a minute stamp spans its whole minute', stampSpan('2026-09-10T06:37Z').to - stampSpan('2026-09-10T06:37Z').from, 60000);
+  t('H56 grain: …and a seconds stamp spans one second', stampSpan('2026-09-10T06:37:48Z').to - stampSpan('2026-09-10T06:37:48Z').from, 1000);
+  t('H56 grain: an unparseable stamp has no span, and never a NaN one', stampSpan('yesterday'), null);
+  t('H56 grain: a `created_at` 48s into the stamped minute is ON TIME', stampDriftMinutes('2026-09-10T06:37Z', C56), 0);
+  t('H56 grain: …and the seconds spelling of the same instant is too', stampDriftMinutes('2026-09-10T06:37:48Z', C56), 0);
+
+  // The tolerance is a boundary, and both sides of it are pinned.
+  t('H56 tolerance: the shared constant is 15 minutes', H56_STAMP_TOLERANCE_MIN, 15);
+  t('H56 tolerance: exactly at the tolerance is clean', h56({ body: 'R9 2026-09-10T06:24Z open', created_at: '2026-09-10T06:40:00Z', updated_at: '2026-09-10T06:40:00Z' }), null);
+  t('H56 tolerance: one minute beyond it fires', h56({ body: 'R9 2026-09-10T06:23Z open', created_at: '2026-09-10T06:40:00Z', updated_at: '2026-09-10T06:40:00Z' })?.drift, 16);
+  t('H56 tolerance: a FUTURE-dated stamp fires too — the miss has two directions', h56({ body: 'R9 2026-09-10T07:40Z open', created_at: '2026-09-10T06:40:00Z', updated_at: '2026-09-10T06:40:00Z' })?.drift, 60);
+  t('H56 drift: an unreadable stamp is null, never 0', stampDriftMinutes('soon', C56), null);
+  t('H56 drift: an unreadable write time is null, never 0', stampDriftMinutes('2026-09-10T06:37Z', 'whenever'), null);
+  t('H56 drift: a gap under a minute still reads as ≥1, never as on time', stampDriftMinutes('2026-09-10T06:00Z', '2026-09-10T06:01:20Z'), 1);
+
+  // The EDIT window — the second false-positive source, closed.
+  t('H56 edit: a stamp inside the created..updated window is on time', h56({ body: 'R9 2026-09-10T08:30Z open', created_at: '2026-09-10T06:40:00Z', updated_at: '2026-09-10T09:00:00Z' }), null);
+  // The gap is measured to the NEAR edge of the window on the side the stamp
+  // fell off, so an early stamp is judged against `created_at` (06:40) and not
+  // against the far `updated_at` — 99 minutes, never 240.
+  t('H56 edit: …and one outside it still fires', h56({ body: 'R9 2026-09-10T05:00Z open', created_at: '2026-09-10T06:40:00Z', updated_at: '2026-09-10T09:00:00Z' })?.drift, 99);
+  t('H56 edit: an unedited comment is judged against the instant alone', stampDriftMinutes('2026-09-10T05:27Z', C56, C56), 70);
+
+  // Positions: the two the protocol assigns to the writing act, and nothing else.
+  t('H56 position: the opening line is read', h56StampedReadings('Dispatched — R9, 2026-09-10T06:38Z.').length, 1);
+  t('H56 position: …even behind leading blank lines', h56StampedReadings('\n\n  R9 open 2026-09-10T06:38Z').length, 1);
+  t('H56 position: a subscript reading-time line is read', h56StampedReadings('Seat post\n\n<sub>read 2026-09-10T06:38Z</sub>')[0]?.where, 'a subscript reading-time line');
+  t('H56 position: a stamp in ordinary prose four lines down is NOT read', h56StampedReadings('Title\n\nbody\n\nthe ruling of 2026-09-08T14:00Z stands').length, 0);
+  t('H56 position: an empty body reads nothing, and never crashes', h56StampedReadings('').length, 0);
+  t('H56 position: a missing body reads nothing either', h56StampedReadings(undefined).length, 0);
+
+  // The meaning question this row REFUSES: a line quoting a second reading.
+  const AMBIG56 = 'Dispatched — R9, 2026-09-10T06:38Z, re-reading the board taken 2026-09-08T14:00Z.';
+  t('H56 held out: a line with two stamps contributes NO reading', h56StampedReadings(AMBIG56).length, 0);
+  t('H56 held out: …and is COUNTED so the silence is visible', h56AmbiguousLines(AMBIG56), 1);
+  t('H56 held out: a single-stamp line is not held out', h56AmbiguousLines('R9 2026-09-10T06:38Z'), 0);
+  t('H56 held out: …so the row cannot fire on it', h56EstimatedStamp({ body: AMBIG56, created_at: C56, updated_at: C56 }), null);
+
+  // #4690 — unjudged is never clean, and the caller counts it.
+  t('H56 unjudged: a comment with no readable `created_at` is null, for the census to count', h56EstimatedStamp({ body: OFF56.body, created_at: 'never' }), null);
+  t('H56 unjudged: a comment with no body is null', h56EstimatedStamp({ body: undefined, created_at: C56 }), null);
+  t('H56 unjudged: a missing comment does not crash', h56EstimatedStamp(undefined), null);
+
+  // `protocolStamps` is read by a SECOND module, so the shared regex must not
+  // carry a cursor between calls — the classic `g`-flag defect.
+  t('H56 regex: the exported shape is NOT global', PROTOCOL_STAMP_RE.global, false);
+  t('H56 regex: …so two consecutive scans of one text agree', protocolStamps('a 2026-09-10T06:38Z b').length === protocolStamps('a 2026-09-10T06:38Z b').length, true);
+  t('H56 regex: seconds are optional', protocolStamps('2026-09-10T06:38:12Z').length, 1);
+  t('H56 regex: a bare HH:MMZ is H44\'s shape, not this one', protocolStamps('read at 06:38Z').length, 0);
+
+  // The row sentence.
+  const ROW56 = h56EstimatedStampRow(h56EstimatedStamp(OFF56), OFF56, 3);
+  t('H56 row: null in, null out', h56EstimatedStampRow(null, OFF56), null);
+  t('H56 row: names the comment so the remedy is an edit, not a hunt', ROW56.includes('5614267277'), true);
+  t('H56 row: states both clocks', ROW56.includes('2026-09-10T05:27Z') && ROW56.includes(C56), true);
+  t('H56 row: …and the distance between them', ROW56.includes('70 minute(s) apart'), true);
+  t('H56 row: counts the rest on the carrier and says which one this is', ROW56.includes('2 further comment(s)') && ROW56.includes('WIDEST'), true);
+  t('H56 row: the word for what went wrong is ESTIMATED', ROW56.includes('ESTIMATED'), true);
+  t('H56 row: ⛔ refuses the re-measurement remedy by name', ROW56.includes('never a fresh measurement written as if it were the original'), true);
+  t('H56 row: points at the write-side token route for the NEXT artefact', ROW56.includes('scripts/pm/post-stamped.mjs'), true);
+  t('H56 row: declares itself a LOWER BOUND', ROW56.includes('LOWER BOUND'), true);
+  t('H56 row: report-only, and says no gate reads it', ROW56.includes('no gate reads it'), true);
+  // ⛔ The sentence is rendered into a GitHub issue body, which mutates
+  // less-than fragments — so the subscript position is named in WORDS.
+  t('H56 row: ⛔ carries no angle-bracket fragment at all', /[<>]/.test(ROW56), false);
+  t('H56 row: an edited carrier says the window was widened for it', h56EstimatedStampRow({ stamp: '2026-09-10T05:00Z', where: 'the opening line', drift: 100 }, { id: 1, created_at: '2026-09-10T06:40:00Z', updated_at: '2026-09-10T09:00:00Z' }).includes('edited, so the whole window'), true);
+  t('H56 row: an unread id is named as such rather than printed as undefined', h56EstimatedStampRow({ stamp: 'x', where: 'the opening line', drift: 99 }, {}).includes('an unread id'), true);
+
+  // Census and forwarding.
+  t('H56 census: every count key rides the enumerated forwarding contract', ['stampComments', 'stampUnjudged', 'stampAmbiguous'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  const SUM56 = saidBy('h56Stamps', summaryLine({ stampComments: 411, stampUnjudged: 2, stampAmbiguous: 7 }, 0));
+  t('H56 census: the judged half is reported', SUM56.includes('411 of the comment(s) above'), true);
+  t('H56 census: …the unjudged half is UNJUDGED, never clean', SUM56.includes('2 did not and are UNJUDGED rather than clean'), true);
+  t('H56 census: …and the held-out lines are named', SUM56.includes('7 stamped line(s) carried more than one stamp'), true);
+  t('H56 census: the tolerance is stated in the clause, not left to the reader', SUM56.includes('Tolerance 15 min'), true);
+  t('H56 census: …and the edit-window under-read is declared', SUM56.includes('under-read'), true);
+  t('H56 census: the clause renders on a zero run too — silence is never absence', saidBy('h56Stamps', summaryLine({}, 0)).includes('0 of the comment(s) above'), true);
+
+  // Band.
+  t('H56 band: registered as a STATE row — H44\'s band, because it is H44\'s class', familyBand('H56'), 'state');
+  t('H56 band: …the same band its twin carries', familyBand('H56'), familyBand('H44'));
+  t('H56 band: ⛔ NOT `gate` — nothing was stripped and no absence reads as clearance', familyBand('H56') === 'gate', false);
+  t('H56 band: ⛔ NOT `stall` — a wrong stamp stops no card', familyBand('H56') === 'stall', false);
+  t('H56 band: ⛔ NOT `inventory` — the row alarms per comment; the census is a clause', familyBand('H56') === 'inventory', false);
+  t('H56 band: the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H56'), true);
+  t('H56 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H56 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H56 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H56 band: a gate row still outranks it', familyRank('H31') < familyRank('H56'), true);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.
