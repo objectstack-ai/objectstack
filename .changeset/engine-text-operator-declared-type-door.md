@@ -1,8 +1,11 @@
 ---
 "@objectstack/objectql": minor
+"@objectstack/spec": patch
 ---
 
 feat(objectql)!: refuse a text operator aimed at a field whose DECLARED type can never store a string — `INVALID_FILTER` 400 at the engine's field-aware door (#15773)
+
+<!-- adr-0087: registered filter-text-operator-declared-type-refused -->
 
 **BREAKING** for a caller that aims `$contains` / `$notContains` / `$startsWith` / `$endsWith` / `$icontains` / `$like` / `$ilike` at a numeric, boolean, temporal or structured-JSON field: the call used to be answered (with `[]`, with every row for `$notContains`, or with a dialect accident) and is now refused with `400 INVALID_FILTER`. Shipped as `minor` under the repo's launch-window convention. Execution lane (2) of the maintainer ruling on #15661 (decision batch #43, option C-deny); lane (1) is the contract it consults, `@objectstack/spec/data`'s `filter-text-operator-declared-type.ts` (#15804).
 
@@ -34,6 +37,23 @@ What the driver then answered is #14079's option-A row: no row for a positive op
 - **An unknown filter field** — the engine keeps its registry-less tolerance; this door adds no second opinion about a name.
 - **A registry-less host** (`schema.fields` absent) — a door that cannot see the field map invents no verdict, the same early return both neighbours make.
 - **`formula`** — judged one door earlier. `assertFilterIsMaterializable` (#8296) refuses every filter over a `formula` field with `INVALID_FIELD` 400, for the broader reason that no driver materialises a column for it, so a formula's declared `returnType` is never the deciding fact at this seam. Not reordered around: that would answer ONE condition with TWO wire codes chosen by `returnType`. The divergence from lane (1)'s formula rows is pinned by name in `engine-text-operator-declared-type-door.test.ts` rather than dropped.
+
+## The ADR-0087 ledger entry, and why this is `registered` rather than `not-required`
+
+`@objectstack/spec` carries one new semantic migration entry, `filter-text-operator-declared-type-refused` (protocol 18) — the `patch` bump above is that entry and nothing else; no schema, no export and no published set moved.
+
+It is a real registration because the refused shape has an AUTHORED, STORED surface, measured on the tree rather than assumed. Nothing rejects a stored filter at load — `FilterConditionSchema` constrains no field type, and `ViewFilterRuleSchema` takes `field: z.string()` with `contains` in its operator enum — so a filter body written before this change still parses, still loads, and answers `400` the next time it is executed. Carriers measured to reach this seam:
+
+| stored surface | how it reaches the door |
+|:--|:--|
+| `sys_saved_report.query_json.filter` | `report-service.ts` runs `engine.find(report.object_name, { where: q.filter })` verbatim; every `sys_report_schedule` row reaches the same body through `report_id` |
+| `FieldSchema.summaryOperations[].filter` | `summary-aggregate.ts` ANDs it with the parent-FK match and calls `engine.aggregate` |
+| `ListView.filter`, tab filters (`ViewFilterRuleSchema`) | `contains` / `not_contains` / `icontains` / `starts_with` / `ends_with` lower to the same operators through `AST_OPERATOR_MAP` |
+| dashboard widget / `GlobalFilter`, dataset `filter`, report `runtimeFilter`, `FieldSchema.relatedListFilter` | `FilterConditionSchema` carriers, executed through the same engine seam |
+
+**Not** on that list, deliberately: an RLS / sharing / tenant predicate. Those are composed onto the AST by the middleware chain AFTER this door, so the door never judges one — a policy filter cannot become a 400 nobody can act on.
+
+No mechanical rewrite exists, which is exactly what a `semantic` entry is for: `{ amount: { $contains: '5' } }` may have meant `$eq: 5`, a range, or a different column, and `objectstack migrate meta` must not choose. The entry ships the repair procedure and its acceptance criteria instead.
 
 ## FROM → TO
 
