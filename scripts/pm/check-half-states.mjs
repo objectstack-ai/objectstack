@@ -11473,6 +11473,27 @@ export const H57_CRON_FIRE_CAP = 64;
 export const H57_WORKFLOW_PAGE_SIZE = 100;
 export const H57_WORKFLOW_PAGE_CEILING = 3;
 
+/**
+ * Which rows of the workflows listing name a workflow FILE this checkout can
+ * hold — an EXTENSION test, and ⛔ deliberately not a `.github/workflows/`
+ * prefix one.
+ *
+ * The two readings classify this fleet identically (GitHub spells a file-backed
+ * workflow's `path` as `.github/workflows/<name>.yml`, and the fileless rows it
+ * lists for Dependabot and the coding agents carry no extension at all), so the
+ * choice is decided by what each SAYS rather than by what it matches. A
+ * directory-shaped string literal in this file is read by
+ * `scripts/pm/dispatch-gates.mjs` as a WATCH SURFACE, which would place
+ * `check:pm-half-states` on every card touching `.github/workflows/**` — and CI
+ * runs this file only as `--self-test`, which reads no workflow file at all.
+ * That placement was removed once already (#15753, through the noise-floor
+ * constant) and `ROOT_WALK_RESIDUE_LEDGER`'s row for this family records why;
+ * re-introducing it says the opposite of what the gate's own invocation does.
+ * ⛔ So this stays a regex: it asserts the property that actually matters — the
+ * listing row names a YAML file — and claims no directory this gate never reads.
+ */
+export const WORKFLOW_FILE_PATH = /\.ya?ml$/i;
+
 /** How many held-out workflows the summary clause names before it counts. */
 export const H57_HELD_OUT_NAME_CAP = 4;
 
@@ -11745,7 +11766,7 @@ export function cronPeriodHours(crons, fromMs = Date.now()) {
  */
 export function h57Population(workflow, triggers) {
   const path = String(workflow?.path ?? '');
-  if (!path.startsWith('.github/workflows/')) {
+  if (!WORKFLOW_FILE_PATH.test(path)) {
     return { inPopulation: false, kind: 'not-a-file', crons: [], detail: null };
   }
   if (!triggers || triggers.events === null) {
@@ -16143,7 +16164,7 @@ export async function sweepScheduledWorkflows(findings, stats = {}, options = {}
   const inactive = [];
   for (const workflow of listed) {
     const path = String(workflow?.path ?? '');
-    if (!path.startsWith('.github/workflows/')) continue;
+    if (!WORKFLOW_FILE_PATH.test(path)) continue;
     let source = null;
     try {
       source = readSource(path);
@@ -25077,6 +25098,16 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H57 population: ⛔ an unreadable `on:` block is UNREADABLE, never clean', h57Population(wf57('.github/workflows/x.yml'), workflowTriggers('name: x')).kind, 'unreadable');
   t('H57 population: …carrying the reason the scanner gave', h57Population(wf57('.github/workflows/x.yml'), workflowTriggers('name: x')).detail, 'no top-level `on:` key');
   t('H57 population: a dynamic (fileless) workflow is out of scope', h57Population(wf57('dynamic/dependabot/dependabot-updates'), workflowTriggers(WF_STALE)).kind, 'not-a-file');
+  t('H57 population: …and so is a coding-agent row, for the same absent extension', h57Population(wf57('dynamic/agents/anthropic-code-agent'), workflowTriggers(WF_STALE)).kind, 'not-a-file');
+  t('H57 population: the `.yaml` spelling is a workflow file too', WORKFLOW_FILE_PATH.test('.github/workflows/a.yaml'), true);
+  t('H57 population: …and the `.yml` one', WORKFLOW_FILE_PATH.test('.github/workflows/a.yml'), true);
+  t('H57 population: an extensionless listing row is not a file', WORKFLOW_FILE_PATH.test('dynamic/copilot-swe-agent/copilot'), false);
+  // ⛔ The discriminator is an EXTENSION and must stay one. A directory-shaped
+  // STRING literal here is read by `scripts/pm/dispatch-gates.mjs` as a watch
+  // surface and places `check:pm-half-states` on every card touching
+  // `.github/workflows/**` — a placement #15753 removed, on a gate CI runs only
+  // as `--self-test`. A regex carries the same meaning and no such claim.
+  t('H57 population: the file discriminator is a REGEX, never a directory string', WORKFLOW_FILE_PATH instanceof RegExp, true);
 
   // The predicate — BOTH directions, which is the card's acceptance criterion.
   const run57 = (over = {}) => ({
