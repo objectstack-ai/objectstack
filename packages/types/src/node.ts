@@ -294,9 +294,11 @@ export function isDeclaredByHost(specifier: string, hostRoot?: string): boolean 
  *   resolve. Remedy: fix the INSTALL. Re-reading the manifest is wasted effort.
  *   ⚠️ One sub-case under this kind is NOT an install problem and does not say
  *   it is (#15045): a `link:` / `file:` (or git / tarball) declaration names a
- *   LOCATION, so the fallback has only the KEY to expect, and a linked manifest
- *   naming something else is refused with
- *   {@link unverifiableLocationMessage}'s wording instead. The KIND is shared
+ *   LOCATION rather than a package, so the fallback cannot verify the directory
+ *   by NAME. #17046 gave it the second axis — the declared path — so a
+ *   correctly linked package now LOADS; what still lands here is the residue
+ *   where neither axis ties the directory to the declaration, refused with
+ *   {@link unverifiableLocationMessage}'s wording. The KIND is shared
  *   deliberately — the refusal, the `MODULE_NOT_FOUND` code and every consumer
  *   branch are unchanged; minting a fourth kind would widen a published union
  *   for a wording fix. ⛔ A consumer that re-words this kind LOCALLY instead of
@@ -644,14 +646,18 @@ const ALIAS_DECLARATION_PROTOCOLS = [
  * refuses a directory holding another.
  *
  * Anything that does not parse as a bare package name yields no expectation to
- * move to, so the key stays and the pre-#14278 refusal is kept: a `workspace:`
- * range, a `link:` / `file:` location, an alias value carrying a subpath, a
- * malformed value. Deliberate — {@link packageNameFromSpecifier} is the one
- * authority on what a package name is here, and its own documentation blesses
- * the aliased declaration shape. On the #13330 leg that residue is a load
- * rather than a refusal: a `link:` target whose manifest names something else
- * keeps today's `require`-condition entry, unchanged by #15044 and pinned as
- * such.
+ * move to, so the key stays: a `workspace:` range, a `link:` / `file:`
+ * location, an alias value carrying a subpath, a malformed value. Deliberate —
+ * {@link packageNameFromSpecifier} is the one authority on what a package name
+ * is here, and its own documentation blesses the aliased declaration shape.
+ *
+ * ⚠️ "The key stays" is a statement about THIS axis only. On the #14041
+ * fallback leg a location specifier now gets a SECOND one
+ * ({@link declaredLocationAxis}, #17046): the host named a directory, so the
+ * directory is what gets verified when the name cannot be. On the #13330 leg
+ * the residue is still a load rather than a refusal: a `link:` target whose
+ * manifest names something else keeps today's `require`-condition entry,
+ * unchanged by #15044 and by #17046, and pinned as such.
  */
 function declaredManifestName(declaration: HostDeclaration): string {
   const { packageName, specifier } = declaration;
@@ -682,11 +688,12 @@ function declaredManifestName(declaration: HostDeclaration): string {
  * made, so a mismatch is the finder's declared limit and NOT an install fault
  * — which is the whole difference between the two messages below.
  *
- * ⚠️ Read for WORDING only. It moves no expectation and licenses no directory:
- * {@link hostInstalledPackageDir} refuses exactly what it refused before, and
- * the second verification axis the card names (comparing
- * `realpath(node_modules/<key>)` against the declared location, which WOULD
- * make these load) is deliberately not built here.
+ * ⚠️ Read for WORDING only. By itself it moves no expectation and licenses no
+ * directory: it is what separates {@link unresolvableMessage}'s INSTALL
+ * remedies from {@link unverifiableLocationMessage}'s statement of the limit.
+ * The SECOND verification axis (#17046) reads a different, strictly narrower
+ * list — {@link LOCATION_DECLARATION_PREFIXES} — because only some of these
+ * name a directory there is anything to compare against.
  *
  * An unrecognised spelling falls out as "the key is a promise" and keeps
  * today's INSTALL wording — the conservative direction, matching
@@ -719,6 +726,155 @@ function declarationNamesNoPackage(declaration: HostDeclaration): boolean {
   // reason; no semver range spelling contains a `/`, so the two do not
   // overlap. A leading `/` is an absolute path, which is not a shorthand.
   return specifier.indexOf('/') > 0 && specifier.indexOf(':') === -1;
+}
+
+/**
+ * ── #17046: the SECOND verification axis — the declaration names a DIRECTORY ──
+ *
+ * The strict subset of {@link NAMELESS_DECLARATION_PREFIXES} whose value is a
+ * FILESYSTEM PATH the host itself wrote. Everything else on that list — a git
+ * or tarball URL, the bare `owner/repo` shorthand — names a remote artefact
+ * and no on-disk location at all, so there is nothing here for it: those keep
+ * the refusal, unchanged, and {@link unverifiableLocationMessage} keeps saying
+ * so.
+ *
+ * ⚠️ This list exists because the two questions are NOT the same question.
+ * `NAMELESS_…` asks *"does the declaration name a package?"* (a WORDING
+ * question, #15045); this one asks *"does the declaration name a directory I
+ * can compare against?"* — the question that decides whether a load happens.
+ * Merging them would license `github:acme/bar` to be verified against a path
+ * nobody wrote.
+ */
+const LOCATION_DECLARATION_PREFIXES = ['link:', 'file:', 'portal:'] as const;
+
+/**
+ * What {@link declaredLocationAxis} measured — kept as a record rather than a
+ * boolean because the REFUSAL has to be able to say what it compared, exactly
+ * as #15045 made the name axis say what it read.
+ */
+interface DeclaredLocationAxis {
+  /** The declared path, resolved against `hostRoot` — as written, not canonicalised. */
+  declaredPath: string;
+  /** `realpath(declaredPath)`, or `undefined` when it does not resolve. */
+  declaredReal: string | undefined;
+  /** `realpath(<hostRoot>/node_modules/<key>)`, or `undefined` when it does not resolve. */
+  installedReal: string | undefined;
+  /** Both sides canonicalised, and the SAME directory. */
+  verified: boolean;
+}
+
+/**
+ * `realpath(path)`, or `undefined` when it cannot be canonicalised at all.
+ *
+ * ⚠️ Deliberately NOT the tolerant catch {@link hostInstalledPackageDir} uses,
+ * which falls back to the uncanonicalised path so an exotic `realpath` failure
+ * cannot un-install a package it already read a manifest out of. Here the
+ * canonical form IS the evidence: falling back to the raw string would make
+ * the comparison below a raw-string comparison in disguise, which is the one
+ * thing #17046's triage ruled out by name.
+ */
+function canonicalPath(path: string): string | undefined {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The `link:` / `file:` / `portal:` path the declaration names, resolved
+ * against the host root — or `undefined` when the declaration names no
+ * directory.
+ *
+ * `file://…` URL spellings are declined on purpose: the remaining `//…` is not
+ * a path, percent-decoding and the optional authority make it a second
+ * grammar, and every unparsed spelling simply keeps today's refusal. Declining
+ * costs a load that was already refused; guessing would license a directory
+ * nobody named.
+ */
+function declaredLocationPath(declaration: HostDeclaration): string | undefined {
+  const { specifier, hostRoot } = declaration;
+  if (specifier === undefined) return undefined;
+  const prefix = LOCATION_DECLARATION_PREFIXES.find((p) => specifier.indexOf(p) === 0);
+  if (prefix === undefined) return undefined;
+  const value = specifier.slice(prefix.length);
+  if (value === '' || value.indexOf('//') === 0) return undefined;
+  return resolve(hostRoot, value);
+}
+
+/**
+ * Is `<hostRoot>/node_modules/<key>` the very directory the host's declaration
+ * NAMED (#17046)?
+ *
+ * ## Why this is a second axis and not a hole in the first
+ *
+ * The #14041 fallback verifies one directory by asking whether its manifest
+ * carries the name the declaration promises ({@link declaredManifestName}).
+ * A `link:` / `file:` value promises no name, so that axis has nothing to
+ * check and the KEY stands in for it — which refuses a *correctly linked*
+ * package whose manifest happens to be named something else. That refusal is a
+ * false one: the host DID name this directory, in its own manifest, in the
+ * same authoring act the declaration gate reads.
+ *
+ * So the expectation moves the same way #14278 moved it — from the KEY to
+ * *what the host actually declared* — only along the other axis: a PATH
+ * instead of a NAME. ⛔ It is emphatically NOT "skip the check when the
+ * specifier is a location", which would accept any directory sitting at the
+ * key and trade a confidently-wrong remedy for a wrong LOAD. Both axes still
+ * end at the host's own `package.json`, and a directory the host did not
+ * declare is refused by both.
+ *
+ * ## The comparison, and why each part of it is what it is
+ *
+ * ⛔ NOT a raw string comparison, and ⛔ not a basename match — the two shapes
+ * `packages/cli`'s own `isProcessEntry` (`src/utils/invocation.ts`) ruled out
+ * for the same reason, where #10086 found basename matching in the wild and
+ * PR #10084 pinned the symlink leg with a real symlink fixture. The DISCIPLINE
+ * is reused here; nothing is imported, since `packages/types` sits below
+ * `packages/cli`. Both sides are canonicalised with `realpathSync` and
+ * compared EXACTLY:
+ *
+ * - **symlinks** — the whole point. `link:` installs `node_modules/<key>` AS a
+ *   symlink, so the left side is a link and the right side is its target;
+ *   without `realpath` they never compare equal. Chains, `..` spans and
+ *   trailing separators all collapse here too, which is why `resolve()` alone
+ *   is not enough on either side.
+ * - **pnpm's store layout** — MEASURED, pnpm 10.33: `link:../x` symlinks the
+ *   key straight at `../x`, so it verifies; `file:../x` on a DIRECTORY does
+ *   not — pnpm routes it through the virtual store
+ *   (`.pnpm/<name>@file+..+x/node_modules/<name>`), a hard-linked COPY whose
+ *   realpath is inside the host's own `node_modules` and is not the declared
+ *   path. That shape keeps today's refusal, deliberately: reading the store's
+ *   encoded directory name to recover the origin would be parsing a package
+ *   manager's private layout, and accepting "anything under `node_modules`"
+ *   is the forbidden relaxation above. npm's `file:` (a symlink) verifies.
+ * - **case-insensitive filesystems** — NOT case-folded, and that is the safe
+ *   direction rather than an oversight. Folding would accept a path the host
+ *   did not write wherever the filesystem is case-SENSITIVE; declining to fold
+ *   can only fail to verify a link whose declared spelling differs in case
+ *   from the on-disk entry, and failing to verify is exactly today's
+ *   behaviour. `realpathSync` (not `.native`) is used because the sibling read
+ *   in {@link hostInstalledPackageDir} uses it: comparing two different
+ *   canonicalisers is its own defect class.
+ *
+ * `undefined === undefined` is not a match: an unresolvable side answers
+ * `verified: false`, so a declaration pointing at nothing and a key holding
+ * nothing do not verify each other.
+ */
+function declaredLocationAxis(
+  declaration: HostDeclaration,
+  installedAt: string,
+): DeclaredLocationAxis | undefined {
+  const declaredPath = declaredLocationPath(declaration);
+  if (declaredPath === undefined) return undefined;
+  const declaredReal = canonicalPath(declaredPath);
+  const installedReal = canonicalPath(installedAt);
+  return {
+    declaredPath,
+    declaredReal,
+    installedReal,
+    verified: installedReal !== undefined && installedReal === declaredReal,
+  };
 }
 
 /**
@@ -839,7 +995,11 @@ function esmEntryForDeclared(
  *     ({@link hasInvalidExportsSubpathSegments}): a subpath carrying `''`,
  *     `.`, `..` or `node_modules` segments is refused exactly as both of
  *     Node's resolvers refuse it — the one validation the specifier has NOT
- *     already passed by the time it reaches this catch (#14271 review).
+ *     already passed by the time it reaches this catch (#14271 review);
+ *   - and that directory is VERIFIED against the host's own declaration
+ *     before anything is loaded out of it — by the manifest NAME the
+ *     declaration promises, or by the PATH it names (#17046). CJS resolution
+ *     asks neither question, which is what "strictly tighter" means here.
  *
  * `import.meta.resolve` with a parent URL is NOT the mechanism, on the same
  * measurement the #10943 note below records: without
@@ -869,11 +1029,23 @@ type DeclaredCjsResolveFallback =
   | { outcome: 'absent' }
   /**
    * Present at the key, holding a package named something ELSE, under a
-   * declaration that names no package to expect (#15045). Refused exactly as
-   * `absent` is — same kind, same throw — but it is a different measurement and
-   * gets its own wording: nothing about the install is broken.
+   * declaration that names no package to expect (#15045) — and, when that
+   * declaration DID name a directory, not that directory either (#17046).
+   * Refused exactly as `absent` is — same kind, same throw — but it is a
+   * different measurement and gets its own wording: nothing about the install
+   * is broken.
+   *
+   * `location` is the second axis's own reading, `undefined` when the
+   * declaration named no directory to read (a git or tarball URL). It is
+   * carried so the refusal can state what it compared instead of asserting a
+   * limit it no longer has.
    */
-  | { outcome: 'unverifiable-location'; packageDir: string; installedName: string }
+  | {
+      outcome: 'unverifiable-location';
+      packageDir: string;
+      installedName: string;
+      location: DeclaredLocationAxis | undefined;
+    }
   /** Rescued: the `import`-condition entry to load. */
   | { outcome: 'entry'; entry: string }
   /** Present, and its manifest names a runtime target — the FILES are the problem. */
@@ -941,27 +1113,54 @@ function manifestNameAt(dir: string): string | undefined {
   }
 }
 
+/** Where the fallback looks, and the only place it looks: `node_modules/<key>`. */
+function hostNodeModulesEntry(declaration: HostDeclaration): string {
+  const { packageName, hostRoot } = declaration;
+  return join(hostRoot, 'node_modules', ...packageName.split('/'));
+}
+
 /**
- * The one directory the fallback finder consults, verified to hold the
- * declared package (a `package.json` whose `name` is the one
- * {@link declaredManifestName} reads out of the host's declaration) and then
- * realpath'd — under pnpm the link target is
+ * The one directory the fallback finder consults, verified to be the declared
+ * package's install and then realpath'd — under pnpm the link target is
  * `.pnpm/<pkg>@<version>/node_modules/<pkg>`, the directory the package's own
  * transitive imports resolve against, exactly as the CJS resolver's realpath
  * answer behaves on the succeeding path.
+ *
+ * ⚠️ TWO verification axes, either of which is sufficient, and BOTH of which
+ * are read out of the host's own `package.json` (#17046):
+ *
+ * 1. **the NAME** (#14041, moved by #14278) — the manifest at the key carries
+ *    the name {@link declaredManifestName} reads out of the declaration;
+ * 2. **the LOCATION** ({@link declaredLocationAxis}) — the declaration names a
+ *    directory and the key IS that directory, canonically.
+ *
+ * The second exists because a `link:` / `file:` declaration promises no name,
+ * so axis 1 falls back to the KEY and refuses a correctly linked package whose
+ * manifest is named something else — a false refusal on a valid setup, where
+ * the operator's only recourse is to stop using a supported linking mode.
+ *
+ * ⛔ The axes are alternatives, never a weakening: a directory the host
+ * declared NEITHER by name NOR by path is refused exactly as before, and no
+ * specifier that names no directory gains anything. The finder therefore stays
+ * strictly tighter than the CommonJS resolution it backs up, which accepts
+ * whatever sits at the key without asking either question.
  */
 function hostInstalledPackageDir(declaration: HostDeclaration): string | undefined {
-  const { packageName, hostRoot } = declaration;
-  const linked = join(hostRoot, 'node_modules', ...packageName.split('/'));
+  const linked = hostNodeModulesEntry(declaration);
   // Unreadable, unparseable, or named something else — all `undefined`, exactly
   // as before #15045; the CALLER is what now distinguishes them, and only to
   // pick the wording.
-  if (manifestNameAt(linked) !== declaredManifestName(declaration)) return undefined;
+  const namedAsDeclared = manifestNameAt(linked) === declaredManifestName(declaration);
+  if (!namedAsDeclared && declaredLocationAxis(declaration, linked)?.verified !== true) {
+    return undefined;
+  }
   try {
     return realpathSync(linked);
   } catch {
     // The manifest read above already succeeded through this path; an exotic
-    // realpath failure does not un-install the package.
+    // realpath failure does not un-install the package. (Unreachable via the
+    // location axis, which is `verified` only when this same realpath just
+    // succeeded.)
     return linked;
   }
 }
@@ -971,21 +1170,28 @@ function declaredCjsResolveFallback(
   specifier: string,
   declaration: HostDeclaration,
 ): DeclaredCjsResolveFallback {
-  const { packageName, hostRoot } = declaration;
+  const { packageName } = declaration;
   const packageDir = hostInstalledPackageDir(declaration);
   if (packageDir === undefined) {
     // #15045: the finder has REFUSED. Re-read the one directory it consulted so
     // the failure can say which of the two absences it measured. A cold error
     // path that was already about to build a multi-line message, so the second
     // read costs nothing anyone can observe.
-    const linked = join(hostRoot, 'node_modules', ...packageName.split('/'));
+    const linked = hostNodeModulesEntry(declaration);
     const installedName = manifestNameAt(linked);
     if (
       installedName !== undefined &&
       installedName !== packageName &&
       declarationNamesNoPackage(declaration)
     ) {
-      return { outcome: 'unverifiable-location', packageDir: linked, installedName };
+      // #17046: BOTH axes have now failed, so the message says so — carrying
+      // the location axis's own measurement when there was one to make.
+      return {
+        outcome: 'unverifiable-location',
+        packageDir: linked,
+        installedName,
+        location: declaredLocationAxis(declaration, linked),
+      };
     }
     return { outcome: 'absent' };
   }
@@ -1034,14 +1240,25 @@ function declaredCjsResolveFallback(
 /**
  * The wording for {@link DeclaredCjsResolveFallback} `unverifiable-location`
  * (#15045) — a `link:` / `file:` (or git / tarball) install whose linked
- * manifest names something other than the key.
+ * manifest names something other than the key, and which #17046's location
+ * axis could not tie to the declaration either.
  *
- * The refusal it explains is unchanged and deliberate; what changed is that it
- * no longer prescribes {@link unresolvableMessage}'s remedies, every one of
- * which is measurably false here: the package IS on disk, so it was neither
- * "never installed" nor pruned away, and its `import` target exists. An
- * operator handed those runs `pnpm install`, watches nothing change, and then
- * goes looking for a build that is not broken.
+ * The refusal it explains is deliberate; what #15045 changed is that it no
+ * longer prescribes {@link unresolvableMessage}'s remedies, every one of which
+ * is measurably false here: the package IS on disk, so it was neither "never
+ * installed" nor pruned away, and its `import` target exists. An operator
+ * handed those runs `pnpm install`, watches nothing change, and then goes
+ * looking for a build that is not broken.
+ *
+ * ⚠️ #17046 NARROWED what reaches this text, so the text had to move with it.
+ * It used to be able to say the KEY was all the finder had; that is no longer
+ * true whenever the declaration names a directory, because
+ * {@link declaredLocationAxis} then compares one. What survives here is the
+ * residue: a remote artefact (no location to compare), or a location that was
+ * compared and came back DIFFERENT — pnpm's `file:` virtual-store copy being
+ * the measured example. Both facts are now stated rather than assumed, because
+ * a message asserting a limit the finder no longer has is the same defect
+ * #15045 removed.
  *
  * The closing remedy is one fact stated from both ends, and it was MEASURED,
  * not reasoned: make the key and the linked manifest's `name` agree — rename
@@ -1059,12 +1276,29 @@ function declaredCjsResolveFallback(
  */
 function unverifiableLocationMessage(
   declaration: HostDeclaration,
-  found: { packageDir: string; installedName: string },
+  found: { packageDir: string; installedName: string; location: DeclaredLocationAxis | undefined },
   cause: unknown,
 ): string {
   const { packageName, hostRoot, field, specifier } = declaration;
-  const { packageDir, installedName } = found;
+  const { packageDir, installedName, location } = found;
   const detail = cause instanceof Error ? cause.message : String(cause);
+  // The second axis, reported only when there WAS one to run. Its two lines are
+  // the two paths that were compared, canonically — the same "say what you
+  // measured" the name lines above owe (#17046).
+  const locationLines =
+    location === undefined
+      ? '  What it IS: this declaration names no on-disk location at all — a git or a\n' +
+        '  tarball URL (github:owner/repo, https://.../pkg.tgz) installs under the key with\n' +
+        '  whatever the published manifest carries, so the KEY is the only thing this finder\n' +
+        '  has to check against, and the manifest above is not it.\n'
+      : '  What it IS: a "link:" / "file:" declaration names a LOCATION, not a package, so\n' +
+        '  the manifest at the other end may carry any name. This finder therefore checks\n' +
+        '  the LOCATION too — and that did not match either:\n' +
+        `    the declaration names:  ${location.declaredReal ?? `${location.declaredPath} (does not exist)`}\n` +
+        `    the key resolves to:    ${location.installedReal ?? `${packageDir} (does not resolve)`}\n` +
+        '  A `file:` directory install under pnpm lands in the virtual store rather than at\n' +
+        '  the declared path, and reaches this text for exactly that reason; `link:` points\n' +
+        '  at the declared directory and is verified by it.\n';
   return (
     `Cannot load module '${packageName}': the host app DECLARES it ` +
     `(${field}: ${JSON.stringify(specifier)}), a package IS installed at that key, and ` +
@@ -1076,15 +1310,11 @@ function unverifiableLocationMessage(
     '\n  This is NOT an install problem, and NOT a declaration problem — the package is\n' +
     '  on disk and the declaration is right, so re-running `pnpm install`, un-pruning a\n' +
     '  deploy and rebuilding a dist all change nothing here.\n' +
-    '  What it IS: a "link:" / "file:" declaration names a LOCATION, not a package. The\n' +
-    '  manifest at the other end may carry any name, and the specifier holds none for\n' +
-    '  this finder to expect, so the KEY is all it has to check against. A git or\n' +
-    '  tarball URL (github:owner/repo, https://.../pkg.tgz) names no on-disk location\n' +
-    '  either and lands here the same way.\n' +
+    locationLines +
     '  The refusal is deliberate: this fallback stays strictly tighter than the\n' +
     '  CommonJS resolution it backs up, and will not load a directory it cannot tie to\n' +
-    '  the declaration. Only a package publishing no `require` condition reaches it at\n' +
-    '  all, so nothing that loads today is affected either way.\n' +
+    '  the declaration — by NAME or by LOCATION. Only a package publishing no `require`\n' +
+    '  condition reaches it at all, so nothing that loads today is affected either way.\n' +
     '  What DOES change it — make the two names AGREE, from whichever end you own:\n' +
     `    • declare the linked package under its own name: key ${JSON.stringify(installedName)},\n` +
     '      pointing at the same location, and import it under that name\n' +

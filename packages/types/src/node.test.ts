@@ -1299,8 +1299,10 @@ describe('the declared leg loads an ESM-only package via a hostRoot node_modules
  * stays green).
  *
  * `link:` / `file:` name a LOCATION rather than a package, so no name can be
- * derived from them at all; they keep the key expectation, and with it today's
- * conservative refusal.
+ * derived from them at all; they keep the key expectation on THIS axis. What
+ * #17046 later added is a second axis rather than a looser first one — the
+ * declared PATH — so the boundary pin below is now a two-axis boundary, and
+ * says so.
  */
 describe('an aliased install is verified against the name its DECLARATION names (#14278)', () => {
   /** The card's exact shape: `import` condition only, no `require`, no `main`. */
@@ -1465,18 +1467,21 @@ describe('an aliased install is verified against the name its DECLARATION names 
     expect((await createHostImporter(root)('linked')).BUILD).toBe('linked');
   });
 
-  it('BOUNDARY: a `link:` target whose manifest names something else keeps the refusal', async () => {
+  it('BOUNDARY: a `link:` key holding a DIFFERENT directory, named otherwise, keeps the refusal', async () => {
     // Deliberate, and the reason `link:` is not "parsed" into a name: a path
     // specifier carries no package name for the finder to expect, so there is
-    // nothing to verify a differing manifest against. The conservative
-    // direction (refuse, never load the wrong thing) is kept rather than
-    // guessed at — widening it here would make the finder looser than the
-    // manifest-name check exists to be.
+    // nothing on the NAME axis to verify a differing manifest against.
     //
-    // ⚠️ This pin asserted the INSTALL wording until #15045. The REFUSAL is
-    // what #14278 declared and it is unchanged — same kind, same throw; only
-    // the words changed, because the install this message described was
-    // already correct. The wording itself is pinned in the #15045 suite below.
+    // ⚠️ This pin has been re-read twice and its reason has moved twice, so it
+    // is spelled out rather than inherited. It asserted the INSTALL wording
+    // until #15045 (which re-worded, and kept the refusal). #17046 then gave
+    // the fallback a SECOND axis — the declared PATH — under which a `link:`
+    // whose key IS the declared directory now loads. This fixture is not that:
+    // `installAs` writes a plain directory at `node_modules/<key>`, while the
+    // declaration names `../elsewhere`, so BOTH axes are measured and BOTH
+    // fail. The assertion below reads the location axis's own line out of the
+    // message, so a future change that silently stopped running it would redden
+    // here instead of passing for the wrong reason.
     const root = app('link-mismatch', 'linked-other', 'link:../elsewhere');
     installAs(root, 'linked-other', '@fixture/some-other-name', { exports: ESM_ONLY_EXPORTS }, {
       'dist/index.js': "export const BUILD = 'other';\n",
@@ -1484,6 +1489,9 @@ describe('an aliased install is verified against the name its DECLARATION names 
     const err = await createHostImporter(root)('linked-other').catch((e: unknown) => e);
     expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
     expect((err as Error).message).not.toMatch(/INSTALL problem/);
+    // The second axis ran, and said what it compared.
+    expect((err as Error).message).toMatch(/checks\n {2}the LOCATION too — and that did not match/);
+    expect((err as Error).message).toMatch(/the key resolves to: {4}.*node_modules\/linked-other/);
   });
 
   it('TIGHTNESS: an alias naming one package does not license a directory holding another', async () => {
@@ -1892,13 +1900,15 @@ exports.BUILD = 'cjs';
  * pruned, and its `import` target exists. The operator runs `pnpm install`,
  * nothing changes, and they go hunting for a build that is not broken.
  *
- * ⛔ What this suite does NOT pin, because it was NOT built: the second
- * verification axis the card also proposes (comparing
- * `realpath(node_modules/<key>)` against the declared location), which would
- * make these installs LOAD. That relaxes the finder's accept set and is a
- * contract decision; the card stays open for it. The tests below assert the
- * opposite — that the refusal still fires on exactly the inputs it fired on
- * before.
+ * ⚠️ #17046 BUILT the second axis this suite was written without, so the
+ * suite's own fixtures had to move — read this before assuming a `link:`
+ * fixture here means what it did. `linkedApp` symlinks `node_modules/<key>` AT
+ * the declared directory, which is now the shape that LOADS; the wording below
+ * is therefore driven on the residue that still cannot be verified either way,
+ * and each fixture says which residue it is. ⛔ Nothing here was deleted to
+ * make room: every #15045 assertion survives, on an input that still reaches
+ * the text it pins. The load itself is pinned in the #17046 suite below, next
+ * to the negative controls that keep the refusal.
  */
 describe('a location install whose manifest differs states the LIMIT, not a false remedy (#15045)', () => {
   const bases: string[] = [];
@@ -1911,13 +1921,24 @@ describe('a location install whose manifest differs states the LIMIT, not a fals
   const ESM_ONLY_EXPORTS = { '.': { import: './dist/index.js' } };
 
   /**
-   * A REAL location install: `node_modules/<key>` is a SYMLINK to a sibling
-   * directory, which is what `link:` and a directory `file:` actually produce.
+   * A REAL location install. Two on-disk shapes, both of which a package
+   * manager really produces for a path specifier — and after #17046 they are
+   * NOT the same input, which is why the shape is now a parameter rather than
+   * an assumption:
    *
-   * #14278's fixtures above install a plain directory instead — correct there,
-   * since the finder reads `node_modules/<key>` and realpaths only afterwards,
-   * so both shapes exercise one code path. This card is ABOUT the location
-   * shape, so it drives the on-disk shape an operator would really have.
+   * - `'symlink'` — `node_modules/<key>` IS the declared directory, reached
+   *   through a symlink. `link:` under pnpm and npm, and `file:` under npm.
+   *   This is what the second axis verifies, so it now LOADS.
+   * - `'copy'` — `node_modules/<key>` holds an independent COPY, and the
+   *   declared directory sits untouched beside it. MEASURED on pnpm 10.33:
+   *   `file:../x` on a directory routes through the virtual store
+   *   (`.pnpm/<name>@file+..+x/node_modules/<name>`), which realpaths inside
+   *   the host's own `node_modules` and is not the declared path. The location
+   *   axis measures a DIFFERENT directory, so the refusal — and this suite's
+   *   wording — stands.
+   *
+   * #14278's fixtures above install a plain directory too; that suite predates
+   * the distinction and its one location pin now names it explicitly.
    */
   function linkedApp(
     tag: string,
@@ -1925,6 +1946,7 @@ describe('a location install whose manifest differs states the LIMIT, not a fals
     specifier: string,
     manifestName: string,
     exportsField: unknown = ESM_ONLY_EXPORTS,
+    shape: 'symlink' | 'copy' = 'symlink',
   ): string {
     const base = mkdtempSync(join(tmpdir(), `os-loc-${tag}-`));
     bases.push(base);
@@ -1937,26 +1959,43 @@ describe('a location install whose manifest differs states the LIMIT, not a fals
       JSON.stringify({ name: 'location-host-fixture', type: 'module', dependencies: { [key]: specifier } }),
       'utf8',
     );
-    writeFileSync(
-      join(linked, 'package.json'),
-      JSON.stringify({ name: manifestName, version: '0.0.0-fixture', type: 'module', exports: exportsField }),
-      'utf8',
-    );
-    writeFileSync(join(linked, 'dist', 'index.js'), `export const BUILD = ${JSON.stringify(manifestName)};\n`, 'utf8');
+    const manifest = JSON.stringify({
+      name: manifestName,
+      version: '0.0.0-fixture',
+      type: 'module',
+      exports: exportsField,
+    });
+    const entry = `export const BUILD = ${JSON.stringify(manifestName)};\n`;
+    writeFileSync(join(linked, 'package.json'), manifest, 'utf8');
+    writeFileSync(join(linked, 'dist', 'index.js'), entry, 'utf8');
     const at = join(root, 'node_modules', ...key.split('/'));
     mkdirSync(dirname(at), { recursive: true });
-    symlinkSync(linked, at, 'dir');
+    if (shape === 'symlink') {
+      symlinkSync(linked, at, 'dir');
+    } else {
+      mkdirSync(join(at, 'dist'), { recursive: true });
+      writeFileSync(join(at, 'package.json'), manifest, 'utf8');
+      writeFileSync(join(at, 'dist', 'index.js'), entry, 'utf8');
+    }
     return root;
   }
+
+  /**
+   * The residue this suite's wording still governs after #17046: a location
+   * declaration whose key is a COPY rather than the declared directory. Both
+   * axes are measured, both fail, and the message is the one #15045 wrote.
+   */
+  const copiedApp = (tag: string, key: string, specifier: string, manifestName: string): string =>
+    linkedApp(tag, key, specifier, manifestName, ESM_ONLY_EXPORTS, 'copy');
 
   const refusalFor = async (root: string, spec: string): Promise<Error> =>
     (await createHostImporter(root)(spec).catch((e: unknown) => e)) as Error;
 
-  it('PRECONDITION: the symlinked ESM-only install reaches the fallback at all', () => {
+  it('PRECONDITION: the copied ESM-only install reaches the fallback at all', () => {
     // Without this, everything below could be passing for the wrong reason:
-    // the CJS resolver must FIND the symlink and refuse on the CONDITION, so
-    // the fallback inside that catch is what decides.
-    const root = linkedApp('precondition', 'linked-other', 'link:../elsewhere', '@fixture/some-other-name');
+    // the CJS resolver must FIND the directory at the key and refuse on the
+    // CONDITION, so the fallback inside that catch is what decides.
+    const root = copiedApp('precondition', 'linked-other', 'file:../elsewhere', '@fixture/some-other-name');
     let code: string | undefined;
     try {
       createHostRequire(root).resolve('linked-other');
@@ -1969,7 +2008,7 @@ describe('a location install whose manifest differs states the LIMIT, not a fals
   it('THE CARD: the refusal is UNCHANGED — same kind, same code, still not loaded', async () => {
     // The half that must not move. A diff that turned this into a load would
     // have left the card's scope whatever its message said.
-    const root = linkedApp('refusal', 'linked-other', 'link:../elsewhere', '@fixture/some-other-name');
+    const root = copiedApp('refusal', 'linked-other', 'file:../elsewhere', '@fixture/some-other-name');
     const err = await refusalFor(root, 'linked-other');
     expect(err).toBeInstanceOf(Error);
     expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
@@ -1979,7 +2018,7 @@ describe('a location install whose manifest differs states the LIMIT, not a fals
   it('THE CARD: the three false remedies are gone', async () => {
     // Asserted as ABSENCES of the old message's load-bearing claims, not as
     // punctuation. Each was measurably false for this shape.
-    const root = linkedApp('remedies-gone', 'linked-other', 'link:../elsewhere', '@fixture/some-other-name');
+    const root = copiedApp('remedies-gone', 'linked-other', 'file:../elsewhere', '@fixture/some-other-name');
     const { message } = await refusalFor(root, 'linked-other');
     expect(message).not.toMatch(/INSTALL problem, not a declaration problem/);
     expect(message).not.toMatch(/dependencies never installed/);
@@ -1988,7 +2027,7 @@ describe('a location install whose manifest differs states the LIMIT, not a fals
   });
 
   it('THE CARD: it states the MEASUREMENT — what is installed, and what was expected', async () => {
-    const root = linkedApp('measurement', 'linked-other', 'link:../elsewhere', '@fixture/some-other-name');
+    const root = copiedApp('measurement', 'linked-other', 'file:../elsewhere', '@fixture/some-other-name');
     const { message } = await refusalFor(root, 'linked-other');
     // The two names it compared, both present, so the operator can see the
     // mismatch rather than infer it.
@@ -1999,16 +2038,26 @@ describe('a location install whose manifest differs states the LIMIT, not a fals
   });
 
   it('THE CARD: it names the LIMIT — a location specifier carries no name to expect', async () => {
-    const root = linkedApp('limit', 'linked-other', 'link:../elsewhere', '@fixture/some-other-name');
+    const root = copiedApp('limit', 'linked-other', 'file:../elsewhere', '@fixture/some-other-name');
     const { message } = await refusalFor(root, 'linked-other');
     expect(message).toMatch(/NOT an install problem/);
     expect(message).toMatch(/names a LOCATION, not a package/);
-    // The card asked for the git / tarball sentence: they carry no on-disk
-    // location either and land in exactly this sub-case.
-    expect(message).toMatch(/tarball URL/);
     // ⚠️ `pnpm install` IS mentioned, inside the sentence that says it changes
     // nothing. Pinned as a PRESENCE so nobody later "fixes" the mention by
     // deleting the one line that stops the operator's reflex.
+    expect(message).toMatch(/re-running `pnpm install`.*change nothing/s);
+  });
+
+  it('THE CARD: the git / tarball sentence is on the spelling that HAS no location', async () => {
+    // #15045 asked for this sentence and pinned it on a `link:` fixture,
+    // because at the time every spelling on the list shared one paragraph.
+    // #17046 split the paragraph — a path specifier now gets the location
+    // axis's own reading instead — so the sentence is pinned where it is true.
+    const root = linkedApp('limit-remote', 'located-other', 'https://example.invalid/pkg.tgz', '@fixture/some-other-name');
+    const { message } = await refusalFor(root, 'located-other');
+    expect(message).toMatch(/NOT an install problem/);
+    expect(message).toMatch(/names no on-disk location at all/);
+    expect(message).toMatch(/tarball URL/);
     expect(message).toMatch(/re-running `pnpm install`.*change nothing/s);
   });
 
@@ -2016,32 +2065,34 @@ describe('a location install whose manifest differs states the LIMIT, not a fals
     // The message tells the operator to make the two names agree. Both ends
     // are pinned, because a printed remedy nobody measured is the class of
     // defect this card is about.
-    const byKey = linkedApp('remedy-key', '@fixture/some-other-name', 'link:../elsewhere', '@fixture/some-other-name');
+    const byKey = copiedApp('remedy-key', '@fixture/some-other-name', 'file:../elsewhere', '@fixture/some-other-name');
     expect((await createHostImporter(byKey)('@fixture/some-other-name')).BUILD).toBe('@fixture/some-other-name');
 
-    const byManifest = linkedApp('remedy-manifest', 'linked-other', 'link:../elsewhere', 'linked-other');
+    const byManifest = copiedApp('remedy-manifest', 'linked-other', 'file:../elsewhere', 'linked-other');
     expect((await createHostImporter(byManifest)('linked-other')).BUILD).toBe('linked-other');
   });
 
   it('NEGATIVE CONTROL: a `link:` install whose manifest MATCHES the key still loads, silently', async () => {
-    // The load path is untouched. If this ever reddens, the change stopped
-    // being a wording change.
+    // The load path #15045 must not have moved, and #17046 must not have moved
+    // either: this one is carried by the NAME axis, which is untouched.
     const root = linkedApp('control', 'linked', 'link:../elsewhere', 'linked');
     expect((await createHostImporter(root)('linked')).BUILD).toBe('linked');
   });
 
   it('the same wording covers `file:`, a tarball URL and the bare `owner/repo` shorthand', async () => {
-    // One fact, four spellings: none of them names a package. `file:` and
-    // `link:` are the two location protocols; a git or tarball URL names no
-    // on-disk location at all and installs under the key with whatever the
-    // published manifest carries.
-    for (const [tag, specifier] of [
-      ['file', 'file:../elsewhere'],
-      ['tarball', 'https://example.invalid/pkg.tgz'],
-      ['github', 'github:acme/bar'],
-      ['shorthand', 'acme/bar'],
+    // One fact, four spellings: none of them names a package, so none of them
+    // is an install fault. ⚠️ The SHAPE now matters and the table says which,
+    // because #17046 verifies a path specifier against the directory it names:
+    // `file:` is driven on the copy shape (the pnpm virtual-store install),
+    // while the three remote artefacts name no directory at all and are the
+    // same whatever sits at the key.
+    for (const [tag, specifier, shape] of [
+      ['file', 'file:../elsewhere', 'copy'],
+      ['tarball', 'https://example.invalid/pkg.tgz', 'symlink'],
+      ['github', 'github:acme/bar', 'symlink'],
+      ['shorthand', 'acme/bar', 'symlink'],
     ] as const) {
-      const root = linkedApp(tag, 'located-other', specifier, '@fixture/some-other-name');
+      const root = linkedApp(tag, 'located-other', specifier, '@fixture/some-other-name', ESM_ONLY_EXPORTS, shape);
       const { message } = await refusalFor(root, 'located-other');
       expect(message, `${specifier} should get the location wording`).toMatch(/NOT an install problem/);
       expect(message, `${specifier} should not keep the install remedy`).not.toMatch(/INSTALL problem/);
@@ -2069,6 +2120,11 @@ describe('a location install whose manifest differs states the LIMIT, not a fals
     // symlinked mismatch under `^1.0.0` is a registry install that landed
     // wrong, and `pnpm install` is exactly the remedy for it. A red here would
     // mean the re-wording leaked out of the location sub-case.
+    //
+    // ⭐ After #17046 this is also the tightest control in the suite: the key
+    // IS a symlink pointing at a real sibling directory, exactly the on-disk
+    // shape the location axis verifies — and it is still refused, because the
+    // DECLARATION named no location. A range licenses no path.
     const root = linkedApp('range-mismatch', '@fixture/plain-range', '^1.0.0', '@fixture/somebody-else');
     const { message } = await refusalFor(root, '@fixture/plain-range');
     expect(message).toMatch(/INSTALL problem, not a declaration problem/);
@@ -2080,5 +2136,292 @@ describe('a location install whose manifest differs states the LIMIT, not a fals
     const root = linkedApp('alias-mismatch', 'aliased', 'npm:@fixture/declared@1', '@fixture/installed');
     const { message } = await refusalFor(root, 'aliased');
     expect(message).toMatch(/INSTALL problem, not a declaration problem/);
+  });
+});
+
+/**
+ * ── #17046: the SECOND verification axis — a correctly LINKED package loads ───
+ *
+ * #14041's fallback verifies the one directory it consults by NAME: does the
+ * manifest at `<hostRoot>/node_modules/<key>` carry the name the declaration
+ * promises? A `link:` / `file:` value promises no name, so the KEY stands in
+ * for one — and a package that is linked exactly as its host asked, whose own
+ * manifest happens to be named something else, is REFUSED. That is a false
+ * refusal on a valid setup: nothing is broken, and the operator's only
+ * recourse is to stop using a supported linking mode.
+ *
+ * The fix moves the expectation the same way #14278 moved it — from the KEY to
+ * what the host ACTUALLY declared — only along the other axis: a PATH instead
+ * of a NAME. `realpath(node_modules/<key>)` is compared with
+ * `realpath(resolve(hostRoot, <declared path>))`, exactly, both sides
+ * canonicalised, no basename matching and no case folding.
+ *
+ * ⛔ What it is NOT, quoted from #15045's triage because it predicted a dev
+ * would reach for it: *"skip the check when the specifier is a location. That
+ * accepts any directory sitting at the key — the looser finder #4719 and
+ * #14041 exist to prevent — and trades a confidently-wrong remedy for a wrong
+ * LOAD."* Every NEGATIVE below is that sentence: a directory the host did not
+ * declare — by name or by path — is still refused. A suite proving only the
+ * new load would be proving the wrong half.
+ *
+ * Three boundaries, deliberate and pinned rather than assumed:
+ *
+ * - **remote artefacts are untouched.** `github:acme/bar`, a tarball URL and
+ *   the bare `owner/repo` shorthand name no on-disk location, so there is
+ *   nothing to compare and the refusal stands.
+ * - **the #13330 leg is untouched.** A dual-published `link:` target still
+ *   resolves through CommonJS and still keeps its `require` entry — pinned by
+ *   the #15044 BOUNDARY above. Extending there would change a load that
+ *   already succeeds; this axis only ever fires inside `hostRequire.resolve`'s
+ *   catch, so nothing that loads today changes.
+ * - **case-insensitive filesystems are NOT covered by a test**, and the
+ *   comparison deliberately does not fold case. This suite runs on a
+ *   case-sensitive filesystem, so a fixture could only assert the same thing
+ *   the other cases already do. The direction is the safe one: folding would
+ *   ACCEPT a path the host did not write wherever case matters, while
+ *   declining to fold can at worst fail to verify — which is today's refusal,
+ *   not a regression.
+ */
+describe('a correctly LINKED package is verified by the LOCATION its host declared (#17046)', () => {
+  const bases: string[] = [];
+
+  afterAll(() => {
+    for (const dir of bases) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** The card's exact shape: `import` condition only, no `require`, no `main`. */
+  const ESM_ONLY_EXPORTS = { '.': { import: './dist/index.js' } };
+
+  interface LinkFixture {
+    /** How the declaration spells the location, resolved against the app root. */
+    specifier: string;
+    /** Manifest `name` of the package at the other end — deliberately NOT the key. */
+    manifestName?: string;
+    /**
+     * Where `node_modules/<key>` actually points, relative to the base dir.
+     * Defaults to the real package directory (`'linked'`), i.e. a correct link.
+     */
+    installTarget?: string;
+    /** Install a COPY at the key instead of a symlink (pnpm's `file:` shape). */
+    copy?: boolean;
+    /** Omit the `node_modules/<key>` entry entirely. */
+    absent?: boolean;
+    exportsField?: unknown;
+  }
+
+  /**
+   * A host app that DECLARES `key` with a location specifier, plus a real
+   * package directory `linked/` beside it and an `alias/` symlink pointing at
+   * that same directory (so a fixture can declare one spelling and install the
+   * other, which is what proves the comparison is canonical rather than
+   * textual).
+   */
+  function linkFixture(tag: string, key: string, fixture: LinkFixture): string {
+    const {
+      specifier,
+      manifestName = '@fixture/named-something-else',
+      installTarget = 'linked',
+      copy = false,
+      absent = false,
+      exportsField = ESM_ONLY_EXPORTS,
+    } = fixture;
+    const base = mkdtempSync(join(tmpdir(), `os-17046-${tag}-`));
+    bases.push(base);
+    const root = join(base, 'app');
+    const linked = join(base, 'linked');
+    const decoy = join(base, 'decoy');
+    mkdirSync(join(root, 'node_modules'), { recursive: true });
+    mkdirSync(join(linked, 'dist'), { recursive: true });
+    mkdirSync(join(decoy, 'dist'), { recursive: true });
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ name: 'linked-host-fixture', type: 'module', dependencies: { [key]: specifier } }),
+      'utf8',
+    );
+    const manifest = (name: string): string =>
+      JSON.stringify({ name, version: '0.0.0-fixture', type: 'module', exports: exportsField });
+    writeFileSync(join(linked, 'package.json'), manifest(manifestName), 'utf8');
+    writeFileSync(join(linked, 'dist', 'index.js'), "export const BUILD = 'the-linked-directory';\n", 'utf8');
+    writeFileSync(join(decoy, 'package.json'), manifest(manifestName), 'utf8');
+    writeFileSync(join(decoy, 'dist', 'index.js'), "export const BUILD = 'the-decoy';\n", 'utf8');
+    // A second NAME for the same directory, so `link:../alias` and a key
+    // symlinked at `../../linked` still have to compare equal.
+    symlinkSync(linked, join(base, 'alias'), 'dir');
+    if (absent) return root;
+    const at = join(root, 'node_modules', ...key.split('/'));
+    mkdirSync(dirname(at), { recursive: true });
+    if (copy) {
+      mkdirSync(join(at, 'dist'), { recursive: true });
+      writeFileSync(join(at, 'package.json'), manifest(manifestName), 'utf8');
+      writeFileSync(join(at, 'dist', 'index.js'), "export const BUILD = 'the-copy';\n", 'utf8');
+    } else {
+      symlinkSync(join(base, installTarget), at, 'dir');
+    }
+    return root;
+  }
+
+  const refusalFor = async (root: string, spec: string): Promise<Error> =>
+    (await createHostImporter(root)(spec).catch((e: unknown) => e)) as Error;
+
+  it('PRECONDITION: the linked ESM-only install reaches the fallback at all', () => {
+    // Without this, the load below could be happening for the wrong reason.
+    // The CJS resolver must FIND the symlink and refuse on the CONDITION, so
+    // the fallback inside that catch is the thing that decides.
+    const root = linkFixture('precondition', 'linked-key', { specifier: 'link:../linked' });
+    let code: string | undefined;
+    try {
+      createHostRequire(root).resolve('linked-key');
+    } catch (e) {
+      code = (e as { code?: string }).code;
+    }
+    expect(code).toBe('ERR_PACKAGE_PATH_NOT_EXPORTED');
+  });
+
+  it('THE CARD: a `link:` install whose manifest names something else now LOADS', async () => {
+    // The false refusal, gone. On `origin/main` this rejects with
+    // `declared-unresolvable` / MODULE_NOT_FOUND; the directory at the key is
+    // the one the host's own package.json named, so the host declared it.
+    const root = linkFixture('loads', 'linked-key', { specifier: 'link:../linked' });
+    expect((await createHostImporter(root)('linked-key')).BUILD).toBe('the-linked-directory');
+  });
+
+  it('THE CARD: it loads the DECLARED directory — not merely something', async () => {
+    // A load is not the assertion; loading the right module is. The fixture
+    // keeps a `decoy/` beside `linked/` carrying the SAME manifest name and a
+    // different build marker, so an implementation that resolved by name, or
+    // by "whatever is nearby", is visible here rather than green.
+    const root = linkFixture('right-one', 'linked-key', { specifier: 'link:../linked' });
+    const loaded = await createHostImporter(root)('linked-key');
+    expect(loaded.BUILD).toBe('the-linked-directory');
+    expect(loaded.BUILD).not.toBe('the-decoy');
+  });
+
+  it('THE CARD: the comparison is CANONICAL — a symlinked spelling on either side still matches', async () => {
+    // ⭐ The measurement triage asked for. The declaration names `../alias`
+    // (itself a symlink to `linked/`), the key points at `../../linked`, and
+    // the declared path is spelled with a traversal span and a trailing
+    // separator. Every one of those is a DIFFERENT string for the same
+    // directory: a raw string comparison fails all four, `resolve()` alone
+    // fails the symlink, and a basename match would pass things it must not.
+    const root = linkFixture('canonical', 'linked-key', {
+      specifier: 'link:../linked/../alias/',
+      installTarget: 'linked',
+    });
+    expect((await createHostImporter(root)('linked-key')).BUILD).toBe('the-linked-directory');
+  });
+
+  it('`file:` and `portal:` are location protocols too, and verify the same way', async () => {
+    // npm installs a directory `file:` dependency AS a symlink, which is this
+    // shape. (pnpm routes `file:` through its virtual store instead — a copy,
+    // covered by the negative below and by the #15045 suite's wording pins.)
+    for (const specifier of ['file:../linked', 'portal:../linked']) {
+      const root = linkFixture(`proto-${specifier.slice(0, 4)}`, 'linked-key', { specifier });
+      expect((await createHostImporter(root)('linked-key')).BUILD, specifier).toBe('the-linked-directory');
+    }
+  });
+
+  it('NEGATIVE: a directory at the key that the host did NOT declare is still refused', async () => {
+    // ⛔ The thing this must not become. The key holds a COPY — a real package,
+    // named the same as the declared one's manifest, sitting exactly where CJS
+    // resolution would happily take it — and the declared directory is
+    // elsewhere. Neither axis ties it to the declaration, so it is refused.
+    // This is also pnpm's measured `file:` virtual-store shape.
+    const root = linkFixture('unnamed-copy', 'linked-key', { specifier: 'file:../linked', copy: true });
+    const err = await refusalFor(root, 'linked-key');
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect((err as unknown as { code?: string }).code).toBe('MODULE_NOT_FOUND');
+    expect(err.message).toMatch(/the LOCATION too — and that did not match/);
+  });
+
+  it('NEGATIVE: a link pointing SOMEWHERE ELSE than the declaration names is refused', async () => {
+    // The stale / redirected link. `decoy/` is a real package directory with
+    // the same manifest name, so only the PATH distinguishes it — which is the
+    // whole point of the axis.
+    const root = linkFixture('wrong-target', 'linked-key', {
+      specifier: 'link:../linked',
+      installTarget: 'decoy',
+    });
+    const err = await refusalFor(root, 'linked-key');
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect(err.message).toMatch(/the LOCATION too — and that did not match/);
+  });
+
+  it('NEGATIVE: a remote artefact declaration gains nothing — there is no location to compare', async () => {
+    // The declared boundary. Even with the key symlinked at a perfectly good
+    // package directory, `github:` / a tarball URL / the `owner/repo`
+    // shorthand name no on-disk location, so the finder has only the KEY and
+    // the refusal stands — unchanged by this card.
+    for (const specifier of ['github:acme/bar', 'https://example.invalid/pkg.tgz', 'acme/bar']) {
+      const root = linkFixture(`remote-${specifier.slice(0, 4)}`, 'linked-key', { specifier });
+      const err = await refusalFor(root, 'linked-key');
+      expect(hostImportFailureKind(err), specifier).toBe('declared-unresolvable');
+      expect(err.message, specifier).toMatch(/names no on-disk location at all/);
+    }
+  });
+
+  it('NEGATIVE: a plain RANGE licenses no path, however correct the link looks', async () => {
+    // The tightness control #14278 wrote for the name axis, re-run for this
+    // one: the on-disk shape is IDENTICAL to the loading case above — a
+    // symlink at the key pointing at a real package directory — and it is
+    // refused, because the declaration named no location. The predicate is on
+    // the DECLARATION, never on what is found.
+    const root = linkFixture('plain-range', 'linked-key', { specifier: '^1.0.0' });
+    const err = await refusalFor(root, 'linked-key');
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect(err.message).toMatch(/INSTALL problem, not a declaration problem/);
+  });
+
+  it('NEGATIVE: an `npm:` alias still names a PACKAGE, and a differing directory stays refused', async () => {
+    // The two axes do not blur into one another: an alias declaration names a
+    // name, so the name is what is checked, and the location axis never runs.
+    const root = linkFixture('alias', 'linked-key', { specifier: 'npm:@fixture/declared@1' });
+    const err = await refusalFor(root, 'linked-key');
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect(err.message).toMatch(/INSTALL problem, not a declaration problem/);
+  });
+
+  it('NEGATIVE: a declared location with NOTHING at the key does not verify itself', async () => {
+    // ⛔ The `undefined === undefined` trap, pinned. The declared directory
+    // exists and is a perfectly good package; `node_modules/<key>` does not
+    // exist at all. Two unresolvable sides must not compare equal.
+    const root = linkFixture('nothing-installed', 'linked-key', { specifier: 'link:../linked', absent: true });
+    const err = await refusalFor(root, 'linked-key');
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect(err.message).toMatch(/INSTALL problem, not a declaration problem/);
+  });
+
+  it('NEGATIVE: a `link:` whose declared directory does not exist is refused', async () => {
+    // The other half of the same trap: the key IS a real package directory and
+    // the declared path resolves to nothing.
+    const root = linkFixture('declared-gone', 'linked-key', {
+      specifier: 'link:../no-such-directory',
+      copy: true,
+    });
+    const err = await refusalFor(root, 'linked-key');
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect(err.message).toMatch(/does not exist/);
+  });
+
+  it('NEGATIVE: a `file://` URL spelling is DECLINED, not guessed at', async () => {
+    // Documented decline: the remainder after `file:` is not a path, and a
+    // second grammar (authority, percent-decoding) is not parsed on the way to
+    // licensing a directory. Declining costs a load that was already refused.
+    const root = linkFixture('file-url', 'linked-key', { specifier: 'file:///nowhere/linked' });
+    const err = await refusalFor(root, 'linked-key');
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect(err.message).toMatch(/names no on-disk location at all/);
+  });
+
+  it('the load stays inside the FALLBACK — a package with a `require` entry never reaches it', async () => {
+    // The property that makes this strictly additive: the axis fires only in
+    // `hostRequire.resolve`'s catch. A dual-published linked package resolves
+    // through CommonJS and keeps today's behaviour, which the #15044 BOUNDARY
+    // above pins from the other side (#13330's leg is deliberately untouched).
+    const root = linkFixture('dual', 'linked-key', {
+      specifier: 'link:../linked',
+      exportsField: { '.': { require: './dist/index.cjs', import: './dist/index.js' } },
+    });
+    writeFileSync(join(root, 'node_modules', 'linked-key', 'dist', 'index.cjs'), 'module.exports={BUILD:"cjs"};\n', 'utf8');
+    expect(createHostRequire(root).resolve('linked-key')).toMatch(/index\.cjs$/);
   });
 });

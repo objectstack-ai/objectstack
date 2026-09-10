@@ -157,18 +157,47 @@ const DECLARED: HostDeclaration = {
 };
 const UNDECLARED: HostDeclaration = { packageName: PKG, hostRoot: '/srv/app', declared: false };
 
-const remedyDeclared = () => formatOrganizationsInstallRemedy('declared-unresolvable', DECLARED, '/srv/app');
-const remedyUndeclared = () => formatOrganizationsInstallRemedy('undeclared', UNDECLARED, '/srv/app');
-const remedyNoLoadableEntry = () =>
-  formatOrganizationsInstallRemedy('declared-no-loadable-entry', DECLARED, '/srv/app');
+const remedyDeclared = () => formatOrganizationsInstallRemedy('declared-unresolvable', DECLARED);
+const remedyUndeclared = () => formatOrganizationsInstallRemedy('undeclared', UNDECLARED);
+const remedyNoLoadableEntry = () => formatOrganizationsInstallRemedy('declared-no-loadable-entry', DECLARED);
 
 describe('serve — the multi-org runtime name an operator READS comes from the declaration (#12151)', () => {
-  it('site 1 — the "install is broken" remedy names it, with the spacing intact', () => {
-    // The `declared-unresolvable` branch: the app's package.json IS correct and
-    // the install is what broke (#4719). One of the two an operator ACTS on.
+  it('site 1 — the "the declaration is not the problem" remedy names it, with the spacing intact', () => {
+    // The `declared-unresolvable` branch: the app's package.json IS correct
+    // (#4719). One of the two an operator ACTS on.
     expect(lines(remedyDeclared())[0]).toBe(
       `      • this app DECLARES ${PKG} (dependencies: "^1.2.3") — the`,
     );
+  });
+
+  it('site 1b — the `declared-unresolvable` remedy DEFERS too; it mints no install advice (#17046)', () => {
+    // ── The arm that used to fire, quoted so the flip is legible ──────────
+    //
+    //         Repair the INSTALL in /srv/app: run `pnpm install`, check that a
+    //         production prune did not drop it, and that its dist is actually built — or
+    //
+    // DRIVEN on both shapes this one kind covers, that text was wrong twice:
+    // for a genuinely broken install it repeats, word for word, the three
+    // remedies `unresolvableMessage` already prints in the `cause:` line four
+    // lines below; and for #15045's location sub-case — narrowed by #17046 but
+    // NOT removed, since pnpm's `file:` virtual-store copy and every git /
+    // tarball declaration still reach it — the same `cause:` says outright
+    // that re-running `pnpm install`, un-pruning and rebuilding change
+    // nothing. One screen contradicting itself, the #14270 class.
+    const rendered = plain(remedyDeclared());
+    expect(rendered).not.toContain('Repair the INSTALL');
+    expect(rendered).not.toContain('pnpm install');
+    expect(rendered).not.toContain('production prune');
+    expect(rendered).not.toContain('dist is actually built');
+    // ⛔ Nor may it drift into the OTHER arm's instruction.
+    expect(rendered).not.toContain("declare it in the app's package.json");
+    // What it says instead: the declaration is fine, and the cause below owns
+    // the remedy — the same DEFERRAL site 2b pins for the sibling kind.
+    expect(rendered).toContain('declaration is NOT the problem');
+    expect(rendered).toContain('the cause below names the');
+    expect(rendered).toContain('authority on');
+    // It still chains into the `Fix one of:` list the fatal assembles.
+    expect(rendered.endsWith(' — or\n')).toBe(true);
   });
 
   it('site 2 — the "add it to THIS APP" remedy names it, with the spacing intact', () => {
