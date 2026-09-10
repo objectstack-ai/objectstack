@@ -73,11 +73,12 @@
  *      under the `## The N Protocol Namespaces` heading. Sets, plus the table's
  *      own no-duplicate rule -- a namespace listed in two layers is a finding
  *      in its own right, because that table is a partition.
- *   4. Every numeric namespace-count CLAIM. `content/docs/**` is swept for the
- *      strict phrasing (a number immediately before `protocol namespaces`); the
- *      three governed pages are additionally swept for the loose phrasing
- *      (`the N namespaces`), which is too weak to run over the whole corpus
- *      without meeting sentences about some other kind of namespace.
+ *   4. Every numeric namespace-count CLAIM in PROSE. `content/docs/**` is swept
+ *      for the strict phrasing (a number immediately before
+ *      `protocol namespaces`); the three governed pages are additionally swept
+ *      for the loose phrasing (`the N namespaces`), which is too weak to run
+ *      over the whole corpus without meeting sentences about some other kind of
+ *      namespace. Fenced code blocks are NOT prose and are skipped -- see below.
  *
  * Every one of those is INDEPENDENTLY load-bearing, and battery 4 mutates them
  * one at a time to prove it: a gate that reads five enumerations and reports
@@ -97,6 +98,29 @@
  *    are a historical record written at release time, and AGENTS.md forbids
  *    editing them in a code PR -- a gate able to demand an edit there would be a
  *    trap, not a guard.
+ *  - **Anything inside a fenced code block**, excluded from the count sweep for
+ *    the same reason and a sharper one: the DOCUMENTATION FOR THIS GATE quotes
+ *    the gate's own output, and so does any troubleshooting page showing a real
+ *    terminal session. `OK spec: 16 protocol namespaces exported` pasted from a
+ *    run last quarter is a transcript, not a claim about today's package, and a
+ *    gate that reds on quoted output teaches people to route around it. A
+ *    repo-wide gate people route around is worse than no gate. This is the count
+ *    sweep ONLY: the five enumerations read specific anchored lines and keep
+ *    their scope, so a fence cannot hide one of them.
+ *
+ *    INDENTED code blocks are deliberately NOT skipped. Measured on this corpus:
+ *    387 swept pages, zero indented code blocks outside a fence -- so skipping
+ *    them would buy nothing, and it cannot be done correctly by a line-based
+ *    reader. Four leading spaces under a list item is list CONTINUATION, not
+ *    code, and CommonMark decides between them with block context this gate does
+ *    not build. The error would be the expensive direction: a real stale total
+ *    silently unread.
+ *
+ *    An unterminated fence would hide the rest of a page from the sweep, so on
+ *    the three governed pages it is a structural REFUSAL rather than a page read
+ *    short. Elsewhere in the corpus it is not policed -- this gate is not a
+ *    markdown linter for 387 pages, and every live count claim is on a governed
+ *    page.
  *  - **Display spelling outside these enumerations.** `Data` in a heading this
  *    gate does not read is compared with nothing.
  *  - **Whether a subpath RESOLVES.** That is the alias-coverage pin's job. This
@@ -127,6 +151,19 @@ import { isEntrypoint } from './invoked-as.mjs';
 // repair -- a battery dropping from 9 cases to 3 keeps a total "right" the
 // moment a sibling grows. The counts are a FLOOR: adding cases is ordinary work
 // and must not red.
+//
+// A floor is the battery's REAL case count, not a round number under it. A
+// floor set below what the battery registers is slack the battery can lose
+// cases into silently: battery 8 declared 12 while registering 16, and a whole
+// `refused(...)` block could be deleted with the self-test still exiting 0 and
+// still printing that its structural cases held. Cases below the floor is the
+// only signal there is, so the floor has to sit against the count. Adding cases
+// raises the floor in the same edit.
+//
+// A `refused(...)` with an `expectIn` argument registers TWO cases, which is
+// where that slack came from -- count the assertions, not the calls.
+const BATTERY_REFUSALS = '8. STRUCTURAL refusals. Each must be RED, none may read as clean.';
+
 const SELF_TEST_BATTERIES = Object.freeze({
   '1. The derivation: two sets, and the split is READ, not typed.': 9,
   '2. THE POSITIVE CONTROL: a stale tree reds on every enumeration.': 8,
@@ -134,14 +171,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '4. Each enumeration is load-bearing ON ITS OWN.': 10,
   '5. The CONFLATION pin: the two sets are not interchangeable.': 4,
   '6. Order belongs to the subpath sentence, and only to that one.': 3,
-  '7. Count claims: digits, words, drift, and the drain refusal.': 8,
-  '8. STRUCTURAL refusals. Each must be RED, none may read as clean.': 12,
+  '7. Count claims: digits, words, drift, fenced code, and the drain refusal.': 15,
+  [BATTERY_REFUSALS]: 20,
   '9. The layers table carries its own no-duplicate rule.': 2,
+  '10. A finding NAMES the real shape, not a nonsense entry.': 2,
 });
 
 // Deleting an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -199,6 +237,13 @@ const BACKTICKED = /`([^`]*)`/g;
 /** The count sweep's root, and the subtree it must never be able to demand an edit in. */
 const DOCS_ROOT = 'content/docs';
 const DOCS_RELEASES = 'content/docs/releases';
+
+/**
+ * A run of three or more backticks or tildes, indented by at most three spaces:
+ * a fenced code block's opening or closing line. Group 1 is the run itself,
+ * group 2 everything after it (the info string on an opener).
+ */
+const FENCE_RUN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 /** `15 protocol namespaces` -- specific enough to sweep the whole corpus with. */
 const COUNT_CLAIM_STRICT = /\b([A-Za-z0-9-]+)\s+protocol\s+namespaces\b/gi;
@@ -685,7 +730,49 @@ export function readProtocolSections(text, fileLabel = PAGE_GLOSSARY) {
 }
 
 /**
- * Every numeric namespace-count claim on one page.
+ * Which lines of a page sit inside a fenced code block, and whether a fence was
+ * left open at the end of it.
+ *
+ * The fence lines themselves count as fenced: an opener's info string is not
+ * prose either. CommonMark's two rules that matter here are both load-bearing
+ * and both cheap -- a backtick opener's info string may not contain a backtick,
+ * and a closer must be the same character, at least as long as its opener, and
+ * carry nothing but whitespace after it. The second is what lets the gate's own
+ * documentation quote a fenced session inside a longer fence.
+ *
+ * @param {string} text
+ * @returns {{ fenced: boolean[], unterminated: { line: number, run: string } | null }}
+ */
+export function readFences(text) {
+  const lines = text.split('\n');
+  const fenced = new Array(lines.length).fill(false);
+  let open = null;
+  lines.forEach((line, index) => {
+    const match = line.match(FENCE_RUN);
+    if (open === null) {
+      if (match === null) return;
+      if (match[1][0] === '`' && match[2].includes('`')) return;
+      open = { line: index + 1, run: match[1] };
+      fenced[index] = true;
+      return;
+    }
+    fenced[index] = true;
+    if (match === null) return;
+    if (match[1][0] !== open.run[0]) return;
+    if (match[1].length < open.run.length) return;
+    if (match[2].trim() !== '') return;
+    open = null;
+  });
+  return { fenced, unterminated: open };
+}
+
+/**
+ * Every numeric namespace-count claim in the PROSE of one page.
+ *
+ * Fenced code blocks are skipped, and that exclusion belongs to the count sweep
+ * alone: quoted tool output and pasted terminal sessions are transcripts, not
+ * claims about today's package. The five enumerations read specific anchored
+ * lines and are unaffected.
  *
  * @param {string} text
  * @param {boolean} loose also read the weak `the N namespaces` phrasing
@@ -695,7 +782,9 @@ export function readCountClaims(text, loose) {
   const claims = [];
   const patterns = loose === true ? [COUNT_CLAIM_STRICT, COUNT_CLAIM_LOOSE] : [COUNT_CLAIM_STRICT];
   const seen = new Set();
+  const { fenced } = readFences(text);
   text.split('\n').forEach((line, index) => {
+    if (fenced[index]) return;
     for (const pattern of patterns) {
       for (const match of line.matchAll(pattern)) {
         const value = parseCountToken(match[1]);
@@ -744,11 +833,22 @@ export function compareEnumeration(expected, actual, opts) {
   }
   for (const item of actualSet) {
     if (expectedSet.has(item)) continue;
-    findings.push({
-      kind: 'unknown',
-      line: opts.line,
-      message: `${opts.what} lists \`${item}\`, which the exports map does not publish (retired, misspelt, or never there).`,
-    });
+    // A subpath is `[a-z][a-z0-9-]*` and a display name comes from a declared
+    // title; neither can contain a sentence break. So an item carrying one is
+    // never a misspelt entry -- it is the last real entry with the following
+    // sentence stuck to it, and saying "the page lists <that>" sends the reader
+    // hunting for an entry the page does not have.
+    findings.push(item.includes('. ')
+      ? {
+        kind: 'unknown',
+        line: opts.line,
+        message: `${opts.what} runs on into the sentence after it: the last item reads \`${item}\`. The list and the sentence share a line, so the enumeration cannot be told from the prose -- end the list, then start the sentence.`,
+      }
+      : {
+        kind: 'unknown',
+        line: opts.line,
+        message: `${opts.what} lists \`${item}\`, which the exports map does not publish (retired, misspelt, or never there).`,
+      });
   }
   if (opts.ordered === true && findings.length === 0 && expected.join(' ') !== actual.join(' ')) {
     findings.push({
@@ -813,8 +913,29 @@ export function run(tree) {
     ...sections.findings.map((f) => ({ ...f, file: PAGE_GLOSSARY })),
   );
 
+  // The count sweep skips fenced code, so a fence left open swallows every
+  // claim below it. On the governed pages that is refused rather than read
+  // short: a page the sweep can only read half of must not be reported clean.
+  const openFences = new Map([
+    [PAGE_TROUBLESHOOTING, readFences(tree.troubleshooting).unterminated],
+    [PAGE_PACKAGES, readFences(tree.packages).unterminated],
+    [PAGE_GLOSSARY, readFences(tree.glossary).unterminated],
+  ]);
+  for (const [file, open] of openFences) {
+    if (open === null) continue;
+    structural.push({
+      kind: 'structure',
+      file,
+      line: open.line,
+      message: `the \`${open.run}\` code fence opened here is never closed, so the count sweep cannot read a single line below it -- close the fence, or this page reports the cleanest green it has.`,
+    });
+  }
+
   const glossaryClaims = readCountClaims(tree.glossary, true);
-  if (glossaryClaims.length < GLOSSARY_COUNT_CLAIM_FLOOR) {
+  // Reported only when the claims are genuinely absent. With a fence left open
+  // above them the shortfall is a SYMPTOM, and the refusal above already names
+  // the cause; two findings for one defect send the reader to the wrong line.
+  if (openFences.get(PAGE_GLOSSARY) === null && glossaryClaims.length < GLOSSARY_COUNT_CLAIM_FLOOR) {
     structural.push({
       kind: 'structure',
       file: PAGE_GLOSSARY,
@@ -1135,7 +1256,7 @@ export function selfTest() {
     run(tree({ packages: shuffledParen })).findings.length === 0);
 
   // ---- 7. Count claims.
-  battery('7. Count claims: digits, words, drift, and the drain refusal.');
+  battery('7. Count claims: digits, words, drift, fenced code, and the drain refusal.');
   const drifted = FIXTURE_GLOSSARY.replace('**4 protocol namespaces**', '**5 protocol namespaces**');
   const driftRun = run(tree({ glossary: drifted }));
   check('count/a stale digit reds', driftRun.findings.some((f) => f.kind === 'count-drift'),
@@ -1154,8 +1275,42 @@ export function selfTest() {
     readCountClaims(FIXTURE_GLOSSARY, true).length > readCountClaims(FIXTURE_GLOSSARY, false).length,
     `${readCountClaims(FIXTURE_GLOSSARY, true).length} vs ${readCountClaims(FIXTURE_GLOSSARY, false).length}`);
 
+  // A wrong count QUOTED from a run is a transcript, not a claim about today's
+  // package. Every case below pairs with the bare-prose leg two lines down: the
+  // point is that the fence moved the verdict, not that the line is harmless.
+  const QUOTED_WRONG = 'OK spec: 16 protocol namespaces exported';
+  const quoting = (...block) => [FIXTURE_GLOSSARY, '## Verifying', '', 'A green run prints:', '', ...block, ''].join('\n');
+  const fencedRun = (...block) => run(tree({ glossary: quoting(...block) }));
+  check('count/a wrong count QUOTED inside a fenced block is not a claim',
+    fencedRun('```text', QUOTED_WRONG, '```').findings.length === 0,
+    JSON.stringify(fencedRun('```text', QUOTED_WRONG, '```').findings));
+  check('count/THE PAIRED LEG: the same line as bare prose still reds',
+    fencedRun(QUOTED_WRONG).findings.some((f) => f.kind === 'count-drift'),
+    JSON.stringify(fencedRun(QUOTED_WRONG).findings));
+  check('count/a tilde fence hides a claim too',
+    fencedRun('~~~text', QUOTED_WRONG, '~~~').findings.length === 0,
+    JSON.stringify(fencedRun('~~~text', QUOTED_WRONG, '~~~').findings));
+  // This gate's own documentation quotes a fenced session inside a longer
+  // fence. A closer shorter than its opener must not end the block.
+  check('count/a longer fence is not closed by the shorter session inside it',
+    fencedRun('````markdown', '```text', QUOTED_WRONG, '```', '````').findings.length === 0,
+    JSON.stringify(fencedRun('````markdown', '```text', QUOTED_WRONG, '```', '````').findings));
+  check('count/a run carrying an info string does not CLOSE a fence',
+    fencedRun('```text', 'first session', '```js', QUOTED_WRONG, '```').findings.length === 0,
+    JSON.stringify(fencedRun('```text', 'first session', '```js', QUOTED_WRONG, '```').findings));
+  check('count/the opener line is not prose either -- its info string is skipped',
+    fencedRun('```text 16 protocol namespaces follow', 'a session', '```').findings.length === 0,
+    JSON.stringify(fencedRun('```text 16 protocol namespaces follow', 'a session', '```').findings));
+  // The exclusion has to reach the corpus sweep, not just the glossary that
+  // `run()` reads directly -- the sweep is where the 350 fenced pages are.
+  const swept = (text) => run(tree({ sweep: [{ file: 'content/docs/plugins/authoring.mdx', text }] }));
+  check('count/the SWEEP skips fenced code too, and still reds on the bare line',
+    swept(['# Authoring', '', '```text', QUOTED_WRONG, '```', ''].join('\n')).findings.length === 0
+    && swept(['# Authoring', '', QUOTED_WRONG, ''].join('\n')).findings.some((f) => f.kind === 'count-drift'),
+    JSON.stringify([swept(['```text', QUOTED_WRONG, '```'].join('\n')).findings, swept(QUOTED_WRONG).findings]));
+
   // ---- 8. Structural refusals.
-  battery('8. STRUCTURAL refusals. Each must be RED, none may read as clean.');
+  battery(BATTERY_REFUSALS);
   const refused = (label, overrides, expectIn) => {
     const result = run(tree(overrides));
     check(`refuse/${label}`, result.structural.length > 0 && result.findings.length === 0,
@@ -1194,6 +1349,15 @@ export function selfTest() {
       .replace('has 4 protocol namespaces:', 'has these protocol namespaces:')
       .replace('The 4 namespaces collapse', 'The namespaces collapse'),
   }, `floor of ${GLOSSARY_COUNT_CLAIM_FLOOR}`);
+  // Skipping fenced code buys a way to hide claims: open a fence and never
+  // close it. On a governed page that is refused, on BOTH the page that holds
+  // the claims and one that does not -- otherwise the guard reads as
+  // glossary-only and the next fence lands on a page nothing refuses.
+  const neverClosed = (page) => [page, '```text', 'a session that never ends', ''].join('\n');
+  refused('the glossary opens a code fence it never closes',
+    { glossary: neverClosed(FIXTURE_GLOSSARY) }, 'never closed');
+  refused('the troubleshooting page opens a code fence it never closes',
+    { troubleshooting: neverClosed(FIXTURE_TROUBLESHOOTING) }, 'never closed');
 
   // ---- 9. The partition rule.
   battery('9. The layers table carries its own no-duplicate rule.');
@@ -1202,6 +1366,21 @@ export function selfTest() {
     doubled.findings.some((f) => f.kind === 'duplicate'), JSON.stringify(doubled.findings));
   check('partition/and it is reported against the glossary',
     JSON.stringify(kindsOn(doubled, PAGE_GLOSSARY)).includes('duplicate'), JSON.stringify(doubled.findings));
+
+  // ---- 10. What a finding SAYS.
+  battery('10. A finding NAMES the real shape, not a nonsense entry.');
+  const runOn = run(tree({
+    glossary: FIXTURE_GLOSSARY.replace(
+      'protocol namespaces: Data, UI, AI, and Marketplace.',
+      'protocol namespaces: Data, UI, AI, and Marketplace. Each is importable from its own subpath.',
+    ),
+  }));
+  check('message/a run-on list item is reported as a run-on, not as an entry the page lists',
+    runOn.findings.some((f) => f.kind === 'unknown' && f.message.includes('runs on into the sentence after it')),
+    JSON.stringify(runOn.findings.map((f) => f.message)));
+  check('message/and the name the sentence swallowed is still reported missing',
+    runOn.findings.some((f) => f.kind === 'missing' && f.message.includes('`Marketplace`')),
+    JSON.stringify(runOn.findings.map((f) => f.message)));
 
   // -- The floor: every declared battery RAN, and ran its cases -------------
   //
@@ -1251,12 +1430,17 @@ export function selfTest() {
   }
 
   const cases = [...batterySeen.values()].reduce((a, b) => a + b, 0);
+  // Read from the run rather than typed here. A second hardcoded number is a
+  // second thing to keep true, and this one was already false: the sentence
+  // claimed 12 structural cases while the battery registered 16.
+  const refusalCases = batterySeen.get(BATTERY_REFUSALS) ?? 0;
   console.log(
     `OK check-docs-spec-enumerations self-test: ${cases} cases over ${declaredBatteries.length} batteries. ` +
     'The positive control reproduces the #17372 defect as 10 divergences across all three pages; each of the ' +
     'five enumerations reds on its own; the subpath set (5) and the namespace set (4) are pinned different and ' +
     'non-interchangeable; order is held on the sentence that claims it and nowhere else; count claims read ' +
-    'digits and number words; and 12 structural cases are refused rather than read as clean.',
+    'digits and number words in prose and skip fenced code, which is refused when left open; ' +
+    `and ${refusalCases} cases hold the structural refusals, each malformed shape refused rather than read as clean.`,
   );
   selfTestReachedVerdict = true;
 }
