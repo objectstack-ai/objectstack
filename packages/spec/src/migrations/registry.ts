@@ -5410,8 +5410,14 @@ const step18: MigrationStep = {
     '(the D7 ledger row `cron-declared-unwired`). All seven are DELETED OUTRIGHT — no ' +
     'retiredKey tombstone, no RETIRED_KEYS_BY_MAJOR[18] entry, no D2 conversion and no D3 ' +
     'semantic entry — so this step replays nothing for them and `migrate meta` lists no ' +
-    'edit: the keys simply stop existing, and the six positions on non-strict schemas are ' +
-    'stripped in silence rather than refused. That is the maintainer ruling of 2026-09-10 ' +
+    'edit: the keys simply stop existing. That the chain is silent does NOT make the ' +
+    'deletion silent to an author: the PARSE strips (no schema here is `.strict()`), but ' +
+    'above it `lintUnknownAuthoringKeys` (#3786) names the dropped key for the one ' +
+    'position a stack manifest reaches — `os validate` and `os build` both print ' +
+    '`connectors.<name>.syncConfig.schedule: \'schedule\' is not a declared connector ' +
+    'key, so its value is dropped at load.`, and `os validate --strict` EXITS 1 on that ' +
+    'warning. The other six positions are unreachable from a manifest, so for those the ' +
+    'parse-level strip is the whole of it. That is the maintainer ruling of 2026-09-10 ' +
     'on the retirement PR, taken over the seat recommendation to keep the connector D2, on ' +
     'the reading that customers do not upgrade major by major in order.',
   conversionIds: [

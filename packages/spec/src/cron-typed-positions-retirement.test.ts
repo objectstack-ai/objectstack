@@ -36,11 +36,34 @@ import {
 // a `retiredKey()` tombstone, a `RETIRED_KEYS_BY_MAJOR[18]` entry, an ADR-0087 D2
 // conversion or a D3 semantic entry.
 //
-// That makes the observable consequence a SILENT STRIP, not a refusal: none of
+// That makes the PARSE-layer consequence a SILENT STRIP, not a refusal: none of
 // the five schemas is `.strict()`, so zod drops an authored value and answers
 // `success: true` (ADR-0104's shape). These pins record exactly that — what an
-// author who keeps writing one of these keys actually gets — so the day someone
-// changes the route, the change is loud here rather than invisible in the field.
+// author who keeps writing one of these keys gets from the SCHEMA — so the day
+// someone changes the route, the change is loud here rather than invisible in
+// the field.
+//
+// ⚠️ The parse is NOT the whole channel, and the difference is measured rather
+// than reasoned. Above the parse, `lintUnknownAuthoringKeys` (#3786) walks every
+// `PLURAL_TO_SINGULAR` collection whose entry schema is strip-mode, and
+// `connectors: 'connector'` is one of them — so for the ONE of the seven a stack
+// manifest reaches, the CLI NAMES the dropped key:
+//
+//   • `os validate` — exit 0, and prints (`--json` carries the same string in
+//     `warnings`):
+//       connectors.sap_erp.syncConfig.schedule: 'schedule' is not a declared
+//       connector key, so its value is dropped at load.
+//   • `os validate --strict` — exit 1. Measured on an otherwise-clean stack:
+//     the same manifest WITHOUT the key is 0 warnings / exit 0, WITH it is
+//     1 warning / exit 1. A CI running `--strict` REFUSES the upgraded manifest.
+//   • `os build` — the same line, under `Undeclared authoring keys (1) —
+//     dropped at load (#3786)`.
+//   • `os migrate meta` — still lists nothing, in either direction. There is no
+//     prescription to make, which is the half the bare deletion really does own.
+//
+// ⇒ ⛔ Do not read these pins as "the author is never told". They pin the schema
+// layer. The author-facing loss is louder than a bare `safeParse` suggests, and
+// it is louder than the ruling comment's cost statement assumed.
 
 const CRON = '0 6 * * MON';
 /** The envelope the old schema normalized the bare string into — dropped just the same. */
@@ -276,9 +299,17 @@ describe('[#16320] the one manifest-reachable position — what an upgrading sta
     // ⚠️ THE CONSEQUENCE OF THE 直接删 RULING, pinned. `DataSyncConfig.schedule`
     // is the only one of the seven a stack manifest reaches (`stack.zod.ts`
     // `connectors[]` → `connector.zod.ts` `syncConfig` → `schedule`). With no
-    // tombstone the manifest still LOADS, and the cadence the author wrote is
-    // discarded without a word — the ADR-0104 silent-strip shape, accepted
+    // tombstone the manifest still LOADS and the cadence the author wrote is
+    // dropped — the ADR-0104 silent-strip shape at the PARSE, accepted
     // deliberately by the ruling.
+    //
+    // ⛔ Silent at the parse is not silent to the author, and the module
+    // docblock carries the measurement: on this exact path `os validate` prints
+    // `connectors.<name>.syncConfig.schedule: 'schedule' is not a declared
+    // connector key, so its value is dropped at load.`, `os build` prints it
+    // under its undeclared-keys block, and `os validate --strict` EXITS 1 on it.
+    // This assertion is about `ObjectStackSchema` alone; it does not measure —
+    // and must not be quoted as — what the CLI tells the author.
     const { ObjectStackSchema } = await import('./stack.zod');
     const parsed = ObjectStackSchema.safeParse({
       connectors: [{ ...CONNECTOR_WELL_FORMED, syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON } }],

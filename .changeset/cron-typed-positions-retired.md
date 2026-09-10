@@ -25,13 +25,30 @@ ledger row `cron-declared-unwired` had every one of them `unevaluated`.
 | backup / DR testing | `BackupConfig`, `DisasterRecoveryPlan.testing` (`system/disaster-recovery.zod.ts`) | `schedule` (both) | no |
 
 **What an upgrading author actually observes.** None of the five schemas is `.strict()`, so
-a bare deletion means Zod DROPS the key: an existing document still parses, still loads, and
-the value is discarded without a word. Nothing refuses it, so there is nothing for
+a bare deletion means Zod DROPS the key at the PARSE: an existing document still parses and
+still loads, and the value is discarded there without a word. There is nothing for
 `objectstack migrate meta` to list and nothing for the ADR-0087 chain to replay — the value
-was already inert before this change, and it is inert after. The one channel that speaks is
-`tsc`: a TypeScript author annotating with `Connector`, `ScheduledExport`, `ScheduleState`,
-`CacheWarmup`, `BackupConfig` or `DisasterRecoveryPlan` gets an excess-property error at the
-key and deletes it.
+was already inert before this change, and it is inert after.
+
+The parse is not the only channel, and the two that speak are worth stating exactly,
+because a reader who stops at "non-strict schema" will conclude the opposite:
+
+- **`os validate` / `os build` NAME the dropped key**, for the one deleted position a stack
+  manifest reaches (`connectors[].syncConfig.schedule`). `os validate` exits 0 and reports
+  `connectors.<name>.syncConfig.schedule: 'schedule' is not a declared connector key, so its
+  value is dropped at load.` — in the text face and in `--json`'s `warnings`; `os build`
+  prints the same line under `Undeclared authoring keys — dropped at load (#3786)`. The
+  channel is `lintUnknownAuthoringKeys`, which walks every stack collection whose entry
+  schema is strip-mode, and `connectors` is one. **`os validate --strict` treats that warning
+  as an error and EXITS 1**, so a pipeline running `--strict` over an otherwise-clean stack
+  refuses the upgraded manifest until the key is deleted. `os migrate meta` still lists
+  nothing, in either direction.
+- **`tsc`**: a TypeScript author annotating with `Connector`, `ScheduledExport`,
+  `ScheduleState`, `CacheWarmup`, `BackupConfig` or `DisasterRecoveryPlan` gets an
+  excess-property error at the key and deletes it.
+
+The other six positions are not reachable from a stack manifest, so no CLI walk visits them:
+for those the parse-level strip really is the whole of it.
 
 **What stays, byte-identical:** every other key of the five schemas and every export — no def
 leaves the public surface. `ScheduledExport.schedule` / `ScheduleExportRequest.schedule` keep
@@ -39,6 +56,19 @@ their `timezone` (still defaulting to `UTC`); `ScheduleState` keeps `timezone`, 
 `nextRunAt`, and a state without `cronExpression` now parses (the requiredness left with the
 key); `CacheWarmup.strategy` keeps its `scheduled` member — a value, not a position the
 ruling names, and exactly as inert as before.
+
+**One published TS MEMBER does leave, and "no def leaves" does not cover it.** The required
+`cronExpression: string` member is deleted from `ScheduleExportInput` in
+`contracts/export-service.ts` — the input type of `IExportService.scheduleExport`, a
+published runtime TS interface (both names are in `api-surface/contracts.json`). It follows
+the two spec positions it mirrored: with `ScheduledExport.schedule.cronExpression` gone, an
+input demanding the key would ask a provider for a cadence it cannot store. The interface,
+the method and every other member stay. Measured blast radius: no source outside
+`packages/spec` names `ScheduleExportInput` or `IExportService` — 0 hits in this repo
+(positive control: a symbol of the same class resolves outside `packages/spec` in the same
+sweep) and 0 in `objectui` (control: 1326 files there import `@objectstack/spec`). An
+implementor that *does* exist off-tree drops the member from its object literal; a caller
+constructing a `ScheduleExportInput` drops it from the literal it passes.
 
 **Not in scope, deliberately:** `CronSchedule.expression` (`system/job.zod.ts`, read by
 `croner` — the ONE cron slot the platform evaluates), `KnowledgeRefreshPolicy.cron`
@@ -48,11 +78,13 @@ retired, on its sibling card).
 ## This change states no before/after rewrite, because there is none
 
 A breaking changeset in this repo normally states the old spelling beside the new one.
-This one has no such pair to state: the same document parses before and after, the value
-was inert in both, and nothing refuses it — so a metadata upgrader has no edit to make and
-`os migrate meta` has nothing to list. The one party with work to do is a TypeScript
-author, and the compiler names the key and the line for them. What follows is guidance for
-authoring a cadence going forward, not a rewrite of an existing document.
+This one has no such pair to state: the same document PARSES before and after, the value
+was inert in both, and no conversion can be written for it — so a metadata upgrader has no
+edit to make and `os migrate meta` has nothing to list. That is a statement about the
+migration chain, not about silence: `os validate` / `os build` do name the dropped
+connector key and `os validate --strict` refuses on it (above), and `tsc` names the key and
+the line for a TypeScript author. What follows is guidance for authoring a cadence going
+forward, not a rewrite of an existing document.
 
 ## What to write instead
 
