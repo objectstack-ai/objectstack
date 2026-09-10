@@ -11,6 +11,7 @@
 import { isMcpServerEnabled } from '@objectstack/types';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import type { MetadataProtocol } from '@objectstack/spec/api';
+import type { ISecurityService } from '@objectstack/spec/contracts';
 import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
 import { isSystemObjectName } from '../action-execution.js';
@@ -585,7 +586,13 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
          */
         diagnoseDelegation: async (object: string) => {
             try {
-                const security: any = await deps.resolveService(context, 'security', envId);
+                // Typed against the published slot contract, never `any`
+                // (#4251): `Partial<…>` is the availability rule the contract
+                // itself states, and it is what makes the feature-detect below
+                // a TYPE-CHECKED narrowing rather than a property probe on an
+                // untyped value — the same shape `domains/automation.ts` uses.
+                const security = await deps.resolveService(context, 'security', envId) as
+                    Partial<ISecurityService> | undefined;
                 if (typeof security?.describeDelegationNarrowing !== 'function') {
                     return { narrowed: false };
                 }
