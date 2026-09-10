@@ -14,6 +14,7 @@ import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { scoreMetadata } from '../lint/score.js';
 import { checkHookBodyLowering } from '../lint/hook-body-lowering.js';
 import { lowerCallables } from '../utils/lower-callables.js';
+import { authoringRuleUnionStack } from '../utils/stack-collections.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
 import { DEFAULT_METADATA_EVAL_CORPUS } from '../lint/corpus.js';
 import {
@@ -511,10 +512,25 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   //     the family stays silent on it and `checkHookBodyLowering` is what
   //     reports it, so no verdict is ever given about a body that was not
   //     produced. Nothing here touches what `os build` accepts (#13838).
+  //
+  // ── Both tiers are handed the UNION-FOLDED stack (ADR-0130 D4, #17069) ──
+  // Under option B every definition lives in `packages[]` and the top level
+  // carries none, so both tiers above were handed an EMPTY stack: the whole
+  // table reported nothing and `os lint` returned no finding of any severity
+  // for a project `os build` refuses. `authoringRuleUnionStack` is the one
+  // helper `compile.ts` calls for its union run — the same fold, not a second
+  // one — and it fills only the collections the top level does not carry, so
+  // a stack that still carries them comes back BY IDENTITY and every
+  // single-package project lints exactly as before.
+  //
+  // Scoped to this call, as it is in `compile.ts`: the hand-written checks
+  // above and `scoreMetadata` (which reaches `lintConfig` through
+  // `lint/score.js`) keep reading the caller's own stack, so nothing about
+  // what this function returns for a top-level stack moves.
   const { lowered, loweredHookRefs } = lowerCallables(config as Record<string, unknown>);
   for (const f of runAuthoringRules('lint', {
-    normalized: config,
-    parsed: lowered,
+    normalized: authoringRuleUnionStack(config as Record<string, unknown>),
+    parsed: authoringRuleUnionStack(lowered),
     sduiManifest: opts.sduiManifest,
     // [#16546] Same ref set `os build` computes from the same normalized
     // input — what lets `validateReadonlyHookWrites` / `validateHookBodyWrites`

@@ -112,10 +112,69 @@ function gateCallsIn(file: string): Set<string> {
 /** Is `name` invoked anywhere in this command's source? */
 const calls = (file: string, name: string) => new RegExp(String.raw`\b${name}\s*\(`).test(sourceOf(file));
 
+/**
+ * The `runAuthoringRules(...)` call in one command's source, from the call
+ * through to its closing brace — the object literal whose `normalized` and
+ * `parsed` members ARE the stack the rule table judges.
+ */
+function ruleTableCallIn(file: string): string {
+  const src = sourceOf(file);
+  const at = src.indexOf('runAuthoringRules(');
+  return at === -1 ? '' : src.slice(at, src.indexOf('})', at));
+}
+
 describe('os validate is the read-only superset of os build (#3782, #4409)', () => {
   it('both commands run the shared authoring-rule registry', () => {
     for (const file of ['compile.ts', 'validate.ts']) {
       expect(calls(file, 'runAuthoringRules'), `${file} must run the authoring-rule registry`).toBe(true);
+    }
+  });
+
+  /**
+   * The same drift one layer EARLIER than every check in this file: not "does
+   * this command run the table" but "what stack does it hand the table".
+   *
+   * ⭐ [#17069] A project whose definitions live only in `packages[]` — the
+   * ADR-0130 D4 / option-B shape — carries no collections at the top level.
+   * `compile.ts` folds them back in with `authoringRuleUnionStack` before it
+   * runs the table; `validate.ts` and `lint.ts` did not, so each ran all 44
+   * rules over an EMPTY stack and reported a clean bill of health for a project
+   * it had read nothing of, at exit 0. That is the #4409 weakest-gate class
+   * arriving through the INPUT rather than the rule set — and in its worst
+   * direction, because `os validate` is the check an author runs before
+   * shipping.
+   *
+   * Source-level for the same reason as the gate check above: it fails when a
+   * door drops the fold, which is the moment it is cheap to fix. The
+   * behavioural half — the card's own repro through the three real binaries —
+   * is `test/union-fold-command-parity.test.ts`.
+   */
+  it('all three authoring commands hand the rule table the union-folded stack', () => {
+    // Positive control FIRST: the helper must still exist and still be the ONE
+    // fold. Without it, deleting `authoringRuleUnionStack` outright would
+    // satisfy nothing below — but renaming it would make every assertion here
+    // fail for the wrong reason, and this line says which.
+    const helper = readFileSync(join(UTILS_DIR, 'stack-collections.ts'), 'utf8');
+    expect(
+      /export function authoringRuleUnionStack\b/.test(helper),
+      'src/utils/stack-collections.ts must export authoringRuleUnionStack — if it moved, move this ' +
+        'guard with it. ⛔ Do not answer a red here by writing a second fold.',
+    ).toBe(true);
+
+    for (const file of AUTHORING_COMMANDS) {
+      const call = ruleTableCallIn(file);
+      expect(call, `${file} must call runAuthoringRules`).not.toBe('');
+      for (const tier of ['normalized', 'parsed']) {
+        expect(
+          new RegExp(String.raw`\b${tier}\s*:\s*authoringRuleUnionStack\s*\(`).test(call),
+          `${file} hands the authoring-rule table a '${tier}' stack that has NOT been through ` +
+            `authoringRuleUnionStack(). On an ADR-0130 D4 / option-B project — every definition in ` +
+            `packages[], none at the top level — that input is an EMPTY stack, so every rule in the ` +
+            `table reports nothing and this command certifies an unread project as clean at exit 0. ` +
+            `Wrap it, as compile.ts does. ⛔ Do not reimplement the fold here — import the one in ` +
+            `src/utils/stack-collections.ts.`,
+        ).toBe(true);
+      }
     }
   });
 
