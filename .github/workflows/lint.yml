@@ -743,7 +743,7 @@ jobs:
       # production zero could equally be a scanner that stopped matching.
       # Invoked as `node` rather than `pnpm check:*`: see the GATE INVOCATION
       # IDIOM note at the top of this file. ~1s, no spawns.
-      - name: The #13419 name-fold fixture has no non-test loader
+      - name: 'The #13419 name-fold fixture has no non-test loader'
         run: |
           node scripts/check-position-name-fold-loaders.mjs --self-test
           node scripts/check-position-name-fold-loaders.mjs
@@ -4395,6 +4395,21 @@ jobs:
       # the package script as `check:self-test-wired` requires.
       - name: Duration-shaped spec keys carry their unit in the key name
         run: pnpm --filter @objectstack/spec check:duration-unit-keys
+
+      # #15149. Grep-level guard for the defect this very repo just shipped: an
+      # unquoted `- name:` step name containing ` #` is silently truncated by
+      # YAML at that point (a space + hash starts a comment inside a plain
+      # scalar), so the step's real parsed name is not the text an author
+      # wrote -- the CI log names the step something else entirely, and
+      # anything that resolves a step by its name text (scripts/pm/ci-failure.mjs)
+      # cannot find it. This repo names issue numbers in step names as a
+      # matter of style, so the shape is likely to recur. Deliberately NOT a
+      # YAML-parser-level name comparison -- see the header of
+      # scripts/check-workflow-step-name-quoting.mjs for why grep-level is
+      # sufficient (triage ruling, #15149). Reads .github/workflows/*.yml as
+      # plain text; no build, sub-second.
+      - name: 'Unquoted workflow step names do not silently truncate at " #" (#15149)'
+        run: pnpm check:workflow-step-name-quoting
 
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the
