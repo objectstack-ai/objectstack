@@ -252,8 +252,8 @@ stored row.
 #### The client SDK declares what the server sends
 
 Four published contracts stop being `any` or wrong. The `organizations.*`
-(`7092d63`, #14314), `auth.*` (`b1b978c`, #14313) and `oauth.*` (`e944fdb`,
-#14312) families declare the wire shapes better-auth actually sends, and
+(`7092d63`, #14314), `auth.*` (`b1b978c`, #14313) and `oauth.*`
+(`e944fdb`, #14312) families declare the wire shapes better-auth sends, and
 `oauth.applications.delete` resolves on the zero-byte 200 its route answers
 instead of rejecting on every successful delete (`7beaaa3`, #15451).
 
@@ -385,11 +385,11 @@ node gains `outcome` and an interpolated `message`, and the run vocabulary gains
 `list_actions` publishes its input names (`b31ebfe`). Two operator run-lifecycle
 verbs get doors and contracts — `cancel` and `restore-suspension`, gated on the
 platform operator (`44c849c`, `abb140c`, #16495). A resume that consumed its
-pause and then failed downstream answers `status: 'stranded'` (`5964124`,
-#13937), the resume route's `400 FLOW_FAILED` says whether the run is stranded
-(`68437d4`), and the stranded-request inspection tells a repairable strand from
+pause and then failed downstream answers `status: 'stranded'`
+(`5964124`, #13937), the resume route's `400 FLOW_FAILED` says whether the run
+is stranded (`68437d4`), and the inspection tells a repairable strand from
 a cascade-failed run through a read-only engine member rather than the wire
-(`4c31f02`, #15358). A contained per-iteration failure is visible at run level,
+(`4c31f02`, #15358). A contained per-iteration failure shows at run level,
 attributed to its iteration and bound to its row (`d30ccb9`); the step log tells
 a `parallel` branch from a `loop` row (`65ec530`); `ExecutionStepMetrics` gains
 a `failures` slot (`68d5dfd`); `evaluateCondition` refuses a malformed condition
@@ -627,7 +627,8 @@ been given.
 - **Do not read `os migrate meta --from 17` reporting `Nothing to migrate` as
   completion.** Its scope is the protocol chain; every rename in this release is
   registered under protocol major 18, and everything else on this list is
-  outside it. *Not exercised* on this hop — measured on the 17.2.0 → 17.3.0 run.
+  outside it. *Not exercised* on this hop; the 17.3.0 list records what that
+  command answered on the previous one.
 
 **Metadata and build — run `os validate` before you ship**
 
