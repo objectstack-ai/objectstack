@@ -349,10 +349,23 @@ export async function runAdminImportUsers(
   }
 
   const protocol: ImportProtocolLike = {
-    // findExisting path: `{ $filter, $top }` against sys_user.
+    // [#16638] findExisting path: the CANONICAL QueryAST against sys_user.
+    // `runImport` hands this handle a `FindDataRequest`, and the `QuerySchema`
+    // that request declares carries `where` / `limit` — it declares neither
+    // `$filter` nor `$top`. Those two are wire-only spellings the protocol
+    // normalizer folds for a caller off the HTTP door; this protocol is
+    // hand-written and never passes through that normalizer, so it must read
+    // the canonical keys itself.
+    //
+    // Two dialects would be the lenient `??` alias Prime Directive #12 forbids,
+    // and the default is not a harmless belt either: a `where` that falls back
+    // to `{}` stops constraining anything, so the duplicate probe matches rows
+    // it was given no key for and the upsert updates the WRONG user. One
+    // dialect, read straight — a request that arrives without a `query` is a
+    // caller defect and costs a loud TypeError, not a silent match-everything.
     async findData(args: any) {
-      const where = args?.query?.$filter ?? {};
-      const limit = args?.query?.$top ?? 2;
+      const where = args.query.where;
+      const limit = args.query.limit;
       return engine.find(args.object, { where, limit, context: SYSTEM_CTX } as any);
     },
 

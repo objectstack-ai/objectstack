@@ -6051,8 +6051,15 @@ export class SqlDriver implements IDataDriver {
    * (field selection, temporal coercion, unknown-column recovery, and the
    * `singleRowLookup` ORDER BY decision).
    * Spell an id lookup as what it is: `{ object, where: { id } }`.
+   *
+   * [#15267] Declared as `IDataDriver.findOne()` declares it: the row, or
+   * `null` when nothing matches — `results[0] || null`, and `null` outright for
+   * a non-object query. The annotation used to be an explicit `Promise<any>`,
+   * which an un-narrowed caller could read fields off with no compiler
+   * complaint; it is the contract's type now, pinned by
+   * `sql-driver-doors-declared-types.test.ts`.
    */
-  async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
+  async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     if (!query || typeof query !== 'object') return null;
     const results = await this.findRows(object, { ...query, limit: 1 }, options, true);
     return results[0] || null;
@@ -6064,7 +6071,14 @@ export class SqlDriver implements IDataDriver {
   // `find()` with `limit`/`offset` until a real Knex `.stream()` read is built to a
   // caller's requirement.
 
-  async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<any> {
+  /**
+   * [#15267] Declared as `IDataDriver.create()` declares it: the inserted
+   * record, `formatOutput(...)` over the `returning('*')` row. The annotation
+   * used to be an explicit `Promise<any>`, so the published `.d.ts` let a
+   * caller read any member off the result; it is the contract's type now,
+   * pinned by `sql-driver-doors-declared-types.test.ts`.
+   */
+  async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
     const { _id, ...rest } = data;
     const toInsert = { ...rest };
 
@@ -7885,7 +7899,14 @@ export class SqlDriver implements IDataDriver {
   // Bulk & Batch Operations
   // ===================================
 
-  async bulkCreate(object: string, data: any[], options?: DriverOptions): Promise<any> {
+  /**
+   * [#15267] Declared as `IDataDriver.bulkCreate()` declares it: the inserted
+   * rows, each through `formatOutput()` for read-back parity with
+   * {@link create}. The annotation used to be an explicit `Promise<any>`, which
+   * erased both the array and the row shape on the published `.d.ts`; it is the
+   * contract's type now, pinned by `sql-driver-doors-declared-types.test.ts`.
+   */
+  async bulkCreate(object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
     this.auditMissingTenant(object, 'bulkCreate', options);
     // Same client-side id assignment as create() (id/_id normalization,
     // nanoid fallback when neither is supplied) — a row missing an id must
@@ -8429,8 +8450,15 @@ export class SqlDriver implements IDataDriver {
    * through them — they handle tenancy, soft-delete, and audit warnings
    * automatically. See `README.md > Tenant Isolation` for the full bypass
    * matrix.
+   *
+   * [#15267] Declared as `IDataDriver.execute()` declares it: `unknown` — a raw
+   * statement's result is whatever the dialect returned, and the contract's own
+   * `unknown` says exactly that. The annotation used to be an explicit
+   * `Promise<any>`, which erased the contract's `unknown` on the class and let
+   * a caller dereference the result unchecked; pinned by
+   * `sql-driver-doors-declared-types.test.ts`.
    */
-  async execute(command: any, params?: any[], options?: DriverOptions): Promise<any> {
+  async execute(command: any, params?: any[], options?: DriverOptions): Promise<unknown> {
     if (typeof command !== 'string') {
       return command;
     }
@@ -9237,8 +9265,18 @@ export class SqlDriver implements IDataDriver {
   // Query Plan Analysis
   // ===================================
 
-  /** IDataDriver standard: analyze query performance */
-  async explain(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
+  /**
+   * IDataDriver standard: analyze query performance.
+   *
+   * [#15267] Declared as `IDataDriver.explain()` declares it: `unknown` — a
+   * query plan's shape is the dialect's, and the contract's own `unknown` says
+   * so. The annotation used to be an explicit `Promise<any>`, which erased that
+   * `unknown` on the class; pinned by
+   * `sql-driver-doors-declared-types.test.ts`. {@link analyzeQuery}, the
+   * off-contract helper it forwards to, keeps its own annotation — it is not an
+   * `IDataDriver` door and is out of that card's scope.
+   */
+  async explain(object: string, query: DriverQuery, options?: DriverOptions): Promise<unknown> {
     return this.analyzeQuery(object, query, options);
   }
 
@@ -9473,7 +9511,7 @@ export class SqlDriver implements IDataDriver {
     // Column-sync every retained shard (creates the current one; adds any
     // newly declared columns to older shards so the UNION stays uniform).
     for (const shard of retained) {
-      await this.ensureShardTable(shard, obj);
+      await this.ensureShardTable(shard, obj, tableName);
       this.aliasShardBookkeeping(tableName, shard);
     }
 
@@ -9589,10 +9627,16 @@ export class SqlDriver implements IDataDriver {
    * two links above still narrowing the same value, so a caller spelling
    * `indexes` in a fresh literal to `rotateShards` would still be refused by a
    * type while the driver read the key regardless.
+   *
+   * `baseTable` is the table the shard belongs to — the key its tenancy record
+   * is held under until {@link aliasShardBookkeeping} copies it across. It
+   * defaults to `shardName` so an existing override or external caller keeps
+   * today's behaviour, and the one in-tree call site names the base.
    */
   protected async ensureShardTable(
     shardName: string,
     obj: { fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
+    baseTable: string = shardName,
   ): Promise<void> {
     const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
     // [#12015] Both branches below drop a declared field named after a builtin
@@ -9641,11 +9685,26 @@ export class SqlDriver implements IDataDriver {
         ...idx,
         name: typeof idx?.name === 'string' && idx.name.trim() ? `${shardName}__${idx.name.trim()}` : undefined,
       }));
-      // Shard bookkeeping is aliased AFTER this method runs, so resolve the
-      // tenant column from the object schema itself — a declared
-      // `unique: 'organization'` index (ADR-0120 D1) must scope identically on
-      // every shard of the base table.
-      await this.syncDeclaredIndexes(shardName, perShard, new Set(Object.keys(colInfo)), this.computeTenantField(obj));
+      // Shard bookkeeping is aliased AFTER this method runs, so `shardName` has
+      // no entry of its own yet — a declared `unique: 'organization'` index
+      // (ADR-0120 D1) must scope identically on every shard of the base table,
+      // so the answer has to come from the base.
+      //
+      // [#16729] Keyed by `baseTable`, and through the RECORDING resolver, not
+      // the bare `computeTenantField`. The bare one reads this call's schema
+      // alone, so a shard synced from a partial re-registration — one carrying
+      // no `tenancy` block — fell through to the implicit `organization_id`
+      // heuristic and gave the shard an organization key part the base table's
+      // own index does not have. `tenantOptOutByTable` already holds the base's
+      // explicit opt-out (`initObjects` recorded it under exactly this key, and
+      // `aliasShardBookkeeping` propagates it to the shard afterwards), so
+      // consulting it here is what makes the two paths answer the same.
+      await this.syncDeclaredIndexes(
+        shardName,
+        perShard,
+        new Set(Object.keys(colInfo)),
+        this.computeAndRecordTenantField(baseTable, obj),
+      );
     }
   }
 

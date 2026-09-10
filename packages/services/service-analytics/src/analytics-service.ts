@@ -507,19 +507,65 @@ export interface AnalyticsServiceConfig {
   getAllowedRelationships?: (cubeName: string) => Set<string> | undefined;
   /**
    * Coerce a filter comparand to a temporal column's storage form so a
-   * relative-date / ISO-string value compares correctly on the active driver
-   * (SQLite `Field.datetime` → epoch ms; `Field.date` / native timestamp →
-   * unchanged). Threaded into the StrategyContext and consulted by
-   * `NativeSQLStrategy` when binding filter values. See the contract docs on
+   * relative-date / ISO-string value compares correctly on the active driver.
+   * Threaded into the StrategyContext and consulted by `NativeSQLStrategy` when
+   * binding filter values. See the contract docs on
    * `StrategyContext.coerceTemporalFilterValue` for the full rationale.
+   *
+   * # ⭐ The storage reality this package coerces against — ONE statement (#16737)
+   *
+   * ⛔ This block is the SINGLE place in `service-analytics` that states what a
+   * `Field.datetime` column physically holds. Every other site that needs the
+   * fact links here instead of restating it — {@link
+   * AnalyticsServiceConfig.coerceTemporalFilterColumn} below, the two hook
+   * bridges in `plugin.ts`, `NativeSQLStrategy.temporalColumn` /
+   * `buildFilterClause`, and `ObjectQLStrategy.dateRangeBounds`. Four of those
+   * carried three mutually incompatible accounts of it before this card, which
+   * is what #16737 was filed to end.
+   *
+   * Measured on `origin/main` (`driver-sql`, better-sqlite3), not recalled:
+   *
+   * - **SQLite `Field.datetime` has ONE storage form: canonical UTC TEXT**,
+   *   `YYYY-MM-DDTHH:MM:SS.sssZ` (#3912/#3928). `SqlDriver.storageDatetimeValue`
+   *   canonicalises on the WRITE path, so every accepted input shape folds onto
+   *   the same stored string — a `Date`, an ISO `…Z`, an ISO with an offset, a
+   *   naive wall clock (ADR-0074), an epoch number, an epoch string, a bare
+   *   calendar day — and the `NOW()` column default writes the same
+   *   `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` bytes. A value the driver cannot
+   *   interpret is preserved verbatim rather than nulled.
+   * - **⛔ The INTEGER epoch is a LEGACY form, not a live write path.** It is
+   *   what a database written BEFORE the convention still holds. `initObjects`
+   *   runs `backfillCanonicalDatetimes` at schema sync to converge such a
+   *   database; `SqlDriver.needsLegacyDatetimeRepair` is the ONE predicate for
+   *   "might this column still hold a pre-canonical value", and it is the only
+   *   thing that makes the column hook below emit anything but the bare column.
+   *   Two cases keep it true: a table not yet backfilled, and an EXTERNAL /
+   *   unmanaged object (`registerExternalObject` never marks its datetime
+   *   columns canonical).
+   * - **Postgres and MySQL never enter that question at all**: the DDL gives
+   *   them a real temporal type (`timestamptz`, `DATETIME(3)`), so there is one
+   *   on-disk shape by construction and nothing to repair.
+   *
+   * ⇒ The mixed INTEGER/TEXT column #3912 fixed is TRANSITIONAL, not the steady
+   * state, and the flat "a SQLite `Field.datetime` IS an INTEGER epoch" (#2034)
+   * has been wrong since #3912 landed. Both hooks stay necessary regardless:
+   * the comparand still has to be canonicalised (an author writes
+   * `'2025-06-18'`, storage holds `'2025-06-18T00:00:00.000Z'`), and the column
+   * still has to be repaired on the un-migrated and external tiers.
    */
   coerceTemporalFilterValue?: (objectName: string, fieldName: string, value: unknown) => unknown;
   /**
    * Normalise the COLUMN side of the same comparison to that storage form — the
-   * other half of the fix, needed because a SQLite `Field.datetime` holds both an
-   * INTEGER epoch (a `Date` write) and ISO TEXT (a REST/JSON write, a `NOW()`
-   * default) at once, so coercing only the comparand matches one of them and
-   * misses the other (#3912). See `StrategyContext.coerceTemporalFilterColumn`.
+   * other half of #3912, and the half that is now conditional.
+   *
+   * The driver answers with the bare column on a converged SQLite column and on
+   * every non-SQLite dialect, and with a repair expression only while
+   * `needsLegacyDatetimeRepair` holds — see the storage-reality block on
+   * {@link AnalyticsServiceConfig.coerceTemporalFilterValue} above, which is
+   * where that fact is stated once. Coercing the comparand alone is therefore
+   * still not sufficient: on an un-migrated or external table it matches
+   * whichever half the writer produced and empties the other.
+   * See `StrategyContext.coerceTemporalFilterColumn`.
    */
   coerceTemporalFilterColumn?: (objectName: string, fieldName: string, columnSql: string) => string;
   /**
@@ -1176,6 +1222,13 @@ export class AnalyticsService implements IAnalyticsService {
     const compiled = compileDataset(dataset, this.relationshipResolver, {
       getObjectDatasource: this.getObjectDatasource,
       isExternalObject: this.isExternalObject,
+      // [#16737 / #16099] …and the aggregate × field-type compatibility table
+      // (`@objectstack/spec`, #16353) is decidable from the same declared type
+      // the result-column enrichment already reads. Same source, one call
+      // shape, so a host that wired `sourceFieldMeta` gets the compile-time
+      // refusal with no second hook to remember.
+      declaredFieldType: (object: string, field: string) =>
+        this.sourceFieldMeta?.(object, field)?.type,
     });
     this.cubeRegistry.register(compiled.cube);
     this.datasetRegistry.set(dataset.name, compiled);

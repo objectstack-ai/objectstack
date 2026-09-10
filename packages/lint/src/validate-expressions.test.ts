@@ -3896,10 +3896,32 @@ describe('structural condition shape (#15662)', () => {
   it('refuses an object that is neither text nor an expression', () => {
     const issues = condIssues({ decisionCondition: { source: 1 } }, "node 'branch'");
     expect(issues).toHaveLength(1);
-    expect(issues[0].message).toContain('neither a string `source` nor an `ast`');
+    expect(issues[0].message).toContain('Found an object carrying no string `source`');
     // A non-string `source` is what is being refused, so it is never the
     // attribution.
     expect(issues[0].source).toBe('');
+  });
+
+  it('refuses an `ast`-only envelope on a node condition and on an edge — the #15792 admission, revisited by #15807', () => {
+    // Measured on #15430: the evaluator reads `source` and never `ast`, so this
+    // envelope answered a silent `false`. On an edge the spec schema refuses it
+    // one tier earlier under `os validate` (`ObjectStackDefinitionSchema`); on
+    // this raw-input path, and on `config.condition` everywhere, the structural
+    // refusal is the gate.
+    const astOnly = { dialect: 'cel', ast: { kind: 'const', value: true } };
+    for (const [opts, site] of [
+      [{ decisionCondition: astOnly }, "node 'branch'"],
+      [{ startCondition: astOnly }, "node 'start'"],
+      [{ edgeCondition: astOnly }, "edge 'e1'"],
+    ] as const) {
+      const issues = condIssues(opts, site);
+      expect(issues, site).toHaveLength(1);
+      expect(issues[0].severity).toBe('error');
+      expect(issues[0].message.startsWith(STRUCTURAL_CONDITION_SHAPE_REFUSAL)).toBe(true);
+      expect(issues[0].message).toContain('Found an object carrying an `ast` but no string `source`');
+    }
+    // CONTROL — an `ast` beside a string `source` is the envelope the engine runs.
+    expect(condIssues({ edgeCondition: { dialect: 'cel', source: 'record.rating >= 4', ast: { kind: 'const' } } }, "edge 'e1'")).toHaveLength(0);
   });
 
   it('refuses ONCE — the value-reading passes do not re-report it as an empty condition', () => {

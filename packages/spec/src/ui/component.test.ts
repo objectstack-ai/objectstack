@@ -1901,10 +1901,11 @@ describe("element:record_picker `filter` — one filter orthography platform-wid
     // Asserted over the WHOLE map by shape rather than over the entries named
     // above, so a future entry declaring `FilterConditionSchema` at `filter`
     // (which refuses an array outright, `invalid_type`) is caught here by
-    // name. Doors that declare `filter` as `z.unknown()` (the `object-*`
-    // blocks hand it to the wire verbatim) accept both forms and are not
-    // holdouts of this census; the holdout shape is exactly "declares
-    // `filter`, refuses the array".
+    // name. The holdout shape is exactly "declares `filter`, refuses the
+    // array". A door declaring `z.unknown()` accepted both forms and was never
+    // a holdout of THIS census by construction — which is why the four
+    // `object-*` doors needed the complementary pin below (#15449): "every
+    // `filter` door refuses the record".
     type Door = { shape?: Record<string, unknown>; safeParse: (v: unknown) => ParseResult };
     const doors = (Object.entries(ComponentPropsMap) as Array<[string, unknown]>)
       .filter(([, schema]) => {
@@ -1920,6 +1921,89 @@ describe("element:record_picker `filter` — one filter orthography platform-wid
       return issuesAt(r, 'filter').length > 0;
     });
     expect(holdouts).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The four `object-*` `filter` doors — the ViewFilterRule ARRAY orthography
+// (ui#6206-B reaching the object-* family: #15449, folded into #15442,
+// decision batch #55, option A: family-wide, one ADR-0087 D3 entry)
+// ---------------------------------------------------------------------------
+describe('the four `object-*` `filter` doors — one filter orthography platform-wide (ui#6206-B, #15449)', () => {
+  const OBJECT_DOORS = ['object-grid', 'object-metric', 'object-kanban', 'object-calendar'] as const;
+  const RULES = [{ field: 'status', operator: 'not_equals', value: 'done' }];
+  const RECORD_FORM = { status: { $ne: 'done' } };
+  /** The showcase's `object-grid` used to author THIS — an ObjectQL AST tuple array. */
+  const TUPLE_ARRAY = [['owner_id', '=', '{current_user_id}']];
+  type ParseResult = { success: boolean; data?: { filter?: unknown }; error?: { issues: Array<{ path: PropertyKey[]; code: string }> } };
+  type Door = { shape?: Record<string, unknown>; safeParse: (v: unknown) => ParseResult };
+  const door = (type: string) => ComponentPropsMap[type as keyof typeof ComponentPropsMap] as unknown as Door;
+  const issuesAtPath = (r: ParseResult, path: string) =>
+    r.success ? [] : r.error!.issues.filter((i) => i.path.join('.') === path);
+
+  it.each(OBJECT_DOORS)('%s accepts a ViewFilterRule[] filter and echoes it — the acceptance criterion', (type) => {
+    // Measured at the objectui pin `53ded82b` before the declarations moved:
+    // grid lowers the rule array through `toFilterNode`; kanban and calendar
+    // hand it verbatim to `$filter`, where `convertQueryParams` lowers it; the
+    // metric's aggregate path lowers it through `translateFilterArray` and
+    // `parseFilterAST` before `POST /analytics/query` (objectui#7754 — the
+    // door the family was sequenced behind, #15828 / #16626).
+    const r = door(type).safeParse({ objectName: 'showcase_task', filter: RULES });
+    expect(r.success).toBe(true);
+    expect(r.data!.filter).toEqual(RULES);
+  });
+
+  it.each(OBJECT_DOORS)('%s carries the REAL ViewFilterRuleSchema: a legacy operator spelling normalizes on parse', (type) => {
+    // `z.unknown()` echoed `ne` back unchanged; the real rule schema lowers it.
+    const r = door(type).safeParse({ objectName: 'showcase_task', filter: [{ field: 'status', operator: 'ne', value: 'done' }] });
+    expect(r.success).toBe(true);
+    expect((r.data!.filter as Array<{ operator: string }>)[0].operator).toBe('not_equals');
+  });
+
+  it.each(OBJECT_DOORS)('%s REFUSES the MongoDB-style record at the `filter` path — what `z.unknown()` used to take silently', (type) => {
+    // Reverse verification on the issue envelope: located at `filter`, kind
+    // named. Before #15449 this exact value parsed with zero issues on every
+    // one of the four doors (measured, census report on #15442). Migration:
+    // `element-data-source-and-object-block-filter-rule-array`.
+    const r = door(type).safeParse({ objectName: 'showcase_task', filter: RECORD_FORM });
+    expect(r.success).toBe(false);
+    const atFilter = issuesAtPath(r, 'filter');
+    expect(atFilter).toHaveLength(1);
+    expect(atFilter[0].code).toBe('invalid_type');
+    expect(atFilter[0]).toMatchObject({ expected: 'array' });
+    const plain = door(type).safeParse({ objectName: 'showcase_task', filter: { status: 'done' } });
+    expect(issuesAtPath(plain, 'filter').map((i) => i.code)).toEqual(['invalid_type']);
+  });
+
+  it.each(OBJECT_DOORS)('%s REFUSES the ObjectQL AST tuple array at `filter.0` — the other shape `z.unknown()` took', (type) => {
+    // The showcase's work-queue grid authored this until #15442 migrated it to
+    // the rule object; the container is right and the element is the wrong
+    // kind, so the refusal sits one hop deeper than the record's.
+    const r = door(type).safeParse({ objectName: 'showcase_task', filter: TUPLE_ARRAY });
+    expect(r.success).toBe(false);
+    expect(issuesAtPath(r, 'filter')).toEqual([]);
+    expect(issuesAtPath(r, 'filter.0').map((i) => i.code)).toEqual(['invalid_type']);
+  });
+
+  it('every `filter` door in ComponentPropsMap refuses the record — the twin of the #14406 census pin', () => {
+    // The #14406 pin above asks "does any `filter` door refuse the ARRAY?" and
+    // cannot see an accept-anything door by construction. This is the other
+    // half of "one filter orthography": asked over the WHOLE map by shape, so
+    // a future entry declaring `filter` as `z.unknown()` or as the record is
+    // caught here by name. Guarded the same way — the doors pinned above must
+    // be found, or the shape read has gone wrong and the loop is vacuous.
+    const doors = (Object.entries(ComponentPropsMap) as Array<[string, unknown]>)
+      .filter(([, schema]) => {
+        const shape = (schema as Door).shape;
+        return !!shape && 'filter' in shape;
+      })
+      .map(([type]) => type);
+    expect(doors).toEqual(expect.arrayContaining([...OBJECT_DOORS, 'element:record_picker', 'element:number', 'record:related_list']));
+    const recordTakers = doors.filter((type) => {
+      const r = door(type).safeParse({ filter: RECORD_FORM });
+      return issuesAtPath(r, 'filter').length === 0;
+    });
+    expect(recordTakers).toEqual([]);
   });
 });
 
@@ -2569,12 +2653,16 @@ describe('#7751 — object-* block props schemas', () => {
   });
 
   it('the corrected #7750 node (my-work.page.ts, post-fix) parses GREEN and retains its filter', () => {
+    // The node as the showcase authors it since #15442 / #15449: the
+    // `ViewFilterRule` array (ui#6206-B). The AST tuple this pin carried
+    // before is refused at `filter.0` now — pinned in the object-* filter
+    // describe below.
     const parsed = ComponentPropsMap['object-grid'].parse({
       objectName: 'showcase_task',
       columns: ['title', 'project', 'status', 'priority', 'due_date'],
-      filter: [['owner_id', '=', '{current_user_id}']],
+      filter: [{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }],
     });
-    expect(parsed.filter).toEqual([['owner_id', '=', '{current_user_id}']]);
+    expect(parsed.filter).toEqual([{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }]);
   });
 
   it("object-grid `data` takes the ViewDataSchema provider object — the ui#6207 convergence (Option A)", () => {
@@ -2649,10 +2737,13 @@ describe('#7751 — object-* block props schemas', () => {
   it('every object-metric node of the showcase corpus parses GREEN (the clean-corpus control)', () => {
     // Copies of all three my-work.page.ts metrics + the command-center shape
     // (variant/format) — the exact nodes the lint must NOT start warning on.
+    // The three filters are the `ViewFilterRule` arrays the showcase authors
+    // since #15442 / #15449 (ui#6206-B); the records they replaced are refused
+    // at `filter` now (pinned in the object-* filter describe above).
     const nodes = [
-      { objectName: 'showcase_task', label: 'Open Tasks', icon: 'list-checks', colorVariant: 'blue', description: 'not done', aggregate: { field: 'id', function: 'count' }, filter: { status: { $ne: 'done' } } },
-      { objectName: 'showcase_task', label: 'In Review', icon: 'eye', colorVariant: 'warning', description: 'awaiting review', aggregate: { field: 'id', function: 'count' }, filter: { status: 'in_review' } },
-      { objectName: 'showcase_project', label: 'At-Risk Projects', icon: 'alert-triangle', colorVariant: 'danger', description: 'health red', aggregate: { field: 'id', function: 'count' }, filter: { health: 'red' } },
+      { objectName: 'showcase_task', label: 'Open Tasks', icon: 'list-checks', colorVariant: 'blue', description: 'not done', aggregate: { field: 'id', function: 'count' }, filter: [{ field: 'status', operator: 'not_equals', value: 'done' }] },
+      { objectName: 'showcase_task', label: 'In Review', icon: 'eye', colorVariant: 'warning', description: 'awaiting review', aggregate: { field: 'id', function: 'count' }, filter: [{ field: 'status', operator: 'equals', value: 'in_review' }] },
+      { objectName: 'showcase_project', label: 'At-Risk Projects', icon: 'alert-triangle', colorVariant: 'danger', description: 'health red', aggregate: { field: 'id', function: 'count' }, filter: [{ field: 'health', operator: 'equals', value: 'red' }] },
       { objectName: 'showcase_task', label: 'Tasks', colorVariant: 'purple', variant: 'bare', aggregate: { field: 'id', function: 'count' }, format: '0,0' },
     ];
     for (const node of nodes) {

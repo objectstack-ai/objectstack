@@ -908,9 +908,16 @@ export class AnalyticsServicePlugin implements Plugin {
     // The raw-SQL strategy binds dashboard relative-date tokens (already expanded
     // to ISO strings) directly, bypassing the driver's CRUD coercion. Delegate to
     // the driver — the single source of truth for the on-disk storage convention —
-    // so a `Field.datetime` ISO comparand becomes epoch ms on SQLite, while
-    // `Field.date` text and native-timestamp (Postgres) columns pass through
-    // unchanged. Resolved at call time so plugin-init order does not matter.
+    // so a `Field.datetime` comparand is canonicalised to the SAME form the write
+    // path stores, while `Field.date` text and native-timestamp (Postgres)
+    // columns pass through unchanged. Resolved at call time so plugin-init order
+    // does not matter.
+    //
+    // ⛔ What that form IS is stated in exactly one place —
+    // `AnalyticsServiceConfig.coerceTemporalFilterValue`'s storage-reality block
+    // in `analytics-service.ts` (#16737). Do not restate it here; this comment
+    // used to say "becomes epoch ms on SQLite", which stopped being true when
+    // #3912 made canonical UTC text the one stored form.
     const coerceTemporalFilterValue = (
       objectName: string,
       fieldName: string,
@@ -929,11 +936,19 @@ export class AnalyticsServicePlugin implements Plugin {
       return value;
     };
 
-    // The column half of the same fix (#3912). A SQLite `Field.datetime` column
-    // holds BOTH storage forms — INTEGER epoch from a `Date` write, ISO TEXT from
-    // a REST/JSON write or a `NOW()` default — so coercing the comparand alone
-    // matched whichever half the writer produced and returned an empty window for
-    // the other. Ask the driver for the column expression that normalises both.
+    // The column half of the same fix (#3912), and the half that is CONDITIONAL.
+    // A SQLite `Field.datetime` column written before the canonical convention
+    // can still hold a mix — INTEGER epoch from a `Date` write next to text from
+    // a REST/JSON write — so coercing the comparand alone matched whichever half
+    // the writer produced and returned an empty window for the other. Ask the
+    // driver for the column expression that normalises both; on a converged
+    // column, and on every dialect with a real temporal type, it answers with the
+    // bare column and the comparison stays indexable.
+    //
+    // ⛔ Same rule as the hook above: the storage reality is stated once, on
+    // `AnalyticsServiceConfig.coerceTemporalFilterValue` (#16737). This comment
+    // used to assert the mixed form as the steady state; it is the transitional
+    // one.
     const coerceTemporalFilterColumn = (
       objectName: string,
       fieldName: string,

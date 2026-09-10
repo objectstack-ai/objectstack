@@ -28,11 +28,24 @@
  *   analytics face answer it identically.
  *
  * ⚠️ The third behaviour, pinned here so a later edit cannot take it away by
- * accident: a SCALAR comparand against a stored ARRAY is untouched. `==`
- * stringifies the stored array (`['a','b']` becomes `"a,b"`), which is a third
+ * accident: a SCALAR comparand against a stored ARRAY was untouched. `==`
+ * stringified the stored array (`['a','b']` becomes `"a,b"`), which is a third
  * bad direction of the same operator — but it is on the VALUE side, and the
- * comparand door judges comparands. It is recorded, not repaired, and the
- * numbers below are the record.
+ * comparand door judges comparands. It was recorded, not repaired, and the
+ * numbers below were the record.
+ *
+ * [#16838] **That third behaviour has since been repaired, and this file's last
+ * block moves with it — deliberately, not by accident.** The pin did its job:
+ * it stated in one place what the VALUE side answered, so the change that moved
+ * it had to come and say so here rather than sliding through as a side effect
+ * of the refusal above. The cell was measured on its own card, on both faces —
+ * the live query path read `['a','b']` as MEMBERSHIP where this face read the
+ * joined string `"a,b"` — and the reference face converged on the live one, so
+ * the numbers below are now the AGREEMENT rather than the record of a
+ * divergence. ⛔ The block is rewritten, never deleted: what it exists to catch
+ * — this refusal reaching the value side by accident — is still live, and the
+ * assertion that the two sides stay distinct is the same assertion whichever
+ * answer the value side gives.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -146,13 +159,38 @@ describe('[#16810] an ARRAY comparand is refused, in the ADR-0112 envelope', () 
   });
 });
 
-describe('[#16810] the value side is NOT the comparand side — recorded, not repaired', () => {
-  it('a scalar comparand against a stored array keeps the answers it had', () => {
-    // `==` stringifies the stored array. All three lines are the behaviour
-    // BEFORE this change as well; they are pinned so the refusal above cannot
-    // silently take the third direction of `==` with it.
-    expect(match({ tags: ['a', 'b'] }, { tags: 'a' })).toBe(false);
-    expect(match({ tags: ['a', 'b'] }, { tags: 'a,b' })).toBe(true); // ⚠️ the coercion, still here
-    expect(match({ tags: ['a'] }, { tags: 'a' })).toBe(true); //       ⚠️ and its single-element form
+describe('[#16810/#16838] the value side is NOT the comparand side — still two cells, both now answered', () => {
+  it('a scalar comparand against a stored array is MEMBERSHIP, and is not refused', () => {
+    // [#16838] The three lines this block pinned as UNCHANGED under #16810,
+    // with the two that #16838 moved and the one it did not:
+    //
+    //   before → after
+    //   `{tags:'a'}`   vs `['a','b']`  false → true   the missing membership reading
+    //   `{tags:'a,b'}` vs `['a','b']`  true  → false  the false positive, the sharper half
+    //   `{tags:'a'}`   vs `['a']`      true  → true   the firing control, unmoved
+    //
+    // They are still asserted here, and still for #16810's reason: this file's
+    // refusal is about the COMPARAND, and an edit that let it reach the VALUE
+    // side would turn the first two lines into a throw. Their VALUES track the
+    // value side's own ruling; the shape of the assertion — an answer, not an
+    // exception — is what #16810 pinned and it is unchanged.
+    expect(match({ tags: ['a', 'b'] }, { tags: 'a' })).toBe(true);
+    expect(match({ tags: ['a', 'b'] }, { tags: 'a,b' })).toBe(false);
+    expect(match({ tags: ['a'] }, { tags: 'a' })).toBe(true);
+  });
+
+  it('the ARRAY-comparand refusal did not follow the value side — a stored array is still evaluated', () => {
+    // The invariant this block was created to hold, stated directly rather than
+    // left to be inferred from the three answers above: the door refuses an
+    // array in the COMPARAND position and says nothing about a stored one, so a
+    // scalar comparand against any stored array must ANSWER.
+    for (const stored of [['a', 'b'], ['a'], [] as unknown[], [null, 'b'], [['a']]]) {
+      expect(() => match({ tags: stored }, { tags: 'a' }), `stored ${JSON.stringify(stored)} was refused`)
+        .not.toThrow();
+    }
+    // …while the comparand position still refuses, on the same row.
+    expect(() => match({ tags: ['a', 'b'] }, { tags: ['a', 'b'] })).toThrow(
+      /requires a single comparable value/,
+    );
   });
 });

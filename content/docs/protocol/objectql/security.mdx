@@ -259,7 +259,7 @@ rejecting — the offending key is removed from the payload and the rest of the 
 committed. The write therefore **succeeds** (REST answers `200`), and the read-only column
 simply keeps its stored value.
 
-Four rules decide whether a given value survives:
+Five rules decide whether a given value survives:
 
 | # | Rule | Effect |
 |:--|:---|:---|
@@ -267,10 +267,37 @@ Four rules decide whether a given value survives:
 | 2 | **Only *caller-supplied* keys are candidates** | The engine snapshots the payload's keys at entry (`suppliedKeys`), *before* middleware and `beforeUpdate` hooks run. Only keys in that snapshot can be stripped. |
 | 3 | **Hook / middleware backfill survives** | A key a `beforeUpdate` hook *adds* to `data` is absent from the entry snapshot, so it is not a candidate — this is why the built-in `updated_by` / `updated_at` stamps land even though those columns are `readonly`. |
 | 4 | **`context.preserveAudit` admits a whitelist — on UPDATE only** | An opt-in historical import reinstates the audit/timestamp family and author-declared business `readonly` fields; platform-managed `system` columns (tenancy, generated) stay stripped. This exemption exists on the **UPDATE** path and nowhere else — see below. |
+| 5 | **Hooks are shown the persist image, not the submission** (#16344) | On UPDATE, a caller-supplied value for a `readonly` field is hidden from `ctx.input.data` *before* `beforeUpdate` is dispatched, so a hook cannot derive a persisted column from a value the row will never hold. What the caller actually sent is on **`ctx.submitted`** — diagnostics only, never the persist image. |
 
-Rule 2 is scoped to keys, not values: a key the caller sent stays a strip candidate even if
-a hook later overwrites its value. So a `beforeUpdate` hook can *backfill* a read-only
-field, but cannot *rescue* one the caller supplied.
+Rule 2 selects the *candidates*; rules 3 and 5 decide what a hook can do about one. A key
+the caller never sent is not a candidate at all, which is why the built-in `updated_by` /
+`updated_at` stamps land. A key the caller **did** send stays a candidate — but a hook that
+**assigns** it owns the value standing on it and the strip keeps that write (#5591 /
+#14088: authorship is *recorded* while the hook writes happen, not inferred from value
+equality afterwards). So a `beforeUpdate` hook can both *backfill* a read-only field and
+*overwrite* one the caller supplied; what it can no longer do is *rescue the caller's own
+value*, because since #16344 that value is not on `ctx.input.data` for it to echo back.
+
+<Callout type="warn" title="`beforeUpdate` no longer sees the caller's read-only values (#16344)">
+This is a **breaking** change to what a hook reads, not to what is stored: the accept /
+refuse set is unchanged, `onFieldsDropped` reports the same fields under the same
+`readonly` reason, the WARN says the same sentence, and `strictReadonlyWrites` refuses the
+same writes. What moved is the hook's view.
+
+- A handler **deriving** a column from a read-only field reads the stored row on
+  `ctx.previous`, or treats the key's absence as "unchanged" — which is what absence
+  always meant for a field the caller never sent.
+- A handler **reporting on what the caller sent** (a guard naming an offending key) reads
+  `ctx.submitted`.
+- A self-assignment (`data.x = data.x`) on such a field is now a **no-op** — the stored
+  value stands, and the write is stripped and reported exactly as an un-hooked one is.
+- `ctx.submitted` is **not** marshalled onto the sandboxed `body` face. A `body` deriving
+  from a read-only column reads `ctx.previous`, the stored row, which is the correct
+  source either way.
+
+`beforeInsert` is untouched (#14147), and `readonlyWhen` locks are deliberately still
+hook-writable (#9107).
+</Callout>
 
 <Callout type="warn">
 **`preserveAudit` is an UPDATE-path exemption. It does not apply on INSERT (#6640).**

@@ -2,6 +2,10 @@
 
 import type { RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+// The contract's own list of kernel-resolved context keys an app may never
+// supply. Consumed — not redeclared — so this merge and `stageRlsMembership`'s
+// resolver screen can never disagree about which keys are reserved.
+import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
 // [ADR-0056 D4 / ADR-0058 D1] `isSupportedRlsExpression` and `sqlPredicateToCel`
 // used to be DEFINED in this file. #4983 hoisted them into `@objectstack/formula`
 // — verbatim, behaviour-preserving — because `@objectstack/lint` must ask the
@@ -61,6 +65,29 @@ interface RLSUserContext {
    * and are merged in under their own keys (see {@link RLSCompiler.compileFilter}).
    */
   org_user_ids?: string[];
+  /**
+   * [ADR-0105 D2] Every organization the caller holds a valid membership in —
+   * the `group` posture's union org scope. RLS expressions reference it as
+   * `<org column> IN (current_user.accessible_org_ids)`, whether that column is
+   * `organization_id` or an app's own (`employer_org`, say).
+   *
+   * Sourced from `ExecutionContext.accessible_org_ids`, which the runtime
+   * already computes for the Layer 0 tenancy wall. Like {@link org_user_ids}
+   * this set is CORE-resolved and PRE-resolved — pre-resolved precisely so the
+   * compiler needs no subquery support — and for the same reason it is
+   * reserved: `RESERVED_RLS_MEMBERSHIP_KEYS` refuses it from an app's
+   * `rlsMembership` bag, because a wall an app could redefine would not be a
+   * wall.
+   *
+   * ⚠️ Reserving a key obliges someone to FILL it. Until #16518 nobody did:
+   * `packages/spec` declared the key's SHAPE (`accessible_org_ids?: string[]`)
+   * and named core as its resolver, an app was refused from supplying it, and
+   * this interface did not carry it — so every predicate naming it dropped out
+   * and `RLS_DENY_FILTER` returned zero rows with no error raised. An empty
+   * list is indistinguishable from "this user really has no data", which is how
+   * that shape survived three green static gates.
+   */
+  accessible_org_ids?: string[];
   /**
    * The caller's unique, auth-enforced email. RLS expressions reference it as
    * `current_user.email` for human-readable, *seedable* owner scoping
@@ -428,6 +455,13 @@ export class RLSCompiler {
       organization_id: executionContext?.tenantId,
       positions: executionContext?.positions,
       org_user_ids: (executionContext as any)?.org_user_ids,
+      // [ADR-0105 D2 / #16518] The caller's union org scope, copied from the
+      // execution context exactly as `org_user_ids` is. Both are core-resolved
+      // membership sets the runtime pre-resolves so this compiler never has to
+      // issue a subquery; the ONLY reason this line was missing is that nobody
+      // wrote it, and its absence made every predicate naming the key fail
+      // closed to zero rows in silence.
+      accessible_org_ids: (executionContext as any)?.accessible_org_ids,
       // Unique identifier — safe for ownership predicates (see RLSUserContext).
       email: (executionContext as any)?.email,
     };
@@ -437,10 +471,43 @@ export class RLSCompiler {
     // into `ExecutionContext.rlsMembership`. Merge each set under its key
     // so `field IN (current_user.<key>)` resolves without subquery support.
     // Arrays only; a missing/empty set still fails closed downstream.
-    // We never let a membership key clobber the named fields above.
+    //
+    // A RESERVED key is refused BY NAME, never by "was this field already
+    // defined". The two tests are not the same test, and the difference is
+    // the whole guarantee: `userCtx[key] === undefined` asks whether the
+    // KERNEL happened to resolve a value on THIS request, so on any request
+    // where it did not — an anonymous caller, a principal with no active
+    // organization, a deployment that resolves no `org_user_ids` — the bag
+    // won the name and supplied the authorization vocabulary itself. The
+    // direction is WIDENING: with the key unresolved the predicate would
+    // have joined `deniedBy` and returned {@link RLS_DENY_FILTER} (zero
+    // rows), so a reserved-key entry converted a denial into a satisfiable
+    // filter over attacker-chosen values.
+    //
+    // `RESERVED_RLS_MEMBERSHIP_KEYS` is the contract's own list of "context
+    // keys a membership resolver may never supply … they are resolved by the
+    // kernel and carry authorization meaning an app must not be able to
+    // redefine" (`@objectstack/spec/contracts`). `stageRlsMembership`
+    // screens a RESOLVER's answer against it, but that screen covers only
+    // one producer and only when it runs: it returns at its first line when
+    // no `rls-membership-resolver` is registered, which is every deployment
+    // that has not opted into the ADR-0105 D11 seam, and it never screens
+    // the bag it SEEDS from an already-present `context.rlsMembership` at
+    // all. This merge is the choke point both faces pass through — the read
+    // layer compiles `using` here and the ADR-0058 D4 write gate compiles
+    // `check` here — so the refusal belongs here, where it holds for every
+    // producer including ones outside this repo.
+    //
+    // No new drop reason: a reserved key that is not merged leaves its
+    // variable unresolved, so the predicate takes the existing
+    // unresolved-variable path, joins `deniedBy`, warns with the vocabulary
+    // that already exists and fails CLOSED. Refusing is silent here on
+    // purpose — the observable event is the policy drop, which is already
+    // reported one loop below.
     const membership = (executionContext as any)?.rlsMembership;
     if (membership && typeof membership === 'object') {
       for (const [key, value] of Object.entries(membership)) {
+        if (RESERVED_RLS_MEMBERSHIP_KEYS.includes(key)) continue;
         if (Array.isArray(value) && userCtx[key] === undefined) {
           userCtx[key] = value;
         }

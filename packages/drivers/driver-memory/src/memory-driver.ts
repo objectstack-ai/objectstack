@@ -49,6 +49,7 @@ import {
 // module docblock.
 import {
   assertNoUniqueViolation,
+  computeAndRecordTenantField,
   uniqueConstraintsFromDeclaredIndexes,
   uniqueConstraintsFromFields,
   type MemoryUniqueEnforcement,
@@ -404,6 +405,27 @@ export class InMemoryDriver implements IDataDriver {
    * the data it happens to hold.
    */
   private uniqueConstraints: Map<string, MemoryUniqueEnforcement[]> = new Map();
+
+  /**
+   * [#16729] Objects whose schema EXPLICITLY declared `tenancy.enabled: false`,
+   * this driver's counterpart of `SqlDriver.tenantOptOutByTable` and the record
+   * {@link computeAndRecordTenantField} maintains.
+   *
+   * Sticky across re-registrations on purpose: a later `syncSchema` that omits
+   * the `tenancy` block must NOT resurrect org-scoping of the uniqueness key
+   * via the implicit `organization_id` heuristic. Without it a platform-global
+   * object's UNIQUE partition silently moved from one row per install to one
+   * row per organization, and the duplicate its declaration refuses LANDED.
+   *
+   * Unlike {@link uniqueConstraints} it is deliberately NOT cleared by
+   * `dropTable`. That map is cleared because a constraint outliving its table
+   * would be ENFORCED over a table nobody declared; this record enforces
+   * nothing on its own — it only decides which partition the NEXT declaration
+   * resolves to, and the last authoritative word on this object was still
+   * "platform-global". Dropping a table is not a schema declaring itself
+   * tenant-scoped, and only such a declaration clears the record.
+   */
+  private tenantOptOutByObject: Set<string> = new Set();
   private transactions: Map<string, MemoryTransaction> = new Map();
   private persistenceAdapter: PersistenceAdapterInterface | null = null;
 
@@ -1978,9 +2000,18 @@ export class InMemoryDriver implements IDataDriver {
     // an already-duplicated pair is reported by the first write that touches
     // it — the same posture `driver-sql` takes when a unique index cannot be
     // built over dirty data (it announces, it does not delete rows).
+    // [#16729] Resolve the tenant column through the STICKY record rather than
+    // from this call's schema alone. `syncSchema` is idempotent and is called
+    // again with whatever schema the caller happens to hold; a call carrying no
+    // `tenancy` block would otherwise fall through to the implicit
+    // `organization_id` heuristic and re-scope an object that declared itself
+    // platform-global. Both surfaces are handed the SAME resolved column, so
+    // the field-level and declared-index keys of one object cannot disagree
+    // about which partition it lives in.
+    const tenantField = computeAndRecordTenantField(this.tenantOptOutByObject, object, schema);
     this.uniqueConstraints.set(object, [
-      ...uniqueConstraintsFromFields(schema),
-      ...uniqueConstraintsFromDeclaredIndexes(schema),
+      ...uniqueConstraintsFromFields(schema, tenantField),
+      ...uniqueConstraintsFromDeclaredIndexes(schema, tenantField),
     ]);
     if (kinds.size > 0) {
       const table = this.db[object];

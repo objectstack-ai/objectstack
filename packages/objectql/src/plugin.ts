@@ -141,7 +141,7 @@ export interface ObjectQLPluginOptions {
    *
    * Same lesson as `authoringChannel` right above: the gate used to be deduced
    * from `environmentId === undefined`, which is a row-scoping key and not a
-   * topology signal — the standalone stack stamps `'proj_local'`, so the three
+   * topology signal — the standalone stack stamps `'env_local'`, so the three
    * migrations never armed on a self-hosted boot at all. Forwarded verbatim to
    * `assembleMetadataProtocol`; see
    * `AssembleMetadataProtocolOptions.runPlatformMigrations` for the two facts

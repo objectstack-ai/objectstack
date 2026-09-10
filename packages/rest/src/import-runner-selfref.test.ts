@@ -42,8 +42,10 @@ function makeProtocol(seed: Array<Record<string, any>> = []) {
       return rec;
     }),
   }));
-  const findData = vi.fn(async (args: { query?: { $filter?: Record<string, any> } }) => {
-    const filter = args.query?.$filter ?? {};
+  // [#16638] Reads the CANONICAL `where` the runner sends. ⛔ No `?? {}`: an
+  // absent filter must throw here, never degrade into a match-everything probe.
+  const findData = vi.fn(async (args: { query: { where: Record<string, any> } }) => {
+    const filter = args.query.where;
     return store.filter((row) => Object.entries(filter).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return row[k] === v; }));
   });
   const p: ImportProtocolLike = { findData, createData: vi.fn(), updateData: vi.fn(), createManyData };

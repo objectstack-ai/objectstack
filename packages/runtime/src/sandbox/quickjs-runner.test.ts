@@ -153,11 +153,27 @@ describe('QuickJSScriptRunner — L2 hook script', () => {
   // without also installing it.
 
   it('the VM ctx.crypto exposes exactly randomUUID, under ANY grant (#4391)', async () => {
-    // The EXECUTABLE pin, and the load-bearing one. `@objectstack/runtime` has
-    // no `typecheck` script (it sits in the DEBT table of
-    // scripts/check-type-check-coverage.mjs), so a type-level assertion here
-    // would never be compiled — a dead pin reads as assurance and gives none.
-    // This enumerates what `installCtx` actually put on the seam instead.
+    // The EXECUTABLE pin, and the load-bearing one. It enumerates what
+    // `installCtx` actually put on the seam, and it has to: the defect was a
+    // member DECLARED on the host seam and never installed, so a type-level
+    // assertion reads the declaration — the very artefact that lied — and
+    // would have passed green on the broken tree. Only running the sandbox
+    // observes what the VM really got. That reason outlives any package's
+    // script list.
+    //
+    // ⚠️ This used to justify itself the other way round — that
+    // `@objectstack/runtime` "has no `typecheck` script (it sits in the DEBT
+    // table of scripts/check-type-check-coverage.mjs)", so a type-level
+    // assertion here "would never be compiled". False on this tree in BOTH
+    // halves: the package declares `typecheck`
+    // (`tsc --noEmit && pnpm check:test-typecheck`) and holds no DEBT entry,
+    // and #14504's `tsconfig.test.json` — which that script NAMES via
+    // `check:test-typecheck --project` — puts THIS file in its program
+    // (measured with `tsc --listFiles`). The build config still excludes
+    // `**/*.test.ts`, which is where the old sentence came from; it stopped
+    // being the whole story when the test layer got its own program. A
+    // directive here would be LIVE, so the pin below is executable by
+    // ARGUMENT, not for want of a compiler.
     //
     // It is deliberately exhaustive rather than `hash`-specific: the defect was
     // a member advertised ahead of its implementation, so ANY new member must
