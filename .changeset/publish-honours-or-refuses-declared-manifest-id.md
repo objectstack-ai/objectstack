@@ -1,5 +1,5 @@
 ---
-'@objectstack/cli': patch
+'@objectstack/cli': minor
 ---
 
 `os package publish` no longer publishes under a manifest id the author did not write. A `manifest.id` the artifact declares is now used or refused — never silently swapped for a derived one.
