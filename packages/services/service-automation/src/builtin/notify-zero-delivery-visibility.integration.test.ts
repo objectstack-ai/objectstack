@@ -230,8 +230,24 @@ function inProcessEngine(): IDataEngine {
         tables.set(object, fresh);
         return fresh;
     };
-    const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean =>
-        Object.entries(where ?? {}).every(([k, v]) => row[k] === v);
+    const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean => {
+        const clauses = Object.entries(where ?? {});
+        // This store answers SCALAR EQUALITY and nothing else. A `$or` / `$and`
+        // read as a field name is the silently-wrong shape: no row carries a
+        // column called `$or`, so the clause quietly drops everything and this
+        // arm reports "nobody was reached" for a reason that is not the one
+        // under test — the exact failure this whole file exists to make
+        // visible. Refuse loudly instead (`check:where-matcher`).
+        for (const [k] of clauses) {
+            if (k.startsWith('$')) {
+                throw new Error(
+                    `in-process engine double: WHERE combinator '${k}' is not implemented — `
+                        + 'this store answers scalar equality only.',
+                );
+            }
+        }
+        return clauses.every(([k, v]) => row[k] === v);
+    };
 
     return {
         async insert(object: string, row: Record<string, unknown>) {
@@ -241,7 +257,10 @@ function inProcessEngine(): IDataEngine {
         },
         async find(object: string, query?: { where?: Record<string, unknown>; limit?: number }) {
             const hits = rowsOf(object).filter((r) => matches(r, query?.where));
-            return query?.limit ? hits.slice(0, query.limit) : hits;
+            // The caller's bound by PRESENCE, applied AFTER the filter. A
+            // truthiness test hands back EVERY row on `limit: 0` — the one call
+            // that asked for none (`check:objectql-double-limit`).
+            return typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
         },
         async findOne(object: string, query?: { where?: Record<string, unknown> }) {
             // The #4419 dispatch, imported rather than approximated: a `findOne`
