@@ -661,11 +661,23 @@ export const UNBOUNDED_TEXT_FIELD_TYPES: ReadonlySet<string> = new Set([
  * the defect class this module exists to close; this constant is the deletion
  * of that fork, not a new criterion.
  *
- * ⚠️ Seeded from `@objectstack/spec` — the SAME three sets `JSON_COLUMN_TYPES`
- * is seeded from — rather than hand-listed, so a value-shape class added to the
+ * ⚠️ Seeded from `@objectstack/spec` — the SAME sets `JSON_COLUMN_TYPES` is
+ * seeded from — rather than hand-listed, so a value-shape class added to the
  * spec becomes a JSON column and a DETECTABLE one in one edit. Only the two
  * driver-internal aliases are hand-written, because they are not authorable
  * `FieldType`s at all: `object` / `array` name introspected external columns.
+ *
+ * ⚠️ The FILE family is NOT here, and its absence is not a narrowing of the
+ * #15771 population. Since the ADR-0104 addendum a single-value media field is
+ * a json column on a deployment that has not moved its columns and a `varchar`
+ * on one that has, so it is not a constant on either side of the cycle. It is
+ * asked as `fileColumnsMoved` — a per-CALL input to {@link diffManagedTable},
+ * supplied by `SqlDriver.detectTableDrift` from the driver's own arm — and
+ * OMITTING it keeps this module's pre-addendum verdicts exactly (see the
+ * parameter's own note). ⛔ Re-adding the family to this set would report the
+ * RULED end-state column as `type_mismatch` / `severity: 'error'` with a remedy
+ * that converts it back to json, i.e. tell every deployment that ran the
+ * migration to undo it.
  *
  * ⚠️ A second constant rather than an import, for the reason
  * {@link UNBOUNDED_TEXT_FIELD_TYPES} gives in full — `sql-driver.ts` imports
@@ -679,7 +691,7 @@ export const UNBOUNDED_TEXT_FIELD_TYPES: ReadonlySet<string> = new Set([
  * and {@link MULTI_VALUE_COLUMN_REMEDY_COMMAND} make.
  */
 export const JSON_COLUMN_FIELD_TYPES: ReadonlySet<string> = new Set<string>([
-  ...STRUCTURED_JSON_TYPES, ...FILE_REFERENCE_TYPES, ...MULTI_OPTION_TYPES,
+  ...STRUCTURED_JSON_TYPES, ...MULTI_OPTION_TYPES,
   'object', 'array',
 ]);
 
@@ -825,8 +837,23 @@ export function diffManagedTable(args: {
    * this exported function changes shape under it.
    */
   varcharColumnChars?: (field: FieldDef, keyed?: { unique: boolean }) => number | null;
+  /**
+   * Has this deployment completed the ADR-0104 column move for the file family
+   * (`SqlDriverConfig.fileColumnsMoved`, resolved from
+   * `sys_migration.columns_moved_at`)? `SqlDriver.detectTableDrift` supplies
+   * its own arm on every real call.
+   *
+   * OMITTED — the default — means NOT moved, which reproduces this module's
+   * pre-addendum verdicts for the family byte for byte: the same intentionally
+   * additive posture {@link varcharColumnChars} above takes, and the same
+   * direction the driver's own arm fails toward. A caller that has not been
+   * threaded the new input therefore keeps reporting a `varchar` media column
+   * as the #15771 corruption it still is on an unmoved deployment.
+   */
+  fileColumnsMoved?: boolean;
 }): ManagedDriftEntry[] {
   const { table, fields, columns, dialect, keyedColumns, varcharColumnChars } = args;
+  const fileColumnsMoved = args.fileColumnsMoved === true;
   const out: ManagedDriftEntry[] = [];
 
   const columnsByName = new Map(columns.map((c) => [c.name, c]));
@@ -1037,7 +1064,14 @@ export function diffManagedTable(args: {
     // scalar rows. That refusal is the command's designed branch for a message
     // it cannot read, and it is pinned from both sides.
     const declaredType = field.type || 'string';
-    const declaresJsonColumn = JSON_COLUMN_FIELD_TYPES.has(declaredType) || field.multiple === true;
+    // The FILE family is asked per deployment rather than by set membership —
+    // see {@link JSON_COLUMN_FIELD_TYPES}. `multiple: true` media is a list of
+    // ids and stays a json column on every deployment, which the second
+    // disjunct already covers on its own.
+    const declaresJsonColumn =
+      JSON_COLUMN_FIELD_TYPES.has(declaredType)
+      || field.multiple === true
+      || (!fileColumnsMoved && FILE_REFERENCE_TYPES.has(declaredType));
     // Is the declared VALUE an array? `multiple: true` on any type, plus the
     // inherently-multi option types, whose value is a list with or without the
     // flag (`MULTI_OPTION_TYPES` — the spec's own class). This, and never
