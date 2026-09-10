@@ -434,6 +434,17 @@ describe.each(DRIVERS)('#17123 zero-delivery is distinguishable [driver=%s]', (k
         expect(zeroLine).toContain('acted=0');
         // The zero is MEASURED, so no `unmeasured` token qualifies it away.
         expect(zeroLine).not.toContain('unmeasured=');
+
+        // ⭐ The card's table, pinned VERBATIM rather than described, so the
+        // rows published on the PR are a measurement anyone can re-run and not
+        // a recollection. Before this fix both of these read `selected=0`, and
+        // the first was byte-identical to the quiet-day row below.
+        expect(zeroLine).toBe(
+            '[automation] run flow=nudge run=run_fixed status=completed selected=1 acted=0 skipped=0 failed=0',
+        );
+        expect(deliveringLine).toBe(
+            '[automation] run flow=nudge run=run_fixed status=completed selected=1 acted=0 skipped=0 failed=0 unmeasured=1',
+        );
     });
 
     it('the zero-delivery run stops reading like a run that had nothing to notify about', async () => {
@@ -447,6 +458,10 @@ describe.each(DRIVERS)('#17123 zero-delivery is distinguishable [driver=%s]', (k
 
         expect(triple(quiet)).toBe('selected=0 acted=0 unmeasured=0');
         expect(triple(zero)).not.toBe(triple(quiet));
+        // The third row of the published table, verbatim.
+        expect(formatRunSummaryLine({ ...LINE, flowName: 'quiet_day' }, quiet)).toBe(
+            '[automation] run flow=quiet_day run=run_fixed status=completed selected=0 acted=0 skipped=0 failed=0',
+        );
         expect(insideBrokenSweepFilter(quiet)).toBe(false);
         expect(insideBrokenSweepFilter(zero)).toBe(true);
     });
