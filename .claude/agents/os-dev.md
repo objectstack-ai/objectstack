@@ -65,7 +65,7 @@ model: opus
    - 就地修欠两样:认领申报的文件面同轮增补;PR 正文点名该修复并附证据。
    - 优先扩展一个守卫关掉整个类;任一条不成立 ⇒ 回默认:无 assignee 立单、列出、不碰。
    - 本轮改动令其变假或触碰的已发布缺陷必修;其余立卡并记明已发布面,PR 照常落地。
-4. ⛔ 永不编辑 `content/docs/releases/`、force-push、推 `main`、合并任何东西。
+4. ⛔ 永不编辑 `content/docs/releases/`、推 `main`、合并任何东西;force-push 只按 AGENTS.md §3。
    - 用户可见的改动需要 `.changeset/*.md`。
 5. **Contract-first。** 修复若诱使你在消费端加宽容回退(`??` 别名、宽松解析),缺陷在上游。
    - 去生产者或 spec 修,或返回 `needs_decision`。
