@@ -109,7 +109,11 @@ function makeAggregatingDriver(seen: Seen) {
       for (const agg of aggs) {
         const f = agg?.filter;
         if (f && typeof f === 'object' && Object.keys(f).length > 0) {
-          // Byte-for-byte the class `refusePerAggregationFilter` raises.
+          // The same ENVELOPE `refusePerAggregationFilter` raises — the
+          // `code`/`status` pair, which is what ADR-0112 makes the contract
+          // and what these cases assert. The message text is this file's
+          // own: pinning the driver's prose here would pin a sentence this
+          // package does not own.
           const err = new Error(
             `Per-aggregation \`filter\` on "${agg.alias}" is not supported by this backend (stand-in).`,
           ) as Error & { code?: string; status?: number };
