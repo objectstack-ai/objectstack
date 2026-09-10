@@ -8,6 +8,9 @@ import {
   canonicalApproverType,
   normalizeDecisionOutputs,
   type ApprovalNodeConfig,
+  // [#16433] The canonical run-status vocabulary, imported for its TYPE so the
+  // liveness classification below is checked against it member for member.
+  type ExecutionStatus,
 } from '@objectstack/spec/automation';
 import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
 // [#10101] The SHARED platform-row organization resolver — the cloud#1395
@@ -284,33 +287,147 @@ export const SLA_ACTOR_ID = 'system:sla';
 export const ESCALATION_ENABLED_FLIP_CUTOFF_MS = Date.parse('2026-08-28T00:00:00Z');
 /** Reserved actor id for requests abandoned because their run died (#3456). */
 export const DEAD_RUN_ACTOR_ID = 'system:dead-run';
-/**
- * Run statuses that mean "this run will never resume", so a request still
- * pending on it is orphaned (#3456). A CLOSED set, deliberately: the dead-run
- * sweep treats every other answer — `paused` (a run waiting on its approval,
- * the normal case), `running`, an unknown status, or no answer at all — as
- * alive, so an unrecognised state can never cost someone a live approval.
- *
- * `completed` belongs here with the failure states. The approval node only
- * writes a request row on the path where it also suspends the run, and every
- * in-band transition (decide / recall / send-back / resubmit) finalises the
- * request *before* it resumes the run — so a completed run with a still-pending
- * request means the run was resumed out of band and left the request behind.
- */
-const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set([
-  'completed', 'failed', 'cancelled', 'timed_out',
-]);
+/** How the dead-run sweep must treat one `ExecutionStatus` member. */
+type RunLiveness = 'terminal' | 'live';
 
 /**
- * Request statuses that can leave a ZOMBIE behind (#4469) — the terminal states
- * a decision reaches only by ALSO resuming the owning run.
+ * EVERY `ExecutionStatus` member (`@objectstack/spec`), classified for the
+ * dead-run sweep: `'terminal'` means the run has stopped and will never resume,
+ * so a request still pending on it is orphaned (#3456); `'live'` means it may
+ * still move, and the sweep must leave it strictly alone.
  *
- * `recalled` is deliberately absent: a recall ABANDONS the request on purpose,
- * and {@link ApprovalService.recall} explicitly tolerates a run it cannot
- * resume (the withdrawal and the lock release are the point). Reporting those
- * would bury the real findings under expected ones.
+ * ## Why a total MAP and not a list of the terminal ones (#16433)
+ *
+ * This was a hand-copied FOUR-member subset — `completed`, `failed`,
+ * `cancelled`, `timed_out` — written when `ExecutionStatus` had eight members
+ * and correct on the day it was written. #14945 then appended `refused`
+ * ("Terminal, never resumed"), and this subset did not grow with it: the sweep
+ * `continue`d past a refused run, so a pending approval on it read ALIVE and
+ * was never released. Nothing went red, because a subset that is missing a
+ * member is still a valid subset.
+ *
+ * ⚠️ Note what #14945's author DID do, directly above that member: *"Appended
+ * last so every reader that indexes `.options` keeps its positions."* That is a
+ * real precaution, taken with downstream readers genuinely in mind — but it
+ * protects readers that index the enum BY POSITION. **This reader hand-copied
+ * a subset, which lives by CONTENT, and position-safety does nothing for it.**
+ * ⇒ Enum-growth compatibility reasoning points naturally at order and index;
+ * the copies that rot are the ones keyed on membership, and they rot silently.
+ *
+ * So the repair is not "add `refused`" — that produces a five-member hand-copy
+ * with the identical trap re-armed for the tenth member. It is not "derive the
+ * terminal set from the enum" either: `running` and `paused` are obviously not
+ * terminal, and a wholesale derivation would make every FUTURE member terminal
+ * by default — the same silent default pointing the other way, and pointing at
+ * the worse outcome (releasing approvals out from under live runs).
+ *
+ * What this map is instead: a TOTAL function over the enum, so growth forces a
+ * decision. `satisfies Record<ExecutionStatus, RunLiveness>` is exhaustive in
+ * both directions — a tenth member added to `ExecutionStatus` with no entry
+ * here fails to compile, and an entry for a member the enum dropped fails too.
+ * `run-status-liveness.test.ts` asserts the same totality at RUNTIME against
+ * `ExecutionStatus.options` and drives every member through the real sweep, so
+ * the classification and the behaviour cannot drift apart either.
+ *
+ * ⛔ Terminality is NOT declared machine-readably anywhere today — `refused`'s
+ * terminality lives in a COMMENT beside the enum member, and a comment is not a
+ * gate. The `TERMINAL_RUN_STATUSES` exported by `@objectstack/service-automation`
+ * is a DIFFERENT vocabulary (which terminal states a run may be RECORDED in,
+ * tied to `sys_automation_run.status`' options) that excludes `refused` on
+ * purpose, and that package is only a devDependency here. Hence a local total
+ * map rather than a shared import; see the card for the spec-level proposal.
+ *
+ * `completed` is classified terminal alongside the failure states. The approval
+ * node only writes a request row on the path where it also suspends the run,
+ * and every in-band transition (decide / recall / send-back / resubmit)
+ * finalises the request *before* it resumes the run — so a completed run with a
+ * still-pending request means the run was resumed out of band and left the
+ * request behind.
+ *
+ * `pending` / `running` / `paused` / `retrying` are live. `paused` especially:
+ * that is a run waiting on its own approval, the normal case.
  */
-const STRANDABLE_REQUEST_STATUSES = ['approved', 'rejected', 'returned'] as const;
+export const RUN_STATUS_LIVENESS = {
+  pending:   'live',       // queued, has not started
+  running:   'live',       // executing right now
+  paused:    'live',       // parked at a wait/checkpoint — usually THIS approval
+  retrying:  'live',       // failed and will run again
+  completed: 'terminal',   // finished; a pending request means an out-of-band resume
+  failed:    'terminal',   // terminated with an error
+  cancelled: 'terminal',   // cancelled by hand
+  timed_out: 'terminal',   // exceeded its budget
+  // [#14945 / #16433] The flow reached an `end` node declaring
+  // `outcome: 'refused'` — a successful evaluation that said no. The enum
+  // documents it "Terminal, never resumed"; this is that sentence made
+  // machine-readable for the one reader that has to act on it.
+  refused:   'terminal',
+} as const satisfies Record<ExecutionStatus, RunLiveness>;
+
+/**
+ * Run statuses that mean "this run will never resume" — DERIVED from
+ * {@link RUN_STATUS_LIVENESS}, never re-typed (#16433).
+ *
+ * Still a closed set at the point of use, and deliberately so: the sweep treats
+ * every other answer — a live status, an unknown status, or no answer at all —
+ * as alive, so an unrecognised state can never cost someone a live approval.
+ */
+const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(
+  Object.entries(RUN_STATUS_LIVENESS)
+    .filter(([, liveness]) => liveness === 'terminal')
+    .map(([status]) => status),
+);
+
+/** Whether one {@link ApprovalStatus} can leave a zombie behind (#4469). */
+type RequestStrandability = 'strandable' | 'not-strandable';
+
+/**
+ * EVERY {@link APPROVAL_STATUSES} member, classified for the stranded-request
+ * scan: `'strandable'` are the terminal states a decision reaches only by ALSO
+ * resuming the owning run (#4469), so a row sitting in one with its run still
+ * parked is a zombie.
+ *
+ * ## The same construction as {@link RUN_STATUS_LIVENESS}, for the same reason
+ *
+ * [#16433] This was the second hand-copied subset of a growing enum in this
+ * file, and the card that fixed the first one asked for a reading of it rather
+ * than an assumption. The reading: `APPROVAL_STATUSES` gained `cancelled`
+ * (#13568) AFTER this subset was written, and `cancelled` is correctly outside
+ * it — {@link ApprovalService.cancelForDeletedRecord} does NOT resume
+ * the run, says so in its own `warn` naming the parked run ids, and reporting
+ * those here would bury the real findings under expected ones, exactly the
+ * `recalled` argument. ⇒ the VALUE was right; only the MECHANISM was the
+ * hand-copy, and nothing recorded that `cancelled` had been considered at all,
+ * so the next reader could not tell "weighed and excluded" from "written before
+ * it existed".
+ *
+ * The derived list below is byte-identical to the four-year-old literal
+ * (`['approved', 'rejected', 'returned']`, in that order, which the `$in` at
+ * the call site depends on). What changed is that a SEVENTH approval status now
+ * fails to compile until someone classifies it.
+ *
+ * `recalled` is deliberately not strandable: a recall ABANDONS the request on
+ * purpose, and {@link ApprovalService.recall} explicitly tolerates a run it
+ * cannot resume (the withdrawal and the lock release are the point).
+ * `pending` is not terminal at all.
+ */
+export const REQUEST_STATUS_STRANDABILITY = {
+  pending:   'not-strandable',   // not terminal — still awaiting a decision
+  approved:  'strandable',       // a decision that should have resumed the run
+  rejected:  'strandable',       // idem
+  recalled:  'not-strandable',   // deliberate abandonment; tolerates an unresumable run
+  returned:  'strandable',       // send-back resumes down the `revise` edge
+  cancelled: 'not-strandable',   // [#13568] platform void; never resumes, and says so
+} as const satisfies Record<ApprovalStatus, RequestStrandability>;
+
+/**
+ * The strandable statuses, DERIVED from {@link REQUEST_STATUS_STRANDABILITY}
+ * and never re-typed (#16433). Declaration order follows `APPROVAL_STATUSES`.
+ */
+const STRANDABLE_REQUEST_STATUSES: readonly ApprovalStatus[] = Object.entries(
+  REQUEST_STATUS_STRANDABILITY,
+)
+  .filter(([, strandability]) => strandability === 'strandable')
+  .map(([status]) => status as ApprovalStatus);
 
 /**
  * Where {@link ApprovalService.journalStrandedContinuation} keeps the signal a
