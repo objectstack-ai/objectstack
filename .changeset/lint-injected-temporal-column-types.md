@@ -29,4 +29,13 @@ The engine already refused all three of those at query time (`INVALID_FILTER` / 
 
 **Type change for direct consumers of the seam**: `GraphObject.injected` changed from `ReadonlySet<string>` to `ReadonlyMap<string, GraphField>`. `.has(name)` answers exactly as before; code that iterated the set or spread it into one needs `.keys()`. Shipped as `minor` under the repo's launch-window convention.
 
+## Two more rules inherit it, in the same edit
+
+The type reaches every rule that asks a second question about a resolved leaf, which is the whole reason it was fixed at the seam rather than inside `filter-preset-comparand`:
+
+- **`list-view-field-dotted`** now refuses a dotted list-view filter key whose head is an injected column, on the same axis as an authored one. `created_at.x` reads as the `datetime` scalar it is (nothing beneath it for a path to reach) and `owner_id.name` as the `lookup` it is (it stores an id, not an embedded document). `assertFilterIsMaterializable` and the REST ingress have always answered `400 INVALID_FIELD` for both — the linter was silent only because the type was missing here.
+- **`dataset-include-unknown`** now judges an `include[]` entry naming an injected column instead of bailing on the marker: `include: ['owner_id']` joins (it is the registry's `lookup`), `include: ['created_at']` is refused (a `datetime` derives no join, so every dimension written against that prefix addresses nothing).
+
+`id` falls through the untyped branch of all three rules — the DRIVER provisions the primary key and no definition table describes it, so an unreadable head is what the door sees too, and none of them invents a refusal there.
+
 A relationship HOP through an injected column stays a skip (`unknowable` / `injected-hop`), deliberately: the slice now carries `reference`, and traversing it would newly judge every path through a platform anchor wherever `sys_user` is compiled into the stack — a widening with its own findings to measure.
