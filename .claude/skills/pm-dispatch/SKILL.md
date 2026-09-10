@@ -188,7 +188,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - objectui 构建产物经 `pnpm objectui:refresh` 回流。
 - 多车道仓 `objectstack`、`objectui`:中央分诊是 `domain:*`/type/定级的唯一生产者。
 - 单车道仓 `cloud`、`objectos`、`hotcrm`、`www.objectos.ai`;未来新仓默认此类。
-- 单车道仓 `repo:*` 席自理机械三务,⛔ 不产 `domain:*`;决策卡默认入 objectstack 收件箱。
+- 单车道仓 `repo:*` 席自理机械三务,⛔ 不产 `domain:*`;决策卡入本仓收件箱,不落 objectstack。
 - 机械三务 = 自扫 sweep、自打 `type`、自做 `finding` 首触定级。
 - 跨仓查重/shadow 检查恒归中央,全仓视图 ⛔ 不下放。
 - 新仓登记是一张清单:座位贴、标签、类别归属、门禁盘点。
@@ -207,7 +207,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 判据:正文抽掉 objectstack 还成立 ⇒ 当场转仓(console/UI 缺陷即转 objectui);不成立才是缝卡。
 - transfer 不可用时重建:出处头 + 裸 `#N` 改全名 + 关源单为 moved。
 - 缝卡收窄为真协调卡:留 objectstack 带 `repo:*`,正文点名读者(哪个座位、哪一步)。
-- 维护者收件箱恒为 objectstack;在飞卡 ⛔ 不中途转仓。
+- 决策收件箱按仓:平台在 objectstack / objectui,元数据项目在本仓;在飞卡 ⛔ 不中途转仓。
 - 规则 2:跨仓 feature 永不是一次派发:父单 + 每仓一 sub-issue,spec/后端先行。
 - 下游带 `Blocked-by: <owner/repo>#<n>`;`Blocked-by` 未关闭/未合并的不派发,对 GitHub 现验。
 - 被链接或同父的两单永不同批。
@@ -232,7 +232,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 任何跨座位请求都是工作(要读数、要开卡、要授权):一律立卡进目标车道队列。
 - ⛔ 座位贴敲门或裁决评论永不作跨座位请求的唯一载体;评论是加速器不是记录。
 - 等待方同一笔把自卡翻 `pm:blocked` + `Blocked-by:` 指向请求卡;⛔ 不设新标签新 sweep。
-- 目标仓不可达时按缝卡规则落 objectstack 带 `repo:*` + 具名读者。
+- 目标仓不可达是读数缺口,不是落点:由可达席在目标仓立卡,此前请求记座位贴或协调卡。
 
 ## 域车道
 
