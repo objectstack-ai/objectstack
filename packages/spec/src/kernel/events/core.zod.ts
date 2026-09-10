@@ -70,7 +70,7 @@ export const EventMetadataSchema = lazySchema(() => z.object({
    * @see content/docs/kernel/cluster.mdx §4
    */
   cluster: EventClusterOptionsSchema.optional()
-    .describe('Per-emit cluster routing & delivery options. See cluster-semantics.mdx §4.'),
+    .describe('Per-emit cluster routing & delivery options. See /docs/kernel/cluster §4.'),
 }));
 
 // ==========================================

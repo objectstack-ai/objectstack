@@ -43,7 +43,7 @@ const result = EventSchema.parse(data);
 | **correlationId** | `string` | optional | Correlation ID for event tracing |
 | **causationId** | `string` | optional | ID of the event that caused this event |
 | **priority** | `Enum<'critical' \| 'high' \| 'normal' \| 'low' \| 'background'>` | optional (default: `"normal"`) | Event priority |
-| **cluster** | `{ scope: Enum<'local' \| 'cluster' \| 'tenant'>; deliverySemantics?: Enum<'best-effort' \| 'at-least-once' \| 'exactly-once'>; partitionKey?: string }` | optional | Per-emit cluster routing & delivery options. See cluster-semantics.mdx §4. |
+| **cluster** | `{ scope: Enum<'local' \| 'cluster' \| 'tenant'>; deliverySemantics?: Enum<'best-effort' \| 'at-least-once' \| 'exactly-once'>; partitionKey?: string }` | optional | Per-emit cluster routing & delivery options. See /docs/kernel/cluster §4. |
 
 
 ---
@@ -61,7 +61,7 @@ const result = EventSchema.parse(data);
 | **correlationId** | `string` | optional | Correlation ID for event tracing |
 | **causationId** | `string` | optional | ID of the event that caused this event |
 | **priority** | `Enum<'critical' \| 'high' \| 'normal' \| 'low' \| 'background'>` | optional (default: `"normal"`) | Event priority |
-| **cluster** | `{ scope: Enum<'local' \| 'cluster' \| 'tenant'>; deliverySemantics?: Enum<'best-effort' \| 'at-least-once' \| 'exactly-once'>; partitionKey?: string }` | optional | Per-emit cluster routing & delivery options. See cluster-semantics.mdx §4. |
+| **cluster** | `{ scope: Enum<'local' \| 'cluster' \| 'tenant'>; deliverySemantics?: Enum<'best-effort' \| 'at-least-once' \| 'exactly-once'>; partitionKey?: string }` | optional | Per-emit cluster routing & delivery options. See /docs/kernel/cluster §4. |
 
 ### Nested Shape: `EventMetadata.cluster`
 
