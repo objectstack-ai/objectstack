@@ -304,6 +304,10 @@ import { runImport } from './import-runner.js';
 // [#16581] The public picker's authoring-dialect → parser-grammar lowering.
 import { lowerViewFilterRules } from './view-filter-rule-lowering.js';
 import { prepareImportRequest } from './import-prepare.js';
+// [#17058] The `POST …/analytics/dataset/query` door parse — the half of the
+// analytics family this route never had. See the module header for the
+// measurement that decides its shape.
+import { datasetSelectionRefusal } from './analytics-selection-door.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 import { enrichOpenApiWithEndpoints } from './openapi-endpoints.js';
 import { buildBuiltinPaths } from './openapi-builtin-paths.js';
@@ -10918,6 +10922,29 @@ export class RestServer {
                             code: 'VALIDATION_FAILED',
                             message: 'body.selection.measures must be a non-empty array of measure names.',
                         });
+                    }
+
+                    // [#17058] …and every OTHER member of `selection` had no
+                    // door at all, so a malformed one travelled into
+                    // `dataset-executor` and was answered by whatever the face
+                    // behind it happened to do with it — while the sibling
+                    // routes (`/analytics/query`, `/analytics/sql`) lift the
+                    // identical failure to a 400 at the entry. One family, two
+                    // postures, decided by which door the client knocked on.
+                    //
+                    // The parse is a PROJECTION, never the siblings' schema:
+                    // `selection` is a `DatasetSelection`, which is NOT the
+                    // `AnalyticsQuery` the siblings parse — it carries no
+                    // `cube` and has four members of its own, so the sibling
+                    // schema would 400 every real dashboard widget.
+                    // {@link datasetSelectionRefusal} carries that measurement
+                    // and the reason those four are deliberately left out.
+                    //
+                    // Validation-only: the caller's `selection` is what reaches
+                    // `queryDataset` below, never a parse output.
+                    const selectionRefusal = await datasetSelectionRefusal(selection);
+                    if (selectionRefusal) {
+                        return res.status(selectionRefusal.status).json(selectionRefusal.body);
                     }
 
                     // ADR-0037 P3 — draft data preview: the canvas / preview
