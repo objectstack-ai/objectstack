@@ -704,7 +704,36 @@ export const CEILINGS = new Map([
   // the fourth increment MEASURED zero line-neutral folds among this file's
   // adjacent rule pairs, and re-wrap funding is refused per the 2026-08-17 rule
   // in any case. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 419],
+  // Raised 419 → 422 by the NINTH readings increment, again under the STANDING
+  // one-file exception quoted above rather than a fresh decision card, and again
+  // recorded as a `ruledRaises` record citing it. Spent at ONE line per
+  // deduplicated reading, each written in this file's voice: the label-event
+  // stream `GET /issues/{n}/events` follows the SESSION GATE rather than being
+  // shut fleet-wide — 200 carrying each labeled/unlabeled name and timestamp,
+  // measured two-through-one-403 across three containers (+1); the quietest
+  // member of the shallow-checkout trap family is a WINDOWED `git log --grep`,
+  // which answers 0 results with exit 0 and no warning, so the reading drawn is
+  // "that commit never existed" (+1); and the response to
+  // `check-governed-merges`'s refusal is to deepen from a date BEFORE the
+  // window, never to enumerate past it, because a short list reads as
+  // COMPLIANCE (+1) = +3 exactly.
+  //
+  // ⚠️ The candidate set was larger than what landed, and the cut is the
+  // exception's own dedup condition doing its work rather than an author
+  // trimming: the authenticated 15,000 quota and the round-opening `rate_limit`
+  // read are already here, `/timeline` is already named twice (the
+  // queue-membership discriminant and the red-window row), "the gate forks per
+  // session, ⛔ never inherit another seat's 403" is already here, and the
+  // shallow clone's refusal-with-remedy is already the `check-governed-merges`
+  // row this increment appends to — that row carries the literal
+  // `git fetch --shallow-since=` spelling, so the dispatch's reading that this
+  // file holds ZERO lines on the shallow family was falsified on the tree before
+  // any line was written. Candidates 7 / landed 3 / already present 4 /
+  // refused 0. Nothing was paid in place: the fourth increment MEASURED zero
+  // line-neutral folds among this file's adjacent rule pairs, and re-wrap
+  // funding is refused per the 2026-08-17 rule in any case. Landed count,
+  // headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 422],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -1225,6 +1254,23 @@ export const CROSS_FILE_MOVES = new Map([
             + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
           date: '2026-09-09',
           delta: 17,
+        },
+        {
+          // The NINTH increment, under the same STANDING exception — the same
+          // words again, for the same reason: a record that quotes no ruling is
+          // RED and each record stands alone. The +3 is accounted for line by
+          // line beside this entry's ceiling above, and the exception's own
+          // conditions (per-item verification and the candidate / landed /
+          // already-present / refused counts) are carried by the raising PR's
+          // dedup table and the seat's ACCEPT.
+          ruling:
+            'the standing one-file exception for'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
+            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
+            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
+            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
+          date: '2026-09-10',
+          delta: 3,
         },
       ],
       sources: [
