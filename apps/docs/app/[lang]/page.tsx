@@ -33,7 +33,7 @@ const mono = IBM_Plex_Mono({
 
 const HOME_TITLE = 'Metadata framework for AI-written apps';
 const HOME_DESCRIPTION =
-  'ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata: a complete CRM in under 150k tokens, one context window.';
+  'ObjectStack turns the whole app — data model, UI, workflows, permissions — into typed metadata that fits in a single context window.';
 
 /**
  * The homepage's metadata. Its social card is the shared hero cover,
@@ -140,7 +140,7 @@ const VOCABULARY: { tag: string; title: string; copy: string }[] = [
 const GATES: { title: string; copy: string }[] = [
   { title: 'Typed', copy: 'Strict TypeScript + Zod — shape errors die in the editor, seconds after the agent writes them.' },
   { title: 'Validated', copy: 'os validate rejects metadata that would fail silently at runtime — before it ships.' },
-  { title: 'Reviewed', copy: 'You approve a small readable diff in the Console — not fifty thousand lines of glue.' },
+  { title: 'Reviewed', copy: 'You approve a small readable diff in the Console — not a pile of generated glue.' },
   { title: 'Governed', copy: 'Permissions and audit are enforced by the runtime on every call. Even a wrong app stays inside the fence.' },
 ];
 
@@ -219,8 +219,8 @@ export default function HomePage() {
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg text-fd-muted-foreground text-pretty">
             ObjectStack turns the whole app — data model, UI, workflows, permissions — into
-            typed metadata: a complete CRM in under 150k tokens, one context window. Agents
-            read it whole, reason it whole, refactor it whole.
+            typed metadata that fits in a single context window. Agents read it whole, reason
+            it whole, refactor it whole.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link
@@ -291,20 +291,14 @@ export default function HomePage() {
           </figure>
         </section>
 
-        {/* ── the claim the video makes, in prose ──────────────── */}
+        {/* ── what that metadata is, in prose ──────────────────── */}
         <section className="relative mx-auto w-full max-w-5xl px-6 pt-12 md:pt-14">
-          <div className="grid gap-8 md:grid-cols-2">
-            <p className="text-lg text-fd-muted-foreground text-pretty">
-              The business logic alone — every object, workflow and permission — is under 100k
-              tokens; the UI adds just 50k more.
-            </p>
-            <p className="text-base text-fd-muted-foreground text-pretty">
-              That metadata is your business ontology — an open, versioned definition you own.
-              Strict TypeScript, Zod schemas, and a validation gate catch the agent&apos;s mistakes
-              at authoring time, and the runtime derives the database, REST API, UI, and MCP
-              server — permissions and audit enforced on every call.
-            </p>
-          </div>
+          <p className="text-base text-fd-muted-foreground text-pretty">
+            That metadata is your business ontology — an open, versioned definition you own.
+            Strict TypeScript, Zod schemas, and a validation gate catch the agent&apos;s mistakes
+            at authoring time, and the runtime derives the database, REST API, UI, and MCP
+            server — permissions and audit enforced on every call.
+          </p>
         </section>
 
         {/* ── 01 · the loop ────────────────────────────────────── */}
@@ -439,18 +433,6 @@ export default function HomePage() {
                 </div>
               </div>
             ))}
-          </div>
-          <div
-            className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-fd-muted-foreground"
-            style={{ fontFamily: 'var(--l-mono)' }}
-          >
-            <span>1,600+ typed schemas</span>
-            <span aria-hidden className="text-fd-border">|</span>
-            <span>5 database drivers</span>
-            <span aria-hidden className="text-fd-border">|</span>
-            <span>7 framework adapters</span>
-            <span aria-hidden className="text-fd-border">|</span>
-            <span>MCP built-in</span>
           </div>
           <Link
             href="/docs"
