@@ -13611,13 +13611,27 @@ export class SqlDriver implements IDataDriver {
    * been certified canonical) is a REPAIR concern and deliberately not read
    * here: an uncertified column is still a declared datetime, and gating on
    * certification would make the answer depend on repair state.
+   *
+   * ⚠️ A MULTI-VALUED temporal column is excluded, and the exclusion is load
+   * bearing. `multiple: true` stores a JSON TEXT array ({@link isJsonField}),
+   * where `$contains` is not a substring test at all — it is the MEMBERSHIP
+   * spelling, the one operator #7398 left working on a JSON column after
+   * refusing the equality family there, and downstream code depends on it
+   * (`sql-driver-json-column-operator-refusal.test.ts` pins it on both lowering
+   * families). The numeric limb has the same carve-out already, spelled at the
+   * registry instead: `numericFields` is filled `NUMERIC_SCALAR_TYPES.has(type)
+   * && !field.multiple`. The temporal registries carry no such condition —
+   * `dateFields` / `datetimeFields` / `timeFields` serve the read-presentation
+   * seam, which does apply to a multi-valued column — so the condition is
+   * spelled HERE, where the two questions differ, rather than by narrowing a
+   * registry three other seams read.
    */
   protected isNonTextColumn(table: string | null | undefined, localField: string): boolean {
     if (!table) return false;
     return (
       this.numericFields[table]?.includes(localField) === true ||
       this.booleanFields[table]?.includes(localField) === true ||
-      this.temporalFieldKind(table, localField) !== null
+      (this.temporalFieldKind(table, localField) !== null && !this.isJsonColumn(table, localField))
     );
   }
 

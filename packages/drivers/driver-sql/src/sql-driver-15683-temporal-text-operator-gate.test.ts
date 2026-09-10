@@ -286,6 +286,39 @@ describe('[#15683] the per-dialect construct, compiled', () => {
     expect(d.compileWhere({ on_day: { $contains: '2026' } })).toMatch(/LIKE/);
   });
 
+  /**
+   * The carve-out this gate must NOT swallow. A `multiple: true` temporal field
+   * is stored as a JSON TEXT array, and there `$contains` is the MEMBERSHIP
+   * spelling — the one operator #7398 left working on a JSON column after
+   * refusing the equality family there. Gating it would turn a working
+   * membership filter into "matches nothing", which is the fail-CLOSED shape
+   * #7398's own table calls out. Caught by that suite's live row when the gate
+   * first landed without this condition; pinned here too, at the predicate, so
+   * the two cannot drift apart.
+   */
+  it('a MULTI-VALUED temporal column keeps $contains — it is JSON membership, not a substring test', () => {
+    class MultiProbeDriver extends CompilerProbeDriver {
+      declareMultiTemporal(): this {
+        this.registerExternalObject({
+          name: TEMPORAL_OBJECT,
+          fields: {
+            label: { type: 'string' },
+            on_day: { type: 'date' },
+            milestones: { type: 'datetime', multiple: true },
+          },
+        });
+        return this;
+      }
+    }
+    const d = new MultiProbeDriver(DIALECTS[0][1]).declareMultiTemporal();
+    const membership = d.compileWhere({ milestones: { $contains: '2026-01-05T00:00:00.000Z' } });
+    expect(membership).not.toMatch(/1 = 0/);
+    expect(membership).toMatch(/LIKE|GLOB/);
+    // …while the scalar temporal column beside it is gated as usual, so this is
+    // a carve-out for the JSON storage shape and not a hole in the gate.
+    expect(d.compileWhere({ on_day: { $contains: '2026' } })).toMatch(/1 = 0/);
+  });
+
   it('the NON-temporal comparison operators over the same columns are untouched', () => {
     const d = typed(DIALECTS[0][1]);
     for (const op of ['$eq', '$gte', '$lt', '$between'] as const) {
