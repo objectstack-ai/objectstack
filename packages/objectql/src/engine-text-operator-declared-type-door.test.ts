@@ -71,6 +71,7 @@ import {
   type FilterTextCase,
   type FilterTextRowsCase,
   type TextOperatorDoorCase,
+  type TextOperatorDoorRefusalCase,
   type EngineAggregateOptions,
   type EngineQueryOptions,
 } from '@objectstack/spec/data';
@@ -144,7 +145,8 @@ describe('[#15773] the text-operator declared-type door at the engine collection
 
   // ── the derived case table, driven end to end ────────────────────────────
 
-  const REFUSALS = TEXT_OPERATOR_DOOR_CASES.filter((c) => c.verdict === 'door-refusal' && !isFormulaCase(c));
+  const REFUSALS = TEXT_OPERATOR_DOOR_CASES.filter(
+    (c): c is TextOperatorDoorRefusalCase => c.verdict === 'door-refusal' && !isFormulaCase(c));
   const PASSES = TEXT_OPERATOR_DOOR_CASES.filter((c) => c.verdict === 'passes' && !isFormulaCase(c));
   const DEFERRED = TEXT_OPERATOR_DOOR_CASES.filter((c) => c.verdict === 'deferred' && !isFormulaCase(c));
   const FORMULA = TEXT_OPERATOR_DOOR_CASES.filter(isFormulaCase);
