@@ -232,8 +232,17 @@ export async function resolveDefaultOrgId(engine: any): Promise<string | null> {
  * The stable NAME of this report — the grep token an operator or a support
  * thread keys on, the same way `no_sign_in_account_at_boot` leads its line in
  * `boot-sign-in-reachability.ts`.
+ *
+ * ⛔ Module-private, together with everything below it, and deliberately: the
+ * census has exactly ONE caller and it is in this file, so publishing a probe,
+ * a predicate and a sink type through the package barrel
+ * (`index.ts` re-exports this module wholesale) would widen the public surface
+ * for nobody. The neighbouring `boot-sign-in-reachability.ts` exports its pair
+ * because `auth-plugin.ts` wires it from a hook; this one needs no wiring, so
+ * it publishes nothing. The suite reaches all of it through
+ * {@link createTenancyService}, which is how a consumer reaches it too.
  */
-export const SINGLE_POSTURE_MANY_ORGANIZATIONS = 'single_posture_holds_many_organizations';
+const SINGLE_POSTURE_MANY_ORGANIZATIONS = 'single_posture_holds_many_organizations';
 
 /**
  * The `error` channel this census needs, with the `warn` fallback the
@@ -252,7 +261,7 @@ export const SINGLE_POSTURE_MANY_ORGANIZATIONS = 'single_posture_holds_many_orga
  * declared sink to this one at RUNTIME instead, proving the required member
  * rather than asserting it.
  */
-export interface TenancyBootDiagnosticLogger {
+interface TenancyBootDiagnosticLogger {
   info?: (msg: string, meta?: any) => void;
   /** The GUARANTEED channel — what makes the `error` fallback real, not aspirational. */
   warn: (msg: string, meta?: any) => void;
@@ -270,7 +279,7 @@ export interface TenancyBootDiagnosticLogger {
  * throwing inside a diagnostic — and every host in this repository passes the
  * kernel logger, which carries both `warn` and `error`.
  */
-export function asTenancyBootDiagnosticSink(
+function asTenancyBootDiagnosticSink(
   logger: TenancyServiceDeps['logger'],
 ): TenancyBootDiagnosticLogger | undefined {
   return typeof logger?.warn === 'function' ? (logger as TenancyBootDiagnosticLogger) : undefined;
@@ -284,7 +293,7 @@ export function asTenancyBootDiagnosticSink(
  * question was not answered (no engine, no `count` capability, a failed read),
  * and every consumer here treats it as "make no claim".
  */
-export interface SinglePostureOrganizationCensus {
+interface SinglePostureOrganizationCensus {
   /** The REQUESTED posture — what the deployment DECLARED, which is what the report names. */
   posture: TenancyPosture;
   /** `count(sys_organization)`, or `null` when the question was not answered. */
@@ -301,7 +310,7 @@ export interface SinglePostureOrganizationCensus {
  * every reduced mock embedding — answers `null` and the census stays silent,
  * because this report makes a POSITIVE claim or none at all.
  */
-export async function probeOrganizationCount(engine: any): Promise<number | null> {
+async function probeOrganizationCount(engine: any): Promise<number | null> {
   if (!engine || typeof engine.count !== 'function') return null;
   try {
     const counted = await engine.count('sys_organization', {}, { context: SYSTEM_CTX });
@@ -328,7 +337,7 @@ export async function probeOrganizationCount(engine: any): Promise<number | null
  *   - **`null` count** — the store was not consulted. An absence of measurement
  *     is not evidence of a defect.
  */
-export function resolveSinglePostureManyOrganizationsReport(
+function resolveSinglePostureManyOrganizationsReport(
   census: SinglePostureOrganizationCensus,
 ): string | null {
   if (postureEnforcesWall(census.posture)) return null;
@@ -372,7 +381,7 @@ export function resolveSinglePostureManyOrganizationsReport(
  *
  * Never throws.
  */
-export function reportIfSinglePostureHoldsManyOrganizations(
+function reportIfSinglePostureHoldsManyOrganizations(
   census: SinglePostureOrganizationCensus,
   logger?: TenancyBootDiagnosticLogger,
 ): string | null {

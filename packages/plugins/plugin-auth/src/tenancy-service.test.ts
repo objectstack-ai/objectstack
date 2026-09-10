@@ -1,13 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import {
-  asTenancyBootDiagnosticSink,
-  createTenancyService,
-  resolveDefaultOrgId,
-  resolveSinglePostureManyOrganizationsReport,
-  SINGLE_POSTURE_MANY_ORGANIZATIONS,
-} from './tenancy-service.js';
+import { createTenancyService, resolveDefaultOrgId } from './tenancy-service.js';
 import { backfillMemberships } from './reconcile-membership.js';
 
 function makeEngine(orgs: Array<{ id: string; slug?: string }>) {
@@ -330,6 +324,11 @@ describe('single-posture organization census (#17010)', () => {
 
   const makeSink = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() });
 
+  // Spelled here rather than imported: the census is module-private (it has one
+  // in-file caller), so this literal is the pin — rename the token and this
+  // suite says so, which is the whole point of a grep token an operator keys on.
+  const SINGLE_POSTURE_MANY_ORGANIZATIONS = 'single_posture_holds_many_organizations';
+
   const orgs = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `org_${i + 1}` }));
 
   it('reports at ERROR, naming the posture, the COUNT and both remedies', async () => {
@@ -498,26 +497,21 @@ describe('single-posture organization census (#17010)', () => {
     expect(thrower.error).toHaveBeenCalledTimes(1);
   });
 
-  it('the sink narrowing refuses a logger with no warn channel at all', () => {
-    expect(asTenancyBootDiagnosticSink(undefined)).toBeUndefined();
-    expect(asTenancyBootDiagnosticSink({ info: () => {} })).toBeUndefined();
-    const usable = { warn: () => {} };
-    expect(asTenancyBootDiagnosticSink(usable)).toBe(usable);
-  });
+  it('a sink with no warn channel at all drops the report instead of throwing', async () => {
+    // The declared sink types both members as optional, so a host CAN inject
+    // `{ info }` alone. The narrowing proves `warn` before it claims the sink,
+    // so such a host gets nothing — quietly, from inside a diagnostic.
+    const engine = makeCensusEngine(orgs(3));
+    const infoOnly = { info: vi.fn() };
+    const t = createTenancyService({
+      requested: 'single',
+      probeIsolation: () => false,
+      getEngine: () => engine,
+      logger: infoOnly,
+    });
 
-  it('the predicate itself is silent on every shape but the undeclared one', () => {
-    expect(
-      resolveSinglePostureManyOrganizationsReport({ posture: 'single', organizationCount: null }),
-    ).toBeNull();
-    expect(
-      resolveSinglePostureManyOrganizationsReport({ posture: 'single', organizationCount: 1 }),
-    ).toBeNull();
-    expect(
-      resolveSinglePostureManyOrganizationsReport({ posture: 'isolated', organizationCount: 9 }),
-    ).toBeNull();
-    expect(
-      resolveSinglePostureManyOrganizationsReport({ posture: 'single', organizationCount: 2 }),
-    ).toContain(SINGLE_POSTURE_MANY_ORGANIZATIONS);
+    expect(await t.defaultOrgId()).toBeNull();
+    expect(infoOnly.info).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
