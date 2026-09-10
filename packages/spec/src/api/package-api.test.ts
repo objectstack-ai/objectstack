@@ -18,7 +18,10 @@ import {
   UninstallPackageApiResponseSchema,
   PackageApiErrorCode,
   PackageApiContracts,
+  AssembledInstalledPackageSchema,
+  InstalledPackageAtEitherStageSchema,
 } from './package-api.zod';
+import { InstalledPackageSchema } from '../kernel/package-registry.zod';
 
 // ==========================================
 // Path Parameters
@@ -474,5 +477,115 @@ describe('package-rollback-response retirement (#12038 3A)', () => {
     expect(claimants).toEqual([]);
     // Anti-vacuity: the map still carries its surviving entries.
     expect(entries.length).toBeGreaterThan(0);
+  });
+});
+
+
+// ==========================================
+// Manifest STAGES on the installed-package row (#17431 / #14242 road B)
+// ==========================================
+
+/**
+ * The two stages, as one row each, differing ONLY in `manifest.objects`.
+ *
+ * Everything else is held equal on purpose: what separates them has to be the
+ * stage, so a failure below can only be about the stage.
+ */
+const LIFECYCLE = { status: 'installed', enabled: true } as const;
+const MANIFEST_BASE = {
+  id: 'com.acme.stage', namespace: 'stage', version: '1.0.0', type: 'app', scope: 'project',
+  name: 'Stage Fixture',
+} as const;
+/** AUTHORING: `objects` are GLOB PATTERNS. */
+const GLOB_ROW = { ...LIFECYCLE, manifest: { ...MANIFEST_BASE, objects: ['./src/objects/*.object.yml'] } };
+/** ASSEMBLED: `objects` are object DEFINITIONS — what `registerApp` iterates. */
+const ASSEMBLED_ROW = {
+  ...LIFECYCLE,
+  manifest: { ...MANIFEST_BASE, objects: [{ name: 'stage_lead', fields: { title: { type: 'text' } } }] },
+};
+/** NEITHER stage: one array carrying both spellings — road C's shape. */
+const MIXED_ROW = {
+  ...LIFECYCLE,
+  manifest: {
+    ...MANIFEST_BASE,
+    objects: ['./src/objects/*.object.yml', { name: 'stage_lead', fields: { title: { type: 'text' } } }],
+  },
+};
+
+describe('the two declared manifest stages are DISTINCT, not two names for one shape', () => {
+  it('`InstalledPackageSchema` is the AUTHORING stage: globs parse, definitions are refused', () => {
+    expect(InstalledPackageSchema.safeParse(GLOB_ROW).success).toBe(true);
+
+    const dark = InstalledPackageSchema.safeParse(ASSEMBLED_ROW);
+    expect(dark.success).toBe(false);
+    expect(dark.error!.issues.map((i) => i.path.join('.'))).toEqual(['manifest.objects.0']);
+  });
+
+  it('`AssembledInstalledPackageSchema` is the ASSEMBLED stage: definitions parse, globs are refused', () => {
+    expect(AssembledInstalledPackageSchema.safeParse(ASSEMBLED_ROW).success).toBe(true);
+
+    const dark = AssembledInstalledPackageSchema.safeParse(GLOB_ROW);
+    expect(dark.success).toBe(false);
+    expect(dark.error!.issues.map((i) => i.path.join('.'))).toEqual(['manifest.objects.0']);
+  });
+
+  it('⛔ neither stage was WIDENED to reach the other — each still refuses the other exactly', () => {
+    // The pair above already shows it; this states the proposition #14242 ruled
+    // on so a future widening of either declaration reddens by name here.
+    expect(InstalledPackageSchema.safeParse(ASSEMBLED_ROW).success).toBe(false);
+    expect(AssembledInstalledPackageSchema.safeParse(GLOB_ROW).success).toBe(false);
+  });
+});
+
+describe('`InstalledPackageAtEitherStageSchema` admits both stages and NOTHING else', () => {
+  it('parses the authoring row', () => {
+    expect(InstalledPackageAtEitherStageSchema.safeParse(GLOB_ROW).success).toBe(true);
+  });
+
+  it('parses the assembled row', () => {
+    expect(InstalledPackageAtEitherStageSchema.safeParse(ASSEMBLED_ROW).success).toBe(true);
+  });
+
+  it('⛔ REFUSES a row belonging to neither stage — this is not road C', () => {
+    // Road C would have widened `objects` to `(string | ObjectDef)[]`, which
+    // accepts exactly this. A union over two whole CLOSED stages does not: the
+    // mixed array parses through neither branch.
+    const verdict = InstalledPackageAtEitherStageSchema.safeParse(MIXED_ROW);
+    expect(verdict.success).toBe(false);
+  });
+
+  it('⛔ still refuses an unknown key INSIDE the manifest, on both branches', () => {
+    // `ManifestSchema` is `strictObject` and the assembled body inherits that
+    // close, so the union cannot become a hole either stage does not have.
+    for (const row of [GLOB_ROW, ASSEMBLED_ROW]) {
+      const typo = { ...row, manifest: { ...row.manifest, namesapce: 'stage' } };
+      expect(InstalledPackageAtEitherStageSchema.safeParse(typo).success).toBe(false);
+    }
+  });
+});
+
+describe('the read-API responses are declared at both stages (#17431)', () => {
+  const envelope = (data: unknown) => ({ success: true, data });
+
+  it('`ListInstalledPackagesResponseSchema` parses a list of either stage', () => {
+    for (const row of [GLOB_ROW, ASSEMBLED_ROW]) {
+      const verdict = ListInstalledPackagesResponseSchema.safeParse(
+        envelope({ packages: [row], total: 1, hasMore: false }),
+      );
+      expect(verdict.success).toBe(true);
+    }
+  });
+
+  it('`GetInstalledPackageResponseSchema` parses either stage', () => {
+    for (const row of [GLOB_ROW, ASSEMBLED_ROW]) {
+      expect(GetInstalledPackageResponseSchema.safeParse(envelope(row)).success).toBe(true);
+    }
+  });
+
+  it('both responses still refuse a row that is at NEITHER stage', () => {
+    expect(ListInstalledPackagesResponseSchema.safeParse(
+      envelope({ packages: [MIXED_ROW], total: 1, hasMore: false }),
+    ).success).toBe(false);
+    expect(GetInstalledPackageResponseSchema.safeParse(envelope(MIXED_ROW)).success).toBe(false);
   });
 });
