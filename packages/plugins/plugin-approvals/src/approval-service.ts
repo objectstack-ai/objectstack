@@ -5100,10 +5100,14 @@ export class ApprovalService implements IApprovalService {
    *
    * Deliberately shaped like the engine verb it completes: an in-process
    * operator repair, reachable from a host or a console script, with no REST
-   * route — exactly as `restoreConsumedSuspension` is reached. Both verbs are
+   * route. ⚠️ That last part is where it DIFFERS from
+   * `restoreConsumedSuspension`, which does have a platform-operator door —
+   * `POST /:name/runs/:runId/restore-suspension`, the #13953 services half.
+   * This verb has none: the #15389 ruling of 2026-09-09 refused a REST/CLI
+   * route for it, so a door for it would be a new card. Both verbs are
    * DECLARED on their spec contracts as OPTIONAL members —
    * `IAutomationService.restoreConsumedSuspension` by #16495, and this one on
-   * `IApprovalService` by the #15389 ruling of 2026-09-09 — which declares the
+   * `IApprovalService` by that same ruling — which declares the
    * capability without opening a door: a caller reaching this verb through the
    * contract must probe for presence and refuse fail-closed when it is absent.
    * It authorizes nothing new: the decision it replays

@@ -956,12 +956,14 @@ export interface IApprovalService {
    * its own contract, deliberately does NOT replay the resume signal — the
    * continuation must be re-issued. For an `approval` suspension there was
    * then nobody who could: {@link decide}, {@link recall}, {@link sendBack}
-   * and {@link resubmit} all guard on a `pending` request, and the row is
-   * terminal — written by the very call that stranded the run — while a
-   * generic engine resume is refused at a node declaring
-   * `resumeAuthority: 'service'`. The only verb left was cancel, which
-   * discards the branch's downstream work. This is the issuer that exits that
-   * dead end.
+   * and {@link resubmit} each guard on a LIVE request — `pending` for
+   * {@link decide} and {@link sendBack}, `returned` for {@link resubmit},
+   * and `pending` or the revise window for {@link recall} — and the row is
+   * terminal, none of those: it was written by the very call that stranded
+   * the run. Meanwhile a generic engine resume is refused at a node
+   * declaring `resumeAuthority: 'service'`. The only verb left was cancel,
+   * which discards the branch's downstream work. This is the issuer that
+   * exits that dead end.
    *
    * What it does, exactly, and what it does not:
    *  - it replays the outcome the request ALREADY recorded onto the pause that
