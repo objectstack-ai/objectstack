@@ -54,6 +54,13 @@ import {
   inferExpressionType,
   type FieldRole,
 } from '@objectstack/formula';
+// [#16913] The unknown-key error map every `strictToolInput` shape below is
+// built with. Imported, never re-implemented: #4001 is this repo's ruling on
+// silent key stripping and its explicit instruction is that the parts already
+// exist ("这件事需要的零件**已经全在仓库里**"). This is the published factory
+// the `packages/spec` campaign standardised on — already carried in
+// `api-surface/shared.json`, so reusing it adds nothing to any public surface.
+import { strictUnknownKeyError } from '@objectstack/spec/shared';
 import {
   METADATA_UNAVAILABLE_CODE,
   metadataPartialListingSentence,
@@ -344,6 +351,113 @@ const VALIDATE_SITE_MAP: Record<string, { role: FieldRole; scope: 'record' | 'fl
   template: { role: 'template', scope: 'record' },
 };
 
+// ── Tool arguments: an undeclared key is REFUSED, not stripped (#16913) ──────
+
+/**
+ * The one sentence every tool's refusal ends with — why the key the caller
+ * just sent used to disappear without a word.
+ *
+ * Kept identical across the eleven tools on purpose. Triage's reading of this
+ * card was that one tool holding two postures is evidence there was never a
+ * rule; the answer to that is one posture, stated in one sentence, on every
+ * door — not eleven bespoke ones.
+ */
+const UNKNOWN_ARG_HISTORY =
+  'Until #16913 an undeclared argument was dropped silently and the call still succeeded, '
+  + 'so a mis-guessed parameter name answered a differently filtered or differently ordered '
+  + 'set with no way for the caller to tell.';
+
+/**
+ * Close an MCP tool's argument shape against keys it does not declare.
+ *
+ * ## Why the shape has to become a real schema
+ *
+ * `McpServer.registerTool` takes `inputSchema` as `ZodRawShapeCompat |
+ * AnySchema` (measured against `@modelcontextprotocol/sdk` 1.30.0 — the same
+ * reading `toolInputSchema()` in `mcp-server-runtime.ts` already records). Hand
+ * it a RAW SHAPE, as every tool here did until #16913, and the SDK wraps it with
+ * `objectFromShape()`, whose zod default is `.strip`: `validateToolInput()`
+ * parses the arguments against that wrap and the handler is invoked with a
+ * payload the undeclared keys have already been deleted from. The handler
+ * cannot report what it never received — this is not a handler bug, and no
+ * amount of care inside one can fix it. `run_action`'s confirmation member
+ * carries the same finding from the other side ("Under zod an undeclared key is
+ * DROPPED, not rejected"), and had to be *declared* for exactly this reason.
+ *
+ * Handing `registerTool` a built `.strict()` object instead moves the decision
+ * one frame up, to the only place that can still see the key: the SDK refuses
+ * before dispatch, the bridge is never called, and the client receives a tool
+ * error. Two consequences worth naming because they are the deliverable:
+ *
+ *  - the refusal arrives as a TOOL ERROR (`isError: true`, text content), not
+ *    as an exception across the wire — the SDK's `CallTool` handler converts
+ *    its own `McpError` through `createToolError()`, so this file's standing
+ *    promise ("errors are returned as tool errors, never thrown across the
+ *    wire") survives intact;
+ *  - `tools/list` renders the closed shape as `additionalProperties: false`,
+ *    so an agent reads the narrowing off the schema rather than discovering it
+ *    by being refused. Triage asked for the narrowing to be DECLARED; that is
+ *    where it is declared.
+ *
+ * ## Why refusing, and not tolerating
+ *
+ * The consumer of these tools is an AI agent, and a silently dropped argument
+ * produces a plausible, confident, wrong answer: a dropped `orderBy` answers a
+ * differently ORDERED set ("the top 3 by amount" that is really the first 3 in
+ * seed order), a dropped `where` a WIDER one (all 16 rows reported as the
+ * filtered ones). Both were reported from real spikes against 17.3.0. Nothing
+ * in either payload — status, header or field — distinguishes them from a real
+ * answer, which is the asymmetry #4001 named: **静默失效比硬报错更坏,因为它制造
+ * 虚假的完成**.
+ *
+ * ⛔ The direction is refusal only. Adding `sort` or `filters` as accepted
+ * aliases would be the loosening triage explicitly ruled out — these keys are
+ * *named in the message* so the caller can fix the call, and are never parsed.
+ *
+ * ## Why the message, and not just `.strict()`
+ *
+ * #4001: 「**strict 必须配可修的错误信息,不能只是「大声」。** 光报
+ * "unrecognized key" 只是把静默失效换成了困惑」. Bare zod answers
+ * `Unrecognized key: "sort"`, which tells an agent it was wrong and not what to
+ * write. {@link strictUnknownKeyError} adds both channels the campaign
+ * standardised: an explicit alias table for semantic near-misses, then a
+ * length-relative edit-distance fallback for slips. `sort → orderBy` and
+ * `filters → where` are alias-table entries, not typos — they are the spellings
+ * a caller who knows other query APIs reaches for, the same species as #3746's
+ * `visibleWhen → visible`.
+ *
+ * `knownKeys` is read from `shape` rather than transcribed beside it, which is
+ * what `packages/spec`'s own `strictObject()` does and for the same reason: a
+ * hand-written key array is a second copy of the truth that can drift from the
+ * shape it describes. That helper is internal to `packages/spec` (not exported
+ * from `@objectstack/spec`), so this is the same two lines over the published
+ * factory rather than a second implementation of it.
+ */
+function strictToolInput<T extends z.ZodRawShape>(
+  options: { surface: string; aliases?: Readonly<Record<string, string>> },
+  shape: T,
+) {
+  return z
+    .object(shape, {
+      error: strictUnknownKeyError({
+        surface: options.surface,
+        knownKeys: Object.keys(shape),
+        aliases: options.aliases,
+        history: UNKNOWN_ARG_HISTORY,
+      }),
+    })
+    .strict();
+}
+
+/**
+ * The spellings every object-scoped tool shares, split out because they are the
+ * same guess wherever an object name is taken.
+ */
+const OBJECT_NAME_ALIASES = { object: 'objectName', table: 'objectName' } as const;
+
+/** The spellings every record-scoped tool shares. */
+const RECORD_ID_ALIASES = { id: 'recordId', record_id: 'recordId' } as const;
+
 /**
  * Wire the FULL tool surface a bridge can serve onto one {@link McpServer} —
  * the single composition both transports call (#8034).
@@ -416,7 +530,7 @@ export function registerObjectTools(
       {
         description:
           'List the data objects (tables) available in this app. Returns each object\'s name, label and field count.',
-        inputSchema: {},
+        inputSchema: strictToolInput({ surface: 'this list_objects call' }, {}),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
       // [#6504] This tool MIS-DESCRIBES during a metadata loader outage, which
@@ -472,7 +586,10 @@ export function registerObjectTools(
       {
         description:
           'Get the schema of a data object: its fields (name, type, label, required) and enabled features.',
-        inputSchema: { objectName: z.string().describe('The object/table name, e.g. "task"') },
+        inputSchema: strictToolInput(
+          { surface: 'this describe_object call', aliases: { ...OBJECT_NAME_ALIASES, name: 'objectName' } },
+          { objectName: z.string().describe('The object/table name, e.g. "task"') },
+        ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
       async ({ objectName }) => {
@@ -502,16 +619,28 @@ export function registerObjectTools(
           '(text/boolean fields misused in arithmetic, date-equality pitfalls), plus the fields and stdlib ' +
           'functions in scope so you can self-correct. `site` says where the expression will live: a `formula` ' +
           'field, a `validation`/predicate, or a `flow_condition` (fields are bound bare in flow conditions).',
-        inputSchema: {
-          objectName: z.string().describe('The object/table the expression is authored against, e.g. "task"'),
-          expression: z.string().describe('The CEL expression to validate, e.g. "record.amount / 100"'),
-          site: z
-            .enum(['formula', 'validation', 'flow_condition', 'template'])
-            .optional()
-            .describe(
-              'Where the expression will live. formula/validation bind `record.<field>`; flow_condition binds fields bare. Default: formula.',
-            ),
-        },
+        inputSchema: strictToolInput(
+          {
+            surface: 'this validate_expression call',
+            aliases: {
+              ...OBJECT_NAME_ALIASES,
+              formula: 'expression',
+              expr: 'expression',
+              cel: 'expression',
+              context: 'site',
+            },
+          },
+          {
+            objectName: z.string().describe('The object/table the expression is authored against, e.g. "task"'),
+            expression: z.string().describe('The CEL expression to validate, e.g. "record.amount / 100"'),
+            site: z
+              .enum(['formula', 'validation', 'flow_condition', 'template'])
+              .optional()
+              .describe(
+                'Where the expression will live. formula/validation bind `record.<field>`; flow_condition binds fields bare. Default: formula.',
+              ),
+          },
+        ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
       async ({ objectName, expression, site }) => {
@@ -557,20 +686,48 @@ export function registerObjectTools(
         description:
           'Query records from an object with optional filter, field selection, sorting and pagination. ' +
           'Runs under the caller\'s permissions and row-level security.',
-        inputSchema: {
-          objectName: z.string().describe('The object/table name'),
-          where: z
-            .record(z.string(), z.unknown())
-            .optional()
-            .describe('Filter conditions, e.g. {"status":"open"}'),
-          fields: z.array(z.string()).optional().describe('Field names to return (defaults to all)'),
-          limit: z.number().int().positive().max(maxLimit).optional().describe(`Max rows (≤ ${maxLimit})`),
-          offset: z.number().int().nonnegative().optional().describe('Rows to skip'),
-          orderBy: z
-            .array(z.object({ field: z.string(), order: z.enum(['asc', 'desc']) }))
-            .optional()
-            .describe('Sort order'),
-        },
+        inputSchema: strictToolInput(
+          {
+            surface: 'this query_records call',
+            // The three spellings both #16913 repro reports actually sent, plus
+            // the neighbours of each. None is a typo: they are what a caller who
+            // knows another query API reaches for, which is why edit distance
+            // cannot find them and an explicit table must.
+            aliases: {
+              ...OBJECT_NAME_ALIASES,
+              sort: 'orderBy',
+              sortBy: 'orderBy',
+              order: 'orderBy',
+              order_by: 'orderBy',
+              filters: 'where',
+              filter: 'where',
+              conditions: 'where',
+              criteria: 'where',
+              select: 'fields',
+              columns: 'fields',
+              projection: 'fields',
+              pageSize: 'limit',
+              top: 'limit',
+              take: 'limit',
+              skip: 'offset',
+              start: 'offset',
+            },
+          },
+          {
+            objectName: z.string().describe('The object/table name'),
+            where: z
+              .record(z.string(), z.unknown())
+              .optional()
+              .describe('Filter conditions, e.g. {"status":"open"}'),
+            fields: z.array(z.string()).optional().describe('Field names to return (defaults to all)'),
+            limit: z.number().int().positive().max(maxLimit).optional().describe(`Max rows (≤ ${maxLimit})`),
+            offset: z.number().int().nonnegative().optional().describe('Rows to skip'),
+            orderBy: z
+              .array(z.object({ field: z.string(), order: z.enum(['asc', 'desc']) }))
+              .optional()
+              .describe('Sort order'),
+          },
+        ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
       async ({ objectName, where, fields, limit, offset, orderBy }) => {
@@ -613,7 +770,23 @@ export function registerObjectTools(
             'optionally grouped by fields (dates can be bucketed by day/week/month/quarter/year). ' +
             'Use this instead of paging query_records when a question needs totals or breakdowns. ' +
             'Runs under the caller\'s permissions, row-level security and field-level security.',
-          inputSchema: {
+          inputSchema: strictToolInput(
+            {
+              surface: 'this aggregate_records call',
+              aliases: {
+                ...OBJECT_NAME_ALIASES,
+                filters: 'where',
+                filter: 'where',
+                conditions: 'where',
+                group_by: 'groupBy',
+                metrics: 'aggregations',
+                aggregates: 'aggregations',
+                aggs: 'aggregations',
+                tz: 'timezone',
+                timeZone: 'timezone',
+              },
+            },
+            {
             objectName: z.string().describe('The object/table name'),
             aggregations: z
               .array(
@@ -651,7 +824,8 @@ export function registerObjectTools(
               .string()
               .optional()
               .describe('IANA timezone for date bucketing (defaults to UTC)'),
-          },
+            },
+          ),
           annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
         },
         async ({ objectName, aggregations, groupBy, where, timezone }) => {
@@ -683,10 +857,13 @@ export function registerObjectTools(
       note('get_record'),
       {
         description: 'Fetch a single record by id.',
-        inputSchema: {
-          objectName: z.string().describe('The object/table name'),
-          recordId: z.string().describe('The record id'),
-        },
+        inputSchema: strictToolInput(
+          { surface: 'this get_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
+          {
+            objectName: z.string().describe('The object/table name'),
+            recordId: z.string().describe('The record id'),
+          },
+        ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
       async ({ objectName, recordId }) => {
@@ -708,10 +885,16 @@ export function registerObjectTools(
       note('create_record'),
       {
         description: 'Create a new record. Runs under the caller\'s permissions and validations.',
-        inputSchema: {
-          objectName: z.string().describe('The object/table name'),
-          data: z.record(z.string(), z.unknown()).describe('Field values for the new record'),
-        },
+        inputSchema: strictToolInput(
+          {
+            surface: 'this create_record call',
+            aliases: { ...OBJECT_NAME_ALIASES, record: 'data', values: 'data', fields: 'data' },
+          },
+          {
+            objectName: z.string().describe('The object/table name'),
+            data: z.record(z.string(), z.unknown()).describe('Field values for the new record'),
+          },
+        ),
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       },
       async ({ objectName, data }) => {
@@ -729,11 +912,23 @@ export function registerObjectTools(
       note('update_record'),
       {
         description: 'Update fields on an existing record by id.',
-        inputSchema: {
-          objectName: z.string().describe('The object/table name'),
-          recordId: z.string().describe('The record id'),
-          data: z.record(z.string(), z.unknown()).describe('Field values to change'),
-        },
+        inputSchema: strictToolInput(
+          {
+            surface: 'this update_record call',
+            aliases: {
+              ...OBJECT_NAME_ALIASES,
+              ...RECORD_ID_ALIASES,
+              record: 'data',
+              values: 'data',
+              fields: 'data',
+            },
+          },
+          {
+            objectName: z.string().describe('The object/table name'),
+            recordId: z.string().describe('The record id'),
+            data: z.record(z.string(), z.unknown()).describe('Field values to change'),
+          },
+        ),
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       },
       async ({ objectName, recordId, data }) => {
@@ -751,10 +946,13 @@ export function registerObjectTools(
       note('delete_record'),
       {
         description: 'Delete a record by id. This is destructive.',
-        inputSchema: {
-          objectName: z.string().describe('The object/table name'),
-          recordId: z.string().describe('The record id'),
-        },
+        inputSchema: strictToolInput(
+          { surface: 'this delete_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
+          {
+            objectName: z.string().describe('The object/table name'),
+            recordId: z.string().describe('The record id'),
+          },
+        ),
         annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
       },
       async ({ objectName, recordId }) => {
@@ -815,7 +1013,7 @@ export function registerActionTools(
         'Returns each action\'s name, the object it operates on, a description, whether it needs a record id, ' +
         'whether it is destructive, and its input parameters. Only actions the app author has exposed to AI ' +
         'and that the caller is permitted to run are returned. Use run_action to invoke one.',
-      inputSchema: {},
+      inputSchema: strictToolInput({ surface: 'this list_actions call' }, {}),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async () => {
@@ -841,7 +1039,22 @@ export function registerActionTools(
         'Supply recordId for actions that operate on a specific record, and params for any declared inputs. ' +
         'An action the author gated (list_actions reports requiresConfirmation) is REFUSED unless you also ' +
         'send confirm: true — ask the human first, then retry; nothing runs on a refused call.',
-      inputSchema: {
+      inputSchema: strictToolInput(
+        {
+          surface: 'this run_action call',
+          aliases: {
+            ...OBJECT_NAME_ALIASES,
+            ...RECORD_ID_ALIASES,
+            action: 'actionName',
+            name: 'actionName',
+            action_name: 'actionName',
+            args: 'params',
+            input: 'params',
+            arguments: 'params',
+            parameters: 'params',
+          },
+        },
+        {
         actionName: z.string().describe('The action name from list_actions, e.g. "complete_task"'),
         objectName: z
           .string()
@@ -880,7 +1093,8 @@ export function registerActionTools(
             + 'the human in the loop has approved THIS call; without it a gated action is refused '
             + 'and nothing runs.',
           ),
-      },
+        },
+      ),
       // Actions execute app-defined business logic with side effects (writes,
       // flows, outbound calls), so we mark the tool destructive + open-world:
       // MCP clients should confirm before invoking. Per-action destructiveness
