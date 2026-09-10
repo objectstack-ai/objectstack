@@ -62,6 +62,26 @@ descriptor would make it invisible to the time-relative sweep, which carries
 its cadence in the same slot but binds through a different descriptor. One
 key, one layer, both time triggers.
 
+## Why `ScheduleOrganization…` and not `FlowActingOrganization…`
+
+The key governs both trigger kinds, and `FlowTriggerKind` lists
+`time_relative` and `schedule` as two of its four members — so the name looks
+inaccurate for half its subjects. It is not, and the deciding reading is the
+AUTHORABLE surface rather than the derived kind: `FlowSchema.type` is
+`z.enum(['autolaunched', 'record_change', 'schedule', 'screen', 'api'])` and
+has no `time_relative` member at all. A time-relative sweep is authored as
+`type: 'schedule'` with a `timeRelative` descriptor on its start node — the
+docs say so in as many words ("a `schedule` flow whose `start` node declares
+a `timeRelative` descriptor"), and `TimeRelativeTriggerSchema`'s own opening
+line says the trigger "sweeps an object on a schedule". `FlowTriggerKind`
+splits the two because the ENGINE routes them to different triggers; its
+precedence note distinguishes a sweep from "a plain schedule flow", which is
+a split inside the schedule family, not out of it.
+
+⇒ Every flow this key applies to declares `type: 'schedule'`. The name is
+accurate for both subjects, and a `minor` freezes it, so this is recorded
+rather than left to be re-litigated.
+
 <Callout type="info">
 **Source:** `packages/spec/src/automation/schedule-organization.zod.ts`
 </Callout>

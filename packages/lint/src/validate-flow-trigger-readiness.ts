@@ -129,7 +129,6 @@ import {
   resolveFlowTriggerKind,
   SCHEDULE_ORGANIZATION_KEY,
   resolveScheduleOrganization,
-  findScheduleOrganizationNearMissInConfig,
   describeMissingScheduleOrganization,
 } from '@objectstack/spec/automation';
 import { recordsOf } from './object-graph.js';
@@ -723,7 +722,6 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
       (triggerKind === 'schedule' || triggerKind === 'time_relative') &&
       resolveScheduleOrganization(flow) === undefined
     ) {
-      const nearMiss = findScheduleOrganizationNearMissInConfig(config);
       findings.push({
         // `warning`, and the reason is the shipped corpus rather than the
         // strength of the verdict — see FLOW_SCHEDULE_ORGANIZATION_MISSING's
@@ -732,7 +730,7 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
         rule: FLOW_SCHEDULE_ORGANIZATION_MISSING,
         where: `flow "${flowName}" › start node`,
         path: `flows[${flowIndex}].nodes[${start.index}].config.${SCHEDULE_ORGANIZATION_KEY}`,
-        message: describeMissingScheduleOrganization(flowName, { kind: triggerKind, nearMiss }),
+        message: describeMissingScheduleOrganization(flowName, { kind: triggerKind, config }),
         hint:
           `Add config.${SCHEDULE_ORGANIZATION_KEY}: '<sys_organization.id>' to the start node. The id is minted ` +
           `by the running install, so a flow shipped INSIDE a package cannot carry one — register such a flow ` +

@@ -5,7 +5,6 @@ import {
   SCHEDULE_ORGANIZATION_KEY,
   ScheduleOrganizationSchema,
   describeMissingScheduleOrganization,
-  findScheduleOrganizationNearMissInConfig,
   resolveScheduleOrganization,
 } from './schedule-organization.zod';
 
@@ -91,32 +90,45 @@ describe('resolveScheduleOrganization', () => {
   });
 });
 
-describe('findScheduleOrganizationNearMissInConfig', () => {
+// The near-miss scan is NOT published — it folded into the sentence below, so
+// every case that used to call it directly now goes through the one exported
+// door. The vocabulary is still pinned member by member; what is no longer
+// pinned is a NAME a consumer could import, which is the point of the fold.
+describe('the near-miss scan, through the sentence that owns it', () => {
   it('takes the START NODE CONFIG — the record a trigger actually holds', () => {
-    // ⛔ Not a flow. The only caller is a trigger, and the engine hands a
-    // trigger the start node's `config`, never the flow.
-    expect(findScheduleOrganizationNearMissInConfig({ organizationId: 'org_a' })).toBe('organizationId');
-    expect(findScheduleOrganizationNearMissInConfig(flow({ organizationId: 'org_a' }))).toBeUndefined();
+    // ⛔ Not a flow. The engine hands a trigger the start node's `config`,
+    // never the flow, so a flow-shaped `config` must find nothing.
+    expect(describeMissingScheduleOrganization('f', { config: { organizationId: 'org_a' } })).toContain(
+      '`organizationId`',
+    );
+    expect(describeMissingScheduleOrganization('f', { config: flow({ organizationId: 'org_a' }) })).not.toContain(
+      '`organizationId`',
+    );
   });
 
   it.each(['organizationId', 'organization_id', 'organizationID', 'orgId', 'org_id', 'org', 'tenantId', 'tenant_id', 'tenant'])(
     'recognises `%s`',
     (key) => {
-      expect(findScheduleOrganizationNearMissInConfig({ [key]: 'org_a' })).toBe(key);
+      expect(describeMissingScheduleOrganization('f', { config: { [key]: 'org_a' } })).toContain(`\`${key}\``);
     },
   );
 
   it('ignores a near-miss key present but empty or null', () => {
     // A key the author left blank is not evidence of the mistake the message
     // describes ("you wrote X, which is not this key").
-    expect(findScheduleOrganizationNearMissInConfig({ organizationId: '' })).toBeUndefined();
-    expect(findScheduleOrganizationNearMissInConfig({ organizationId: null })).toBeUndefined();
+    for (const value of ['', null]) {
+      const msg = describeMissingScheduleOrganization('f', { config: { organizationId: value } });
+      expect(msg).not.toContain('`organizationId`');
+      // Non-vacuity: the sentence itself was produced, so the absence above is
+      // "no near-miss clause", not "no message".
+      expect(msg).toContain('`organization`');
+    }
   });
 
-  it('answers undefined for anything that is not a record', () => {
+  it('answers with no near-miss clause for anything that is not a record', () => {
     for (const input of [undefined, null, 42, 'org_a', []]) {
-      expect(() => findScheduleOrganizationNearMissInConfig(input)).not.toThrow();
-      expect(findScheduleOrganizationNearMissInConfig(input)).toBeUndefined();
+      expect(() => describeMissingScheduleOrganization('f', { config: input })).not.toThrow();
+      expect(describeMissingScheduleOrganization('f', { config: input })).not.toContain('which is not this key');
     }
   });
 });
@@ -131,9 +143,12 @@ describe('describeMissingScheduleOrganization', () => {
   });
 
   it('names the near-miss spelling and never a value', () => {
-    const msg = describeMissingScheduleOrganization('nightly_sweep', { nearMiss: 'organizationId' });
+    const msg = describeMissingScheduleOrganization('nightly_sweep', { config: { organizationId: 'org_a' } });
     expect(msg).toContain('`organizationId`');
     expect(msg).toContain('open');
+    // The KEY, never what was written under it — a diagnostic that echoes the
+    // value puts an id into every log line that carries the refusal.
+    expect(msg).not.toContain('org_a');
   });
 
   it('says `time-relative` for the sweep and `scheduled` for the plain cadence', () => {
@@ -145,7 +160,7 @@ describe('describeMissingScheduleOrganization', () => {
   it('⛔ never offers a fallback: no organization is ever chosen for the author', () => {
     // The ruling forbids a silent default and forbids the platform
     // organization. The sentence must ASK for a value, not supply one.
-    const msg = describeMissingScheduleOrganization('nightly_sweep', { nearMiss: 'orgId' });
+    const msg = describeMissingScheduleOrganization('nightly_sweep', { config: { orgId: 'org_a' } });
     expect(msg).toContain('<sys_organization.id>');
     expect(msg).not.toMatch(/defaults? to/i);
     expect(msg).not.toMatch(/platform organization/i);

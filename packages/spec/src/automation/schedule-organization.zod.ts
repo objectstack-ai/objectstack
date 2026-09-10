@@ -59,6 +59,26 @@ import { z } from 'zod';
  * descriptor would make it invisible to the time-relative sweep, which carries
  * its cadence in the same slot but binds through a different descriptor. One
  * key, one layer, both time triggers.
+ *
+ * ## Why `ScheduleOrganization…` and not `FlowActingOrganization…`
+ *
+ * The key governs both trigger kinds, and `FlowTriggerKind` lists
+ * `time_relative` and `schedule` as two of its four members — so the name looks
+ * inaccurate for half its subjects. It is not, and the deciding reading is the
+ * AUTHORABLE surface rather than the derived kind: `FlowSchema.type` is
+ * `z.enum(['autolaunched', 'record_change', 'schedule', 'screen', 'api'])` and
+ * has no `time_relative` member at all. A time-relative sweep is authored as
+ * `type: 'schedule'` with a `timeRelative` descriptor on its start node — the
+ * docs say so in as many words ("a `schedule` flow whose `start` node declares
+ * a `timeRelative` descriptor"), and `TimeRelativeTriggerSchema`'s own opening
+ * line says the trigger "sweeps an object on a schedule". `FlowTriggerKind`
+ * splits the two because the ENGINE routes them to different triggers; its
+ * precedence note distinguishes a sweep from "a plain schedule flow", which is
+ * a split inside the schedule family, not out of it.
+ *
+ * ⇒ Every flow this key applies to declares `type: 'schedule'`. The name is
+ * accurate for both subjects, and a `minor` freezes it, so this is recorded
+ * rather than left to be re-litigated.
  */
 
 /** The start-node `config` key naming a time-triggered flow's acting organization. */
@@ -100,11 +120,13 @@ export type ScheduleOrganization = z.input<typeof ScheduleOrganizationSchema>;
  * all. Naming them in the refusal is the only place the mistake becomes
  * visible, so this list is load-bearing rather than decorative.
  *
- * Module-local on purpose: its only reader is
- * {@link findScheduleOrganizationNearMissInConfig} in this file, and an export
- * whose consumers all live inside its own package does not belong on a
- * published barrel. A caller that needs the vocabulary needs the ANSWER, which
- * that function gives.
+ * Module-local on purpose, and so is the scan that reads it: every caller that
+ * needs the vocabulary needs the SENTENCE, and
+ * {@link describeMissingScheduleOrganization} is the one that writes it. Both
+ * callers of the scan did `find` then `describe` back to back, so publishing
+ * the finder froze an orphan diagnostic on the surface — a `minor` freezes what
+ * it publishes, and removing an export later is breaking where adding one is
+ * not.
  */
 const SCHEDULE_ORGANIZATION_NEAR_MISSES: readonly string[] = Object.freeze([
   'organizationId',
@@ -156,14 +178,19 @@ export function resolveScheduleOrganization(flow: unknown): string | undefined {
  * ⛔ Takes the start node's `config` record, NOT a flow — hence the name. The
  * caller that needs this is a TRIGGER, and a trigger never holds the flow: the
  * engine parses the start node and hands it a binding whose `config` is that
- * record. A flow-shaped overload would answer `undefined` for the very input
- * the only caller has, which is the silent-acceptance this module exists to
- * end, so the argument it wants is the one the name asks for.
+ * record. A flow-shaped input would answer `undefined` for the very shape the
+ * only caller has, which is the silent-acceptance this module exists to end.
  *
  * Anything that is not a record answers `undefined` rather than throwing,
  * matching {@link resolveScheduleOrganization}'s structural posture.
+ *
+ * ⛔ NOT exported. It was, briefly, and had two consumers that each called it
+ * only to hand the answer straight back to
+ * {@link describeMissingScheduleOrganization} on the next line. A published
+ * name is answerable forever after a `minor`, so the one that ships is the one
+ * a caller actually wants: the sentence.
  */
-export function findScheduleOrganizationNearMissInConfig(
+function findScheduleOrganizationNearMissInConfig(
   startConfig: unknown,
 ): string | undefined {
   if (!startConfig || typeof startConfig !== 'object') return undefined;
@@ -186,16 +213,22 @@ export function findScheduleOrganizationNearMissInConfig(
  *
  * It names the flow (the ruling requires that), the key, where the key goes,
  * and — when the author wrote a near-miss — which spelling of theirs was
- * dropped. It states the consequence rather than only the rule, because the
+ * dropped. `options.config` is the START NODE's `config` record (what a trigger
+ * holds on its binding, and what the lint rule reads off the parsed start
+ * node); anything else, or nothing, simply yields no near-miss clause. It states the consequence rather than only the rule, because the
  * consequence is the part an operator has already seen: this is the flow whose
  * tick delivered nothing.
  */
 export function describeMissingScheduleOrganization(
   flowName: string,
-  options?: { readonly kind?: string; readonly nearMiss?: string },
+  options?: { readonly kind?: string; readonly config?: unknown },
 ): string {
   const kind = options?.kind === 'time_relative' ? 'time-relative' : 'scheduled';
-  const nearMiss = options?.nearMiss;
+  // The scan lives HERE rather than at the two call sites, which both ran it
+  // and passed the answer straight in. One published name, one place the
+  // near-miss vocabulary is consulted, and no way for a caller to describe a
+  // near-miss the scan would not have found.
+  const nearMiss = findScheduleOrganizationNearMissInConfig(options?.config);
   return (
     `${kind} flow '${flowName}' declares no acting organization: its start node's \`config\` is ` +
     `missing the \`${SCHEDULE_ORGANIZATION_KEY}\` key` +

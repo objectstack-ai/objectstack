@@ -6,7 +6,6 @@ import type { JobSchedule, JobHandler } from '@objectstack/spec/contracts';
 import {
     SCHEDULE_ORGANIZATION_KEY,
     ScheduleOrganizationSchema,
-    findScheduleOrganizationNearMissInConfig,
     describeMissingScheduleOrganization,
 } from '@objectstack/spec/automation';
 
@@ -333,7 +332,10 @@ export function refuseMissingOrganization(
 ): never {
     const sentence = describeMissingScheduleOrganization(flowName, {
         kind: tag === 'time-relative' ? 'time_relative' : 'schedule',
-        nearMiss: findScheduleOrganizationNearMissInConfig(binding.config),
+        // The start node's `config` as the engine handed it over; the near-miss
+        // scan is `@objectstack/spec`'s and runs inside the sentence, so a
+        // trigger cannot report a spelling the scan would not have found.
+        config: binding.config,
     });
     const report = logger.error?.bind(logger) ?? logger.warn.bind(logger);
     report(`[${tag}] NOT BOUND — ${sentence}`);

@@ -265,7 +265,6 @@
     "describeMissingScheduleOrganization (function)",
     "exportConstructsToBpmn (function)",
     "findRegionEntry (function)",
-    "findScheduleOrganizationNearMissInConfig (function)",
     "flowForm (const)",
     "getApprovalNodeConfigJsonSchema (function)",
     "getSchemalessNodeConfigJsonSchemas (function)",
