@@ -29,7 +29,6 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
 
 describe('#16319 — `createColumn` refuses a field that declares no `type`', () => {
@@ -80,12 +79,16 @@ describe('#16319 — `createColumn` refuses a field that declares no `type`', ()
       { name: 'probe_object', fields: { good: { type: 'text' }, probe: { maxLength: 100 } } },
     ] as any)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
 
-    // The object is not left half-built: nothing that names it survives as a
-    // usable table. (SQLite answers a missing table by throwing.) The options bag
-    // is TYPED rather than erased — `pnpm check:query-options-erasure` counts an
-    // `any`-shaped one on a `find` call, tests included.
-    const all: EngineQueryOptions = {};
-    await expect(driver.find('probe_object', all)).rejects.toBeTruthy();
+    // The object is not left half-built: no table named by it survives. Asked at
+    // the KNEX level rather than through `driver.find`, because the question is
+    // about the TABLE and the driver's read path would answer it through an
+    // options bag this assertion has no use for. ⚠️ Measured: on SQLite
+    // `columnInfo()` for a table that does not exist RESOLVES `{}` rather than
+    // rejecting, so the assertion is on the key set — and the CONTROL above,
+    // which reads a non-empty one from the same call, is what makes this zero a
+    // reading rather than an empty walk.
+    const info: Record<string, unknown> = await (driver as any).knex('probe_object').columnInfo();
+    expect(Object.keys(info)).toEqual([]);
   });
 
   it('⭐ BOUNDARY PIN — presence is refused here; MEMBERSHIP is not, and is refused at the registry', async () => {
