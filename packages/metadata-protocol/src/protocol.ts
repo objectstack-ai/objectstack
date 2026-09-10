@@ -4768,9 +4768,9 @@ export class ObjectStackProtocolImplementation implements
         // This line used to read `if (this.environmentId === undefined)
         // return;` — the carve-out keyed off a ROW-SCOPING key. #6285 measured
         // that short-circuit and found every *regular* serving path safely on
-        // the gated side (`os dev` / `os start` bind `env_local`, the
-        // standalone artifact stack `proj_local`, a cloud per-project kernel
-        // its own), and concluded the only thing behind it was the
+        // the gated side (`os dev` / `os start` and the standalone artifact
+        // stack bind `env_local`, a cloud per-project kernel its own), and
+        // concluded the only thing behind it was the
         // control-plane bootstrap kernel. That conclusion was incomplete, and
         // #6710 measured the counter-example at boot level: the CLI's
         // lightweight host-config assembler (`serve.ts`'s
