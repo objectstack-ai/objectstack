@@ -624,11 +624,33 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
   }
 
   /**
-   * Persist a TERMINAL run (completed / failed) as durable history. Keyed by a
-   * `run_`-prefixed id so it NEVER collides with a live suspended run's row
-   * (id = raw `runId`, status `paused`) — the suspend save/load/delete/list
-   * path (which only touches raw ids and `status:'paused'` rows) is untouched.
-   * Upsert so a re-emitted terminal (e.g. a resumed run) updates in place.
+   * Persist a TERMINAL run as durable history — whichever member of the one
+   * terminal vocabulary the run reached ({@link isTerminalStatus}); ⛔ not
+   * completed/failed only, which is the two-member fold #15223 removed from
+   * both ends of this write. Keyed by a `run_`-prefixed id so it NEVER collides
+   * with a live suspended run's row (id = raw `runId`, status `paused`) — the
+   * suspend save/load/delete/list path (which only touches raw ids and
+   * `status:'paused'` rows) is untouched. Upsert so a re-emitted terminal
+   * (e.g. a resumed run) updates in place.
+   *
+   * ⭐ [#15336] The other end of this write lives in `engine.ts`: the row is
+   * what `AutomationEngine.restoreConsumedSuspension` reads — through
+   * {@link ObjectStoreSuspendedRunStore.loadTerminal} and
+   * {@link deserializeConsumedSuspension} — when an operator asks for a
+   * stranded run to be put back on its pause, and it is the only witness any
+   * OTHER replica (or this one after a restart) has. Three things below are
+   * that verb's inputs rather than local detail, so ⛔ do not change one
+   * without reading it:
+   *
+   *  - the four consumed-suspension columns are ALWAYS written, `null`
+   *    included — a restored run that later finishes must CLEAR what it
+   *    carried, which is also why an absent snapshot never means the run never
+   *    had one (`sys-automation-run.object.ts` states that direction at
+   *    `variables_json`);
+   *  - `node_id` carries the PAUSE node on a stranded row, because the
+   *    snapshot's node is rebuilt from that one column;
+   *  - an over-budget snapshot is recorded as a drop notice rather than
+   *    dropped silently, because a bare NULL reads as "the run moved on".
    */
   async recordTerminal(record: RunRecord): Promise<void> {
     const now = new Date().toISOString();
@@ -1007,10 +1029,23 @@ function serializeConsumedSuspension(
  *
  * Keyed off `variables_json`, which no other terminal-row writer populates —
  * see the call site. `correlation` and `node_type` come back from their own
- * columns, written by the same helper. `steps` come from the row's own `steps_json`: they are the
- * step log AS OF THE PAUSE (the engine trims the failed attempt's steps off the
- * snapshot before recording), bounded by the same cap every terminal row's
- * steps are.
+ * columns, written by the same helper.
+ *
+ * ⚠️ [#15336] `steps`, alone among them, do NOT come from the snapshot: they
+ * come from the row's own `steps_json`, which is the TERMINAL row's step log
+ * and covers the WHOLE run — the steps before the pause and the failed
+ * attempt's after it. Only the JOURNAL copy is as of the pause: the engine
+ * slices `run.steps` back to the step count at the pause when it journals a
+ * strand (`AutomationEngine.journalConsumedSuspension`), and that trimmed array
+ * never reaches this column — `recordTerminal` writes `record.steps`, the
+ * compacted log of the whole run, and compaction keeps every FAILURE on purpose
+ * while {@link serializeStepsBounded} trims the HEAD when the row is over
+ * budget, so the failed attempt's steps are the ones that survive both bounds.
+ * A snapshot rebuilt HERE therefore carries steps the pause did not have. It
+ * re-arms the same run regardless — the pause is `nodeId` plus `variables` /
+ * `context` / `correlation`, none of which the step log feeds — but ⛔ never
+ * read a row-rebuilt snapshot's `steps` as the state at the pause; the
+ * process-local journal is the only copy that is.
  */
 function deserializeConsumedSuspension(row: any): SuspendedRun | undefined {
   if (row.variables_json == null || row.variables_json === '') return undefined;
