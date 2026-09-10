@@ -15,25 +15,33 @@
  * `toMajor: 18`, so `--from 17` defaulted to `--to 17`,
  * `composeMigrationChain` (which keeps `m > fromMajor`) selected NO step, and
  * the command answered `✓ Nothing to migrate — the metadata is already
- * canonical for this range` with exit 0 — for the very conversions the
- * tombstone had just sent the author to run it for. 29 shipped tombstones
- * across 15 files prescribe that invocation.
+ * canonical for this range` at exit 0 — for the very conversions the tombstone
+ * had just sent the author to run it for. 29 shipped tombstones across 15
+ * source files prescribe that invocation.
  *
- * ## Why these are spawned rather than unit-tested
+ * ⚠️ The sharp half is that an empty chain makes the answer UNFALSIFIABLE:
+ * with no step selected, `applied` and `todos` are empty for every input, so
+ * that invocation at the installed major could not have reported anything
+ * else, for any stack, ever.
+ *
+ * ## Why these spawn, and why the file is QUEUE tier rather than `.e2e`
  *
  * The subject is a FLAG DEFAULT and the sentence a real terminal prints, both
- * of which live above every seam an in-process test could reach: the default
- * is resolved by oclif from the flag declaration, and the answer is chosen in
- * the human-output branch that `--json` skips entirely. The `--json` reading is
- * taken from the same spawned process for exactly one reason — `applied` is the
- * machine half of the same claim, and the pre-fix run reported
- * `applied: [], todos: [], schemaValid: false` in one breath.
+ * of which live above every seam an in-process test could reach: the default is
+ * resolved by oclif from the flag declaration, and the answer is chosen in the
+ * human-output branch `--json` skips entirely. So the CLI is spawned — but the
+ * file deliberately does NOT carry the `.e2e` name, because that name selects
+ * the NIGHTLY population (`vitest-tiers.ts` → "The NIGHTLY tiers"), and a p1
+ * whose only pin runs nightly is not protected by the merge queue's required
+ * set. The tier header sanctions exactly this combination: the name decides the
+ * run and the behaviour decides the project, so this is queue-tier by name and
+ * `integration` by behaviour. Cost is held down by running each distinct
+ * invocation once and sharing it across the assertions that read it.
  *
- * ⛔ No expectation here hard-codes 17 or 18 as the terminus. The two majors
- * move every release; what does not move is that the default terminus is the
- * highest major the installed build carries a step for, so the expectations are
- * derived from `MIGRATION_MAJORS` and `PROTOCOL_MAJOR` and stay true one major
- * later.
+ * ⛔ No expectation here hard-codes 17 or 18. Both majors move every release;
+ * what does not move is that the default terminus is the highest major the
+ * installed build carries a step for, so every expectation is derived from
+ * `MIGRATION_MAJORS` and `PROTOCOL_MAJOR` and stays true one major later.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -54,11 +62,12 @@ const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /** What the command must now default `--to` to — derived, never written down. */
 const TERMINUS = Math.max(PROTOCOL_MAJOR, ...MIGRATION_MAJORS);
+const INSTALLED = String(PROTOCOL_MAJOR);
 
 /**
  * The card's reproduction: a stack on the installed line authoring the
- * tombstoned `dashboard.refreshInterval` five times. Five rather than one so an
- * assertion cannot pass on a single incidental rewrite.
+ * tombstoned `dashboard.refreshInterval` five times. Five rather than one so no
+ * assertion can pass on a single incidental rewrite.
  */
 const RETIRED_KEY_CONFIG = `
 export default {
@@ -74,7 +83,7 @@ export default {
 };
 `;
 
-/** The same stack already canonical — the anti-vacuity control. */
+/** The same shape already canonical — the control every "it fired" line needs. */
 const CANONICAL_CONFIG = `
 export default {
   manifest: { id: 'default_range_canon', name: 'Default Range Canon', version: '1.0.0', type: 'app' },
@@ -85,21 +94,30 @@ export default {
 
 const RENAME_CONVERSION = 'dashboard-refresh-interval-to-refresh-interval-seconds';
 
+interface Run { stdout: string; code: number }
+
 let retiredDir: string;
 let canonicalDir: string;
+const runs = new Map<string, Promise<Run>>();
 
-/** Spawn the real CLI; returns stdout AND the exit code, which is half the claim. */
-async function runMeta(args: string[], cwd: string): Promise<{ stdout: string; code: number }> {
-  try {
-    const { stdout } = await execFileP(TSX, [CLI, 'migrate', 'meta', ...args], {
-      cwd,
-      maxBuffer: 64 * 1024 * 1024,
-      env: childEnv({ NO_COLOR: '1' }),
-    });
-    return { stdout, code: 0 };
-  } catch (error: any) {
-    return { stdout: String(error.stdout ?? ''), code: Number(error.code ?? 1) };
-  }
+/**
+ * Spawn the real CLI once per distinct invocation. The exit code is returned
+ * beside stdout because it is half of what "reads as success" meant here.
+ */
+function runMeta(args: string[], cwd: string): Promise<Run> {
+  const key = `${cwd}::${args.join(' ')}`;
+  const hit = runs.get(key);
+  if (hit) return hit;
+  const started = execFileP(TSX, [CLI, 'migrate', 'meta', ...args], {
+    cwd,
+    maxBuffer: 64 * 1024 * 1024,
+    env: childEnv({ NO_COLOR: '1' }),
+  }).then(
+    ({ stdout }) => ({ stdout, code: 0 }),
+    (error: any) => ({ stdout: String(error.stdout ?? ''), code: Number(error.code ?? 1) }),
+  );
+  runs.set(key, started);
+  return started;
 }
 
 beforeAll(() => {
@@ -117,22 +135,21 @@ afterAll(() => {
 
 describe('os migrate meta — the invocation the tombstones prescribe (#17134)', () => {
   it('defaults --to to the highest major this build has a step for, not the runtime major', async () => {
-    const { stdout, code } = await runMeta(['--from', PROTOCOL_MAJOR.toString(), '--json'], canonicalDir);
+    const { stdout, code } = await runMeta(['--from', INSTALLED, '--json'], retiredDir);
     const parsed = JSON.parse(stdout);
     expect(code).toBe(0);
     expect(parsed.from).toBe(PROTOCOL_MAJOR);
     expect(parsed.to).toBe(TERMINUS);
-    // ⛔ Anti-vacuity: if the terminus ever equalled PROTOCOL_MAJOR the line
+    // ⛔ Anti-vacuity. If the terminus ever equalled PROTOCOL_MAJOR the line
     // above would hold for the very default this card exists to replace, so the
-    // premise is asserted rather than assumed. When a major ships and the
-    // registry has no entries beyond it yet, this is the line that says so.
+    // premise is asserted rather than assumed: this is the line that speaks up
+    // when a major ships and the registry has no entry past it yet.
     expect(TERMINUS, 'the registry carries a step past the runtime major').toBeGreaterThan(PROTOCOL_MAJOR);
   }, 120_000);
 
-  it('lists every retired-key rewrite for `--from <runtime major>` with no --to at all', async () => {
-    const { stdout, code } = await runMeta(['--from', PROTOCOL_MAJOR.toString(), '--json'], retiredDir);
+  it('lists every retired-key rewrite with no --to given at all', async () => {
+    const { stdout } = await runMeta(['--from', INSTALLED, '--json'], retiredDir);
     const parsed = JSON.parse(stdout);
-    expect(code).toBe(0);
 
     const renames = parsed.applied.filter((a: any) => a.conversionId === RENAME_CONVERSION);
     expect(renames.map((a: any) => a.path)).toEqual([
@@ -147,57 +164,63 @@ describe('os migrate meta — the invocation the tombstones prescribe (#17134)',
       expect(r.to).toBe('refreshIntervalSeconds');
     }
     // The command's own success criterion, unreachable before this fix: the
-    // stack the author is asked to adopt parses under the installed schema.
+    // stack the author is asked to adopt parses under the INSTALLED schema.
+    // Pre-fix this same run reported `applied: [], schemaValid: false`.
     expect(parsed.schemaValid).toBe(true);
   }, 120_000);
 
   it('the human run prints the rewrites instead of `Nothing to migrate`', async () => {
-    const { stdout, code } = await runMeta(['--from', PROTOCOL_MAJOR.toString()], retiredDir);
+    const { stdout, code } = await runMeta(['--from', INSTALLED], retiredDir);
     expect(code).toBe(0);
     expect(stdout).toContain('Applied 5 mechanical change(s)');
     expect(stdout).toContain(RENAME_CONVERSION);
-    expect(stdout).not.toContain('Nothing to migrate');
+    // ⛔ The whole sentence, never the phrase. Two step-18 semantic entries open
+    // their `replacement` with "Nothing to migrate to, because …", so a bare
+    // `not.toContain('Nothing to migrate')` fails on prose that is not this
+    // command's verdict at all — and, run the other way round, a grep for the
+    // phrase reports the verdict present on a run that never printed it. That
+    // collision is why the published acceptance check this PR corrects reads
+    // `applied` from `--json` instead of grepping the headline.
+    expect(stdout).not.toContain('Nothing to migrate — the metadata is already canonical');
   }, 120_000);
 });
 
 describe('os migrate meta — an empty range answers as an empty range (#17134)', () => {
   /**
-   * The pre-fix default, now only reachable by typing it. The command is right
-   * that this range holds no conversion; what it may not do is convert that
-   * into a verdict about the metadata.
+   * The pre-fix default, now reachable only by typing it. The command is right
+   * that this range holds no conversion; what it may not do is turn that into a
+   * verdict about the metadata.
    */
   it('refuses to call an un-migrated stack canonical when the range holds no step', async () => {
-    const major = PROTOCOL_MAJOR.toString();
-    const { stdout, code } = await runMeta(['--from', major, '--to', major], retiredDir);
+    const { stdout, code } = await runMeta(['--from', INSTALLED, '--to', INSTALLED], retiredDir);
 
     expect(stdout).not.toContain('already canonical');
-    expect(stdout).toContain(`No migration step exists for protocol ${major} → ${major}`);
+    expect(stdout).toContain(`No migration step exists for protocol ${INSTALLED} → ${INSTALLED}`);
     // Triage's requirement: name the range that WOULD list them.
     expect(stdout).toContain(`--to ${TERMINUS}`);
-    expect(stdout).toContain(`Protocol ${major} → ${TERMINUS} has 5 mechanical`);
-    // ⛔ The exit code is deliberately unchanged — this command reports
-    // findings rather than exiting on them, exactly as the schema-invalid path
-    // beside it always has. What changed is that the text no longer reads as
-    // success while it does so.
+    expect(stdout).toContain(`Protocol ${INSTALLED} → ${TERMINUS} has 5 mechanical`);
+    // ⛔ The exit code is deliberately unchanged. This command reports findings
+    // rather than exiting on them — its schema-invalid arm beside this one has
+    // always been a warning at exit 0. What changed is that the text no longer
+    // reads as success while it does so.
     expect(code).toBe(0);
   }, 120_000);
 
   it('no longer returns past the schema verdict that contradicts it', async () => {
-    const major = PROTOCOL_MAJOR.toString();
-    const { stdout } = await runMeta(['--from', major, '--to', major], retiredDir);
-    // Before the fix this line was unreachable: the zero-change branch returned
-    // first, so the same run could report `schemaValid: false` in `--json` while
-    // the human output stopped at "already canonical".
+    const { stdout } = await runMeta(['--from', INSTALLED, '--to', INSTALLED], retiredDir);
+    // Unreachable before the fix: the zero-change branch returned first, so the
+    // same run could report `schemaValid: false` in `--json` while the human
+    // output claimed the metadata was canonical and stopped.
     expect(stdout).toContain('does not pass schema validation');
     expect(stdout).toContain('replayed no conversion');
   }, 120_000);
 
   it('still says `Nothing to migrate` for a range that HAS steps and rewrote nothing', async () => {
     // ⛔ The success sentence is not collateral damage: a range holding real
-    // steps that matched nothing is a finding about the metadata and keeps the
-    // answer every published acceptance check greps for. `13 → 14` is chosen
+    // steps that matched nothing is a finding about the metadata, and it keeps
+    // the answer published acceptance checks grep for. `13 → 14` is chosen
     // because step 14 carries no semantic entries, so a canonical stack comes
-    // back with both lists empty.
+    // back with both lists empty for a NON-empty chain.
     const { stdout, code } = await runMeta(['--from', '13', '--to', '14'], canonicalDir);
     expect(code).toBe(0);
     expect(stdout).toContain('Nothing to migrate');
