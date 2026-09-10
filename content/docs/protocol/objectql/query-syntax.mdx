@@ -1089,10 +1089,22 @@ label→value mapping in the expansion rather than by the operator.
   Postgres, `LIKE` over a binary cast on MySQL), and
   [#6682](https://github.com/objectstack-ai/objectstack/issues/6682) removed
   `driver-mongodb`'s hardcoded `$options: 'i'` and then the case-insensitive regex
-  `driver-memory` used on its query and analytics faces. So running your tests on the
-  in-memory double no longer returns rows a SQL or MongoDB deployment would not —
-  the divergence this callout warned about is closed, and
-  `FILTER_TEXT_CASES` holds all five drivers to it. Whether the expansion should emit
+  `driver-memory` used on its query and analytics faces. **On CASE** — this callout's
+  subject — the divergence it warned about is closed: running your tests on the
+  in-memory double no longer returns rows a SQL or MongoDB deployment would not
+  because of a fold, and `FILTER_TEXT_CASES` holds all five drivers to that rule.
+  ⚠️ **One axis is NOT aligned, and it is not a case question.** Over a column whose
+  DECLARED type is temporal (`date` / `datetime` / `time`), the SQL family answers a
+  text operator with a declared no-match — `$contains` and its positive siblings
+  select nothing, `$notContains` selects every valued row — by the maintainer ruling
+  on [#15683](https://github.com/objectstack-ai/objectstack/issues/15683), while
+  `driver-memory` canonicalises such a column to ISO text on write and so still
+  MATCHES the substring. On that one axis the in-memory double does return rows a
+  SQL deployment would not; it is tracked as
+  [#17348](https://github.com/objectstack-ai/objectstack/issues/17348) and
+  `driver-mongodb` is **not measured** for it in either direction. `FILTER_TEXT_CASES`
+  does not cover this axis and is not expected to: every row in that table is keyed on
+  the STORED value, whereas the temporal rule is keyed on the DECLARED type. Whether the expansion should emit
   `$icontains` instead of `$contains` — i.e. whether search is case-insensitive by
   definition — is **settled, not open**:
   [#7641](https://github.com/objectstack-ai/objectstack/issues/7641) ruled that it should,
