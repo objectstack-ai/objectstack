@@ -120,10 +120,37 @@ schedule and launched **once per matching record**:
 ```
 
 The sweep owes the acting organization for a **stronger** reason than a plain
-schedule flow does: it queries with `context: { isSystem: true }` on purpose, so
-that without a declared organization it would select rows across every tenant
-and then launch a run able to write into none of them. A `timeRelative` flow
-that declares none takes the same bind-time refusal.
+schedule flow does, and it is the value that BOUNDS THE QUERY. The sweep runs
+elevated on purpose (`context: { isSystem: true }` — a background sweep must see
+every row, not the RLS-scoped subset an absent user would see), so nothing else
+keeps its selection inside one organization: the declared id is passed as
+`context.tenantId` on the same query, the engine turns that into
+`DriverOptions.tenantId`, and the driver scopes the read. Selection and
+identity are then the same organization. A `timeRelative` flow that declares
+none takes the same bind-time refusal.
+
+⚠️ Elevation and tenancy are **independent axes** — `isSystem` decides what the
+sweep is allowed to see, `tenantId` decides whose rows they are. A sweep that
+passed only the first was a cross-organization scheduled task even with a
+declaration on the flow: it matched rows in every tenant and launched runs
+stamped with one, so `update_record` matched nothing, `notify` posted into the
+declared organization's inbox about another organization's record, and the
+history row landed under the record's organization rather than the run's.
+
+Two consequences worth knowing before you declare one:
+
+- **A store that cannot scope refuses the sweep rather than answering it.**
+  `@objectstack/driver-memory` implements no row-level tenant isolation and
+  refuses any call handed a tenant scope (`MEMORY_MULTI_TENANT_UNSUPPORTED`), so
+  a scoped sweep there fails loudly every tick instead of quietly selecting
+  every organization's rows. Multi-organization deployments use
+  `@objectstack/driver-sql`.
+- **On a platform-global or federated object the declaration cannot narrow
+  anything.** The engine drops the tenant scope for an object declaring
+  `tenancy: { enabled: false }` (ADR-0066) or carrying `external` (ADR-0015), so
+  such a sweep still selects across every organization while its runs act as the
+  declared one. The trigger says so at bind time, at `warn`, naming the object —
+  ⛔ it does not pretend the flow is contained.
 
 The matched record rides on the automation context (`event: 'time_relative'`,
 `record`, `params`), so the start-node `condition` gate and `{record.<field>}`
