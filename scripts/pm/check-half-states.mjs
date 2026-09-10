@@ -11346,6 +11346,630 @@ export function h56EstimatedStampRow(hit, comment, total = 1) {
 }
 
 // ---------------------------------------------------------------------------
+// H57 — a SCHEDULED, NON-BLOCKING workflow whose latest `event=schedule` run is
+// not green, read by something OTHER than itself (#17132).
+//
+// ## The ruling, and the two things it refuses
+//
+// Ruled on objectui#8402 (director seat, batch #88, maintainer authority): this
+// sweep gains one check — for each scheduled, non-blocking workflow, read the
+// LATEST run whose `event` is `schedule` and report it RED when its conclusion
+// is not `success` or its age exceeds the schedule period plus one day. Two
+// refusals travel with it and neither is re-opened here:
+//
+//   ⛔ NO SELF-REPORTING AUTOMATION. A workflow that dies at `Set up job` never
+//      reaches a step that could open an issue, so a workflow watching itself
+//      is silent at exactly the moment there is something to say. An external
+//      reader is not, which is why the check is a row in this file — and why
+//      this change adds no workflow, no step and no schedule anywhere.
+//   ⛔ NEVER A `status=success` COUNT. Measured on the originating card and
+//      re-measured for this row: objectui's `check-links.yml` answers
+//      `?status=success` with 218 runs, and its newest are from 2026-01-24..28
+//      on `push` / `pull_request` — triggers it no longer declares, under the
+//      scan scope it had before objectui#3449. They are a different job wearing
+//      this job's name. `?event=schedule` on the same workflow answers FIVE
+//      runs, all five `failure`, weekly since 2026-08-09. So the filter is a
+//      CORRECTNESS requirement rather than a preference, and it is enforced
+//      structurally: every runs read this row makes is built by
+//      `scheduledRunsPath`, which cannot be spelled without `event=schedule`.
+//
+// ## Why the absence of this row is silence rather than a red light
+//
+// The population is defined by NOT blocking anything: no PR turns red when one
+// of these dies, no card is opened, no label moves. objectui#8126 is the
+// measured shape — `stale.yml` there accumulated 234 scheduled runs and ZERO
+// successes from 2026-01-16, every one failing at `Set up job`, and nothing on
+// any board said so for eight months. A row that is the only reader of a
+// surface with no board presence at all is the row whose loss restores the
+// original silence exactly.
+//
+// ## Where the population comes from — three readings, each stated
+//
+//   ACTIVE — `GET /actions/workflows` (ONE request for the swept repo) gives
+//     `id`, `path`, `name` and `state`. Only `state === 'active'` is judged, per
+//     the card's own wording. A scheduled workflow in any other state is HELD
+//     OUT and NAMED in the summary clause rather than dropped: GitHub disables a
+//     scheduled workflow after 60 days of repository inactivity, and that
+//     disablement is itself a death this row must not swallow silently.
+//   SCHEDULED — read from the workflow FILE's own `on:` block, off the local
+//     checkout, because the checkout is the swept repo on the runner this patrol
+//     actually runs on (`GITHUB_REPOSITORY`) and reading it costs no request.
+//     ⛔ Not from the API: classifying by `GET /contents/.github/workflows/<f>`
+//     would cost one request per workflow — 36 on this repo — to answer a
+//     question the disk answers for free. When the local checkout is NOT the
+//     swept repo the whole row reports `unresolved` and reads NOTHING, because
+//     judging one repo's runs by another repo's workflow files is #11217's
+//     disease pointed the other way.
+//   NON-BLOCKING — the workflow declares none of `pull_request`,
+//     `pull_request_target` or `merge_group`. This is a STRUCTURAL reading of
+//     "not in the required set" and it is exact in the direction it is used: a
+//     required status check is matched by check-run NAME on a pull request or in
+//     the merge queue, so a workflow that runs on neither can produce no
+//     required context and can block nothing. ⇒ {required} ⊆ {declares a
+//     PR-gating trigger}, and its contrapositive is what this reading asserts.
+//     It is deliberately NARROWER than the ruleset's own answer: a workflow that
+//     declares `pull_request` and is NOT required is held out here. ⛔ The
+//     ruleset is not read instead, because mapping a required CONTEXT (a job's
+//     check-run name, `Test (shard 1/4)`) back to a workflow FILE requires
+//     guessing at job names a matrix computes at run time — a silent, confident
+//     mis-mapping, which is the one failure mode this file spends its length
+//     refusing. The held-out count rides the summary clause so the narrowing is
+//     a stated bound rather than a quiet one.
+//
+// Measured 2026-09-10 across the two installed repos: objectstack 36 workflow
+// files, 22 scheduled, 7 of them non-blocking; objectui 37 files, 9 scheduled,
+// 7 non-blocking — 14 rows' worth of population and 16 requests a sweep for the
+// pair, each install paying only its own 8.
+//
+// ## The period, and why it is the LONGEST gap rather than the shortest
+//
+// The verdict is "older than the schedule period plus one day", so the period
+// has to be the longest wait the schedule itself produces — otherwise a cron
+// firing Monday and Tuesday (shortest gap: one day) reports RED every Wednesday
+// for doing exactly what it declares. `cronPeriodHours` therefore enumerates the
+// UNION of the workflow's crons over a bounded horizon and returns the widest
+// gap between consecutive fires. Declaring a second, denser cron shortens that
+// answer, which is the "shortest interval among the crons" the card asks for,
+// arrived at structurally instead of by special case. A cron this file cannot
+// parse, or one too sparse to show two fires inside the horizon, returns `null`
+// — the staleness leg is then UNJUDGED and says so; ⛔ never a default period,
+// which would date every sweep to a schedule nobody read.
+// ---------------------------------------------------------------------------
+
+/** Triggers that can produce a required check-run, and therefore BLOCK a merge. */
+export const H57_PR_GATING_EVENTS = Object.freeze([
+  'pull_request',
+  'pull_request_target',
+  'merge_group',
+]);
+
+/**
+ * The grace the ruling grants on top of the period, verbatim: "its age exceeds
+ * the schedule period plus one day". GitHub's scheduled-workflow queue delays
+ * fires under load — sometimes by tens of minutes at the top of the hour — so a
+ * period-exact threshold would alarm on lateness rather than on death.
+ */
+export const H57_STALE_GRACE_HOURS = 24;
+
+/**
+ * How far `cronPeriodHours` looks for fires, and how many it collects. The
+ * horizon is two full years plus a margin, so a YEARLY cron shows two fires
+ * from any starting date and anything sparser reads UNJUDGED rather than
+ * guessed at; the fire cap bounds a dense one
+ * (`7,22,37,52 * * * *` would otherwise enumerate ~76,000 instants to answer a
+ * question its first hour settles).
+ */
+export const H57_CRON_HORIZON_DAYS = 800;
+export const H57_CRON_FIRE_CAP = 64;
+
+/**
+ * The workflows listing's page size and its quota backstop, in this file's
+ * standing "bounded window, stated boundary" shape. Neither install binds it
+ * today — objectstack lists 44 workflows and objectui 47 — so the ceiling can
+ * only ever bite on a repo that grew past 300, and the shortfall is PRINTED
+ * rather than absorbed: a workflow never listed is a workflow this row is
+ * silent about, which is the failure it exists to end.
+ */
+export const H57_WORKFLOW_PAGE_SIZE = 100;
+export const H57_WORKFLOW_PAGE_CEILING = 3;
+
+/** How many held-out workflows the summary clause names before it counts. */
+export const H57_HELD_OUT_NAME_CAP = 4;
+
+/**
+ * The ONE spelling of this row's runs read. Every caller goes through it, so
+ * `event=schedule` is not something an author has to remember: a request that
+ * omits it cannot be built here at all, and the self-test drives a spy that
+ * throws on any runs path reaching the transport without the filter.
+ *
+ * `per_page=1` is the whole read — the ruling asks for the LATEST scheduled run
+ * and nothing else, so the bound is one request per workflow by construction
+ * rather than by discipline.
+ */
+export function scheduledRunsPath(ownerRepo, workflowId) {
+  return `/repos/${ownerRepo}/actions/workflows/${workflowId}/runs?event=schedule&per_page=1`;
+}
+
+/**
+ * Every Actions RUNS path this file can build, and which of them omit the
+ * `event=schedule` filter — read off this file's own source, the same detector
+ * shape `familyRegistryCoverage` uses and for the same reason.
+ *
+ * The injectable spy in the self-test proves THIS pass sends the filter. This
+ * proves no OTHER line in the file can send a runs read without it, which is
+ * the half a spy cannot cover: the next author reaching for a second runs read
+ * writes a path here, not a call into the pass. The refused shape is exactly the
+ * 217-run trap — a runs listing whose answer is drawn from triggers the workflow
+ * no longer declares.
+ *
+ * @param {string} [source] — defaults to this file; injectable for the self-test.
+ * @returns {{ paths: string[], unfiltered: string[] }}
+ */
+export function h57RunsPathAudit(source) {
+  const text =
+    typeof source === 'string' ? source : readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const paths = [];
+  const re = /`\/repos\/[^`]*?\/actions\/workflows\/[^`]*?\/runs[^`]*`/g;
+  let m;
+  while ((m = re.exec(text))) paths.push(m[0]);
+  return { paths, unfiltered: paths.filter((p) => !p.includes('event=schedule')) };
+}
+
+/**
+ * A YAML line with its trailing comment removed — `#` only where it opens the
+ * line or follows whitespace, and only outside a quoted span, so
+ * `cron: '0 1 * * *' # daily` loses the note and `path: 'a#b'` does not lose the
+ * value.
+ */
+export function stripYamlComment(line) {
+  const text = String(line ?? '');
+  let quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      continue;
+    }
+    if (c === '#' && (i === 0 || /\s/.test(text[i - 1]))) return text.slice(0, i);
+  }
+  return text;
+}
+
+const yamlIndent = (line) => line.length - line.trimStart().length;
+const unquote = (value) => String(value ?? '').trim().replace(/^(['"])([\s\S]*)\1$/, '$2');
+
+/**
+ * The trigger names and cron expressions a workflow file DECLARES.
+ *
+ * A bounded line scanner rather than a YAML parse, and the reason is the
+ * adoption model: this file is copied VERBATIM into sibling repos (#11217) and
+ * imports node builtins only, so a dependency it cannot assume is present is a
+ * dependency it cannot have. The scanner is therefore written to REFUSE rather
+ * than to interpret — anything it cannot resolve returns `events: null` with a
+ * reason, which the row reports as UNJUDGED. ⛔ A shape it half-reads must never
+ * become a clean reading; that is #4690 with a `#` in front of it.
+ *
+ * Handles the four spellings this fleet uses today, all pinned in the
+ * self-test: a block map (`on:` then indented keys), a flow sequence
+ * (`on: [push, pull_request]`), a sequence block (`on:` then `- push` items),
+ * and a bare scalar (`on: push`). YAML 1.1 reads a bare `on` as a boolean, so
+ * `'on':` and `"on":` are accepted at the same position.
+ *
+ * @param {string} text — the workflow file's bytes.
+ * @returns {{ events: string[]|null, crons: string[], reason: string|null }}
+ */
+export function workflowTriggers(text) {
+  const lines = String(text ?? '')
+    .split(/\r?\n/)
+    .map(stripYamlComment);
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (yamlIndent(lines[i]) !== 0) continue;
+    const m = /^(?:on|'on'|"on")\s*:(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    const inline = m[1].trim();
+    if (inline) {
+      if (inline.startsWith('{')) {
+        return { events: null, crons: [], reason: 'a flow-mapping `on:` value' };
+      }
+      const flow = /^\[([\s\S]*)\]$/.exec(inline);
+      const names = (flow ? flow[1] : inline)
+        .split(',')
+        .map((s) => unquote(s))
+        .filter(Boolean);
+      if (names.length > 0 && names.every((n) => /^[a-z_]+$/.test(n))) {
+        return { events: [...new Set(names)].sort(), crons: [], reason: null };
+      }
+      return { events: null, crons: [], reason: 'an unreadable inline `on:` value' };
+    }
+    start = i;
+    break;
+  }
+  if (start < 0) return { events: null, crons: [], reason: 'no top-level `on:` key' };
+
+  const events = new Set();
+  const crons = [];
+  let base = null;
+  let inSchedule = false;
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    const indent = yamlIndent(line);
+    if (indent === 0) break;
+    if (base === null) base = indent;
+    if (indent < base) break;
+    if (indent === base) {
+      const key = /^\s*([A-Za-z_][A-Za-z0-9_-]*)\s*:/.exec(line);
+      if (key) {
+        events.add(key[1]);
+        inSchedule = key[1] === 'schedule';
+        continue;
+      }
+      const item = /^\s*-\s*(.+)$/.exec(line);
+      const name = item ? unquote(item[1]) : '';
+      if (name && /^[a-z_]+$/.test(name)) {
+        events.add(name);
+        inSchedule = false;
+        continue;
+      }
+      return { events: null, crons: [], reason: 'an unreadable key inside `on:`' };
+    }
+    if (!inSchedule) continue;
+    const cron = /^\s*-\s*cron\s*:\s*(.+)$/.exec(line);
+    if (cron) crons.push(unquote(cron[1]));
+  }
+  return { events: [...events].sort(), crons, reason: null };
+}
+
+/**
+ * One cron field expanded to the values it matches, or `null` when this file
+ * cannot read it. ⛔ Names (`MON`, `JAN`) are refused rather than guessed: they
+ * are a crontab extension, and a wrong expansion here would compute a period
+ * nobody declared.
+ */
+export function expandCronField(spec, min, max) {
+  const text = String(spec ?? '').trim();
+  if (!text) return null;
+  const out = new Set();
+  for (const part of text.split(',')) {
+    const m = /^(\*|\d+(?:-\d+)?)(?:\/(\d+))?$/.exec(part.trim());
+    if (!m) return null;
+    const step = m[2] === undefined ? 1 : Number(m[2]);
+    if (!Number.isInteger(step) || step < 1) return null;
+    let from;
+    let to;
+    if (m[1] === '*') {
+      from = min;
+      to = max;
+    } else {
+      const range = m[1].split('-').map(Number);
+      from = range[0];
+      to = range.length > 1 ? range[1] : range[0];
+      if (range.length === 1 && m[2] !== undefined) to = max;
+    }
+    if (![from, to].every((n) => Number.isInteger(n)) || from < min || to > max || from > to) {
+      return null;
+    }
+    for (let v = from; v <= to; v += step) out.add(v);
+  }
+  return out.size > 0 ? [...out].sort((a, b) => a - b) : null;
+}
+
+/**
+ * A cron expression as five expanded fields, or `null` when any field refuses.
+ * Day-of-week 7 is Sunday's second spelling and folds onto 0.
+ */
+export function parseCron(expression) {
+  const fields = String(expression ?? '').trim().split(/\s+/);
+  if (fields.length !== 5) return null;
+  const minute = expandCronField(fields[0], 0, 59);
+  const hour = expandCronField(fields[1], 0, 23);
+  const dom = expandCronField(fields[2], 1, 31);
+  const month = expandCronField(fields[3], 1, 12);
+  const dowRaw = expandCronField(fields[4], 0, 7);
+  if (!minute || !hour || !dom || !month || !dowRaw) return null;
+  const dow = [...new Set(dowRaw.map((d) => (d === 7 ? 0 : d)))].sort((a, b) => a - b);
+  return {
+    minute,
+    hour,
+    dom,
+    month,
+    dow,
+    domRestricted: fields[2].trim() !== '*',
+    dowRestricted: fields[4].trim() !== '*',
+  };
+}
+
+/**
+ * The widest gap, in hours, between consecutive fires of the UNION of these
+ * crons — this row's "schedule period". See the section header for why it is
+ * the widest gap and not the narrowest.
+ *
+ * `null` means UNJUDGED, and the two ways to get there are deliberately the
+ * same value: a cron this file refuses to parse, and a schedule too sparse to
+ * show two fires inside `H57_CRON_HORIZON_DAYS`. ⛔ Neither falls back to a
+ * default period — a period nobody declared would make every later staleness
+ * reading a fiction.
+ *
+ * @param {string[]} crons
+ * @param {number} [fromMs] — the instant the horizon starts at, UTC.
+ */
+export function cronPeriodHours(crons, fromMs = Date.now()) {
+  const list = Array.isArray(crons) ? crons : [];
+  if (list.length === 0) return null;
+  const parsed = list.map(parseCron);
+  if (parsed.some((p) => !p)) return null;
+  const day = new Date(fromMs);
+  day.setUTCHours(0, 0, 0, 0);
+  const fires = [];
+  for (let d = 0; d < H57_CRON_HORIZON_DAYS && fires.length < H57_CRON_FIRE_CAP; d++) {
+    const at = new Date(day.getTime() + d * 86_400_000);
+    const month = at.getUTCMonth() + 1;
+    const dom = at.getUTCDate();
+    const dow = at.getUTCDay();
+    for (const cron of parsed) {
+      if (!cron.month.includes(month)) continue;
+      // POSIX cron: with BOTH day fields restricted the day matches when EITHER
+      // does; with one restricted, that one decides.
+      const domHit = cron.dom.includes(dom);
+      const dowHit = cron.dow.includes(dow);
+      const dayHit =
+        cron.domRestricted && cron.dowRestricted ? domHit || dowHit : domHit && dowHit;
+      if (!dayHit) continue;
+      for (const h of cron.hour) {
+        for (const m of cron.minute) {
+          fires.push(at.getTime() + h * 3_600_000 + m * 60_000);
+        }
+      }
+    }
+  }
+  const sorted = [...new Set(fires)].sort((a, b) => a - b);
+  if (sorted.length < 2) return null;
+  let widest = 0;
+  for (let i = 1; i < sorted.length; i++) widest = Math.max(widest, sorted[i] - sorted[i - 1]);
+  return widest / 3_600_000;
+}
+
+/**
+ * Is this workflow in H57's population at all, and if not, why not — one
+ * three-valued answer so the sweep never has to re-derive the reason for the
+ * clause that reports it.
+ *
+ * @param {{ state?: string, path?: string }} workflow — a `GET /actions/workflows` row.
+ * @param {{ events: string[]|null, crons: string[], reason: string|null }} triggers
+ * @returns {{ inPopulation: boolean, kind: string, crons: string[], detail: string|null }}
+ */
+export function h57Population(workflow, triggers) {
+  const path = String(workflow?.path ?? '');
+  if (!path.startsWith('.github/workflows/')) {
+    return { inPopulation: false, kind: 'not-a-file', crons: [], detail: null };
+  }
+  if (!triggers || triggers.events === null) {
+    return {
+      inPopulation: false,
+      kind: 'unreadable',
+      crons: [],
+      detail: triggers?.reason ?? 'the file could not be read',
+    };
+  }
+  if (!triggers.events.includes('schedule')) {
+    return { inPopulation: false, kind: 'not-scheduled', crons: [], detail: null };
+  }
+  const gating = H57_PR_GATING_EVENTS.filter((e) => triggers.events.includes(e));
+  if (gating.length > 0) {
+    return { inPopulation: false, kind: 'pr-gating', crons: triggers.crons, detail: gating.join(', ') };
+  }
+  if (String(workflow?.state ?? '') !== 'active') {
+    return {
+      inPopulation: false,
+      kind: 'not-active',
+      crons: triggers.crons,
+      detail: String(workflow?.state ?? 'an unread state'),
+    };
+  }
+  return { inPopulation: true, kind: 'judged', crons: triggers.crons, detail: null };
+}
+
+/**
+ * H57 — `null` when the workflow's latest scheduled run is green and fresh,
+ * else the finding sentence.
+ *
+ * Three RED reasons, and they compose: a run can be both non-success and stale,
+ * and the row then says both rather than picking one.
+ *
+ *   never ran     `total_count` is 0 — the schedule is declared and has never
+ *                 produced a run. Its own RED, stated as such, because "no run
+ *                 to judge" is not a clean reading of a declared schedule.
+ *   non-success   the latest scheduled run CONCLUDED, and not as `success`.
+ *                 ⚠️ A run that has not concluded (`status !== 'completed'`)
+ *                 carries `conclusion: null`, and reading that as non-success
+ *                 would report RED on every sweep that lands inside a run's own
+ *                 window. It is held out of this leg and kept in the staleness
+ *                 one, so a run wedged in `queued` still ages into a finding.
+ *   stale         the run started longer ago than the period plus the grace.
+ *                 UNJUDGED, never assumed fresh, when the period is `null`.
+ *
+ * @param {object} entry — `{ repo, path, crons, periodHours, runsRead, run }`. `runsRead` is
+ *   the guard that keeps a FAILED runs read from reading as "never ran on schedule": the two
+ *   arrive at this predicate as the same absent `run`, and only one of them is a finding.
+ * @param {number} [nowMs]
+ */
+export function h57ScheduledWorkflowRed(entry, nowMs = Date.now()) {
+  if (!entry || entry.runsRead !== true) return null;
+  const repo = String(entry.repo ?? 'an unread repo');
+  const path = String(entry.path ?? 'an unread workflow');
+  const crons = Array.isArray(entry.crons) ? entry.crons : [];
+  const cronText = crons.length > 0 ? crons.map((c) => `\`${c}\``).join(' + ') : 'an unread cron';
+  const period = typeof entry.periodHours === 'number' ? entry.periodHours : null;
+  const periodText =
+    period === null
+      ? 'a period this sweep could not derive from that cron, so the staleness leg is UNJUDGED'
+      : `a fire at least every ${Math.round(period)}h, plus the ruled ${H57_STALE_GRACE_HOURS}h grace`;
+  const remedy =
+    ' An EXTERNAL reader found this, because a workflow that dies at `Set up job` cannot report its' +
+    " own death: the owning lane's seat opens the run above and fixes the workflow, or retires it." +
+    ' ⛔ This row never reads a `status=success` count — that count answers about every trigger the' +
+    ' workflow ever had, including ones it no longer declares. Report-only patrol INPUT, not a gate' +
+    ' verdict: nothing is blocked by this row.';
+
+  const run = entry.run ?? null;
+  if (!run) {
+    return (
+      `\`${repo}\` · \`${path}\` declares a schedule (${cronText}) and has NEVER produced a run whose ` +
+      '`event` is `schedule` — the declaration is the only evidence it exists. ⇒ RED for never having ' +
+      'run on schedule, which is a reading of the schedule rather than the absence of one.' +
+      remedy
+    );
+  }
+
+  const startedAt = run.run_started_at ?? run.created_at ?? null;
+  const startedMs = startedAt ? Date.parse(startedAt) : Number.NaN;
+  const ageHours = Number.isFinite(startedMs) ? (nowMs - startedMs) / 3_600_000 : null;
+  const completed = String(run.status ?? '') === 'completed';
+  const conclusion = run.conclusion ?? null;
+  const reasons = [];
+  if (completed && conclusion !== 'success') {
+    reasons.push(`concluded \`${conclusion ?? 'null'}\` rather than \`success\``);
+  }
+  if (period !== null && ageHours !== null && ageHours > period + H57_STALE_GRACE_HOURS) {
+    reasons.push(
+      `started ${Math.round(ageHours)}h ago, past the ${Math.round(period)}h period plus the ` +
+        `${H57_STALE_GRACE_HOURS}h grace`,
+    );
+  }
+  if (reasons.length === 0) return null;
+
+  const inFlight = completed ? '' : ` (still \`${run.status ?? 'an unread status'}\`, so its conclusion is not judged)`;
+  const seen = ageHours === null ? 'an unread start time' : `${Math.round(ageHours)}h ago`;
+  return (
+    `\`${repo}\` · \`${path}\` — the latest run whose \`event\` is \`schedule\` (run ` +
+    `\`${run.id ?? 'an unread id'}\`, started ${startedAt ?? 'at an unread instant'}, ${seen})` +
+    `${inFlight} ${reasons.join(', and ')}. Declared ${cronText} ⇒ ${periodText}. ⇒ RED.` +
+    remedy
+  );
+}
+
+/**
+ * Does the LOCAL checkout hold the workflow files of the repo being swept?
+ *
+ * The whole `on:`-block reading is a disk read, so this is the guard that keeps
+ * it honest. #11217's disease was a verbatim copy sweeping the WRONG board and
+ * rendering a full, green, entirely wrong report; the same disease points the
+ * other way here — reading objectstack's workflow files while judging objectui's
+ * runs would classify by one repo and alarm about another, with no symptom at
+ * all. So the answer is two definite readings and a refusal, never a guess:
+ *
+ *   the runner leg   `GITHUB_REPOSITORY` names the repo a runner checks out, so
+ *                    when it equals the swept repo the disk is that repo. This
+ *                    is the leg that answers on every real patrol run.
+ *   the terminal leg the checkout's own `origin` remote, for a seat running the
+ *                    sweep by hand.
+ *   otherwise        `unresolved`, with the reason — and the row reads nothing.
+ *
+ * @param {string} sweepRepo — `owner/name`.
+ * @param {Record<string, string|undefined>} env
+ * @param {string|null} originUrl — `git remote get-url origin`, or null.
+ */
+export function localCheckoutServes(sweepRepo, env = {}, originUrl = null) {
+  const want = String(sweepRepo ?? '').trim();
+  const fromEnv = String(env?.GITHUB_REPOSITORY ?? '').trim();
+  if (fromEnv) {
+    return fromEnv === want
+      ? { serves: true, source: 'GITHUB_REPOSITORY', reason: null }
+      : {
+          serves: false,
+          source: 'GITHUB_REPOSITORY',
+          reason: `the runner checked out \`${fromEnv}\` while this sweep reads \`${want}\``,
+        };
+  }
+  const m = /(?:[:/])([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(String(originUrl ?? ''));
+  if (!m) {
+    return {
+      serves: false,
+      source: 'origin',
+      reason: 'no `origin` remote resolved to an `owner/name` in this checkout',
+    };
+  }
+  return m[1] === want
+    ? { serves: true, source: 'origin', reason: null }
+    : {
+        serves: false,
+        source: 'origin',
+        reason: `this checkout's \`origin\` is \`${m[1]}\` while the sweep reads \`${want}\``,
+      };
+}
+
+/**
+ * H57's population reading, as the summary line prints it.
+ *
+ * UNCONDITIONAL, and every number in it is a bound on what the row could have
+ * said. A held-out workflow is a workflow this row is silent about, and this
+ * file's standing doctrine is that an unread input must never present as a
+ * clean one (#4690) — so each way of being held out is counted, the non-active
+ * ones are NAMED (that state is itself a death this row must not swallow), and
+ * the whole clause renders on a run that judged nothing.
+ *
+ * The `unresolved` branch is the one Zone-2 shape the ruling asks for by name:
+ * a repo whose workflow files this install cannot read prints `unresolved` and
+ * reads NOTHING — ⛔ never a retry loop and never a partial answer dressed as a
+ * complete one.
+ */
+export function h57PopulationClause(counts = {}) {
+  const requests = counts.scheduledRequests ?? 0;
+  if (counts.scheduledUnresolved) {
+    return (
+      `UNRESOLVED — ${counts.scheduledUnresolved}, so this row read NOTHING this sweep. ` +
+      'Its silence is an unread input, not a clean board, and no request was spent on it.'
+    );
+  }
+  const inactive = counts.scheduledInactive ?? 0;
+  const named = counts.scheduledInactiveNames
+    ? ` (${counts.scheduledInactiveNames})`
+    : '';
+  const short = counts.scheduledListingShort ?? 0;
+  return (
+    `${counts.scheduledDeclared ?? 0} workflow(s) on the swept repo declare a schedule; ` +
+    `${counts.scheduledJudged ?? 0} were judged against their latest \`event=schedule\` run and ` +
+    `${counts.scheduledUnreadRuns ?? 0} are UNJUDGED rather than clean because that read failed. ` +
+    `Held out: ${counts.scheduledGating ?? 0} declaring a PR-gating trigger ` +
+    `(\`${H57_PR_GATING_EVENTS.join('` / `')}\` — the structural reading of "not in the required set", ` +
+    'deliberately NARROWER than the ruleset\'s own answer, so a scheduled workflow that runs on pull ' +
+    `requests without being required is silence this row does not break), ${inactive} for a non-active ` +
+    `workflow state${named}. A further ${counts.scheduledUnreadable ?? 0} workflow file(s) carried an ` +
+    '`on:` block this file refused to read, so whether they belong to this population is UNJUDGED' +
+    `${short > 0 ? `, and ${short} more were never listed at the ${H57_WORKFLOW_PAGE_CEILING}-page ceiling` : ''}. ` +
+    `Cost ${requests} request(s): the workflows listing plus one \`event=schedule\` read per judged ` +
+    'workflow, and ⛔ never a `status=success` count.'
+  );
+}
+
+/**
+ * The subject a H57 row is filed against.
+ *
+ * Every other family here files against a card or a PR, and the renderers spell
+ * a subject as `#<number>` linked to `html_url`. This row's subject is a
+ * workflow RUN, so the number is a RUN id rather than a card number — which the
+ * sentence says in its own first clause, and which is the right target because
+ * the remedy the row prescribes is opening that run. A workflow that never ran
+ * on schedule has no run to open, so it falls back to the workflow's own page
+ * and number `0`; ⛔ not to a card number, which would file the row against
+ * whatever card happens to carry it. Extracted from the sweep so the fallback is
+ * pinned rather than written once inside a loop nothing can drive offline.
+ */
+export function h57RowSubject(entry) {
+  const run = entry?.run ?? null;
+  const runId = Number(run?.id ?? 0);
+  return {
+    number: Number.isFinite(runId) ? runId : 0,
+    html_url: String(run?.html_url ?? entry?.workflowUrl ?? ''),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -11526,6 +12150,23 @@ export const SWEEP_COUNT_KEYS = [
   // unbought one, and either way an unjudged PR must not read as a clean one.
   'briefCandidates',
   'briefJudged',
+  // H57's population reading (#17132) — the only row here whose subject is a
+  // WORKFLOW rather than a card or a PR, so none of its numbers can be inferred
+  // from a listing another row already paid for. `scheduledUnresolved` and
+  // `scheduledInactiveNames` are STRINGS (or null) and ride the same contract
+  // for H43's `governedRegisterReason` reason: without them the clause would
+  // render a row that read NOTHING as `0 of 0`, which is the confusion the
+  // enumeration exists to end.
+  'scheduledDeclared',
+  'scheduledJudged',
+  'scheduledUnreadRuns',
+  'scheduledGating',
+  'scheduledInactive',
+  'scheduledInactiveNames',
+  'scheduledUnreadable',
+  'scheduledRequests',
+  'scheduledListingShort',
+  'scheduledUnresolved',
   // H49's coverage pair (#16003). `partialCandidates` is how many OPEN
   // `pm:dispatched` + assigned cards the row could speak about and
   // `partialJudged` how many had a comment thread in hand — this row buys none,
@@ -12067,6 +12708,13 @@ export function summaryLine(counts, findingCount) {
     'whole shape UNJUDGED while looking healthy. An incomplete or failed walk is UNJUDGED rather than ' +
     "clean, since a full page may hide the newest claim. The PR leg is the open listing plus H8's " +
     'bounded merged window, so a landing older than that window is as invisible here as it is to H8. ' +
+    // H57's population reading (#17132). UNCONDITIONAL like every other
+    // window's, and it carries every narrowing this row makes: how many of the
+    // swept repo's workflows declare a schedule, how many of those were judged,
+    // and the ways one is held out. A held-out workflow is silence, and silence
+    // a reader cannot see is the exact failure this row exists to end — so the
+    // clause names them rather than only counting them.
+    `Scheduled non-blocking workflows (H57): ${h57PopulationClause(counts)} ` +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -12126,6 +12774,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h52OpenQuestions', 'Open questions (H52): '],
   ['h51Handoff', 'Contract-review handoffs (H51): '],
   ['h53Carrier', 'Carriers without increment (H53): '],
+  ['h57Scheduled', 'Scheduled non-blocking workflows (H57): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -12568,6 +13217,34 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // losing this row to the trim is 17 days on a P0 whose deployment had served
   // 503 for a day. ⛔ Not `inventory`: it alarms about one card, not a population.
   H52: 'stall',
+
+  // H57 is a `stall` (#17132), and the three refusals are each taken on the
+  // refused band's own criterion rather than on this subject's vocabulary —
+  // which is how every band call since H51 has been argued.
+  //
+  // ⛔ NOT `gate`, and this is the close one. That band's criterion has two
+  // halves and H57 satisfies only the second: "the row's SUBJECT is a GATE that
+  // may have been stripped or split" — and this row's population is defined by
+  // the ruling as NOT blocking anything, so its subject is by construction not
+  // in the required set that H31/H35 are about. Reading `gate` off the second
+  // half alone ("its absence reads as a green light") would make the band mean
+  // "anything protective", which is the lenient-widening shape this file
+  // refuses everywhere else; the band stays about the required set.
+  // ⛔ NOT `state`: nothing on the board contradicts itself. There is no card,
+  // no label and no claim to repair — the repair is a workflow run.
+  // ⛔ NOT `inventory`: the row alarms about ONE workflow. The population
+  // reading — how many were scheduled, how many held out, and why — is a summary
+  // clause and takes no band at all (H39's shape).
+  //
+  // What is left is `stall`'s criterion exactly: forward motion is STOPPED and
+  // nothing else will move it. `stall`'s wording enumerates "a card or PR"
+  // because every subject it held when it was written was one; the criterion is
+  // the second clause, and this subject satisfies it more completely than any
+  // card does — a card at least has a board presence a person can stumble on,
+  // while a dead scheduled non-blocking workflow has none at all. Measured:
+  // objectui#8126 sat at 234 scheduled runs and zero successes for eight months
+  // with nothing anywhere saying so.
+  H57: 'stall',
 
   H5: 'inventory',
   H6: 'inventory',
@@ -13967,6 +14644,22 @@ async function sweep(options = {}) {
     refDeferred: 0,
     refFloor: null,
     refBeyond: 0,
+    // H57's population reading (#17132), initialised for the reason every
+    // window pair above is: a sweep that throws before the workflow pass must
+    // render numbers rather than the string `undefined`. ⛔ `scheduledUnresolved`
+    // starts null and not a sentence — "this row ran and read the board" is the
+    // claim a null makes here, and a sweep that never reached the pass has made
+    // no claim at all; the pass writes the sentence the moment it declines.
+    scheduledDeclared: 0,
+    scheduledJudged: 0,
+    scheduledUnreadRuns: 0,
+    scheduledGating: 0,
+    scheduledInactive: 0,
+    scheduledInactiveNames: null,
+    scheduledUnreadable: 0,
+    scheduledRequests: 0,
+    scheduledListingShort: 0,
+    scheduledUnresolved: null,
   };
   // H17's gathering rides out of the sweep the same way, because it has the
   // same per-row failure mode as H16's detail pass and therefore owes the
@@ -15360,7 +16053,160 @@ export const SEEN_LABEL_PAGES = Object.freeze([
   'priority:p0',
 ]);
 
+/**
+ * The workflow-file source H57 classifies from — the LOCAL checkout, and the
+ * two git reads that make it honest.
+ *
+ * `git ls-files` already proves a git channel exists here (`readTrackedFiles`),
+ * and the shallow-checkout objection that keeps H23 on REST does not apply: a
+ * depth-1 checkout has every FILE, it only lacks history. So the `on:` blocks
+ * cost nothing, where classifying them through `GET /contents/…` would cost one
+ * request per workflow — 36 on this repo — for the same bytes.
+ */
+function readRepoRoot() {
+  try {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function readOriginUrl() {
+  try {
+    return execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * H57's pass (#17132) — the swept repo's scheduled, non-blocking workflows,
+ * each judged on the latest run whose `event` is `schedule`.
+ *
+ * Every failure here is CONTAINED: a refusal writes `scheduledUnresolved` and
+ * returns, a failed runs read counts one UNJUDGED workflow and moves on. ⛔ No
+ * retry loop on any status, per the fleet-budget discipline (#17374) — a repo
+ * this install cannot read prints `unresolved` and the sweep continues, because
+ * this row must never be what stops the board from being swept.
+ *
+ * Its four seams are injectable, in the tradition of `familyRegistryCoverage`
+ * and `loadGovernedRegister`: the whole pass then runs offline, which is what
+ * lets the self-test drive it with a SPY transport that throws on any runs read
+ * reaching it without `event=schedule`. A structural refusal nobody can execute
+ * is a refusal that has never been observed to hold.
+ *
+ * @param {Array} findings
+ * @param {object} stats
+ * @param {object} [options] — `{ get, env, originUrl, root, readSource, nowMs, ownerRepo }`.
+ */
+export async function sweepScheduledWorkflows(findings, stats = {}, options = {}) {
+  const get = options.get ?? rest;
+  const env = options.env ?? process.env;
+  const ownerRepo = options.ownerRepo ?? OWNER_REPO;
+  const nowMs = options.nowMs ?? Date.now();
+  const serves = localCheckoutServes(
+    ownerRepo,
+    env,
+    options.originUrl === undefined ? readOriginUrl() : options.originUrl,
+  );
+  if (!serves.serves) {
+    stats.scheduledUnresolved = serves.reason;
+    return;
+  }
+  const root = options.root === undefined ? readRepoRoot() : options.root;
+  if (!root && !options.readSource) {
+    stats.scheduledUnresolved = 'no git checkout resolved under this working directory';
+    return;
+  }
+  const readSource =
+    options.readSource ?? ((path) => readFileSync(`${root}/${path}`, 'utf8'));
+
+  let listed = [];
+  let total = null;
+  try {
+    for (let page = 1; page <= H57_WORKFLOW_PAGE_CEILING; page++) {
+      const batch = await get(
+        `/repos/${ownerRepo}/actions/workflows?per_page=${H57_WORKFLOW_PAGE_SIZE}&page=${page}`,
+      );
+      stats.scheduledRequests = (stats.scheduledRequests ?? 0) + 1;
+      const rows = Array.isArray(batch?.workflows) ? batch.workflows : [];
+      if (total === null) total = Number(batch?.total_count ?? rows.length);
+      listed = listed.concat(rows);
+      if (rows.length < H57_WORKFLOW_PAGE_SIZE) break;
+    }
+  } catch (err) {
+    stats.scheduledUnresolved = `the workflows listing could not be read (${err?.message ?? 'unknown'})`;
+    return;
+  }
+  stats.scheduledListingShort = Math.max(0, (total ?? listed.length) - listed.length);
+
+  const inactive = [];
+  for (const workflow of listed) {
+    const path = String(workflow?.path ?? '');
+    if (!path.startsWith('.github/workflows/')) continue;
+    let source = null;
+    try {
+      source = readSource(path);
+    } catch {
+      source = null;
+    }
+    const triggers =
+      typeof source === 'string'
+        ? workflowTriggers(source)
+        : { events: null, crons: [], reason: 'the file is not in this checkout' };
+    const where = h57Population(workflow, triggers);
+    if (where.kind === 'unreadable') {
+      stats.scheduledUnreadable = (stats.scheduledUnreadable ?? 0) + 1;
+      continue;
+    }
+    if (where.kind === 'not-scheduled') continue;
+    stats.scheduledDeclared = (stats.scheduledDeclared ?? 0) + 1;
+    if (where.kind === 'pr-gating') {
+      stats.scheduledGating = (stats.scheduledGating ?? 0) + 1;
+      continue;
+    }
+    if (where.kind === 'not-active') {
+      stats.scheduledInactive = (stats.scheduledInactive ?? 0) + 1;
+      if (inactive.length < H57_HELD_OUT_NAME_CAP) inactive.push(`\`${path}\` is \`${where.detail}\``);
+      continue;
+    }
+
+    // The one runs read, and the ONLY spelling of it (`scheduledRunsPath`).
+    let run;
+    try {
+      const runs = await get(scheduledRunsPath(ownerRepo, workflow.id));
+      stats.scheduledRequests = (stats.scheduledRequests ?? 0) + 1;
+      run = Array.isArray(runs?.workflow_runs) ? runs.workflow_runs[0] ?? null : null;
+    } catch {
+      stats.scheduledRequests = (stats.scheduledRequests ?? 0) + 1;
+      stats.scheduledUnreadRuns = (stats.scheduledUnreadRuns ?? 0) + 1;
+      continue;
+    }
+    stats.scheduledJudged = (stats.scheduledJudged ?? 0) + 1;
+    const entry = {
+      repo: ownerRepo,
+      path,
+      crons: where.crons,
+      periodHours: cronPeriodHours(where.crons, nowMs),
+      workflowUrl: String(workflow?.html_url ?? ''),
+      runsRead: true,
+      run,
+    };
+    const red = h57ScheduledWorkflowRed(entry, nowMs);
+    if (red) findings.push([h57RowSubject(entry), 'H57', red]);
+  }
+  stats.scheduledInactiveNames = inactive.length > 0 ? inactive.join(', ') : null;
+}
+
 async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null, references = null) {
+  // H57 (#17132) — FIRST in the sweep, and the placement is mechanism rather
+  // than preference. This is the only pass here whose subject is not a card or
+  // a PR: it touches `seen`, the comment cache and the reference corpus not at
+  // all, so running it before the listings keeps H45's "LAST in the sweep"
+  // claim exactly as true as it was, and its own contained failure cannot
+  // consume the card budget it never shares.
+  await sweepScheduledWorkflows(findings, stats);
+
   for (const label of SEEN_LABEL_PAGES) {
     for (const issue of await listIssues(label, stats)) seen.set(issue.number, issue);
   }
@@ -24103,6 +24949,347 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H56 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
   t('H56 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
   t('H56 band: a gate row still outranks it', familyRank('H31') < familyRank('H56'), true);
+
+
+  // -- H57 — a scheduled, NON-BLOCKING workflow whose latest `event=schedule`
+  // -- run is not green (#17132). Both directions, per the card's acceptance.
+  //
+  // The fixtures are the two workflows the ruling names, VERBATIM in the shapes
+  // measured on 2026-09-10: objectui's `check-links.yml` (weekly cron, both
+  // PR-gating triggers commented OUT — the comment stripper is load-bearing
+  // here, because reading one of them would remove the workflow the acceptance
+  // criterion is written about) and objectstack's `stale.yml` (daily cron).
+  const WF_CHECK_LINKS = [
+    'name: Check Links',
+    '',
+    'on:',
+    '  workflow_dispatch:',
+    '',
+    "  # Weekly sweep, Sundays at 04:17 UTC.",
+    '  schedule:',
+    "    - cron: '17 4 * * 0'",
+    '',
+    "  # ⛔ Do NOT enable the two triggers below — ruling B still stands.",
+    '  # push:',
+    '  #   branches:',
+    '  #     - main',
+    '  # pull_request:',
+    '',
+    'jobs:',
+    '  check-links:',
+    '    runs-on: ubuntu-latest',
+  ].join('\n');
+  const WF_STALE = [
+    'name: Stale Issues and PRs',
+    '',
+    'on:',
+    '  schedule:',
+    "    # Run daily at 01:00 UTC",
+    "    - cron: '0 1 * * *'",
+    '  workflow_dispatch:',
+    '',
+    'jobs:',
+    '  stale:',
+    '    name: Clean up stale issues and PRs',
+  ].join('\n');
+  const WF_GATING = [
+    'name: Lint',
+    'on:',
+    '  push:',
+    '    branches: [main]',
+    '  pull_request:',
+    '  merge_group:',
+    '  schedule:',
+    "    - cron: '0 * * * *'",
+    'jobs:',
+    '  lint:',
+    '    runs-on: ubuntu-latest',
+  ].join('\n');
+
+  // Comment stripping — the leg that keeps a commented-out trigger commented.
+  t('H57 yaml: a trailing comment after whitespace is dropped', stripYamlComment("  - cron: '0 1 * * *' # daily"), "  - cron: '0 1 * * *' ");
+  t('H57 yaml: a `#` inside a quoted span survives', stripYamlComment("  path: 'a#b'"), "  path: 'a#b'");
+  t('H57 yaml: a `#` with no whitespace before it survives', stripYamlComment('  tag: v1#2'), '  tag: v1#2');
+  t('H57 yaml: a whole-line comment strips to nothing', stripYamlComment('  # pull_request:').trim(), '');
+
+  // The `on:` scanner — the four spellings this fleet uses, and every refusal.
+  t('H57 triggers: a block map reads its keys', workflowTriggers(WF_STALE).events.join(','), 'schedule,workflow_dispatch');
+  t('H57 triggers: …and the cron under `schedule`', workflowTriggers(WF_STALE).crons.join('|'), '0 1 * * *');
+  t('H57 triggers: a COMMENTED-OUT `pull_request` is not a trigger', workflowTriggers(WF_CHECK_LINKS).events.includes('pull_request'), false);
+  t('H57 triggers: …and the workflow still reads as scheduled', workflowTriggers(WF_CHECK_LINKS).events.join(','), 'schedule,workflow_dispatch');
+  t('H57 triggers: …with the weekly cron read', workflowTriggers(WF_CHECK_LINKS).crons.join('|'), '17 4 * * 0');
+  t('H57 triggers: a nested key under a trigger is NOT itself a trigger', workflowTriggers(WF_GATING).events.includes('branches'), false);
+  t('H57 triggers: …while the sibling triggers all read', workflowTriggers(WF_GATING).events.join(','), 'merge_group,pull_request,push,schedule');
+  t('H57 triggers: a flow sequence reads', workflowTriggers('on: [push, pull_request]\njobs:').events.join(','), 'pull_request,push');
+  t('H57 triggers: a sequence block reads', workflowTriggers('on:\n  - push\n  - pull_request\njobs:').events.join(','), 'pull_request,push');
+  t('H57 triggers: a bare scalar reads', workflowTriggers('on: push\njobs:').events.join(','), 'push');
+  t('H57 triggers: the YAML-1.1 quoted key reads at the same position', workflowTriggers("'on':\n  schedule:\n    - cron: '0 1 * * *'").crons.join('|'), '0 1 * * *');
+  t('H57 triggers: two crons both read', workflowTriggers("on:\n  schedule:\n    - cron: '0 1 * * *'\n    - cron: '0 13 * * *'").crons.length, 2);
+  t('H57 triggers: a `jobs:` key at column 0 ends the block', workflowTriggers('on:\n  schedule:\n    - cron: "0 1 * * *"\njobs:\n  a:\n    pull_request: x').events.includes('pull_request'), false);
+  t('H57 triggers: ⛔ a file with no `on:` key REFUSES', workflowTriggers('name: x\njobs:\n  a: {}').events, null);
+  t('H57 triggers: …and names why', workflowTriggers('name: x').reason, 'no top-level `on:` key');
+  t('H57 triggers: ⛔ a flow-mapping `on:` REFUSES rather than half-reading', workflowTriggers('on: {push: null}').events, null);
+  t('H57 triggers: ⛔ an unreadable inline value REFUSES', workflowTriggers('on: !!weird').events, null);
+  t('H57 triggers: ⛔ an unreadable key inside the block REFUSES', workflowTriggers('on:\n  ??? nonsense\n').events, null);
+  t('H57 triggers: an empty file REFUSES, and never crashes', workflowTriggers('').events, null);
+  t('H57 triggers: a missing file REFUSES, and never crashes', workflowTriggers(undefined).events, null);
+
+  // Cron fields.
+  t('H57 cron: `*` expands to the whole range', expandCronField('*', 0, 23).length, 24);
+  t('H57 cron: a step reads', expandCronField('*/6', 0, 23).join(','), '0,6,12,18');
+  t('H57 cron: a list reads', expandCronField('7,22,37,52', 0, 59).join(','), '7,22,37,52');
+  t('H57 cron: a stepped range reads', expandCronField('1-5/2', 0, 59).join(','), '1,3,5');
+  t('H57 cron: a start-step reads to the ceiling', expandCronField('5/10', 0, 59).join(','), '5,15,25,35,45,55');
+  t('H57 cron: ⛔ a NAME is refused, never guessed at', expandCronField('MON', 0, 7), null);
+  t('H57 cron: ⛔ an out-of-range value is refused', expandCronField('70', 0, 59), null);
+  t('H57 cron: ⛔ an inverted range is refused', expandCronField('5-1', 0, 59), null);
+  t('H57 cron: ⛔ a four-field expression is refused', parseCron('0 1 * *'), null);
+  t('H57 cron: day-of-week 7 folds onto Sunday', parseCron('0 1 * * 7').dow.join(','), '0');
+  t('H57 cron: a restricted day field is recorded as restricted', parseCron('0 1 5 * *').domRestricted, true);
+  t('H57 cron: …and `*` is not', parseCron('0 1 * * *').domRestricted, false);
+
+  // The period — the WIDEST gap, which is the whole point.
+  const AT57 = Date.parse('2026-09-10T19:30:00Z');
+  t('H57 period: a daily cron is 24h', cronPeriodHours(['0 1 * * *'], AT57), 24);
+  t('H57 period: a weekly cron is 168h', cronPeriodHours(['17 4 * * 0'], AT57), 168);
+  t('H57 period: a six-hourly cron is 6h', cronPeriodHours(['0 */6 * * *'], AT57), 6);
+  t('H57 period: a four-times-hourly cron is 15 minutes', cronPeriodHours(['7,22,37,52 * * * *'], AT57), 0.25);
+  t('H57 period: two crons are read as ONE timeline', cronPeriodHours(['0 1 * * *', '0 13 * * *'], AT57), 12);
+  t('H57 period: …so a denser second cron SHORTENS the answer', cronPeriodHours(['17 4 * * 0', '0 1 * * *'], AT57), 24);
+  // The case the "shortest interval" reading gets wrong: Monday and Tuesday
+  // only. Its narrowest gap is 24h and its widest is 144h, and a period of 24h
+  // would report RED every Wednesday for a schedule doing exactly what it says.
+  t('H57 period: a Mon+Tue cron is 144h, NOT its 24h narrow gap', cronPeriodHours(['0 0 * * 1,2'], AT57), 144);
+  t('H57 period: ⛔ an unparseable cron is UNJUDGED, never a default', cronPeriodHours(['0 1 * * MON'], AT57), null);
+  t('H57 period: ⛔ no cron at all is UNJUDGED', cronPeriodHours([], AT57), null);
+  t('H57 period: ⛔ a missing list is UNJUDGED, and never crashes', cronPeriodHours(undefined, AT57), null);
+  t('H57 period: a yearly cron still shows two fires inside the horizon', cronPeriodHours(['0 0 1 1 *'], AT57) > 8000, true);
+  t('H57 period: the horizon is two years plus a margin', H57_CRON_HORIZON_DAYS, 800);
+
+  // Population — the four ways out, each by its own criterion.
+  const wf57 = (path, state = 'active') => ({ path, state, id: 42, html_url: `https://x/${path}` });
+  t('H57 population: a scheduled non-blocking ACTIVE workflow is judged', h57Population(wf57('.github/workflows/check-links.yml'), workflowTriggers(WF_CHECK_LINKS)).inPopulation, true);
+  t('H57 population: …carrying its crons for the period', h57Population(wf57('.github/workflows/check-links.yml'), workflowTriggers(WF_CHECK_LINKS)).crons.join('|'), '17 4 * * 0');
+  t('H57 population: a PR-gating workflow is held out', h57Population(wf57('.github/workflows/lint.yml'), workflowTriggers(WF_GATING)).kind, 'pr-gating');
+  t('H57 population: …and names WHICH triggers made it blocking', h57Population(wf57('.github/workflows/lint.yml'), workflowTriggers(WF_GATING)).detail, 'pull_request, merge_group');
+  t('H57 population: an unscheduled workflow is not in it at all', h57Population(wf57('.github/workflows/ci.yml'), workflowTriggers('on:\n  pull_request:\n')).kind, 'not-scheduled');
+  t('H57 population: a disabled workflow is held out and its STATE is carried', h57Population(wf57('.github/workflows/stale.yml', 'disabled_inactivity'), workflowTriggers(WF_STALE)).detail, 'disabled_inactivity');
+  t('H57 population: ⛔ an unreadable `on:` block is UNREADABLE, never clean', h57Population(wf57('.github/workflows/x.yml'), workflowTriggers('name: x')).kind, 'unreadable');
+  t('H57 population: …carrying the reason the scanner gave', h57Population(wf57('.github/workflows/x.yml'), workflowTriggers('name: x')).detail, 'no top-level `on:` key');
+  t('H57 population: a dynamic (fileless) workflow is out of scope', h57Population(wf57('dynamic/dependabot/dependabot-updates'), workflowTriggers(WF_STALE)).kind, 'not-a-file');
+
+  // The predicate — BOTH directions, which is the card's acceptance criterion.
+  const run57 = (over = {}) => ({
+    id: 34011606950,
+    status: 'completed',
+    conclusion: 'success',
+    run_started_at: '2026-09-10T04:28:58Z',
+    html_url: 'https://github.com/objectstack-ai/objectui/actions/runs/34011606950',
+    ...over,
+  });
+  const entry57 = (over = {}) => ({
+    repo: 'objectstack-ai/objectui',
+    path: '.github/workflows/check-links.yml',
+    crons: ['17 4 * * 0'],
+    periodHours: 168,
+    workflowUrl: 'https://github.com/objectstack-ai/objectui/actions/workflows/check-links.yml',
+    runsRead: true,
+    run: run57(),
+    ...over,
+  });
+  const h57row = (over) => String(h57ScheduledWorkflowRed(entry57(over), AT57) ?? '');
+  // ✅ The SILENT half — green and fresh emits NOTHING.
+  t('H57 clean: a green, fresh latest scheduled run is SILENT', h57ScheduledWorkflowRed(entry57(), AT57), null);
+  // The threshold pair, one hour either side of period + grace (168 + 24 = 192h).
+  t('H57 clean: …and a green run one hour INSIDE the threshold is still silent', h57ScheduledWorkflowRed(entry57({ run: run57({ run_started_at: '2026-09-02T20:30:00Z' }) }), AT57), null);
+  t('H57 red: …while one hour OUTSIDE it fires', String(h57ScheduledWorkflowRed(entry57({ run: run57({ run_started_at: '2026-09-02T18:30:00Z' }) }), AT57) ?? '').includes('past the 168h period'), true);
+  // 🚨 The RED half — three reasons, and they compose.
+  const RED_FAIL = h57row({ run: run57({ conclusion: 'failure' }) });
+  t('H57 red: a non-success conclusion fires', RED_FAIL.length > 0, true);
+  t('H57 red: …naming the conclusion it actually read', RED_FAIL.includes('concluded `failure` rather than `success`'), true);
+  t('H57 red: …the repo', RED_FAIL.includes('`objectstack-ai/objectui`'), true);
+  t('H57 red: …the workflow FILE, which is what a person opens', RED_FAIL.includes('`.github/workflows/check-links.yml`'), true);
+  t('H57 red: …the run id', RED_FAIL.includes('34011606950'), true);
+  t('H57 red: …and the cron the period came from', RED_FAIL.includes('`17 4 * * 0`'), true);
+  t('H57 red: a `cancelled` conclusion is non-success too', h57row({ run: run57({ conclusion: 'cancelled' }) }).includes('concluded `cancelled`'), true);
+  const RED_STALE = h57row({ run: run57({ run_started_at: '2026-08-20T04:17:00Z' }) });
+  t('H57 red: a stale run fires even when it concluded green', RED_STALE.length > 0, true);
+  t('H57 red: …stating the age against the derived period', RED_STALE.includes('past the 168h period'), true);
+  t('H57 red: …and the ruled one-day grace', RED_STALE.includes('24h grace'), true);
+  t('H57 red: the two reasons COMPOSE rather than one hiding the other', h57row({ run: run57({ conclusion: 'failure', run_started_at: '2026-08-20T04:17:00Z' }) }).includes(', and '), true);
+  const RED_NEVER = h57row({ run: null });
+  t('H57 red: a declared schedule that NEVER ran is its own red', RED_NEVER.includes('NEVER produced a run'), true);
+  t('H57 red: …and files against the workflow page, number 0', h57RowSubject(entry57({ run: null })).number, 0);
+  t('H57 red: …under the workflow page URL', h57RowSubject(entry57({ run: null })).html_url.endsWith('check-links.yml'), true);
+  t('H57 red: an ordinary row files against the RUN, so the remedy is one click', h57RowSubject(entry57()).number, 34011606950);
+  // ⛔ The distinction a bare `run: null` cannot make on its own.
+  t('H57 unjudged: a FAILED runs read is not "never ran on schedule"', h57ScheduledWorkflowRed(entry57({ run: null, runsRead: false }), AT57), null);
+  t('H57 unjudged: …and neither is a missing entry', h57ScheduledWorkflowRed(undefined, AT57), null);
+  // An in-flight run carries `conclusion: null`, which is the ABSENCE of a
+  // conclusion and not a non-success one.
+  t('H57 in flight: a queued run is NOT judged on its absent conclusion', h57ScheduledWorkflowRed(entry57({ run: run57({ status: 'queued', conclusion: null }) }), AT57), null);
+  const RED_WEDGED = h57row({ run: run57({ status: 'queued', conclusion: null, run_started_at: '2026-08-20T04:17:00Z' }) });
+  t('H57 in flight: …but one wedged past the period still ages into a row', RED_WEDGED.includes('past the 168h period'), true);
+  t('H57 in flight: …and the row says the conclusion was not judged', RED_WEDGED.includes('so its conclusion is not judged'), true);
+  // An underivable period leaves the STALENESS leg unjudged and says so, while
+  // the conclusion leg keeps working.
+  t('H57 unjudged period: an old run with no derivable period does not fire on age', h57ScheduledWorkflowRed(entry57({ periodHours: null, crons: ['0 1 * * MON'], run: run57({ run_started_at: '2026-01-01T00:00:00Z' }) }), AT57), null);
+  t('H57 unjudged period: …and a non-success one still fires, saying the leg is UNJUDGED', h57row({ periodHours: null, crons: ['0 1 * * MON'], run: run57({ conclusion: 'failure' }) }).includes('staleness leg is UNJUDGED'), true);
+  // The remedy, and the two refusals it carries.
+  t('H57 remedy: the reader is EXTERNAL, which is refusal B in one clause', RED_FAIL.includes('cannot report its own death'), true);
+  t('H57 remedy: ⛔ the `status=success` count is refused in the row itself', RED_FAIL.includes('never reads a `status=success` count'), true);
+  t('H57 remedy: report-only, like every other row here', RED_FAIL.includes('not a gate verdict'), true);
+
+  // The request path — the 217-run trap, refused structurally.
+  t('H57 path: the ONE spelling carries the filter', scheduledRunsPath('o/r', 7).includes('event=schedule'), true);
+  t('H57 path: …and asks for exactly one run', scheduledRunsPath('o/r', 7).includes('per_page=1'), true);
+  t('H57 path: ⛔ it can never carry a `status=` filter', scheduledRunsPath('o/r', 7).includes('status='), false);
+  t('H57 path: every runs path in this file is filtered', h57RunsPathAudit().unfiltered.length, 0);
+  t('H57 path: …and there is one of them, not zero (the audit can fail)', h57RunsPathAudit().paths.length, 1);
+  // ⚠️ ASSEMBLED, never written literally. A literal unfiltered runs path in
+  // this file would be the one hit that defeats the file-wide audit two cases
+  // above — the same trap `RETIRED_ASSIGNEE_COINAGE` names, in a new costume.
+  const BACKTICK57 = String.fromCharCode(96);
+  const UNFILTERED57 =
+    BACKTICK57 + '/repos/o/r/actions/workflows/1/runs?status=success' + BACKTICK57;
+  t('H57 path: the audit SEES an unfiltered path when one exists', h57RunsPathAudit(UNFILTERED57).unfiltered.length, 1);
+  t('H57 path: …and the assembled needle did not defeat the file-wide audit', h57RunsPathAudit().unfiltered.length, 0);
+
+  // The pass, driven offline through a SPY that refuses an unfiltered read.
+  const spyGet = (calls) => async (path) => {
+    calls.push(path);
+    if (/\/actions\/workflows\/\d+\/runs/.test(path) && !path.includes('event=schedule')) {
+      throw new Error(`H57 SPY: a runs listing reached the transport without event=schedule — ${path}`);
+    }
+    if (path.includes('/actions/workflows?')) {
+      return {
+        total_count: 4,
+        workflows: [
+          { id: 1, path: '.github/workflows/check-links.yml', state: 'active', html_url: 'https://x/1' },
+          { id: 2, path: '.github/workflows/lint.yml', state: 'active', html_url: 'https://x/2' },
+          { id: 3, path: '.github/workflows/stale.yml', state: 'disabled_inactivity', html_url: 'https://x/3' },
+          { id: 4, path: 'dynamic/dependabot/dependabot-updates', state: 'active', html_url: 'https://x/4' },
+        ],
+      };
+    }
+    // The 217-run trap in one fixture: the newest SCHEDULED run failed, while
+    // the newest run overall is a green `workflow_dispatch` from days later.
+    return {
+      total_count: 5,
+      workflow_runs: [
+        { id: 900, status: 'completed', conclusion: 'failure', run_started_at: '2026-09-06T04:28:58Z', html_url: 'https://x/runs/900' },
+      ],
+    };
+  };
+  const sources57 = {
+    '.github/workflows/check-links.yml': WF_CHECK_LINKS,
+    '.github/workflows/lint.yml': WF_GATING,
+    '.github/workflows/stale.yml': WF_STALE,
+  };
+  const runPass = async (over = {}) => {
+    const calls = [];
+    const rows = [];
+    const st = {};
+    await sweepScheduledWorkflows(rows, st, {
+      get: spyGet(calls),
+      env: { GITHUB_REPOSITORY: 'objectstack-ai/objectui' },
+      ownerRepo: 'objectstack-ai/objectui',
+      originUrl: null,
+      root: null,
+      readSource: (p) => {
+        if (!(p in sources57)) throw new Error('absent');
+        return sources57[p];
+      },
+      nowMs: AT57,
+      ...over,
+    });
+    return { calls, rows, st };
+  };
+  const PASS57 = await runPass();
+  t('H57 pass: the spy saw a runs read and did not throw', PASS57.calls.some((p) => p.includes('/runs?')), true);
+  t('H57 pass: …and every runs read it saw carried the filter', PASS57.calls.filter((p) => p.includes('/runs?') && !p.includes('event=schedule')).length, 0);
+  t('H57 pass: ⛔ and not one carried a `status=` filter', PASS57.calls.filter((p) => p.includes('status=')).length, 0);
+  t('H57 pass: the failing scheduled run becomes ONE row', PASS57.rows.length, 1);
+  t('H57 pass: …filed under H57', PASS57.rows[0][1], 'H57');
+  t('H57 pass: …naming the workflow the ruling names', PASS57.rows[0][2].includes('check-links.yml'), true);
+  t('H57 pass: …and linked to the run, not to a card', PASS57.rows[0][0].html_url, 'https://x/runs/900');
+  t('H57 pass: the PR-gating workflow bought no runs read', PASS57.st.scheduledGating, 1);
+  t('H57 pass: the disabled workflow bought none either', PASS57.st.scheduledInactive, 1);
+  t('H57 pass: …and is NAMED, because a disabled schedule is a death too', PASS57.st.scheduledInactiveNames.includes('disabled_inactivity'), true);
+  t('H57 pass: three workflow files declare a schedule', PASS57.st.scheduledDeclared, 3);
+  t('H57 pass: exactly one of them was judged', PASS57.st.scheduledJudged, 1);
+  t('H57 pass: the request bound is one listing plus one read per judged workflow', PASS57.st.scheduledRequests, 2);
+  t('H57 pass: the listing was not ceiling-bound', PASS57.st.scheduledListingShort, 0);
+  t('H57 pass: a completed pass claims no `unresolved`', PASS57.st.scheduledUnresolved ?? null, null);
+  // ✅ The silent direction, through the whole pass: same fixture, green run.
+  const GREEN57 = await runPass({
+    get: async (path) =>
+      path.includes('/actions/workflows?')
+        ? { total_count: 1, workflows: [{ id: 1, path: '.github/workflows/check-links.yml', state: 'active', html_url: 'https://x/1' }] }
+        : { total_count: 5, workflow_runs: [{ id: 901, status: 'completed', conclusion: 'success', run_started_at: '2026-09-06T04:28:58Z', html_url: 'https://x/runs/901' }] },
+  });
+  t('H57 pass: a green, fresh scheduled run emits NOTHING at all', GREEN57.rows.length, 0);
+  t('H57 pass: …while still reporting that it read the workflow', GREEN57.st.scheduledJudged, 1);
+  // The refusals — each one reads NOTHING rather than reporting a clean board.
+  const WRONG57 = await runPass({ env: { GITHUB_REPOSITORY: 'objectstack-ai/objectstack' } });
+  t('H57 refusal: a checkout of another repo reads nothing', WRONG57.rows.length, 0);
+  t('H57 refusal: …spends no request', WRONG57.st.scheduledRequests ?? 0, 0);
+  t('H57 refusal: …and says so as `unresolved`, never as a clean board', String(WRONG57.st.scheduledUnresolved).includes('objectstack-ai/objectstack'), true);
+  const NOLIST57 = await runPass({
+    get: async () => {
+      throw new Error('HTTP 403');
+    },
+  });
+  t('H57 refusal: an unreadable workflows listing is `unresolved`', String(NOLIST57.st.scheduledUnresolved).includes('403'), true);
+  t('H57 refusal: …with no row invented from it', NOLIST57.rows.length, 0);
+  const NORUNS57 = await runPass({
+    get: async (path) =>
+      path.includes('/actions/workflows?')
+        ? { total_count: 1, workflows: [{ id: 1, path: '.github/workflows/check-links.yml', state: 'active', html_url: 'https://x/1' }] }
+        : Promise.reject(new Error('HTTP 500')),
+  });
+  t('H57 refusal: a failed runs read is UNJUDGED, not "never ran"', NORUNS57.rows.length, 0);
+  t('H57 refusal: …and is counted so the silence is visible', NORUNS57.st.scheduledUnreadRuns, 1);
+  t('H57 refusal: …and never counted as judged', NORUNS57.st.scheduledJudged ?? 0, 0);
+  const NOFILES57 = await runPass({ readSource: () => { throw new Error('ENOENT'); } });
+  t('H57 refusal: a workflow file absent from the checkout is UNREADABLE', NOFILES57.st.scheduledUnreadable, 3);
+  t('H57 refusal: …and contributes no row', NOFILES57.rows.length, 0);
+
+  // The local-checkout guard.
+  t('H57 checkout: a runner sweeping its own repo serves', localCheckoutServes('o/r', { GITHUB_REPOSITORY: 'o/r' }).serves, true);
+  t('H57 checkout: …and names the reading it used', localCheckoutServes('o/r', { GITHUB_REPOSITORY: 'o/r' }).source, 'GITHUB_REPOSITORY');
+  t('H57 checkout: a runner pointed at another board REFUSES', localCheckoutServes('o/other', { GITHUB_REPOSITORY: 'o/r' }).serves, false);
+  t('H57 checkout: an https origin resolves', localCheckoutServes('o/r', {}, 'https://github.com/o/r').serves, true);
+  t('H57 checkout: …with a `.git` suffix too', localCheckoutServes('o/r', {}, 'https://github.com/o/r.git').serves, true);
+  t('H57 checkout: an ssh origin resolves', localCheckoutServes('o/r', {}, 'git@github.com:o/r.git').serves, true);
+  t('H57 checkout: a DIFFERENT origin refuses and names both repos', localCheckoutServes('o/r', {}, 'https://github.com/o/other').reason.includes('o/other'), true);
+  t('H57 checkout: no origin at all refuses', localCheckoutServes('o/r', {}, null).serves, false);
+
+  // Census and forwarding.
+  t('H57 census: every count key rides the enumerated forwarding contract', ['scheduledDeclared', 'scheduledJudged', 'scheduledUnreadRuns', 'scheduledGating', 'scheduledInactive', 'scheduledInactiveNames', 'scheduledUnreadable', 'scheduledRequests', 'scheduledListingShort', 'scheduledUnresolved'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  const SUM57 = saidBy('h57Scheduled', summaryLine({ scheduledDeclared: 22, scheduledJudged: 7, scheduledUnreadRuns: 0, scheduledGating: 15, scheduledInactive: 0, scheduledUnreadable: 0, scheduledRequests: 8 }, 0));
+  t('H57 census: the declared population is reported', SUM57.includes('22 workflow(s) on the swept repo declare a schedule'), true);
+  t('H57 census: …the judged half', SUM57.includes('7 were judged'), true);
+  t('H57 census: …the PR-gating hold-out, which is the narrowing this row makes', SUM57.includes('15 declaring a PR-gating trigger'), true);
+  t('H57 census: …stated as NARROWER than the ruleset, not as equal to it', SUM57.includes('deliberately NARROWER'), true);
+  t('H57 census: …and the request the row cost', SUM57.includes('Cost 8 request(s)'), true);
+  t('H57 census: ⛔ the refused count is named in the clause too', SUM57.includes('never a `status=success` count'), true);
+  t('H57 census: the clause renders on a zero run — silence is never absence', saidBy('h57Scheduled', summaryLine({}, 0)).includes('0 workflow(s) on the swept repo'), true);
+  const UNRES57 = saidBy('h57Scheduled', summaryLine({ scheduledUnresolved: 'the workflows listing could not be read (HTTP 403)' }, 0));
+  t('H57 census: an unresolved row says it read NOTHING', UNRES57.includes('read NOTHING this sweep'), true);
+  t('H57 census: …and refuses to be read as a clean board', UNRES57.includes('not a clean board'), true);
+
+  // Band.
+  t('H57 band: registered as a STALL row', familyBand('H57'), 'stall');
+  t('H57 band: ⛔ NOT `gate` — the population is by ruling NOT in the required set', familyBand('H57') === 'gate', false);
+  t('H57 band: ⛔ NOT `state` — there is no card contradicting itself', familyBand('H57') === 'state', false);
+  t('H57 band: ⛔ NOT `inventory` — the row alarms per workflow; the census is a clause', familyBand('H57') === 'inventory', false);
+  t('H57 band: the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H57'), true);
+  t('H57 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H57 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H57 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H57 band: a gate row still outranks it', familyRank('H31') < familyRank('H57'), true);
+  t('H57 band: …and it outranks an inventory row', familyRank('H57') < familyRank('H14'), true);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.
