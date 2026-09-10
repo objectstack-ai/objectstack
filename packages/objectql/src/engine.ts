@@ -10562,9 +10562,12 @@ export class ObjectQL implements IObjectQLEngine {
         // it did not widen WHAT exempts it.
         //
         // WHICH fields it may judge is {@link staticReadonlyInsertSubject}'s
-        // (runtime-owned types belong to the pass above, platform objects to
-        // their own 403 guards); `null` — no such field on this object — is
-        // the cheap exit every ordinary insert takes.
+        // (runtime-owned types belong to the pass above; the `sys_` namespace
+        // and the PLATFORM-INTERNAL `managedBy` buckets to their own 403
+        // guards — #15719 narrowed that second exclusion from "`managedBy` set
+        // to anything", so a user-writable bucket is judged here exactly as it
+        // is on update); `null` — no such field on this object — is the cheap
+        // exit every ordinary insert takes.
         const readonlySubject = staticReadonlyInsertSubject(schemaForValidation as any);
         if (readonlySubject) {
           const preserveAuditIgnored: string[] = [];
