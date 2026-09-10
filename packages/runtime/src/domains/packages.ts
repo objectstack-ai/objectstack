@@ -596,7 +596,20 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const rows = packages.map(
                 (p: any) => withWritableVerdict(qlService, toPackageResponse(p) as any),
             );
-            return { handled: true, response: deps.success({ packages: rows, total: rows.length }) };
+            // [#16781] `hasMore` is REQUIRED by
+            // `ListInstalledPackagesResponseSchema` and this door did not send
+            // it, so the payload it served could not parse through its own
+            // declared contract. Reconciled toward the SPEC (protocol is the
+            // baseline), additively — nothing that was on this wire left it.
+            //
+            // The value is a constant `false` because it is TRUE, not because
+            // it is convenient: this door applies the `status` / `type`
+            // filters and then returns every remaining row. It reads no
+            // `limit` and no `cursor`, so there is never a next page to
+            // announce and `nextCursor` (optional) stays absent. If this route
+            // ever starts paginating, `hasMore` is the key that has to start
+            // telling the truth — which is exactly why it is declared.
+            return { handled: true, response: deps.success({ packages: rows, total: rows.length, hasMore: false }) };
         }
 
         // POST /packages → install package.
@@ -1351,7 +1364,16 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             if (!registryRemoved && deletedCount === 0) {
                 return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             }
-            return { handled: true, response: deps.success({ success: true, registryRemoved, persisted }) };
+            // [#16781] `packageId` is REQUIRED by
+            // `UninstallPackageApiResponseSchema` and this door did not send
+            // it. Added, additively — `registryRemoved` and `persisted` stay
+            // on the wire exactly as they were. They are keys the declared
+            // schema does not carry, so a declared parse STRIPS them; that
+            // residue is pinned by name in
+            // `packages-read-delete-response-conformance.test.ts` rather than
+            // fixed by deleting live keys from a published payload, which is
+            // not this card's to do.
+            return { handled: true, response: deps.success({ packageId: id, success: true, registryRemoved, persisted }) };
         }
     } catch (e: any) {
         return { handled: true, response: deps.errorFromThrown(e, 500) };

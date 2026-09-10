@@ -37,9 +37,20 @@
  *    run, one variable apart — so it reddens from either side: remove the
  *    registration and the accepted half fails; widen it and the refused half
  *    does.
+ * 5. [#16418] The principal-binding block does the same for
+ *    `verifyMcpAccessToken`: it mints a REAL `client_credentials` token from
+ *    this server and hands it to a real AuthManager verifying against this
+ *    server's JWKS. The refusal it pins used to be asserted against a
+ *    HAND-BUILT token with no `sub` at all — a shape the provider does not
+ *    mint — so that assertion passed for years while the method admitted
+ *    every real M2M token. A minted token is the only subject that can tell
+ *    those two apart, and the user leg beside it is the differential: same
+ *    server, same JWKS, same audience, one variable (which grant produced the
+ *    token).
  */
 
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
 
@@ -291,6 +302,95 @@ function decodeJwtPayload(token: string): any {
   return JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8'));
 }
 
+/**
+ * The at-rest form the installed provider expects for a client secret. 1.7.2
+ * defaults `storeClientSecret` to `"hashed"` whenever the jwt plugin is on
+ * (it is here), and hashes with SHA-256 → unpadded base64url. Seeding the raw
+ * secret instead produces `invalid_client`, i.e. NO token — which the mint
+ * assertions below turn into a loud failure rather than a quiet "refused".
+ */
+function storedClientSecret(secret: string): string {
+  return createHash('sha256').update(secret).digest('base64url');
+}
+
+const M2M_CLIENT_ID = 'headless-integration-client';
+const M2M_CLIENT_SECRET = 'headless-integration-secret';
+
+/**
+ * Registers a CONFIDENTIAL `client_credentials` client on the running AS and
+ * links it to the MCP resource — the shape #16418's trace names: a client row
+ * carrying `client_credentials_scopes`, plus the `oauthClientResource` link
+ * `enforcePerClientResources` requires.
+ *
+ * ⚠️ Seeded through the AS's OWN adapter, not by pushing a row into the store:
+ * the memory adapter persists under the schema's `fieldName` mapping
+ * (`client_credentials_scopes`, not `clientCredentialsScopes`), so a raw push
+ * is not found and the grant fails as "missing client" — a refusal for the
+ * wrong reason. It is also NOT registered through DCR, because 1.7.2 refuses
+ * `client_credentials` in an unauthenticated registration and only an
+ * administrative registration may set the scope ceiling.
+ */
+async function seedClientCredentialsClient(server: { auth: any; pluginSchema?: any }) {
+  const ctx = await server.auth.$context;
+  await ctx.adapter.create({
+    model: 'oauthClient',
+    data: {
+      clientId: M2M_CLIENT_ID,
+      clientSecret: storedClientSecret(M2M_CLIENT_SECRET),
+      name: 'Headless integration',
+      redirectUris: [REDIRECT_URI],
+      grantTypes: ['client_credentials'],
+      responseTypes: [],
+      tokenEndpointAuthMethod: 'client_secret_post',
+      scopes: ['data:read'],
+      clientCredentialsScopes: ['data:read'],
+      disabled: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+  });
+  await ctx.adapter.create({
+    model: 'oauthClientResource',
+    data: { clientId: M2M_CLIENT_ID, resourceId: MCP_RESOURCE, createdAt: new Date() },
+  });
+}
+
+/** Runs the real `client_credentials` grant and returns the minted token. */
+async function mintClientCredentialsToken(server: { auth: any }): Promise<string> {
+  const res = await server.auth.handler(
+    new Request(`${ISSUER}/oauth2/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: M2M_CLIENT_ID,
+        client_secret: M2M_CLIENT_SECRET,
+        scope: 'data:read',
+        resource: MCP_RESOURCE,
+      }).toString(),
+    }),
+  );
+  const body: any = await res.json().catch(() => null);
+  // ⛔ "the grant failed" must never be spellable as "the door refused it".
+  expect(res.status, `the client_credentials grant did not mint a token: ${JSON.stringify(body)}`).toBe(200);
+  expect(body?.access_token, 'no M2M access token was minted').toBeTruthy();
+  return body.access_token as string;
+}
+
+/**
+ * An AuthManager whose JWKS comes from the RUNNING authorization server, so
+ * `verifyMcpAccessToken` verifies signatures the same server produced. Issuer
+ * and audience already agree by construction (both derive from BASE_URL).
+ */
+function managerVerifyingAgainst(server: { auth: any }): AuthManager {
+  process.env.OS_MCP_SERVER_ENABLED = 'true';
+  const m = new AuthManager({ secret: 'test-secret-at-least-32-chars-long', baseUrl: BASE_URL });
+  vi.spyOn(m, 'getApi').mockResolvedValue({
+    getJwks: async () => await server.auth.api.getJwks(),
+  } as any);
+  return m;
+}
+
 describe('oauthProvider option surface liveness (installed 1.7.2)', () => {
   // Two-way control on the scanner itself: it must be able to answer BOTH
   // "present" and "absent", or a 0-hit reading proves nothing.
@@ -519,5 +619,88 @@ describe('MCP resource registration against the real provider (RFC 8707)', () =>
     ).not.toBe(200);
     expect(tokenBody?.error, JSON.stringify(tokenBody)).toBe('invalid_target');
     expect(tokenBody?.access_token, 'no token may be minted for an unbound resource').toBeFalsy();
+  });
+});
+
+describe('[#16418] MCP is principal-bound — a minted client_credentials token resolves to NO principal', () => {
+  it('mints a REAL M2M token whose `sub` is the client id and which carries no `sid` (the claim reading, off the token)', async () => {
+    const opts = await captureProviderOptions();
+    const server = await bootRealAuthorizationServer(opts);
+    await seedClientCredentialsClient(server);
+
+    const payload = decodeJwtPayload(await mintClientCredentialsToken(server));
+
+    // Re-derive #3 from the card, kept live: the subject is read OFF THE
+    // TOKEN, never inferred from the provider's source. This is the fact the
+    // docblock used to deny ("carries no `sub`").
+    expect(payload.sub, 'the M2M token must carry a subject at all').toBeTruthy();
+    expect(payload.sub, "and that subject is the CLIENT — RFC 9068 §2.2.3.1's no-resource-owner shape").toBe(
+      M2M_CLIENT_ID,
+    );
+    expect(payload.client_id).toBe(M2M_CLIENT_ID);
+    expect(payload.azp).toBe(M2M_CLIENT_ID);
+    // Measured absence, recorded because it names the discriminator this fix
+    // deliberately did NOT choose: `sid` separates the two shapes today, but
+    // it is upstream-optional (already gated per client on ID tokens), so
+    // relying on it would 401 every human the moment a bump gated it here.
+    expect(payload.sid, 'no session exists behind a client_credentials grant').toBeUndefined();
+  });
+
+  it('DIFFERENTIAL: same server, same JWKS — the user token resolves, the M2M token does not', async () => {
+    const opts = await captureProviderOptions();
+    const server = await bootRealAuthorizationServer(opts);
+    await seedClientCredentialsClient(server);
+    const manager = managerVerifyingAgainst(server);
+
+    // -- machine leg -------------------------------------------------------
+    const m2mToken = await mintClientCredentialsToken(server);
+    expect(
+      await manager.verifyMcpAccessToken(m2mToken),
+      'a client_credentials token must assemble NO principal on the MCP surface — '
+        + 'headless callers use API keys (ADR-0101 D1), which is a separate chain entirely',
+    ).toBeNull();
+
+    // -- human leg (the negative control) ----------------------------------
+    // The full flow on the SAME server: DCR → sign-up → authorize → consent →
+    // token. If this half went red the refusal above would be worthless — a
+    // method that refuses everything satisfies it.
+    const reg = await registerDcrClient(server.auth);
+    expect(reg.status, JSON.stringify(reg.body)).toBe(201);
+    const cookie = await signUp(server.auth);
+    const az = await authorizeWithResource(server.auth, reg.body.client_id, cookie, MCP_RESOURCE);
+    expect(az.location).not.toContain('invalid_target');
+    const code = await consentToCode(server.auth, az.location, cookie);
+    const tokenRes = await server.auth.handler(
+      new Request(`${ISSUER}/oauth2/token`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code,
+          redirect_uri: REDIRECT_URI,
+          client_id: reg.body.client_id,
+          code_verifier: PKCE_VERIFIER,
+          resource: MCP_RESOURCE,
+        }).toString(),
+      }),
+    );
+    const tokenBody: any = await tokenRes.json().catch(() => null);
+    expect(tokenRes.status, JSON.stringify(tokenBody)).toBe(200);
+    const userToken: string = tokenBody.access_token;
+    const userPayload = decodeJwtPayload(userToken);
+
+    expect(
+      await manager.verifyMcpAccessToken(userToken),
+      'an authorization-code token must still resolve — this narrows the M2M shape and nothing else',
+    ).toEqual({
+      userId: userPayload.sub,
+      scopes: ['openid', 'profile', 'email', 'offline_access', 'data:read'],
+      clientId: reg.body.client_id,
+    });
+
+    // The one variable between the two legs, stated as an assertion: the
+    // human token's subject is NOT its client, the machine token's subject IS.
+    expect(userPayload.sub).not.toBe(userPayload.client_id);
+    expect(decodeJwtPayload(m2mToken).sub).toBe(decodeJwtPayload(m2mToken).client_id);
   });
 });

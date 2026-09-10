@@ -200,6 +200,9 @@ describe('verifyMcpAccessToken (local JWKS verification, fail-closed)', () => {
 
   function signToken(overrides: Record<string, unknown> = {}, opts: { expired?: boolean } = {}) {
     const now = Math.floor(Date.now() / 1000);
+    // `undefined` in an override DROPS the claim: jose serialises the payload
+    // with JSON.stringify, which omits undefined values. That is how the
+    // no-client-claim case below is expressed without a second signer.
     const jwt = new SignJWT({
       scope: 'data:read data:write',
       azp: 'client-abc',
@@ -249,9 +252,9 @@ describe('verifyMcpAccessToken (local JWKS verification, fail-closed)', () => {
     expect(await manager().verifyMcpAccessToken(token)).toBeNull();
   });
 
-  it('rejects a sub-less (client-credentials / M2M) token — MCP is principal-bound', async () => {
+  it('rejects a sub-less token — a subject is the minimum a principal can be built from', async () => {
     const now = Math.floor(Date.now() / 1000);
-    const token = await new SignJWT({ scope: 'data:read' })
+    const token = await new SignJWT({ scope: 'data:read', azp: 'client-abc' })
       .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
       .setIssuer(ISSUER)
       .setAudience(AUDIENCE)
@@ -259,6 +262,51 @@ describe('verifyMcpAccessToken (local JWKS verification, fail-closed)', () => {
       .setExpirationTime(now + 3600)
       .sign(privateKey);
     expect(await manager().verifyMcpAccessToken(token)).toBeNull();
+  });
+
+  // ── the client_credentials discriminator, by CLAIM SHAPE ─────────────────
+  // These pin the rule on hand-built claim combinations, including ones no
+  // grant produces today (a token disagreeing with itself across the two
+  // client spellings). The behaviour on a token the REAL provider actually
+  // mints for a `client_credentials` grant is pinned in
+  // auth-manager.mcp-oauth-resource.test.ts, against a real authorization
+  // server — the docblock's former "carries no `sub`" premise was green here
+  // for years precisely because no minted token was ever handed to it.
+
+  it('rejects a token whose `sub` IS its `azp` — RFC 9068 §2.2.3.1: no resource owner was involved', async () => {
+    const token = await signToken({ sub: 'client-abc', azp: 'client-abc' });
+    expect(await manager().verifyMcpAccessToken(token)).toBeNull();
+  });
+
+  it('rejects a token whose `sub` IS its `client_id` — the RFC 9068 §2.2 spelling of the same fact', async () => {
+    const token = await signToken({ sub: 'client-abc', client_id: 'client-abc', azp: undefined });
+    expect(await manager().verifyMcpAccessToken(token)).toBeNull();
+  });
+
+  it('refuses on EITHER client spelling — a token that disagrees with itself is still refused', async () => {
+    // `azp` says one client, `client_id` says another, and `sub` matches the
+    // one a `??` chain would have discarded. Read as a pair, this is refused;
+    // read through a precedence chain, it resolves.
+    const token = await signToken({ sub: 'client-two', client_id: 'client-two', azp: 'client-one' });
+    expect(await manager().verifyMcpAccessToken(token)).toBeNull();
+  });
+
+  it('rejects a token carrying NEITHER `client_id` nor `azp` — the discriminator cannot run, so it must not pass', async () => {
+    const token = await signToken({ azp: undefined });
+    expect(await manager().verifyMcpAccessToken(token)).toBeNull();
+  });
+
+  it('still resolves a delegated token that carries `client_id` and `azp` alongside a DIFFERENT `sub`', async () => {
+    // The positive half of the pair rule, on the claim set a real
+    // authorization-code token carries (measured: `client_id` === `azp`,
+    // both != `sub`). Without this, the four refusals above are also
+    // satisfied by a method that refuses everything.
+    const token = await signToken({ sub: 'user-1', client_id: 'client-abc', azp: 'client-abc' });
+    expect(await manager().verifyMcpAccessToken(token)).toEqual({
+      userId: 'user-1',
+      scopes: ['data:read', 'data:write'],
+      clientId: 'client-abc',
+    });
   });
 
   it('rejects garbage / non-JWT input without touching the JWKS', async () => {
