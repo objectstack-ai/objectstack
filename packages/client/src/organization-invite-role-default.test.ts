@@ -39,10 +39,16 @@
  * into the request, so a later "helpful" translation layer could add or rename
  * members without changing a type and without changing a status. ④ therefore
  * holds the request bytes to FULL-STRING equality — never `toContain`, which a
- * body carrying extra members would satisfy — and it is the guard that the
- * default is applied by SUBSTITUTION, not by clobbering: a spread written the
- * other way round (`{ role: 'member', ...req }`) passes ① and ③ and fails ②
- * and ④.
+ * body carrying extra members would satisfy.
+ *
+ * It is also the guard that the default is applied by SUBSTITUTION rather than
+ * by ordering. The tempting other spelling, `{ role: 'member', ...req }`, agrees
+ * with the shipped one on every status cases ① – ③ can observe, and differs in
+ * exactly two places ④ can: it re-orders the body, and — because a spread
+ * copies an explicitly-`undefined` member over the default while `??` does not
+ * — it puts a caller's `role: undefined` back on the wire as no `role` at all,
+ * restoring the 400 for the caller who wrote `invite({ email, role: maybe })`.
+ * ④c is that case.
  *
  * ## ⑤ pins the shape of the fix, not just its effect
  *
@@ -267,6 +273,23 @@ describe('#16582 the bytes organizations.invite puts on the wire', () => {
 
     expect(soleBody(fetchMock)).toBe(
       JSON.stringify({ email: 'probe@example.com', role: 'admin', organizationId: 'org_probe' }),
+    );
+  });
+
+  it('④c an explicitly-undefined role is the same call as omitting it', async () => {
+    const { client, fetchMock } = capturing();
+
+    // What `invite({ email, role: maybeRole })` compiles to when the variable
+    // is empty — indistinguishable from omission to the caller, and it must be
+    // indistinguishable on the wire too.
+    await client.organizations.invite({
+      email: 'probe@example.com',
+      role: undefined,
+      organizationId: 'org_probe',
+    });
+
+    expect(soleBody(fetchMock)).toBe(
+      JSON.stringify({ email: 'probe@example.com', role: 'member', organizationId: 'org_probe' }),
     );
   });
 });
