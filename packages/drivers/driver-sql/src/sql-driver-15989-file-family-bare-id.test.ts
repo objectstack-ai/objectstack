@@ -82,6 +82,19 @@ async function writeRaw(driver: SqlDriver, table: string, id: string, patch: Rec
   await (driver as any).knex(table).where('id', id).update(patch);
 }
 
+/**
+ * `findOne`, with the row's absence made an ASSERTION rather than a cast.
+ *
+ * Every case here is about the VALUE a media column reads back, so a missing
+ * row must fail as a missing row: casting the null away would let a fixture
+ * that never landed report as a value that never moved.
+ */
+async function readField(driver: SqlDriver, table: string, id: string, field: string): Promise<unknown> {
+  const row = await driver.findOne(table, { where: { id } } as any, OPTS);
+  expect(row, `${table}#${id} was not found`).not.toBeNull();
+  return (row as Record<string, unknown>)[field];
+}
+
 async function columnTypeOf(driver: SqlDriver, table: string, column: string) {
   const info: any = await (driver as any).knex(table).columnInfo();
   return info[column];
@@ -145,8 +158,7 @@ function measure(cell: DialectCell): void {
       expect(unmoved.varcharChars({ type: 'image' })).toBeNull();
 
       await unmoved.create(T_UNMOVED, { id: 'u1', cover: 'file_01UNMOVED', label: 'a' }, OPTS);
-      const read = await unmoved.findOne(T_UNMOVED, { where: { id: 'u1' } }, OPTS);
-      expect(read.cover).toBe('file_01UNMOVED');
+      expect(await readField(unmoved, T_UNMOVED, 'u1', 'cover')).toBe('file_01UNMOVED');
 
       // …and what the SERVER holds is the JSON encoding of that id — the same
       // sentence on all three dialects, read past the client's own json decode.
@@ -178,8 +190,7 @@ function measure(cell: DialectCell): void {
 
       // ⭐ The reverse verification the card names: a bare id written under the
       // flag reads back UNCHANGED, and the bytes on disk are that same id.
-      const read = await moved.findOne(T_MOVED, { where: { id: 'm1' } }, OPTS);
-      expect(read.cover).toBe('file_01MOVED');
+      expect(await readField(moved, T_MOVED, 'm1', 'cover')).toBe('file_01MOVED');
       const stored = await storedText(moved, T_MOVED, 'cover', 'm1');
       expect(stored).toBe('file_01MOVED');
       expect(stored).not.toContain('"');
@@ -194,13 +205,12 @@ function measure(cell: DialectCell): void {
       await writeRaw(moved, T_MOVED, 'm2', { cover: '"file_01LEGACY"' });
       expect(await storedText(moved, T_MOVED, 'cover', 'm2')).toBe('"file_01LEGACY"');
 
-      const read = await moved.findOne(T_MOVED, { where: { id: 'm2' } }, OPTS);
-      expect(read.cover).toBe('file_01LEGACY');
+      expect(await readField(moved, T_MOVED, 'm2', 'cover')).toBe('file_01LEGACY');
 
       // The other encoding in the same run, so the pin discriminates rather
       // than unquoting everything it is handed.
       await writeRaw(moved, T_MOVED, 'm2', { cover: 'file_01BARE' });
-      expect((await moved.findOne(T_MOVED, { where: { id: 'm2' } }, OPTS)).cover).toBe('file_01BARE');
+      expect(await readField(moved, T_MOVED, 'm2', 'cover')).toBe('file_01BARE');
     });
 
     it('§3b the repair cannot eat an id, a URL or an unparseable cell', async () => {
@@ -211,14 +221,14 @@ function measure(cell: DialectCell): void {
       // data. None of these begins with `"`, `{` or `[`, so none is touched.
       for (const value of ['12345', 'null', 'true', 'false', 'https://cdn/x.png', '/api/v1/files/f_1']) {
         await writeRaw(moved, T_MOVED, 'm3', { cover: value });
-        const back = (await moved.findOne(T_MOVED, { where: { id: 'm3' } }, OPTS)).cover;
+        const back = await readField(moved, T_MOVED, 'm3', 'cover');
         expect(back, value).toBe(value);
         expect(typeof back, value).toBe('string');
       }
       // A cell that DOES begin with a delimiter but is not JSON keeps its raw
       // string — the same posture the SQLite json arm has always taken.
       await writeRaw(moved, T_MOVED, 'm3', { cover: '"unterminated' });
-      expect((await moved.findOne(T_MOVED, { where: { id: 'm3' } }, OPTS)).cover).toBe('"unterminated');
+      expect(await readField(moved, T_MOVED, 'm3', 'cover')).toBe('"unterminated');
     });
 
     // ── §4 the #15771 repair, on the UNMOVED arm ────────────────────────────
@@ -242,7 +252,7 @@ function measure(cell: DialectCell): void {
 
       // MEASURED on live PG 16.13 before this change: this answered
       // `"file_01CORRUPT"`, quotes included.
-      expect((await unmoved.findOne(T_MOVED, { where: { id: 'x1' } }, OPTS)).cover).toBe('file_01CORRUPT');
+      expect(await readField(unmoved, T_MOVED, 'x1', 'cover')).toBe('file_01CORRUPT');
     });
 
     // ── §5 the member the arm must not move ─────────────────────────────────
@@ -253,11 +263,10 @@ function measure(cell: DialectCell): void {
         expect(driver.varcharChars({ type: 'image', multiple: true })).toBeNull();
       }
       await moved.create(T_MOVED, { id: 'm5', gallery: ['file_a', 'file_b'], label: 'a' }, OPTS);
-      const read = await moved.findOne(T_MOVED, { where: { id: 'm5' } }, OPTS);
-      expect(read.gallery).toEqual(['file_a', 'file_b']);
+      expect(await readField(moved, T_MOVED, 'm5', 'gallery')).toEqual(['file_a', 'file_b']);
 
       await unmoved.create(T_UNMOVED, { id: 'u5', gallery: ['file_a', 'file_b'], label: 'a' }, OPTS);
-      expect((await unmoved.findOne(T_UNMOVED, { where: { id: 'u5' } }, OPTS)).gallery).toEqual(['file_a', 'file_b']);
+      expect(await readField(unmoved, T_UNMOVED, 'u5', 'gallery')).toEqual(['file_a', 'file_b']);
     });
 
     // ── §6 the whole family, not just the two the fixture names ─────────────
