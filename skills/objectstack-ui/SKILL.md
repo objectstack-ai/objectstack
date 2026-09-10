@@ -160,6 +160,10 @@ An **App** groups objects, dashboards, reports, and custom pages into a
 structured navigation tree. Build with `App.create({...})` from
 `@objectstack/spec/ui` and register under `defineStack({ apps: [...] })`.
 
+⛔ **Exactly one App per `type: 'app'` package** — `defineStack` refuses a
+second at load, per ADR-0019 (app-as-consumer-unit) D3. More audiences are
+`requiredPermissions`-gated groups **inside** that one app, never a second app.
+
 ### Navigation Item Types
 
 | Type | Properties | Purpose |
