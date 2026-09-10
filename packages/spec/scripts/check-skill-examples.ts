@@ -95,11 +95,11 @@
  * SCOPE — the annotation must BE `any`, in a position where it erases checking
  * wholesale: a parameter, a variable/property/return annotation, an index
  * signature, a type alias, or an `as any` / `satisfies any` / angle-bracket
- * assertion. `any` NESTED inside a
- * larger type (`Record<string, any>`, `any[]`, `Promise<any>`) is deliberately
- * NOT flagged — the same line `check-exported-any.ts` draws for the same reason:
- * a nested `any` is a much broader question, and holding the gate at zero false
- * positives is what keeps red meaning broken.
+ * assertion. `any` NESTED inside a larger type (`Record<string, any>`, `any[]`,
+ * `Promise<any>`) is deliberately NOT flagged — the same line
+ * `check-exported-any.ts` draws for the same reason: a nested `any` is a much
+ * broader question, and holding the gate at zero false positives is what keeps
+ * red meaning broken.
  *
  * "NESTED" IS A CLAIM ABOUT THE `any`, NOT ABOUT ITS ANCESTRY (#14910). The three
  * examples above share one property: the `any` is a COMPONENT of a composite type
