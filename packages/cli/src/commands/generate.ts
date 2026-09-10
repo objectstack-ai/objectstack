@@ -24,6 +24,10 @@ import {
   isTenancyDisabled,
   isUniqueDeclared,
   numericColumnFor,
+  // #16726 — the name gate below. IMPORTED for the same reason as the five
+  // above: it asks the schema whether a name is legal instead of restating
+  // the charset the schema declares.
+  ObjectSchema,
 } from '@objectstack/spec/data';
 import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, isReportedError, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
@@ -472,6 +476,54 @@ function toSnakeCase(str: string): string {
   return str.replace(/[-]/g, '_').replace(/[A-Z]/g, c => `_${c.toLowerCase()}`).replace(/^_/, '');
 }
 
+/**
+ * Is this a name `os generate` accepts? (#16726)
+ *
+ * ## The declared answer, asked rather than restated
+ *
+ * The accepted set is the charset `packages/spec` ALREADY declares for an
+ * object `name` — maintainer ruling, decision batch #82 (2026-09-08, option
+ * A): a gate, ⛔ no sanitiser, and ⛔ no third charset. So the judge here is
+ * that declaration itself (`ObjectSchema.shape.name`), reached through the
+ * package's exported surface. Nothing in this file states what the charset
+ * IS: a transcription is a second declaration that can drift green while spec
+ * moves, and the ruling asks for the spec's rule, not for a copy of today's
+ * reading of it. The refusal even quotes the schema's own message, so the
+ * pattern the author is shown is the pattern that judged them.
+ *
+ * ## ⛔ Why it returns a REASON and never a repaired name
+ *
+ * The rejected option (B) was to derive a legal identifier the way
+ * `os create` has since #15892. It was refused because it decouples the name
+ * the author wrote from the name that gets emitted, silently: write
+ * `foo.bar`, get `fooBar` in the file, and every later reference the author
+ * types by hand is wrong with nothing announcing it. For metadata written in
+ * bulk that divergence multiplies unseen. So this answers only *may this name
+ * through*, and the caller refuses loudly — ⛔ it never rewrites, and no flag
+ * bypasses it.
+ *
+ * ## What it deliberately does NOT decide
+ *
+ * Whether the TypeScript the accepted name would produce actually PARSES.
+ * That is #16541's check (`findEmissionParseFailures`), it stays exactly where
+ * it landed, and it is a genuinely different question: `class` is inside this
+ * charset and is still refused by the compiler in a `const` binding position,
+ * while `order-line` emits a perfectly parseable `orderLine` and is refused
+ * here. Neither layer shadows the other — `generate-refuses-name-outside-charset.test.ts`
+ * measures both directions.
+ *
+ * @returns `null` when the name is accepted, or the schema's own reason when
+ *          it is not.
+ */
+function nameCharsetRefusal(name: string): string | null {
+  // Reached lazily, inside the call: `ObjectSchema` is a lazy schema, and a
+  // module-top `.shape` read would materialize it for every CLI command
+  // including the ones that never generate anything.
+  const verdict = ObjectSchema.shape.name.safeParse(name);
+  if (verdict.success) return null;
+  return verdict.error.issues[0]?.message ?? 'not a legal object name';
+}
+
 // ─── Field Type Mapping ─────────────────────────────────────────────
 
 /**
@@ -669,6 +721,58 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
       process.exit(1);
     }
 
+    // ⛔ REFUSE a name outside the declared charset, BEFORE anything is
+    // derived from it (#16726).
+    //
+    // Placed here on purpose, and the position is the ruling: every derivation
+    // this command performs — `toSnakeCase` for the metadata name and the
+    // filename, `toCamelCase` for the binding and the barrel alias,
+    // `toTitleCase` for the labels — happens BELOW this line, so a refused
+    // name is never folded into a legal-looking one on the way to a
+    // diagnostic. It sits after the type roster so that `os g <unknown-type>
+    // <name>` still answers about the type, which is the more useful answer.
+    //
+    // What it is NOT: a sanitiser (option B was refused — see
+    // `nameCharsetRefusal`), a charset of this command's own (the judge is
+    // spec's object-`name` declaration), and not a replacement for the parse
+    // check further down, which stays as the backstop it was built to be.
+    const charsetRefusal = nameCharsetRefusal(name);
+    if (charsetRefusal) {
+      printError(`Refusing to generate — \`${name}\` is not a name this command accepts`);
+      console.log('');
+      console.log(`  ${chalk.dim('Name:')} ${chalk.white(name)}`);
+      console.log(`  ${chalk.dim('Rule:')} ${chalk.white(charsetRefusal)}`);
+      console.log('');
+      console.log(chalk.dim(
+        `  That rule is not \`${CLI_ALIAS} g\`'s own: it is the charset \`@objectstack/spec\``,
+      ));
+      console.log(chalk.dim(
+        '  declares for an object `name`, asked of the schema itself. A metadata name',
+      ));
+      console.log(chalk.dim(
+        '  that is refused there has no business being scaffolded here.',
+      ));
+      console.log('');
+      console.log(chalk.dim(
+        '  It refuses instead of folding your name into one that fits, so the name you',
+      ));
+      console.log(chalk.dim(
+        '  write and the name that lands in the file are always the same string.',
+      ));
+      console.log(chalk.dim(
+        // ⛔ The examples are deliberately NOT built from what the author
+        // typed. A suggestion derived from the refused name is option (B)
+        // wearing a prompt: the author accepts it, and the divergence this
+        // gate exists to prevent arrives one keystroke later.
+        `  Nothing was written. Names like \`${CLI_ALIAS} g ${type} customer\` or`,
+      ));
+      console.log(chalk.dim(
+        `  \`${CLI_ALIAS} g ${type} sales_order\` are accepted.`,
+      ));
+      console.log('');
+      process.exit(1);
+    }
+
     const dir = flags.dir || generator.defaultDir;
     // The written name comes from the registry's `filePatterns` for this type
     // — see `metadataFileName`, which carries why it is derived rather than
@@ -774,10 +878,14 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
         '  which would decide in silence which names this command accepts. Pick a name',
       ));
       console.log(chalk.dim(
-        `  that survives as an identifier — \`${CLI_ALIAS} g ${type} order_line\` and`,
+        // ⛔ This line used to offer `order-line` as an equal alternative. The
+        // #16726 gate above refuses that spelling before this check is ever
+        // reached, so offering it here would send the author to a second
+        // refusal. The CHECK is untouched — only the advice it prints.
+        `  that survives as an identifier — \`${CLI_ALIAS} g ${type} order_line\` works,`,
       ));
       console.log(chalk.dim(
-        `  \`${CLI_ALIAS} g ${type} order-line\` both work, and both fold to \`orderLine\`.`,
+        '  and binds `orderLine`.',
       ));
       console.log('');
       process.exit(1);
@@ -2598,7 +2706,11 @@ export default class Generate extends Command {
 
   static override args = {
     type: Args.string({ description: 'Metadata type to generate (object, view, action, flow, dashboard, app)', required: true }),
-    name: Args.string({ description: 'Name for the metadata (use kebab-case)', required: false }),
+    // ⛔ NOT "use kebab-case" any more (#16726): a name outside the charset
+    // spec declares for an object `name` is refused at the door, and
+    // kebab-case is outside it. What this string advertises and what the
+    // command accepts have to be the same set.
+    name: Args.string({ description: 'Name for the metadata (snake_case)', required: false }),
   };
 
   static override flags = {
