@@ -299,6 +299,22 @@ export interface AuthoringRuleContext {
    * argument.
    */
   runtimeWriteType?: string;
+  /**
+   * [#16546] `hooks[*].handler` ref strings whose metadata `body` was minted
+   * by `lowerCallables` from the author's inline `handler` function, rather
+   * than authored directly. Set by the CLI commands that lower before they
+   * run this registry (`os build`, `os lint`, `os validate`, scaffold
+   * validate — `lowerCallables`'s own return value, unchanged); ABSENT on the
+   * runtime publish gate, which never receives a `handler` function to lower.
+   *
+   * Read by `validateReadonlyHookWrites` / `validateHookBodyWrites`
+   * (`@objectstack/lint`) through the reference-integrity suite, to report
+   * `path: hooks[i].handler` — the key the author actually wrote — instead of
+   * `hooks[i].body.source`, a key this stack's `body` did not come from the
+   * author for. Absent or not naming a hook's ref means "this hook's `body`
+   * is author-written", and both validators keep reporting `body.source`.
+   */
+  loweredHookRefs?: ReadonlySet<string>;
 }
 
 export interface AuthoringRule {
@@ -1623,7 +1639,7 @@ export function authoringRulesFor(command: AuthoringCommand): readonly Authoring
  */
 export function runAuthoringRules(command: AuthoringCommand, run: AuthoringRuleRun): AuthoringFinding[] {
   const findings: AuthoringFinding[] = [];
-  const ctx: AuthoringRuleContext = { sduiManifest: run.sduiManifest };
+  const ctx: AuthoringRuleContext = { sduiManifest: run.sduiManifest, loweredHookRefs: run.loweredHookRefs };
   for (const rule of authoringRulesFor(command)) {
     const stack = rule.input === 'normalized' ? run.normalized : (run.parsed ?? run.normalized);
     findings.push(...rule.run(stack, ctx));

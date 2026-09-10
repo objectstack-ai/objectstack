@@ -5,6 +5,7 @@ import {
   validateHookBodyWrites,
   extractHookBodyWrites,
   extractHookBodyWriteSet,
+  hookBodyFindingLocation,
   HOOK_BODY_WRITE_PATTERNS,
   HOOK_BODY_WRITE_PATTERN_IDS,
   HOOK_BODY_WRITE_EXCLUSIONS,
@@ -659,5 +660,50 @@ describe('an unparseable hook body is reported, not scored clean (#10653)', () =
         `parseable body gained a parse failure:\n${source}`,
       ).toBeUndefined();
     }
+  });
+});
+
+// [#16546] `hooks[i].body.source` names a key the author never wrote when the
+// body was minted by `lowerCallables` from an inline `handler` function.
+describe('hookBodyFindingLocation / validateHookBodyWrites — #16546: path redirect for a lowered hook', () => {
+  it('hookBodyFindingLocation: `handler` ref present in ctx.loweredHookRefs redirects path, with suffix', () => {
+    const loc = hookBodyFindingLocation({ handler: 'normalize_deal' }, 0, {
+      loweredHookRefs: new Set(['normalize_deal']),
+    });
+    expect(loc.path).toBe('hooks[0].handler');
+    expect(loc.messageSuffix).toContain('judged on the metadata body lowered from the inline handler');
+  });
+
+  it('hookBodyFindingLocation: absent ctx, non-string handler, or an unmarked ref all keep body.source', () => {
+    expect(hookBodyFindingLocation({}, 2, undefined).path).toBe('hooks[2].body.source');
+    expect(hookBodyFindingLocation({ handler: 'x' }, 2, {}).path).toBe('hooks[2].body.source');
+    expect(hookBodyFindingLocation({ handler: 'x' }, 2, { loweredHookRefs: new Set(['y']) }).path).toBe(
+      'hooks[2].body.source',
+    );
+    // Not lowered at all — no ref, still the author's own key.
+    expect(hookBodyFindingLocation({}, 2, { loweredHookRefs: new Set(['x']) }).path).toBe('hooks[2].body.source');
+  });
+
+  it('validateHookBodyWrites reports `hooks[0].handler` + suffix on a lowered hook, verdict unchanged', () => {
+    const findings = validateHookBodyWrites(
+      stackWith('ctx.input.discont_total = 0;', { handler: 'normalize_deal' }),
+      { loweredHookRefs: new Set(['normalize_deal']) },
+    );
+    expect(findings).toHaveLength(1);
+    // [3] Same rule, same severity, same message content — only path + suffix move.
+    expect(findings[0].rule).toBe(HOOK_BODY_WRITE_UNKNOWN_FIELD);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].message).toContain('discont_total');
+    expect(findings[0].path).toBe('hooks[0].handler');
+    expect(findings[0].message).toContain('(judged on the metadata body lowered from the inline handler)');
+  });
+
+  it('CONTROL — the identical hook keeps `hooks[0].body.source` with no ctx (author-written body)', () => {
+    // [4] Non-regression control: this is the standing shape every other test
+    // in this file already exercises — the fix must never move it.
+    const findings = validateHookBodyWrites(stackWith('ctx.input.discont_total = 0;'));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('hooks[0].body.source');
+    expect(findings[0].message).not.toContain('lowered from the inline handler');
   });
 });

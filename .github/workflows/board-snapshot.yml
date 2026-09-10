@@ -28,16 +28,46 @@ name: Board Snapshot
 # self-test cases read its own source and hold that structurally — and
 # `--restore` PRINTS a recreate payload for a seat to post, or for nobody to.
 #
-# ## Budget, and why a run may stop before it is finished
+# ## The budget this run is capped against, and who else spends it
 #
-# `GITHUB_TOKEN` is limited to 1,000 requests per hour PER REPOSITORY, and this
-# job is not that budget's only caller (the half-state patrol and the closed-card
-# sweep share it). A first full snapshot of this board — several thousand
-# numbers, each with a comment thread — does not fit one run and must not try, so
-# the script stops at its own `--max-requests` ceiling, writes a resume cursor
-# into the manifest and exits 0. The next scheduled run continues from that
-# cursor. Four runs a day walk the backlog in a few days without ever exceeding
-# the budget, and a steady-state incremental run costs a few hundred requests.
+# `GITHUB_TOKEN` is limited to 1,000 requests per hour PER REPOSITORY. That is
+# ONE pool for every workflow in this repo that calls the API — not a per-workflow
+# allowance — and this job is far from its only caller:
+#
+#   this archiver             800 per run (the `--max-requests` cap below), 4/day
+#   half-state patrol         a board sweep, 4/day at :37 on hours 1,7,13,19
+#   required-set patrol       2/day at :23 on hours 4,16
+#   release-coverage patrol   daily at 04:19; platform-checklist watchdog at 02:51
+#   merged-branch reaper      Mondays 04:37, an API sweep over branches and PRs
+#   every CI, lint and smoke run
+#                             a handful of requests each, hourly and per push
+#
+# 800 is chosen against that pool rather than against this job's appetite: it is
+# the largest cap that still leaves a fifth of the hour to whatever else lands in
+# the same window, and the schedule below keeps the two heavy board readers out
+# of each other's hours entirely. ⛔ Raising the cap is not a tuning decision,
+# ⛔ there is no retry loop, and ⛔ there is no second token — a run that wants
+# more requests waits for the next slot, which is what the resume cursor is for.
+#
+# ## Why a run may stop before it is finished — and what it reads FIRST
+#
+# A first full snapshot of this board — several thousand numbers, each with a
+# comment thread — does not fit one run and must not try, so the script stops at
+# its own `--max-requests` ceiling, writes its phase cursor into the manifest and
+# exits 0. The next scheduled run continues from that cursor. Four runs a day
+# walk the backlog in a few days without ever exceeding the budget, and a
+# steady-state incremental run costs a few hundred requests.
+#
+# WHICH records it reads first is the part that matters, and it is measured
+# rather than assumed. The first scheduled run of this workflow walked
+# `state=all` oldest-first and spent all 800 requests on 137 closed issues and
+# 268 closed pull requests from February — ZERO open cards, with days of runs
+# still to go. The open board is exactly what a suspension destroys (#17374 F3),
+# so it was the half being archived last. A first walk now runs the OPEN phase to
+# completion — issues and pull requests, one listing — before the closed history
+# starts, and a run that runs out of budget inside the open set resumes inside
+# it. The manifest's `walk_phase` says which phase a run is in, so "open set
+# complete, history resuming" is never read as "still inside the open set".
 #
 # ⛔ On a real rate-limit refusal the script does NOT retry: it stops, writes the
 # cursor and exits non-zero with the reset time. A loop against a spent budget
@@ -85,13 +115,35 @@ name: Board Snapshot
 
 on:
   schedule:
-    # The half-state patrol's cadence, deliberately: four times a day, six hours
-    # apart, at :37 past the hour — offset from the top of the hour where the
-    # hourly triage Routine runs, so the two do not contend for the same minute
-    # of the shared request budget. Six-hourly is the loss window this accepts:
-    # a card created and destroyed inside one interval was never archived, and
-    # nothing cheaper than a webhook closes that, which is a different card.
-    - cron: '37 1,7,13,19 * * *'
+    # Four times a day, six hours apart, at :07 past the hour. The HOURS are
+    # chosen against the other standing spenders listed above, not for tidiness.
+    #
+    # This job first shipped at `37 1,7,13,19` — the half-state patrol's cron to
+    # the minute. Both are scheduled board readers, both authenticate as this
+    # repository's `GITHUB_TOKEN`, and that budget is per repository per hour, so
+    # a snapshot run spending its full 800 leaves the patrol the remainder of the
+    # same window. Measured on the day this moved: the 13:37Z patrol run and the
+    # 13:41Z snapshot run were BOTH green, so nothing had been starved yet — the
+    # offset is PREVENTION, taken while the archive was still small enough that
+    # no run had yet spent its whole cap against the patrol's window.
+    #
+    # Of the five hour sets that share no hour with the patrol's 1,7,13,19, this
+    # is the least contended on this repository's cron inventory: 08, 14 and 20
+    # UTC carry no other scheduled workflow at all, and 02 UTC carries only the
+    # platform-checklist watchdog at :51 — 44 minutes after this run starts —
+    # plus CodeQL on Mondays. `4,10,16,22` was the obvious alternative and is
+    # worse on the same measurement: it drops an 800-request run into the busiest
+    # scheduled hour on this board (04:00 rerun-safety, 04:19 release-coverage
+    # patrol, 04:23 required-set patrol, 04:37 branch reaper on Mondays, 04:41
+    # create-smoke) and shares hour 16 with the required-set patrol.
+    #
+    # The minute is off the top of the hour on purpose, as in every patrol here:
+    # scheduled workflows queue behind everyone else's :00 cron.
+    #
+    # Six-hourly is the loss window this accepts: a card created and destroyed
+    # inside one interval was never archived, and nothing cheaper than a webhook
+    # closes that, which is a different card.
+    - cron: '7 2,8,14,20 * * *'
   workflow_dispatch: {}
   # Changes to the archiver itself get exercised before they merge. The paths
   # name every file the run actually loads — the archiver, the module it imports

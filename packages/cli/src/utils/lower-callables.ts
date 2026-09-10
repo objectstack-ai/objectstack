@@ -59,6 +59,29 @@ export interface LoweringResult {
   bodyExtracted: number;
   /** Per-extraction failures (still emit handler ref + bundle, but warn). */
   bodyExtractionWarnings: BodyExtractionWarning[];
+  /**
+   * [#16546] The `hooks[*].handler` ref strings whose `body` was minted HERE
+   * — extracted from the author's inline `handler` function — as opposed to a
+   * `body` the author wrote directly. A ref lands here if and only if this
+   * call set `hook.body`, so the set is empty whenever every hook already
+   * carried its own `body`.
+   *
+   * A ref, not a hook index: `register`'s `taken`/`refByFn` maps are shared
+   * across the whole walk (top level AND every ADR-0130 D4 package body, see
+   * `lowerBody`'s header), so a ref is unique for this whole call and
+   * survives unchanged through a Zod parse (`handler` is an ordinary
+   * string field) — an index would not: `authoringRuleUnionStack` folds
+   * package hooks into a new top-level array with its OWN numbering, and a
+   * hook index recorded against this call's `hooks[i]` would silently
+   * address a different hook once folded.
+   *
+   * Consumed by `validateReadonlyHookWrites` / `validateHookBodyWrites`
+   * (`@objectstack/lint`) via `AuthoringRuleContext.loweredHookRefs`, to
+   * report `path: hooks[i].handler` — a key that exists in the author's
+   * source — instead of `hooks[i].body.source`, a key this function minted
+   * and the author never wrote.
+   */
+  loweredHookRefs: ReadonlySet<string>;
 }
 
 type AnyFn = (...args: unknown[]) => unknown;
@@ -83,6 +106,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
   const functions: Record<string, AnyFn> = {};
   const taken = new Set<string>();
   const warnings: BodyExtractionWarning[] = [];
+  const loweredHookRefs = new Set<string>();
   let bodyExtracted = 0;
 
   // Try to extract a metadata-only body from a callable. Returns null if the
@@ -170,7 +194,12 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
           // Extract metadata body unless the user already provided one.
           if (!hook.body) {
             const body = tryExtractBody(hook.handler as AnyFn, `hook '${name}'`);
-            if (body) hook.body = body;
+            if (body) {
+              hook.body = body;
+              // [#16546] This ref's `body` was minted here, not authored — the
+              // marker the two hook write-set rules redirect their `path` on.
+              loweredHookRefs.add(ref);
+            }
           }
           hook.handler = ref;
         }
@@ -296,6 +325,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
     count: Object.keys(functions).length,
     bodyExtracted,
     bodyExtractionWarnings: warnings,
+    loweredHookRefs,
   };
 }
 

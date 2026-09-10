@@ -260,8 +260,8 @@ export default class Validate extends Command {
       //     own contract decision (`compile.ts` records why the key is
       //     build's alone). No step line is printed either: the text face is
       //     byte-for-byte what it was, and the docs transcripts stay true.
-      const { lowered } = lowerCallables(normalized as Record<string, unknown>);
-      const result = ObjectStackDefinitionSchema.safeParse(lowered);
+      const lowering = lowerCallables(normalized as Record<string, unknown>);
+      const result = ObjectStackDefinitionSchema.safeParse(lowering.lowered);
 
       if (!result.success) {
         if (flags.json) {
@@ -304,6 +304,9 @@ export default class Validate extends Command {
         normalized: normalized as Record<string, unknown>,
         parsed: result.data as Record<string, unknown>,
         sduiManifest: resolveSduiManifest(),
+        // [#16546] Same ref set `os build` / `os lint` compute — keeps this
+        // door's hook write-set findings at the same `path` as the other two.
+        loweredHookRefs: lowering.loweredHookRefs,
       });
       const { errors: ruleErrors, advisories } = splitBySeverity(findings);
       ruleAdvisories = advisories;
