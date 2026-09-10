@@ -146,7 +146,7 @@ model: opus
 - 派生答哪些门禁读你改的文件,不答哪些测试测这个脚本。
 - 跑同目录点名它的 `*.test.ts`,加同包 tests 下 `git grep` 该脚本文件名的全部命中。
 - 该脚本只住在 objectstack,答案只关于它所在的树:每次推导第一行(stderr)点名仓与 commit。
-- 读之前先核对;姊妹仓(objectui / cloud)没有 `scripts/pm/`。
+- 读之前先核对;姊妹仓未必有 `scripts/pm/dispatch-gates.mjs`:objectui 只有 `check-half-states.mjs`。
 - 把它们的路径喂进 objectstack 检出,得到的是 objectstack 的门禁族:形态完整、退出 0、全错。
 - 那边的清单从该仓自己的 `package.json` 与 `.github/workflows/` 手工推导。
 - 加 `--repo <owner>/<name>` 申报本次答案该属于哪个仓,不匹配即拒绝并同时点名两个仓。
