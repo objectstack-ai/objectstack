@@ -150,14 +150,17 @@
  * passed". Precondition ① of the landing check is still a human reading a PASS
  * comment on the card.
  *
- * ⭐ C4 is the ONE thing this file reads out of a verdict comment, and it is not
- * the verdict: the `Implemented-by:` / `Reviewed-by:` identity pair the verdict
- * declares about its own AUTHORSHIP (a session id on both, or a `mode:subagent`
- * dev's BRANCH on the left — the grammar note beside AUTHORSHIP_KEYS). No PASS
- * or FAIL token is read to reach it, so the boundary above is narrowed by
- * exactly one fact and not crossed — a self-issued verdict is refused on WHO
- * wrote it, never on what it concluded, and the row is report-only like every
- * other one here.
+ * ⭐ C4 and C6 are the ONLY things this file reads out of a verdict comment, and
+ * neither is the verdict. C4 reads the `Implemented-by:` / `Reviewed-by:`
+ * identity pair the verdict declares about its own AUTHORSHIP (a session id on
+ * both, or a `mode:subagent` dev's BRANCH on the left — the grammar note beside
+ * AUTHORSHIP_KEYS). C6 (#17302) reads that a review of record EXISTS on the
+ * current head — H51's heading and head-sha facts, plus a `Reviewed-by:` line —
+ * on a pair whose gate was already cleared. No PASS or FAIL token is read to
+ * reach either, so the boundary above is narrowed by exactly two facts and not
+ * crossed — a self-issued verdict is refused on WHO wrote it, an unrecorded one
+ * on WHETHER it was written down, never on what it concluded — and both rows
+ * are report-only like every other one here.
  *
  * ## How a COMPLETED review is told from a gate that never ran (#14155)
  *
@@ -250,6 +253,54 @@
  * PRINTS rather than going quiet, and why it is a fourth reading rather than a
  * silent pass.
  *
+ * ## C6 — a cleared gate with no review of record behind it (#17302)
+ *
+ * The tier policy names the lane seat's own default-tier review, plus the gates,
+ * as the review of record for every lane but spec and skills — and until #17302
+ * nothing named WHERE that review lives or what it must contain. Measured on one
+ * window by the director's leak sweep: five `Clause-②: yes` merges whose
+ * carriers were hung and cleared (or never hung) with NO review-like comment on
+ * the PR or its card except the dev's own `os-dev-report`. Clearing the carrier
+ * was indistinguishable from never reviewing, and `--pair` — the landing
+ * check's own ② — read every one of them as the COMPLETED state and answered 0.
+ *
+ * `references/contract-review.md` now names the record: ONE comment on the PR
+ * or its card, in the shape the tier verdict already has minus the tier line —
+ * 「复核记录 = 一条评论落 PR 或卡,达档与默认档同形」, 「同形 = `## Contract
+ * review` 题头、所审 head sha 码段、①②③ 逐项、独立性对、PASS/FAIL 判词」 — and
+ * makes every clear cite it (「凡清标同笔留 provenance 评论,引记录 id 与所判
+ * head」, 「清标缺引记录即半态」). C6 is the machine half of that sentence: on a
+ * pair in the COMPLETED state (declared `yes`, cleared on both carriers, head
+ * unmoved — `gateBindingState`, unchanged) it reads the PR's thread and the
+ * card's for a comment in H51's measured shape — a level-2 heading beginning
+ * `## Contract review` and this head's sha as a code span, both IMPORTED from
+ * `check-half-states.mjs` rather than restated — that also carries a
+ * `Reviewed-by:` line, read by C4's own key regex. Absent ⇒ a FINDING row and
+ * exit 4; present ⇒ a NOTE naming the comment, so the provenance comment can
+ * cite it; present without the line ⇒ a finding that names the comment and the
+ * missing line.
+ *
+ * ⛔ A FINDING, not an advisory, and the file's own table decides that: the row
+ * is a fact about THIS pair at its own landing moment — a gate cleared with
+ * nothing behind it — and an adverse fact rendered as 0-with-a-message is the
+ * silence this file exists against. It re-blocks no legal workflow: under the
+ * rule text the record precedes the clear, so a pair that followed it reads
+ * clean, and a pair cleared before the text landed owes exactly one comment —
+ * the review its seat already performed, written down — before `--pair` will
+ * answer 0. The sweep stays report-only (rows print, exit 0), so the board-wide
+ * transition costs nothing; only a pair being landed is judged.
+ *
+ * ⛔ What it does NOT read, and why. No verdict WORD: H51 is verdict-agnostic by
+ * construction, this file's header bans verdict-reading as 自查放行, and the
+ * live corpus already writes the word two ways (a fenced `VERDICT: PASS` on the
+ * 2026-09-01 board that C4's discriminator was measured on; `**Verdict: PASS
+ * WITH FINDINGS**` under an `## Contract review` heading on every 2026-09-09
+ * specimen, which that discriminator does not see) — a regex for it would be a
+ * third spelling, the "check that can barely fail" #12409 measured. No ①②③
+ * line items: they are prose the seat reads. So exit 0 still means "a review of
+ * record exists on this head and names a reviewer", never "the review passed";
+ * precondition ① of the landing check stays human.
+ *
  * ## The three read paths — a seat's ACCESS must not decide whether ② is checkable
  *
  * Precondition ② is read by the seat that LANDS the pair, and the carrier
@@ -294,6 +345,11 @@
  *                           head.ref, head.sha, labels ]  (or "pull", one row)
  *             "cards":    { "13476": the `/issues/N` payload }
  *             "comments": { "13476": the `/issues/N/comments` rows }
+ *                         — the SAME bag, keyed by the PR NUMBER, carries the
+ *                         PR's own thread (a PR is an issue at that endpoint),
+ *                         owed by a pair in the COMPLETED state for C6
+ *                         (#17302); omitting it there reads `null` → the pair
+ *                         is UNJUDGED, never a missing record.
  *             "events":   { "13476": the `/issues/N/events` rows }  — optional
  *             "commits":  { "HEAD-SHA": { commit: { committer: { date } } } }
  *                         — optional
@@ -321,8 +377,10 @@
  * carriers' event streams (one page each on this board) and — only once both
  * read cleared — one commit: ≤5 reads for a candidate pair, 2 for every other.
  * A pair whose card declares `Clause-②: no` adds ONE more — its changed-file
- * listing, for C5 (#16448). The sweep pays the listing once and the same
- * per-pair cost for every pair it derives. ⇒ a `--pair` run costs 3–7 requests,
+ * listing, for C5 (#16448) — and a pair in the COMPLETED state adds one more,
+ * in BOTH modes: its PR's own comment thread, for C6 (#17302), cached per PR so
+ * a two-card PR pays once. The sweep pays the listing once and the same
+ * per-pair cost for every pair it derives. ⇒ a `--pair` run costs 3–8 requests,
  * while a 29-PR sweep costs about 60 — which is exactly GitHub's documented
  * anonymous hourly budget, one more reason the run prints the remaining count
  * instead of assuming it.
@@ -378,11 +436,15 @@
  *      "0-with-a-message" the entry for 4 below bans: that ⛔ forbids
  *      rendering an ADVERSE verdict as 0, and this reading is not one.
  *   2  also the answer when a C3 candidate's event stream or head commit could
- *      not be read, or when a `Clause-②: no` pair's changed-file listing could
- *      not be: an unread stream is not a never-hung gate and an unread diff is
- *      not a narrow one, so both are UNJUDGED rather than either verdict.
+ *      not be read, when a `Clause-②: no` pair's changed-file listing could
+ *      not be, or when a COMPLETED pair's PR thread could not be (C6): an unread
+ *      stream is not a never-hung gate, an unread diff is not a narrow one and
+ *      an unread thread is not a missing record, so all are UNJUDGED rather
+ *      than either verdict.
  *   4  they do not — or, since #16448, the declaration reads `no` while the
- *      diff carries a widening tell (row C5). One exit code with several
+ *      diff carries a widening tell (row C5) — or, since #17302, the gate was
+ *      cleared on both carriers and no review of record names the head (row
+ *      C6). One exit code with several
  *      adverse reasons is the shape this table already had: the ROW says which,
  *      and the exit says only "a verdict about this pair, adverse".
  *      Deliberately NOT 3: a verdict about the PAIR must be
@@ -417,16 +479,20 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import {
   CLAIM_COMMENT_MARKER,
+  CONTRACT_REVIEW_HEADING_MARKER,
   CONTRACT_REVIEW_LABEL,
   DEFAULT_SWEEP_REPO,
   EXIT_PREREQUISITE_NOT_MET,
+  H51_SHA_MIN_HEX,
   PROXY_FLAG,
   SWEEP_REPO_SHAPE,
+  contractReviewHeadMatch,
   deliveryEvidence,
   deliveryEvidenceNote,
   governingClaim,
   isGateSemanticLabel,
   labelNames,
+  latestMarkedComment,
   prDeliversCard,
   proxyRearmPlan,
   resolveSweepRepo,
@@ -471,15 +537,17 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'pairing, derived from the same relation H8/H31 read': 3,
   'the three read paths: ordered, offline-capable, and named in every refusal': 24,
   'C5: the direction claim checked against the diff (#16448)': 16,
+  'C6: the review of record on this head, and the carrier the rule text names (#17302)': 40,
   'the exit register is distinct in every direction it must be': 6,
   'the argv contract and the board provenance (#16623)': 42,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-// Raised by exactly the one battery #16304 adds, so the roster's existing slack
-// is preserved rather than tightened or loosened as a side effect.
-const SELF_TEST_BATTERY_FLOOR = 15;
+// Raised by exactly the one battery #16304 adds, and again by exactly the one
+// #17302 adds, so the roster's existing slack is preserved rather than
+// tightened or loosened as a side effect.
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1571,6 +1639,177 @@ export function wideningUnjudged(pair, repo) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// C6 -- the review of record on this head (#17302)
+// ---------------------------------------------------------------------------
+
+/**
+ * Does this pair owe the review-of-record read -- its PR's own comment thread?
+ *
+ * ⭐ ONLY the completed state: declared `yes`, the gate bound and cleared on
+ * both carriers, head unmoved since (`gateBindingState`, unchanged). That is the
+ * one state in which `references/contract-review.md` says a record must already
+ * exist -- 「复核记录 = 一条评论落 PR 或卡」, 「清标缺引记录即半态」 -- and it is
+ * exactly the state the filing sweep measured five times over: `Clause-②: yes`,
+ * carriers cleared, merged, and the only review-like comment anywhere the dev's
+ * own report. A pair still carrying the gate owes nothing yet (the review is
+ * pending, not missing); a never-hung, half-bound or moved-after-clear pair is
+ * C3's row already, and two rows for one fact is the drift this file avoids.
+ *
+ * Exported and read by BOTH the fetch and the UNJUDGED accounting, the way
+ * `needsGateHistory` and `needsWideningRead` are, so the set that owes the
+ * thread and the set that gets one cannot drift apart. It reads the binding
+ * state, so it can only be true once the event streams and the head commit
+ * have been read -- the record pass in `gather` follows the history pass by
+ * construction.
+ */
+export function needsRecordRead(pair) {
+  return gateBindingState(pair).state === 'completed';
+}
+
+/** The `Reviewed-by:` key line, exactly as C4 reads it -- one spelling, not two. */
+const REVIEWED_BY_LINE = AUTHORSHIP_KEY_LINES.get('Reviewed-by');
+
+/**
+ * The review of record for one pair -- read from the PR's thread AND the card's,
+ * because the rule lets it live on either.
+ *
+ * ## The recognition shape, and why it is H51's and not a new one
+ *
+ * `check-half-states.mjs` H51 already reads "a contract-review verdict on THIS
+ * head" out of a thread, and measured its shape over four live dialects: a
+ * level-2 heading whose line begins `## Contract review`, plus the head sha
+ * written as a code span somewhere in the comment. Both facts are IMPORTED
+ * from it (`CONTRACT_REVIEW_HEADING_MARKER`, `contractReviewHeadMatch`) rather
+ * than restated, and the newest such comment is chosen by the same
+ * `latestMarkedComment` H47 resolves with. The filter is
+ * `latestContractReviewOnHead`'s, spelled out here because that finder returns
+ * an id and not the row, and the row is what the third fact is read from.
+ *
+ * ⭐ The third fact is the CARRIER the rule text names -- 「独立性对」: a
+ * `Reviewed-by:` line, read by C4's own key regex so the two rows cannot
+ * disagree about what one looks like. Its VALUE is not judged here: who
+ * reviewed, and whether that is the implementer, is C4's row. This row asks
+ * only that the record names a reviewer at all, which is what separates a
+ * review of record from a dev's own report -- and from the shape the filing
+ * sweep found on the seat's side: an ACCEPT paragraph carrying the head and the
+ * line under a bold first line, with no heading anywhere.
+ *
+ * ⛔ Not read: the verdict WORD (the file's boundary, and the corpus already
+ * spells it two ways) and the ①②③ items (prose the seat reads).
+ *
+ * @returns {{ state: 'not-owed' }
+ *          | { state: 'unreadable', gaps: string[] }
+ *          | { state: 'absent', read: { pr: number, card: number } }
+ *          | { state: 'unsigned', where: 'PR'|'card', id: number|null, sha: string, at: string|null }
+ *          | { state: 'found', where: 'PR'|'card', id: number|null, sha: string, at: string|null }}
+ */
+export function reviewOfRecord(pair) {
+  if (!needsRecordRead(pair)) return { state: 'not-owed' };
+  const gaps = [];
+  if (!Array.isArray(pair?.prComments)) gaps.push(`PR #${pair?.pr}'s comment thread`);
+  if (!Array.isArray(pair?.cardComments)) gaps.push(`card #${pair?.card}'s comment thread`);
+  const head = String(pair?.headSha ?? '');
+  // A head too short to be matched by H51's span test can never find its
+  // record, so it is a read that could not be made -- never an absent record.
+  if (head.length < H51_SHA_MIN_HEX) gaps.push(`PR #${pair?.pr}'s head sha`);
+  if (gaps.length > 0) return { state: 'unreadable', gaps };
+
+  const tagged = [
+    ...pair.prComments.map((row) => ({ row, where: 'PR' })),
+    ...pair.cardComments.map((row) => ({ row, where: 'card' })),
+  ];
+  const onHead = tagged.filter(
+    ({ row }) =>
+      CONTRACT_REVIEW_HEADING_MARKER.test(String(row?.body ?? '')) &&
+      contractReviewHeadMatch(row?.body, head) !== null,
+  );
+  const newest = latestMarkedComment(onHead.map(({ row }) => row), CONTRACT_REVIEW_HEADING_MARKER);
+  if (!newest) return { state: 'absent', read: { pr: pair.prComments.length, card: pair.cardComments.length } };
+  const { row, where } = onHead[newest.index];
+  const found = {
+    where,
+    id: row?.id ?? null,
+    sha: contractReviewHeadMatch(row?.body, head),
+    at: row?.created_at ?? null,
+  };
+  const signed = String(row?.body ?? '').split(/\r?\n/).some((line) => REVIEWED_BY_LINE.test(line));
+  return signed ? { state: 'found', ...found } : { state: 'unsigned', ...found };
+}
+
+/**
+ * C6 -- a gate cleared on both carriers with no review of record on the head.
+ *
+ * The rule this row carries is the one #17302 landed: the default-tier lanes'
+ * review of record is ONE comment on the PR or its card, in the tier verdict's
+ * own shape minus the tier line, and every clear cites it. Before that text,
+ * clearing the carrier was indistinguishable from never reviewing -- measured
+ * five times in one window by the director's leak sweep -- and this file's own
+ * `--pair` read every one of those pairs as the completed state and answered 0.
+ *
+ * ⛔ A FINDING, and the file's exit table decides that rather than a preference:
+ * the row is an adverse fact about THIS pair at its own landing moment, and an
+ * adverse fact rendered as 0-with-a-message is the silence this file exists
+ * against. It re-blocks no legal workflow -- under the text the record precedes
+ * the clear -- and a pair cleared before the text landed owes exactly one
+ * comment: the review its seat already performed, written down.
+ */
+export function c6NoReviewOfRecord(pair) {
+  const v = reviewOfRecord(pair);
+  if (v.state === 'not-owed' || v.state === 'unreadable' || v.state === 'found') return null;
+
+  const short = String(pair?.headSha ?? '').slice(0, 10);
+  const head =
+    `card #${pair?.card} declares \`Clause-②: yes\`, its gate was bound and cleared on BOTH carriers, and its ` +
+    `open PR #${pair?.pr}${pair?.draft ? ' (draft)' : ''} still sits at the head that was cleared (\`${short}\`)`;
+  const shape =
+    'The record is the comment `references/contract-review.md` names -- 「复核记录 = 一条评论落 PR 或卡,达档与默认档' +
+    '同形」 -- read here in H51\'s measured shape: a level-2 heading beginning `## Contract review`, this head\'s sha ' +
+    'as a code span, and a `Reviewed-by:` line naming the reviewer. Existing tier verdicts already carry all three; a ' +
+    'dev\'s own report, or an ACCEPT paragraph with the head and the line but no heading, is not one -- and ' +
+    '「清标缺引记录即半态」.';
+  const boundary =
+    '⛔ Verdict-agnostic: no PASS or FAIL token is read to reach this -- the PASS half of the landing check stays ' +
+    'human -- and the ①②③ line items are prose the seat reads, not this file.';
+
+  if (v.state === 'unsigned') {
+    return (
+      `${head} -- a \`## Contract review\` comment naming this head exists (${v.where} thread, ` +
+      `${v.id ? `comment ${v.id}` : 'no readable id'}, ${v.at ?? 'undated'}, names \`${v.sha}\`) but carries ` +
+      'NO `Reviewed-by:` line, so it names no reviewer and is not a review of record. ' +
+      `${shape} Remedy: the reviewing seat posts the record with its independence pair (\`Implemented-by:\` / ` +
+      '`Reviewed-by:`) -- the NEWEST heading comment on this head governs, so a corrected record clears the row -- ' +
+      `and cites it in the provenance comment beside the clear. ${boundary} ${NEVER_WRITES}`
+    );
+  }
+  return (
+    `${head} -- and NO review of record exists on this head: ${v.read.pr} comment(s) on the PR thread and ` +
+    `${v.read.card} on the card were read, and none is a \`## Contract review\` comment naming \`${short}\` with a ` +
+    '`Reviewed-by:` line. This is the shape the filing sweep measured five times in one window -- a cleared gate ' +
+    `with nothing behind it, indistinguishable from never reviewing. ${shape} Remedy: the owning seat writes down ` +
+    'the review it already performed, in that shape, on the PR or the card, and cites it in the provenance comment ' +
+    `beside the clear. ${boundary} ${NEVER_WRITES}`
+  );
+}
+
+/**
+ * The C6-RECORD note -- the record WAS found, and here is what to cite.
+ *
+ * A note rather than silence, for the landing seat's next act: the rule makes
+ * the provenance comment name the record's id and the head it judged, and the
+ * run has both in hand. ⚠️ Existence, not the verdict.
+ */
+export function c6RecordNote(pair) {
+  const v = reviewOfRecord(pair);
+  if (v.state !== 'found') return null;
+  return (
+    `review of record on this head: ${v.where} thread, ${v.id ? `comment ${v.id}` : 'a comment carrying no readable id'} ` +
+    `(${v.at ?? 'undated'}) is a \`## Contract review\` comment naming \`${v.sha}\` and carrying a \`Reviewed-by:\` line -- ` +
+    'cite it in the provenance comment beside the clear (「凡清标同笔留 provenance 评论,引记录 id 与所判 head」). ' +
+    '⚠️ Existence, not the verdict: whether it reads PASS is precondition ① of the landing check and stays human.'
+  );
+}
+
 /**
  * Every FINDING row for one pair, in reporting order.
  *
@@ -1594,6 +1833,8 @@ export function pairRows(pair, pairs = null) {
   if (ungated) rows.push({ code: 'C3', text: ungated });
   const selfReview = c4VerdictSelfReview(pair);
   if (selfReview) rows.push({ code: 'C4', text: selfReview });
+  const record = c6NoReviewOfRecord(pair);
+  if (record) rows.push({ code: 'C6', text: record });
   return rows;
 }
 
@@ -1609,6 +1850,8 @@ export function pairNotes(pair, pairs = null) {
   const notes = [];
   const sibling = c2SiblingDeclared(pair, pairs);
   if (sibling) notes.push({ code: 'C2-SIBLING', text: sibling });
+  const record = c6RecordNote(pair);
+  if (record) notes.push({ code: 'C6-RECORD', text: record });
   return notes;
 }
 
@@ -1676,6 +1919,13 @@ export function pairUnjudged(pair) {
   if (gaps.length === 0) {
     const authorship = cardVerdictAuthorship(pair?.cardComments ?? null);
     if (authorship.state === 'unreadable') gaps.push(`card #${pair?.card}'s verdict authorship (${authorship.reason})`);
+  }
+  // C6's own #4690 half: the record read is owed by the COMPLETED state only,
+  // and an unread PR thread there is not an absent record. Reached only once
+  // the binding state itself read, so a stream gap above is never doubled.
+  if (gaps.length === 0) {
+    const record = reviewOfRecord(pair);
+    if (record.state === 'unreadable') gaps.push(...record.gaps.map((g) => `${g} (the review-of-record read)`));
   }
   if (gaps.length === 0) return null;
   return (
@@ -2196,6 +2446,23 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { readFile
       pair.files = await reader.readPullFiles(repo, pair.pr);
     }
   }
+
+  // Fourth pass -- the review of record, for the COMPLETED pairs and nobody
+  // else (#17302). The PR's own thread is the same endpoint the card's is
+  // (`/issues/N/comments` -- a PR is an issue there), read through the same
+  // `readCardComments`, so the offline document carries it in the same
+  // `comments` bag keyed by the PR NUMBER and no reader grows a seventh method.
+  // One read per completed pair, in BOTH modes: the population is the narrow
+  // window between a clear and a landing, and a cleared gate with no record
+  // behind it is precisely the board fact the filing sweep measured five
+  // times. Cached per PR, so a two-card PR (#16304) pays once.
+  const prThreads = new Map();
+  for (const pair of pairs) {
+    if (!needsRecordRead(pair)) continue;
+    if (!prThreads.has(pair.pr)) prThreads.set(pair.pr, await reader.readCardComments(repo, pair.pr));
+    const rows = prThreads.get(pair.pr);
+    pair.prComments = Array.isArray(rows) ? rows : null;
+  }
   return { pulls, pairs };
 }
 
@@ -2591,12 +2858,30 @@ export function selfTest() {
 
   // -- #14155: the COMPLETED state, and the three it must stay distinct from --
   battery('#14155: the COMPLETED state, and the three it must stay distinct from');
+  const HEAD_9AF9 = '9af92aa3'; // the head the 2026-09-01 review judged, as the board abbreviated it.
+  const RECORD_SESSION = 'session_01489YWhZEoHT9oXshiyywQy';
+  // The review of record, in the shape measured on every 2026-09-09 specimen:
+  // the `## Contract review` heading, the head as a code span, the independence
+  // pair -- the shape #17302 names for the default-tier lanes too.
+  const RECORD = (
+    sha,
+    lines = ['- **Implemented-by:** branch `claude/issue-13657-x`', `- **Reviewed-by:** \`${RECORD_SESSION}\``],
+    at = '2026-09-01T08:50:00Z',
+    id = 3301,
+  ) => ({
+    id,
+    created_at: at,
+    body: [`## Contract review (clause ②) — **PASS** · head \`${sha}\``, '', ...lines, '', '### ① Derived judgments', '- none', '### ② semver', '- patch', '### ③ Boundary flags', '- none'].join('\n'),
+  });
+  const RECORD_ON_9AF9 = RECORD(HEAD_9AF9);
   const completed = declaredYes({
     pr: 13864,
     card: 13657,
+    headSha: HEAD_9AF9,
     cardEvents: [CARD_HUNG, CARD_CLEARED],
     prEvents: [PR_HUNG, PR_CLEARED],
     headCommittedAt: HEAD_AT_PASS,
+    prComments: [RECORD_ON_9AF9], // #17302: the completed state now also carries its record.
   });
   t('⭐ the measured 2026-09-01 clear (#13864/#13657) produces NO C3 row — the completed state is clean', c3DeclaredYesUngated(completed) === null, JSON.stringify(gateBindingState(completed)));
   t('…and the pair is CLEAN overall, not merely C3-silent', pairRows(completed).length === 0 && pairUnjudged(completed) === null);
@@ -2938,6 +3223,73 @@ export function selfTest() {
   t('the reader roster carries the sixth read, so both readers must implement it', READER_METHODS.includes('readPullFiles'));
   t('…and the offline document serves it from its own `files` bag', typeof pairJsonReader({ pulls: [], files: { 13910: [] } }).readPullFiles === 'function');
 
+  // -- C6: the review of record on this head (#17302) -------------------------
+  //
+  // ★ The measured shapes, both directions. The record is the 2026-09-09
+  // board's verdict shape (heading, head as a code span, the independence
+  // pair); the controls are the two shapes the filing sweep found INSTEAD of
+  // one -- a dev's own `os-dev-report`, and a seat's ACCEPT paragraph carrying
+  // the head and a `Reviewed-by:` line under a bold first line with no heading
+  // at all (the skills seat's own, card #17285, 2026-09-10) -- plus H51's
+  // dialects and the states that owe no read.
+  battery('C6: the review of record on this head, and the carrier the rule text names (#17302)');
+  const bare = (o) => declaredYes({ pr: 13864, card: 13657, headSha: HEAD_9AF9, cardEvents: [CARD_HUNG, CARD_CLEARED], prEvents: [PR_HUNG, PR_CLEARED], headCommittedAt: HEAD_AT_PASS, prComments: [], ...o });
+  // the cost bound: only the completed state owes the read
+  t('only the COMPLETED state owes the review-of-record read', needsRecordRead(bare({})) === true);
+  t('⛔ a declared `no` owes none — the gate never rode it', needsRecordRead(pair({ cardComments: [CLAIM('Clause-②: no')] })) === false);
+  t('⛔ a pair still carrying the gate owes none — the review is pending, not missing', needsRecordRead(pair({ prLabels: [L], cardLabels: [L], cardComments: [CLAIM('Clause-②: yes')] })) === false);
+  t('⛔ a never-hung gate owes none — that is C3\'s row, and no row owns a fact twice', needsRecordRead(declaredYes({ cardEvents: [], prEvents: [] })) === false);
+  t('⛔ a half-bound gate owes none', needsRecordRead(declaredYes({ cardEvents: [CARD_HUNG, CARD_CLEARED], prEvents: [] })) === false);
+  t('⛔ a gate whose head MOVED after the clear owes none — the 重挂 row already covers it', needsRecordRead(bare({ headCommittedAt: '2026-09-01T10:30:00Z' })) === false);
+  t('⛔ an unreadable stream owes none — it is already UNJUDGED', needsRecordRead(bare({ cardEvents: null })) === false);
+  // recognition — the measured record, on either carrier
+  const onPr = reviewOfRecord(bare({ prComments: [RECORD_ON_9AF9] }));
+  t('the 2026-09-09 verdict shape on the PR thread reads FOUND', onPr.state === 'found');
+  t('…naming where it was found, its id and the head span it names', JSON.stringify([onPr.where, onPr.id, onPr.sha]) === JSON.stringify(['PR', 3301, HEAD_9AF9]), JSON.stringify(onPr));
+  const onCard = reviewOfRecord(bare({ cardComments: [CLAIM('Clause-②: yes'), RECORD_ON_9AF9] }));
+  t('the same comment on the CARD thread reads FOUND too — the rule lets it live on either', onCard.state === 'found' && onCard.where === 'card');
+  const absentRow = c6NoReviewOfRecord(bare({}));
+  t('⭐ a cleared gate with NO record on either thread is a C6 row', typeof absentRow === 'string');
+  t('…that says NO review of record in as many words, and names the head', says(absentRow, 'NO review of record') && says(absentRow, HEAD_9AF9));
+  t('…and states what was read — both threads, with their counts', says(absentRow, '0 comment(s) on the PR thread') && says(absentRow, '1 on the card'));
+  t('…and quotes the rule it is the carrier for', says(absentRow, '复核记录 = 一条评论落 PR 或卡') && says(absentRow, '清标缺引记录即半态'));
+  t('…and names the shape, so the remedy is executable', says(absentRow, '## Contract review') && says(absentRow, 'Reviewed-by:'));
+  t('…and is verdict-agnostic, and never writes', says(absentRow, 'PASS half') && says(absentRow, '自查放行'));
+  // H51's head-identity test, and its dialects
+  t('⛔ a record naming an OLDER head is not a record on this head — 「head 后移或无结论才重挂」 read forwards', reviewOfRecord(bare({ prComments: [RECORD('0ldhead00')] })).state === 'absent');
+  const ADOPTION = { id: 3302, created_at: '2026-09-01T08:52:00Z', body: `**Director seat adoption record** — the verdict below is adopted verbatim.\n\n---\n\n## Contract review (\`CONTRACT_REVIEW_TIER\`, isolated seat) — PR #13864 @ \`${HEAD_9AF9}\`\n\n- **Reviewed-by:** isolated subagent, adopted by \`${RECORD_SESSION}\`\n- **Implemented-by:** branch \`claude/issue-13657-x\`` };
+  t('a director ADOPTION record — heading on a later line — reads FOUND: H51\'s fourth dialect, line-anchored', reviewOfRecord(bare({ prComments: [ADOPTION] })).state === 'found');
+  t('a blockquoted heading still reads — H51 tolerates the `>` a seat writes without meaning it', reviewOfRecord(bare({ prComments: [{ ...RECORD_ON_9AF9, body: RECORD_ON_9AF9.body.replace(/^## /, '> ## ') }] })).state === 'found');
+  t('⛔ a `###` sub-heading is not the marker', reviewOfRecord(bare({ prComments: [{ ...RECORD_ON_9AF9, body: RECORD_ON_9AF9.body.replace(/^## /, '### ') }] })).state === 'absent');
+  t('⛔ the heading mentioned inside a paragraph is not the marker', reviewOfRecord(bare({ prComments: [{ ...RECORD_ON_9AF9, body: RECORD_ON_9AF9.body.replace(/^## /, 'see the ## ') }] })).state === 'absent');
+  // the two shapes the sweep found INSTEAD of a record
+  const DEV_REPORT = { id: 3303, created_at: '2026-09-01T08:40:00Z', body: `os-dev-report\n\n\`\`\`json\n{ "issue": 13657, "pr": "https://github.com/o/r/pull/13864", "summary": "landed at \`${HEAD_9AF9}\`" }\n\`\`\`` };
+  t('⛔ a bare os-dev-report naming the head is NOT a record — the implementer is not the reviewer', reviewOfRecord(bare({ prComments: [DEV_REPORT], cardComments: [CLAIM('Clause-②: yes'), DEV_REPORT] })).state === 'absent');
+  const SEAT_ACCEPT = { id: 3304, created_at: '2026-09-01T08:45:00Z', body: `**ACCEPT — PR #13864 (head \`${HEAD_9AF9}\`) reviewed in-seat at the contract-review tier** (skills seat, session \`${RECORD_SESSION}\`).\n\n- Implemented-by: os-dev subagent on branch \`claude/issue-13657-x\`.\n- Reviewed-by: the skills seat, this session — independence pair holds.` };
+  t('⛔ a seat\'s ACCEPT paragraph — head and `Reviewed-by:` under a bold first line, NO heading — is NOT a record: the measured 2026-09-10 shape this rule changes', reviewOfRecord(bare({ cardComments: [CLAIM('Clause-②: yes'), SEAT_ACCEPT] })).state === 'absent');
+  // the third fact — the carrier the rule text names
+  const UNSIGNED = RECORD(HEAD_9AF9, ['- **Implemented-by:** branch `claude/issue-13657-x`'], '2026-09-01T08:50:00Z', 3305);
+  const unsignedRow = c6NoReviewOfRecord(bare({ prComments: [UNSIGNED] }));
+  t('a heading comment on this head with NO `Reviewed-by:` line reads UNSIGNED, and is a row', reviewOfRecord(bare({ prComments: [UNSIGNED] })).state === 'unsigned' && typeof unsignedRow === 'string');
+  t('…that names the comment and the missing line, not the whole shape', says(unsignedRow, 'comment 3305') && says(unsignedRow, 'NO `Reviewed-by:` line'));
+  t('…and it is a DIFFERENT sentence from the absent row', unsignedRow !== absentRow);
+  t('…and still never writes', says(unsignedRow, '自查放行'));
+  t('the NEWEST heading comment on this head governs — a signed record after an unsigned one clears the row', reviewOfRecord(bare({ prComments: [UNSIGNED, RECORD(HEAD_9AF9, undefined, '2026-09-01T08:55:00Z', 3306)] })).state === 'found');
+  t('…and an unsigned one after a signed one is the reading, in either arrival order', reviewOfRecord(bare({ prComments: [RECORD(HEAD_9AF9, [], '2026-09-01T08:55:00Z', 3307), RECORD(HEAD_9AF9, undefined, '2026-09-01T08:50:00Z', 3306)] })).state === 'unsigned');
+  t('`Reviewed-by:` is read by C4\'s key regex — bullets, bold and backticks read; a different CASE does not', reviewOfRecord(bare({ prComments: [RECORD(HEAD_9AF9, ['- **`Reviewed-by`**: `session_x`'])] })).state === 'found' && reviewOfRecord(bare({ prComments: [RECORD(HEAD_9AF9, ['REVIEWED-BY: `session_x`'])] })).state === 'unsigned');
+  // #4690, C6's half: unread is never clean
+  t('an UNREADABLE PR thread is UNJUDGED, never clean — no row, and the accounting names the read', c6NoReviewOfRecord(bare({ prComments: null })) === null && says(pairUnjudged(bare({ prComments: null })), 'review-of-record read'));
+  t('a completed pair from a caller that predates the read (no `prComments` at all) is UNJUDGED too — fail-closed', says(pairUnjudged(declaredYes({ pr: 13864, card: 13657, headSha: HEAD_9AF9, cardEvents: [CARD_HUNG, CARD_CLEARED], prEvents: [PR_HUNG, PR_CLEARED], headCommittedAt: HEAD_AT_PASS })), 'PR #13864\'s comment thread'));
+  t('a completed pair whose head sha is too short to match is UNJUDGED, not absent', says(pairUnjudged(bare({ headSha: 'abc' })), 'head sha'));
+  // the completed specimen, whole
+  t('⭐ the #14155 specimen WITH its record still reads CLEAN overall — the landing check\'s ② answers 0 after a legitimate clear', pairRows(completed).length === 0 && pairUnjudged(completed) === null, JSON.stringify(pairRows(completed).map((r) => r.code)));
+  t('…and now prints the C6-RECORD note naming the comment, so the provenance comment can cite it', pairNotes(completed).map((n) => n.code).join() === 'C6-RECORD' && says(pairNotes(completed)[0]?.text, 'comment 3301') && says(pairNotes(completed)[0]?.text, '引记录 id 与所判 head'));
+  t('…and the note says existence, not the verdict', says(pairNotes(completed)[0]?.text, 'stays human'));
+  t('C6 reports AFTER C4 and never displaces a row', pairRows(bare({ cardComments: [CLAIM('Clause-②: yes'), VERDICT(SELF_PAIR)] })).map((r) => r.code).join(',') === 'C4,C6');
+  t('C6 is a FINDING — it rides the exit, not the notes', pairRows(bare({})).some((r) => r.code === 'C6') && pairNotes(bare({})).length === 0);
+  t('the offline document serves the PR thread from the same `comments` bag, keyed by the PR number', Array.isArray(pairJsonReader({ pulls: DOC.pulls, comments: { 13910: [] } }).readCardComments('owner/name', 13910)));
+  t('…and one it omits reads null — UNJUDGED, ⛔ never a missing record', pairJsonReader({ pulls: DOC.pulls }).readCardComments('owner/name', 13910) === null);
+
   battery('the exit register is distinct in every direction it must be');
   const codes = [EXIT_OK, EXIT_USAGE, EXIT_INCOMPLETE, EXIT_PREREQUISITE_NOT_MET, EXIT_PAIR_ADVERSE];
   t('every exit code is distinct — a verdict can never be read as an environment complaint', new Set(codes).size === codes.length, JSON.stringify(codes));
@@ -3076,6 +3428,7 @@ export function selfTest() {
       + 'comment with no line — the fourth reading for a card whose sibling carries the declaration '
       + 'with the controls that keep exit 4 reachable, the 2026-08-31 seven-pair replay, the four gate-binding states ' +
       'replayed from the 2026-09-01 clear, the verdict-authorship pair and its legacy silence, ' +
+      'the review of record on the completed state with the two shapes that are not one, ' +
       'the three read paths with their offline reader, the argv contract with its usage and its '
       + 'refusal, the board provenance line, and the exit register).',
   );
