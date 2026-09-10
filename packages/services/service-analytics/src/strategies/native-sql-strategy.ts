@@ -977,12 +977,20 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * The column side of {@link coerceTemporal}: normalise the reference so it
    * reads in the storage form the comparand was coerced into.
    *
-   * A SQLite `Field.datetime` column carries an INTEGER epoch (a `Date` write)
-   * and ISO TEXT (a REST/JSON write, a `NOW()` default — including the platform's
-   * own `created_at`) at the SAME time, so coercing the value alone fixes one half
-   * and empties the other. That is #3912: a `dateRange: last_30_days` on
-   * `created_date` read 0 with 29 rows in range. Every other column and dialect
-   * gets its reference back verbatim.
+   * ⛔ What that form is, on which dialect, is stated in ONE place —
+   * `AnalyticsServiceConfig.coerceTemporalFilterValue`'s storage-reality block
+   * in `analytics-service.ts` (#16737) — and this docblock deliberately does not
+   * restate it. It used to, in a form that has been wrong since #3912: "a SQLite
+   * `Field.datetime` column carries an INTEGER epoch and ISO TEXT at the SAME
+   * time" describes a database written before the canonical convention and not
+   * yet backfilled, not the steady state.
+   *
+   * What is true of THIS method either way: the mixed column is the case it
+   * exists for (#3912 — a `dateRange: last_30_days` on `created_date` read 0
+   * with 29 rows in range, because coercing the value alone fixes one half and
+   * empties the other), and every column the driver reports as converged — plus
+   * every dialect with a real temporal type — gets its reference back verbatim,
+   * so the comparison stays indexable.
    */
   private temporalColumn(
     ctx: StrategyContext,
@@ -1203,11 +1211,14 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     }
 
     // Coerce so booleans/numbers bind as their native SQL types AND so a
-    // relative-date / ISO-string comparand on a SQLite `Field.datetime`
-    // column is converted to its INTEGER epoch storage form. Without this a
-    // dashboard filter like `assessed_at >= '2025-06-18'` compiles to a
-    // TEXT-vs-INTEGER affinity compare that is always false → "No rows",
-    // even though the rows exist (the confirmed time-series chart bug).
+    // relative-date / ISO-string comparand on a SQLite `Field.datetime` column
+    // is converted to that column's storage form (#16737: the ONE statement of
+    // what that form is lives on `AnalyticsServiceConfig.coerceTemporalFilterValue`
+    // — this comment used to name the INTEGER epoch, which #3912 retired as a
+    // live write path). Without the coercion a dashboard filter like
+    // `assessed_at >= '2025-06-18'` compares an unnormalised comparand against
+    // the stored form and is always false → "No rows", even though the rows
+    // exist (the confirmed time-series chart bug).
     params.push(this.coerceTemporal(ctx, target, values[0]));
     return `${this.temporalColumn(ctx, target, rawCol)} ${sqlOp} $${params.length}`;
   }

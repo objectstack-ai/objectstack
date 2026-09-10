@@ -10,7 +10,10 @@
 //   - updateManyData / batchData → per-row `droppedFields` on each result row;
 //   - insertManyData            → per-row `droppedFields` on each outcome;
 //   - createManyData            → aggregated top-level `droppedFields` (its
-//     response has no per-row slot; the insert strip is schema-uniform).
+//     response has no per-row slot, so a union is the only view it can
+//     represent; read a name there as "at least one row dropped this field",
+//     never "every row dropped the same set" — ruling C (#14147) exempts keys a
+//     `beforeInsert` hook assigned, recorded per row, so rows CAN differ).
 
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
@@ -87,7 +90,7 @@ describe('createManyData — aggregated top-level droppedFields (#3455)', () => 
     return { p: new ObjectStackProtocolImplementation(engine as any), engine };
   }
 
-  it('aggregates the schema-uniform create strip across rows into one event', async () => {
+  it('two rows forging the same readonly key surface ONE aggregated top-level event', async () => {
     const { p } = makeProtocol();
     const res: any = await p.createManyData({
       object: 'approval_case',

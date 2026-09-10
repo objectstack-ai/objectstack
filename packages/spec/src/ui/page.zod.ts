@@ -6,7 +6,6 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen } from '../shared/visibility';
 import { VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 import { SortItemSchema } from '../shared/enums.zod';
-import { FilterConditionSchema } from '../data/filter.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { ResponsiveStylesSchema } from './responsive.zod';
 import { retiredKey } from '../shared/retired-key';
@@ -166,7 +165,27 @@ export const ElementDataSourceSchema = lazySchema(() => strictObject({
 }, {
   object: z.string().describe('Object to query'),
   view: z.string().optional().describe('Named view to apply'),
-  filter: FilterConditionSchema.optional().describe('Additional filter criteria'),
+  /**
+   * Additional filter — the `ViewFilterRule` ARRAY form,
+   * `[{ field, operator, value }, ...]`, the one filter orthography every
+   * `filter` door in `ComponentPropsMap` declares (`record:related_list`, its
+   * Add-affordance picker, `element:number`, `element:record_picker`, and the
+   * four `object-*` blocks). Until the ui#6206-B principle reached this key
+   * (#15442, decision batch #55, verbatim 「同意」, option A: family-wide) the
+   * binding alone said `FilterConditionSchema`, the MongoDB-style record — so
+   * `element:record_picker` carried two orthographies at two keys resolved by
+   * one `??` in the renderer, and the consumer's own pins authored an array
+   * here that this declaration refused. Measured at the objectui pin
+   * `53ded82b` before the declaration moved: the composition seam
+   * (`core/src/data-scope/element-data-source.ts`) types the key `unknown`
+   * and AND-combines it with the named view's own rule array through
+   * `mergeFilterNodes`, whose `toFilterNode` lowers a rule array to AST
+   * nodes — the same door every saved view's stored rules take. The record
+   * form is refused at `filter`; the migration prescription is the
+   * `element-data-source-and-object-block-filter-rule-array` semantic entry.
+   */
+  filter: z.array(ViewFilterRuleSchema).optional()
+    .describe('Additional filter criteria — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in ComponentPropsMap shares; AND-combined with the filter of the named view. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   sort: z.array(SortItemSchema).optional().describe('Sort order'),
   limit: z.number().int().positive().optional().describe('Max records to display'),
 }));
@@ -812,6 +831,14 @@ export type PageVariable = z.input<typeof PageVariableSchema>;
 /** Post-parse shape of {@link PageVariable} — defaults applied, transforms run (ADR-0122). */
 export type PageVariableParsed = z.infer<typeof PageVariableSchema>;
 export type ElementDataSource = z.input<typeof ElementDataSourceSchema>;
+/**
+ * Post-parse shape of {@link ElementDataSource} — defaults applied, transforms
+ * run (ADR-0122). Declared on #15442: `filter` carries
+ * `z.array(ViewFilterRuleSchema)`, whose own input ≠ infer (`operator` is
+ * normalized on parse), so the binding left the type-alias convention pin's
+ * isomorphic family the way `element:number` and `element:record_picker` did.
+ */
+export type ElementDataSourceParsed = z.infer<typeof ElementDataSourceSchema>;
 export type InterfacePageConfig = z.input<typeof InterfacePageConfigSchema>;
 /** Post-parse shape of {@link InterfacePageConfig} — defaults applied, transforms run (ADR-0122). */
 export type InterfacePageConfigParsed = z.infer<typeof InterfacePageConfigSchema>;

@@ -229,6 +229,17 @@ describe('validateEmptyCombinators — the surfaces it walks', () => {
   });
 
   it('covers objects, views, reports, datasets, pages and apps', () => {
+    // The `pages` row authors the RETIRED record form on purpose: since
+    // #15442 / #15449 (ui#6206-B, one filter orthography) the `object-*`
+    // `filter` doors carry `z.array(ViewFilterRuleSchema)`, so the spec now
+    // refuses `{ $or: [] }` there. That is exactly what this row measures.
+    // This rule never parses a fixture against the spec schema — the walk is
+    // key-name based (`walkAuthoredFilters` visits any `FILTER_KEYS` key it
+    // reaches, whatever its shape) — so the off-spec author is still judged
+    // here, and gets this located error beside the schema refusal rather than
+    // nothing. It is also the only measurement of the page walk that `pages`
+    // in `EMPTY_COMBINATOR_SURFACES` declares: drop it and that surface is
+    // declared and unmeasured.
     const findings = validateEmptyCombinators({
       objects: [{ name: 'lead', listViews: { mine: { filter: { $or: [] } } } }],
       views: [{ name: 'all', list: { filter: { $and: [] } } }],
