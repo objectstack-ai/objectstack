@@ -376,21 +376,136 @@ function stripServedSystemColumns<T>(type: string, item: T): T {
 let warnedNoRegistryForDataGate = false;
 
 /**
- * Convert a Zod schema to a JSON Schema, returning `undefined` if conversion
- * fails (e.g. unsupported constructs). Cached per schema reference.
+ * [#17501] Does a converted JSON Schema carry any authorable surface at all?
+ *
+ * `z.toJSONSchema()` answers a `ZodPipe` in its default `'output'` mode with a
+ * document that is syntactically a JSON Schema and semantically nothing:
+ * `{"$schema": "..."}` and not one property. It is truthy, so a `?? fallback`
+ * downstream never fires, and the endpoint serves a document that reads as
+ * "this type declares no constraints" when the truth is "this derivation could
+ * not see the type at all".
+ *
+ * A derivation is DEGENERATE when it names no property, offers no union arm,
+ * points at no `$ref` and opens no `additionalProperties` object — i.e. there
+ * is nothing an author or a form renderer could address. Every one of those
+ * four is a real authorable surface, so any one of them present means the
+ * derivation worked.
+ */
+function isDegenerateDerivation(json: Record<string, unknown> | undefined): boolean {
+    if (!json || typeof json !== 'object') return true;
+    const properties = json.properties;
+    if (properties && typeof properties === 'object' && Object.keys(properties).length > 0) return false;
+    for (const arm of ['anyOf', 'oneOf', 'allOf'] as const) {
+        const value = json[arm];
+        if (Array.isArray(value) && value.length > 0) return false;
+    }
+    if (typeof json.$ref === 'string') return false;
+    const additional = json.additionalProperties;
+    if (additional && typeof additional === 'object') return false;
+    return true;
+}
+
+/**
+ * [#17501] One-shot per type: both derivations of this type's schema came back
+ * empty. Keyed by type name, not by schema reference, because the message names
+ * the type and repeating it per request is noise.
+ */
+const _warnedDegenerateDerivation = new Set<string>();
+
+/**
+ * Convert a Zod schema to a JSON Schema, returning `undefined` if no usable
+ * derivation exists — which is what lets the caller's `?? HAND_CRAFTED_SCHEMAS`
+ * arm fire. Cached per schema reference.
+ *
+ * ## [#17501] Why this tries TWICE, and why only sometimes
+ *
+ * `/meta/types` served `action` as `{"$schema": "..."}` — an empty schema for a
+ * type that accepts 47 keys — because `ActionSchema` is
+ * `lazySchema(() => actionObject().refine(...))`, a `ZodPipe`, and the OUTPUT
+ * derivation of a pipe carries no properties. The hand-crafted fallback
+ * declared for exactly this case never fired: conversion did not throw, it
+ * SUCCEEDED and returned a truthy husk.
+ *
+ * The obvious repair — derive everything with `io: 'input'`, the authoring
+ * shape a property panel actually wants, which `reference-sites.ts` already
+ * passes — was measured across the whole served surface and REFUSED. It is not
+ * a repair with a blast radius of one: 24 of the 26 types that carry a Zod
+ * schema answer differently under `input`, and the direction is a WEAKENING of
+ * a published contract — `required` entries 1132 to 867, `additionalProperties:
+ * false` 663 to 637. Serving the authoring shape for every type is a defensible
+ * contract change, but it is a `packages/spec` question with its own review,
+ * not a rider on this bug fix. (The card's own reading that thirteen types
+ * "answer identically" is a TOP-LEVEL PROPERTY COUNT, which cannot see either
+ * keyword; the counts reproduce exactly and the inference from them does not.)
+ *
+ * So the output derivation stays the served default and the authoring
+ * derivation is a RETRY, reached only when the default degenerates. Measured on
+ * the full registry: exactly one type — `action` — takes the retry arm, and the
+ * other 25 stay byte-for-byte identical. `protocol.meta-types-degenerate-derivation.test.ts`
+ * pins that count, which is the assertion that fails if someone later widens
+ * this to every type.
+ *
+ * ## Absence is deliberately NOT degeneracy
+ *
+ * A type with no Zod schema at all (`external_catalog`) never reaches here —
+ * the caller's `zodSchema ? ... : undefined` guard sees to that — and it is a
+ * different, honest shape: nothing is advertised, so nothing lies. This
+ * function judges only a derivation that RAN and came back empty. Widening it
+ * to cover missing schemas would change what absence means at the endpoint and
+ * is out of scope.
+ *
+ * ## A throwing conversion keeps its old path exactly
+ *
+ * If the output derivation THROWS, that is the case `HAND_CRAFTED_SCHEMAS` was
+ * documented for and it returns `undefined` as it always did — no retry. Not
+ * one type's conversion throws today, so retrying there would move no payload
+ * while widening the change past the ruling.
  */
 const _jsonSchemaCache = new WeakMap<z.ZodTypeAny, Record<string, unknown> | null>();
-function toJsonSchemaSafe(schema: z.ZodTypeAny): Record<string, unknown> | undefined {
+function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<string, unknown> | undefined {
     const cached = _jsonSchemaCache.get(schema);
     if (cached !== undefined) return cached ?? undefined;
+
+    let output: Record<string, unknown>;
     try {
-        const result = z.toJSONSchema(schema, { unrepresentable: 'any' }) as Record<string, unknown>;
-        _jsonSchemaCache.set(schema, result);
-        return result;
+        output = z.toJSONSchema(schema, { unrepresentable: 'any' }) as Record<string, unknown>;
     } catch {
+        // Conversion failed outright — the original hand-crafted-fallback case.
         _jsonSchemaCache.set(schema, null);
         return undefined;
     }
+
+    if (!isDegenerateDerivation(output)) {
+        _jsonSchemaCache.set(schema, output);
+        return output;
+    }
+
+    // The default derivation produced a husk. Retry in the authoring shape
+    // before giving up — for a `ZodPipe` this is the derivation that can see
+    // the object at all.
+    try {
+        const authoring = z.toJSONSchema(schema, { unrepresentable: 'any', io: 'input' }) as Record<string, unknown>;
+        if (!isDegenerateDerivation(authoring)) {
+            _jsonSchemaCache.set(schema, authoring);
+            return authoring;
+        }
+    } catch {
+        // Fall through to the loud arm below.
+    }
+
+    // Both derivations are unusable. Say so once, then hand the caller
+    // `undefined` so its `?? HAND_CRAFTED_SCHEMAS` arm decides.
+    if (typeLabel && !_warnedDegenerateDerivation.has(typeLabel)) {
+        _warnedDegenerateDerivation.add(typeLabel);
+        console.warn(
+            `[Protocol] /meta/types: both the output and the authoring derivations of the `
+            + `"${typeLabel}" schema came back empty, so no schema is derived from it — a property `
+            + `panel built for this type will show no fields. Fix the schema so it derives, or `
+            + `declare a HAND_CRAFTED_SCHEMAS entry for "${typeLabel}".`,
+        );
+    }
+    _jsonSchemaCache.set(schema, null);
+    return undefined;
 }
 
 /**
@@ -6388,7 +6503,10 @@ export class ObjectStackProtocolImplementation implements
             // Studio's editor and the runtime overlay validator stay in
             // lock-step (one source of truth).
             const zodSchema = getMetadataTypeSchema(singular);
-            const schema = (zodSchema ? toJsonSchemaSafe(zodSchema) : undefined)
+            // [#17501] `singular` is passed so the degenerate-derivation warning
+            // can name the type it could not derive. A type with NO zod schema
+            // never reaches the converter at all — absence is not degeneracy.
+            const schema = (zodSchema ? toJsonSchemaSafe(zodSchema, singular) : undefined)
                 ?? HAND_CRAFTED_SCHEMAS[singular];
             const form = TYPE_TO_FORM[singular];
             // Phase 2: the authoritative minimal create seed (single source of
