@@ -233,7 +233,7 @@
 >   one affected count (#4639), one aggregate `data.records.updated`. A rewrite
 >   *conditioned* on the row is out of contract: it widens to every matched row
 >   rather than scoping itself. Per-row `previous` is supplied so a guard can
->   REFUSE, not so a rewrite can be aimed.
+>   REFUSE, not so a rewrite can be aimed. **→ Amended in Amendment II.3 below.**
 > - **`input.id` stops being a reroute lever, on this path only (D4).** A
 >   per-row context arrives with `id` already bound and the dispatch decided, so
 >   rebinding it retargets nothing; it is refused rather than ignored, because a
@@ -436,6 +436,61 @@
 > unreachable code the moment the refusal landed. The single pre-dispatch
 > pre-image read that binds `previous` for `beforeDelete` (#5846 (a) / #6697) is
 > a different read and is untouched.
+
+---
+
+> **Amendment II.3 (2026-09, #16074 maintainer ruling, decision batch #59) —
+> a ROW-INVARIANT-IN-EFFECT rewrite is ADMITTED, and the ENGINE is what makes
+> it safe.**
+> _Amends D3's closing sentence in Addendum II above by ADDITION: the 2026-08
+> text is left standing as the dated record of what was decided then, carrying
+> a forward pointer to here. This block RECORDS a decision already taken; it
+> takes none._
+>
+> **The ruling.** Maintainer reply, verbatim: 「16063 c,  其他同意」
+> (2026-09-06, decision batch #59, on this card #16074). Option 1 adopted: the
+> CONTRACT admits the shape. The three shipped provenance stamps are made
+> conforming by amending the contract, not by being changed to fit it.
+>
+> **What the rule now is.** On a predicate write (`multi: true`), per-row
+> `previous` is supplied so a guard can REFUSE (throw) **and** so a `before*`
+> hook can make a **row-invariant-in-effect** rewrite: one whose written KEY
+> SET is the same on every matched row. The shape that ships is the worked
+> example — a provenance stamp writing `customized: true` on every row whose
+> `previous.managed_by` is package-seeded. D3's merge rule is untouched: the
+> payload stays BATCH-scoped, so what "row-invariant in effect" buys is the
+> right to DECIDE per row while writing the same keys for all of them.
+>
+> **The mechanism that makes it safe is the ENGINE, not the hook.** The
+> dispatch's `MULTI_UPDATE_HOOK_KEY_DIVERGENCE` refusal (#14099) records, per
+> row, the payload keys that row's hook chain assigned, and if any two rows
+> disagree it refuses the WHOLE batch BEFORE any write — nothing is written,
+> not the first row. To an operator that refusal is an ADR-0112 envelope,
+> `status: 400`, carrying `keys` (the sorted keys some rows' hooks wrote and
+> other rows' did not) and `rows` (how many rows the predicate matched). So an
+> author does not have to be TRUSTED to be row-invariant; a hook that is not
+> gets a loud, whole-batch 400 instead of a half-stamped table.
+>
+> **The two shapes the rule does NOT admit.**
+>
+> - A rewrite whose written KEY SET differs across rows. That IS the refusal
+>   above: out of contract, and the engine says so before anything is written.
+> - The same key written with a per-row VALUE. The engine judges KEY SETS,
+>   never values — the clock-reading audit stamp has to pass — so this shape
+>   CLEARS the divergence check and applies the LAST dispatch's value to every
+>   matched row. It stays out of contract and stays unenforced.
+>
+> **Why option 2 (change the three stamps) was not adopted.** #15302 measured
+> the cost of the alternative: a stamp that DECLINES on a predicate write
+> leaves unstamped exactly the rows the next boot overwrites, so it converts a
+> visible 400 into the silent loss of an admin edit.
+>
+> **Where the contract text lives now.** The D3 bullet of
+> `packages/spec/src/data/hook.zod.ts#HookContextSchema`'s `input` clause set,
+> mirrored in `packages/spec/src/data/bulk-write-hook-conformance.ts` — both
+> amended in PR #17249. The refusal's own class, and the value-comparison
+> variants that were rejected with it, are
+> `packages/objectql/src/multi-update-hook-key-divergence.ts`.
 
 ---
 
