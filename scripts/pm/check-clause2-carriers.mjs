@@ -154,7 +154,10 @@
  * neither is the verdict. C4 reads the `Implemented-by:` / `Reviewed-by:`
  * identity pair the verdict declares about its own AUTHORSHIP (a session id on
  * both, or a `mode:subagent` dev's BRANCH on the left — the grammar note beside
- * AUTHORSHIP_KEYS). C6 (#17302) reads that a review of record EXISTS on the
+ * AUTHORSHIP_KEYS), on a comment recognised in EITHER live dialect — the fenced
+ * `VERDICT:` marker or H51's `## Contract review` heading on this head, one
+ * recognition shared with C6 (#17346, `isVerdictComment`). C6 (#17302) reads
+ * that a review of record EXISTS on the
  * current head — H51's heading and head-sha facts, plus a `Reviewed-by:` line —
  * on a pair whose gate was already cleared. No PASS or FAIL token is read to
  * reach either, so the boundary above is narrowed by exactly two facts and not
@@ -295,8 +298,12 @@
  * live corpus already writes the word two ways (a fenced `VERDICT: PASS` on the
  * 2026-09-01 board that C4's discriminator was measured on; `**Verdict: PASS
  * WITH FINDINGS**` under an `## Contract review` heading on every 2026-09-09
- * specimen, which that discriminator does not see) — a regex for it would be a
- * third spelling, the "check that can barely fail" #12409 measured. No ①②③
+ * specimen) — a regex for it would be a third spelling, the "check that can
+ * barely fail" #12409 measured. ⭐ #17346 answered the same two dialects the
+ * other way round, and it is worth reading as one decision: C4 now recognises
+ * a verdict COMMENT in both (`isVerdictComment`, H51's two facts reused), while
+ * neither row reads the verdict WORD in either. What a comment IS stays
+ * measurable; what it CONCLUDED stays human. No ①②③
  * line items: they are prose the seat reads. So exit 0 still means "a review of
  * record exists on this head and names a reviewer", never "the review passed";
  * precondition ① of the landing check stays human.
@@ -532,7 +539,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#14155: the COMPLETED state, and the three it must stay distinct from': 18,
   'the event reader itself': 9,
   'the cost bound, stated as one predicate both sides read': 6,
-  'C4: the independence clause\'s carrier (maintainer 2026-09-01 「同意 A」)': 52,
+  'C4: the independence clause\'s carrier (maintainer 2026-09-01 「同意 A」)': 89,
   'the #13910 specimen, end to end': 2,
   'pairing, derived from the same relation H8/H31 read': 3,
   'the three read paths: ordered, offline-capable, and named in every refusal': 24,
@@ -1320,6 +1327,44 @@ export function c3DeclaredYesUngated(pair) {
 const VERDICT_MARKER = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?VERDICT`?(?:\*\*)?[ \t]*:/;
 
 /**
+ * Is this comment a contract-review verdict at all — in EITHER live dialect.
+ *
+ * ⭐ The corpus moved and the discriminator did not (#17346). `VERDICT_MARKER`
+ * was measured on the 2026-09-01 board, where a verdict opened a fenced block
+ * whose first line was `VERDICT: PASS`. Every contract-review verdict measured
+ * on the 2026-09-09 board is written the other way — a `## Contract review`
+ * heading, the reviewed head as a code span, `**Verdict: PASS WITH FINDINGS**`
+ * in bold mixed case — and carries no uppercase `VERDICT:` line anywhere. Read
+ * with the 2026-09-01 marker alone, all four measured specimens answered `null`
+ * (PR #17073 comments 5597841101 / 5600239551, PR #17116 5600627944, PR #17090
+ * 5598904803), so C4 had NO live population: `--pair` exit 0 said nothing about
+ * independence for any pair reviewed in the current dialect, and the
+ * self-review shape this row exists to refuse could not be reached at all.
+ *
+ * ⭐ The second dialect is H51's, IMPORTED and not restated —
+ * `CONTRACT_REVIEW_HEADING_MARKER` plus `contractReviewHeadMatch` against this
+ * pair's head, the same two facts C6 recognises a review of record with. One
+ * recognition, two rows: C4 and C6 can never disagree about what a verdict
+ * comment looks like, which is the drift a second regex here would be.
+ *
+ * ⛔ NOT a regex for the verdict WORD, in either dialect. This file's header
+ * bans verdict-reading as 自查放行, H51 is verdict-agnostic by construction,
+ * and the corpus already spells the word two ways — the "check that can barely
+ * fail" #12409 measured. What is read is that a verdict comment EXISTS and who
+ * it says wrote and reviewed the diff, never what it concluded.
+ *
+ * ⭐ The head is what keeps the heading path honest, and it is REQUIRED for it:
+ * a comment that merely quotes a review heading is not a verdict on this head,
+ * and `contractReviewHeadMatch` answers `null` below `H51_SHA_MIN_HEX`. A
+ * caller with no head in hand therefore gets exactly the 2026-09-01 reading —
+ * the fenced marker alone — rather than a looser one.
+ */
+function isVerdictComment(body, headSha) {
+  if (String(body ?? '').split(/\r?\n/).some((line) => VERDICT_MARKER.test(line))) return true;
+  return CONTRACT_REVIEW_HEADING_MARKER.test(String(body ?? '')) && contractReviewHeadMatch(body, headSha) !== null;
+}
+
+/**
  * The two lines a verdict carries about its own authorship, in the ONE spelling
  * that counts (maintainer 2026-09-01, verbatim and untranslated: 「同意 A」).
  *
@@ -1364,8 +1409,25 @@ const AUTHORSHIP_KEY_LINES = new Map(
  * ruling's own: `claude/…` can never equal `session_…`, so equality on the pair
  * still means exactly what the ruling says it means — the SAME SESSION on both
  * lines — and a branch on the left is silent without a second rule to say so.
+ *
+ * ⛔ `Reviewed-by:` is NOT widened for the isolated review subagent, and that is
+ * the 2026-09-02 ruling held rather than a gap (#17346). Every 2026-09-09
+ * specimen writes the value as prose — "isolated `claude-fable-5-1` subagent,
+ * transcript-verified …" — because an isolated reviewer has no session of its
+ * own. Admitting that prose would retire the reading: a value that names no
+ * identity compares to nothing, so the equality test that IS the independence
+ * clause would answer about every pair the way it answers about none. The
+ * remedy is on the WRITING side, and the identity it needs already exists —
+ * the seat that RENDERS or ADOPTS the verdict has a session, and an adoption
+ * record already carries it (specimen 5597841101 names
+ * `session_01Tep4AYXZvyBA7jsvne5KZV` in its own opening sentence, one line
+ * above a `Reviewed-by:` line that names no session at all).
+ * `references/contract-review.md` :35 states it for the author; here a prose
+ * value reads `malformed`, which is a verdict written without its reviewer's
+ * session — a true reading of a real carrier defect, ⛔ never a false positive
+ * to be tolerated away in the reader.
  */
-const SESSION_TOKEN = /^(?:\*\*)?(?:`)?[ \t]*(session_[A-Za-z0-9]+)(?![A-Za-z0-9_])/;
+const SESSION_TOKEN = /^(session_[A-Za-z0-9]+)(?![A-Za-z0-9_])/;
 
 /**
  * A `mode:subagent` dev's identity: the branch the claim protocol names it by.
@@ -1373,16 +1435,44 @@ const SESSION_TOKEN = /^(?:\*\*)?(?:`)?[ \t]*(session_[A-Za-z0-9]+)(?![A-Za-z0-9
  * an alphanumeric, so the seat's reasoning may follow the token — a trailing
  * `,` or `.` belongs to the prose, never to the branch.
  */
-const BRANCH_TOKEN = /^(?:\*\*)?(?:`)?[ \t]*(claude\/[A-Za-z0-9._/-]*[A-Za-z0-9])/;
+const BRANCH_TOKEN = /^(claude\/[A-Za-z0-9._/-]*[A-Za-z0-9])/;
+
+/**
+ * The markdown decoration a VALUE may open with — stripped, in any order and
+ * any repetition, before either token regex is applied.
+ *
+ * ⭐ Measured, and the fix for a genuine asymmetry (#17346). The key regexes
+ * tolerate `**Implemented-by:**` — bold wrapping the key AND its colon — which
+ * is what every 2026-09-09 specimen writes. But the colon inside the bold means
+ * the captured VALUE opens with the closing `**`, and the old token regexes
+ * admitted a leading `**` only when a backtick or the token followed it with no
+ * space between: on `- **Implemented-by:** \`claude/issue-x\`` the value read
+ * `"** \`claude/issue-x\`"` and BOTH tokens answered `null`. So the key was
+ * recognised, the value was not, and the pair read `malformed` on a comment
+ * whose author had written a perfectly good identity — a false positive
+ * produced by the reader, which is a different fact from the corpus's own
+ * prose values and is fixed HERE rather than tolerated downstream.
+ *
+ * ⛔ It strips DECORATION only — spaces, `**`, backticks — never a word. The
+ * near misses the ruling turns on are untouched: `branch \`claude/…\``,
+ * `the dev on claude/…` and `isolated \`claude-fable-5-1\` subagent` all stop
+ * the strip at their first letter, so the token is still required to be the
+ * FIRST thing after the colon and its decoration.
+ */
+const VALUE_DECORATION = /^(?:[ \t]+|\*\*|`)+/;
+
+function stripValueDecoration(raw) {
+  return String(raw ?? '').replace(VALUE_DECORATION, '');
+}
 
 function readSessionToken(raw) {
-  const m = SESSION_TOKEN.exec(String(raw ?? '').replace(/^[ \t]+/, ''));
+  const m = SESSION_TOKEN.exec(stripValueDecoration(raw));
   return m ? m[1] : null;
 }
 
 /** The `Implemented-by:` value — a session id, or a dev branch. */
 function readImplementerToken(raw) {
-  const rest = String(raw ?? '').replace(/^[ \t]+/, '');
+  const rest = stripValueDecoration(raw);
   const m = SESSION_TOKEN.exec(rest) ?? BRANCH_TOKEN.exec(rest);
   return m ? m[1] : null;
 }
@@ -1411,10 +1501,15 @@ const AUTHORSHIP_KEY_VALUES = new Map([
  * that ⛔ must never turn a historic pair red. `malformed` is a carrier that was
  * STARTED and left unreadable, which is a different fact from never starting it:
  * a comparison needs two IDs, and half a pair compares to nothing.
+ *
+ * `headSha` is what the heading dialect is recognised against, and it is
+ * OPTIONAL: omitted, `isVerdictComment` falls back to the fenced marker alone,
+ * so a caller that has no head reads exactly what this function read before
+ * #17346 rather than something looser.
  */
-export function readVerdictAuthorship(text) {
+export function readVerdictAuthorship(text, headSha) {
+  if (!isVerdictComment(text, headSha)) return null;
   const lines = String(text ?? '').split(/\r?\n/);
-  if (!lines.some((line) => VERDICT_MARKER.test(line))) return null;
 
   const seen = new Map();
   for (const line of lines) {
@@ -1443,7 +1538,47 @@ export function readVerdictAuthorship(text) {
 }
 
 /**
- * The authorship state of one CARD's thread, judged on its GOVERNING verdict.
+ * The threads C4 judges a pair's authorship on — the card's always, the PR's
+ * when it is already in hand.
+ *
+ * ⭐ ONE carrier, two threads, because that is what the rule text says: the
+ * record is 「一条评论落 PR 或卡」, so a reader that consulted only one of them
+ * would answer about where the seat happened to post rather than about the
+ * pair. Measured 2026-09-10 on the corpus that filed #17346: all four live
+ * verdicts sit on the PR thread and NONE of the three delivering cards
+ * (#16657, #16861, #16335) carries a `## Contract review` heading at all —
+ * 0 of 3 — so a card-only C4 stays silent on the live board however good its
+ * discriminator is.
+ *
+ * ⛔ It buys NO read. `pair.prComments` is filled by `gather`'s fourth pass for
+ * the COMPLETED pairs and nobody else (`needsRecordRead`), so this union is
+ * opportunistic by construction: on a completed pair C4 reads card + PR, and
+ * on every other pair state it reads the card thread alone — the same set C2
+ * already fetched, at the same cost.
+ *
+ * ⚠️ The declared LIMIT that follows, stated rather than bought: a verdict on
+ * a PENDING pair's PR thread is INVISIBLE here. That population is a pair whose
+ * gate is still hung — the review is in flight — and buying a thread per open
+ * pair to reach it would double this file's read budget for a fact that the
+ * completed state re-reads a moment later anyway. ⛔ Not a fetch class; the
+ * boundary is the honest answer.
+ *
+ * A card thread that could not be READ is `null` and stays `null` — an unread
+ * thread is never an absent verdict (#4690). A PR thread that was owed and came
+ * back short is `null` too, and is deliberately NOT doubled into this reading:
+ * `reviewOfRecord` already owns that gap and `pairUnjudged` already prints it,
+ * so the pair is UNJUDGED and never renders clean.
+ */
+export function verdictThreadRows(pair) {
+  const card = pair?.cardComments;
+  if (!Array.isArray(card)) return null;
+  const pr = pair?.prComments;
+  return Array.isArray(pr) ? [...card, ...pr] : card;
+}
+
+/**
+ * The authorship state of one pair's verdict threads, judged on its GOVERNING
+ * verdict.
  *
  * ⭐ The newest verdict that carries the pair governs, and the choice is
  * load-bearing rather than tidy: a self-review followed by an independent
@@ -1455,33 +1590,43 @@ export function readVerdictAuthorship(text) {
  * before the carrier existed and cannot be judged, so it neither cleans a pair
  * nor dirties one.
  *
- * @param {{ body?: string, created_at?: string }[]|null} commentRows
+ * ⚠️ Newest-governs is also the ONE direction in which recognising more
+ * verdicts can turn an existing exit 4 into an exit 0: a newer independent
+ * verdict, previously invisible because it was written in the heading dialect
+ * or posted on the PR thread, displaces an older card-thread self-review. That
+ * is this row's own declared remedy arriving through a widened reading, not a
+ * relaxation — the self-review it replaces was cleared by a seat that did not
+ * write the diff, which is exactly what the row asks for — and it is pinned in
+ * both directions in the self-test rather than left to be discovered.
+ *
+ * @param {{ id?: number, body?: string, created_at?: string }[]|null} commentRows
+ * @param {string|null|undefined} headSha the head the heading dialect is recognised against
  * @returns {{ state: 'unreadable', reason: string }
  *          | { state: 'none' }
  *          | { state: 'independent', implementedBy: string, reviewedBy: string }
- *          | { state: 'self-review', session: string, at: string, detail: string }
- *          | { state: 'malformed', at: string, detail: string }}
+ *          | { state: 'self-review', session: string, at: string, id: number|null, detail: string }
+ *          | { state: 'malformed', at: string, id: number|null, detail: string }}
  */
-export function cardVerdictAuthorship(commentRows) {
+export function verdictAuthorship(commentRows, headSha) {
   if (!Array.isArray(commentRows)) return { state: 'unreadable', reason: 'the comment thread could not be read' };
 
   const candidates = [];
   for (const row of commentRows) {
-    const read = readVerdictAuthorship(row?.body);
+    const read = readVerdictAuthorship(row?.body, headSha);
     if (read === null || read.kind === 'legacy') continue;
     const ms = Date.parse(row?.created_at ?? '');
     // ⛔ An undated candidate is not a droppable row: dropping it would move the
     // GOVERNING verdict, which is the whole reading. Refuse, exactly as
     // `carrierGateHistory` refuses an undated gate event.
     if (!Number.isFinite(ms)) return { state: 'unreadable', reason: 'a contract-review verdict comment carries no readable date' };
-    candidates.push({ read, at: String(row.created_at), ms });
+    candidates.push({ read, at: String(row.created_at), id: row?.id ?? null, ms });
   }
   if (candidates.length === 0) return { state: 'none' };
 
   candidates.sort((a, b) => a.ms - b.ms);
   const governing = candidates[candidates.length - 1];
   if (governing.read.kind === 'malformed') {
-    return { state: 'malformed', at: governing.at, detail: governing.read.detail };
+    return { state: 'malformed', at: governing.at, id: governing.id, detail: governing.read.detail };
   }
   const { implementedBy, reviewedBy } = governing.read;
   // ⭐ Equality IS the same-session test, and needs no second rule to be one:
@@ -1491,7 +1636,7 @@ export function cardVerdictAuthorship(commentRows) {
   // reads INDEPENDENT, and only a seat that coded in-session and passed its own
   // diff reads self-review.
   if (implementedBy !== reviewedBy) return { state: 'independent', implementedBy, reviewedBy };
-  return { state: 'self-review', session: implementedBy, at: governing.at, detail: governing.read.line };
+  return { state: 'self-review', session: implementedBy, at: governing.at, id: governing.id, detail: governing.read.line };
 }
 
 /**
@@ -1508,34 +1653,41 @@ export function cardVerdictAuthorship(commentRows) {
  * indistinguishable from one that passed an independent review.
  *
  * The reading costs nothing new: the card's comment thread is already fetched
- * for the declaration limb, so no pair owes an extra request for this row.
+ * for the declaration limb, and the PR's is added only when `gather` already
+ * holds it (`verdictThreadRows`), so no pair owes an extra request for this row.
  */
 export function c4VerdictSelfReview(pair) {
-  const v = cardVerdictAuthorship(pair?.cardComments ?? null);
+  const v = verdictAuthorship(verdictThreadRows(pair), pair?.headSha);
   if (v.state === 'unreadable') return null; // UNJUDGED by the caller — never silently clean.
   if (v.state === 'none' || v.state === 'independent') return null;
 
   const head = `card #${pair?.card} (delivering open PR #${pair?.pr}${pair?.draft ? ' (draft)' : ''})`;
+  const where = `${v.at}${v.id ? `, comment ${v.id}` : ''}`;
   const fixed =
     'the fixed spelling names the identity that produced the diff, read from the implementation ' +
     'claim — `Implemented-by: session_…` for a `mode:remote` dev, `Implemented-by: claude/…` (its ' +
     'BRANCH) for a `mode:subagent` dev, which has no session of its own — and `Reviewed-by: ' +
     'session_…` for the session rendering this verdict, which is a seat and always has one; each ' +
-    'token immediately after its colon, the seat\'s reasoning free to follow it';
+    'token immediately after its colon, the seat\'s reasoning free to follow it. ⭐ An ISOLATED ' +
+    'review subagent has no session either, and its `Reviewed-by:` value is still a session: the ' +
+    'seat that RENDERS or ADOPTS the verdict writes its OWN session there — 「渲染或采纳裁决的席位' +
+    '写自己的 session」 — which every adoption record already carries in its opening sentence. ⛔ ' +
+    'Prose naming the reviewing MODEL is not an identity: it compares to nothing, and this key ' +
+    'admits a session only (2026-09-02 reading a)';
   const legacyIsSilent =
     '⚠️ A verdict carrying NEITHER line is a LEGACY verdict and is silent here — it predates the ' +
     'carrier and ⛔ is never turned red by its absence.';
 
   if (v.state === 'malformed') {
     return (
-      `${head} — its governing contract-review verdict (${v.at}) carries the authorship pair HALF ` +
+      `${head} — its governing contract-review verdict (${where}) carries the authorship pair HALF ` +
       `WRITTEN: ${v.detail}. Both lines or neither — half a pair compares to nothing, so there is ` +
       `no reading of independence here, and a started carrier left unreadable is a different fact ` +
       `from one never started. ${fixed}. ${legacyIsSilent} ${NEVER_WRITES}`
     );
   }
   return (
-    `${head} — its governing contract-review verdict (${v.at}) is a SELF-REVIEW: \`Implemented-by:\` ` +
+    `${head} — its governing contract-review verdict (${where}) is a SELF-REVIEW: \`Implemented-by:\` ` +
     `and \`Reviewed-by:\` name the SAME session \`${v.session}\` (${JSON.stringify(v.detail)}). The ` +
     'in-seat review is a COMPENSATING control for dispatching below the review tier, and every ' +
     'argument for it assumes the reviewer did not write the diff: the clause scopes it to 「低档实现' +
@@ -1915,10 +2067,12 @@ export function pairUnjudged(pair) {
   }
   // C4's own #4690 half: a verdict this file could not ORDER is not a verdict
   // it read as independent. Reached only once the thread itself read, so the
-  // unreadable-thread gap above is never doubled.
+  // unreadable-thread gap above is never doubled. It reads `verdictThreadRows`
+  // — the same set C4 judges — so the set that is accounted for and the set
+  // that is judged cannot drift apart.
   if (gaps.length === 0) {
-    const authorship = cardVerdictAuthorship(pair?.cardComments ?? null);
-    if (authorship.state === 'unreadable') gaps.push(`card #${pair?.card}'s verdict authorship (${authorship.reason})`);
+    const authorship = verdictAuthorship(verdictThreadRows(pair), pair?.headSha);
+    if (authorship.state === 'unreadable') gaps.push(`pair PR #${pair?.pr} / card #${pair?.card}'s verdict authorship (${authorship.reason})`);
   }
   // C6's own #4690 half: the record read is owed by the COMPLETED state only,
   // and an unread PR thread there is not an absent record. Reached only once
@@ -2872,9 +3026,18 @@ export function selfTest() {
   // The review of record, in the shape measured on every 2026-09-09 specimen:
   // the `## Contract review` heading, the head as a code span, the independence
   // pair -- the shape #17302 names for the default-tier lanes too.
+  //
+  // ⭐ The `Implemented-by:` value carries its token FIRST after the colon, and
+  // that is load-bearing rather than tidy (#17346): this fixture is the pair
+  // that must read CLEAN under EVERY row, and C4's grammar has always required
+  // the identity to open the value. Written `branch \`claude/…\`` -- the way two
+  // of the four live specimens write it -- the same comment reads `malformed`
+  // on C4 the moment C4 can see this dialect at all, which is a real carrier
+  // defect and belongs on a defective specimen (the `ADOPTION` fixture below
+  // keeps it), never on the reference one.
   const RECORD = (
     sha,
-    lines = ['- **Implemented-by:** branch `claude/issue-13657-x`', `- **Reviewed-by:** \`${RECORD_SESSION}\``],
+    lines = ['- **Implemented-by:** `claude/issue-13657-x`', `- **Reviewed-by:** \`${RECORD_SESSION}\``],
     at = '2026-09-01T08:50:00Z',
     id = 3301,
   ) => ({
@@ -3017,7 +3180,7 @@ export function selfTest() {
   const SUBAGENT_PAIR = [`Implemented-by: \`${DEV_BRANCH}\``, `Reviewed-by: \`${REVIEW_SESSION}\``];
   t('⭐ a `mode:subagent` dev is named by its BRANCH, and that reads as a first-class pair', readVerdictAuthorship(VERDICT(SUBAGENT_PAIR).body)?.kind === 'pair' && readVerdictAuthorship(VERDICT(SUBAGENT_PAIR).body)?.implementedBy === DEV_BRANCH);
   t('⭐ …so a subagent-dispatched card is SILENT — the reviewing seat did not write the diff', c4VerdictSelfReview(reviewed([VERDICT(SUBAGENT_PAIR)])) === null);
-  t('…and it reads INDEPENDENT rather than unjudged — silence here is a reading, not a gap', cardVerdictAuthorship([VERDICT(SUBAGENT_PAIR)]).state === 'independent' && pairUnjudged(reviewed([VERDICT(SUBAGENT_PAIR)])) === null);
+  t('…and it reads INDEPENDENT rather than unjudged — silence here is a reading, not a gap', verdictAuthorship([VERDICT(SUBAGENT_PAIR)]).state === 'independent' && pairUnjudged(reviewed([VERDICT(SUBAGENT_PAIR)])) === null);
   t('⭐ …while the same-session pair still FIRES: widening the grammar did not disarm the row', typeof c4VerdictSelfReview(reviewed([VERDICT(SELF_PAIR)])) === 'string');
   t('the branch token ends at the branch — the seat\'s reasoning may follow it', readVerdictAuthorship(VERDICT([`Implemented-by: ${DEV_BRANCH} (implementation claim, 16:29Z)`, `Reviewed-by: ${REVIEW_SESSION}`]).body)?.implementedBy === DEV_BRANCH);
   t('…and a trailing sentence mark belongs to the prose, never to the branch', readVerdictAuthorship(VERDICT([`Implemented-by: ${DEV_BRANCH}.`, `Reviewed-by: ${REVIEW_SESSION}`]).body)?.implementedBy === DEV_BRANCH);
@@ -3029,15 +3192,137 @@ export function selfTest() {
   // the governing verdict — why the newest one carrying the pair decides
   t('⭐ a self-review followed by an INDEPENDENT re-review reads clean — the remedy clears the row', c4VerdictSelfReview(reviewed([VERDICT(SELF_PAIR, '2026-09-01T11:21:18Z'), VERDICT(INDEPENDENT_PAIR, '2026-09-01T12:56:27Z')])) === null);
   t('…and the reverse order still fires, so a later self-review is not hidden by an earlier clean one', typeof c4VerdictSelfReview(reviewed([VERDICT(INDEPENDENT_PAIR, '2026-09-01T09:00:00Z'), VERDICT(SELF_PAIR, '2026-09-01T12:56:27Z')])) === 'string');
-  t('…and arrival order does not decide it — the reader sorts', cardVerdictAuthorship([VERDICT(INDEPENDENT_PAIR, '2026-09-01T12:56:27Z'), VERDICT(SELF_PAIR, '2026-09-01T11:21:18Z')]).state === 'independent');
-  t('a LEGACY verdict posted after a self-review does not clean it — it is not a candidate at all', cardVerdictAuthorship([VERDICT(SELF_PAIR, '2026-09-01T11:21:18Z'), VERDICT([], '2026-09-01T13:00:00Z')]).state === 'self-review');
+  t('…and arrival order does not decide it — the reader sorts', verdictAuthorship([VERDICT(INDEPENDENT_PAIR, '2026-09-01T12:56:27Z'), VERDICT(SELF_PAIR, '2026-09-01T11:21:18Z')]).state === 'independent');
+  t('a LEGACY verdict posted after a self-review does not clean it — it is not a candidate at all', verdictAuthorship([VERDICT(SELF_PAIR, '2026-09-01T11:21:18Z'), VERDICT([], '2026-09-01T13:00:00Z')]).state === 'self-review');
 
   // #4690, C4's half: unread is never clean
   t('an UNREADABLE thread produces no C4 row — it is UNJUDGED instead', c4VerdictSelfReview(pair({ cardComments: null })) === null);
-  t('an UNDATED verdict refuses the ordering rather than guessing it', cardVerdictAuthorship([VERDICT(SELF_PAIR, null)]).state === 'unreadable');
+  t('an UNDATED verdict refuses the ordering rather than guessing it', verdictAuthorship([VERDICT(SELF_PAIR, null)]).state === 'unreadable');
   t('…and the unjudged accounting names it, so the pair cannot render as clean', says(pairUnjudged(reviewed([VERDICT(SELF_PAIR, null)])), 'verdict authorship'));
   t('…while a dated, judged verdict adds no gap of its own', pairUnjudged(reviewed([VERDICT(INDEPENDENT_PAIR)])) === null);
   t('C4 costs no extra request — it reads the thread C2 already fetched', needsGateHistory(reviewed([VERDICT(SELF_PAIR)])) === false);
+
+  // -- #17346: the 2026-09-09 dialect, and the reviewer identity it needs ----
+  //
+  // ⭐ The fixtures are the live specimens the card measured, read via
+  // repo-scoped REST on 2026-09-10 and trimmed to what the reader reads: the
+  // heading, the head as a code span, the authorship pair. Under the 2026-09-01
+  // marker alone every one of them answered `null`, so C4 had NO live
+  // population and the self-review shape it exists to refuse was unreachable.
+  const LIVE_HEAD_73 = 'de0bd50469a6c5f20102f67e0901c43fe316567c';
+  const LIVE_HEAD_16 = 'e91934804197f5336aafdcc0bef0a0cccef1be83';
+  const ADOPTING_SEAT = 'session_01Tep4AYXZvyBA7jsvne5KZV';
+  const DEV_16861 = 'session_012zTkyNHJ7TkuN2oXtP5x37';
+  // Dialect ① — comment 5597841101 (PR #17073), a director-seat ADOPTION
+  // record: its own sentence first, H51's heading on a LATER line, the pair
+  // written bare at the end. BOTH values are prose — `branch` puts a word
+  // before the branch token, and `Reviewed-by:` names the summon rather than a
+  // session — and the session the reviewer line owes is one line above it.
+  const LIVE_ADOPTION = {
+    id: 5597841101,
+    created_at: '2026-09-09T07:19:12Z',
+    body: [
+      `**Director seat adoption record** — summon #20, \`${ADOPTING_SEAT}\`. The verdict below is adopted **verbatim** from an isolated contract-review subagent.`,
+      '',
+      '---',
+      '',
+      `## Contract review (\`CONTRACT_REVIEW_TIER\`, isolated seat) — PR #17073 @ \`${LIVE_HEAD_73}\``,
+      '',
+      '**Verdict: PASS WITH FINDINGS**',
+      '',
+      'Implemented-by: branch `claude/issue-16657-raw-exec-operator-detail-cause`',
+      'Reviewed-by: director seat summon #20 (isolated fable subagent, transcript-verified before adoption)',
+    ].join('\n'),
+  };
+  // Dialect ② — comment 5600239551 (PR #17073): heading first, the pair as bold
+  // bullets, the reviewer named by MODEL rather than by a session.
+  const LIVE_BOLD = {
+    id: 5600239551,
+    created_at: '2026-09-09T10:17:06Z',
+    body: [
+      `## Contract review (clause ②) — **PASS WITH FINDINGS**, no blocking item · head \`${LIVE_HEAD_73}\``,
+      '',
+      '- **Implemented-by:** branch `claude/issue-16657-raw-exec-operator-detail-cause` @ `de0bd50469`',
+      '- **Reviewed-by:** isolated `claude-fable-5-1` subagent, **transcript-verified**: 105 harness-stamped model fields, one distinct value.',
+    ].join('\n'),
+  };
+  // Dialect ③ — comment 5600627944 (PR #17116): the verdict word bolded INSIDE
+  // the heading, and the implementer's session present but not first after the
+  // colon.
+  const LIVE_HEADING_VERDICT = {
+    id: 5600627944,
+    created_at: '2026-09-09T10:49:48Z',
+    body: [
+      `## Contract review at \`CONTRACT_REVIEW_TIER\` — **Verdict: PASS WITH FINDINGS** (audit reading; director seat, \`session_017Js5kTpTtxieBjPyScgxJ3\`)`,
+      '',
+      `PR #17116 · verdict pinned to head \`${LIVE_HEAD_16}\` · reviewed 10:36Z–10:46Z.`,
+      '- **Reviewed-by:** isolated `claude-fable-5-1` subagent, transcript-verified (89 harness stamps), adopted **verbatim** below.',
+      `- **Implemented-by:** the \`domain:services\` seat's dev \`${DEV_16861}\` (\`mode:subagent\`), branch \`claude/issue-16861-already-have-admin-unordered-cap\`.`,
+    ].join('\n'),
+  };
+  // The same 2026-09-09 dialect written the way :35 now names — the ADOPTING
+  // seat's own session on `Reviewed-by:`, the dev's branch on the left.
+  const LIVE_WRITTEN_RIGHT = {
+    id: 5600239552,
+    created_at: '2026-09-09T10:18:00Z',
+    body: [
+      `## Contract review (clause ②) — **PASS WITH FINDINGS** · head \`${LIVE_HEAD_73}\``,
+      '',
+      '- **Implemented-by:** `claude/issue-16657-raw-exec-operator-detail-cause`',
+      `- **Reviewed-by:** \`${ADOPTING_SEAT}\` (adopting seat; the isolated subagent that rendered the text has no session of its own)`,
+    ].join('\n'),
+  };
+  const live = (rows, o) => pair({ headSha: LIVE_HEAD_73, cardComments: [CLAIM('Clause-②: no'), ...rows], ...o });
+
+  // the discriminator, second dialect — H51's two facts, reused and not re-spelled
+  t('⭐ the 2026-09-09 ADOPTION dialect is a verdict — heading on a later line, head as a code span', readVerdictAuthorship(LIVE_ADOPTION.body, LIVE_HEAD_73) !== null);
+  t('⭐ …so is the bold-bullet dialect', readVerdictAuthorship(LIVE_BOLD.body, LIVE_HEAD_73) !== null);
+  t('⭐ …and the one that bolds the verdict word INSIDE the heading', readVerdictAuthorship(LIVE_HEADING_VERDICT.body, LIVE_HEAD_16) !== null);
+  t('⛔ CONTROL — all three read `null` under the 2026-09-01 marker alone, which is the defect #17346 filed', [LIVE_ADOPTION, LIVE_BOLD, LIVE_HEADING_VERDICT].every((r) => readVerdictAuthorship(r.body) === null));
+  t('⛔ the head is REQUIRED for the heading path — a caller with none keeps exactly the 2026-09-01 reading', readVerdictAuthorship(LIVE_BOLD.body, undefined) === null && readVerdictAuthorship(LIVE_BOLD.body, null) === null);
+  t('⛔ …and a heading naming ANOTHER head is not a verdict on this one — a quoted heading stays silent', readVerdictAuthorship(LIVE_BOLD.body, '0ldhead00abc') === null);
+  t('⛔ a head too short for H51\'s span test recognises nothing rather than everything', readVerdictAuthorship(LIVE_BOLD.body, 'de0bd5') === null);
+  t('⛔ the verdict WORD is still not a discriminator in either dialect — bold `**Verdict: PASS**` with no heading and no fenced line is not a verdict', readVerdictAuthorship(`**Verdict: PASS WITH FINDINGS** on head \`${LIVE_HEAD_73}\``, LIVE_HEAD_73) === null);
+  t('⛔ nor is a `###` sub-heading — the marker is H51\'s, so its calibration is inherited, not re-spelled', readVerdictAuthorship(LIVE_BOLD.body.replace(/^## /, '### '), LIVE_HEAD_73) === null);
+  t('⭐ the fenced 2026-09-01 dialect still reads with a head in hand — the new path ADDS, it never displaces', readVerdictAuthorship(VERDICT(SELF_PAIR).body, LIVE_HEAD_73)?.kind === 'pair');
+
+  // the reviewer grammar — HELD, with the remedy on the writing side
+  t('⭐ the 2026-09-09 dialect with a bold `**Reviewed-by:**` and a SESSION reads as a first-class pair', readVerdictAuthorship(LIVE_WRITTEN_RIGHT.body, LIVE_HEAD_73)?.kind === 'pair');
+  t('…with both tokens read — the dev\'s branch on the left, the adopting seat\'s session on the right', readVerdictAuthorship(LIVE_WRITTEN_RIGHT.body, LIVE_HEAD_73)?.implementedBy === 'claude/issue-16657-raw-exec-operator-detail-cause' && readVerdictAuthorship(LIVE_WRITTEN_RIGHT.body, LIVE_HEAD_73)?.reviewedBy === ADOPTING_SEAT);
+  t('⭐ …and C4 judges it NORMALLY: independent, so no row', c4VerdictSelfReview(live([LIVE_WRITTEN_RIGHT])) === null);
+  t('⭐ …while the same dialect naming ONE session on both lines FIRES C4 — the row now has a live population', says(c4VerdictSelfReview(live([{ ...LIVE_WRITTEN_RIGHT, body: LIVE_WRITTEN_RIGHT.body.replace('`claude/issue-16657-raw-exec-operator-detail-cause`', `\`${ADOPTING_SEAT}\``) }])), 'SELF-REVIEW'));
+  const proseRow = c4VerdictSelfReview(live([LIVE_BOLD]));
+  t('⭐ a PROSE `Reviewed-by:` value with no session token reads MALFORMED — the ruling is held, not widened', typeof proseRow === 'string' && says(proseRow, 'HALF'));
+  t('…naming the missing token by what the key admits', says(proseRow, '`Reviewed-by:` carries no readable session ID'));
+  t('…and quoting the offending line back, so the repair is located', says(proseRow, 'claude-fable-5-1'));
+  t('…and naming the WRITING-side remedy: the rendering or adopting seat writes its OWN session', says(proseRow, '渲染或采纳裁决的席位写自己的 session') && says(proseRow, 'ADOPTS'));
+  t('…and refusing the model name as an identity in as many words', says(proseRow, 'Prose naming the reviewing MODEL is not an identity'));
+  t('…and pointing at the comment, not merely the timestamp', says(proseRow, 'comment 5600239551'));
+  t('⛔ it is NOT a false positive: the adoption specimen carries the seat session one line ABOVE a `Reviewed-by:` line that names none', LIVE_ADOPTION.body.includes(ADOPTING_SEAT) && readVerdictAuthorship(LIVE_ADOPTION.body, LIVE_HEAD_73)?.kind === 'malformed');
+  t('⛔ and the implementer half is measured the same way — a session that is not FIRST after the colon is not the token', readVerdictAuthorship(LIVE_HEADING_VERDICT.body, LIVE_HEAD_16)?.kind === 'malformed' && says(readVerdictAuthorship(LIVE_HEADING_VERDICT.body, LIVE_HEAD_16)?.detail, '`Implemented-by:` carries no readable identity'));
+  t('⭐ so the live corpus reads MALFORMED, never `pair` and never silent — three specimens, three carrier defects', [LIVE_ADOPTION, LIVE_BOLD].every((r) => readVerdictAuthorship(r.body, LIVE_HEAD_73)?.kind === 'malformed') && readVerdictAuthorship(LIVE_HEADING_VERDICT.body, LIVE_HEAD_16)?.kind === 'malformed');
+
+  // the decoration asymmetry the same corpus exposed — key tolerant, value not
+  t('⭐ `- **Implemented-by:** `+backticked value reads — the colon sits INSIDE the bold, which is what every 2026-09-09 specimen writes', readVerdictAuthorship(LIVE_WRITTEN_RIGHT.body, LIVE_HEAD_73)?.implementedBy === 'claude/issue-16657-raw-exec-operator-detail-cause');
+  t('…and the same decoration on `Reviewed-by:` reads its session', readVerdictAuthorship(LIVE_WRITTEN_RIGHT.body, LIVE_HEAD_73)?.reviewedBy === ADOPTING_SEAT);
+  t('⛔ the strip eats DECORATION only, never a word: `branch `+token is still refused', readVerdictAuthorship(VERDICT(['Implemented-by: branch `claude/issue-x`', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.kind === 'malformed');
+  t('⛔ …and a bold PROSE value is refused on both keys', readVerdictAuthorship(VERDICT(['Implemented-by: **the dispatching seat**', 'Reviewed-by: **the skills seat, this session**']).body)?.kind === 'malformed');
+  t('⛔ …so the live reviewer prose stays malformed after the fix — the ruling was held, not quietly widened', readVerdictAuthorship(LIVE_BOLD.body, LIVE_HEAD_73)?.kind === 'malformed');
+  t('⭐ the C6 reference record is legal under BOTH rows — a pair for C4, a found record for C6', readVerdictAuthorship(RECORD_ON_9AF9.body, HEAD_9AF9)?.kind === 'pair' && readVerdictAuthorship(RECORD_ON_9AF9.body, HEAD_9AF9)?.implementedBy === 'claude/issue-13657-x');
+
+  // which threads C4 reads, per pair state — stated, and bought for nothing
+  const COMPLETED_BASE = { pr: 13864, card: 13657, headSha: HEAD_9AF9, cardEvents: [CARD_HUNG, CARD_CLEARED], prEvents: [PR_HUNG, PR_CLEARED], headCommittedAt: HEAD_AT_PASS };
+  const onHeadVerdict = (lines, at, id) => ({ id, created_at: at, body: [`## Contract review (clause ②) — **PASS** · head \`${HEAD_9AF9}\``, '', ...lines].join('\n') });
+  const PR_SELF = onHeadVerdict([`- **Implemented-by:** \`${IMPL_SESSION}\``, `- **Reviewed-by:** \`${IMPL_SESSION}\``], '2026-09-01T08:50:00Z', 3401);
+  const PR_INDEP = onHeadVerdict([`- **Implemented-by:** \`${IMPL_SESSION}\``, `- **Reviewed-by:** \`${REVIEW_SESSION}\``], '2026-09-01T08:52:00Z', 3402);
+  t('⭐ on a COMPLETED pair C4 reads the PR thread too — the rule puts the record 「一条评论落 PR 或卡」', typeof c4VerdictSelfReview(declaredYes({ ...COMPLETED_BASE, prComments: [PR_SELF] })) === 'string');
+  t('…and names the PR-thread comment it judged', says(c4VerdictSelfReview(declaredYes({ ...COMPLETED_BASE, prComments: [PR_SELF] })), 'comment 3401'));
+  t('⭐ the union is the DECLARED limit, not a fetch: with no `prComments` in hand C4 reads the card thread alone', c4VerdictSelfReview(declaredYes({ ...COMPLETED_BASE })) === null && verdictThreadRows(declaredYes({ ...COMPLETED_BASE })).length === 1);
+  t('⛔ an unread PR thread is not doubled into C4 — C6 owns that gap, and the pair is UNJUDGED there', c4VerdictSelfReview(declaredYes({ ...COMPLETED_BASE, prComments: null })) === null && says(pairUnjudged(declaredYes({ ...COMPLETED_BASE, prComments: null })), 'review-of-record read'));
+  t('⛔ an unread CARD thread still refuses the whole reading, PR thread in hand or not (#4690)', verdictThreadRows({ cardComments: null, prComments: [PR_SELF] }) === null && c4VerdictSelfReview({ cardComments: null, prComments: [PR_SELF] }) === null);
+  t('⭐ newest-governs spans the two threads: a newer INDEPENDENT verdict on the PR thread clears a card self-review', c4VerdictSelfReview(declaredYes({ ...COMPLETED_BASE, cardComments: [CLAIM('Clause-②: yes'), VERDICT(SELF_PAIR, '2026-09-01T08:40:00Z')], prComments: [PR_INDEP] })) === null);
+  t('⭐ …and the reverse direction is not hidden either: a newer PR-thread self-review fires over an older clean card verdict', says(c4VerdictSelfReview(declaredYes({ ...COMPLETED_BASE, cardComments: [CLAIM('Clause-②: yes'), VERDICT(INDEPENDENT_PAIR, '2026-09-01T08:40:00Z')], prComments: [PR_SELF] })), 'SELF-REVIEW'));
+  t('C4 still costs no extra request — the PR thread it reads is the one the COMPLETED state already owed', needsRecordRead(declaredYes({ ...COMPLETED_BASE, prComments: [PR_SELF] })) === true && needsGateHistory(live([LIVE_BOLD])) === false);
 
   // the reporting order, and the rows that were already there
   t('C4 reports AFTER the three existing rows, and never displaces one', pairRows(pair({ prLabels: [L], cardLabels: [], cardComments: [CLAIM('Clause-②: yes'), VERDICT(SELF_PAIR)] })).map((r) => r.code).join(',') === 'C1,C4');
