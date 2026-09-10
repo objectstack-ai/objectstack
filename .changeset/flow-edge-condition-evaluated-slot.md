@@ -4,7 +4,7 @@
 
 feat(spec)!: `FlowEdgeSchema.condition` is an evaluated slot — it composes the new `EvaluatedExpressionInputSchema`, and `structuralConditionRefusal` no longer admits an `ast`-only envelope (#15807)
 
-<!-- adr-0087: not-required (no-migration-prescription) No authorable key is renamed, retired or re-typed: `condition` keeps its name and both of its spellings (a bare CEL string, an expression envelope), and every edge condition that carried a non-blank `source` parses byte-identically. The two newly refused spellings — an envelope carrying only `ast`, and a `source` that is blank after trimming (through the envelope key or the bare-string shorthand) — never evaluated on any release: the engine reads `source` alone, so both landed in the empty-source arm and answered a silent `false` (measured on #15430, comment 5550509137). A repo-wide census re-run for edges (examples/, packages/, content/, skills/, at `ae19f5edb`) found zero edge conditions of either spelling against a lit control of one known string condition, so `objectstack migrate meta` has nothing to rewrite and the remedy is authoring a `source`, which the refusal itself prescribes. -->
+<!-- adr-0087: registered flow-edge-condition-evaluated-slot-source-required -->
 
 **BREAKING** in the accept-set sense, landing in the launch window as `minor`
 (the lockstep convention: `major` is refused by `check-changeset-no-major`, and
@@ -77,6 +77,29 @@ whitespace-only condition — envelope or bare string — was never a predicate
 expression if it was meant to branch. Every edge condition with a
 non-blank `source` is unchanged, and nothing is renamed, retired or rewritten —
 the refusal itself carries the prescription.
+
+**A flow ALREADY STORED in `sys_metadata` stops running entirely — the whole
+flow, not just the edge.** The paragraph above is the author's remedy, at
+`objectstack validate` / `POST /flows`; a stored row has no author in front of
+it. Stored flows are deliberately NOT canonicalized by
+`applyConversionsToStoredItem` (`spec/src/conversions/stored.ts`, and the same
+skip in `metadata/src/loaders/database-loader.ts`'s `rowToData`) — flow-node
+conversions need the automation engine's live executor registry, so flows
+canonicalize at `registerFlow` instead, which parses through
+`canonicalizeStoredFlow` → `FlowSchema.parse`. Each of the three boot paths in
+`service-automation/src/plugin.ts` wraps that call in `try`/`catch`, logs one
+`warn` naming the flow, and continues. So an edge that used to answer a silent
+`false` while the rest of the flow ran now takes the flow down with it: it is
+never registered, its trigger is never armed, and the only announcement is that
+one warn line — `[Automation] failed to register flow` at boot,
+`[Automation] cold-boot flow bind: failed to register flow` at the kernel:ready
+bind, `[Automation] flow re-sync: failed to register flow` on a re-sync. Run
+`objectstack validate` on the exported stack to locate the edge (it reports
+`edges.N.condition` with the sentence above), author the `source` — or remove
+the key, if the edge was meant to be unconditional — and republish. Registered
+as the ADR-0087 D3 semantic entry
+`flow-edge-condition-evaluated-slot-source-required`, which carries the same
+judgment for a consumer replaying the chain.
 
 Not touched here: `start.config.condition` has no Zod schema to narrow (the
 start node's `config` is an open record); its producer-side gate is the

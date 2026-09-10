@@ -149,6 +149,13 @@ export const EVALUATED_EXPRESSION_SOURCE_REQUIRED =
  * shape, and narrows the TYPE too (`source: string`) — the same move
  * `AssignmentExpressionValueSchema` makes for `dialect`, so an `ast`-only
  * envelope is a compile error before it is a parse error.
+ *
+ * That promise is scoped to a DIRECT caller of this schema (#15807). Composed
+ * through {@link EvaluatedExpressionInputSchema}, only the blank-`source`
+ * envelope still surfaces from here, at `source`; an `ast`-only envelope and a
+ * blank bare string abort BOTH arms of that union and surface as one
+ * `invalid_union` at the SLOT instead, carrying this same sentence from
+ * `evaluatedExpressionInputRefusal` — see that map's docblock for why.
  */
 export const EvaluatedExpressionSchema = ExpressionSchema.safeExtend({
   /**
