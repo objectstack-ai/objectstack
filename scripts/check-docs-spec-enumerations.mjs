@@ -897,7 +897,7 @@ const FIXTURE_PKG = JSON.stringify({
     '.': {},
     './data': {},
     './ui': {},
-    './qa': {},
+    './ai': {},
     './marketplace': {},
     './meta-spelling': {},
     './openapi.json': {},
@@ -915,7 +915,7 @@ const FIXTURE_TITLES = [
   "  // fictitious: 'Fictitious Protocol',",
   "  marketplace: 'Marketplace Protocol',",
   "  'meta-spelling': 'Meta-Spelling Vocabulary',",
-  "  qa: 'QA Protocol',",
+  "  ai: 'AI Protocol',",
   "  ui: 'UI Protocol',",
   "};",
   "",
@@ -924,14 +924,14 @@ const FIXTURE_TITLES = [
 const FIXTURE_TROUBLESHOOTING = [
   '### Bundle size is too large',
   '',
-  "Available subpaths (the `./*` entries of the package's `exports` map, in its order): `data`, `ui`, `qa`, `marketplace`, `meta-spelling`.",
+  "Available subpaths (the `./*` entries of the package's `exports` map, in its order): `data`, `ui`, `ai`, `marketplace`, `meta-spelling`.",
   '',
 ].join('\n');
 
 const FIXTURE_PACKAGES = [
   '### @objectstack/spec',
   '',
-  '- **Exports**: Builder functions from the root entry. Protocol namespaces (Data, UI, QA, Marketplace) are not re-exported from the top-level entry for tree-shaking reasons.',
+  '- **Exports**: Builder functions from the root entry. Protocol namespaces (Data, UI, AI, Marketplace) are not re-exported from the top-level entry for tree-shaking reasons.',
   '',
 ].join('\n');
 
@@ -941,7 +941,7 @@ const FIXTURE_GLOSSARY = [
   'It is organized into **4 protocol namespaces** grouped into three architectural layers.',
   '',
   '### Protocol Namespace',
-  'A logical grouping of related schemas. ObjectStack has 4 protocol namespaces: Data, UI, QA, and Marketplace.',
+  'A logical grouping of related schemas. ObjectStack has 4 protocol namespaces: Data, UI, AI, and Marketplace.',
   '',
   '## The Three Architectural Layers',
   '',
@@ -950,7 +950,7 @@ const FIXTURE_GLOSSARY = [
   '| Layer | Also called | Namespaces it includes | Purpose |',
   '| :--- | :--- | :--- | :--- |',
   '| **ObjectQL** | Data Layer | Data | Objects and fields |',
-  '| **Kernel** | Control Layer | QA, Marketplace | Runtime and packages |',
+  '| **Kernel** | Control Layer | AI, Marketplace | Runtime and packages |',
   '| **ObjectUI** | View Layer | UI | Apps and views |',
   '',
   '## The 4 Protocol Namespaces',
@@ -961,7 +961,7 @@ const FIXTURE_GLOSSARY = [
   '### UI Protocol',
   'Server-Driven UI specification.',
   '',
-  '### QA Protocol',
+  '### AI Protocol',
   'Quality assurance contracts.',
   '',
   '### Marketplace Protocol',
@@ -1020,8 +1020,16 @@ export function selfTest() {
   const derived = deriveSets(sub.subpaths, cat.titles);
   check('derivation/clean', sub.findings.length === 0 && cat.findings.length === 0 && derived.findings.length === 0,
     JSON.stringify([sub.findings, cat.findings, derived.findings]));
+  // Spelled as ONE joined literal rather than an array of bare names, and that
+  // is not style. The dispatch-gates tool re-anchors a bare single-segment
+  // literal in a gate's source against the gate's own directory when it
+  // resolves to a tracked one, so a lone directory-shaped name in a code span
+  // here hands this gate a phantom watch hint on a directory it never reads,
+  // named on every card that touches it. Measured on this tree: it happens, and
+  // it is why the fixture's subpath names above are picked against the tracked
+  // listing of this gate's own directory rather than after the real ones.
   check('subpaths drop the root entry and the two data files',
-    JSON.stringify(sub.subpaths) === JSON.stringify(['data', 'ui', 'qa', 'marketplace', 'meta-spelling']),
+    sub.subpaths.join(' ') === 'data ui ai marketplace meta-spelling',
     JSON.stringify(sub.subpaths));
   check('subpaths keep the exports map ORDER', sub.subpaths[0] === 'data' && sub.subpaths[3] === 'marketplace');
   check('the vocabulary subpath IS a subpath', sub.subpaths.includes('meta-spelling'));
@@ -1032,7 +1040,7 @@ export function selfTest() {
   check('THE TWO COUNTS DIFFER', sub.subpaths.length === 5 && derived.namespaces.length === 4,
     `${sub.subpaths.length} vs ${derived.namespaces.length}`);
   check('display names come from the declared titles, abbreviations intact',
-    JSON.stringify(derived.namespaces.map((n) => n.display)) === JSON.stringify(['Data', 'UI', 'QA', 'Marketplace']),
+    JSON.stringify(derived.namespaces.map((n) => n.display)) === JSON.stringify(['Data', 'UI', 'AI', 'Marketplace']),
     JSON.stringify(derived.namespaces.map((n) => n.display)));
   check('the AST does not read the commented-out entry as live', !cat.titles.has('fictitious'),
     JSON.stringify([...cat.titles.keys()]));
@@ -1085,14 +1093,14 @@ export function selfTest() {
   // Inside the glossary the three enumerations are separated one at a time,
   // because a single stale word there moves all three at once.
   const colonOnly = FIXTURE_GLOSSARY.replace(
-    'ObjectStack has 4 protocol namespaces: Data, UI, QA, and Marketplace.',
-    'ObjectStack has 4 protocol namespaces: Data, UI, QA, and Cloud.',
+    'ObjectStack has 4 protocol namespaces: Data, UI, AI, and Marketplace.',
+    'ObjectStack has 4 protocol namespaces: Data, UI, AI, and Cloud.',
   );
   const g1 = run(tree({ glossary: colonOnly }));
   check('alone/the colon sentence reds by itself', g1.findings.length === 2, JSON.stringify(g1.findings));
   check('alone/and names the colon sentence', g1.findings.every((f) => f.message.includes(NAMESPACE_COLON_PREFIX)),
     JSON.stringify(g1.findings.map((f) => f.message)));
-  const tableOnly = FIXTURE_GLOSSARY.replace('| QA, Marketplace |', '| QA, Cloud |');
+  const tableOnly = FIXTURE_GLOSSARY.replace('| AI, Marketplace |', '| AI, Cloud |');
   const g2 = run(tree({ glossary: tableOnly }));
   check('alone/the layers table reds by itself', g2.findings.length === 2, JSON.stringify(g2.findings));
   check('alone/and names the table column', g2.findings.every((f) => f.message.includes(COL_NAMESPACES)),
@@ -1122,7 +1130,7 @@ export function selfTest() {
   const orderRun = run(tree({ troubleshooting: reordered }));
   check('order/exactly one finding', orderRun.findings.length === 1, JSON.stringify(orderRun.findings));
   check('order/its kind is `order`', orderRun.findings[0]?.kind === 'order', JSON.stringify(orderRun.findings));
-  const shuffledParen = FIXTURE_PACKAGES.replace('(Data, UI, QA, Marketplace)', '(Marketplace, QA, UI, Data)');
+  const shuffledParen = FIXTURE_PACKAGES.replace('(Data, UI, AI, Marketplace)', '(Marketplace, AI, UI, Data)');
   check('order/a reordered namespace list is NOT a finding -- it claims no order',
     run(tree({ packages: shuffledParen })).findings.length === 0);
 
@@ -1172,7 +1180,7 @@ export function selfTest() {
   });
   refused('the paren list is gone', { packages: '### @objectstack/spec\n' });
   refused('the colon sentence is gone', {
-    glossary: FIXTURE_GLOSSARY.replace('protocol namespaces: Data, UI, QA, and Marketplace.', 'several namespaces.'),
+    glossary: FIXTURE_GLOSSARY.replace('protocol namespaces: Data, UI, AI, and Marketplace.', 'several namespaces.'),
   });
   refused('the layers column was renamed', {
     glossary: FIXTURE_GLOSSARY.replace(COL_NAMESPACES, 'Namespaces'),
@@ -1189,7 +1197,7 @@ export function selfTest() {
 
   // ---- 9. The partition rule.
   battery('9. The layers table carries its own no-duplicate rule.');
-  const doubled = run(tree({ glossary: FIXTURE_GLOSSARY.replace('| **ObjectUI** | View Layer | UI |', '| **ObjectUI** | View Layer | UI, QA |') }));
+  const doubled = run(tree({ glossary: FIXTURE_GLOSSARY.replace('| **ObjectUI** | View Layer | UI |', '| **ObjectUI** | View Layer | UI, AI |') }));
   check('partition/a namespace in two layers reds',
     doubled.findings.some((f) => f.kind === 'duplicate'), JSON.stringify(doubled.findings));
   check('partition/and it is reported against the glossary',
