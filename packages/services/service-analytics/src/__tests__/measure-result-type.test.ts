@@ -118,23 +118,28 @@ const AGGREGATE_VOCABULARY: ReadonlyArray<{
  *    value (or on whether a value exists at all). Left uncorrected on purpose;
  *    the missing refusal is owned by the `needs-user-decision` card for "no
  *    layer refuses an incoherent aggregate / field-type pair".
- *  - `not-on-this-input` — an answer exists in the metadata but not on this
- *    rule's input (`formula.returnType`, which `sourceFieldMeta` does not
- *    carry). Filed rather than guessed.
+ *  - `declared-elsewhere` — the answer is declared on a SECOND key rather than
+ *    on the `FieldType` this axis walks. `formula` is the only member: its
+ *    result type is `FieldSchema.returnType`, which `measureResultType` reads
+ *    as a third input since #16236. On the declared `FieldType` ALONE — which
+ *    is what this axis passes, and what a formula whose type could not be
+ *    proven at authoring really presents — the verdict is no correction. The
+ *    returnType axis has its own walk in
+ *    `formula-return-type-measure.test.ts`.
  */
 type FieldTypeBucket =
   | 'string'
   | 'temporal'
   | 'numeric-correct'
   | 'backend-dependent'
-  | 'not-on-this-input';
+  | 'declared-elsewhere';
 
 const EXPECTED_BY_BUCKET: Record<FieldTypeBucket, string | undefined> = {
   string: MEASURE_RESULT_TYPE_STRING,
   temporal: MEASURE_RESULT_TYPE_TEMPORAL,
   'numeric-correct': undefined,
   'backend-dependent': undefined,
-  'not-on-this-input': undefined,
+  'declared-elsewhere': undefined,
 };
 
 /**
@@ -206,7 +211,7 @@ const FIELD_TYPE_VERDICTS: ReadonlyArray<{
   { type: 'vector', bucket: 'backend-dependent', why: 'a number array in a JSON column' },
   { type: 'json', bucket: 'backend-dependent', why: 'the untyped escape hatch — the value contract is explicitly open (z.unknown())' },
   // ── answerable, but not from this rule's input ──
-  { type: 'formula', bucket: 'not-on-this-input', why: 'FieldSchema.returnType declares it, but sourceFieldMeta returns only { type, defaultCurrency, max } — and returnType is itself optional' },
+  { type: 'formula', bucket: 'declared-elsewhere', why: 'the answer is FieldSchema.returnType, a SECOND key measureResultType takes as its third input (#16236); on the FieldType alone — an unproven formula — there is no correction' },
 ];
 
 describe('A) measureResultType covers both closed vocabularies, member by member', () => {
@@ -229,7 +234,7 @@ describe('A) measureResultType covers both closed vocabularies, member by member
   it('every bucket is populated — the split is real, not three names for one branch', () => {
     const buckets = new Set(FIELD_TYPE_VERDICTS.map((v) => v.bucket));
     expect([...buckets].sort()).toEqual([
-      'backend-dependent', 'not-on-this-input', 'numeric-correct', 'string', 'temporal',
+      'backend-dependent', 'declared-elsewhere', 'numeric-correct', 'string', 'temporal',
     ]);
   });
 
@@ -346,7 +351,8 @@ const FIELD_TYPES: Record<string, string> = {
   estimate_hours: 'number',     // numeric-correct
   is_urgent: 'boolean',         // backend-dependent
   payload: 'json',              // backend-dependent
-  margin: 'formula',            // not-on-this-input
+  margin: 'formula',            // declared-elsewhere — and NO returnType here, so this
+                                //   fixture drives the absent tier end to end
   child_total: 'summary',       // numeric-correct
 };
 

@@ -1046,13 +1046,24 @@ export class AnalyticsServicePlugin implements Plugin {
       // of the two moves.
       debugSql: this.options.debugSql,
       // Source-field metadata behind the display chains on result columns:
-      // ADR-0053 currency (`currencyConfig.defaultCurrency`) and percent scale
-      // (`max`, which is what marks whole-percent storage — objectui#3136).
+      // ADR-0053 currency (`currencyConfig.defaultCurrency`), percent scale
+      // (`max`, which is what marks whole-percent storage — objectui#3136) and,
+      // since #16236, a formula field's declared `returnType`.
+      //
+      // [#16236] `returnType` is relayed exactly as the other three are —
+      // straight off the object's declared field, unvalidated and uncoerced.
+      // ⛔ Deliberately NOT narrowed to the accepted four here: this adapter's
+      // job is to carry what the engine declares, and a second copy of that
+      // vocabulary at this seam is one that can drift from
+      // `FieldSchema.returnType`. The one reader (`measureResultType`) holds
+      // the single copy and tiers anything else as "cannot answer".
       sourceFieldMeta: (object: string, field: string) => {
         const f = dataEngine()?.getObject?.(object)?.fields?.[field] as
-          | { type?: string; max?: number; currencyConfig?: { defaultCurrency?: string } }
+          | { type?: string; max?: number; returnType?: string; currencyConfig?: { defaultCurrency?: string } }
           | undefined;
-        return f ? { type: f.type, max: f.max, defaultCurrency: f.currencyConfig?.defaultCurrency } : undefined;
+        return f
+          ? { type: f.type, max: f.max, defaultCurrency: f.currencyConfig?.defaultCurrency, returnType: f.returnType }
+          : undefined;
       },
       // #5033 — the datasource an object is bound to, used ONLY to name the
       // actual cause when a dataset's SQL references a table that is not on the
