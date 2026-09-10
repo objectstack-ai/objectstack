@@ -189,10 +189,13 @@ export interface ApprovalResumeSurface {
    * [#15358] Whether the consumed suspension behind a `failed` run SURVIVES —
    * i.e. whether the engine's `restoreConsumedSuspension` would re-arm it.
    * Read by {@link ApprovalService.inspectStrandedRequests}, for `failed` rows
-   * only, to tell the #13909 strand (repairable) from a cascade-failed
-   * ancestor — the `failAncestors` shape the engine itself calls NOT stranded,
-   * because `failSuspendedRun` consumed the ancestor's pause and journalled
-   * nothing, so no verb re-arms it (#15222's shape). {@link getRun} answers
+   * only, to tell a run whose consumed pause the engine still holds from one
+   * whose it does not. ⚠️ [#15222] A cascade-failed ancestor is no longer
+   * automatically the second of those: `failSuspendedRun` now journals the
+   * pause it consumes whenever the descendant that cascaded into it is itself
+   * repairable, and the restore verb re-arms that whole chain as one unit. So
+   * this member is asked per run and its answer taken as given — ⛔ never
+   * inferred from the run's position in a subflow tree. {@link getRun} answers
    * `status: 'failed'` for both: the discriminator is deliberately NOT on
    * `ExecutionLogEntry`, which `GET /automation/:name/runs/:runId` serves
    * verbatim. Ruled B′ on #15358 (2026-09-07): it is published as a dedicated
@@ -512,8 +515,10 @@ function classifyStrandedRunState(run: { status?: string } | null | undefined): 
     // refined by the third oracle ({@link refineFailedRunState}) into which of
     // the three `failed` shapes it is. This arm alone cannot tell them apart:
     // the row reads identically for a resume that consumed the pause and
-    // threw downstream (repairable) and for an ancestor `failAncestors`
-    // cascade-failed (not). `'failed'` here means "reported, undifferentiated".
+    // threw downstream and for an ancestor `failAncestors` cascade-failed —
+    // and [#15222] which of THOSE is repairable is itself no longer decided by
+    // the shape: an ancestor whose descendant is repairable is journalled and
+    // re-armed with it. `'failed'` here means "reported, undifferentiated".
     case 'failed':
       return 'failed';
 
@@ -559,7 +564,10 @@ function refineFailedRunState(verdict: ConsumedSuspensionVerdict): StrandedRunSt
     // engine asked holds no hot copy. Its own class — see the type below.
     case 'SNAPSHOT_DROPPED':
       return 'snapshot_dropped';
-    // Neither witness holds anything: cascade-failed, or never paused.
+    // Neither witness holds anything: never paused, the snapshot is no longer
+    // held, or [#15222] a cascade whose own descendant was beyond repair — the
+    // one cascade shape that is still journalled nothing, deliberately, so the
+    // report never promises a chain repair that could not be completed.
     case 'NO_CONSUMED_SUSPENSION':
       return 'unrepairable';
     // Re-armed between the two reads (an operator's restore landed while this
@@ -605,16 +613,19 @@ function refineFailedRunState(verdict: ConsumedSuspensionVerdict): StrandedRunSt
  *    lives; the restore verb refuses it elsewhere naming the budget. ⛔ Not
  *    folded into either neighbour: as `repairable` it over-reports, as
  *    `unrepairable` it is #15555's false negative. Reported as what it is.
- *  - `unrepairable` — the engine holds NO consumed suspension: the run was
- *    cascade-failed (`failAncestors` → `failSuspendedRun`, which consumes the
- *    ancestor's pause and journals nothing — #15222's shape, the one the
- *    engine's own words call not a strand), never paused at all, or did
- *    strand and its snapshot is no longer held (the journal evicted a copy
- *    whose write never landed; the run was restored and then finished; a
- *    store class without `loadTerminal`, after a restart) — the engine's
- *    `NO_CONSUMED_SUSPENSION` covers all three and does not say which. The
- *    label is faithful to the verb: nothing re-arms it; the remedy is a new
- *    run, not a restore.
+ *  - `unrepairable` — the engine holds NO consumed suspension: the run never
+ *    paused at all; or it did strand and its snapshot is no longer held (the
+ *    journal evicted a copy whose write never landed; the run was restored and
+ *    then finished; a store class without `loadTerminal`, after a restart); or
+ *    it was cascade-failed by a descendant that was ITSELF beyond repair —
+ *    the engine's `NO_CONSUMED_SUSPENSION` covers all three and does not say
+ *    which. The label is faithful to the verb: nothing re-arms it; the remedy
+ *    is a new run, not a restore.
+ *    ⚠️ [#15222] A cascade-failed ancestor is NOT this label by default any
+ *    more. `failSuspendedRun` journals the pause it consumes whenever the
+ *    descendant that cascaded into it is repairable, and the restore verb
+ *    re-arms leaf and ancestors as one unit — so those ancestors report
+ *    `repairable`, and restoring any member of the chain repairs all of it.
  *  - `failed` — the engine COULD NOT BE ASKED which of the three it is, or
  *    was asked and could not answer. Three ways in: the attached surface has
  *    no `inspectConsumedSuspension` (an engine build older than this plugin,
@@ -706,10 +717,11 @@ export interface StrandedApprovalRequest {
    * Which unrecoverable shape this is — see {@link StrandedRunState}. Carried
    * because the shapes need different remedies: a `missing` run has no history
    * to read; a `repairable` one is put back by `restoreConsumedSuspension` and
-   * continued by {@link ApprovalService.continueRestoredRun}; an
-   * `unrepairable` one (#15222's cascade-failed ancestor) is refused by that
-   * verb and needs a new run. An operator reading `'failed'` has to ask the
-   * engine directly.
+   * continued by {@link ApprovalService.continueRestoredRun} — and [#15222]
+   * that restore re-arms every run of a nested chain, so a `repairable` row
+   * may be repaired by restoring a DIFFERENT row of the same tree; an
+   * `unrepairable` one is refused by that verb and needs a new run. An
+   * operator reading `'failed'` has to ask the engine directly.
    */
   runState: StrandedRunState;
   flowName?: string;
@@ -4505,11 +4517,14 @@ export class ApprovalService implements IApprovalService {
    * counted as healthy.
    *
    * **A THIRD oracle tells the `failed` rows apart (#15358).** `status ===
-   * 'failed'` over-reports in one specific direction: a cascade-failed run
-   * — an ancestor `failAncestors` failed while it was parked at its `subflow`
-   * node, whose pause `failSuspendedRun` consumed and journalled nothing — has
-   * the same terminal row as the #13909 strand, and `restoreConsumedSuspension`
-   * refuses it. The engine's discriminator (the consumed-suspension snapshot)
+   * 'failed'` over-reports in one specific direction: a run whose consumed
+   * pause the engine no longer holds — never paused, snapshot gone, or
+   * [#15222] cascade-failed by a descendant that was itself beyond repair —
+   * has the same terminal row as the #13909 strand, and
+   * `restoreConsumedSuspension` refuses it while re-arming the strand. (⚠️ An
+   * ancestor cascade-failed by a REPAIRABLE descendant is journalled and
+   * re-armed with it since #15222, so that shape is `'repairable'` here.)
+   * The engine's discriminator (the consumed-suspension snapshot)
    * is deliberately NOT on the object `getRun` answers, so it is asked through
    * a dedicated read-only member, `inspectConsumedSuspension`, and only for
    * `failed` rows: the answer splits `'failed'` into `'repairable'`,

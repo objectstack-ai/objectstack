@@ -695,6 +695,45 @@ export const MAX_PERSISTED_HISTORY_STEPS = 200;
 export const MAX_CONSUMED_SUSPENSIONS = 50;
 
 /**
+ * [#15222] How far a chain restore walks in either direction before it stops —
+ * the same bound `failAncestors` puts on the walk that CREATED the chain, so
+ * the repair can reach exactly as deep as the cascade could, and a corrupt
+ * context cannot make either loop run forever.
+ */
+const MAX_RESTORE_CHAIN_HOPS = 32;
+
+/**
+ * [#15222] The child run a parked run is awaiting, read off the correlation
+ * the engine already writes when it parks a parent at a nested node —
+ * `subflow:<childRunId>` for a subflow (`builtin/subflow-node.ts`) and
+ * `map:<childRunId>` for a `map` unit (ADR-0037 A2).
+ *
+ * ⛔ Not a new link and not a new field: this is the SAME string the delegation
+ * path in `resumeInternal` slices to find the child it must forward a signal
+ * to. Naming it once here is what keeps the restore walk and the resume walk
+ * reading one fact.
+ */
+function nestedChildRunId(correlation: string | undefined): string | undefined {
+    if (typeof correlation !== 'string') return undefined;
+    for (const prefix of ['subflow:', 'map:']) {
+        if (correlation.startsWith(prefix)) return correlation.slice(prefix.length) || undefined;
+    }
+    return undefined;
+}
+
+/** [#15222] One chain member's outcome, projected from its own restore result. */
+function chainEntryOf(runId: string, result: SuspensionRestoreResult): ChainRestoreEntry {
+    return {
+        runId,
+        restored: result.restored,
+        ...(result.refusal !== undefined ? { refusal: result.refusal } : {}),
+        reason: result.reason,
+        ...(result.flowName !== undefined ? { flowName: result.flowName } : {}),
+        ...(result.nodeId !== undefined ? { nodeId: result.nodeId } : {}),
+    };
+}
+
+/**
  * Level the one-line-per-terminal-run summary is logged at (#4354), or `'off'`.
  *
  * Defaults to `'info'` — deliberately. The whole premise of #4354 is that a
@@ -1512,6 +1551,35 @@ export type SuspensionRestoreRefusal =
     | 'RUN_NOT_FOUND';
 
 /**
+ * [#15222] What ONE run of a nested chain got out of a chain restore — see
+ * {@link SuspensionRestoreResult.chain}.
+ *
+ * The same fields the top-level result carries for the run the operator named,
+ * per member, and deliberately no more: a member is either re-armed or refused
+ * for one of this verb's own reasons, and WHY it was part of the chain is
+ * structural (its `$parentRunId`, its nested correlation), not a further
+ * outcome to enumerate.
+ *
+ * ⛔ It carries no status word, and must not grow one. A cascade-failed
+ * ancestor is not `'stranded'` — that is the resume result of a run that
+ * consumed its OWN pause and then threw downstream, and nothing re-arms an
+ * ancestor by resuming it. Its repairability is this entry and the journal
+ * behind it.
+ */
+export interface ChainRestoreEntry {
+    runId: string;
+    /** `true` only when a suspension was put back for this run by THIS call. */
+    restored: boolean;
+    /** Absent exactly when `restored` is `true`. */
+    refusal?: SuspensionRestoreRefusal;
+    /** One sentence naming what was observed for this run — always present. */
+    reason: string;
+    /** This run's flow / node, when it was re-armed. */
+    flowName?: string;
+    nodeId?: string;
+}
+
+/**
  * Outcome of {@link AutomationEngine.restoreConsumedSuspension} (#13909).
  *
  * Deliberately NOT an {@link AutomationResult}: this verb does not execute a
@@ -1534,6 +1602,23 @@ export interface SuspensionRestoreResult {
     nodeId?: string;
     /** When the resume that consumed the restored suspension failed. */
     consumedAt?: string;
+    /**
+     * [#15222] Every run this call re-armed when the named run was part of a
+     * NESTED chain — leaf-first, including the named run itself, each with its
+     * own outcome.
+     *
+     * **Absent for a flat run**, which is the whole compatibility story: a
+     * single-run strand answers exactly what it always answered, and the six
+     * fields above always describe the run the CALLER NAMED, wherever in the
+     * chain that run sits.
+     *
+     * Present means the repair was a chain repair: a stranded descendant's
+     * cascade consumed each ancestor's pause too, all of them were journalled,
+     * and this call put every one of them back in a fixed order — deepest
+     * first, so no ancestor becomes resumable before the run it is parked
+     * awaiting is parked again.
+     */
+    chain?: ChainRestoreEntry[];
 }
 
 /**
@@ -5692,7 +5777,30 @@ export class AutomationEngine implements IAutomationService {
                     }
                     if (!childRes.success) {
                         const error = `subflow run '${childRunId}' (${childRun.flowName}) failed: ${childRes.error ?? 'unknown error'}`;
-                        await this.failSuspendedRun(run, error);
+                        // [#15222] This frame consumes its OWN pause here, and
+                        // before this card journalled nothing for it — so a
+                        // child that stranded left a repairable leaf under an
+                        // ancestor no verb could reach. Journalled exactly when
+                        // the child is repairable, asked of the journal rather
+                        // than of the child's `status`: a child that itself
+                        // cascade-failed from a deeper strand carries no status
+                        // word at all (see the return below) and is repairable
+                        // all the same, which is what makes a chain deeper than
+                        // two levels re-armable by induction.
+                        //
+                        // ⛔ And the envelope below is UNCHANGED — no status is
+                        // stamped on it. `'stranded'` belongs to the run that
+                        // consumed its own pause and then threw downstream;
+                        // stamping it here would tell an operator to retry a
+                        // recovery that cannot succeed, because nothing re-arms
+                        // this run by resuming it. What reaches this run is
+                        // {@link restoreConsumedSuspension}, through the
+                        // journal one line up.
+                        await this.failSuspendedRun(
+                            run,
+                            error,
+                            this.consumedSuspensions.has(childRunId) ? childRunId : undefined,
+                        );
                         return { success: false, error, durationMs: Date.now() - run.startTime };
                     }
                     // Child completed — continue below with its output as the
@@ -6163,7 +6271,11 @@ export class AutomationEngine implements IAutomationService {
                     // ancestor awaiting it — they can never be resumed otherwise.
                     // The delegation path handles its own level (skipBubble).
                     if (!skipBubble) {
-                        await this.failAncestors(run.context, errorMessage);
+                        // [#15222] `runId` names the run that stranded two
+                        // statements above, so the walk journals every ancestor
+                        // whose pause this cascade consumes and the chain is
+                        // re-armable to its full depth, leaf-first.
+                        await this.failAncestors(run.context, errorMessage, runId);
                     }
                 } catch (bookkeeping) {
                     // #4632 verdict: DURABILITY, so `error` — the caller is
@@ -6498,8 +6610,44 @@ export class AutomationEngine implements IAutomationService {
      * Terminally fail a suspended run: consume its continuation and record a
      * `failed` log so it stops surfacing as resumable. Used when a subflow
      * descendant fails — the ancestor awaiting it can never be resumed.
+     *
+     * [#15222] **And journal the pause it consumes, when the descendant whose
+     * failure got us here is itself repairable.** This consumption is exactly
+     * as terminal as the one `resumeInternal`'s catch arm makes — the paused
+     * row is deleted, `resume` then answers `RUN_NOT_FOUND` and `cancelRun` is
+     * a no-op — so leaving no snapshot left the operator exit reaching the
+     * stranded leaf and NOTHING above it: restoring the leaf completed it into
+     * an ancestor that never continues. The journal is written from the same
+     * one producer ({@link journalConsumedSuspension}) and carried into the
+     * durable terminal row by the same third argument to
+     * {@link recordLog} as the strand's own, so a chain is repairable from any
+     * replica and across a restart, not only from this process's memory.
+     *
+     * @param repairableDescendant - The descendant run whose failure consumed
+     *   this pause, and ONLY when a consumed-suspension snapshot is held for
+     *   it. `undefined` journals nothing, which is the honest answer for a
+     *   cascade nothing can re-arm from below: re-arming an ancestor whose
+     *   descendant is beyond repair promises a chain repair that cannot be
+     *   completed, and an operator acting on that promise resumes the ancestor
+     *   past a nested node whose child never ran.
+     *
+     * ⛔ The snapshot is taken BEFORE `forgetSuspendedRun`, from a `run` no
+     * traversal has touched: this seam is reached with the pause still live
+     * (the ancestor never resumed at all, or — on the delegation path — its
+     * own resume has not passed the consumption point yet), so `run.steps` is
+     * the pause's own step log and `run.variables` the pause's own scope. That
+     * is why there is no {@link cloneVariablesAtPause} here: the #15660
+     * aliasing hazard is a FAILED ATTEMPT writing through a shared scope
+     * object, and no attempt has run against this run.
      */
-    private async failSuspendedRun(run: SuspendedRun, error: string): Promise<void> {
+    private async failSuspendedRun(
+        run: SuspendedRun,
+        error: string,
+        repairableDescendant?: string,
+    ): Promise<void> {
+        const consumed = repairableDescendant !== undefined
+            ? this.journalConsumedSuspension(run, run.steps.length, error, run.variables)
+            : undefined;
         await this.forgetSuspendedRun(run, 'failed');
         this.recordLog({
             id: run.runId,
@@ -6512,7 +6660,7 @@ export class AutomationEngine implements IAutomationService {
             trigger: buildRunTrigger(run.context),
             steps: run.steps,
             error,
-        }, run.context);
+        }, run.context, consumed?.run);
     }
 
     /**
@@ -6939,6 +7087,155 @@ export class AutomationEngine implements IAutomationService {
         runId: string,
         options?: { requestedBy?: string; reason?: string },
     ): Promise<SuspensionRestoreResult> {
+        // [#15222] Resolve the nested chain FIRST, read-only. A flat run finds
+        // nothing here and takes the per-run call below unchanged — same
+        // guards, same answer, and a result with no `chain` key at all.
+        //
+        // A nested one is the whole of this card: the ancestors' pauses were
+        // consumed by the same cascade and journalled by
+        // {@link failSuspendedRun}, and re-arming only the run the operator
+        // named would put the deployment back in the condition the verb exists
+        // to leave — a leaf that completes into an ancestor which never
+        // continues. So the chain is one unit of repair, and this is the call
+        // that makes it one.
+        const { below, above } = await this.resolveRestoreChain(runId);
+        if (below.length === 0 && above.length === 0) {
+            return this.restoreOneConsumedSuspension(runId, options);
+        }
+        // DEEPEST FIRST, and the order IS the guarantee: an ancestor becomes
+        // resumable only after the run it is parked awaiting is parked again,
+        // so a resume arriving mid-repair delegates into a live child instead
+        // of continuing past a nested node whose child is terminal.
+        //
+        // Every member goes through the SAME per-run call — its own
+        // `restoring` claim, its own strict live-suspension read, its own
+        // two-witness read, its own durable park. So the verb's idempotence
+        // and the #14333 advance claim hold PER RUN in the chain rather than
+        // once for the chain, and a second chain restore finds every member
+        // parked and answers `RUN_SUSPENDED` without minting a second pause
+        // anywhere.
+        const chain: ChainRestoreEntry[] = [];
+        for (const memberId of below) {
+            chain.push(chainEntryOf(memberId, await this.restoreOneConsumedSuspension(memberId, options, runId)));
+        }
+        const own = await this.restoreOneConsumedSuspension(runId, options);
+        chain.push(chainEntryOf(runId, own));
+        for (const memberId of above) {
+            chain.push(chainEntryOf(memberId, await this.restoreOneConsumedSuspension(memberId, options, runId)));
+        }
+        // The six fields above `chain` keep describing the run the caller
+        // NAMED, wherever in the chain it sits — a consumer that never heard
+        // of nesting reads exactly what it always read.
+        return { ...own, chain };
+    }
+
+    /**
+     * [#15222] The runs a chain restore of `runId` must re-arm besides it:
+     * `below` deepest-first (the descendants it is parked awaiting) and
+     * `above` nearest-first (the ancestors whose pauses its cascade consumed).
+     *
+     * READ-ONLY, and bounded in both directions by
+     * {@link MAX_RESTORE_CHAIN_HOPS}. A run joins the chain only when it is
+     * BOTH not currently suspended and holds a consumed-suspension snapshot —
+     * which is what makes a second restore of an already-repaired chain
+     * resolve to nothing and answer the flat `RUN_SUSPENDED`.
+     *
+     * The links are ones the engine already persists: a parent parked at a
+     * nested node carries `<kind>:<childRunId>` as its correlation
+     * ({@link nestedChildRunId}) and a child carries `$parentRunId` in its
+     * context. ⛔ No new column and no new marker on the journal — a durable
+     * marker would be a store change, and a hot-only one would make a chain
+     * resolvable in the process that stranded it and not in the replica that
+     * has to repair it after a restart, which is the one place this has to
+     * work.
+     */
+    private async resolveRestoreChain(runId: string): Promise<{ below: string[]; above: string[] }> {
+        const below: string[] = [];
+        const above: string[] = [];
+        const self = await this.peekConsumedSuspension(runId);
+        if (!self) return { below, above };
+
+        let cursor = self;
+        for (let hops = 0; hops < MAX_RESTORE_CHAIN_HOPS; hops++) {
+            const childRunId = nestedChildRunId(cursor.run.correlation);
+            if (childRunId === undefined || childRunId === runId || below.includes(childRunId)) break;
+            const child = await this.peekConsumedSuspension(childRunId, runId);
+            if (!child) break;
+            below.unshift(childRunId);
+            cursor = child;
+        }
+
+        cursor = self;
+        for (let hops = 0; hops < MAX_RESTORE_CHAIN_HOPS; hops++) {
+            const parentRunId = (cursor.run.context as Record<string, unknown> | undefined)?.$parentRunId;
+            if (typeof parentRunId !== 'string' || !parentRunId) break;
+            if (parentRunId === runId || above.includes(parentRunId)) break;
+            const parent = await this.peekConsumedSuspension(parentRunId, runId);
+            if (!parent) break;
+            above.push(parentRunId);
+            cursor = parent;
+        }
+        return { below, above };
+    }
+
+    /**
+     * [#15222] Is there a consumed suspension to put back for `runId` — without
+     * putting anything back, and without evicting the stale hot copy the
+     * restore verb would drop? The read-only step of a chain walk, taking the
+     * same two witnesses {@link resolveConsumedSuspensionWitnesses} reconciles
+     * for every other reader.
+     *
+     * A run that is still SUSPENDED answers `undefined`: it is not a member to
+     * re-arm, and treating it as one would turn an idempotent second call into
+     * a chain of `RUN_SUSPENDED`s where the flat answer is the truthful one.
+     *
+     * @param chainOf - The run whose chain is being walked. Present only for a
+     *   HOP, and only so that an unreadable store is reported: the walk stops
+     *   there, and a chain silently truncated by an outage would read to an
+     *   operator as a complete repair. The named run's own read is not
+     *   reported here because {@link restoreOneConsumedSuspension} takes the
+     *   identical read immediately afterwards and refuses `STORE_UNAVAILABLE`
+     *   on it — one degradation, said once.
+     */
+    private async peekConsumedSuspension(runId: string, chainOf?: string): Promise<ConsumedSuspension | undefined> {
+        try {
+            if (await this.loadSuspendedRunStrict(runId)) return undefined;
+            const terminal = this.store?.loadTerminal ? await this.store.loadTerminal(runId) : null;
+            return this.resolveConsumedSuspensionWitnesses(runId, terminal).consumed;
+        } catch (err) {
+            if (chainOf !== undefined) {
+                // #6299 — the driver's own text rides the structured slot.
+                // #4632 verdict: FUNCTIONAL — the repair is visibly short (the
+                // `chain` this call returns names only what it reached) and the
+                // remedy is to re-issue, which is safe per run.
+                this.logger.warn(
+                    `[automation] restoreConsumedSuspension('${chainOf}') could not read run '${runId}' while ` +
+                        `walking its nested chain, so the walk STOPPED there and nothing beyond it was re-armed ` +
+                        `— the repair this call reports is partial. Nothing was written for that run. Fix the ` +
+                        `store failure in this record's meta, then re-issue the restore: it is idempotent per ` +
+                        `run and puts back only what is still missing.`,
+                    describeThrownForLog(err),
+                );
+            }
+            return undefined;
+        }
+    }
+
+    /**
+     * One run's half of {@link restoreConsumedSuspension}: every guard, both
+     * witnesses, the re-arm and the trace, for exactly one run id. The public
+     * verb is this call for a flat run, and this call per member — in a fixed
+     * order — for a nested chain (#15222).
+     *
+     * @param chainRestoreOf - Set when this run is being re-armed as a member
+     *   of another run's chain. It shapes the trace only; every guard above is
+     *   taken identically either way.
+     */
+    private async restoreOneConsumedSuspension(
+        runId: string,
+        options?: { requestedBy?: string; reason?: string },
+        chainRestoreOf?: string,
+    ): Promise<SuspensionRestoreResult> {
         // Synchronously, before the first await — the same shape as `resuming`
         // in `resumeInternal`: a guard set after an await is not a guard.
         if (this.restoring.has(runId)) {
@@ -7126,10 +7423,21 @@ export class AutomationEngine implements IAutomationService {
             // argument; `warn` has no `Error` slot.
             this.logger.warn(
                 `[automation] run '${runId}' of flow '${consumed.run.flowName}': an operator RESTORED the ` +
-                    `suspension its resume had consumed at node '${consumed.run.nodeId}', so the run is resumable ` +
+                    // [#15222] "consumed at" rather than "its resume had
+                    // consumed": an ancestor's pause was consumed by a
+                    // descendant's cascade, not by a resume of its own, and the
+                    // old wording was false for every member of a chain. Which
+                    // of the two it was is not guessed here — `failure` in the
+                    // meta below is the cascade's own text when it was one, and
+                    // it is durable, where a marker on the journal would not be.
+                    `suspension consumed at node '${consumed.run.nodeId}', so the run is resumable ` +
                     `again. ⚠️ Nothing the failed attempt already did was undone, and the original resume signal ` +
                     `was NOT replayed — the continuation must be re-issued. Who asked, why, and the failure this ` +
-                    `is an exit from are in this record's meta.`,
+                    `is an exit from are in this record's meta.` +
+                    (chainRestoreOf === undefined
+                        ? ''
+                        : ` This run was re-armed as one member of the nested chain repaired by the restore of ` +
+                          `run '${chainRestoreOf}' — the continuation is re-issued on THAT run.`),
                 {
                     runId,
                     flowName: consumed.run.flowName,
@@ -7140,6 +7448,7 @@ export class AutomationEngine implements IAutomationService {
                     requestedBy: options?.requestedBy ?? 'not recorded',
                     restoreReason: options?.reason ?? 'not recorded',
                     failure: consumed.error,
+                    ...(chainRestoreOf === undefined ? {} : { chainRestoreOf }),
                 },
             );
 
@@ -7236,9 +7545,24 @@ export class AutomationEngine implements IAutomationService {
      * Walk a failed run's `$parentRunId` chain and fail each suspended
      * ancestor (see {@link failSuspendedRun}). Bounded so a corrupt context
      * can't loop forever.
+     *
+     * [#15222] Each hop carries the run BELOW it, so every ancestor's pause is
+     * journalled for as long as the thing under it is repairable — the leaf on
+     * the first hop, the ancestor this walk just journalled on every hop after
+     * it. The chain therefore stays restorable to its full depth by induction,
+     * and stops being journalled at the exact hop where re-arming would stop
+     * being honest (an evicted journal, a store that dropped the snapshot).
+     *
+     * @param strandedRunId - The run that stranded and started this cascade.
+     *   Omitted by a caller that has no repairable run below the walk.
      */
-    private async failAncestors(context: AutomationContext | undefined, error: string): Promise<void> {
+    private async failAncestors(
+        context: AutomationContext | undefined,
+        error: string,
+        strandedRunId?: string,
+    ): Promise<void> {
         let parentId = (context as Record<string, unknown> | undefined)?.$parentRunId;
+        let below = strandedRunId;
         let hops = 0;
         while (typeof parentId === 'string' && parentId && hops++ < 32) {
             // [#14332] The DEGRADING loader, by deliberate choice: this walk runs
@@ -7255,7 +7579,15 @@ export class AutomationEngine implements IAutomationService {
             // its declared best-effort level — no new `error` seam here).
             const parent = await this.loadSuspendedRun(parentId);
             if (!parent) return;
-            await this.failSuspendedRun(parent, `subflow descendant failed: ${error}`);
+            await this.failSuspendedRun(
+                parent,
+                `subflow descendant failed: ${error}`,
+                // [#15222] Earned, not assumed: only a descendant this process
+                // actually holds a snapshot for makes the ancestor's own
+                // snapshot a promise the restore verb can keep.
+                below !== undefined && this.consumedSuspensions.has(below) ? below : undefined,
+            );
+            below = parent.runId;
             parentId = (parent.context as Record<string, unknown> | undefined)?.$parentRunId;
         }
     }
