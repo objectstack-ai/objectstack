@@ -160,11 +160,13 @@ describe('#17081 — the claim and the route are the platform\'s own declaration
     const entries = SETUP_NAV_CONTRIBUTIONS
       .filter((c) => c.app === 'setup')
       .flatMap((c) => c.items ?? []);
-    const users = entries.find((i) => (i as { objectName?: string }).objectName === 'sys_user');
+    const users = entries.find((i) => (i as { objectName?: string }).objectName === 'sys_user') as
+      | { label?: unknown; requiredPermissions?: string[] }
+      | undefined;
     expect(users).toBeDefined();
     expect(users!.label).toBe('Users');
     // Ungated: an operator holding only `setup.access` still sees the entry.
-    expect((users as { requiredPermissions?: string[] }).requiredPermissions ?? []).toEqual([]);
+    expect(users!.requiredPermissions ?? []).toEqual([]);
     // …and the group anchor it lands in is ungated too.
     const group = (SETUP_APP.navigation ?? []).find((g) => g.id === 'group_people_org');
     expect(group).toBeDefined();
