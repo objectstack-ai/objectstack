@@ -73,6 +73,24 @@ const BASE = {
 const labels = (result: { rows: Record<string, unknown>[] }) =>
   result.rows.map((r) => r['events.createdAt']);
 
+/**
+ * The in-process door PAST the schema — `AnalyticsQuerySchema` would refuse an
+ * undeclared spelling itself, so a query that tests what the DRIVER does with
+ * one must not be parsed first. This is the reachability
+ * `analyticsDateRangeUnrecognizedError` records for its own out-of-vocabulary
+ * refusal: `POST /analytics/dataset/query` types `selection.timeDimensions`
+ * from `AnalyticsQuery` and never Zod-parses them.
+ */
+async function unparsed(granularity: string) {
+  const driver = new InMemoryDriver({ initialData: { events: TWO_ROWS_ONE_UTC_DAY } });
+  await driver.connect();
+  const service = new MemoryAnalyticsService({ driver, cubes });
+  return service.query({
+    ...BASE,
+    timeDimensions: [{ dimension: 'events.createdAt', granularity }],
+  } as unknown as AnalyticsQuery);
+}
+
 describe('[#16178] a time dimension buckets by its declared granularity', () => {
   it("folds two rows on one UTC day into ONE group under granularity 'day'", async () => {
     const result = await query({
@@ -133,6 +151,74 @@ describe('[#16178] a time dimension buckets by its declared granularity', () => 
 
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0]).toMatchObject({ createdAt: '2026-09-06', 'events.count': 2 });
+  });
+});
+
+describe('[#16178] a granular time dimension is a projected group column on its own', () => {
+  /** Measures + one granular time dimension, `dimensions` absent entirely. */
+  const TREND = {
+    cube: 'events',
+    measures: ['events.count'],
+    timeDimensions: [{ dimension: 'events.createdAt', granularity: 'day' }],
+  } satisfies Partial<AnalyticsQuery>;
+
+  it('groups and projects a `timeDimensions` member that `dimensions` never lists', async () => {
+    // The canonical trend-query shape. Keying `$group` on `query.dimensions`
+    // alone answered ONE TOTAL for it (`_id: null`) — a chart with a y-value
+    // and no x-axis, which is the #4033 symptom the SQL/ObjectQL face already
+    // repaired: `objectql-strategy.ts` groups every granular entry not listed
+    // in `dimensions` (:163-167) and `projectedDimensions` (:1889-1893) hands
+    // that one set to grouping, row mapping and field metadata alike. Accepted,
+    // silent and inert is this card's own defect class, so the two faces agree
+    // here rather than one of them declaring a key it never reads.
+    const result = await query(TREND);
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toMatchObject({ 'events.createdAt': '2026-09-06', 'events.count': 2 });
+  });
+
+  it('names the projected bucket in `fields`, on the terms the listed shape gets', async () => {
+    // Rows without their `fields` entry is half of #4033: the x-axis exists in
+    // the data and not in the metadata beside it. Pinned as AGREEMENT with the
+    // shape that lists the member, so the two spellings of one query cannot
+    // drift into two answers.
+    const projected = await query(TREND);
+    const listed = await query({
+      ...BASE,
+      timeDimensions: [{ dimension: 'events.createdAt', granularity: 'day' }],
+    });
+
+    expect(projected.fields).toEqual(listed.fields);
+    expect(projected.fields.map((f) => f.name)).toEqual(['events.createdAt', 'events.count']);
+  });
+
+  it('CONTROL — a `dateRange`-only entry is NOT projected (#5688)', async () => {
+    // The rule's other half, and what keeps the cells above from reading as
+    // "every time dimension becomes a column". An entry carrying only a window
+    // is a PREDICATE: it selects rows and contributes no group key, so this
+    // answers one total under a `fields` list that never mentions the member.
+    const result = await query({
+      cube: 'events',
+      measures: ['events.count'],
+      timeDimensions: [{ dimension: 'events.createdAt', dateRange: ['2026-09-06', '2026-09-06'] }],
+    });
+
+    expect(result.rows).toEqual([{ 'events.count': 2 }]);
+    expect(result.fields.map((f) => f.name)).toEqual(['events.count']);
+  });
+
+  it('keys a member listed BOTH ways exactly once', async () => {
+    // Matched on the resolved field path, the same way the `dimensions` loop
+    // already folds a bucketed member — so the unprefixed spelling collides
+    // with the prefixed one instead of adding a second column.
+    const result = await query({
+      ...BASE,
+      dimensions: ['createdAt'],
+      timeDimensions: [{ dimension: 'events.createdAt', granularity: 'day' }],
+    });
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.fields.map((f) => f.name)).toEqual(['createdAt', 'events.count']);
   });
 });
 
@@ -222,6 +308,30 @@ describe('[#16178] a sub-day granularity is refused, not dropped', () => {
         [],
       ),
     ).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED', status: 501 });
+  });
+
+  it('answers 400, not 501, for a granularity the CONTRACT never declared', async () => {
+    // 501 is a claim about this BACKEND, and it is only honest about a value the
+    // contract actually declares. `'fortnight'` is a mistake in the query, and
+    // the 501 sentence asserting "the spec declares the value" would have been
+    // false of it. Reached the way its `dateRange` sibling documents — past the
+    // schema door, which is where `POST /analytics/dataset/query` types
+    // `selection.timeDimensions` without Zod-parsing them — so this query
+    // deliberately does NOT go through `asQuery`.
+    await expect(unparsed('fortnight')).rejects.toMatchObject({
+      code: 'INVALID_QUERY',
+      status: 400,
+    });
+  });
+
+  it('CONTROL — the same unparsed door still answers 501 for a DECLARED interval', async () => {
+    // Without this the cell above proves only "the unparsed door throws". The
+    // two answers differ on exactly one thing: whether `TimeUpdateInterval`
+    // declares the value.
+    await expect(unparsed('hour')).rejects.toMatchObject({
+      code: 'NOT_IMPLEMENTED',
+      status: 501,
+    });
   });
 });
 

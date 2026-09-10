@@ -646,6 +646,8 @@ export interface MemoryAnalyticsConfig {
  * at compile, before this is built.
  */
 interface TimeBucket {
+  /** The member as the CALLER spelled it, which is how a projected bucket is named back. */
+  readonly dimension: string;
   /** The row field the instant is read from. */
   readonly fieldPath: string;
   /** The bucket size, narrowed to what `bucketDateKey` can label. */
@@ -856,6 +858,7 @@ export class MemoryAnalyticsService implements IAnalyticsService {
           // and a measure's aggregand (`max(created_at)`), and folding the field
           // in place would silently rank bucket LABELS instead of instants.
           timeBuckets.push({
+            dimension: timeDim.dimension,
             fieldPath,
             granularity: timeDim.granularity,
             bucketKey: bucketFieldFor(this.getShortName(timeDim.dimension)),
@@ -931,6 +934,7 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     const groupStage: Record<string, any> = { _id: {} };
     
     // Add dimensions to _id
+    const keyedBucketPaths = new Set<string>();
     if (query.dimensions && query.dimensions.length > 0) {
       for (const dim of query.dimensions) {
         const fieldPath = this.resolveFieldPath(cube, dim);
@@ -939,9 +943,39 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         // value. Matched on the resolved field path, so `createdAt` in
         // `dimensions` and `events.createdAt` in `timeDimensions` are one member.
         const bucketed = timeBuckets.find(b => b.fieldPath === fieldPath);
+        if (bucketed) keyedBucketPaths.add(bucketed.fieldPath);
         groupStage._id[dimName] = bucketed ? `$${bucketed.bucketKey}` : `$${fieldPath}`;
       }
-    } else {
+    }
+
+    // [#16178] A GRANULAR time dimension is a group column in its own right,
+    // whether or not `dimensions` also lists it. Keying `$group` on
+    // `query.dimensions` alone answered ONE TOTAL (`_id: null`) for the
+    // canonical trend shape — `{measures, timeDimensions:[{dimension,
+    // granularity}]}` with no `dimensions` — so the granularity was accepted,
+    // silent and inert: this card's own defect class under a different name.
+    //
+    // The rule and its exception are the SQL/ObjectQL face's, recorded there:
+    // every granular entry not already listed groups and projects
+    // (`objectql-strategy.ts` :163-167), and one set — `projectedDimensions`
+    // (:1889-1893) — feeds grouping, row mapping and field metadata alike,
+    // because rows carrying a bucket under a `fields` list that never mentions
+    // it is a trend chart with no x-axis (#4033). An entry carrying only a
+    // `dateRange` is a PREDICATE and is NOT projected (#5688) — which needs no
+    // test here, since `timeBuckets` only ever admits an entry that declared a
+    // granularity.
+    //
+    // Deduped on the resolved field path, the same way the loop above folds a
+    // bucketed member, so two spellings of one member cannot become two columns.
+    const projectedBuckets: TimeBucket[] = [];
+    for (const bucket of timeBuckets) {
+      if (keyedBucketPaths.has(bucket.fieldPath)) continue;
+      keyedBucketPaths.add(bucket.fieldPath);
+      projectedBuckets.push(bucket);
+      groupStage._id[this.getShortName(bucket.dimension)] = `$${bucket.bucketKey}`;
+    }
+
+    if (Object.keys(groupStage._id).length === 0) {
       groupStage._id = null; // No grouping, aggregate all
     }
 
@@ -967,6 +1001,10 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         const dimName = this.getShortName(dim);
         projectStage[dimName] = `$_id.${dimName}`;
       }
+    }
+    for (const bucket of projectedBuckets) {
+      const dimName = this.getShortName(bucket.dimension);
+      projectStage[dimName] = `$_id.${dimName}`;
     }
     if (query.measures && query.measures.length > 0) {
       for (const measure of query.measures) {
@@ -1040,6 +1078,13 @@ export class MemoryAnalyticsService implements IAnalyticsService {
           }
         }
       }
+      // [#16178] and a granular time dimension `dimensions` never listed.
+      for (const bucket of projectedBuckets) {
+        const shortName = this.getShortName(bucket.dimension);
+        if (shortName in row) {
+          renamedRow[bucket.dimension] = row[shortName];
+        }
+      }
       
       // Rename measures
       if (query.measures) {
@@ -1065,6 +1110,19 @@ export class MemoryAnalyticsService implements IAnalyticsService {
           type: dimension?.type || 'string'
         });
       }
+    }
+
+    // [#16178] On the declared type, not on `string`: the value is a bucket
+    // LABEL either way, and the shape that DOES list the member has always
+    // answered the member's own type for exactly that folded value. Two
+    // spellings of one query answer one `fields` list — the same choice the
+    // ObjectQL face records at `buildFieldMeta`.
+    for (const bucket of projectedBuckets) {
+      const dimension = this.resolveDimension(cube, bucket.dimension);
+      fields.push({
+        name: bucket.dimension,
+        type: dimension?.type || 'string'
+      });
     }
     
     if (query.measures) {
