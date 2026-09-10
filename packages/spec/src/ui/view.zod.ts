@@ -1746,6 +1746,27 @@ const VIEW_CALENDAR_ALLOWED_NEEDS_START_DATE =
  * another visualization has the same shape is a separate finding to measure
  * first, not a rider here (the #13748 ruling says so in those words).
  *
+ * ⚠️ [#16577] Scope, the OTHER axis: this check reads
+ * `appearance.allowedVisualizations` and NOT `type`. A view that asks for a
+ * calendar by BEING one — `type: 'calendar'` with no `calendar:` block —
+ * parses CLEAN at all three doors, measured. That is not an unwatched shape:
+ * it is the axis `checkViewCompleteness`'s `VIEW_BINDING_BLOCKS`
+ * (`../kernel/functional-completeness.ts`) carries, at WARNING, under the same
+ * ADR-0078 §1 rubric the `page` note above cites — refuse what renders
+ * NOTHING, warn what degrades. The two axes are covered by two doors with
+ * complementary coverage: the completeness check reads `type` only and is
+ * blind to `allowedVisualizations`, this check reads `allowedVisualizations`
+ * only and is blind to `type`. ⛔ Escalating the `type` axis to a refusal is
+ * NOT ruled: it would refuse a shape 17.3.0 accepts, so it is a
+ * published-surface narrowing and a separate finding — the same disposition
+ * the `timeline` sentence above states. Both halves are pinned in
+ * `view.test.ts`, so a change to either is a deliberate edit.
+ *
+ * ⚠️ [#16577] `viewType` is NOT a second spelling of `type` at any of these
+ * doors: the two authoring doors refuse it as an unknown key, and the
+ * `.strip()`ed overlay door DROPS it, so the view parses as the defaulted
+ * `type: 'grid'` — an author who spells it reaches a grid, never a calendar.
+ *
  * Attached with `.superRefine` at the same three doors as
  * {@link checkListViewPageMount}, for the same zod-4 reason (refinements block
  * `.omit()`/key-overwriting `.extend()`, so derived shapes re-attach): the
