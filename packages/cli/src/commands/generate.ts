@@ -6,10 +6,12 @@ import { createHash } from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
 
-// Type-only (erased at runtime): the three field-type vocabularies below are
-// `satisfies Record<FieldType, …>`, which is what makes a field type added to
-// the spec a named compile error here instead of a silent fallback (#14657).
-import type { FieldType } from '@objectstack/spec/data';
+// [#16319] `FieldType` is now imported as a VALUE below, beside the other
+// `@objectstack/spec/data` helpers — the enum object carries the type of the
+// same name, so the three vocabularies below still read
+// `satisfies Record<FieldType, …>` and a field type added to the spec is still a
+// named compile error here instead of a silent fallback (#14657). The value
+// half is what {@link refuseUndeclarableFieldType} reads.
 // #16091 — IMPORTED, not transcribed. Both are on `@objectstack/spec/data`'s
 // exported surface, and spec is not a driver package: the #5726 constraint the
 // transcriptions below cite forbids a static value import of an
@@ -19,6 +21,11 @@ import type { FieldType } from '@objectstack/spec/data';
 // these, so the part that can be shared is shared and only the part that
 // genuinely lives on `driver-sql` is mirrored.
 import {
+  // [#16319] The closed field-type vocabulary itself, read by
+  // {@link refuseUndeclarableFieldType}. Imported for the same reason as the
+  // four helpers beside it — never transcribed — so a type added to the spec is
+  // admitted by these generators on the same commit.
+  FieldType,
   isNowDefaultToken,
   isRuntimeDefaultToken,
   isTenancyDisabled,
@@ -581,6 +588,78 @@ function fieldTypeToTs(fieldType: string, multiple?: boolean): string {
   return multiple ? `${base}[]` : base;
 }
 
+/** [#16319] The closed `FieldType` vocabulary as a Set — built once, off the spec enum. */
+const DECLARABLE_FIELD_TYPES: ReadonlySet<string> = new Set<string>(FieldType.options);
+
+/**
+ * [#16319] The field-`type` a generator will not guess at.
+ *
+ * MAINTAINER RULING, 2026-09-10 (director seat batch #111 item 2): 「一个没写
+ * type(或拼错)的字段 应该禁止加载」, and 「下游默认值全部改拒绝 … ⛔ 不再猜族;
+ * 按构造它们应当不可达,拒绝是防御」.
+ *
+ * All four generator loops in this file read `String(fieldDef.type || 'text')`.
+ * That default put a typeless field in the TEXT family — unbounded unless the
+ * column is keyed — while `SqlDriver.createColumn`'s own `field.type ||
+ * 'string'` put the SAME declaration in the STRING family, sized from the
+ * declared `maxLength` (knex's 255 without one). Measured on live PostgreSQL
+ * 16.13: `{ maxLength: 100 }` with no `type` produced `character varying(100)`
+ * from the platform and `TEXT` from both generated migrations, so the platform
+ * refused a 101-character value both generated tables accepted. The two
+ * `os generate types` loops made a third answer out of the same split
+ * (`string` for a typeless field, `unknown` for a mis-spelled one).
+ *
+ * ⭐ By construction this is now unreachable through any door that reaches a
+ * runtime: `SchemaRegistry.registerObject` refuses the whole object
+ * declaration. A generator, though, reads a config file directly and never
+ * touches the registry — so here the refusal is the only door, not defence.
+ *
+ * ⛔ It refuses the FILE, not the field: emitting a table one column short is
+ * the same silent loss the ruling refuses at the registration door, one artifact
+ * to the left. It names the object, the field and the reason, on this file's own
+ * `generate:`-prefixed convention ({@link numericSqlType} is the sibling).
+ */
+function refuseUndeclarableFieldType(
+  objectName: string,
+  fieldName: string,
+  declared: unknown,
+): never {
+  const absent = declared === undefined || declared === null || declared === '';
+  const shown =
+    typeof declared === 'string' ? `'${declared}'` : (JSON.stringify(declared) ?? String(declared));
+  throw new Error(
+    `generate: object '${objectName}' field '${fieldName}' ` +
+      (absent
+        ? 'declares no `type`'
+        : `declares \`type: ${shown}\`, which is not a member of \`FieldType\``) +
+      `. Nothing is generated for this object. This generator no longer defaults such a field to ` +
+      `the TEXT family: \`SqlDriver.createColumn\` put the same declaration in the STRING family, ` +
+      `so the generated table and the platform's own table disagreed about the column — and since ` +
+      `2026-09-10 the platform refuses to load the declaration at all. \`FieldSchema\` requires ` +
+      `\`type\` and admits only \`FieldType\` members. Give the field a \`FieldType\` member, or ` +
+      `remove the field.`,
+  );
+}
+
+/**
+ * [#16319] The one read of a field's declared `type` in this file.
+ *
+ * Every generator loop asks THIS, so the four of them cannot drift back into
+ * four defaults. Returns the declared member; refuses everything else.
+ */
+function declaredFieldType(
+  objectName: string,
+  fieldName: string,
+  fieldDef: { type?: unknown },
+): string {
+  const declared = fieldDef.type;
+  if (typeof declared !== 'string' || !DECLARABLE_FIELD_TYPES.has(declared)) {
+    refuseUndeclarableFieldType(objectName, fieldName, declared);
+  }
+  return declared;
+}
+
+
 export function generateTypesFromConfig(config: Record<string, unknown>): string {
   const lines: string[] = [
     '// Auto-generated by ObjectStack CLI — do not edit manually',
@@ -620,7 +699,8 @@ export function generateTypesFromConfig(config: Record<string, unknown>): string
     lines.push('  id: string;');
 
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
-      const fType = String(fieldDef.type || 'text');
+      // [#16319] Was `String(fieldDef.type || 'text')`. See {@link declaredFieldType}.
+      const fType = declaredFieldType(name, fieldName, fieldDef);
       const tsType = fieldTypeToTs(fType, !!fieldDef.multiple);
       const required = fieldDef.required ? '' : '?';
       if (fieldDef.label) {
@@ -920,7 +1000,8 @@ function generateClientFromConfig(config: Record<string, unknown>): string {
     lines.push('  id: string;');
 
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
-      const fType = String(fieldDef.type || 'text');
+      // [#16319] Was `String(fieldDef.type || 'text')`. See {@link declaredFieldType}.
+      const fType = declaredFieldType(name, fieldName, fieldDef);
       const tsType = fieldTypeToTs(fType, !!fieldDef.multiple);
       const required = fieldDef.required ? '' : '?';
       lines.push(`  ${fieldName}${required}: ${tsType};`);
@@ -1965,15 +2046,33 @@ function partitionUniqueIndexes(
  * driver's order: `multiple` still wins first, so a flagged field of any type
  * is a JSON column and never reaches the lookup at all.
  *
- * ⚠️ The default is selected by OWN-PROPERTY PRESENCE, not by the value being
- * falsy or nullish, because `null` is now a meaningful ANSWER and every other
- * spelling swallows it: `||` and `??` both fall through on `null` and hand a
- * virtual field a TEXT column again — the exact defect this card closes, one
- * operator to the left. (Measured: the first cut of this fix used `??` and
- * still emitted `"f" TEXT`.) `hasOwnProperty` rather than `in` for the second
- * half of the same care — `in` answers true for `toString` and every other
- * inherited key, and the unvalidated authoring door can deliver one as a
- * `type` string.
+ * ⚠️ The lookup is by OWN-PROPERTY PRESENCE, not by the value being falsy or
+ * nullish, because `null` is a meaningful ANSWER and every other spelling
+ * swallows it: `||` and `??` both fall through on `null` and hand a virtual
+ * field a TEXT column again — the exact defect #14828 closed, one operator to
+ * the left. (Measured: the first cut of that fix used `??` and still emitted
+ * `"f" TEXT`.) `hasOwnProperty` rather than `in` for the second half of the same
+ * care — `in` answers true for `toString` and every other inherited key.
+ *
+ * ⭐ [#16319] `fieldType` IS a `FieldType` member by the time this is called,
+ * and the `: 'TEXT'` arm below is therefore dead rather than a default.
+ *
+ * This function used to be reached with a `type` string that was not a field
+ * type at all — the paragraph above said so, and named the unvalidated
+ * authoring door that delivered it. That door is CLOSED as of the maintainer
+ * ruling of 2026-09-10 (「一个没写 type(或拼错)的字段 应该禁止加载」): every
+ * caller now resolves the field through {@link declaredFieldType}, which refuses
+ * an absent or non-member `type` and generates nothing for the object, and
+ * `SchemaRegistry.registerObject` refuses the same declaration at the platform's
+ * own registration door so it can never reach a runtime either.
+ *
+ * ⛔ So the `: 'TEXT'` arm is NOT a family default to reason from, and ⛔ nothing
+ * new may be routed to it: it is the residue of a total table
+ * (`FIELD_TYPE_SQL_MAP satisfies Record<FieldType, string | null>` makes a
+ * missing member a named `tsc` error), kept only because a total table still
+ * needs an expression on the miss branch. The retired guess it replaces —
+ * TEXT here against `SqlDriver.createColumn`'s STRING family — is what made one
+ * declaration produce two different columns, and refusing is the ruled answer.
  */
 function fieldTypeToSql(
   fieldType: string,
@@ -2085,7 +2184,8 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
     // as DDL that cannot run. Filled by the loop below, read after it.
     const emittedColumns = new Set<string>(['id']);
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
-      const fType = String(fieldDef.type || 'text');
+      // [#16319] Was `String(fieldDef.type || 'text')`. See {@link declaredFieldType}.
+      const fType = declaredFieldType(tableName, fieldName, fieldDef);
       const sqlType = fieldTypeToSql(
         fType,
         !!fieldDef.multiple,
@@ -2247,7 +2347,8 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
     lines.push("    table.string('id').primary();");
 
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
-      const fType = String(fieldDef.type || 'text');
+      // [#16319] Was `String(fieldDef.type || 'text')`. See {@link declaredFieldType}.
+      const fType = declaredFieldType(tableName, fieldName, fieldDef);
       // [#16318 / ADR-0113] `storage.notNull`, never `required` — the same
       // move, for the same recorded reason, as the sql format above. The local
       // name is kept so the emitter below reads unchanged.

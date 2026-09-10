@@ -21,6 +21,10 @@ import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readA
 // "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` actually admits.
 import { AggregationFunction, emptyGroupValueFor } from '@objectstack/spec/data';
+// [#16319] The closed field-type vocabulary itself — IMPORTED, never
+// transcribed, so a type added to the spec is admitted here on the same
+// commit. Read by {@link refuseUndeclarableFieldType} below.
+import { FieldType } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
 // [#16318] The per-field-type physical representation of the NUMERIC family.
 // `os generate migration` reads the SAME table, in both of its formats — that
@@ -1737,6 +1741,60 @@ function refuseRejectedReferenceAlias(column: string): never {
     `\`reference\`, and referential integrity is enforced by the ENGINE via \`deleteBehavior\` ` +
     `(the 409 DELETE_RESTRICTED), not by a database FOREIGN KEY: #11567 retired the FK DDL this ` +
     `key used to gate, which could never fire for a spec-conformant lookup in the first place.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  throw err;
+}
+
+/** [#16319] The closed `FieldType` vocabulary as a Set — built once, off the spec enum. */
+const DECLARABLE_FIELD_TYPES: ReadonlySet<string> = new Set<string>(FieldType.options);
+
+/**
+ * [#16319] DDL-time defence: a field declaration whose `type` is absent or is
+ * not a `FieldType` member gets no column — it gets a refusal.
+ *
+ * MAINTAINER RULING, 2026-09-10 (director seat batch #111 item 2): 「一个没写
+ * type(或拼错)的字段 应该禁止加载」, and 「下游默认值全部改拒绝 … ⛔ 不再猜族;
+ * 按构造它们应当不可达,拒绝是防御」.
+ *
+ * What it replaces is `createColumn`'s `const type = field.type || 'string'`,
+ * which sized the column from `declaredVarcharLength(field)` — the declared
+ * `maxLength` verbatim, knex's 255 without one — while BOTH `os generate
+ * migration` formats defaulted the same declaration to `TEXT`. Two families
+ * from one declaration: the platform refused a 101-character value that both
+ * generated tables accepted, in both directions, silently (#16319's live
+ * PostgreSQL 16.13 measurement). An unknown `type` string split the same way for
+ * a different reason — this arm's catch-all `table.string(name)` against the
+ * generators' `default:` TEXT.
+ *
+ * ⭐ By construction this is now UNREACHABLE: `SchemaRegistry.registerObject`
+ * refuses the whole object declaration before anything can call `syncSchema`,
+ * and that door covers every route into this one (boot rehydration, package and
+ * plugin manifests, programmatic registration). It stays as defence, and it
+ * stays LOUD, because the alternative is a silent guess — and a driver that
+ * meets this has been reached by a path the registry does not front.
+ *
+ * `VALIDATION_ERROR` + 400, exactly as {@link refuseRejectedReferenceAlias}
+ * one function up: a standard-catalog member, so no new code is minted and this
+ * package's ledger entry is unchanged.
+ */
+function refuseUndeclarableFieldType(column: string, declared: unknown): never {
+  const absent = declared === undefined || declared === null || declared === '';
+  const shown =
+    typeof declared === 'string' ? `'${declared}'` : (JSON.stringify(declared) ?? String(declared));
+  const err = new Error(
+    `[sql-driver] field '${column}' ` +
+      (absent
+        ? 'declares no `type`'
+        : `declares \`type: ${shown}\`, which is not a member of \`FieldType\``) +
+      `, so no column is created for it. ⛔ The driver no longer guesses a family here: it used to ` +
+      `build \`varchar(255)\` (or the declared \`maxLength\`) while both \`os generate migration\` ` +
+      `formats built \`TEXT\` from the same declaration, so the platform refused values the ` +
+      `generated tables accepted. \`FieldSchema\` requires \`type\` and admits only \`FieldType\` ` +
+      `members, and \`SchemaRegistry.registerObject\` refuses the whole object declaration before ` +
+      `any DDL runs — so reaching this line means the object was handed to \`syncSchema\` by a path ` +
+      `that does not go through the registry. Give the field a \`FieldType\` member, or remove it.`,
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.VALIDATION_ERROR;
   err.status = 400;
@@ -16552,7 +16610,14 @@ export class SqlDriver implements IDataDriver {
       return;
     }
 
-    const type = field.type || 'string';
+    // [#16319] ⛔ Was `const type = field.type || 'string'`. See
+    // {@link refuseUndeclarableFieldType} for what that default cost and why the
+    // answer is a refusal rather than a different guess. Asked AFTER `multiple`,
+    // exactly where the default stood, so a flagged field is still a JSON column
+    // whatever its element type would have been — the rule the two generators
+    // and `fieldHasColumn` state as well.
+    const type: string = field.type;
+    if (!DECLARABLE_FIELD_TYPES.has(type)) refuseUndeclarableFieldType(name, field.type);
     let col: any;
     switch (type) {
       case 'string':
