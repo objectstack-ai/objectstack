@@ -127,6 +127,7 @@ import {
   PAGE_COMPONENT_COPY_KEYS,
   FLOW_SCREEN_COPY_KEYS,
   FLOW_SCREEN_FIELD_COPY_KEYS,
+  globalFilterKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
@@ -1054,25 +1055,30 @@ export function authorWarnedTranslationGroups(): ReadonlySet<string> {
  * neither can drift. The KEY list is {@link PAGE_COMPONENT_COPY_KEYS}; the
  * WALK — which components carry those keys — is `walkAddressedPageComponents`,
  * the same traversal `translatePage` itself runs (#13218, completing the key
- * list's precedent). The walk owns the roots (`regions[].components[]` only),
- * the descent (`properties.children` only, depth-capped, cycle-guarded) and
- * the ruled collision arbitration (#12961: region level wins outright; among
- * nested components, document-order first sighting) — this function used to
+ * list's precedent). The walk owns the roots (`regions[].components[]` AND
+ * `slots.<slot>`), the descent (`properties.children` AND a panel's
+ * `properties.items[].children`, depth-capped, cycle-guarded) and the ruled
+ * collision arbitration (#12961: root level wins outright; among nested
+ * components, document-order first sighting) — this function used to
  * hand-mirror all five and now owns none of them. What it still owns:
  *
- *   - the emission exception: a REGION-LEVEL `page:header` emits nothing here
- *     (its copy is offered under `pages.<page>.title` / `.subtitle` instead —
- *     emitting both would offer one string under two keys), but the walk still
- *     counts its id as region-level, so a nested namesake stays blocked;
+ *   - the emission exception: a ROOT-LEVEL `page:header` — a region's entry
+ *     or a `slots.<slot>` entry — emits nothing here (its copy is offered
+ *     under `pages.<page>.title` / `.subtitle` instead — emitting both would
+ *     offer one string under two keys), but the walk still counts its id as
+ *     root-level, so a nested namesake stays blocked;
  *   - the `label` either/or: `label` may be authored on the component itself
  *     or in its props — the same either/or `translatePage` resolves back onto.
  *
  * ⛔ Deliberately NOT `@objectstack/lint`'s `walkPageComponents`, which is
- * WIDER than the resolver in four ways (`slots.<slot>` roots,
- * `properties.items[].children`, `properties.body`, `properties.footer`) and
- * NARROWER in one (it skips `kind: 'html' | 'react' | 'jsx'` pages, which
- * `translatePage` walks) — either direction of that mismatch is one half of
- * the failure pair `PAGE_COMPONENT_COPY_KEYS`' own JSDoc names.
+ * WIDER than the resolver in two ways (`properties.body`, `properties.footer`
+ * — `page:card`'s slots, which the resolver leaves undescended as a renderer
+ * back-compat fallback rather than an authorable spelling; `slots.<slot>`
+ * roots and `properties.items[].children` were the other two until #16772
+ * brought both into the shared walk) and NARROWER in one (it skips
+ * `kind: 'html' | 'react' | 'jsx'` pages, which `translatePage` walks) —
+ * either direction of that mismatch is one half of the failure pair
+ * `PAGE_COMPONENT_COPY_KEYS`' own JSDoc names.
  */
 function emitPageComponentCopy(out: ExpectedEntry[], page: any, name: string): void {
   walkAddressedPageComponents(page, (component, { id, nested, addressed }) => {
@@ -1321,6 +1327,26 @@ export function collectExpectedEntries(
         pushEntry(out, ['dashboards', name, 'widgets', wid, 'description'], w.description, 'widget');
       }
     }
+    // Global-filter copy (#16772) — `dashboards.<name>.globalFilters.<key>`,
+    // the filter bar drawn above the widget titles. The KEY is imported from
+    // `@objectstack/spec` (`name`, else `field`) so the extractor offers the
+    // entry `translateDashboard` reads and never a neighbour of it; an option
+    // is keyed by its `value` spelled as a string, the resolver's own
+    // spelling. `optionsFrom` options are fetched rows and have no key.
+    const globalFilters: any[] = Array.isArray(dash.globalFilters) ? dash.globalFilters : [];
+    for (const filter of globalFilters) {
+      if (!filter || typeof filter !== 'object') continue;
+      const key = globalFilterKey(filter);
+      if (key === undefined) continue;
+      pushEntry(out, ['dashboards', name, 'globalFilters', key, 'label'], filter.label, 'dashboard');
+      const options: any[] = Array.isArray(filter.options) ? filter.options : [];
+      for (const option of options) {
+        if (!option || typeof option !== 'object') continue;
+        const { value } = option;
+        if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') continue;
+        pushEntry(out, ['dashboards', name, 'globalFilters', key, 'options', String(value)], option.label, 'dashboard');
+      }
+    }
   }
 
   // ── Analytics datasets (`datasets.<name>.…`) ─────────────────────
@@ -1337,12 +1363,13 @@ export function collectExpectedEntries(
     }
     // Header copy is authored inside the page's `page:header` component but
     // is addressed by page name — `translatePage` overlays it back onto every
-    // header in the page's regions.
-    const regions: any[] = Array.isArray(page.regions) ? page.regions : [];
-    for (const region of regions) {
-      const components: any[] = Array.isArray(region?.components) ? region.components : [];
-      for (const component of components) {
-        if (component?.type !== PAGE_HEADER_COMPONENT_TYPE) continue;
+    // ROOT-LEVEL header: a region's entry, or a `slots.<slot>` entry on a
+    // `kind: 'slotted'` page (#16772). Which components are root level is the
+    // shared walk's to say (`nested: false`), not a second loop's — the loop
+    // this replaced read `page.regions` by hand and would have offered
+    // nothing for the `slots.header` the resolver now translates.
+    walkAddressedPageComponents(page, (component, { nested }) => {
+      if (!nested && component?.type === PAGE_HEADER_COMPONENT_TYPE) {
         const props = component.properties ?? {};
         // `title` duplicating `label` is the common case and resolves via the
         // label fallback — only emit it when the two genuinely differ.
@@ -1351,7 +1378,8 @@ export function collectExpectedEntries(
         }
         pushEntry(out, ['pages', name, 'subtitle'], props.subtitle, 'page');
       }
-    }
+      return component;
+    });
 
     // Per-component copy, addressed by the component's own id (#6080). Without
     // this pass the face exists but nothing writes the skeleton, so a

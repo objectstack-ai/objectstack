@@ -4,7 +4,8 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import { AggregationFunction } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { IAnalyticsService, IDataDriver, IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { IAnalyticsService, IDataDriver, IDataEngine, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
+import { translateObject, type ObjectLike, type ObjectFieldLike, type TranslationBundle } from '@objectstack/spec/system';
 import { AnalyticsService } from './analytics-service.js';
 import type { AnalyticsServiceConfig } from './analytics-service.js';
 import type { AnalyticsDriverCapabilities } from './strategies/types.js';
@@ -190,6 +191,21 @@ export interface AnalyticsServicePluginOptions {
     | null
     | undefined
     | Promise<FilterCondition | null | undefined>;
+  /**
+   * The OBJECT-LEVEL read admission — "may this caller read this object at
+   * all". The sibling of {@link AnalyticsServicePluginOptions.getReadScope} and
+   * NOT a substitute for it: the scope answers WHICH ROWS and answers
+   * `undefined` for a caller with no grant at all, so a door holding only the
+   * scope cannot tell "unrestricted" from "not permitted" — which is how the
+   * raw-SQL path served a row count for an object whose `/data` door answers
+   * 403. When omitted, the plugin auto-bridges to a registered `'security'`
+   * service, preferring `canReadObject(object, context)` and falling back to
+   * `explain({ object, operation: 'read' }, context).allowed`.
+   */
+  admitObjectRead?: (
+    objectName: string,
+    context?: ExecutionContext,
+  ) => boolean | Promise<boolean>;
   /**
    * ADR-0021 D-C — join allowlist per cube (the dataset's declared `include`).
    * Typically wired from the dataset registry's compiled `allowedRelationships`.
@@ -467,17 +483,73 @@ export class AnalyticsServicePlugin implements Plugin {
         | undefined
         | Promise<FilterCondition | null | undefined>;
     }
+    /**
+     * The three resolutions of the `security` service, for the ROW-LEVEL half
+     * of the read — the same three the OBJECT-LEVEL bridge below tells apart,
+     * and for the same reason.
+     *
+     *   ABSENT   — `getService('security')` returns nothing. No row-scope
+     *              provider on this deployment, which is a legitimate
+     *              configuration (a single-tenant kernel that ships no
+     *              `plugin-security`), reported loudly at init below. Today's
+     *              behaviour is kept EXACTLY: no scope, query runs.
+     *   UNUSABLE — a security service exists but cannot answer: resolving it
+     *              THREW, or the object it returned carries no
+     *              `getReadFilter`. A wired-but-broken provider, and the
+     *              answer here is NOT "no row restriction" — that value means
+     *              one thing only (`ISecurityService.getReadFilter`: "this
+     *              caller has no row restriction on this object"), and
+     *              spending it on a provider that never answered is how a
+     *              query ends up running with no row-level policy at all.
+     *              It REFUSES, and says why.
+     *   USABLE   — ask it.
+     *
+     * ⛔ The refusal is a THROW, not a louder log over an `undefined`: a log is
+     * not a refusal. `AnalyticsService.resolveReadScopes` is the fail-closed
+     * seam that already denies the whole query when this provider throws (it
+     * has since ADR-0021 D-C), so serving nothing — the same outcome the
+     * object-level bridge produces — needs no new error code and no new
+     * envelope here.
+     */
+    type SecurityReadFilterResolution =
+      | { kind: 'usable'; svc: SecurityReadFilter }
+      | { kind: 'absent' }
+      | { kind: 'unusable'; why: string };
     let getReadScope = this.options.getReadScope;
     let autoBridgedReadScope = false;
     let securityPresentAtInit = false;
     if (!getReadScope) {
-      const trySecurity = (): SecurityReadFilter | undefined => {
+      const trySecurity = (): SecurityReadFilterResolution => {
+        let svc: SecurityReadFilter | undefined;
         try {
-          const svc = ctx.getService<SecurityReadFilter>('security');
-          return svc && typeof svc.getReadFilter === 'function' ? svc : undefined;
-        } catch {
-          return undefined;
+          svc = ctx.getService<SecurityReadFilter>('security');
+        } catch (e) {
+          // ⛔ Not `absent`. A throwing resolver is a service that exists and
+          // failed, and a failed security lookup is a refusal everywhere else
+          // in this stack — including the object-level bridge below, which
+          // used to be spelled exactly like this one and now denies.
+          return {
+            kind: 'unusable',
+            why:
+              `resolving the "security" service threw ` +
+              `(${String((e as Error)?.message ?? e)})`,
+          };
         }
+        if (!svc) return { kind: 'absent' };
+        if (typeof svc.getReadFilter !== 'function') {
+          // `getReadFilter` is a REQUIRED member of `ISecurityService`, so a
+          // conforming provider never lands here — reaching it means the
+          // registered object is not the contract it claims to be, and a
+          // provider that cannot answer "which rows" must not be read as
+          // "every row".
+          return {
+            kind: 'unusable',
+            why:
+              'the registered "security" service exposes no getReadFilter(), ' +
+              'so it cannot answer a row-level read scope',
+          };
+        }
+        return { kind: 'usable', svc };
       };
       // ALWAYS wire the bridge — resolution happens at call time, mirroring the
       // executeAggregate / executeRawSql auto-bridges above. Gating the
@@ -487,9 +559,140 @@ export class AnalyticsServicePlugin implements Plugin {
       // strategy ran unscoped and only a WARN marked it. The repo's own
       // `bootStack` harness registers in exactly that order, which is why no
       // dogfood test could ever observe analytics RLS.
-      securityPresentAtInit = !!trySecurity();
-      getReadScope = (object, context) => trySecurity()?.getReadFilter(object, context);
+      securityPresentAtInit = trySecurity().kind === 'usable';
+      getReadScope = (object, context) => {
+        const resolved = trySecurity();
+        // No security service resolved at call time → no row-scope provider on
+        // this deployment, the state reported at init. Unchanged.
+        if (resolved.kind === 'absent') return undefined;
+        if (resolved.kind === 'unusable') {
+          ctx.logger.error(
+            `[Analytics] row-level read scope could not be resolved for "${object}" — ` +
+            `refusing the query (fail-closed): ${resolved.why}. ` +
+            'A security service is wired on this deployment, so analytics must not fall ' +
+            'open and serve rows with no row-level policy applied.',
+          );
+          throw new Error(
+            `[Analytics] row-level read scope could not be resolved for "${object}"; ` +
+            'query refused (fail-closed).',
+          );
+        }
+        return resolved.svc.getReadFilter(object, context);
+      };
       autoBridgedReadScope = true;
+    }
+
+    // The OBJECT-LEVEL half of the same read, bridged the same way and for the
+    // same reason the scope is: analytics stays decoupled from security, and
+    // resolution happens at CALL time so plugin-registration order does not
+    // decide whether the gate exists.
+    //
+    // ## Why there are two spellings and neither of them is "admit"
+    //
+    // `canReadObject` is the direct answer and the one this repo's
+    // `plugin-security` serves. A security service that predates it is still a
+    // conforming `ISecurityService`, and the fallback for such a service is NOT
+    // to admit — falling open on absence is exactly the defect this gate
+    // closes. It is `explain`, which is NOT optional on that contract and whose
+    // `allowed` is the same bottom line ("would the middleware allow this
+    // operation?") computed by the same enforcement walk. `explain` is the
+    // heavier call, which is why it is the fallback and not the primary; it
+    // never fires against an in-repo stack.
+    //
+    // ## The three resolutions, and why only ONE of them admits
+    //
+    // "No security service" and "the security service could not be used" are
+    // different states and they get opposite answers. Collapsing them is the
+    // shape of the defect this whole change removes, one level up.
+    //
+    //   ABSENT   — `getService('security')` returns nothing. There is no
+    //              object-level gate on this deployment at all, including on
+    //              `/data`, because that gate IS this plugin's absent
+    //              middleware. The two doors still agree, which is the
+    //              equivalence property the card asks for, so this ADMITS and
+    //              is reported loudly at init below.
+    //   UNUSABLE — a security service exists but cannot answer: resolving it
+    //              THREW, or the object it returned carries neither
+    //              `canReadObject` nor `explain`. This is a wired-but-broken
+    //              provider, and `/data`'s middleware does NOT fall open in
+    //              that state — so admitting here would reopen the exact
+    //              divergence between the two doors that this PR closes, and
+    //              it would do it silently. It DENIES, and says why.
+    //   USABLE   — ask it (below).
+    //
+    // The distinction is worth the type: both unusable corners used to be
+    // spelled `return undefined` beside the absent one, and three lines later
+    // all three read `if (!svc) return true`. A deployment whose security
+    // service throws on resolution is not a deployment without security.
+    interface SecurityReadAdmission {
+      canReadObject?(object: string, context?: ExecutionContext): boolean | Promise<boolean>;
+      explain?(
+        request: { object: string; operation: string },
+        callerContext?: ExecutionContext,
+      ): Promise<{ allowed?: boolean }>;
+    }
+    type SecurityAdmissionResolution =
+      | { kind: 'usable'; svc: SecurityReadAdmission }
+      | { kind: 'absent' }
+      | { kind: 'unusable'; why: string };
+    let admitObjectRead = this.options.admitObjectRead;
+    let autoBridgedReadAdmission = false;
+    if (!admitObjectRead) {
+      const trySecurityAdmission = (): SecurityAdmissionResolution => {
+        let svc: SecurityReadAdmission | undefined;
+        try {
+          svc = ctx.getService<SecurityReadAdmission>('security');
+        } catch (e) {
+          // ⛔ Not `absent`. A throwing resolver is a service that exists and
+          // failed, and a failed security lookup is a refusal everywhere else
+          // in this stack.
+          return {
+            kind: 'unusable',
+            why:
+              `resolving the "security" service threw ` +
+              `(${String((e as Error)?.message ?? e)})`,
+          };
+        }
+        if (!svc) return { kind: 'absent' };
+        if (typeof svc.canReadObject !== 'function' && typeof svc.explain !== 'function') {
+          // A registered service that answers neither question cannot admit
+          // anything. `explain` is NON-optional on `ISecurityService`, so a
+          // conforming provider never lands here — reaching it means the
+          // registered object is not the contract it claims to be.
+          return {
+            kind: 'unusable',
+            why:
+              'the registered "security" service exposes neither canReadObject() ' +
+              'nor explain(), so it cannot answer an object-level read admission',
+          };
+        }
+        return { kind: 'usable', svc };
+      };
+      admitObjectRead = async (object, context) => {
+        const resolved = trySecurityAdmission();
+        // No security service resolved at call time → no object-level gate on
+        // this deployment, which is the state reported at init.
+        if (resolved.kind === 'absent') return true;
+        if (resolved.kind === 'unusable') {
+          ctx.logger.error(
+            `[Analytics] object-level read admission could not be resolved for "${object}" — ` +
+            `denying the query (fail-closed): ${resolved.why}. ` +
+            'A security service is wired on this deployment, so analytics must not fall open: ' +
+            'GET /data/' + object + ' does not.',
+          );
+          return false;
+        }
+        const svc = resolved.svc;
+        if (typeof svc.canReadObject === 'function') {
+          return await svc.canReadObject(object, context);
+        }
+        const decision = await svc.explain!({ object, operation: 'read' }, context);
+        // A conforming `explain` always answers `allowed`; a shape that does
+        // not is a broken provider, and the fail-closed reading is the only
+        // safe one here.
+        return decision?.allowed === true;
+      };
+      autoBridgedReadAdmission = true;
     }
 
     // ADR-0021 — relationship → target-object resolver. A dataset's `include`
@@ -529,6 +732,38 @@ export class AnalyticsServicePlugin implements Plugin {
         const svc = ctx.getService<DataEngineLike>('data');
         return svc && typeof svc.getObject === 'function' ? svc : undefined;
       } catch { return undefined; }
+    };
+
+    // #16773 — a select option's `label` (`SelectOptionSchema.label`) is a
+    // PLAIN authored string; its translation, if any, lives in an i18n
+    // TRANSLATION BUNDLE, not on the field metadata `getObjectFields` reads.
+    // Resolved lazily, same as `dataEngine` above, so plugin-init order is
+    // free and a kernel with no i18n service configured degrades to exactly
+    // today's (locale-blind, authored-label) behaviour.
+    const i18nService = (): II18nService | undefined => {
+      try {
+        const svc = ctx.getService<II18nService>('i18n');
+        return svc && typeof svc.getTranslations === 'function' && typeof svc.getLocales === 'function'
+          ? svc
+          : undefined;
+      } catch { return undefined; }
+    };
+    // Mirrors `RestServer.buildTranslationBundle` (`packages/rest`) — this
+    // package has no dependency on `packages/rest`, so the ~10-line glue that
+    // turns an `II18nService` into a `TranslationBundle` is rebuilt here
+    // against the SAME public `II18nService` surface. This is NOT a second
+    // "translate a select option label" implementation: the actual lookup
+    // stays exactly one function, `translateObject` below, imported rather
+    // than reimplemented.
+    const buildTranslationBundle = (i18n: II18nService): TranslationBundle | undefined => {
+      const locales = i18n.getLocales();
+      if (!locales.length) return undefined;
+      const bundle: TranslationBundle = {};
+      for (const locale of locales) {
+        const data = i18n.getTranslations(locale);
+        if (data && typeof data === 'object') (bundle as Record<string, unknown>)[locale] = data;
+      }
+      return Object.keys(bundle).length ? bundle : undefined;
     };
     const labelResolver: DimensionLabelDeps = {
       getObjectFields: (objectName) => dataEngine()?.getObject?.(objectName)?.fields,
@@ -591,6 +826,42 @@ export class AnalyticsServicePlugin implements Plugin {
           }
         }
         return map;
+      },
+      // #16773 — route a select option label through the SAME translator the
+      // object-metadata REST endpoint uses (`GET /meta/object/:name`, which
+      // is where the console's list/kanban/grid renderers get theirs), so a
+      // chart's category/series labels match what those surfaces render for
+      // the identical field. `undefined` (no i18n service, no locales
+      // declared, or nothing in the bundle for this locale) leaves the
+      // caller's authored-label fallback untouched.
+      translateSelectOptions: (objectName, fieldName, options, locale) => {
+        if (!locale) return undefined;
+        const i18n = i18nService();
+        if (!i18n) return undefined;
+        const bundle = buildTranslationBundle(i18n);
+        if (!bundle) return undefined;
+        const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
+        const defaultLocale = typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+        // `value` here is `unknown` (an option's stored value, of whatever
+        // shape the field declares); `ObjectFieldLike.options[].value` narrows
+        // to `string | number | boolean` (`SelectOptionSchema.value`'s real
+        // runtime type). The cast is a type-only widening back to what this
+        // capability's own signature promises — no value is coerced.
+        const fields: Record<string, ObjectFieldLike> = {
+          [fieldName]: { name: fieldName, options: options as ObjectFieldLike['options'] },
+        };
+        const doc: ObjectLike = { name: objectName, fields };
+        const translated = translateObject(doc, bundle, {
+          locale,
+          fallbackChain: typeof fallback === 'string' && fallback.length > 0 ? [fallback] : undefined,
+          defaultLocale: typeof defaultLocale === 'string' && defaultLocale.length > 0 ? defaultLocale : undefined,
+        });
+        const translatedField = Array.isArray(translated.fields)
+          ? translated.fields.find((f) => f && f.name === fieldName)
+          : translated.fields?.[fieldName];
+        return Array.isArray(translatedField?.options)
+          ? (translatedField.options as typeof options)
+          : undefined;
       },
     };
 
@@ -715,6 +986,7 @@ export class AnalyticsServicePlugin implements Plugin {
       executeAggregate,
       fallbackService,
       getReadScope,
+      admitObjectRead,
       getAllowedRelationships: this.options.getAllowedRelationships,
       coerceTemporalFilterValue,
       coerceTemporalFilterColumn,
@@ -804,6 +1076,22 @@ export class AnalyticsServicePlugin implements Plugin {
         '[Analytics] No getReadScope configured and no "security" service with getReadFilter found — ' +
         'analytics queries will NOT enforce tenant/RLS scoping (ADR-0021 D-C). ' +
         'Supply getReadScope or register a security service in multi-tenant deployments.',
+      );
+    }
+
+    if (autoBridgedReadAdmission && securityPresentAtInit) {
+      ctx.logger.info(
+        '[Analytics] Auto-bridged admitObjectRead → "security" service (canReadObject, ' +
+        'falling back to explain) — every analytics door now asks the object-level ' +
+        'read grant the engine middleware asks, ahead of the strategy chain.',
+      );
+    } else if (autoBridgedReadAdmission) {
+      ctx.logger.warn(
+        '[Analytics] No admitObjectRead configured and no "security" service registered at init — ' +
+        'the bridge resolves per query, but if no security service ever appears, analytics ' +
+        'queries will NOT enforce the OBJECT-LEVEL read grant. On a SQL driver that means any ' +
+        'authenticated caller can post an inline dataset and read counts and groupings for an ' +
+        'object they hold no grant on. Supply admitObjectRead or register a security service.',
       );
     }
 

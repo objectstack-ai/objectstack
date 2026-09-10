@@ -870,6 +870,42 @@ export function zodIssuesToMetadataIssues(issues: unknown): MetadataIssueEntry[]
 export { recordNotFoundError };
 
 /**
+ * The RECORD limb of `IDataEngine.update`'s declared result, for the four
+ * ingresses in this file whose call is BY-ID by construction (#16231).
+ *
+ * `update()` used to declare `Promise<any>` and now declares the union its two
+ * dispatch paths actually answer: a record (or `null`) from the by-id exit
+ * (`driver.update`), or the affected-row COUNT from the predicate exit
+ * (`driver.updateMany`, #4639). Every call site below hands the engine a
+ * `where` naming exactly one primary key — or folds the row's id into the
+ * payload — with no `multi`, which `resolveEngineUpdateDispatch` resolves
+ * `by-id`. So the count limb is unreachable from here, and it is REFUSED
+ * loudly rather than cast away: a dispatch change that started routing these
+ * calls through `updateMany` would otherwise drop an affected count into a
+ * per-row receipt's `record` / `data` slot, where every consumer reads it as a
+ * row.
+ *
+ * The `null` limb is NOT refused and NOT narrowed away — it is passed through
+ * exactly as it was while the declaration said `any`. `update()`'s by-id exit
+ * answers `null` when the post-write readback leaves the caller's row scope
+ * (see `updateData`'s own note on that), while `DataProtocol`'s row receipts
+ * declare `record` / `data` non-null. That disagreement pre-dates this change,
+ * and this file preserves it rather than widening a shipped response shape as
+ * a rider; the assertion below is the one place it is written down.
+ */
+function byIdUpdateRecord(result: Record<string, any> | number | null): Record<string, any> {
+    if (typeof result === 'number') {
+        throw new Error(
+            `A by-id update resolved an affected-row count (${result}) instead of a record. ` +
+            `This ingress addresses exactly one row, so the engine's predicate dispatch ` +
+            `(driver.updateMany) is not reachable from it — the dispatch ladder or this ` +
+            `call site changed.`,
+        );
+    }
+    return result as Record<string, any>;
+}
+
+/**
  * A 400 for a `$filter` ARRAY that looks like a filter AST but is not one.
  *
  * The message has to be *actionable from the request*, which is the whole point
@@ -1775,18 +1811,33 @@ function compareAuditInstants(a: unknown, b: unknown): number {
  * declared `string` return type.
  *
  * ⚠️ Deliberately NOT the `canonicalIsoInstant` spelling next door in
- * `sys-metadata-repository.ts` / `database-loader.ts` (#14037's sibling
- * sites). That difference used to be exactly one input shape — the Invalid
+ * `sys-metadata-repository.ts` / `database-loader.ts` — which is, since
+ * #16422, the ONLY spelling at #14037's sibling sites. That difference used
+ * to be exactly one input shape — the Invalid
  * `Date` on which that spelling raised `RangeError: Invalid time value`,
  * measured reachable on BOTH live dialects (a MySQL zero datetime; any
  * Postgres year in 275760..294276). #14078 has since RULED it (option B,
  * 2026-09-02): that arm is now total and answers `undefined` for the shape.
  *
- * ⛔ They are still not ONE spelling, and this copy has the strongest reason
- * of the three not to be collapsed — see the paragraph below on what
- * `listCommits` promises its callers for a non-`Date` value. The
- * consolidation is tracked as **#16422**; #14078 ruled only the five arms
- * that THREW.
+ * ⛔ They are still not ONE spelling, and **#16422 ruled that this copy is the
+ * one that stays**. That card collapsed the family's other four call sites —
+ * `rowToEvent` in `sys-metadata-repository.ts` and the three adapter
+ * boundaries in `database-loader.ts` — into `canonicalIsoInstant` and deleted
+ * both sibling definitions of this spelling. This site was held out, for the
+ * reason the last paragraph below states: `listCommits` promises its callers
+ * the RAW value back for a non-`Date`, and `canonicalIsoInstant` rewrites the
+ * whole domain. Measured on the seven inputs that distinguish the two
+ * helpers, swapping it in here moves three: an Invalid `Date` would be ERASED
+ * from the response (`undefined` — the one answer [ADR-0053 D-F3] refuses,
+ * because it silently drops a value that is on disk), and a `number` and an
+ * opaque object would reach {@link compareAuditInstants} as `String(value)`
+ * rather than verbatim, reordering rows this seam deliberately leaves alone.
+ *
+ * ⇒ The family is now two DELIBERATE helpers, not one pending merge: the
+ * shared domain rewrite at the sites whose declared field is a
+ * `z.string().datetime()` and whose caller carries a terminal value, and this
+ * narrow one-shape conversion at the site whose declared contract is
+ * pass-through. ⛔ Do not collapse it without superseding that ruling.
  *
  * ⛔ NOT a tolerant fallback (#13973's standing prohibition): it teaches no
  * consumer to accept an off-spec shape; it converts the one measured
@@ -1801,8 +1852,9 @@ function compareAuditInstants(a: unknown, b: unknown): number {
  * valid `Date` — an absent/opaque column must still reach `sort`'s fallback
  * branch and any in-process reader exactly as before. Consolidating the
  * family's near-identical copies was expected to be #14078's call; that
- * ruling covered only the five arms that threw, so the consolidation is
- * tracked separately as #16422.
+ * ruling covered only the five arms that threw, and #16422 then ruled this
+ * promise the reason to keep this copy rather than the obstacle to removing
+ * it. §D of `protocol-14038-list-commits-created-at-iso.test.ts` is the pin.
  */
 function isoFromValidDate(value: unknown): unknown {
     if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
@@ -11096,7 +11148,7 @@ export class ObjectStackProtocolImplementation implements
         )
             ? { ...(request.data as Record<string, unknown>), id: request.id }
             : request.data;
-        const result = await this.engine.update(request.object, writeData, opts);
+        const result = byIdUpdateRecord(await this.engine.update(request.object, writeData, opts));
         // [#7823] The PATCH 200 body is the surface #7728's fourth measurement
         // caught: a client revoking a `sys_api_key` (apiMethods keeps `update`
         // open, #7727) got the stored hash back in this response. That closure
@@ -12132,7 +12184,7 @@ export class ObjectStackProtocolImplementation implements
                         await this.assertRecordExists(object, record.id);
                         // [#3455] Collect the engine's LEGAL write strips per row.
                         const dropped: DroppedFieldsEvent[] = [];
-                        const updated = await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any);
+                        const updated = byIdUpdateRecord(await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any));
                         omitInternalFieldsFromWriteResponse(batchSchema, updated); // [#7823]
                         results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                         succeeded++;
@@ -12164,7 +12216,7 @@ export class ObjectStackProtocolImplementation implements
                             const existing = await this.probeRecord(object, record.id);
                             if (existing) {
                                 const dropped: DroppedFieldsEvent[] = [];
-                                const updated = await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any);
+                                const updated = byIdUpdateRecord(await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any));
                                 omitInternalFieldsFromWriteResponse(batchSchema, updated); // [#7823]
                                 results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                             } else {
@@ -12547,7 +12599,7 @@ export class ObjectStackProtocolImplementation implements
                 const dropped: DroppedFieldsEvent[] = [];
                 const opts: any = { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
                 if (context !== undefined) opts.context = context;
-                const updated = await this.engine.update(object, record.data || {}, opts);
+                const updated = byIdUpdateRecord(await this.engine.update(object, record.data || {}, opts));
                 omitInternalFieldsFromWriteResponse(updateManySchema, updated); // [#7823]
                 results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                 succeeded++;

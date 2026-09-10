@@ -25,8 +25,17 @@
     // `@objectstack/types/*` subpath, and a `paths` target that matches
     // nothing on disk would silently fall back to node resolution (see the
     // rest package's block for the measured traps).
+    // [#16608] `@objectstack/driver-sqlite-wasm` is imported as a VALUE by
+    // `src/insert-check-post-image.test.ts`, whose conformance cell runs on two
+    // driver families. Same rule, same reason and the same bare (star-free)
+    // key shape as the entry above — an exact match, so it cannot swallow a
+    // subpath, and this package imports none. It is declared HERE and not in
+    // `tsconfig.test.json` because a child that declared its own `paths` would
+    // REPLACE this map rather than merge into it, silently sending
+    // `@objectstack/types` back to `dist/`.
     "paths": {
-      "@objectstack/types": ["../../types/src/index.ts"]
+      "@objectstack/types": ["../../types/src/index.ts"],
+      "@objectstack/driver-sqlite-wasm": ["../../drivers/driver-sqlite-wasm/src/index.ts"]
     }
   },
   "include": [

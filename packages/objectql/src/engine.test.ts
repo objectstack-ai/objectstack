@@ -83,8 +83,14 @@ describe('ObjectQL Engine', () => {
             find: vi.fn().mockResolvedValue([{ id: '1', name: 'Test Record' }]),
             findOne: vi.fn(),
             create: vi.fn().mockResolvedValue({ id: '1', success: true }),
-            update: vi.fn(),
-            delete: vi.fn(),
+            // [#16231] `IDataDriver.update` declares `Promise<Record<string, unknown> | null>`
+            // and `IDataDriver.delete` declares `Promise<boolean>`. A bare `vi.fn()`
+            // resolves `undefined`, which is neither — and the engine used to hand that
+            // straight out under `Promise<any>`. The engine's seam guard refuses it now,
+            // so the doubles answer the shapes their own contract declares. Individual
+            // cases still override these with `mockResolvedValue`.
+            update: vi.fn().mockResolvedValue({ id: '1' }),
+            delete: vi.fn().mockResolvedValue(true),
             count: vi.fn(),
             capabilities: {} as any // Simplified
         } as unknown as IDataDriver;
@@ -96,8 +102,8 @@ describe('ObjectQL Engine', () => {
             find: vi.fn().mockResolvedValue([{ id: '2', name: 'Mongo Record' }]),
             findOne: vi.fn(),
             create: vi.fn().mockResolvedValue({ id: '2', success: true }),
-            update: vi.fn(),
-            delete: vi.fn(),
+            update: vi.fn().mockResolvedValue({ id: '2' }),
+            delete: vi.fn().mockResolvedValue(true),
             count: vi.fn(),
             capabilities: {} as any
         } as unknown as IDataDriver;
@@ -2398,7 +2404,8 @@ describe('ObjectQL Engine', () => {
                 expand: { assignee: { object: 'assignee' } },
             });
 
-            expect(result.assignee).toEqual({ id: 'u1', name: 'Alice' });
+            expect(result).not.toBeNull();
+            expect(result!.assignee).toEqual({ id: 'u1', name: 'Alice' });
         });
 
         it('should handle already-expanded objects (skip re-expansion)', async () => {

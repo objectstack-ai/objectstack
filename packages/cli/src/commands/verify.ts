@@ -20,6 +20,13 @@ import {
   type RlsPositionPersonaInput,
 } from '@objectstack/verify';
 import { loadConfig } from '../utils/config.js';
+import {
+  printError,
+  emitJson,
+  isExitSignal,
+  errorCodeFields,
+  isReportedError,
+} from '../utils/format.js';
 
 /**
  * Should this `os verify` run boot an org-scoped (multi-tenant) stack?
@@ -86,9 +93,59 @@ export default class Verify extends Command {
     json: Flags.boolean({ description: 'Emit the structured report as JSON', default: false }),
   };
 
+  /**
+   * The catch-all this command did not have (#15547).
+   *
+   * Every one of its nine `--json` siblings wraps its whole body in one `try`
+   * and answers a throw with an envelope; `os verify` wrapped nothing, so a
+   * throw walked out of `run()` and oclif rendered it. Measured on the
+   * published entry before this landed, against a config module that throws at
+   * evaluation:
+   *
+   *     os verify   --json  →  exit 1, stdout 0 B, stderr `    Error: …`
+   *     os validate --json  →  exit 1, stdout `{"valid":false,"error":…}`
+   *     os info     --json  →  exit 1, stdout `{"error":…}`
+   *
+   * That mattered the moment `resolveConfigPath()` started throwing instead of
+   * exiting: this face would have been the one command turned INTO a crash
+   * dump by a change that fixed the other nine. So the `try` lands with the
+   * throw, never after it.
+   *
+   * The body moves into {@link runVerification} verbatim rather than being
+   * re-indented under a `try` here — the guard is the change, and a 120-line
+   * whitespace diff would bury it.
+   */
   async run(): Promise<void> {
     const { flags } = await this.parse(Verify);
 
+    try {
+      await this.runVerification(flags);
+    } catch (error: any) {
+      // `this.exit()` THROWS (see `isExitSignal`) — including the exit 0 this
+      // command's success path takes — so the signal is re-thrown before
+      // anything is described as a failure.
+      if (isExitSignal(error)) throw error;
+      if (flags.json) {
+        await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
+        this.exit(1);
+      }
+      // [#15547] `resolveConfigPath()` already wrote its refusal and hint lines
+      // to stderr before throwing; printing the sentence again here would put a
+      // second copy on stdout.
+      if (!isReportedError(error)) {
+        console.log('');
+        printError(error.message || String(error));
+      }
+      this.exit(1);
+    }
+  }
+
+  private async runVerification(flags: {
+    app?: string;
+    rls: boolean;
+    'multi-tenant': boolean;
+    json: boolean;
+  }): Promise<void> {
     const { config, absolutePath } = await loadConfig(flags.app);
 
     const multiTenant = resolveVerifyMultiTenant(flags);

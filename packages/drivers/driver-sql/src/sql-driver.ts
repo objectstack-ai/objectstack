@@ -22,6 +22,10 @@ import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readA
 // `AggregationNodeSchema.function` actually admits.
 import { AggregationFunction, emptyGroupValueFor } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
+// [#16318] The per-field-type physical representation of the NUMERIC family.
+// `os generate migration` reads the SAME table, in both of its formats — that
+// shared table IS the repair, so ⛔ never restate one of its numbers here.
+import { numericColumnFor } from '@objectstack/spec/data';
 // [#5659] The Filter Protocol's boolean identity reduction — `$and: []` is TRUE,
 // `$or: []` is FALSE, `{}` is a TRUE disjunct, `$not: {}` is FALSE. One
 // implementation for all four consumers, proven against the same
@@ -244,6 +248,13 @@ const JSON_COLUMN_TYPES = new Set<string>([
  * Field types whose value is a numeric scalar. SINGLE SOURCE for the DDL
  * column-type switch (these map to INTEGER/REAL columns) and the read-side
  * coercion registry (`numericFields`).
+ *
+ * ⚠️ [#16318] The read coercion no longer reads this whole set on every
+ * dialect. The three ALIASES below are how an external, introspected column
+ * reaches the driver, and on PostgreSQL a `bigint` arrives as a STRING; the
+ * server-dialect arm therefore reads {@link SqlDriver.numericValueFields}, the
+ * authorable `NUMERIC_VALUE_TYPES` half, and SQLite keeps this full set for the
+ * legacy TEXT-affinity repair described below. The DDL switch is unchanged.
  *
  * The read coercion exists so the fix is robust on SQLite even when the column
  * predates it: a `rating`/`slider`/`progress` column created before #2025 has
@@ -4376,6 +4387,30 @@ export class SqlDriver implements IDataDriver {
   protected jsonFields: Record<string, string[]> = {};
   protected booleanFields: Record<string, string[]> = {};
   protected numericFields: Record<string, string[]> = {};
+  /**
+   * [#16318] The subset of {@link numericFields} whose field type is an
+   * AUTHORABLE numeric one (`NUMERIC_VALUE_TYPES`), with the driver-internal
+   * SQL aliases `integer` / `int` / `float` deliberately left out.
+   *
+   * Why a second registry rather than a narrower first one: `numericFields` is
+   * read by three other seams — the presentation-kind door, the cross-field
+   * comparability door, and the shard aliasing — and every one of them is about
+   * "this column holds a number", which the aliases do. Only the READ COERCION
+   * needed narrowing, and it needed it on exactly one axis.
+   *
+   * ⚠️ The axis is EXISTING columns. Moving the coercion off the SQLite-only
+   * arm (see `formatOutput`) is what the exact-decimal column forced, and the
+   * aliases are how an EXTERNAL, introspected table's columns reach this
+   * driver — a PostgreSQL `bigint`, which node-postgres hands back as a STRING
+   * precisely because it does not fit a JS double. Coercing those through
+   * `Number()` would silently round above 2^53 on a table this change never
+   * created, which is outside the "new tables only" bound the ruling drew
+   * (「不考虑现有数据」). So on the server dialects the coercion applies to the
+   * seven authorable numeric types and to nothing else; SQLite keeps the wider
+   * set, because that is where the legacy TEXT-affinity repair this pass was
+   * originally written for actually lives.
+   */
+  protected numericValueFields: Record<string, string[]> = {};
   protected dateFields: Record<string, Set<string>> = {};
   protected datetimeFields: Record<string, Set<string>> = {};
   /**
@@ -9438,7 +9473,7 @@ export class SqlDriver implements IDataDriver {
     // Column-sync every retained shard (creates the current one; adds any
     // newly declared columns to older shards so the UNION stays uniform).
     for (const shard of retained) {
-      await this.ensureShardTable(shard, obj);
+      await this.ensureShardTable(shard, obj, tableName);
       this.aliasShardBookkeeping(tableName, shard);
     }
 
@@ -9554,10 +9589,16 @@ export class SqlDriver implements IDataDriver {
    * two links above still narrowing the same value, so a caller spelling
    * `indexes` in a fresh literal to `rotateShards` would still be refused by a
    * type while the driver read the key regardless.
+   *
+   * `baseTable` is the table the shard belongs to — the key its tenancy record
+   * is held under until {@link aliasShardBookkeeping} copies it across. It
+   * defaults to `shardName` so an existing override or external caller keeps
+   * today's behaviour, and the one in-tree call site names the base.
    */
   protected async ensureShardTable(
     shardName: string,
     obj: { fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
+    baseTable: string = shardName,
   ): Promise<void> {
     const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
     // [#12015] Both branches below drop a declared field named after a builtin
@@ -9606,11 +9647,26 @@ export class SqlDriver implements IDataDriver {
         ...idx,
         name: typeof idx?.name === 'string' && idx.name.trim() ? `${shardName}__${idx.name.trim()}` : undefined,
       }));
-      // Shard bookkeeping is aliased AFTER this method runs, so resolve the
-      // tenant column from the object schema itself — a declared
-      // `unique: 'organization'` index (ADR-0120 D1) must scope identically on
-      // every shard of the base table.
-      await this.syncDeclaredIndexes(shardName, perShard, new Set(Object.keys(colInfo)), this.computeTenantField(obj));
+      // Shard bookkeeping is aliased AFTER this method runs, so `shardName` has
+      // no entry of its own yet — a declared `unique: 'organization'` index
+      // (ADR-0120 D1) must scope identically on every shard of the base table,
+      // so the answer has to come from the base.
+      //
+      // [#16729] Keyed by `baseTable`, and through the RECORDING resolver, not
+      // the bare `computeTenantField`. The bare one reads this call's schema
+      // alone, so a shard synced from a partial re-registration — one carrying
+      // no `tenancy` block — fell through to the implicit `organization_id`
+      // heuristic and gave the shard an organization key part the base table's
+      // own index does not have. `tenantOptOutByTable` already holds the base's
+      // explicit opt-out (`initObjects` recorded it under exactly this key, and
+      // `aliasShardBookkeeping` propagates it to the shard afterwards), so
+      // consulting it here is what makes the two paths answer the same.
+      await this.syncDeclaredIndexes(
+        shardName,
+        perShard,
+        new Set(Object.keys(colInfo)),
+        this.computeAndRecordTenantField(baseTable, obj),
+      );
     }
   }
 
@@ -9631,6 +9687,7 @@ export class SqlDriver implements IDataDriver {
     this.jsonFields[shard] = this.jsonFields[base] ?? [];
     this.booleanFields[shard] = this.booleanFields[base] ?? [];
     this.numericFields[shard] = this.numericFields[base] ?? [];
+    this.numericValueFields[shard] = this.numericValueFields[base] ?? [];
     this.autoNumberFields[shard] = this.autoNumberFields[base] ?? [];
     if (this.dateFields[base]) this.dateFields[shard] = this.dateFields[base];
     if (this.datetimeFields[base]) this.datetimeFields[shard] = this.datetimeFields[base];
@@ -9757,6 +9814,7 @@ export class SqlDriver implements IDataDriver {
     const jsonCols: string[] = [];
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
+    const numericValueCols: string[] = [];
     const dateCols: string[] = [];
     const datetimeCols: string[] = [];
     const timeCols: string[] = [];
@@ -9769,6 +9827,8 @@ export class SqlDriver implements IDataDriver {
         if (this.isJsonField(type, field)) jsonCols.push(name);
         if (type === 'boolean' || type === 'toggle') booleanCols.push(name);
         if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) numericCols.push(name);
+        // [#16318] The authorable half only — see {@link numericValueFields}.
+        if (NUMERIC_VALUE_TYPES.has(type) && !field.multiple) numericValueCols.push(name);
         if (type === 'date') dateCols.push(name);
         if (type === 'datetime') datetimeCols.push(name);
         if (type === 'time') timeCols.push(name);
@@ -9781,6 +9841,7 @@ export class SqlDriver implements IDataDriver {
     this.jsonFields[key] = jsonCols;
     this.booleanFields[key] = booleanCols;
     this.numericFields[key] = numericCols;
+    this.numericValueFields[key] = numericValueCols;
     this.autoNumberFields[key] = autoNumberCols;
     this.tenantFieldByTable[key] = tenantField;
     if (dateCols.length) this.dateFields[key] = new Set(dateCols);
@@ -9827,6 +9888,7 @@ export class SqlDriver implements IDataDriver {
     const jsonCols: string[] = [];
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
+    const numericValueCols: string[] = [];
     const autoNumberCols: Array<{ name: string; format: string; tokens: AutonumberToken[]; tenantField: string | null }> = [];
     // Tenant-isolation column: explicit tenancy opt-out → declared field →
     // implicit `organization_id`. See {@link computeAndRecordTenantField}
@@ -9850,6 +9912,10 @@ export class SqlDriver implements IDataDriver {
         if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) {
           numericCols.push(name);
         }
+        // [#16318] The authorable half only — see {@link numericValueFields}.
+        if (NUMERIC_VALUE_TYPES.has(type) && !field.multiple) {
+          numericValueCols.push(name);
+        }
         if (type === 'date') {
           (this.dateFields[tableName] ??= new Set()).add(name);
         }
@@ -9872,6 +9938,7 @@ export class SqlDriver implements IDataDriver {
     this.jsonFields[tableName] = jsonCols;
     this.booleanFields[tableName] = booleanCols;
     this.numericFields[tableName] = numericCols;
+    this.numericValueFields[tableName] = numericValueCols;
     this.autoNumberFields[tableName] = autoNumberCols;
     this.tenantFieldByTable[tableName] = tenantField;
     // [#11067] The declared shape's answer to "does this table carry
@@ -13121,8 +13188,11 @@ export class SqlDriver implements IDataDriver {
    * `formatOutput` gates its row reads that way (#11782; SQLite-only before,
    * which is how a declared boolean answered `1`/`0` on MySQL). Postgres
    * stores a real `boolean` node-pg parses, so there the stored form already
-   * IS the presented form. The numeric repair stays SQLite-only: it exists
-   * for legacy TEXT-affinity columns, which no other dialect has.
+   * IS the presented form. The numeric repair ran SQLite-only on the premise
+   * that string-valued numerics exist only for legacy TEXT-affinity columns;
+   * #16318 falsified that premise by moving the numeric family to an exact
+   * decimal, which node-postgres and mysql2 both hand back as a string, so it
+   * runs on every dialect now.
    */
   protected readPresentationKind(
     table: string | null | undefined,
@@ -13135,7 +13205,11 @@ export class SqlDriver implements IDataDriver {
     if ((this.isSqlite || this.isMysql) && this.booleanFields[table]?.includes(field)) {
       return 'boolean';
     }
-    if (!this.isSqlite) return null;
+    // [#16318] Every dialect, for the reason `formatOutput`'s own numeric pass
+    // records: an exact-decimal column is handed back as a STRING by
+    // node-postgres and by mysql2, so `aggregate()` / `distinct()` would present
+    // a declared numeric field as a string on exactly the dialects `find()` now
+    // presents it as a number. One class, one answer, on every door.
     if (this.numericFields[table]?.includes(field)) return 'number';
     return null;
   }
@@ -15934,8 +16008,12 @@ export class SqlDriver implements IDataDriver {
       // Virtual — `createColumn` returns without emitting anything.
       case 'formula':
         return null;
-      // The non-string primitives: INTEGER / REAL / BOOLEAN / DATE / DATETIME /
-      // TIME columns. None of them is sized from metadata and none is a varchar.
+      // The non-string primitives: INTEGER / REAL / DECIMAL / BOOLEAN / DATE /
+      // DATETIME / TIME columns. None of them is a varchar, so none is sized
+      // from `maxLength` — which is the only question this mirror answers.
+      // ⚠️ Since #16318 the numeric members ARE sized, by `numericColumnFor`,
+      // but from the field's TYPE and not from any declaration; `null` here
+      // stays the correct answer to the question actually asked.
       case 'integer':
       case 'int':
       case 'float':
@@ -16413,21 +16491,67 @@ export class SqlDriver implements IDataDriver {
       case 'int':
         col = table.integer(name);
         break;
+      // `float` is a DRIVER-SIDE ALIAS, not a `FieldType`: there is no
+      // `Field.float` builder and `NUMERIC_VALUE_TYPES` does not carry it, so
+      // #16318's table has no opinion about it and it keeps the column it has
+      // always had.
       case 'float':
-      case 'number':
-      case 'currency':
-      case 'percent':
+        col = table.float(name);
+        break;
+      // [#16318] The seven members of `NUMERIC_VALUE_TYPES` take the physical
+      // representation `packages/spec` states for them ({@link
+      // numericColumnFor}) — the same table both `os generate migration`
+      // formats read, so one declaration can no longer produce three different
+      // columns (measured on live PostgreSQL 16.13: this arm's `real`, the sql
+      // format's `numeric(18,2)`/`numeric(5,2)`, and the typescript format's
+      // `numeric(8,2)`). The spec module carries the measurements, the ruling
+      // and the residual bound; ⛔ do not restate its numbers here.
+      //
+      // What this arm still owes its reader is the SQLite half, because that is
+      // why three of these types were put in a float arm in the first place:
+      //
       // `rating`/`slider`/`progress` are authored as numeric scalars (a star
       // count, a slider position, a percent-of-completion). Without an explicit
       // case they fell to `default → table.string`, giving the column TEXT
       // affinity so SQLite coerced the written number to a string ('4' not 4) —
       // a silent type-fidelity leak the value-loss tests didn't catch. REAL
       // affinity round-trips them as JS numbers (#field-zoo).
+      //
+      // That leak stays defeated, and MEASURED rather than argued: knex
+      // compiles `table.decimal(name, p, s)` and `table.float(name)` to the
+      // IDENTICAL `float` column on SQLite
+      // (`ColumnCompiler_SQLite3.prototype.decimal` is the literal `'float'`),
+      // so the six exact-decimal members emit byte-identical SQLite DDL to what
+      // this arm emitted before and keep REAL affinity. `rating` moves to
+      // INTEGER affinity, where SQLite stores `4` as an integer and still
+      // accepts `4.5` as a REAL — it refuses no fractional value — so nothing
+      // this dialect accepts today stops being accepted.
+      //
+      // ⚠️ The read path is what makes the move safe on the server dialects:
+      // node-postgres parses `numeric` to a STRING and `real` to a number, and
+      // it is `NUMERIC_SCALAR_TYPES`' existing `numericFields` coercion —
+      // already registered for all seven of these types — that turns it back
+      // into a JS number on the way out.
+      case 'number':
+      case 'currency':
+      case 'percent':
       case 'rating':
       case 'slider':
       case 'progress':
-        col = table.float(name);
+      case 'summary': {
+        const numeric = numericColumnFor(type);
+        // ⛔ Not `?? table.float(name)`: an undefined answer for a type named
+        // in these very case labels would mean the labels and
+        // `NUMERIC_VALUE_TYPES` have parted, and a silent fallback is exactly
+        // the drift #16318 exists to close. The spec-side pin
+        // (`numeric-column-representation.test.ts`) holds the two equal, and
+        // `NUMERIC_VALUE_TYPES` is the single membership authority both read.
+        col =
+          numeric === undefined || numeric.kind === 'integer'
+            ? table.integer(name)
+            : table.decimal(name, numeric.precision, numeric.scale);
         break;
+      }
       // `toggle` is a boolean rendered as a switch. Same leak as above (TEXT
       // affinity stored '1'); a boolean column gives NUMERIC affinity and the
       // `booleanFields` read-coercion below converts the stored 1/0 back to a
@@ -16521,9 +16645,6 @@ export class SqlDriver implements IDataDriver {
         // `deleteBehavior` — which is what `content/docs/protocol/objectql/
         // types.mdx` has told authors since 2026-07-30.
         col = table.string(name);
-        break;
-      case 'summary':
-        col = table.float(name);
         break;
       case 'auto_number':
       case 'autonumber':
@@ -17018,23 +17139,64 @@ export class SqlDriver implements IDataDriver {
         }
       }
 
-      // Numeric scalars stored on a legacy TEXT-affinity column come back as
-      // strings ('4'); coerce numeric-looking strings back to numbers so the
-      // declared type wins regardless of when the column was created. Only
-      // touch strings — a fresh REAL/INTEGER column already yields a number,
-      // and a genuinely non-numeric value (junk legacy data) is left intact
-      // rather than turned into NaN. See NUMERIC_SCALAR_TYPES.
-      const numericFields = this.numericFields[object];
-      if (numericFields && numericFields.length > 0) {
-        for (const field of numericFields) {
-          const v = data[field];
-          if (typeof v === 'string' && v.trim() !== '') {
-            const n = Number(v);
-            if (!Number.isNaN(n)) data[field] = n;
-          }
+    }
+
+    // Numeric scalars handed back as STRINGS are coerced to numbers, on EVERY
+    // dialect, so the declared type wins regardless of which dialect stored the
+    // value or when the column was created. Only strings are touched — a
+    // REAL/INTEGER column already yields a number — and a genuinely non-numeric
+    // value (junk legacy data) is left intact rather than turned into NaN.
+    // See NUMERIC_SCALAR_TYPES.
+    //
+    // ⚠️ [#16318] This pass was SQLite-only until the numeric family moved to an
+    // exact-decimal column, on the stated premise that string-valued numerics
+    // "exist for legacy TEXT-affinity columns, which no other dialect has".
+    // That premise is now false and it is THIS change that falsified it, so it
+    // is corrected here rather than left as a fossil: measured on live
+    // PostgreSQL 16.13, node-postgres parses `real` to a JS `number` and
+    // `numeric` to a STRING (`1234567.89` arrives as
+    // `'1234567.890000000000000000000000000000'`), and mysql2 does the same for
+    // `DECIMAL`. Without this line every `number` / `currency` / `percent` /
+    // `slider` / `progress` / `summary` field would start reading back as a
+    // string on the two server dialects — a wire-contract break, since
+    // `valueSchemaFor` gives the whole class `z.number().finite()`.
+    //
+    // Two SQLite readings stay exactly as they were: the legacy TEXT-affinity
+    // repair this pass was written for, and a fresh column, which knex declares
+    // `float` for both the old float arm and the new decimal one.
+    //
+    // ⚠️ [#16318] The registry is chosen PER DIALECT, and the narrowing is the
+    // "new tables only" bound, not a taste. `numericFields` carries the
+    // driver-internal aliases `integer` / `int` / `float`, which is how an
+    // EXTERNAL, introspected table's columns reach this driver. A PostgreSQL
+    // `bigint` is handed back by node-postgres as a STRING precisely because it
+    // does not fit a JS double, so running it through `Number()` would silently
+    // round it above 2^53 — on a table this change never created. SQLite is the
+    // one dialect where the wider set is right, because there the pass exists
+    // for legacy TEXT-affinity columns of exactly those alias types.
+    //
+    // ⚠️ The repair is bounded by the wire contract it restores, and that bound
+    // is binary64: `valueSchemaFor` gives this whole class `z.number().finite()`
+    // (ADR-0104 D1), so a `find()` result is a JS double however exact the
+    // COLUMN is. Measured: a value the driver itself wrote from a JS number
+    // round-trips exactly ('1234567.890000000000000000000000000000' → 1234567.89),
+    // because the shortest representation is what was stored; a value that was
+    // never a double does not ('1234567890123456.123' → 1234567890123456,
+    // 2^53+1 → 2^53). ⇒ the exactness this change buys is exact-column-through-
+    // a-double: SQL-side writers, `summary` roll-ups computed in SQL and any
+    // magnitude at or above 2^53 are bounded by the read seam, not by the
+    // column. Widening that is a wire-contract change and is NOT in #16318.
+    const numericFields = this.isSqlite
+      ? this.numericFields[object]
+      : this.numericValueFields[object];
+    if (numericFields && numericFields.length > 0) {
+      for (const field of numericFields) {
+        const v = data[field];
+        if (typeof v === 'string' && v.trim() !== '') {
+          const n = Number(v);
+          if (!Number.isNaN(n)) data[field] = n;
         }
       }
-
     }
 
     // [ADR-0053 D-F1] (#13973) — the two instant classes present as ONE shape

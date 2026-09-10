@@ -288,6 +288,32 @@ function runHarness(): Record<string, string> {
       // quietly, since nothing else in the run would notice until two agents
       // overlapped again.
       `printf "FIXED_LOG_LITERALS=%s\\n" "$(grep -c '/tmp/sdui-dump-dev\\.log' ${JSON.stringify(SCRIPT)} || true)"`,
+      // ── 5b. every mktemp template is portable: X's terminal, no suffix ───
+      //
+      // A spelling pin like 5 above, and for a defect from the same family: a
+      // per-run temp path that is not actually per-run. `mktemp
+      // "…dump-dev.XXXXXX.log"` reads as per-run and is per-run on GNU
+      // coreutils, which splits the trailing `.log` off as an implied
+      // `--suffix` and substitutes the X's anyway. That is a coreutils
+      // extension. BSD mktemp(1) wraps mkstemp(3), which only ever replaces a
+      // TRAILING run of X's, so on stock macOS nothing is substituted: the
+      // first run creates the file called literally `sdui-dump-dev.XXXXXX.log`
+      // and every later run dies there with `File exists`. Reported from a
+      // real mac; measured here only at the libc layer, where glibc's
+      // mkstemp("./x.XXXXXX.log") refuses with EINVAL outright.
+      //
+      // CI is Linux, so CI can never see this — which is precisely why it wants
+      // a pin rather than a run. The counted shape is the ASSIGNMENT form, not
+      // the word `mktemp`: the script's own comments quote the broken spelling
+      // in order to explain it, and a pattern that read those would be red on
+      // the fixed tree.
+      //
+      // TERMINAL_X is the vacuity guard, in the same spirit as
+      // STEAL_CLAIM_ON_PICK above: SUFFIXED=0 is also what a file with no
+      // mktemp templates left in it looks like, so the count of GOOD templates
+      // is asserted beside the count of bad ones.
+      `printf "SUFFIXED_MKTEMP_TEMPLATES=%s\\n" "$(grep -cE '^[[:space:]]*[A-Za-z_]+="\\$\\(mktemp "[^"]*X{3,}[^"X][^"]*"' ${JSON.stringify(SCRIPT)} || true)"`,
+      `printf "TERMINAL_X_MKTEMP_TEMPLATES=%s\\n" "$(grep -cE '^[[:space:]]*[A-Za-z_]+="\\$\\(mktemp "[^"]*X{3,}"' ${JSON.stringify(SCRIPT)} || true)"`,
       '',
       '# ── 6. concurrent callers from ONE base get DISTINCT ports ──────────',
       // The card, as an executed assertion. Eight subshells, one base, at
@@ -423,5 +449,11 @@ describe.skipIf(!RUNNABLE)('gen-sdui-manifest.sh concurrent-run contract', () =>
 
   it('keeps no fixed dev-server log path (spelling pin)', () => {
     expect(seen.FIXED_LOG_LITERALS).toBe('0');
+  });
+
+  it("keeps every mktemp template portable — X's terminal, no suffix (spelling pin)", () => {
+    // Vacuity first: zero bad templates is also what zero templates looks like.
+    expect(seen.TERMINAL_X_MKTEMP_TEMPLATES, JSON.stringify(seen)).toBe('3');
+    expect(seen.SUFFIXED_MKTEMP_TEMPLATES, JSON.stringify(seen)).toBe('0');
   });
 });

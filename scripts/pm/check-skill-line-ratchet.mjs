@@ -292,7 +292,32 @@ export const CEILINGS = new Map([
   // narratives, incident post-mortems and rationale tails leave the corpus; one
   // rule per ≤120-byte line, 红线 first, templates last). Landed count, headroom
   // 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/SKILL.md', 811],
+  // Raised 811 → 812 by the queue-entry third-case ruling — an ORDINARY raise
+  // under this map's own maintainer exit, ⛔ not a cross-file move. Maintainer,
+  // live PM chat with the director seat, 2026-09-08, decision batch #91, under
+  // the standing delegation 「继续决策」, adopting option A of the skills seat's
+  // recommendation; the director record's own words (#16516):
+  //   Ruled content is not growth: the ratchet's own maintainer exit exists for
+  //   exactly this, and the precedent (`state-machine.md` 43→44) is on the map.
+  //   Land the ready text (115 / 112 / 116 B lines) with all three conjunctive
+  //   conditions intact. ⛔ B refused (collapsing an unrelated rule to a pointer
+  //   is an unmeasured weakening of something else); ⛔ C refused (SKILL.md:44
+  //   同 PR 同改 is not waived); ⛔ D refused by triage already.
+  // The content is the #16502 ruling (decision batch #73, 2026-09-07, maintainer
+  // 「同意」 on options C + D): a red on a NON-required check admits a PR to the
+  // queue only when (a) the check's own source names the red as by-design on a
+  // pushed branch, (b) the check does not run on `merge_group`, and (c) the PR
+  // comment records which check and why — three conjunctive conditions, none
+  // droppable. ONE line, and it could not be paid in place — measured, not
+  // assumed: the conditions need ≥107 B against 8 spare bytes on the 112 B rule
+  // line; the tightest self-contained one-line form is 137 B; and of the file's
+  // 601 adjacent bullet pairs ZERO merge under the 120-byte cap (smallest 121 B,
+  // and that one splices two rules). So the two-case premise line is compressed
+  // in place (88 → 115 B) to carry the case's head and the conditions land as one
+  // 112 B line; re-wrap funding is refused per the 2026-08-17 rule, and deleting
+  // a ruled clause is refused on the state-machine precedent. Landed count,
+  // headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/SKILL.md', 812],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -634,7 +659,52 @@ export const CEILINGS = new Map([
   // line-neutral folds among this file's adjacent rule pairs, and re-wrap funding
   // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0,
   // same convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 402],
+  // Raised 402 → 419 by the EIGHTH readings increment, again under the STANDING
+  // one-file exception quoted above rather than a fresh decision card, and again
+  // recorded as a `ruledRaises` record citing it. Its carrier card invited riders
+  // as comments, so the candidate set was 25 readings across the body and eleven
+  // rider comments; deduplicated against the file they land as 17 lines, one per
+  // reading, each written in this file's voice: the footer appender's
+  // discriminator is the SENT body's tail rather than the channel — a body
+  // already ending in the rule line + session-URL block gets nothing appended,
+  // measured in both directions on both channels (+1) — with its boundary, that
+  // no controlled pair has been sent and the fit is not a finding (+1); a call
+  // carrying no `body` argument changes the footer state not at all (+1); the
+  // strip reading recorded no input shape and is the one observation outside the
+  // fit (+1); a body stacking the harness's two-line block over the footer
+  // stores THREE attribution blocks (+1); the comment EDIT path is idempotent on
+  // a body that already ends in its block, unlike comment creation (+1); an
+  // issue-body `PATCH` normalises a pre-existing footer to the end instead of
+  // duplicating it (+1); the merge queue builds a BOUNDED window, so an entry
+  // past it shows neither queue ref nor `merge_group` run (+1); the
+  // `auto_merge_enabled` webhook payload names `merge` too, so the landing
+  // method is read off the squash commit's parent count (+1); the squash
+  // rewrites the authored co-author trailer while `Claude-Session:` survives
+  // (+1); web-page reachability forks per session AND per URL shape (+1), with
+  // the local permission classifier's pre-network refusal named as a THIRD
+  // mechanism that is not a 403 (+1); the PR page carries every comment's raw
+  // markdown in `clipboard-copy` value attributes (+1) while the ISSUE page
+  // carries no such thing and its mention counts are identical blind and
+  // sighted (+1); the public issues query page DOES serve SSR anchors and ANDs
+  // its `label:` filters, matching REST number for number on a small result and
+  // truncating silently on a large one (+1); the search index's zeros fork by
+  // TERM SHAPE — camelCase identifiers and quoted phrases return 0 where a
+  // hyphenated slug in the same sequence returns the full set (+1); and
+  // `list_pull_requests` addressed by `head: owner:branch` returns draft,
+  // labels, assignees and requested reviewers in ONE call (+1) = +17 exactly.
+  //
+  // FIVE corrections are paid in place and buy nothing: the create-side row's
+  // bare-REST-only attribution (both channels behave alike, keyed on the sent
+  // tail); the cell's closing row, which named the CHANNEL as the create-side
+  // variable; the `--pair` row, which lifted out of its paragraph read as
+  // "always exits 0 in-container" and now carries the exit-4 verdict it must not
+  // suppress; the search row's flat claim that a qualifier-shaped query returns
+  // 0, which a same-session control carrying a qualifier disproves; and the
+  // public-page boundary row's "no SSR results". Nothing else was paid in place:
+  // the fourth increment MEASURED zero line-neutral folds among this file's
+  // adjacent rule pairs, and re-wrap funding is refused per the 2026-08-17 rule
+  // in any case. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 419],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -744,7 +814,15 @@ export const CEILINGS = new Map([
   // instead of the corpus. Set at the landed line count (headroom 0, same
   // convention as every entry above); it is a NEW file, so this is an added row
   // and no other row moves.
-  ['.claude/skills/pm-dispatch/references/core-rules.md', 150],
+  // Raised 150 → 151 by the same queue-entry third-case ruling (decision batch
+  // #91, 2026-09-08, option A — quoted in full at the SKILL.md entry above): the
+  // twin line that SKILL.md:44 orders (一条规则在本文与核心条款一处改动,另一处同
+  // PR 同改), one 116 B line stating the sole exception with all three conditions.
+  // Could not be paid in place: the rule line holds 114 B of 120, and of this
+  // file's 121 adjacent bullet pairs ZERO merge under the cap (smallest 156 B).
+  // Landing it in SKILL.md alone was option C, refused by the ruling: the twin
+  // obligation is not waived. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/core-rules.md', 151],
   // The app-vs-platform boundary — the deciding question (could this be written
   // from the metadata alone, with no knowledge of this company?), the publication
   // test (one consumer is a use, two is a contract) and the two anti-patterns.
@@ -950,7 +1028,15 @@ export const CEILINGS = new Map([
   // convention as the entries above).
   // 86 → 41: the ownership excerpt rewritten by role in the same rules-only pass;
   // re-pinned at the landed count, headroom 0.
-  ['CLAUDE.md', 41],
+  // 41 → 5: the inlined never-miss digest left the file entirely — it is now a pure
+  // pointer at AGENTS.md, which carries every rule it used to restate. Maintainer
+  // ruling 2026-09-09, verbatim and untranslated: 「其次 claude.md 是不是直接让他阅读
+  // agents.md 即可，没必要维护两套。所有仓库都有类似的问题」 (program #17161, card
+  // #17162). A LOWERING, which needs no ruling of its own — quoted because the
+  // ruling is what emptied the file. Re-pinned at the landed count, headroom 0: the
+  // 36 lines of slack a shrink leaves behind are exactly the budget a future digest
+  // would re-accrete into, which is the growth this entry exists to price.
+  ['CLAUDE.md', 5],
 ]);
 
 /**
@@ -1115,6 +1201,23 @@ export const CROSS_FILE_MOVES = new Map([
             + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
           date: '2026-09-08',
           delta: 7,
+        },
+        {
+          // The EIGHTH increment, under the same STANDING exception — the same
+          // words again, for the same reason: a record that quotes no ruling is
+          // RED and each record stands alone. The +17 is accounted for line by
+          // line beside this entry's ceiling above, and the exception's own
+          // conditions (per-item verification and the candidate / landed /
+          // already-present / refused counts) are carried by the raising PR's
+          // dedup table and the seat's ACCEPT.
+          ruling:
+            'the standing one-file exception for'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
+            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
+            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
+            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
+          date: '2026-09-09',
+          delta: 17,
         },
       ],
       sources: [

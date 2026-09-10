@@ -117,8 +117,18 @@
  * lean-entry promise (`@objectstack/metadata/errors`, 2.4 MB across 83 modules
  * standalone) and is the object a gate like this would measure — but it is a
  * separate card with a separate owner, and adding its row here would decide its
- * open question by writing down today's number as tomorrow's contract. The
- * table shape is what makes that a one-row change for whoever owns it.
+ * open question by writing down today's number as tomorrow's contract.
+ *
+ * ⛔ A second entry is NOT a one-row change, and an earlier revision of this
+ * header said it was (#16980). The table row is the cheap half. The other half
+ * is that `ADMITTED_PACKAGES` below is ONE set belonging to ONE entry: a second
+ * entry measures its own closure and therefore needs its own admitted set, and
+ * a package entering an admitted set is the ADR-0076 D2 boundary moving —
+ * which is why every widening remedy this gate prints carries
+ * `RATCHET_AUTHORITY_MARKER`. ⇒ Whoever owns a second entry owns a MAINTAINER
+ * decision, not just a row. `resolveConditions()` reads both `exports`
+ * spellings this workspace uses, so the row itself is at least honest now; that
+ * is the part this header used to get wrong, not the price.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -431,6 +441,85 @@ export function judge(grouped, label) {
 // ── The run ─────────────────────────────────────────────────────────────────
 
 /**
+ * Describe a condition value this gate refused, in terms a manifest author can
+ * act on — the JS shape, and for an object the keys it does carry.
+ *
+ * ⛔ It reports what was found and nothing more. It does not name a cause,
+ * because from here the gate cannot tell a malformed manifest from an `exports`
+ * spelling it has simply never been taught.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function describeConditionShape(value) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return `an array of ${value.length} element(s)`;
+  if (typeof value === 'object') {
+    const keys = Object.keys(value);
+    return keys.length
+      ? `an object with keys [${keys.join(', ')}] and no string "default"`
+      : 'an empty object';
+  }
+  if (typeof value === 'string') return 'an empty string';
+  return `a ${typeof value} (${JSON.stringify(value) ?? String(value)})`;
+}
+
+/**
+ * The path ONE `exports` condition names — for the two spellings this workspace
+ * actually uses — or a refusal that says what it found instead.
+ *
+ *     flat    "./core":   { "import": "./dist/core.mjs" }
+ *     nested  "./errors": { "import": { "types": "…", "default": "./dist/errors.js" } }
+ *
+ * Both spellings are live here, so reading only the flat one was never a
+ * simplification: it was a gate that could not read half of its own repo.
+ * Before #16980 the nested spelling was handed to `node:path` as an object and
+ * died with a raw `TypeError: The "paths[2]" argument must be of type string`
+ * — no gate name, no entry id, no repair. The shape guard one level up (the
+ * `exports[subpath]` object check in `resolveConditions()`) already had the
+ * right form; it was checking the wrong level.
+ *
+ * ⛔ Any other shape is REFUSED here rather than guessed at. A guess would pick
+ * some file and then report a closure measured from the wrong artifact as if it
+ * had measured the right one — a confident wrong answer, which is strictly
+ * worse than the crash it would replace.
+ *
+ * ⚠️ Absent means absent, and only `undefined` and `null` mean it. Every other
+ * falsy value was skipped silently by the previous `if (!rel) continue`; they
+ * are refusals now, because `""` and `false` are not a manifest declining to
+ * publish a condition — they are a manifest this gate cannot read.
+ *
+ * @param {{pkgDir: string, subpath: string, id: string}} entry
+ * @param {'import' | 'require'} flavour
+ * @param {unknown} value the raw `exports[subpath][flavour]`
+ * @returns {string | null} the relative path, or null when the condition is not published
+ */
+export function conditionTarget(entry, flavour, value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string' && value !== '') return value;
+  if (
+    typeof value === 'object'
+    && !Array.isArray(value)
+    && typeof value.default === 'string'
+    && value.default !== ''
+  ) {
+    return value.default;
+  }
+  throw new Error(
+    `${entry.pkgDir}/package.json declares exports["${entry.subpath}"]["${flavour}"] as `
+      + `${describeConditionShape(value)}; this gate reads a condition only as a path string, or as `
+      + 'a nested condition object whose "default" is a path string.\n'
+      + `          entry:   ${entry.id}\n`
+      + `          subpath: ${entry.subpath}\n`
+      + `          flavour: ${flavour}\n`
+      + '          ⇒ Either that manifest is wrong, or it uses an exports spelling conditionTarget() '
+      + 'in this file has not been taught. This gate cannot tell which from here, so it names the '
+      + 'shape and stops. ⛔ What it may not do is resolve something anyway: a closure measured from '
+      + 'the wrong artifact would be reported as if it were the right one.',
+  );
+}
+
+/**
  * Resolve a guarded entry's conditions from its own manifest.
  *
  * @param {{pkgDir: string, subpath: string, id: string}} entry
@@ -446,8 +535,8 @@ export function resolveConditions(entry) {
   const conditions = [];
   const missing = [];
   for (const flavour of /** @type {const} */ (['import', 'require'])) {
-    const rel = map[flavour];
-    if (!rel) continue;
+    const rel = conditionTarget(entry, flavour, map[flavour]);
+    if (rel === null) continue;
     const target = resolve(ROOT, entry.pkgDir, rel);
     if (existsSync(target)) conditions.push({ flavour, target });
     else missing.push(`${entry.id} (${flavour}) -> ${relative(ROOT, target)}`);
@@ -581,11 +670,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the three judgements': 5,
   'the disjointness wall': 2,
   'measuring a real load': 3,
+  'reading a condition': 6,
   'the prerequisite': 2,
 });
 
 /** Deleting a roster entry silences its floor as surely as zeroing it. */
-const SELF_TEST_BATTERY_FLOOR = 5;
+const SELF_TEST_BATTERY_FLOOR = 6;
 
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
@@ -749,6 +839,90 @@ export function selfTest() {
     const broken = measure(join(fixture, 'no-such-entry.mjs'), 'import');
     t('an entry that does not load is an ERROR, never an empty closure', 'error' in broken, JSON.stringify(broken).slice(0, 200));
 
+    // ── reading a condition ───────────────────────────────────────────────
+    //
+    // One case per branch of conditionTarget(), because the branch that was
+    // MISSING is exactly what #16980 cost: a nested condition was handed to
+    // node:path as an object and died there. The refusal branch is pinned in
+    // the same battery — an unreadable shape has to arrive as this gate's own
+    // sentence, naming the entry, and never as a crash from a node builtin.
+    battery('reading a condition');
+    const condEntry = { id: '@fixture/pkg/errors', pkgDir: 'packages/fixture', subpath: './errors' };
+    t(
+      'a flat condition is the path string itself',
+      conditionTarget(condEntry, 'import', './dist/errors.js') === './dist/errors.js',
+    );
+    t(
+      'a nested condition is read through its "default"',
+      conditionTarget(condEntry, 'require', { types: './dist/errors.d.cts', default: './dist/errors.cjs' })
+        === './dist/errors.cjs',
+    );
+    t(
+      'an unpublished condition is absent, not a refusal',
+      conditionTarget(condEntry, 'import', undefined) === null
+        && conditionTarget(condEntry, 'require', null) === null,
+    );
+
+    /** @param {unknown} value */
+    const refuseCondition = (value) => {
+      try {
+        conditionTarget(condEntry, 'import', value);
+        return { threw: false, ctor: '(none)', message: '(returned a target instead of refusing)' };
+      } catch (e) {
+        return { threw: true, ctor: e.constructor.name, message: String(e.message) };
+      }
+    };
+
+    const noDefault = refuseCondition({ types: './dist/errors.d.ts', browser: './dist/errors.browser.js' });
+    t(
+      'a condition object with no "default" is refused by this gate, naming entry, subpath and shape',
+      noDefault.threw && noDefault.ctor === 'Error'
+        && noDefault.message.includes(condEntry.id)
+        && noDefault.message.includes(condEntry.subpath)
+        && noDefault.message.includes('types, browser'),
+      `${noDefault.ctor}: ${noDefault.message.slice(0, 220)}`,
+    );
+
+    const thirdShape = refuseCondition(['./dist/a.js', './dist/b.js']);
+    t(
+      'a third shape is refused too, and the refusal reports what it found rather than guessing',
+      thirdShape.threw && thirdShape.ctor === 'Error'
+        && thirdShape.message.includes('an array of 2 element(s)')
+        && thirdShape.message.includes(condEntry.id),
+      `${thirdShape.ctor}: ${thirdShape.message.slice(0, 220)}`,
+    );
+
+    t(
+      'resolveConditions reads a NESTED manifest end to end — the shape that used to reach node:path',
+      (() => {
+        const nestedPkg = join(scratch, 'nestedpkg');
+        mkdirSync(nestedPkg, { recursive: true });
+        writeFileSync(
+          join(nestedPkg, 'package.json'),
+          JSON.stringify({
+            name: 'nestedpkg',
+            exports: {
+              './errors': {
+                import: { types: './dist/errors.d.ts', default: './dist/errors.js' },
+                require: { types: './dist/errors.d.cts', default: './dist/errors.cjs' },
+              },
+            },
+          }),
+        );
+        const { conditions, missing } = resolveConditions({
+          id: 'nestedpkg/errors',
+          pkgDir: relative(ROOT, nestedPkg),
+          subpath: './errors',
+        });
+        // Unbuilt by construction, so both conditions land in `missing` — which
+        // is the point: they are NAMED, having been resolved to real paths,
+        // rather than never reaching a diagnostic at all.
+        return conditions.length === 0 && missing.length === 2
+          && missing[0].endsWith(join('dist', 'errors.js'))
+          && missing[1].endsWith(join('dist', 'errors.cjs'));
+      })(),
+    );
+
     // ── the prerequisite ──────────────────────────────────────────────────
     battery('the prerequisite');
     t(
@@ -792,7 +966,8 @@ export function selfTest() {
   }
   console.log(
     `✓ check-lean-entry-closure self-test: ${cases.length} cases pass `
-      + '(attribution, all three judgements, the disjointness wall, two real child loads, the prerequisite).',
+      + '(attribution, all three judgements, the disjointness wall, two real child loads, '
+      + 'both condition spellings plus two refusals, the prerequisite).',
   );
   selfTestReachedVerdict = true;
   return 0;

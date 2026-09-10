@@ -51,6 +51,8 @@
 - 设方法的 GraphQL mutation 不服务 agent 会话 ⇒ 席位既设不了也纠不了。
 - 它在本仓无实效:`main` 的合并队列规则带 `merge_method: SQUASH`,合并由队列执行。
 - ⇒ 落地方法读分支规则,⛔ 永不读 auto-merge 请求;树上每 PR 一个 squash 提交。
+- `auto_merge_enabled` webhook 载荷同报 `merge` ⇒ 三个载体一致也不作数,判据是落地提交的父数。
+- squash 落地重写署名 trailer:作者行按提交作者身份改拼,`Claude-Session:` 原样存活。
 - `enable_pr_auto_merge` 对已 `mergeable_state: clean` 的 PR 照样成功,与工具描述的优雅失败相反。
 - 回显两向不可靠,空回显不等于未挂上 ⇒ ⛔ 不拿它当任何方向的证据、不为它空转。
 - 配额枯竭时 `enable_pr_auto_merge` 回成功而挂载根本没发生 ⇒ 验效果,不验回应。
@@ -77,6 +79,7 @@
 - 吞吐两则:合并队列落地 ≈ 每 PR 15–30 分钟且串行,⛔ 不据还没落提前判异常。
 - 单容器重验证(build 加 test)并发甜点 ≈3,排批按它定上限。
 - 入队事件与队列 ref 迟 1–3 分钟才出现 ⇒ 轮询预算按 3 分钟,⛔ 不按 1 分钟判没挂上。
+- 队列窗口有界:满窗条目 ref 与 `merge_group` run 双缺席,ref 随前一条落地才现,不按计时器。
 - ready 翻转触发检查重跑 ⇒ 入队落在翻转之后约一分钟,那段空窗不是挂载失败。
 - `behind` 的 PR 照常入队:落后于 main 不是入队否决,⛔ 不为它先跑 update-branch。
 - `check_suite.completed` 会命名过期 head,check-run 也只属最后一次 push ⇒ 用前先重读当前 head。
@@ -106,7 +109,7 @@
 - CCR 容器的 GitHub 出口是代理加凭据的:无 header 的 REST 读回 200 带会话身份,core 上限 15000。
 - 调用方自带的 `Authorization` 头被代理覆盖;`HTTPS_PROXY` 端口打死也不切断网络。
 - ⇒ 容器内得出的 token 作用域结论 ⛔ 不迁移到出口未经代理的会话。
-- 同因:`check-clause2-carriers.mjs --pair` 在容器内带与不带 token 都 exit 0,不再是 403 退 3。
+- 同因:`check-clause2-carriers.mjs --pair` 带与不带 token 都不再 403 退 3;真缺声明照常退 4。
 - 两通道的信封在配额、权限、传输三样上都不同 ⇒ 任一侧的拒绝只是那一侧的读数。
 - 限流、403、传输失败都要试过另一侧才说得出我没手段。
 - 读数:`POST /actions/runs/{id}/rerun-failed-jobs` REST 回 403 而 MCP 回 201。
@@ -148,6 +151,8 @@
 - 重试对齐整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询。
 - 文档载明未实测:条件请求答 `304` 不计 core 池。
 - 公开仓零配额读法两档,payload 档优先 —— 只有 body 精确。
+- 网页档可达性逐会话逐 URL 形状分叉:一处容器 `/actions/**` 与 api. 回 403,另一处网页全 200。
+- ⇒ 要用哪个形状先探哪个;本地权限分类器在网络之前的拒绝是第三种机制,⛔ 不记 403。
 - 单卡页 `/issues/N` 内嵌 JSON 载原始 body:取含 `bodyHTML` 的 `script[type="application/json"]` 块。
 - 读 `payload.preloadedQueries[0].result.data.repository.issue.body` 与 `frontTimelineItems`/`backTimelineItems`。
 - 评论表与标量字段都不可信:时间线只渲染前 15 项且 `hasNextPage: true`。
@@ -160,11 +165,15 @@
 - 内容可滞后数分钟到数十分钟;它没有位置性对照 —— 更早内容全在,只有最新几条缺席。
 - ⇒ 前 15 项那条判别式在此不成立,唯一出路是第二通道。
 - 失效方向是据它对别人的工作下没有认领的判词。
-- 边界:⛔ 只因仓库公开成立;⛔ 覆盖单卡读、不覆盖 issue search,搜索页无 SSR 结果。
+- PR 页把正文与每条评论的原始 markdown 放进 `clipboard-copy` 的 value 属性,是另一条零配额读。
+- issue 页无此载体,且盲态与好态的提及计数相同 ⇒ 卡片评论只走 API,⛔ 不套 PR 页读法。
+- 边界:⛔ 只因仓库公开成立;⛔ 覆盖单卡读,搜索页只给锚点不给正文。
 - ⛔ 永不拿渲染列表定规模:静默只显一页。渲染层 WebFetch 仍在,~15 分缓存、有损。
+- issue 查询页有 SSR 锚点且 `label:` 是真 AND:小结果与 REST 逐号相等,大结果静默截到十余条。
 - 查重先 `search_issues`,并按它的契约拼:它是语义匹配器。
 - ⛔ `query` 里永不放 GitHub 限定符(`repo:` / `is:` / `label:` / `in:title`),范围走 `owner`/`repo` 参数。
-- `query` 写成描述缺陷的句子;限定符形回 `total_count: 0` 且 `incomplete_results: false`。
+- `query` 写成描述缺陷的句子;限定符形亦可回 `total_count: 0` 且 `incomplete_results: false`。
+- 零还按词形分叉:camelCase 标识符与带引号短语回 0,同序列里连字符 slug 照常回全集。
 - 同一意图换文档形则命中,首条即目标;body 文本匹配是 repo-scoped `list` 做不到的。
 - `list` 加本地扫描是确定性回退,⛔ 不是默认。
 - `search_issues` 可整会话静默归零,控制词一并归零 —— 故障是会话级,同刻别的会话正常。
@@ -211,6 +220,7 @@
 - 腿 ③:payload 档 —— issue 页的 `href` 锚点 grep(`/labels/NAME`)在 PR 页命中零。
 - PR 侧拼写是 `data-name="NAME"`,片链到 `issues?q=…label%3A…`。
 - 腿 ④:`list_pull_requests` 与 `search_pull_requests` 传 PR 号回完整 `labels`,是可用读腿。
+- 同接口按 `head: owner:分支` 加 `fields` 一次回全 draft、labels、assignees 与请审人。
 - 反向不对称:`issue_write update` 传 PR 号写 `labels` 与 `assignees` 生效,而读腿 ① 拒 PR 号。
 - ⇒ ⛔ 读成功而标签空或缺席不读作没有标签:按 `data-name=` 确认,否则整集作 UNKNOWN。
 - 可达时优先加法端点;⛔ 单读与单次即时读回都不决断。
@@ -308,11 +318,17 @@
 - 裸 REST `PATCH /pulls` 追加一个裸页脚并保留既有 session-URL 页脚,差恰 58 字节。
 - 同一 MCP 包装器上有反例:把已带页脚的正文整体重送,两条页脚均逐字节存活。
 - 送无页脚正文经 MCP 编辑回读仍无页脚(两次实测)⇒ 它不为无页脚正文合成页脚。
-- 第四形:裸 REST `POST /pulls` 建 PR 时,在已带 session-URL 页脚的正文后再追加一条同形页脚。
+- 第四形:建 PR 两通道同判 —— 送出体尾部不是 `---` 加页脚块时,追加一条同形页脚。
 - 该追加带前置横线、恰 90 字节,送出体是存储体的严格前缀。
-- ⇒ 追加形态随通道与动作(建 / 改)变,⛔ 不由任一条推其余;写后必回读。
+- 尾部已是该块则一字不追加,两通道各实测两向 ⇒ 建侧通道不是变量,判据是送出体尾部。
+- ⛔ 无受控对照(同通道只差该块两送)⇒ 是拟合不是定论,⛔ 不外推到别的动作。
+- 调用不带 `body` 参数则页脚状态不动:`draft` 或 `title` 单字段更新既不删也不合成。
+- 删页脚那条读数没记送入体形态,是唯一不合此判据的观察 ⇒ 该格按最坏走,写后必回读。
+- 正文把 harness 两行块叠在页脚之上,存回是三条署名块;单块形态才复现成一条。
+- ⇒ 形态随动作与送出体尾部变,改侧还随通道变;⛔ 不由任一条推其余,写后必回读。
 - 平台在尾部 `---` 前后正反两向归一空行:比对正文只按首个差异偏移,⛔ 不按长度。
 - 评论创建两通道都追加 58 字节 ⇒ 严格解析 `os-dev-report` 必须停在最后一个右花括号。
+- 评论 `PATCH` 重送含尾部页脚块的存储体是幂等的:逐字节一条页脚,与创建的追加相反。
 - 并行 spec PR 同动 pin 计数断言:被踢不是事故,按 os-regen 序再解一轮。
 - 解冲突两侧收据都保留、按合并顺序堆叠;新计数从合并后源码重数,⛔ 不从收据做算术。
 - 操作数是文件本身不是历史;双方占同一编号是常态,重编号后进侧。
@@ -353,6 +369,7 @@
 - ⛔ 别处写下的计数值一律先复测再用。
 - MCP `issue_write create` 落库丢掉正文尾部的署名页脚块,正文其余部分完好。
 - 建卡改走 REST `POST /issues` 页脚存活;回读后 `PATCH /issues/{n}` 重送正文逐字节存下。
+- issue 正文 `PATCH` 存回可多一条裸页脚,已有页脚被归一到末尾而非复制,总数恒一条。
 - 内联双引号 JSON 建卡:标题反引号标识符被 shell 以 root 展开,正文完好 —— 内容被执行。
 - CI job 的失败 step 不必与 job 名一致 ⇒ ⛔ 不由 job 名推原因,先读 step 名再下结论。
 - Actions 日志保留把老 job 截到 post-job cleanup ⇒ 归档只剩清理输出时原因不可断言。

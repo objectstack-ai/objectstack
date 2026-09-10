@@ -14,12 +14,20 @@
  * asking which rows nobody claims (PENDING-GAPS §E; the gate is
  * `packages/qa/dogfood/test/route-ledger-live-mount-parity.dogfood.test.ts`).
  *
- * WHAT GUARDS IT. That parity gate, in both directions: a row here whose
- * route the plugin stops mounting fails it, and a fifth route mounted without
- * a row here fails it too. Deliberately NOT a fifth per-package conformance
- * test — the sibling ledgers each grew one because nothing else could see
- * their registrar, and the gate now can. A second guard over the same fact
- * would be the "two places to remember" shape this issue is about.
+ * WHAT GUARDS IT. Two layers, since #17062. The dogfood parity gate above
+ * checks both directions too — a row here whose route the plugin stops
+ * mounting fails it, and any live mount without a row in the union of the
+ * ledgers it reads fails it — but only as part of a full boot, in a
+ * different package's suite, gated on whatever plugins that specific boot
+ * composes. `settings-route-ledger.conformance.test.ts`, alongside this
+ * file, is the package-local guard every OTHER `*-route-ledger.ts` in the
+ * tree already pairs itself with: it drives `registerSettingsRoutes` against
+ * a capturing mock `IHttpServer` (the same seam `storage-routes.ts` and
+ * datasource's `admin-routes.ts` use — `registerSettingsRoutes` is an
+ * exported, synchronous, top-level function that touches neither argument
+ * before a request arrives, so a bare stub of each enumerates the real
+ * surface), runs on every `pnpm test` for this package alone, and fails by
+ * name in both directions without needing a boot.
  *
  * SCOPE & SHAPE. Rows carry full wire paths at the DEFAULT base
  * (`/api/settings` — note NOT under `/api/v1`; this surface predates the

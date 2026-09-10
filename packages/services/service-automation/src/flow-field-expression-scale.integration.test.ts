@@ -127,7 +127,7 @@ describe('flow-computed money lands within its declared scale (#11060, oracle fo
         const row = await quoteByTitle('rounded');
         expect(row, 'the quote row must persist').toBeTruthy();
         // The PERSISTED value — not the expression result.
-        expect(row.total).toBe(126000);
+        expect(row!.total).toBe(126000);
     });
 
     it('the assignment surface computes the same rounded value (config.assignments → interpolate)', async () => {

@@ -420,9 +420,9 @@ export class PluginLoader {
      * aligns to it").
      *
      * The check itself — `PluginSchema.safeParse` for validation only, the
-     * eight keys it reaches, the `version` exclusion and the
-     * `PLUGIN_CONTRACT_VIOLATION` envelope — lives in `plugin-contract.ts`,
-     * because since #16721 it is ONE statement run by BOTH kernels:
+     * nine keys it reaches and the `PLUGIN_CONTRACT_VIOLATION` envelope —
+     * lives in `plugin-contract.ts`, because since #16721 it is ONE statement
+     * run by BOTH kernels:
      * `LiteKernel.use()` calls it directly, and `ObjectKernel.use()` reaches
      * it here, through `loadPlugin`. That module's comment is the authority on
      * what is refused; this method adds nothing to it and subtracts nothing.
@@ -431,6 +431,19 @@ export class PluginLoader {
      * structural checks one call up ({@link validatePluginStructure} —
      * `name`, `init`, semver) and the version-compatibility check below.
      * The convergence is on the schema, not on the loader.
+     *
+     * ⭐ Those structural checks no longer DISAGREE with the schema, which for
+     * `version` they used to. #16365 gave `PluginSchema.version` the grammar
+     * {@link isValidSemanticVersion} implements, character for character, and
+     * `plugin-contract.ts` dropped the `version` exclusion it carried while the
+     * two spellings differed. Both now judge `version` by the same regex, so
+     * this method and the one above it can only agree on that key; the
+     * structural checks stay here because they cover `name` and `init` too,
+     * which `PluginSchema` does not declare — not because they judge `version`
+     * differently. ⚠️ Their ORDER is still observable and still pinned:
+     * `validatePluginStructure` runs first, so a malformed `version` on this
+     * kernel is refused as `Invalid semantic version`, never as
+     * `PLUGIN_CONTRACT_VIOLATION`.
      */
     private validatePluginContract(plugin: PluginMetadata): void {
         assertPluginContract(plugin);

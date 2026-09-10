@@ -475,7 +475,7 @@ describe('#8050 cold boot over the same sqlite file (full stack)', () => {
             where: { id: runId }, context: { isSystem: true } as never,
         });
         expect(row, 'the suspension row must survive the restart').toBeTruthy();
-        expect(row.status).toBe('paused');
+        expect(row!.status).toBe('paused');
 
         // RED on main: `[]` for both listings, `null` for the detail.
         const listed = await second.automation.listRuns('showcase_budget_approval', { status: 'paused' });

@@ -1529,7 +1529,12 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
         findOne: async () => null,
         create: async (_o: string, d: any) => ({ id: 'rec-1', ...d }),
         update: async (_o: string, _i: any, d: any) => ({ id: _i, ...d }),
-        updateMany: async (_o: string, _ast: any, d: any) => { bulkUpdates.push({ ...d }); return [{ ...d }]; },
+        // [#16231] `IDataDriver.updateMany` declares `Promise<number>` — the
+        // affected-row count a predicate write resolves. This double answered an
+        // ARRAY of rows, a shape no driver produces and one the engine used to
+        // hand straight out under `Promise<any>`; the assertions here read the
+        // captured payload, never the return, so the drift was invisible.
+        updateMany: async (_o: string, _ast: any, d: any) => { bulkUpdates.push({ ...d }); return 1; },
         delete: async () => true, syncSchema: async () => {},
       };
       await kernel.use({
@@ -1604,7 +1609,12 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
         findOne: async () => null,
         create: async (_o: string, d: any) => ({ id: 'rec-1', ...d }),
         update: async (_o: string, _i: any, d: any) => ({ id: _i, ...d }),
-        updateMany: async (_o: string, _ast: any, d: any) => { bulkUpdates.push({ ...d }); return [{ ...d }]; },
+        // [#16231] `IDataDriver.updateMany` declares `Promise<number>` — the
+        // affected-row count a predicate write resolves. This double answered an
+        // ARRAY of rows, a shape no driver produces and one the engine used to
+        // hand straight out under `Promise<any>`; the assertions here read the
+        // captured payload, never the return, so the drift was invisible.
+        updateMany: async (_o: string, _ast: any, d: any) => { bulkUpdates.push({ ...d }); return 1; },
         delete: async () => true, syncSchema: async () => {},
       };
       await kernel.use({

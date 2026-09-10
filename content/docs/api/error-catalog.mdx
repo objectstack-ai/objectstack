@@ -664,6 +664,7 @@ Every error response follows the `EnhancedApiError` schema:
 interface EnhancedApiError {
   code: StandardErrorCode;       // Machine-readable error code
   message: string;               // Human-readable description
+  refusal?: true;                // Producer-declared refusal: keeps message on a 5xx
   category?: ErrorCategory;      // Error category
   httpStatus?: number;           // HTTP status code
   retryable: boolean;            // Whether retry may succeed

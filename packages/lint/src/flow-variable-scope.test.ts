@@ -183,6 +183,64 @@ describe('shadowedFieldReads (#14089)', () => {
     expect(SCOPE_ROOTS.length).toBeGreaterThan(0);
     expect(shadowedFieldReads(`${root} == "x"`, vars(root), [root])).toEqual([]);
   });
+
+  /**
+   * ── #16412: the blind spot above is name-local again, as written ────
+   *
+   * It used to be far wider than its own wording, and that is what #16412
+   * measured. `SCOPE_ROOTS` were declared `map` in the strict env, so a root
+   * name — or a field/variable sharing one — used with an ordinary operator
+   * faulted `no such overload` rather than `Unknown variable`. cel-js returns
+   * ONE error, so that fault took the slot, `bareRootsOf`'s loop got `null` on
+   * iteration 0 and terminated before judging anything, and EVERY shadow in
+   * that source was lost whatever it was named. The source still compiled (the
+   * permissive env leaves those roots `dyn`), so no sibling diagnostic fired
+   * either.
+   *
+   * The roots are `dyn` in both environments now. What survives is exactly what
+   * the pin above says: the colliding NAME itself is still not reported.
+   */
+  it.each([
+    ['config', "config == 'x' && status == 'y'"],
+    ['data', "data == 'x' && status == 'y'"],
+    ['result', "result > 1 && status == 'y'"],
+    ['item', "item == 'x' && status == 'y'"],
+  ])('a %s-named first operand no longer swallows every other shadow in the source', (root, source) => {
+    expect(SCOPE_ROOTS as readonly string[]).toContain(root);
+    expect(shadowedFieldReads(source, vars('status', root), ['status', root])).toEqual(['status']);
+  });
+
+  it('the loop reaches shadows in either order — the masking was POSITIONAL', () => {
+    // Same two sub-expressions, both orders. The second was already correct
+    // before #16412 and is the control: it is what made the first legible.
+    const masked = shadowedFieldReads("data == 'x' && status == 'y'", vars('status', 'data'), ['status', 'data']);
+    const control = shadowedFieldReads("status == 'y' && data == 'x'", vars('status', 'data'), ['status', 'data']);
+    expect(masked).toEqual(control);
+    expect(masked).toEqual(['status']);
+  });
+
+  it('still collects EVERY shadow behind a root name, not just the first', () => {
+    const found = shadowedFieldReads(
+      "config == 'x' && status == 'y' && amount > 1",
+      vars('status', 'amount', 'config'),
+      ['status', 'amount', 'config'],
+    );
+    expect(found.sort()).toEqual(['amount', 'status']);
+  });
+
+  /**
+   * ⛔ The under-report direction is preserved: closing the `SCOPE_ROOTS` class
+   * must not start reporting anything a rooted or macro-bound source contains.
+   * These are the false positives the pinned oracle exists to avoid.
+   */
+  it.each([
+    ['record.status == "x"', 'the dotted spelling this rule prescribes'],
+    ['record.lines.exists(status, status.ok)', 'a comprehension-macro variable sharing a field name'],
+    ['size(record.lines) > 0', 'a function name sharing a field name'],
+    ['data.status == "x" && record.status == "y"', 'a root used as a NAMESPACE, which is correct'],
+  ])('%s reports nothing (%s)', (source) => {
+    expect(shadowedFieldReads(source, vars('status', 'size', 'data'), ['status', 'size', 'data'])).toEqual([]);
+  });
 });
 
 describe('shadowedFieldMessage (#14089)', () => {

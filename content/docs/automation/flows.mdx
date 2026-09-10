@@ -1734,6 +1734,8 @@ curl -b cookies.txt -X POST \
 | `GET /api/v1/automation/:name/runs/:runId` | One run's detail (404 `Execution not found`). Requires read on `sys_automation_run` — see [Observing runs](#observing-runs) |
 | `POST /api/v1/automation/:name/runs/:runId/resume` | Resume a paused run — body `{ inputs, output, branchLabel }` |
 | `GET /api/v1/automation/:name/runs/:runId/screen` | The pending screen of a screen-flow run |
+| `POST /api/v1/automation/:name/runs/:runId/cancel` | Cancel a suspended run (ADR-0044) — `PLATFORM_ADMIN` posture only (`isSystem` bypass); body `{ reason? }`. `501 NOT_IMPLEMENTED` when the service does not declare the verb |
+| `POST /api/v1/automation/:name/runs/:runId/restore-suspension` | Re-arm a run stranded by a failed resume — same gate as `cancel`; body `{ reason? }`. `501 NOT_IMPLEMENTED` when the service does not declare the verb |
 
 **Failures answer real HTTP status codes.** A flow that does not run is not a
 `200`. The route classifies five outcomes, and it reads the engine's own verdict

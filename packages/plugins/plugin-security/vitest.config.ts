@@ -71,6 +71,19 @@ export default defineConfig({
         find: /^@objectstack\/metadata-protocol$/,
         replacement: path.resolve(__dirname, '../../metadata-protocol/src/index.ts'),
       },
+      // [#16608] `insert-check-post-image.test.ts` imports `SqliteWasmDriver`
+      // as a VALUE: its conformance cell runs on two driver families, because
+      // "the check judges the row that will be stored" is a claim about the
+      // write gate that must not turn out to depend on which backend a
+      // deployment happens to run. Same reason as `driver-sql` above — left
+      // unaliased the specifier resolves through the workspace link to `dist/`,
+      // a BUILD ARTIFACT, and a dist merely BEHIND runs GREEN against the
+      // driver's old behaviour while saying nothing (`check:test-source-alias`
+      // refuses exactly that).
+      {
+        find: /^@objectstack\/driver-sqlite-wasm$/,
+        replacement: path.resolve(__dirname, '../../drivers/driver-sqlite-wasm/src/index.ts'),
+      },
     ],
   },
 });

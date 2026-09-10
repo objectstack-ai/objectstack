@@ -18,6 +18,7 @@
 - 前瞻的条款②事实住卡上裁决与分诊评论、`Clause-②` 申报和 `--tier` 输出。
 - 开着的载体恒 = 真实待审。
 - 载体不迁移:⛔ 不迁 PR review 或 Request Changes,⛔ 不为迁移留门。
+- FAIL 同 PASS 剥双载体:同笔留卡上交接评论(引复审、独立性对、欠改);卡态与 assignee 不动。
 - 重挂前先查裁决:闸门标签缺失 ⇒ 先 grep 卡评论找复审结论。
 - PASS + 无标 + head 未动 = 已清标不是被剥;head 后移或无结论才重挂。
 - `get_reviews` 读空 ≠ 未复审。
@@ -44,7 +45,6 @@
 - 放宽 tell 由 `scripts/pm/check-widening-tells.mjs` 判,`no` 撞新键/成员/导出/登记即拒,附 file:line。
 - ③ PR 全部 check 全绿,⛔ 非 required 子集;受管面不适用,draft-only 终局不变。
 - 外部评审链是可选事后审计:分诊定时轮与总监席召唤 ⛔ 不是放行必要条件。
-- 审计 FAIL 按状态机 label-flip 交回派发席补丁轮。
 
 ## 降档保险丝(机读)
 

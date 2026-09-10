@@ -125,15 +125,36 @@
 //
 //  1. NO NOTION OF "GATED", and this ratchet's promise is about UNGATED
 //     routes. Ledger dispositions grade SDK expressibility, not authorization:
-//     REST reads `sdk` 84 / `server-only` 7 / `public` 3. Cross-checked
-//     directly rather than assumed — of the 8 REST route mounts measured to
+//     REST reads `sdk` 81 / `server-only` 7 / `public` 3. Cross-checked
+//     directly rather than assumed — of the 7 REST route mounts measured to
 //     carry no `enforceAuth`, the ledger grades 3 `server-only`, 3 `public`
-//     and 2 `sdk`; and one of those two `sdk` rows is
+//     and 1 `sdk`, and that one row is `GET /api/v1/discovery`.
+//
+//     ⚠️ RE-MEASURED 2026-09-09 against `f6b7c53db7`. Both halves of the
+//     sentence above moved, FOR TWO UNRELATED REASONS, and separating them is
+//     the whole value of re-recording it.
+//
+//     THE SET LOST A ROW: 8 -> 7, and the row it lost is
 //     `GET /api/v1/ui/view/:object/:type`, the single route in this whole
-//     population ever measured unguarded. Its ledger row is shape-identical to
-//     the 83 `sdk` rows that ARE gated. `public` states INTENT for 3
-//     browser-facing form routes; it is not a gate measurement and was never
-//     built as one.
+//     population ever measured unguarded. Guarding it at `cc837dbfec` is the
+//     same repair that moved 30 ungated to 29 one paragraph below, so it is
+//     gated at the call site now and leaves this set, taking the second `sdk`
+//     with it: 3 / 3 / 2 became 3 / 3 / 1. ⛔ Its LEDGER row did not move at
+//     all — still `sdk`, still shape-identical to every other `sdk` row, the
+//     79 that are gated and the 1 that is not. That is this blocker restated
+//     by a live example: the grade did not notice the gate arriving, and it
+//     would not notice one leaving either.
+//
+//     THE LEDGER TOTAL MOVED FOR A REASON THAT IS NOT ABOUT GATES AT ALL, and
+//     ⛔ must not be read as evidence about them: `sdk` 84 -> 81 when #14503
+//     took the three REST package read/delete rows out of the ledger
+//     (94 rows -> 91, already recorded on the `rest-route-ledger.ts` probe row
+//     in the PROBES table below). It is written down here only because both
+//     figures live in one sentence, where a reader has no way to tell which of
+//     them moved for which reason — the failure this whole census is named for.
+//
+//     `public` states INTENT for 3 browser-facing form routes; it is not a
+//     gate measurement and was never built as one.
 //
 //  2. DERIVING "gated" FROM SOURCE SYNTAX IS UNSAFE — measured, not assumed.
 //     Scanning each of the 80 registration sites in `rest-server.ts` for

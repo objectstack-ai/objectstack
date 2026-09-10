@@ -682,6 +682,7 @@ import {
   resolveMetadataTypeLabel,
   resolveMetadataTypeDescription,
   resolveMetadataFormLabels,
+  resolveMetadataFormSchemaTitles,
 } from './i18n-resolver';
 
 describe('TranslationDataSchema metadataForms', () => {
@@ -902,6 +903,7 @@ describe('resolveMetadataFormLabels', () => {
 import {
   translateApp,
   translateDashboard,
+  globalFilterKey,
   resolveViewLabel as _resolveViewLabel,
   type DashboardLike,
 } from './i18n-resolver';
@@ -1123,6 +1125,120 @@ describe('translateDashboard', () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 import { translatePage } from './i18n-resolver';
+
+describe('translateDashboard — global filters (#16772)', () => {
+  const bundle: TranslationBundle = {
+    'zh-CN': {
+      dashboards: {
+        contract_overview: {
+          widgets: { by_category: { title: '按类别' } },
+          globalFilters: {
+            // Keyed by `name` when the filter authors one…
+            dept: { label: '申请部门', options: { legal: '法务', sales: '销售' } },
+            // …and by `field` when it does not (the schema's declared default).
+            category: { label: '类别', options: { '1': '服务', 'true': '有效' } },
+            // CONTROL: this entry is keyed by the FIELD of a filter that
+            // authors a `name`, so it must never be read.
+            department: { label: 'MUST-NOT-APPLY' },
+          },
+        },
+      },
+    },
+    en: {
+      dashboards: {
+        contract_overview: {
+          globalFilters: { dept: { options: { ops: 'Operations' } } },
+        },
+      },
+    },
+  };
+
+  const dashboard = () => ({
+    name: 'contract_overview',
+    label: 'Contract Overview',
+    widgets: [{ id: 'by_category', title: 'By category' }],
+    globalFilters: [
+      {
+        name: 'dept', field: 'department', type: 'select', label: 'Requesting Department',
+        options: [
+          { value: 'legal', label: 'Legal' },
+          { value: 'sales', label: 'Sales' },
+          { value: 'ops', label: 'Ops' },
+          { value: 'hr', label: 'HR' },
+        ],
+      },
+      {
+        field: 'category', type: 'select', label: { en: 'Category', 'zh-CN': '类别（内联）' },
+        options: [{ value: 1, label: 'Services' }, { value: true, label: 'Active' }, { value: 'x', label: 'Untouched' }],
+      },
+      { field: 'owner', type: 'lookup', label: 'Owner', optionsFrom: { object: 'user', valueField: 'id', labelField: 'name' } },
+    ],
+  });
+
+  it('translates the filter label and its static option labels, keyed by `name`', () => {
+    // The chain is the deployment's DECLARED one (#14882): `en` is consulted
+    // because the caller names it, never by default.
+    const out = translateDashboard(dashboard(), bundle, { locale: 'zh-CN', fallbackChain: ['en'] });
+    expect(out.globalFilters![0].label).toBe('申请部门');
+    expect(out.globalFilters![0].options).toEqual([
+      { value: 'legal', label: '法务' },
+      { value: 'sales', label: '销售' },
+      // Resolved key by key along the declared chain — `ops` comes from `en`.
+      { value: 'ops', label: 'Operations' },
+      // No entry anywhere on the chain: authored label kept.
+      { value: 'hr', label: 'HR' },
+    ]);
+    // The widget half keeps working alongside.
+    expect(out.widgets![0].title).toBe('按类别');
+  });
+
+  it('keys a filter that authors no `name` by its `field`, and spells number/boolean option values as strings', () => {
+    const out = translateDashboard(dashboard(), bundle, { locale: 'zh-CN' });
+    const category = out.globalFilters![1];
+    // A bundle entry wins over an authored inline locale map, as everywhere
+    // else on this surface.
+    expect(category.label).toBe('类别');
+    expect(category.options).toEqual([
+      { value: 1, label: '服务' },
+      { value: true, label: '有效' },
+      { value: 'x', label: 'Untouched' },
+    ]);
+  });
+
+  it('CONTROL: a filter with a `name` is not reachable by its `field`, and an unaddressed filter keeps its identity', () => {
+    const doc = dashboard();
+    const out = translateDashboard(doc, bundle, { locale: 'zh-CN' });
+    expect(out.globalFilters![0].label).not.toBe('MUST-NOT-APPLY');
+    // `owner` has no entry: the very same object comes back, and `optionsFrom`
+    // is carried through untouched.
+    expect(out.globalFilters![2]).toBe(doc.globalFilters[2]);
+    // The input is never mutated.
+    expect(doc.globalFilters[0].label).toBe('Requesting Department');
+    expect(doc.globalFilters[0].options?.[0]?.label).toBe('Legal');
+  });
+
+  it('CONTROL: leaves `globalFilters` off the copy when nothing resolved, and invents none on a dashboard without filters', () => {
+    const filters = dashboard().globalFilters;
+    const untouched = translateDashboard(
+      { name: 'other_dashboard', globalFilters: filters },
+      bundle,
+      { locale: 'zh-CN' },
+    );
+    // Nothing resolved ⇒ the authored array itself is carried through, not a
+    // rebuilt copy of it.
+    expect(untouched.globalFilters).toBe(filters);
+
+    const noFilters = translateDashboard({ name: 'contract_overview', label: 'X' }, bundle, { locale: 'zh-CN' });
+    expect('globalFilters' in noFilters).toBe(false);
+  });
+
+  it('exports the key derivation the extractor shares — `name`, else `field`, else nothing', () => {
+    expect(globalFilterKey({ name: 'dept', field: 'department' })).toBe('dept');
+    expect(globalFilterKey({ field: 'category' })).toBe('category');
+    expect(globalFilterKey({ name: '', field: 'category' })).toBe('category');
+    expect(globalFilterKey({})).toBeUndefined();
+  });
+});
 
 describe('translatePage', () => {
   const bundle: TranslationBundle = {
@@ -1632,17 +1748,29 @@ describe('translatePage — nested `properties.children` descent (#12961)', () =
       expect((card(out).properties.body as any[])[0].properties.label).toBe('Deals Won');
     });
 
-    it('does not descend into `items[].children` — outside the ruled `properties.children` face', () => {
+    it('descends into `items[].children` — the contract call the #12961 line left open, made by #16772', () => {
       // `page:tabs` / `page:accordion` nest their children one level deeper,
-      // under `properties.items[].children`. The ruling names
-      // `properties.children`; widening further is its own contract call, so
-      // this records where the line is rather than silently crossing it.
+      // under `properties.items[].children`. The #12961 ruling named
+      // `properties.children` and recorded this one as "its own contract
+      // call"; #16772 is that call, measured on a slotted contract page whose
+      // seven tab panels held every related list the resolver never reached.
       const out = translatePage(
         nestedUnder({ items: [{ label: 'Details', children: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Deals Won' } }] }] }),
         kpiBundle,
         { locale: 'zh-CN' },
       );
-      expect((card(out).properties.items as any[])[0].children[0].properties.label).toBe('Deals Won');
+      expect((card(out).properties.items as any[])[0].children[0].properties.label).toBe('赢单数');
+      // The panel's own keys survive the rebuild.
+      expect((card(out).properties.items as any[])[0].label).toBe('Details');
+    });
+
+    it('still does not descend into `footer` — the other back-compat spelling (#5775)', () => {
+      const out = translatePage(
+        nestedUnder({ footer: [{ type: 'object-metric', id: 'kpi_deals_won', properties: { label: 'Deals Won' } }] }),
+        kpiBundle,
+        { locale: 'zh-CN' },
+      );
+      expect((card(out).properties.footer as any[])[0].properties.label).toBe('Deals Won');
     });
 
     it('keeps the page-name header route region-level', () => {
@@ -1873,15 +2001,59 @@ describe('walkAddressedPageComponents (#13218)', () => {
     return rows;
   };
 
-  it('walks regions[].components[] only — slots is not a root', () => {
+  it('walks regions[].components[] AND slots.<slot> as roots — regions first, then slots in authored order (#16772)', () => {
+    // A slot holds one component OR an array of them (`PageSchema.slots`);
+    // both shapes are roots, at depth 0 and un-nested, exactly like a
+    // region's entry. Before #16772 this walk visited `a` alone.
     const doc: any = {
       regions: [{ name: 'main', components: [{ id: 'a', type: 'object-metric', properties: {} }] }],
-      slots: { aside: { id: 'slot_child', type: 'object-metric', properties: {} } },
+      slots: {
+        header: { id: 'slot_header', type: 'page:header', properties: {} },
+        details: [
+          { id: 'slot_d1', type: 'record:details', properties: {} },
+          { id: 'slot_d2', type: 'record:details', properties: {} },
+        ],
+      },
     };
-    expect(trace(doc).map((r) => r.id)).toEqual(['a']);
+    expect(trace(doc)).toEqual([
+      { id: 'a', nested: false, depth: 0, addressed: true },
+      { id: 'slot_header', nested: false, depth: 0, addressed: true },
+      { id: 'slot_d1', nested: false, depth: 0, addressed: true },
+      { id: 'slot_d2', nested: false, depth: 0, addressed: true },
+    ]);
   });
 
-  it('descends properties.children only — body, footer and items[].children stay unvisited', () => {
+  it('visits every root of a `kind: slotted` page that authors `regions: []` — the measured zero (#16772)', () => {
+    // The shape the card measured: `regions: []`, everything under `slots`.
+    // `walkAddressedPageComponents(page, …)` visited NOTHING on it, so
+    // `pages.<name>` carried exactly two addressable keys however many
+    // components the page authored.
+    const doc: any = {
+      kind: 'slotted',
+      regions: [],
+      slots: {
+        highlights: { id: 'path', type: 'record:path', properties: {} },
+        tabs: {
+          id: 'tabs',
+          type: 'page:tabs',
+          properties: {
+            items: [
+              { label: 'Overview', children: [{ id: 'rl_1', type: 'record:related_list', properties: {} }] },
+              { label: 'History', children: [{ id: 'rl_2', type: 'record:related_list', properties: {} }] },
+            ],
+          },
+        },
+      },
+    };
+    expect(trace(doc)).toEqual([
+      { id: 'path', nested: false, depth: 0, addressed: true },
+      { id: 'tabs', nested: false, depth: 0, addressed: true },
+      { id: 'rl_1', nested: true, depth: 1, addressed: true },
+      { id: 'rl_2', nested: true, depth: 1, addressed: true },
+    ]);
+  });
+
+  it('descends properties.children AND properties.items[].children — body and footer stay unvisited (#16772)', () => {
     const doc: any = {
       regions: [{
         name: 'main',
@@ -1897,7 +2069,65 @@ describe('walkAddressedPageComponents (#13218)', () => {
         }],
       }],
     };
-    expect(trace(doc).map((r) => r.id)).toEqual(['card', 'in_children']);
+    // `children` first, then the panels — both one level below the container;
+    // `body` / `footer` are the renderer's back-compat fallback and are still
+    // not an authorable composition spelling.
+    expect(trace(doc)).toEqual([
+      { id: 'card', nested: false, depth: 0, addressed: true },
+      { id: 'in_children', nested: true, depth: 1, addressed: true },
+      { id: 'in_items', nested: true, depth: 1, addressed: true },
+    ]);
+  });
+
+  it('matches a panel by SHAPE — an `items` entry without a `children` array is not descended and passes through', () => {
+    // `properties` is an open bag: another component's `items` may be option
+    // rows. Only an object entry carrying a `children` array is a panel.
+    const doc: any = {
+      regions: [{
+        name: 'main',
+        components: [{
+          id: 'picker',
+          type: 'element:select',
+          properties: { items: [{ value: 'a', label: 'A' }, 'bare', null] },
+        }],
+      }],
+    };
+    expect(trace(doc).map((r) => r.id)).toEqual(['picker']);
+    const { regions } = walkAddressedPageComponents(doc, (c) => c);
+    // Nothing descended ⇒ `items` is not rebuilt; the node comes back as-is.
+    expect((regions as any)[0].components[0]).toBe(doc.regions[0].components[0]);
+  });
+
+  it('arbitrates a repeated id across ROOTS: a slot entry wins outright over a nested namesake seen earlier in a region', () => {
+    const doc: any = {
+      regions: [{
+        name: 'main',
+        components: [{
+          id: 'wrap',
+          type: 'page:card',
+          properties: { children: [{ id: 'shared', type: 'object-metric', properties: {} }] },
+        }],
+      }],
+      slots: { details: { id: 'shared', type: 'record:details', properties: {} } },
+    };
+    expect(trace(doc)).toEqual([
+      { id: 'wrap', nested: false, depth: 0, addressed: true },
+      { id: 'shared', nested: true, depth: 1, addressed: false },
+      { id: 'shared', nested: false, depth: 0, addressed: true },
+    ]);
+  });
+
+  it('returns each root key exactly when the input carried it, and passes an off-spec slot value through', () => {
+    const regionsOnly = walkAddressedPageComponents({ regions: [] }, (c) => c);
+    expect(Object.keys(regionsOnly)).toEqual(['regions']);
+
+    const slotsOnly = walkAddressedPageComponents(
+      { slots: { header: { id: 'h', type: 'page:header', properties: {} }, alerts: 'not-a-component' } } as any,
+      (c) => c,
+    );
+    expect(Object.keys(slotsOnly)).toEqual(['slots']);
+    expect((slotsOnly.slots as any).alerts).toBe('not-a-component');
+    expect((slotsOnly.slots as any).header.id).toBe('h');
   });
 
   it('stops the descent at the cap: a 40-chain is visited down to depth 32 and no further', () => {
@@ -1959,7 +2189,7 @@ describe('walkAddressedPageComponents (#13218)', () => {
     expect(trace(doc).filter((r) => r.id === 'twice').map((r) => r.addressed)).toEqual([true, false]);
   });
 
-  it("replaces each node with the visitor's return and re-attaches rebuilt children — never mutating the input", () => {
+  it("replaces each node with the visitor's return and re-attaches rebuilt children and panels — never mutating the input", () => {
     const doc: any = {
       regions: [{
         name: 'main',
@@ -1975,11 +2205,16 @@ describe('walkAddressedPageComponents (#13218)', () => {
               'bare-component-id-string',
               null,
             ],
+            items: [
+              { label: 'Panel', icon: 'list', children: [{ id: 'tab_kid', type: 'object-metric', properties: { title: 'Tab kid' } }] },
+              { label: 'Empty' },
+            ],
           },
         }],
       }],
+      slots: { header: { id: 'hdr', type: 'page:header', properties: { title: 'Header' } } },
     };
-    const regions = walkAddressedPageComponents(doc, (component, { id }) => ({
+    const { regions, slots } = walkAddressedPageComponents(doc, (component, { id }) => ({
       ...component,
       properties: { ...component.properties, title: `visited:${id}` },
     })) as any;
@@ -1988,9 +2223,166 @@ describe('walkAddressedPageComponents (#13218)', () => {
     expect(rebuilt.properties.title).toBe('visited:card');
     expect(rebuilt.properties.children[0].properties.title).toBe('visited:kid');
     expect(rebuilt.properties.children.slice(1)).toEqual(['bare-component-id-string', null]);
+    // A panel keeps every key of its own (`label`, `icon`) and gets its
+    // `children` rebuilt; a panel without `children` passes through as-is.
+    expect(rebuilt.properties.items[0]).toEqual({
+      label: 'Panel', icon: 'list',
+      children: [{ id: 'tab_kid', type: 'object-metric', properties: { title: 'visited:tab_kid' } }],
+    });
+    expect(rebuilt.properties.items[1]).toBe(doc.regions[0].components[0].properties.items[1]);
+    expect(slots.header.properties.title).toBe('visited:hdr');
     // The source document is untouched — both walk consumers rely on it.
     expect(doc.regions[0].components[0].properties.title).toBe('Card');
     expect(doc.regions[0].components[0].properties.children[0].properties.title).toBe('Kid');
+    expect(doc.regions[0].components[0].properties.items[0].children[0].properties.title).toBe('Tab kid');
+    expect(doc.slots.header.properties.title).toBe('Header');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// #16772 — a `kind: 'slotted'` page goes from unaddressable to addressable
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('translatePage — slotted page roots and tab panels (#16772)', () => {
+  /**
+   * The measured shape, rebuilt as a minimal fixture rather than restated
+   * from the card: a `kind: 'slotted'` record page authoring `regions: []`,
+   * its header / path / details under `slots.*`, and a `page:tabs` under
+   * `slots.tabs` whose panels hold the related lists. Every authored copy
+   * site that the walk can address carries an id.
+   */
+  const contractPage = () => ({
+    name: 'contract_detail',
+    label: 'Contract',
+    kind: 'slotted',
+    object: 'contract',
+    regions: [] as any[],
+    slots: {
+      // THE page's header — root level, so the page-name route reaches it.
+      header: { type: 'page:header', id: 'hdr', properties: { title: 'Contract', subtitle: 'Lifecycle' } },
+      highlights: { type: 'record:path', id: 'stage_path', properties: { label: 'Stage', field: 'stage' } },
+      details: [{ type: 'record:details', id: 'main_details', properties: { label: 'Details' } }],
+      tabs: {
+        type: 'page:tabs',
+        id: 'detail_tabs',
+        properties: {
+          label: 'Sections',
+          items: [
+            { label: 'Parties', value: 'parties', children: [{ type: 'record:related_list', id: 'rl_parties', properties: { title: 'Parties' } }] },
+            { label: 'Clauses', value: 'clauses', children: [{ type: 'record:related_list', id: 'rl_clauses', properties: { title: 'Clauses' } }] },
+            {
+              label: 'Documents', value: 'documents',
+              children: [{
+                type: 'page:card', id: 'doc_card',
+                properties: {
+                  title: 'Documents',
+                  // Two levels in — a card inside a panel — still reached.
+                  children: [{ type: 'record:related_list', id: 'rl_documents', properties: { title: 'Attached documents' } }],
+                  // CONTROL: `body` is not an authorable composition slot and
+                  // is still not descended.
+                  body: [{ type: 'record:related_list', id: 'rl_body_control', properties: { title: 'Body control' } }],
+                },
+              }],
+            },
+          ],
+        },
+      },
+    },
+  });
+
+  /** Every id the fixture authors, so the bundle can offer copy for each. */
+  const bundle: TranslationBundle = {
+    'zh-CN': {
+      pages: {
+        contract_detail: {
+          label: '合同',
+          title: '合同详情',
+          subtitle: '生命周期',
+          components: {
+            hdr: { title: 'ID-ROUTE-MUST-NOT-WIN' },
+            stage_path: { label: '阶段' },
+            main_details: { label: '详细信息' },
+            detail_tabs: { label: '分区' },
+            rl_parties: { title: '当事方' },
+            rl_clauses: { title: '条款' },
+            doc_card: { title: '文档' },
+            rl_documents: { title: '附件' },
+            rl_body_control: { title: 'MUST-NOT-APPLY' },
+          },
+        },
+      },
+    },
+  };
+
+  const count = (doc: any): number => {
+    let n = 0;
+    walkAddressedPageComponents(doc, (c) => (n++, c));
+    return n;
+  };
+
+  it('addresses a slotted page — the walk count is non-zero and every authored id is visited once', () => {
+    // Measured here, on this fixture: 8 components authored (1 header, 1
+    // path, 1 details, 1 tabs, 2 related lists directly in panels, 1 card in
+    // a panel, 1 related list nested in that card); the `body` control is
+    // not a visit. The card's own number came from one app and one console
+    // build and is not restated.
+    expect(count(contractPage())).toBe(8);
+    const ids: string[] = [];
+    walkAddressedPageComponents(contractPage(), (c, { id, addressed }) => {
+      if (addressed) ids.push(id as string);
+      return c;
+    });
+    expect(ids).toEqual([
+      'hdr', 'stage_path', 'main_details', 'detail_tabs',
+      'rl_parties', 'rl_clauses', 'doc_card', 'rl_documents',
+    ]);
+  });
+
+  it('resolves each authored key — slots roots, tab panels, and a card inside a panel', () => {
+    const out = translatePage(contractPage(), bundle, { locale: 'zh-CN' });
+    const tabs = (out.slots as any).tabs;
+    expect(out.label).toBe('合同');
+    expect((out.slots as any).highlights.properties.label).toBe('阶段');
+    expect((out.slots as any).details[0].properties.label).toBe('详细信息');
+    expect(tabs.properties.label).toBe('分区');
+    expect(tabs.properties.items[0].children[0].properties.title).toBe('当事方');
+    expect(tabs.properties.items[1].children[0].properties.title).toBe('条款');
+    expect(tabs.properties.items[2].children[0].properties.title).toBe('文档');
+    expect(tabs.properties.items[2].children[0].properties.children[0].properties.title).toBe('附件');
+    // `regions: []` is carried through unchanged, and no key is invented.
+    expect(out.regions).toEqual([]);
+    expect(out.kind).toBe('slotted');
+  });
+
+  it('routes the `slots.header` page:header by PAGE NAME — the id route is not read for a root-level header', () => {
+    const out = translatePage(contractPage(), bundle, { locale: 'zh-CN' });
+    expect((out.slots as any).header.properties).toEqual({ title: '合同详情', subtitle: '生命周期' });
+  });
+
+  it('CONTROL: a component under `body` inside a panel stays untranslated, and a slotted page without a bundle entry is untouched', () => {
+    const out = translatePage(contractPage(), bundle, { locale: 'zh-CN' });
+    const docCard = (out.slots as any).tabs.properties.items[2].children[0];
+    expect(docCard.properties.body[0].properties.title).toBe('Body control');
+
+    const other = translatePage(
+      { ...contractPage(), name: 'other_page' },
+      bundle,
+      { locale: 'zh-CN' },
+    );
+    expect(other.slots).toEqual(contractPage().slots);
+  });
+
+  it('BOUNDARY: a tab panel `label` (`items[].label`) has no bundle key — its route is the inline locale map', () => {
+    // Recorded, not endorsed. `PageTabsProps.items[].label` is an
+    // `I18nLabelSchema`, so a tab strip is localisable at its authoring site;
+    // a bundle key for the panel (which carries no id and whose `value` is
+    // optional) is a naming decision this change does not make. If a key is
+    // added, this pin is the one to flip.
+    const page = contractPage();
+    (page.slots.tabs.properties.items[0] as any).label = { en: 'Parties', 'zh-CN': '当事方' };
+    const out = translatePage(page, bundle, { locale: 'zh-CN' });
+    expect((out.slots as any).tabs.properties.items[0].label).toEqual({ en: 'Parties', 'zh-CN': '当事方' });
+    expect((out.slots as any).tabs.properties.items[1].label).toBe('Clauses');
   });
 });
 
@@ -3728,5 +4120,139 @@ describe('#14882 — a declared fallback chain, at the resolver', () => {
     expect(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'en' }).label).toBe('Entry Sheet');
     expect(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'fr', fallbackChain: ['en'] }).label)
       .toBe('Entry Sheet');
+  });
+});
+
+describe('resolveMetadataFormSchemaTitles (#16458)', () => {
+  const bundle: TranslationBundle = {
+    'zh-CN': {
+      metadataForms: {
+        dashboard: {
+          fields: {
+            columns: { label: '列数' },
+            'header.showTitle': { label: '显示标题', helpText: '在页眉中显示仪表板标题' },
+            'header.actions': { label: '操作按钮' },
+            'header.actions.label': { label: '标签' },
+            'header.actions.actionUrl': { label: '操作地址' },
+            'ghost.child': { label: '幽灵' },
+          },
+        },
+      },
+    },
+    'zh-TW': {
+      metadataForms: {
+        dashboard: {
+          fields: {
+            'header.actions.icon': { label: '圖示' },
+          },
+        },
+      },
+    },
+  };
+
+  // The shape `z.toJSONSchema(DashboardSchema)` derives for the header,
+  // trimmed: a composite, a repeater whose row properties carry the authored
+  // English title, and an `I18nLabel` union on one of them.
+  const schema = () => ({
+    type: 'object',
+    properties: {
+      columns: { type: 'integer', description: 'Number of grid columns (default 12)' },
+      header: {
+        type: 'object',
+        properties: {
+          showTitle: { type: 'boolean', description: 'Show dashboard title in header' },
+          actions: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                label: { anyOf: [{ type: 'string' }, { type: 'object' }], title: 'Label' },
+                actionUrl: { type: 'string', title: 'Action URL' },
+                actionType: { type: 'string', title: 'Action Type', enum: ['url', 'modal'] },
+                icon: { type: 'string', title: 'Icon' },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  it('names a repeater ROW property through the array\'s `items`, with no `items` segment in the path', () => {
+    const out: any = resolveMetadataFormSchemaTitles(schema(), 'dashboard', bundle, { locale: 'zh-CN' });
+    const row = out.properties.header.properties.actions.items.properties;
+    expect(row.label.title).toBe('标签');
+    expect(row.actionUrl.title).toBe('操作地址');
+    // A union node takes the title at the node, where the renderer reads it.
+    expect(row.label.anyOf).toHaveLength(2);
+    // The authored English title stays where no locale names the property.
+    expect(row.actionType.title).toBe('Action Type');
+  });
+
+  it('names a composite child and a top-level field by the same rule; only `label` crosses over', () => {
+    const out: any = resolveMetadataFormSchemaTitles(schema(), 'dashboard', bundle, { locale: 'zh-CN' });
+    expect(out.properties.header.properties.showTitle.title).toBe('显示标题');
+    expect(out.properties.header.properties.actions.title).toBe('操作按钮');
+    expect(out.properties.columns.title).toBe('列数');
+    // `helpText` is a FormView attribute — the schema `description` is untouched.
+    expect(out.properties.header.properties.showTitle.description).toBe('Show dashboard title in header');
+    expect(out.properties.columns.description).toBe('Number of grid columns (default 12)');
+  });
+
+  it('walks the fallback chain per key', () => {
+    const out: any = resolveMetadataFormSchemaTitles(schema(), 'dashboard', bundle, {
+      locale: 'zh-TW', fallbackChain: ['zh-CN'],
+    });
+    const row = out.properties.header.properties.actions.items.properties;
+    expect(row.icon.title).toBe('圖示');   // the requested locale's own entry
+    expect(row.label.title).toBe('标签');  // reached through the chain
+  });
+
+  it('leaves a path the schema cannot place alone — an overlay, not a fork', () => {
+    const out: any = resolveMetadataFormSchemaTitles(schema(), 'dashboard', bundle, { locale: 'zh-CN' });
+    expect(out.properties.ghost).toBeUndefined();
+    expect(Object.keys(out.properties).sort()).toEqual(['columns', 'header']);
+  });
+
+  it('is pure: the input is not mutated, and the untouched spine is shared by identity', () => {
+    const input: any = schema();
+    const before = JSON.stringify(input);
+    const out: any = resolveMetadataFormSchemaTitles(input, 'dashboard', bundle, { locale: 'zh-CN' });
+    expect(JSON.stringify(input)).toBe(before);
+    expect(out).not.toBe(input);
+    // `actionType` is renamed by no locale: its node is the input's own object.
+    expect(out.properties.header.properties.actions.items.properties.actionType)
+      .toBe(input.properties.header.properties.actions.items.properties.actionType);
+  });
+
+  it('returns the input object itself when no bundle entry for the type exists at any locale of the chain', () => {
+    const input: any = schema();
+    expect(resolveMetadataFormSchemaTitles(input, 'dashboard', bundle, { locale: 'en' })).toBe(input);
+    expect(resolveMetadataFormSchemaTitles(input, 'report', bundle, { locale: 'zh-CN' })).toBe(input);
+    expect(resolveMetadataFormSchemaTitles(input, 'dashboard', undefined, { locale: 'zh-CN' })).toBe(input);
+  });
+
+  it('a literal `items` segment addresses a declared property of that name, never the row', () => {
+    const declaredItems = {
+      type: 'object',
+      properties: {
+        fields: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              items: { type: 'object', properties: { label: { type: 'string' } } },
+              label: { type: 'string' },
+            },
+          },
+        },
+      },
+    };
+    const b: TranslationBundle = {
+      'zh-CN': { metadataForms: { object: { fields: { 'fields.items.label': { label: '字段标签' }, 'fields.label': { label: '行标签' } } } } },
+    };
+    const out: any = resolveMetadataFormSchemaTitles(declaredItems, 'object', b, { locale: 'zh-CN' });
+    expect(out.properties.fields.items.properties.items.properties.label.title).toBe('字段标签');
+    expect(out.properties.fields.items.properties.label.title).toBe('行标签');
   });
 });

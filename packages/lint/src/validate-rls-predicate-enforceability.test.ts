@@ -3,11 +3,15 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { isSupportedRlsExpression, setCelPushdownLimitsModeForTests } from '@objectstack/formula';
 
+import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
+
 import {
   validateRlsPredicateEnforceability,
   RLS_PREDICATE_UNENFORCEABLE,
   RLS_PREDICATE_UNPARSEABLE,
   RLS_PREDICATE_OVER_BUDGET,
+  RLS_PREDICATE_UNKNOWN_FIELD,
+  RLS_PREDICATE_UNKNOWN_USER_VARIABLE,
 } from './validate-rls-predicate-enforceability.js';
 import { AUTHORING_RULES, runAuthoringRules } from './authoring-rules.js';
 
@@ -505,5 +509,379 @@ describe('validateRlsPredicateEnforceability — a bounds overrun is its own id 
     const stack = policyWith('using', OVER_BUDGET.maxAstNodes);
     expect(atGa(() => runAuthoringRules('validate', { normalized: stack, parsed: stack }).map((f) => f.rule)))
       .toEqual([RLS_PREDICATE_OVER_BUDGET]);
+  });
+});
+
+// ── #16119: the REFERENCE half — a predicate that lowers but points at nothing
+
+/**
+ * The card's site, reproduced: hotcrm's `opportunity_private_owner_only` on
+ * `crm_opportunity`, whose shipped `using` is
+ * `is_private == false || owner_id == current_user.id`.
+ *
+ * The object is declared here because that is the whole point — the three shape
+ * ids never needed one, and these two cannot exist without it.
+ */
+const CRM_OPPORTUNITY = {
+  name: 'crm_opportunity',
+  label: 'Opportunity',
+  ownership: 'user',
+  fields: [
+    { name: 'name', type: 'text' },
+    { name: 'is_private', type: 'boolean' },
+    { name: 'owner_id', type: 'user', reference: 'sys_user' },
+    { name: 'assigned_to_id', type: 'user', reference: 'sys_user' },
+    { name: 'amount', type: 'number' },
+    { name: 'status', type: 'text' },
+    { name: 'organization_id', type: 'text' },
+  ],
+};
+
+/** The card's site with one clause swapped, over a stack that DECLARES the object. */
+const siteWith = (clause: 'using' | 'check', source: unknown, object = 'crm_opportunity') => ({
+  objects: [CRM_OPPORTUNITY],
+  permissions: [
+    {
+      name: 'sales_manager',
+      label: 'Sales Manager',
+      rowLevelSecurity: [
+        {
+          name: 'opportunity_private_owner_only',
+          object,
+          operation: 'all',
+          ...(clause === 'using' ? {} : { using: 'true' }),
+          [clause]: source,
+        },
+      ],
+    },
+  ],
+});
+
+describe('validateRlsPredicateEnforceability — the four injections at ONE site (#16119)', () => {
+  /**
+   * The card's measurement, restated as a table so the two halves stay
+   * comparable. The two CONTROLS must keep firing under their EXISTING ids and
+   * must NOT acquire either new one — a rule that swallowed them would look
+   * like an improvement and would be a regression of #4983/#6778.
+   */
+  it.each([
+    ['CONTROL — not pushdownable', 'billing_address.country == "US"', [RLS_PREDICATE_UNENFORCEABLE]],
+    ['CONTROL — unparseable', 'is_private == = false', [RLS_PREDICATE_UNPARSEABLE]],
+    ['was SILENT — unknown field', 'is_private_nope == false || owner_id == current_user.id', [RLS_PREDICATE_UNKNOWN_FIELD]],
+    ['was SILENT — unknown user variable', 'is_private == false || owner_id == current_user.nope', [RLS_PREDICATE_UNKNOWN_USER_VARIABLE]],
+  ])('%s', (_label, source, expected) => {
+    expect(validateRlsPredicateEnforceability(siteWith('using', source)).map((f) => f.rule)).toEqual(expected);
+  });
+
+  it('leaves the shipped predicate at that site silent — the negative control', () => {
+    // Without this, an always-fires implementation satisfies the table above.
+    expect(ids(siteWith('using', 'is_private == false || owner_id == current_user.id'))).toEqual([]);
+  });
+
+  it('is disjoint from the three SHAPE ids by construction', () => {
+    // A shape fault never earns a reference id and vice versa: the reference
+    // pass only runs where `isSupportedRlsExpression` already said yes.
+    for (const source of ['size(record.tags) > 0', 'a = current_user.id AND b = 1', 'is_private == = false']) {
+      const rules = ids(siteWith('using', source));
+      expect(rules).not.toContain(RLS_PREDICATE_UNKNOWN_FIELD);
+      expect(rules).not.toContain(RLS_PREDICATE_UNKNOWN_USER_VARIABLE);
+      expect(rules).toHaveLength(1);
+    }
+  });
+
+  /**
+   * The "before" half, mechanical rather than asserted in prose — the same
+   * construction #4983's own test uses. If some future rule grows to cover
+   * these shapes, this fails and someone decides which of the two owns it.
+   */
+  it('NOTHING else in the whole rule table reports either miss', () => {
+    for (const source of [
+      'is_private_nope == false || owner_id == current_user.id',
+      'is_private == false || owner_id == current_user.nope',
+    ]) {
+      const stack = siteWith('using', source);
+      const findings = runAuthoringRules('lint', { normalized: stack, parsed: stack });
+      const mine = findings.filter(
+        (f) => f.rule === RLS_PREDICATE_UNKNOWN_FIELD || f.rule === RLS_PREDICATE_UNKNOWN_USER_VARIABLE,
+      );
+      expect(mine).toHaveLength(1);
+      // Every other finding the table produces is about something else entirely
+      // (the object declares no `sharingModel`), and is identical for the
+      // SHIPPED predicate — so it is background, not a second report of this.
+      const others = findings.filter((f) => !f.rule.startsWith('rls-predicate')).map((f) => f.rule);
+      const shipped = siteWith('using', 'is_private == false || owner_id == current_user.id');
+      const baseline = runAuthoringRules('lint', { normalized: shipped, parsed: shipped }).map((f) => f.rule);
+      expect(others).toEqual(baseline);
+    }
+  });
+});
+
+describe('validateRlsPredicateEnforceability — the messages name the COST, not just the miss', () => {
+  it('says the object disappears for every holder of the set (unknown field)', () => {
+    const [f] = validateRlsPredicateEnforceability(siteWith('using', 'is_private_nope == false'));
+    expect(f.rule).toBe(RLS_PREDICATE_UNKNOWN_FIELD);
+    expect(f.where).toBe('permission set "sales_manager" policy "opportunity_private_owner_only" on object "crm_opportunity"');
+    expect(f.path).toBe('permissions[0].rowLevelSecurity[0].using');
+    expect(f.severity).toBe('error');
+    // ⚠️ ONE direction, and the pin says so on purpose. This block used to
+    // assert the opposite — that the field half had a fail-OPEN leg decided by
+    // position — which was true of the runtime at the time and is now false:
+    // column existence is judged on the COMPILED predicate, so position and
+    // polarity are normalised away before the check runs. An author told "one
+    // of these directions is fail-OPEN" would now harden against a hole that
+    // no longer exists, and would not fix the name.
+    expect(f.message).not.toMatch(/fail-OPEN/);
+    expect(f.message).toMatch(/judges column existence on the COMPILED predicate/);
+    expect(f.message).toMatch(/the position and the polarity you wrote it in make no difference/);
+    // …and every shape the old text split across two directions is named in
+    // the one direction, so an author recognises their own predicate in it.
+    expect(f.message).toMatch(/`field != x`/);
+    expect(f.message).toMatch(/any arm after the first/);
+    // ⛔ …and NOT by citing a tracker id. This string reaches authors,
+    // operators and generated surfaces, none of whom can resolve `#NNNN`
+    // (`check:doc-authoring`); the id lives in the adjacent `//` comment, which
+    // the reader who CAN resolve it is already reading. Pinned here so the next
+    // author does not re-add it and learn this from CI instead.
+    expect(f.message).not.toMatch(/#\d{3,}/);
+    expect(f.hint).not.toMatch(/#\d{3,}/);
+    // the cost, which is the same cost the variable half carries
+    expect(f.message).toMatch(/DROP the policy at request time/);
+    expect(f.message).toMatch(/RLS_DENY_FILTER/);
+    expect(f.message).toMatch(/ZERO rows/);
+    expect(f.message).toMatch(/DISAPPEARS for every holder of this permission set/);
+    // ⛔ …and NOT the three claims the rewritten text retired. The
+    // cross-tenant sentence went with them: it was there to bound a leak
+    // reading that the message no longer makes, and a denial needs no such
+    // disclaimer. Overstating the old defect was the risk; restating a bound
+    // on a defect the text does not describe is just noise.
+    expect(f.message).not.toMatch(/leaves the policy KEPT/);
+    expect(f.message).not.toMatch(/DEFEATED/);
+    expect(f.message).not.toMatch(/driver-sql is NOT MEASURED/);
+    // …and the miss itself, with the platform's own "did you mean".
+    expect(f.message).toMatch(/"is_private_nope" is not a field on object "crm_opportunity"/);
+    expect(f.message).toMatch(/Did you mean "is_private"\?/);
+    // The hint lists the columns that DO exist and names the rename story.
+    expect(f.hint).toMatch(/Fields on "crm_opportunity": amount, assigned_to_id/);
+    expect(f.hint).toMatch(/RENAMED/);
+  });
+
+  it('says the same for an unresolved `current_user.*`, and prescribes the §7.3.1 route', () => {
+    const [f] = validateRlsPredicateEnforceability(siteWith('using', 'owner_id == current_user.nope'));
+    expect(f.rule).toBe(RLS_PREDICATE_UNKNOWN_USER_VARIABLE);
+    expect(f.message).toMatch(/reads `current_user\.nope`, which nothing pre-resolves/);
+    expect(f.message).toMatch(/scalar position, so no request can ever supply it/);
+    // The variable half really is fail-closed in EVERY position — the compiler
+    // refuses it under `!` and in a trailing `||` arm alike — so unlike the
+    // field half it may say so without qualification.
+    expect(f.message).toMatch(/unresolved-variable` in EVERY position/);
+    expect(f.message).toMatch(/DISAPPEARS for every holder of this permission set/);
+    expect(f.message).not.toMatch(/fail-OPEN/);
+    expect(f.hint).toMatch(/IRlsMembershipResolver/);
+    expect(f.hint).toMatch(/never compared with `==`/);
+  });
+
+  it('names the WRITE consequence on a `check` clause, not the read one', () => {
+    const [f] = validateRlsPredicateEnforceability(siteWith('check', 'nope_field == 1'));
+    expect(f.rule).toBe(RLS_PREDICATE_UNKNOWN_FIELD);
+    expect(f.path).toBe('permissions[0].rowLevelSecurity[0].check');
+    expect(f.message).toMatch(/PermissionDeniedError/);
+    // ⚠️ The write leg says the SAME thing the read leg does — one direction —
+    // and it is the leg whose old text was not merely stale but misattributed:
+    // it credited a fail-closed to the `extractTargetField` safety net, and
+    // `computeWriteCheckFilter` never had one. The vacuous-permit sentence
+    // survives as an explicit statement about an OLDER runtime, so an operator
+    // reading this against a deployment that predates the guard is not told the
+    // wrong thing.
+    expect(f.message).toMatch(/On a runtime older than that guard this clause failed OPEN/);
+    expect(f.message).toMatch(/PERMITTED exactly the writes the policy was written to refuse/);
+    expect(f.message).not.toMatch(/select \/ update \/ delete matches ZERO/);
+  });
+});
+
+describe('validateRlsPredicateEnforceability — the `current_user` set is DERIVED, not transcribed', () => {
+  /**
+   * The known set is {@link RESERVED_RLS_MEMBERSHIP_KEYS} from
+   * `@objectstack/spec/contracts` — the contract that declares which
+   * `current_user.*` keys the kernel owns and an `IRlsMembershipResolver` may
+   * therefore never supply. Asserting the BEHAVIOUR against that import (rather
+   * than a literal list retyped here) is what makes this rule follow the
+   * platform: a key added to the contract stops being reported the same day,
+   * with no edit in this package.
+   *
+   * ⛔ The card's own five-name list is hotcrm's local guard, and
+   * `RLSUserContextSchema` in `packages/spec/src/security/rls.zod.ts` is a
+   * different, stale shape (`tenantId`, `department`, `attributes`) the RLS
+   * compiler never binds — neither is the authority.
+   */
+  it('accepts every kernel-resolved key in BOTH positions', () => {
+    expect(RESERVED_RLS_MEMBERSHIP_KEYS.length).toBeGreaterThan(0);
+    for (const key of RESERVED_RLS_MEMBERSHIP_KEYS) {
+      // ⚠️ BOTH, asserted separately. An `a.length === 0 || b.length === 0`
+      // here would pass on whichever position happened to be silent, and this
+      // rule is silent in both — so the disjunction pinned nothing about
+      // position at all and would have survived a position-blind rewrite.
+      const scalar = ids(siteWith('using', `owner_id == current_user.${key}`));
+      const member = ids(siteWith('using', `owner_id in current_user.${key}`));
+      expect({ key, scalar, member }).toEqual({ key, scalar: [], member: [] });
+    }
+  });
+
+  it('reports a key the contract does not name — the firing control beside that zero', () => {
+    for (const key of ['nope', 'roles', 'organizationId', 'department', 'tenantId']) {
+      expect(RESERVED_RLS_MEMBERSHIP_KEYS).not.toContain(key);
+      expect(ids(siteWith('using', `owner_id == current_user.${key}`))).toEqual([
+        RLS_PREDICATE_UNKNOWN_USER_VARIABLE,
+      ]);
+    }
+  });
+});
+
+describe('validateRlsPredicateEnforceability — §7.3.1 membership keys stay UNKNOWABLE', () => {
+  /**
+   * The false-positive this rule exists on the edge of. An app stages arbitrary
+   * keys into `ExecutionContext.rlsMembership` and references them as
+   * `field in current_user.<key>`; `RowLevelSecurityPolicySchema` documents the
+   * pattern and the EXISTING `rls-predicate-unparseable` hint recommends it. In
+   * an `in` position an unknown key is indistinguishable from a correct one, so
+   * it must never be reported.
+   *
+   * It is decidable in the other positions only because the merge is array-only
+   * (`compileFilter` stages an entry `if (Array.isArray(value))`), so the sole
+   * value an app-staged key can ever hold is an array — which a scalar position
+   * cannot use, on any request.
+   */
+  it.each([
+    ['a team set', 'assigned_to_id in current_user.team_member_ids'],
+    ['a territory set', 'owner_id in current_user.territory_account_ids'],
+    ['the spec doc example', 'assigned_to_id in current_user.team_ids'],
+    ['bridged from legacy SQL', 'assigned_to_id IN (current_user.team_member_ids)'],
+    ['composed with a real clause', 'is_private == false || assigned_to_id in current_user.team_member_ids'],
+  ])('%s is silent', (_label, source) => {
+    expect(ids(siteWith('using', source))).toEqual([]);
+  });
+
+  it('a key used in BOTH positions takes the membership answer (the conservative direction)', () => {
+    expect(ids(siteWith('using', 'owner_id in current_user.zzz && status == current_user.zzz'))).toEqual([]);
+  });
+});
+
+describe('validateRlsPredicateEnforceability — the graph\'s three skips, not this rule\'s', () => {
+  it('skips an object this stack does not define', () => {
+    expect(ids(siteWith('using', 'whatever == current_user.id', 'not_in_this_stack'))).toEqual([]);
+  });
+
+  it('skips an object that declares no readable field map', () => {
+    const stack = {
+      objects: [{ name: 'ext_thing', label: 'Ext', external: true }],
+      permissions: [
+        { name: 'p', rowLevelSecurity: [{ name: 'r', object: 'ext_thing', using: 'whatever == current_user.id' }] },
+      ],
+    };
+    expect(ids(stack)).toEqual([]);
+  });
+
+  it('skips a registry-injected system column', () => {
+    // `created_at` appears in no authored `fields` and is real at runtime.
+    expect(ids(siteWith('using', 'created_at != null'))).toEqual([]);
+    // …and `owner_id` resolves through the declared map on an `ownership: user`
+    // object, so the injected path and the declared path agree here.
+    expect(ids(siteWith('using', 'owner_id == current_user.id'))).toEqual([]);
+  });
+
+  it('skips a policy that names no object at all', () => {
+    const stack = {
+      objects: [CRM_OPPORTUNITY],
+      permissions: [{ name: 'p', rowLevelSecurity: [{ name: 'r', using: 'whatever == current_user.id' }] }],
+    };
+    expect(ids(stack)).toEqual([]);
+  });
+});
+
+describe('validateRlsPredicateEnforceability — the reference pass never throws', () => {
+  it.each([
+    ['an empty stack', {}],
+    ['objects but no permissions', { objects: [CRM_OPPORTUNITY] }],
+    ['a permission set with no policies', { objects: [CRM_OPPORTUNITY], permissions: [{ name: 'p' }] }],
+    ['a null member in `objects`', { objects: [null, CRM_OPPORTUNITY], permissions: [] }],
+    ['a null member in `rowLevelSecurity`', { objects: [CRM_OPPORTUNITY], permissions: [{ name: 'p', rowLevelSecurity: [null] }] }],
+  ])('%s', (_label, stack) => {
+    expect(() => validateRlsPredicateEnforceability(stack)).not.toThrow();
+    expect(validateRlsPredicateEnforceability(stack)).toEqual([]);
+  });
+
+  it('still resolves through the name-keyed map spelling of `objects`', () => {
+    const stack = {
+      objects: { crm_opportunity: { fields: { is_private: { name: 'is_private', type: 'boolean' } } } },
+      permissions: [
+        { name: 'p', rowLevelSecurity: [{ name: 'r', object: 'crm_opportunity', using: 'nope_field == 1' }] },
+      ],
+    };
+    expect(ids(stack)).toEqual([RLS_PREDICATE_UNKNOWN_FIELD]);
+  });
+});
+
+describe('validateRlsPredicateEnforceability — the once-fail-OPEN field shapes are reported too', () => {
+  /**
+   * The half the card's escalation clause did not name. It asked for a
+   * fail-OPEN *variable*, and the compiler refuses those in every position; the
+   * hole was field-shaped instead.
+   *
+   * `extractTargetField` matched only a LEADING `field ==` / `=` / `in`, so for
+   * each shape below the safety net returned `null`, the policy was KEPT, and
+   * the phantom column lowered to a negated constraint that a row without that
+   * column satisfies (`noValueSatisfiesNegation`). Measured on the runtime of
+   * the day: 3 of 3 rows, against 1 of 3 for the real narrowing and 0 of 3 for
+   * the same phantom column in a positive position — read path and write path
+   * alike, the write path being the worse one because it had no
+   * field-existence net at all.
+   *
+   * ⚠️ The runtime has since been repaired: `RLSCompiler.compileFilter` judges
+   * column existence on the COMPILED predicate, which both faces pass through,
+   * so all five shapes now fail CLOSED. That does NOT retire these cases —
+   * `noValueSatisfiesNegation` is deliberately unchanged, so the shapes are
+   * still exactly the ones whose miss used to invert, and DETECTING them is
+   * still this rule's job. A rule that only caught the leading position would
+   * satisfy the card and miss the half that was dangerous.
+   */
+  it.each([
+    ['a bare negation', 'nope_a != "x"'],
+    ['a negated equality', '!(nope_b == 1)'],
+    ['a negated membership', "!(nope_c in ['a'])"],
+    ['a trailing `||` arm behind a REAL leading field', 'is_private == false || nope_d != "x"'],
+    ['a trailing `&&` arm behind a REAL leading field', 'is_private == false && nope_e != "x"'],
+  ])('%s is reported', (_label, source) => {
+    expect(ids(siteWith('using', source))).toEqual([RLS_PREDICATE_UNKNOWN_FIELD]);
+  });
+
+  it('the shipped predicate in the same shapes stays silent — the negative control', () => {
+    for (const source of ['is_private != true', '!(is_private == true)', 'is_private == false || owner_id != "x"']) {
+      expect(ids(siteWith('using', source))).toEqual([]);
+    }
+  });
+});
+
+describe('validateRlsPredicateEnforceability — the field set is read off the COMPILER\'s output', () => {
+  it.each([
+    ['a leading miss (the safety net\'s own position)', 'nope_one == 1', 1],
+    ['a trailing miss (past the safety net)', 'is_private == false || nope_two == 1', 1],
+    ['a miss on the right of a field-to-field comparison', 'owner_id == nope_three', 1],
+    ['a miss inside a membership test', "nope_four in ['a', 'b']", 1],
+    ['a miss inside a string method', "nope_five.startsWith('AC')", 1],
+    ['a miss under a negation', '!(nope_six == 1)', 1],
+    ['two distinct misses in one predicate', 'nope_seven == 1 && nope_eight == 2', 2],
+  ])('%s', (_label, source, expected) => {
+    const findings = validateRlsPredicateEnforceability(siteWith('using', source));
+    expect(findings.map((f) => f.rule)).toEqual(new Array(expected).fill(RLS_PREDICATE_UNKNOWN_FIELD));
+  });
+
+  it('reports one finding per missing NAME, not one per occurrence', () => {
+    expect(ids(siteWith('using', 'nope_dup == 1 || nope_dup == 2'))).toEqual([RLS_PREDICATE_UNKNOWN_FIELD]);
+  });
+
+  it('reports both halves when a predicate carries both misses', () => {
+    expect(ids(siteWith('using', 'nope_field == current_user.nope_var'))).toEqual([
+      RLS_PREDICATE_UNKNOWN_FIELD,
+      RLS_PREDICATE_UNKNOWN_USER_VARIABLE,
+    ]);
   });
 });

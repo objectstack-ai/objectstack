@@ -690,11 +690,17 @@ const translationDataShape = () => ({
    *   dashboards.<name>.widgets.<widgetId>.title
    *   dashboards.<name>.widgets.<widgetId>.description
    *   dashboards.<name>.widgets.<widgetId>.subCaption
+   *   dashboards.<name>.globalFilters.<filterName>.label
+   *   dashboards.<name>.globalFilters.<filterName>.options.<value>
    */
   dashboards: z.record(z.string(), strictObject({
     surface: 'this dashboard translation',
     history: TRANSLATION_HISTORY,
-    aliases: { name: 'label', title: 'label', components: 'widgets', charts: 'widgets', cards: 'widgets' },
+    // `filters` / `globalFilter` mirror `DashboardSchema`'s own alias table for
+    // the authored key, so an author who spells the group the way the
+    // dashboard document accepts it is pointed at the one spelling the bundle
+    // takes.
+    aliases: { name: 'label', title: 'label', components: 'widgets', charts: 'widgets', cards: 'widgets', filters: 'globalFilters', globalFilter: 'globalFilters' },
   }, {
     label: z.string().optional().describe('Translated dashboard title'),
     description: z.string().optional().describe('Translated dashboard description'),
@@ -735,6 +741,52 @@ const translationDataShape = () => ({
        */
       subCaption: z.string().optional().describe("Translated metric sub-caption (overlays the widget's `options.description`, a different authored field from `description`)"),
     })).optional().describe('Widget translations keyed by widget id'),
+    /**
+     * Global-filter copy, keyed by the filter's stable `name`
+     * (`GlobalFilterSchema.name`, which the dashboard schema declares as
+     * defaulting to `field` — a filter that authors no `name` is addressed by
+     * its `field`, the same key its value is published under and that
+     * widgets reference in `filterBindings`).
+     *
+     * **The hole this closes (#16772).** The filter bar draws DIRECTLY ABOVE
+     * the widget titles this group has always translated, and neither a
+     * filter's label nor its static option labels had any key here — so a
+     * translated dashboard rendered `Requesting Department: 全部` over six
+     * Chinese widget titles. Not a drifted key: no key. `label` overlays
+     * `globalFilters[].label`; `options.<value>` overlays the matching
+     * `globalFilters[].options[].label`, keyed by the option's `value`
+     * spelled as a string (`String(value)` — the option value is declared
+     * `string | number | boolean`, and a record key can only be a string).
+     * Resolved by `translateDashboard` (i18n-resolver.ts) on the served
+     * document; objectui's filter bar reads the served `label` / option
+     * `label` through `pickLocalized`, so no client change is needed.
+     *
+     * **Two routes, and which one this is.** A filter bound to an object field
+     * may also set `object` (#7804), in which case the CONSOLE resolves its
+     * field label and option labels through `objects.<object>.fields.<field>`
+     * client-side. That route is object-scoped and shared across every
+     * dashboard drawing that field; this group is dashboard-scoped copy for
+     * the filter AS THIS DASHBOARD LABELS IT — the authored `label` a
+     * translator sees beside the widget titles. A filter that omits `object`
+     * (every filter in the measured app) has only this route.
+     *
+     * `optionsFrom` options are NOT here: they are fetched rows, labelled by
+     * the source object's `labelField` at request time, and a bundle key for
+     * a value that exists only in data would be the declared-but-unresolvable
+     * shape this file exists to keep out.
+     */
+    globalFilters: z.record(z.string(), strictObject({
+      surface: 'this dashboard global-filter translation',
+      history: TRANSLATION_HISTORY,
+      // `title` / `name` are the `GlobalFilterSchema` alias spellings for the
+      // authored label; `choices` / `values` are its alias spellings for
+      // `options` — the same words an author reaches for on the dashboard
+      // document itself.
+      aliases: { name: 'label', title: 'label', text: 'label', choices: 'options', values: 'options', items: 'options' },
+    }, {
+      label: z.string().optional().describe("Translated filter label (overlays the filter's authored `label` in the dashboard filter bar)"),
+      options: z.record(z.string(), z.string()).optional().describe("Static option value to translated label map (overlays `options[].label` for the option whose `value`, spelled as a string, matches the key)"),
+    })).optional().describe('Global-filter translations keyed by the filter `name` (a filter that authors no `name` is keyed by its `field`)'),
   })).optional().describe('Dashboard translations keyed by dashboard name'),
 
   /**
@@ -1158,8 +1210,16 @@ const translationDataShape = () => ({
    *   metadataForms.<type>.fields.<field_path>.placeholder
    *
    * `field_path` uses dot-notation for nested composite/repeater fields,
-   * e.g. `"name"`, `"capabilities.trackHistory"`,
-   * `"fields.items.label"` (a repeater "fields" → row → "label" sub-field).
+   * e.g. `"name"`, `"capabilities.trackHistory"`, and a repeater ROW property
+   * is `"<repeater>.<property>"` with no `items` segment —
+   * `"header.actions.label"` names the `label` column of each
+   * `dashboard.header.actions[]` row (`"fields.items.label"` addresses a
+   * declared child that happens to be named `items`).
+   *
+   * A row property is rendered from the JSON Schema (`items.properties[k].title`),
+   * not from a form-field spec, so its `label` here is applied by
+   * `resolveMetadataFormSchemaTitles` as the schema node's `title`; the zod
+   * item schema's own `.meta({ title })` is the English name it overlays.
    *
    * @example
    * ```ts

@@ -51,7 +51,7 @@
     "dashboards": {
       "status": "live",
       "verifiedAt": "2026-08-28",
-      "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupDashboardAttr (`dashboards.<name>.label` / `.description`); packages/spec/src/system/i18n-resolver.ts#lookupWidgetAttr (`dashboards.<name>.widgets.<id>.<attr>`, `subCaption` included); packages/spec/src/system/i18n-resolver.ts#translateDashboard",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupDashboardAttr (`dashboards.<name>.label` / `.description`); packages/spec/src/system/i18n-resolver.ts#lookupWidgetAttr (`dashboards.<name>.widgets.<id>.<attr>`, `subCaption` included); packages/spec/src/system/i18n-resolver.ts#translateGlobalFilter (`dashboards.<name>.globalFilters.<key>.label` / `.options.<value>`, keyed by `globalFilterKey` — `name`, else `field`; #16772); packages/spec/src/system/i18n-resolver.ts#translateDashboard",
       "note": "translateDashboard: label/description plus per-widget title/description/subCaption by widget id; header action labels. `subCaption` (#7862, #5428 item 4) overlays the metric widget's `options.description` — a different authored field from `widget.description`, each on its own key — live through the same translateDashboard REST path; objectui's client-side renderer half is the downstream follow-up. 2026-08-28: RE-ANCHORED (#13003) and REPOINTED — `:538` had rotted onto the opening line of `translateAction`'s docblock, an ACTION resolver ~244 lines above the dashboard ones; the second position `:554` was a bare line suffix with no path and resolved to nothing. Re-closed by hand against 8cb96ec41."
     },
     "datasets": {

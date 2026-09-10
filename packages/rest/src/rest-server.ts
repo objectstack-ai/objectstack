@@ -9,11 +9,12 @@ import {
     // be RESOLVED leaves the caller's permissions equally undetermined, so it
     // takes the same loud answer rather than the quiet 403 it used to wear.
     AuthzStoreUnavailableError,
-    effectiveTenancyPosture,
-    // [#13906] The REGISTRY's own "never registered" brand — the discriminator
-    // that lets the tenancy seam absorb the supported no-tenancy composition
-    // while every other rejection stays loud. Never message text (#13905).
-    isServiceNotRegisteredError,
+    // [#13906 / #16013] The ONE classification the tenancy seam applies on
+    // BOTH of its wirings: the REGISTRY's own "never registered" brand absorbs
+    // the supported no-tenancy composition (never message text, #13905) while
+    // every other rejection stays loud. ⛔ The two wirings themselves are NOT
+    // the helper's — see `computeExecCtx`.
+    classifyAdmissionTenancyPosture,
     assembleExecutionContext, normalizeAuthGate, type AuthGate,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
     // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
@@ -2788,22 +2789,23 @@ export class RestServer {
             // factories (`registerServiceFactory` throws "not supported"), so
             // absence is the only fault it could report anyway. It keeps the
             // previous quiet answer, unchanged.
+            //
+            // [#16013] The CLASSIFICATION below is one shared function, not two
+            // hand-written copies: `classifyAdmissionTenancyPosture` answers
+            // quiet `undefined` for the branded "never registered" (the
+            // supported no-tenancy composition, no posture-conditional refusal)
+            // and raises `AuthzStoreUnavailableError('tenancy', err)` for every
+            // other rejection — the same loud answer `wiredEngineOrLoud` gives
+            // the engine seam, carried to the door by the same nets, because
+            // the posture is an authorization INPUT and admission was never
+            // decided. ⛔ The WIRING branch is NOT shared and must not become
+            // so: which of the two wirings may be asked is this file's fact
+            // alone, for the reason spelled out in the `else if` below.
             let tenancyPosture;
             if (kernel && typeof kernel.getServiceAsync === 'function') {
-                try {
-                    tenancyPosture = effectiveTenancyPosture(await kernel.getServiceAsync('tenancy') as any);
-                } catch (err) {
-                    // Registered and unable to answer. The posture is an
-                    // authorization INPUT, so admission was never decided — the
-                    // same loud answer `wiredEngineOrLoud` gives the engine seam,
-                    // carried to the door by the same nets.
-                    if (!isServiceNotRegisteredError(err)) {
-                        throw new AuthzStoreUnavailableError('tenancy', err);
-                    }
-                    // Never registered ⇒ the supported no-tenancy composition:
-                    // quiet `undefined`, no posture-conditional refusal.
-                    tenancyPosture = undefined;
-                }
+                tenancyPosture = await classifyAdmissionTenancyPosture(
+                    () => kernel.getServiceAsync('tenancy') as any,
+                );
             } else if (this.tenancyServiceProvider) {
                 // [#15256 / 1A] The SINGLE-KERNEL branch — the wiring every
                 // deployment the open core builds actually runs, and the one
@@ -2821,16 +2823,9 @@ export class RestServer {
                 // rejection is the outage it is. The provider re-raises
                 // unbranded rejections for precisely that reason — see
                 // `rest-api-plugin.ts`.
-                try {
-                    tenancyPosture = effectiveTenancyPosture(
-                        await this.tenancyServiceProvider(environmentId) as any,
-                    );
-                } catch (err) {
-                    if (!isServiceNotRegisteredError(err)) {
-                        throw new AuthzStoreUnavailableError('tenancy', err);
-                    }
-                    tenancyPosture = undefined;
-                }
+                tenancyPosture = await classifyAdmissionTenancyPosture(
+                    () => this.tenancyServiceProvider!(environmentId) as any,
+                );
             }
             const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
             // [#6216] The anonymous contract IS the shared assembler's default
@@ -3897,9 +3892,11 @@ export class RestServer {
 
     /**
      * Translate the `entries` payload returned by `getMetaTypes()` — applies
-     * the active locale to each entry's `label`, `description`, and the
+     * the active locale to each entry's `label`, `description`, the
      * nested `form` layout (section labels, field labels, helpText,
-     * placeholders) via `metadataForms.<type>` translation namespace.
+     * placeholders) and the derived JSON `schema` (a `title` per node the
+     * bundle names — the only channel that reaches a repeater row's column
+     * headers, #16458) via the `metadataForms.<type>` translation namespace.
      *
      * No-ops when no i18n service / locale / matching bundle entry exists,
      * so this is safe to call unconditionally from the `/meta` handler.
@@ -3915,6 +3912,7 @@ export class RestServer {
             resolveMetadataTypeLabel,
             resolveMetadataTypeDescription,
             resolveMetadataFormLabels,
+            resolveMetadataFormSchemaTitles,
         } = await import('@objectstack/spec/system');
         const opts = RestServer.translateOptionsFor(i18n, locale);
         const entries = payload.entries.map((entry: any) => {
@@ -3925,6 +3923,9 @@ export class RestServer {
             if (desc !== undefined) next.description = desc;
             if (entry.form) {
                 next.form = resolveMetadataFormLabels(entry.form, entry.type, bundle, opts);
+            }
+            if (entry.schema && typeof entry.schema === 'object') {
+                next.schema = resolveMetadataFormSchemaTitles(entry.schema, entry.type, bundle, opts);
             }
             return next;
         });
@@ -8092,9 +8093,45 @@ export class RestServer {
                     // stringified pair and match no transition key.
                     if (refuseRepeatedQueryParams(req, res, ['from'])) return;
                     const from = req.query?.from !== undefined ? String(req.query.from) : undefined;
-                    const ql = this.objectQLProvider
-                        ? await this.objectQLProvider(environmentId).catch(() => undefined)
-                        : undefined;
+                    // [#15405] The engine seam, reached the way its SIBLING at
+                    // `computeExecCtx` already reaches it — `wiredEngineOrLoud`
+                    // — so "no engine is wired" and "the engine WAS wired and
+                    // could not be resolved" stay two facts instead of one
+                    // `undefined`. The retired spelling this replaces:
+                    //
+                    //     this.objectQLProvider(environmentId).catch(() => undefined)
+                    //
+                    // ⚠️ That `.catch` was DEAD CODE until #13904. The shipped
+                    // provider used to be `try { … } catch { return undefined; }`
+                    // and so could not reject at all; the collapse happened one
+                    // layer earlier. #13904 made the provider re-raise PRECISELY
+                    // so a consumer could see the outage — and this consumer, the
+                    // slot's second and the one nobody enumerated, caught it
+                    // straight back. A wired-and-failing engine and a
+                    // never-registered one therefore both answered the
+                    // `404 NOT_FOUND · "Object not found"` twelve lines below:
+                    // this route lying about the cause during exactly the
+                    // incident it would be consulted in.
+                    //
+                    // ⛔ NOT `seamOrUndefined`. That helper SWALLOWS, and
+                    // swallowing at this seam IS the defect #13476 repaired —
+                    // its own docblock forbids routing the data-engine seam
+                    // back through it "to make the seams uniform".
+                    //
+                    // The wiring fact is the provider's PRESENCE, asked once and
+                    // never inferred from what it returned, so an UNWIRED engine
+                    // still reaches the 404 below byte-for-byte as before — and
+                    // so does a provider that RESOLVES `undefined`, which is the
+                    // seam contract declaring absence rather than failing.
+                    // `wiredEngineOrLoud` also invokes the provider
+                    // SYNCHRONOUSLY, so a host wiring a non-`async` provider —
+                    // which the seam's declared type cannot prevent — reaches the
+                    // same answer as one that rejects (#13280) instead of
+                    // escaping past a `.catch` that never came into existence.
+                    const ql = await wiredEngineOrLoud(
+                        Boolean(this.objectQLProvider),
+                        () => this.objectQLProvider!(environmentId),
+                    );
                     const schema = (ql as any)?.registry?.getObject?.(name);
                     if (!schema) {
                         // `{ error: { code, message } }`, the envelope
@@ -9978,7 +10015,29 @@ export class RestServer {
                         });
                         return;
                     }
-                    const emailService = await this.emailServiceProvider(environmentId).catch(() => undefined);
+                    // [#15405] `seamOrUndefined`, not the retired
+                    // `.catch(() => undefined)`. That handler attaches to the
+                    // promise the call RETURNS, so it can only ever see a
+                    // REJECTION: a host wiring a non-`async` provider — which
+                    // the seam's declared type cannot prevent, and
+                    // `RestServer`'s constructor is the public wiring point —
+                    // throws while the expression is still being evaluated, so
+                    // there is no promise to attach to and the handler is never
+                    // reached (#13280).
+                    //
+                    // ⚠️ NOT reachable from the SHIPPED wiring: the provider
+                    // `rest-api-plugin.ts` hands over is declared `async`.
+                    // Repaired because it is the same retired spelling at an
+                    // embedder-reachable seam, ⛔ not on a claim of live impact.
+                    //
+                    // The ANSWER is deliberately unchanged — absorb to
+                    // `undefined` and take the 501 below. ⛔ Unlike the engine
+                    // seam, this one must NOT go loud: the
+                    // `if (!this.emailServiceProvider)` guard above has already
+                    // answered the wiring question, and "not configured" and
+                    // "configured and unusable" both mean this deployment cannot
+                    // send mail — one 501, no fact lost by folding them.
+                    const emailService = await seamOrUndefined(() => this.emailServiceProvider!(environmentId));
                     if (!emailService || typeof emailService.send !== 'function') {
                         res.status(501).json({
                             code: 'NOT_IMPLEMENTED',

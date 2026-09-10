@@ -1103,6 +1103,28 @@ jobs:
       - name: Widening-tell gate self-test
         run: pnpm check:pm-widening-tells
 
+      # Changeset-deadline census self-test (#16850) — same family and the same
+      # split as every step around it. The LIVE census reads the shared board
+      # over the API and is REPORT-ONLY by ruling: #16850 takes option 1 (detect
+      # the consumption) under this lane's standing rule that a NEW scan
+      # population — here, issue BODIES — is censused before anything is
+      # enforced. So a card whose changeset window closed is a fact about the
+      # board, not about the PR that happens to run CI next, and failing that
+      # PR would punish the wrong actor.
+      #
+      # ⛔ Do not "promote" the live census into this step, and ⛔ do not give it
+      # a failing exit on findings. Whether the number justifies an exit
+      # contract at all is the question the census exists to answer, and the
+      # answer it produced on 2026-09-09 is in the PR that landed this file.
+      #
+      # What the self-test instruments is the MATCHING RULE and the CONTROLS —
+      # the two things a clean tree cannot exercise. Weakening either (counting
+      # the glob spelling as a target; accepting a zero without its positive
+      # control) leaves a production run just as green, which is the shape
+      # `check:self-test-wired` requires this step for.
+      - name: Changeset-deadline census self-test
+        run: pnpm check:pm-changeset-deadline-census
+
       # Governed-merges audit self-test (#9495) — same family, same split as
       # the half-state sweeper above: the live sweep enumerates the governed
       # merges since a date/ref for the PM round report — report-only by
@@ -2503,6 +2525,7 @@ jobs:
           run_self_test node scripts/symbol-anchors.mjs --self-test
           run_self_test node scripts/check-adr-symbol-anchors.mjs --self-test
           run_self_test node scripts/check-scripts-symbol-anchors.mjs --self-test
+          run_self_test node scripts/check-spec-docblock-symbol-anchors.mjs --self-test
           if [ -n "$failed" ]; then
             echo ""
             echo "Symbol-anchor self-tests — the following FAILED:"
@@ -2520,6 +2543,20 @@ jobs:
       # harness plants and the count comes out 4/3.
       - name: scripts/** symbol anchors resolve (no line citations on tracked targets survive)
         run: node scripts/check-scripts-symbol-anchors.mjs
+
+      # The THIRD corpus (#17065) — `packages/spec/src/**` doc blocks, again a
+      # `defineCorpus` registration and ⛔ not a second resolver. Separate sweep
+      # step for the same `check-step-collectors` reason stated above.
+      #
+      # ⭐ Its exit contract is a PINNED DAY-ONE RESIDUAL, not a clean tree: the
+      # census (7 findings across 6 of 1,317 files, taken in reporting mode
+      # BEFORE any exit code was chosen) is enumerated in the gate's
+      # `CENSUS_RESIDUAL`, every finding outside it is a hard red, and a row
+      # whose citation gets repaired goes STALE and reds until it is deleted.
+      # Repairing those 7 edits `packages/spec/**` text, which is `domain:spec`
+      # work with its own cards — the registration does not do it.
+      - name: packages/spec/src/** doc-block symbol anchors resolve (no NEW line citations on tracked targets)
+        run: node scripts/check-spec-docblock-symbol-anchors.mjs
 
       # NOTE: the standing platform test checklist (docs/qa/platform-checklist/)
       # is validated by `pnpm check:platform-checklist`, but by MAINTAINER
@@ -3028,6 +3065,34 @@ jobs:
       # pr-automation.yml). ~0.8s + ~5.0s.
       - name: Changeset-family gate self-tests
         run: pnpm check:changeset-gate-self-tests
+
+      # Lockstep package-count guard (#17039). `.changeset/config.json`'s
+      # `fixed` array is the one true count of packages one stray `major`
+      # promotes; check-changeset-fixed.mjs (release/RC workflows) already
+      # gates that array against the real workspace. Nothing gated the THREE
+      # prose restatements of the array's length — two sentences in
+      # content/docs/protocol/backward-compatibility.mdx and one header
+      # comment in scripts/publish-smoke-pack.mjs — so all three drifted
+      # silently (69 written, 70 true) the day a package joined the group.
+      # Full-repo state, not diff-shaped, so — unlike the self-tests above —
+      # this runs its real check every time, unconditionally.
+      - name: Lockstep package-count guard
+        run: pnpm check:lockstep-package-count
+
+      # Route-ledger census guard (#16758). `packages/runtime/src/route-ledger.ts`
+      # is census-shaped: its value is the completeness of a list, and nothing in
+      # this tree read its row COUNT. An index-slice edit meant to add two rows
+      # removed 105 lines — route rows plus the whole `/actions` section — and
+      # exited 0; it was caught only because an unrelated gate happened to redden.
+      # The file's own package suite is domain-level ("every registered dispatcher
+      # domain has at least one ledger entry"), which a shorter list satisfies, and
+      # the cross-ledger guards compare against a UNION that still holds 26 of the
+      # 82 rows' wire patterns from other ledgers. This gate holds the GENERATED
+      # census sentence above the array to the array's real length, so a deletion
+      # reds and a deliberate change shows its digits moving in the same diff.
+      # Full-repo state, not diff-shaped, so it runs its real check unconditionally.
+      - name: Route-ledger census guard
+        run: pnpm check:route-ledger-census
 
       # Release-notes drift guard: the platform is one version-locked train, so
       # every released @objectstack/spec major must have a curated, navigable

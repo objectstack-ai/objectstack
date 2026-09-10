@@ -183,7 +183,15 @@ describe('[#14099] the mixed batch the card measured is refused', () => {
 
   it('names the object, the diverging key and the prescription', async () => {
     const { engine } = await mixedBatch();
-    const err = await run(engine).catch((e) => e as MultiUpdateHookKeyDivergenceError);
+    // [#16231] The same two-armed `then` the case above uses, and now for a
+    // second reason: `update()` declares its result union, so a bare `.catch`
+    // types `err` as "the refusal OR whatever the write resolved" and every
+    // assertion below reads through that union. The refusal arm is the only one
+    // this case is about — an update that RESOLVED here is the defect.
+    const err = await run(engine).then(
+      () => { throw new Error('expected the batch to be refused'); },
+      (e: unknown) => e as MultiUpdateHookKeyDivergenceError,
+    );
     expect(err.object).toBe('task');
     expect(err.keys).toEqual(['completed_at']);
     expect(err.rows).toBe(2);

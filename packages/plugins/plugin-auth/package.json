@@ -47,10 +47,10 @@
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
     "@types/node": "^26.2.0",
-    "hono": "^4.13.2",
+    "hono": "^4.13.5",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "objectstack",

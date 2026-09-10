@@ -85,9 +85,29 @@ export async function loadArtifactBundle(
     try {
         const raw = await readArtifactSource(absArtifactPath, { fetchTimeoutMs: opts.fetchTimeoutMs });
         const parsed = JSON.parse(raw);
-        bundle = opts.unwrapEnvelope && parsed?.schemaVersion != null && parsed?.metadata !== undefined
-            ? parsed.metadata
-            : parsed;
+        const unwrapping = Boolean(opts.unwrapEnvelope)
+            && parsed?.schemaVersion != null && parsed?.metadata !== undefined;
+        bundle = unwrapping ? parsed.metadata : parsed;
+        // [#13457] The unwrap keeps `metadata` and DROPS every key standing
+        // beside it, so an envelope key whose declared consumer is this loader
+        // has to be carried across by name or it is silently gone.
+        // `grantedPermissions` is that key: `EnvironmentArtifactSchema` puts the
+        // install-time consented set BESIDE `metadata` (outside the checksum
+        // digest), and names the materialize-time loader as its consumer — so
+        // before this line an envelope artifact reached the kernel with every
+        // consent record stripped, and the enforcer had nothing to register.
+        // (⛔ Not "the gate had nothing to enforce": there is no gate — this
+        // round fills the registry, and nothing on this tree queries it yet.)
+        // Nothing threw: the key was simply absent, which is also a legitimate
+        // reading ("no consent record"), which is why it could be lost in
+        // silence.
+        // ⛔ `!== undefined`, never a truthiness or emptiness test: `{}` is a
+        // consent record that consented to nothing and must survive the unwrap
+        // as `{}`, while a genuinely absent key must NOT be created here.
+        if (unwrapping && parsed.grantedPermissions !== undefined
+            && bundle !== null && typeof bundle === 'object') {
+            bundle.grantedPermissions = parsed.grantedPermissions;
+        }
     } catch (err: any) {
         // An ABSENT artifact is not a failure (#4085). The platform is a
         // development platform first: `os serve objectstack.config.ts` boots

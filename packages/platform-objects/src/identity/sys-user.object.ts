@@ -611,10 +611,11 @@ export const SysUser = ObjectSchema.create({
     role: Field.text({
       label: 'Platform Role',
       required: false,
-      readonly: true, // ADR-0092 — set via the Set Platform Role action, never the edit form
+      readonly: true, // ADR-0092 — never the edit form; no writer since #9968 (platform admin: `sys_user_permission_set` / `admin_full_access`)
       maxLength: 64,
       group: 'Admin',
-      description: 'Platform-level role (admin, user, …). Set via the Set Platform Role action.',
+      description:
+        'Legacy better-auth role scalar (admin, user, …). ObjectStack no longer writes it (ADR-0068 D2) — grant platform-admin standing with an unscoped `admin_full_access` assignment in `sys_user_permission_set`.',
     }),
 
     banned: Field.boolean({

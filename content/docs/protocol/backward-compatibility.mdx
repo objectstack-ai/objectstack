@@ -111,7 +111,7 @@ Read the **Breaking?** column, not the version number: during the launch window 
 1. **RFC (Request for Comments)** — Breaking changes are proposed as GitHub issues with the `protocol:breaking` label.
 2. **Deprecation** — The old behavior is deprecated in a MINOR release (see timeline above).
 3. **Migration Guide** — A detailed migration guide is published before the removal lands, in the release notes for the version that carries it.
-4. **Release** — During the launch window the breaking change ships in the next **MINOR** version, carrying a changeset entry marked `**BREAKING**`. `scripts/check-changeset-no-major.mjs` fails any pull request that declares a `major` bump, because under lockstep one `major` would promote all 69 published packages.
+4. **Release** — During the launch window the breaking change ships in the next **MINOR** version, carrying a changeset entry marked `**BREAKING**`. `scripts/check-changeset-no-major.mjs` fails any pull request that declares a `major` bump, because under lockstep one `major` would promote all 70 published packages.
 
 ---
 
@@ -189,7 +189,7 @@ The `@objectstack/spec` package provides additional stability guarantees:
 
 ### Which surfaces this covers
 
-**All of them.** This is not scoped to an experimental corner or a pre-release channel: all **69** packages published from this repository belong to a single Changesets `fixed` group, so they share one version number and one policy. No published surface is exempt.
+**All of them.** This is not scoped to an experimental corner or a pre-release channel: all **70** packages published from this repository belong to a single Changesets `fixed` group, so they share one version number and one policy. No published surface is exempt.
 
 The convention is enforced rather than informal — `scripts/check-changeset-no-major.mjs` fails any pull request that introduces a `major` bump, because under lockstep a single `major` on one package would promote the entire stack.
 

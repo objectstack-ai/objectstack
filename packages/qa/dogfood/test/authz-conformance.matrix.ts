@@ -31,8 +31,8 @@
 // domain cannot be silently absent from them, and therefore cannot be silently
 // absent from here. Widening a regex instead was refused: it rots on the next
 // added file, which is the mechanism this replaces. Deriving "gated" from
-// source syntax was refused too, on a measurement — 22 of 30 apparently
-// ungated `register(` sites in `rest-server.ts` are false, a 73% false-ungated
+// source syntax was refused too, on a measurement — 22 of 29 apparently
+// ungated `register(` sites in `rest-server.ts` are false, a 76% false-ungated
 // rate — because that trades a visible gap for a written-down false assurance.
 // The ledgers supply the POPULATION; the classification stays a reviewed row
 // here.

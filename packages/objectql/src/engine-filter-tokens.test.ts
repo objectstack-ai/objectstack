@@ -61,7 +61,11 @@ function makeDriver() {
     update: vi.fn(async (_o: string, id: any, d: any) => { seen.updateId = id; return { id, ...d }; }),
     updateMany: vi.fn(async (_o: string, ast: any) => { seen.updateManyAst = ast; return { modified: 0 }; }),
     delete: vi.fn(async (_o: string, id: any) => { seen.deleteId = id; return true; }),
-    deleteMany: vi.fn(async (_o: string, ast: any) => { seen.deleteManyAst = ast; return { deleted: 0 }; }),
+    // [#16231] `IDataDriver.deleteMany` declares `Promise<number>` — the
+    // affected-row count. This double answered an invented `{ deleted: n }`
+    // envelope that no driver produces; `Promise<any>` on the engine door
+    // admitted it all the way out to the caller.
+    deleteMany: vi.fn(async (_o: string, ast: any) => { seen.deleteManyAst = ast; return 0; }),
   };
   return { driver, seen };
 }

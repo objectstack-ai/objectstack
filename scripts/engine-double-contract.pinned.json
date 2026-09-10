@@ -2657,6 +2657,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/bootstrap-platform-admin-existing-holder-scan.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
       "file": "packages/plugins/plugin-security/src/bootstrap-platform-admin-promotion-selection.test.ts",
       "verb": "update",
       "pinned": 3
@@ -2730,6 +2735,21 @@
       "file": "packages/plugins/plugin-security/src/field-masking-rule.test.ts",
       "verb": "findOne",
       "pinned": 2
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/insert-check-post-image.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/insert-check-post-image.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/insert-check-post-image.test.ts",
+      "verb": "update",
+      "pinned": 1
     },
     {
       "file": "packages/plugins/plugin-security/src/invitation-placement.test.ts",

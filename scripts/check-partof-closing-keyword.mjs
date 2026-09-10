@@ -504,9 +504,9 @@ export const COMMITS_FILE_ENV = 'PR_COMMITS_FILE';
  */
 const RELATION_CONTRACT =
   'The contract is written down in the agent rules at .claude/agents/os-dev.md — '
-  + '「PR 正文与 commit message 分开解析:卡片关系只在正文声明一次,commit ⛔ 不带卡片 trailer。」 '
-  + '(The PR body and the commit messages are parsed separately: the card relation is declared ONCE, '
-  + 'in the body, and a commit carries no card trailer.)';
+  + '「卡片关系只在 PR 正文声明一次:commit ⛔ 不带卡片 trailer,其 trailer pair 一律 model-free。」 '
+  + '(The card relation is declared ONCE, in the PR body; a commit carries no card trailer, '
+  + 'and its trailer pair is model-free.)';
 
 /**
  * Every sentence inside the corner brackets of a citation, in order.
