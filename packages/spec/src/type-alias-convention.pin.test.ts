@@ -269,7 +269,7 @@ import type * as M184 from './shared/value-domain.zod.js';
 import type * as M185 from './shared/epoch.zod.js';
 
 // ---------------------------------------------------------------------------
-// 811 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 782 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1646,7 +1646,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 811 isomorphic pins', () => {
+  it('still declares all 782 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2142,7 +2142,17 @@ describe('ADR-0122 type-alias convention', () => {
     // left the isomorphic family the way ADR-0122 prescribes: the `XParsed`
     // alias declared, the pin deleted. -4 converted to `XParsed` pairs; the
     // Iso numbers stay vacant (ids are claims about pins, not positions).
-    expect(pins).toHaveLength(811);
+    //
+    // 811 -> 782 is #16325, the `./cloud` subpath leaving `@objectstack/spec`
+    // (maintainer ruling, option B "cut by owner"): the six control-plane
+    // modules — `cloud/app-store` (6 pins), `developer-portal` (5),
+    // `environment-package` (2), `environment` (7), `marketplace-admin` (5),
+    // `tenant` (5) — left with their 30 pins (module slots M45–M49 and M54 are
+    // vacant), and `EnvironmentTypeSchema` moved with its only open-source
+    // reader to `api/discovery.zod.ts` (M17), where it is pinned again as
+    // `Iso871`. The four package-format modules (M50–M53) moved to
+    // `marketplace/` and kept their pins. -30 + 1.
+    expect(pins).toHaveLength(782);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

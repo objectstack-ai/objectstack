@@ -1,0 +1,168 @@
+---
+title: Package Version
+description: Package Version protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Package Version Protocol
+
+A **package version** is an **immutable** release snapshot of a package.
+Once published (`status = 'published'`), its `manifestJson` and `checksum`
+fields are frozen — publishing is the act of sealing the snapshot.
+
+Lifecycle:
+  draft → published → deprecated
+
+Installing a package means pointing a `sys_package_installation` row at a
+specific `sys_package_version` UUID. Upgrading swaps that pointer atomically.
+
+See `docs/adr/0003-package-as-first-class-citizen.md` for the full rationale.
+
+<Callout type="info">
+**Source:** `packages/spec/src/marketplace/package-version.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { CreatePackageVersionRequestSchema, PackageDependencySchema, PackageManifestSchema, PackageVersionSchema, PackageVersionStatusSchema, PublishPackageVersionRequestSchema, UpdatePackageVersionRequestSchema } from '@objectstack/spec/marketplace';
+import type { CreatePackageVersionRequest, PackageDependency, PackageManifest, PackageVersion, PackageVersionStatus, PublishPackageVersionRequest, UpdatePackageVersionRequest } from '@objectstack/spec/marketplace';
+
+// Validate data
+const result = CreatePackageVersionRequestSchema.parse(data);
+```
+
+---
+
+## CreatePackageVersionRequest
+
+Create a new draft package version
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **packageId** | `string` | ✅ | Parent package UUID |
+| **version** | `string` | ✅ | Semantic version string |
+| **manifestJson** | `string` | ✅ | Initial manifest JSON (can be updated while draft) |
+| **releaseNotes** | `string` | optional |  |
+| **isPreRelease** | `boolean` | optional |  |
+| **createdBy** | `string` | ✅ | User ID creating this version |
+
+
+---
+
+## PackageDependency
+
+Package dependency declaration
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **packageId** | `string` | ✅ | Manifest ID of the dependency |
+| **versionRange** | `string` | ✅ | Semver version range (e.g. ^1.0.0) |
+| **optional** | `boolean` | optional (default: `false`) | Whether this dependency is optional |
+
+
+---
+
+## PackageManifest
+
+Package manifest snapshot embedded in a package version
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Package manifest ID (reverse-domain) |
+| **version** | `string` | ✅ | Semver version string (e.g. 1.2.3) |
+| **name** | `string` | ✅ | Display name |
+| **description** | `string` | optional | Short description |
+| **scope** | `Enum<'platform' \| 'environment'>` | optional (default: `"environment"`) | Package scope |
+| **minPlatformVersion** | `string` | optional | Minimum required platform version (semver) |
+| **dependencies** | `{ packageId: string; versionRange: string; optional: boolean }[]` | optional (default: `[]`) | Package dependencies |
+| **metadataTypes** | `string[]` | optional (default: `[]`) | Metadata types provided by this package |
+| **migrations** | `string[]` | optional (default: `[]`) | Migration script identifiers (ordered) |
+| **configurationSchema** | `Record<string, any>` | optional | JSON Schema for per-installation configuration properties |
+| **metadata** | `Record<string, any>` | optional | Extension metadata |
+
+### Nested Shape: `PackageManifest.dependencies[number]`
+
+Package dependency declaration
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **packageId** | `string` | ✅ | Manifest ID of the dependency |
+| **versionRange** | `string` | ✅ | Semver version range (e.g. ^1.0.0) |
+| **optional** | `boolean` | optional (default: `false`) | Whether this dependency is optional |
+
+
+---
+
+## PackageVersion
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | UUID of the package version (stable, never reused) |
+| **packageId** | `string` | ✅ | UUID of the parent sys_package row |
+| **version** | `string` | ✅ | Semantic version string |
+| **status** | `Enum<'draft' \| 'published' \| 'deprecated'>` | optional (default: `"draft"`) | Package version lifecycle status |
+| **manifestJson** | `string` | ✅ | JSON-serialized package manifest (frozen on publish) |
+| **checksum** | `string` | optional | SHA-256 hex digest of manifestJson |
+| **releaseNotes** | `string` | optional | Release notes for this version (markdown) |
+| **minPlatformVersion** | `string` | optional | Minimum required platform version (denormalized from manifest) |
+| **isPreRelease** | `boolean` | optional (default: `false`) | Whether this is a pre-release version |
+| **publishedAt** | `string` | optional | Publish timestamp (ISO-8601) |
+| **publishedBy** | `string` | optional | User ID who published this version |
+| **createdAt** | `string` | ✅ | Creation timestamp (ISO-8601) |
+| **updatedAt** | `string` | ✅ | Last update timestamp (ISO-8601) |
+| **createdBy** | `string` | ✅ | User ID that created this version |
+
+
+---
+
+## PackageVersionStatus
+
+Package version lifecycle status
+
+### Allowed Values
+
+* `draft`
+* `published`
+* `deprecated`
+
+
+---
+
+## PublishPackageVersionRequest
+
+Publish a draft version — seals manifestJson and checksum
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **publishedBy** | `string` | ✅ | User ID publishing this version |
+
+
+---
+
+## UpdatePackageVersionRequest
+
+Update a draft package version (only while status is draft)
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **manifestJson** | `string` | optional | Updated manifest JSON |
+| **releaseNotes** | `string` | optional |  |
+| **isPreRelease** | `boolean` | optional |  |
+
+
+---
+

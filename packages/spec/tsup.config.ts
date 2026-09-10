@@ -117,7 +117,6 @@ const browserConditionedEntries = [
   'src/data/index.ts',
   'src/system/index.ts',
   'src/kernel/index.ts',
-  'src/marketplace/index.ts',
 ];
 
 /**

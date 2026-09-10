@@ -1905,7 +1905,11 @@ describe('corpus — every rendered description is well-formed markdown', () => 
     // whose "description" was one schema's detached comment; the diff of every
     // per-file verdict, old selector vs new over all 208 sources, is in that
     // card's PR: 200 identical, 8 SELECTED→null, 0 to a different block).
-    expect(described.length).toBeGreaterThan(140);
+    // 138 at #16325: the seven `cloud/*.zod.ts` sources that left with the
+    // `./cloud` subpath (six control-plane modules plus the environment-artifact
+    // re-export) took their descriptions with them; the four package-format
+    // modules moved to `marketplace/` and still count.
+    expect(described.length).toBeGreaterThan(130);
   });
 
   it('never cuts an inline code span in half (#5553)', () => {
@@ -2095,10 +2099,17 @@ describe('corpus — every rendered description is well-formed markdown', () => 
       .filter(d => d.untouched !== d.emitted);
 
     // (38 -> 37: `kernel/metadata-customization.zod.ts` — one of the level-1
-    // openers — was removed whole by #13135's ADR-0049 retirement.)
-    expect(shifted.length).toBe(37);
+    // openers — was removed whole by #13135's ADR-0049 retirement.
+    // 37 -> 31: six of the seven `cloud/*.zod.ts` sources that left with the
+    // `./cloud` subpath at #16325 opened at level 1 — `app-store`,
+    // `developer-portal`, `environment-package`, `environment`,
+    // `marketplace-admin` and the `environment-artifact` re-export; `tenant`
+    // opened at level 2 and was never counted. `marketplace.zod.ts`, the one
+    // level-1 opener among the four modules that moved to `marketplace/`,
+    // still counts.)
+    expect(shifted.length).toBe(31);
     // …and every one of them was shifted because it opened at level 1.
-    expect(shifted.filter(d => /^ {0,3}#(?:[ \t]|$)/m.test(withoutFences(d.untouched)))).toHaveLength(37);
+    expect(shifted.filter(d => /^ {0,3}#(?:[ \t]|$)/m.test(withoutFences(d.untouched)))).toHaveLength(31);
   });
 
   it('never opens a page on the `@module` marker (#13796)', () => {

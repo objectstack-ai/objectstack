@@ -168,16 +168,6 @@
       }
     },
     "./marketplace": {
-      "browser": {
-        "import": {
-          "types": "./dist/marketplace/index.d.mts",
-          "default": "./dist/browser/marketplace/index.mjs"
-        },
-        "require": {
-          "types": "./dist/marketplace/index.d.ts",
-          "default": "./dist/browser/marketplace/index.js"
-        }
-      },
       "import": {
         "types": "./dist/marketplace/index.d.mts",
         "default": "./dist/marketplace/index.mjs"

@@ -66,6 +66,7 @@ import {
   AUTHORABLE_DEFAULTS_DIR_NAME,
   authorableDefaultsShardTexts,
   authoriseDefaultChanges,
+  carryDefaultsThroughRenames,
   collectAuthorableDefaults,
   diffAuthorableDefaults,
   parseDefaultEntries,
@@ -2526,12 +2527,16 @@ if (resolvedSurfaceBase) {
     `authorable-defaults change check (#4666)`,
   );
   if (upstream) {
+    // BOTH halves of the baseline are carried through RENAMED_DEFS — the keys
+    // here and the defaults below. Carrying only the keys charged a declared
+    // rename with `(none) → <value> (added)` for every default it moved
+    // (#16325: 22 of them on the cloud → marketplace category move).
     const keys = new Map<string, boolean>();
     for (const entry of resolvedSurfaceBase.doc.keys ?? []) {
       keys.set(carryAuthorableKey(entry.replace(RETIRED_MARK, '')), entry.endsWith(RETIRED_MARK));
     }
     defaultsBaseline = {
-      defaults: parseDefaultEntries(upstream.entries),
+      defaults: carryDefaultsThroughRenames(parseDefaultEntries(upstream.entries)),
       keys,
       label: `upstream ${resolvedSurfaceBase.rev.slice(0, 12)}`,
     };
@@ -2543,7 +2548,7 @@ if (!defaultsBaseline && committedDefaults && surfaceDoc) {
     keys.set(carryAuthorableKey(entry.replace(RETIRED_MARK, '')), entry.endsWith(RETIRED_MARK));
   }
   defaultsBaseline = {
-    defaults: committedDefaults,
+    defaults: carryDefaultsThroughRenames(committedDefaults),
     keys,
     label: 'in-tree (this commit owns these bytes — no upstream baseline was reachable)',
   };

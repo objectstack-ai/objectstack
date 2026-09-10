@@ -1196,7 +1196,8 @@ describe('client SDK return-type precision (#8140)', () => {
         expect(typeof deleteDataResponseIsNotTheMetaResetShape).toBe('function');
         expect(typeof metaResetResponseDeclaresTheWireReceipt).toBe('function');
         expect(typeof commitRollbackResponseIsNotTheVersionRollbackShape).toBe('function');
-        expect(typeof environmentIsNotTheCloudWireRow).toBe('function');
+        // `environmentIsNotTheCloudWireRow` left with its subject (#16325): the
+        // guard is now the `@ts-expect-error`'d import at the top of the file.
     });
 
     it('unwraps exactly one `{ success, data }` envelope — the premise the annotations rest on', async () => {
