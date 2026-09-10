@@ -86,7 +86,7 @@ export const ServiceMetadataSchema = lazySchema(() => z.object({
    * @see content/docs/kernel/cluster.mdx §5
    */
   cluster: ServiceClusterAnnotationsSchema.optional()
-    .describe('Cluster scope & leader strategy. See cluster-semantics.mdx §5.'),
+    .describe('Cluster scope & leader strategy. See /docs/kernel/cluster §5.'),
 }));
 
 export type ServiceMetadata = z.input<typeof ServiceMetadataSchema>;
