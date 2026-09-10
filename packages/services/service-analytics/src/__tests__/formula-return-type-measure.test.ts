@@ -42,13 +42,16 @@
  * pair) was taken before the compile leg of #16099 landed, and
  * `AGGREGATE_FIELD_TYPE_COMPATIBILITY` does NOT list `formula` under `min` or
  * `max`. It is nonetheless not refused today: `dataset-compiler`'s
- * `assertAggregateFieldTypeCompatible` executes only the TEMPORAL rows
- * (`if (!TEMPORAL_SOURCE_FIELD_TYPES.has(fieldType)) return;`), by its own
- * documented scope, and `formula` is outside that class. Section B is the
- * standing control on that: it drives the pair through `queryDataset` and gets
- * a response, so this rule's `formula` branch is reached by the tree as it
- * ships. If the full-table leg is ever executed the branch becomes unreachable
- * and inert — never wrong.
+ * `assertAggregateFieldTypeCompatible` judges only the DERIVING aggregates
+ * (`if (!DERIVING_AGGREGATES.has(aggregate)) return;` — `sum` / `avg`), so
+ * `min` / `max` sit outside its reach whatever the field type. ⚠️ #16099 re-cut
+ * that scope from the FIELD class to the AGGREGATE class without changing this
+ * conclusion: the reason used to be 「`formula` is not temporal」 and is now
+ * 「`min` / `max` are not judged here at all」, which is the #17513 population.
+ * Section B is the standing control either way: it drives the pair through
+ * `queryDataset` and gets a response, so this rule's `formula` branch is reached
+ * by the tree as it ships. If the `min` / `max` rows are ever executed the branch
+ * becomes unreachable and inert — never wrong.
  *
  * ## ⚠️ The mapping is a TRANSLATION, and section A is the pin that keeps it one
  *
