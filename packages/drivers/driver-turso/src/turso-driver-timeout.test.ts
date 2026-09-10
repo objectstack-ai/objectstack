@@ -38,6 +38,12 @@
  * remote the transport reaches" is, off the timed path, and that is the
  * anti-vacuity guard the case actually needs.
  *
+ * Both latch assertions carry a failure message naming their bound, so a red
+ * says in words that a DURATION went unmet. Merge-queue triage classifies a red
+ * by asking whether the assertion names a duration; a bare `expected 0 to be
+ * greater than 0` from a sampled counter answers no and is read as a behaviour
+ * regression, which is exactly how this file's flake was first read.
+ *
  * Each arm carries a NEGATIVE control — the same stalled remote with no
  * `timeout` (and, on the replica arm, `timeout: 0`, the documented "no bound")
  * is still pending well past the window — so the failure the positive case
@@ -154,7 +160,10 @@ describe('TursoDriverConfig.timeout — remote mode over HTTP', () => {
     cleanups.push(() => reachable.disconnect());
     // Settles only when the fixture tears the socket down; nobody reads that.
     reachable.find('probe', {}).catch(() => {});
-    expect(await settlesWithin(remote.firstRequest, REACH_BOUND_MS)).toBe(true);
+    expect(
+      await settlesWithin(remote.firstRequest, REACH_BOUND_MS),
+      `the HTTP transport did not reach the stalled fixture within ${REACH_BOUND_MS} ms`,
+    ).toBe(true);
 
     const driver = new TursoDriver({ url: remote.url, timeout: WINDOW_MS });
     expect(driver.transportMode).toBe('remote');
@@ -188,7 +197,10 @@ describe('TursoDriverConfig.timeout — remote mode over HTTP', () => {
     expect(await stillPendingAfter(operation, CONTROL_WAIT_MS)).toBe(PENDING);
     // Same latch, same reason: nothing bounds this operation, so the request is
     // reached and the condition is awaited, never sampled at a chosen instant.
-    expect(await settlesWithin(remote.firstRequest, REACH_BOUND_MS)).toBe(true);
+    expect(
+      await settlesWithin(remote.firstRequest, REACH_BOUND_MS),
+      `the HTTP transport did not reach the stalled fixture within ${REACH_BOUND_MS} ms`,
+    ).toBe(true);
   });
 });
 
