@@ -57,10 +57,67 @@ export function normalizeAuthGate(sessionUser: any): AuthGate | null {
 }
 
 // Endpoints a gated user MUST still reach to remediate or bootstrap the
-// remediation UI. Matched against the request path (query stripped). Covers
-// both REST (`/api/v1/auth/…`) and dispatcher (`/auth/…`) path shapes.
-const ALLOW_PREFIXES = ['/api/v1/auth/', '/api/auth/', '/auth/'];
-const ALLOW_SUFFIXES = ['/health', '/ready', '/discovery', '/me/apps', '/me/localization'];
+// remediation UI. Matched against the request path (query stripped).
+//
+// [#16839] Every test below is ANCHORED to a mount boundary, because the
+// allow-list is a set of ROUTES and a route is identified by where it sits,
+// not by text appearing somewhere in a path. The two predicates this replaced
+// were unanchored — `path.includes('/auth/')` matched at ANY position and a
+// suffix test matched at ANY depth — so a segment whose VALUE happened to
+// spell an allow-listed token carried the exemption: `/data/auth/123` (an
+// object named `auth`), `/data/x/health` (a record whose id is `health`),
+// `/data/xyz/me/apps`. Both seams pass a data-plane path straight in
+// (`HttpDispatcher.enforceAuthGate`, `RestServer.enforceAuth`), so those were
+// reachable requests, and object + record names are tenant-controlled.
+
+/**
+ * The mount bases an allow-listed route can sit at, as SEGMENT lists, longest
+ * first. `[]` is the dispatcher shape: the hono adapter hands
+ * `HttpDispatcher.dispatch` the app prefix already stripped, so a dispatcher
+ * path arrives as `/auth/…`, `/health`, `/environments/<id>/auth/…`. The other
+ * two are the REST/better-auth mounts (`${basePath}/${version}` and
+ * better-auth's own `${basePath}/auth`) at their shipped defaults — the same
+ * three bases the pre-anchoring `ALLOW_PREFIXES` enumerated.
+ *
+ * ⚠️ A host that moves `api.basePath`/`api.version` off those defaults is no
+ * longer named here. That is the deliberate price of anchoring and it cannot
+ * be avoided: `/rest/v2/health` and `/data/xyz/health` are the SAME SHAPE, so
+ * a rule that accepts an arbitrary base is the defect. It costs nothing at
+ * either live seam — the dispatcher's path is base-stripped (matched by `[]`),
+ * and REST registers its control-plane routes without `enforceAuth` at all.
+ */
+const MOUNT_BASES: readonly (readonly string[])[] = [['api', 'v1'], ['api'], []];
+
+/**
+ * Segments that open an environment scope between the base and the route
+ * (`/api/v1/environments/<id>/auth/…`). The dispatcher evaluates the gate
+ * BEFORE its scoped-URL strip, so the scoped spelling reaches this predicate;
+ * `projects` is ADR-0006's superseded spelling, which the REST scope strip
+ * still accepts.
+ */
+const SCOPE_SEGMENTS: readonly string[] = ['environments', 'projects'];
+
+/**
+ * The bootstrap reads, as EXACT routes at a mount (replaces the old
+ * `ALLOW_SUFFIXES` endsWith test). `/health`, `/ready` and `/discovery` are
+ * the dispatcher's probes and discovery document; `/me/apps` and
+ * `/me/localization` are the current-user reads the remediation UI needs
+ * (`plugin-hono-server/src/current-user-endpoints.ts`).
+ */
+const ALLOW_ROUTES: readonly (readonly string[])[] = [
+  ['health'],
+  ['ready'],
+  ['discovery'],
+  ['me', 'apps'],
+  ['me', 'localization'],
+];
+
+/** Do `segments` start with every segment of `prefix`? */
+function startsWithSegments(segments: readonly string[], prefix: readonly string[]): boolean {
+  if (segments.length < prefix.length) return false;
+  for (let k = 0; k < prefix.length; k++) if (segments[k] !== prefix[k]) return false;
+  return true;
+}
 
 /** True when `path` is exempt from the auth gate (auth + remediation + health). */
 export function isAuthGateAllowlisted(rawPath: string | undefined | null): boolean {
@@ -71,14 +128,34 @@ export function isAuthGateAllowlisted(rawPath: string | undefined | null): boole
   let end = path.length;
   while (end > 1 && path.charCodeAt(end - 1) === 47) end--;
   path = path.slice(0, end) || '/';
-  // Any path with an `/auth/` segment is an auth endpoint (covers project-
-  // scoped mounts like `/api/v1/environments/:env/auth/...`).
-  if (path.includes('/auth/')) return true;
-  for (const p of ALLOW_PREFIXES) {
-    if (path.startsWith(p) || path === p.replace(/\/$/, '')) return true;
-  }
-  for (const s of ALLOW_SUFFIXES) {
-    if (path.endsWith(s)) return true;
+  // Segment view — `''` entries dropped so `//auth//me` cannot smuggle an
+  // empty segment past the position tests below.
+  const segments = path.split('/').filter((s) => s !== '');
+  for (const base of MOUNT_BASES) {
+    if (!startsWithSegments(segments, base)) continue;
+    let i = base.length;
+    let scoped = false;
+    // One optional environment scope, and only immediately after the base —
+    // which is why `/data/environments/x/health` is NOT a scoped `/health`.
+    if (i + 1 < segments.length && SCOPE_SEGMENTS.includes(segments[i] as string)) {
+      i += 2;
+      scoped = true;
+    }
+    if (segments[i] === 'auth') {
+      // `<base>[/<scope>/<id>]/auth/…` — the remediation surface. This is the
+      // anchored replacement for `path.includes('/auth/')`.
+      if (i + 1 < segments.length) return true;
+      // Bare `<base>/auth`, exempt only UNSCOPED: that is exactly what the old
+      // `ALLOW_PREFIXES` equality branch admitted (`/auth`, `/api/auth`,
+      // `/api/v1/auth`). The scoped spelling was never exempt and must not
+      // become so here — this repair only ever removes exemptions.
+      if (!scoped) return true;
+    }
+    for (const route of ALLOW_ROUTES) {
+      if (segments.length - i === route.length && startsWithSegments(segments.slice(i), route)) {
+        return true;
+      }
+    }
   }
   return false;
 }

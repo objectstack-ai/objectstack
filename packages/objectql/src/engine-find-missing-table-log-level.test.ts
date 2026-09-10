@@ -323,18 +323,26 @@ describe('engine `find` failure log level is chosen by CAUSE (#13273)', () => {
       );
     });
 
-    it('a WRITE to a table that does not exist is still `error`', async () => {
-      // Nothing landed, and the row the caller believes it stored is gone —
-      // never a normal answer, whatever the cause.
+    it('a WRITE to a table that does not exist reports ONCE, and not at `debug`', async () => {
+      // [#17052] This case is unchanged in the two things it was written to
+      // hold — the write door reports, and it does not join the read door's
+      // `debug` demotion — and changed in the one it also happened to state:
+      // the level is `warn`, because the write catch rethrows and the caller
+      // was told. The demotion this suite governs is still READS ONLY: a
+      // missing table earns no quieter treatment on a write than any other
+      // driver fault does, and `warn` is what every write fault takes now.
       await boot(() => envelope(new Error(`no such table: ${OBJECT}`)));
 
       await expect(engine.insert(OBJECT, { label: 'x' } as any)).rejects.toThrow();
 
-      const insertFrames = logger.lines.error.filter(
+      const insertFrames = logger.lines.warn.filter(
         (l: any) => l.msg === 'Insert operation failed',
       );
       expect(insertFrames).toHaveLength(1);
       expect(logger.lines.debug.filter((l: any) => l.msg === 'Insert operation failed')).toHaveLength(0);
+      // ⭐ The read door's classification did NOT leak onto the write door:
+      // there is no second, quieter entry and no `error` entry either.
+      expect(logger.lines.error.filter((l: any) => l.msg === 'Insert operation failed')).toHaveLength(0);
     });
   });
 });

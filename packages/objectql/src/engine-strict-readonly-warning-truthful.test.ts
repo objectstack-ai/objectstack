@@ -125,16 +125,24 @@ interface Observed {
 
 /**
  * The level of the STRIP's own line, isolated from the engine's pre-existing
- * `'Update operation failed'` / `'Insert operation failed'` ERROR — which a
+ * `'Update operation failed'` / `'Insert operation failed'` entry — which a
  * strict refusal legitimately emits, because the caller really was handed a
  * failure. The two lines are different facts and this suite must not conflate
  * them: the strip's line stays at `warn` (its docblock argues that level), and
- * the operation-level error is nobody's business here.
+ * the operation-level entry is nobody's business here.
+ *
+ * [#17052] That operation-level entry moved from `error` to `warn`, which makes
+ * the isolation this helper performs load-bearing rather than merely tidy: the
+ * two lines now share a level, so only the MESSAGE tells them apart. The filter
+ * was already keyed on the message, so it needed no change — but the two
+ * assertions below that named `error` did, and they now assert the level the
+ * door actually takes rather than the one it used to.
  */
+const isOperationFailedLine = (msg: string): boolean =>
+  /^(Update|Insert) operation failed$/.test(msg);
+
 function stripLineLevels(o: Observed): string[] {
-  return o.lines
-    .filter((l) => !/^(Update|Insert) operation failed$/.test(l.msg))
-    .map((l) => l.level);
+  return o.lines.filter((l) => !isOperationFailedLine(l.msg)).map((l) => l.level);
 }
 
 async function observeUpdate(data: unknown, options: Record<string, unknown>): Promise<Observed> {
@@ -148,7 +156,14 @@ async function observeUpdate(data: unknown, options: Record<string, unknown>): P
   return {
     refusedCode,
     driverWrites: writes.length,
-    warns: logger.lines.filter((l: any) => l.level === 'warn').map((l: any) => l.msg),
+    // [#17052] The operation-level entry is at `warn` now too, so the message
+    // isolation this suite has always performed has to hold HERE as well —
+    // `warns` is the accessor every strip assertion counts, and a second warn
+    // line that is not the strip's would make every `toHaveLength(1)` a
+    // statement about the engine's door instead of about the strip.
+    warns: logger.lines
+      .filter((l: any) => l.level === 'warn' && !isOperationFailedLine(l.msg))
+      .map((l: any) => l.msg),
     lines: logger.lines.filter((l: any) => l.level !== 'debug' && l.level !== 'info'),
   };
 }
@@ -164,7 +179,9 @@ async function observeInsert(data: unknown, options: Record<string, unknown> = {
   return {
     refusedCode,
     driverWrites: writes.filter((w) => w.fn === 'create').length,
-    warns: logger.lines.filter((l: any) => l.level === 'warn').map((l: any) => l.msg),
+    warns: logger.lines
+      .filter((l: any) => l.level === 'warn' && !isOperationFailedLine(l.msg))
+      .map((l: any) => l.msg),
     lines: logger.lines.filter((l: any) => l.level !== 'debug' && l.level !== 'info'),
   };
 }
@@ -201,7 +218,9 @@ describe('#8214 — a strict refusal is not reported as a commit (UPDATE)', () =
     expect(stripLineLevels(o)).toEqual(['warn']); // the level its docblock argues
     // …and the refusal itself is reported separately, at `error`, by the
     // engine — two lines, two facts, neither pretending to be the other.
-    expect(o.lines.some((l) => l.level === 'error' && l.msg === 'Update operation failed')).toBe(true);
+    expect(o.lines.some((l) => l.level === 'warn' && l.msg === 'Update operation failed')).toBe(true);
+    // …and it is no longer ALSO at `error` — the move is a move, not a copy.
+    expect(o.lines.some((l) => l.level === 'error')).toBe(false);
     expect(o.warns[0]).toContain("Field 'locked_note'");  // the field, named
     expect(o.warns[0]).toContain('{ context: { isSystem: true } }'); // a remedy
   });
@@ -248,7 +267,8 @@ describe('#8214 — the INSERT side carries the identical defect (the card marke
       }),
     );
     expect(stripLineLevels(o)).toEqual(['warn']);
-    expect(o.lines.some((l) => l.level === 'error' && l.msg === 'Insert operation failed')).toBe(true);
+    expect(o.lines.some((l) => l.level === 'warn' && l.msg === 'Insert operation failed')).toBe(true);
+    expect(o.lines.some((l) => l.level === 'error')).toBe(false);
   });
 
   it('the DEFAULT insert strip still says COMMITTED WITHOUT IT — and the row really does commit', async () => {

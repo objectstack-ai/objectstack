@@ -3508,12 +3508,34 @@ export class ObjectStackClient {
 
     /**
      * Invite a user to the organization.
+     *
+     * `role` is declared optional and STAYS optional — omitting it sends
+     * `'member'`. better-auth 1.7.2's body schema for
+     * `POST /organization/invite-member` makes `role` REQUIRED, so the shorter
+     * call the declaration advertises was refused before it reached any
+     * ObjectStack code. Measured against a real `AuthManager` (better-auth
+     * 1.7.2, organization plugin, `teams: { enabled: true }`) over a real
+     * `SqlDriver` (better-sqlite3):
+     *
+     * ```
+     * invite({ email, organizationId })                  -> 400 [body.role] Invalid input  (VALIDATION_ERROR)
+     * invite({ email, role: 'member', organizationId })   -> 200 status: 'pending'
+     * ```
+     *
+     * The default is `'member'` because {@link ObjectStackClient.organizations}
+     * `.invitations.resend` already substitutes exactly that over the same
+     * vendor endpoint: one family, one behaviour. It is also the least
+     * privileged name in the closed membership vocabulary (ADR-0108 D1 —
+     * `orgRoleGrade` floors at `member` and raises only for `owner`/`admin`),
+     * so the implicit choice cannot confer more reach than the caller asked
+     * for. Declaring `role` required instead would narrow a published request
+     * type to restate the vendor's requirement, and buy nothing.
      */
     invite: async (req: { email: string; role?: string; organizationId?: string }): Promise<OrganizationInvitationWire<'pending'>> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/invite-member`, {
         method: 'POST',
-        body: JSON.stringify(req),
+        body: JSON.stringify({ ...req, role: req.role ?? 'member' }),
       });
       return res.json();
     },

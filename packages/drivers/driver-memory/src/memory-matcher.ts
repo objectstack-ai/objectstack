@@ -271,8 +271,13 @@ function valueWithinRange(value: any, min: any, max: any): boolean {
  * An Invalid Date has no time value (`NaN`), so it equals nothing, itself
  * included — JS `Date` convention, `formula`'s answer, and ADR-0053 D-F1's
  * reading that an Invalid Date has no canonical text.
+ *
+ * ⚠️ This function decides ONE stored value against one comparand. A stored
+ * ARRAY is not one value, and {@link comparandEquals} — the entry every arm
+ * calls — decides that case before reaching here. ⛔ Do not call this directly
+ * from an arm: `==` against an array is exactly the conversion #16838 removed.
  */
-function comparandEquals(value: any, condition: any): boolean {
+function singleValueEquals(value: any, condition: any): boolean {
     if (value instanceof Date && condition instanceof Date) {
         return value.getTime() === condition.getTime();
     }
@@ -285,6 +290,69 @@ function comparandEquals(value: any, condition: any): boolean {
     // Loose equality to handle undefined/null mismatch or string/number coercion if desired.
     // But stick to == for JS loose equality which is often convenient in weakly typed queries.
     return value == condition;
+}
+
+/**
+ * [#16838] Equality as the arms ask it: one comparand against a stored value
+ * that may be an ARRAY.
+ *
+ * ## What `==` did to a stored array, and in which direction
+ *
+ * The arm used to end in `value == condition` for every stored value. `==`
+ * against an array converts it to a PRIMITIVE — `['a','b']` becomes the string
+ * `"a,b"` — and that one conversion made this face disagree with the live query
+ * path in BOTH directions on the same row:
+ *
+ * | filter | stored | this face, BEFORE | the live path (`InMemoryDriver.find` → mingo) |
+ * |---|---|---|---|
+ * | `{ tags: 'a' }`   | `['a','b']` | no row  | the row |
+ * | `{ tags: 'a,b' }` | `['a','b']` | the row | no row  |
+ *
+ * The second is the sharper one — a FALSE POSITIVE, a filter written to narrow
+ * returning a row it should not, which on an RLS read scope is a permission
+ * concern rather than a degraded filter (#3948, and the identical notes this
+ * file carries for `$null`, for the malformed `$between` shape and for an
+ * unknown operator). The first is fail-open in the other direction and just as
+ * silent: `if (!rows.length)` cannot tell "genuinely none" from "the predicate
+ * asked the wrong question".
+ *
+ * ## The rule, and why it is not a free choice
+ *
+ * A stored array is read as its ELEMENTS, and each of them is asked the
+ * question {@link singleValueEquals} asks of a scalar. So the answer for a row
+ * storing an array is the OR of the answers for the rows storing its elements —
+ * a property `memory-matcher-scalar-comparand-array-value.test.ts` asserts over
+ * its whole matrix rather than case by case.
+ *
+ * That is MongoDB's array semantics and therefore mingo's, which is this file's
+ * standing tie-break (#5240, #5324, #5328, #5374): the live path is what users
+ * of this package actually run, so the reference face converges on it cell for
+ * cell instead of inventing a third reading. The string-join reading was never
+ * a reading — no author writes `"a,b"` meaning `['a','b']`.
+ *
+ * ⛔ REFUSING the shape, the way #16810 refused an array COMPARAND, is not
+ * available here and the difference is structural, not a preference: a refusal
+ * is raised from the FILTER by `assertFilterConditionShape`, once, before any
+ * row is seen. This cell is a property of the stored ROW, so refusing it would
+ * fire or not fire depending on the data — the exact record-dependence #5240
+ * moved the shape walk out of the field loop to avoid.
+ *
+ * ⚠️ ONE level, measured and not reasoned: mingo does not descend into a nested
+ * array, so an element that is itself an array matches no scalar comparand
+ * here either (`[['a']]` against `'a'` is no row on both faces — it used to be
+ * a match on this one, by the same join).
+ *
+ * ⚠️ An array COMPARAND does not reach this composition. It is refused at the
+ * shape gate (#16810) and floored again at the top of {@link checkCondition};
+ * if a direct caller gets one here anyway it keeps the answer it had, so this
+ * change cannot be read as this package growing array-equality semantics on the
+ * comparand side — the cell #16810 declined to invent.
+ */
+function comparandEquals(value: any, condition: any): boolean {
+    if (Array.isArray(value) && !Array.isArray(condition)) {
+        return value.some((element) => !Array.isArray(element) && singleValueEquals(element, condition));
+    }
+    return singleValueEquals(value, condition);
 }
 
 /**

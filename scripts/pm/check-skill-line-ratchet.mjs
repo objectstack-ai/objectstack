@@ -874,6 +874,13 @@ export const CEILINGS = new Map([
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
   ['.claude/skills/pm-dispatch/references/lanes/spec.md', 43],
+  // domain:ui lane charter — the objectui execution seat's job description. It is
+  // the one lane the multi-repo charter ADDS beyond the domain table, and it was
+  // the only live lane in that directory carrying no versioned charter. A lane
+  // charter is read per seat session like every entry above. Set at the landed
+  // line count read from this ratchet's own run (headroom 0, same convention as
+  // above); it is a NEW file, so this is an added row and no other row moves.
+  ['.claude/skills/pm-dispatch/references/lanes/ui.md', 38],
   // repo:hotcrm lane charter (maintainer rulings 2026-08-20: exemplar-app repo —
   // platform capabilities implemented upstream, 展现平台能力, 不扩散需求, runs on
   // community edition). Set at landed line count (headroom 0, same convention).
@@ -1307,6 +1314,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/devx.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/skills.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/spec.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/ui.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/director.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/triage.md', 0],
