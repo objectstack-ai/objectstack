@@ -950,6 +950,30 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Encabezado",
         helpText: "Configuración de cabecera del panel (title, subtitle, actions)"
       },
+      "header.showTitle": {
+        label: "Mostrar título",
+        helpText: "Mostrar el título del panel en la cabecera"
+      },
+      "header.showDescription": {
+        label: "Mostrar descripción",
+        helpText: "Mostrar la descripción del panel en la cabecera"
+      },
+      "header.actions": {
+        label: "Botones de acción",
+        helpText: "Botones de acción mostrados en la cabecera"
+      },
+      "header.actions.label": {
+        label: "Etiqueta"
+      },
+      "header.actions.actionUrl": {
+        label: "URL de la acción"
+      },
+      "header.actions.actionType": {
+        label: "Tipo de acción"
+      },
+      "header.actions.icon": {
+        label: "Icono"
+      },
       widgets: {
         label: "Widgets del panel",
         helpText: "Widgets del panel con posición y tamaño"

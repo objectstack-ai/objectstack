@@ -35,7 +35,7 @@
  *
  * The text face folds two more advisory streams into the same `⚠` block that
  * the JSON payload carries as its own top-level fields instead — `conversions`
- * (ADR-0087 D2 load-time conversion notices) and `specVersionGap`. Those are a
+ * (ADR-0087 D2 load-time conversion notices) and `protocolVersionGap`. Those are a
  * declared difference in SHAPE, not a drop: the information is reachable on both
  * faces. Rather than silently ignoring them, every fixture ASSERTS both are
  * empty, so the exact set equality below is honest about its scope — and if a
@@ -242,12 +242,12 @@ describe('#10953 — text and --json carry the same warning set', () => {
       const payload = JSON.parse(json.stdout) as {
         warnings?: unknown;
         conversions?: unknown;
-        specVersionGap?: unknown;
+        protocolVersionGap?: unknown;
       };
 
       // Scope declaration, asserted rather than assumed — see the header.
       expect(payload.conversions, 'fixture must raise no conversion notices').toEqual([]);
-      expect(payload.specVersionGap, 'fixture must raise no spec-version gap').toBeNull();
+      expect(payload.protocolVersionGap, 'fixture must raise no protocol-version gap').toBeNull();
 
       const lines = textWarnings(text.stdout);
       const messages = jsonWarnings(payload);

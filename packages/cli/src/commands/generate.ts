@@ -2,6 +2,7 @@
 
 import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
+import { createHash } from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -17,7 +18,13 @@ import type { FieldType } from '@objectstack/spec/data';
 // `computeTenantField` — are spelled here in the driver's own terms ON TOP of
 // these, so the part that can be shared is shared and only the part that
 // genuinely lives on `driver-sql` is mirrored.
-import { isTenancyDisabled, isUniqueDeclared, numericColumnFor } from '@objectstack/spec/data';
+import {
+  isNowDefaultToken,
+  isRuntimeDefaultToken,
+  isTenancyDisabled,
+  isUniqueDeclared,
+  numericColumnFor,
+} from '@objectstack/spec/data';
 import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, isReportedError, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
 import { findEmissionParseFailures } from '../utils/emitted-source-parses.js';
@@ -1336,6 +1343,163 @@ function declaredNotNull(field: unknown): boolean {
 }
 
 /**
+ * The physical column DEFAULT a field's `defaultValue` calls for — or, exactly
+ * as deliberately, none at all.
+ *
+ * `SqlDriver.applyDeclaredColumnDefault` is the single place a `defaultValue`
+ * becomes DDL on the platform side, and this is its decision, format-free. Both
+ * emitters below render THIS verdict, so the two formats cannot answer the
+ * question differently from each other — which is the shape #16294 measured:
+ * both generators agreed with each other and disagreed with the platform.
+ *
+ * The driver's four cases, in its own order:
+ *
+ *   1. **`'NOW()'`** — the one runtime token with a database counterpart,
+ *      translated to the driver-native canonical default (`nowColumnDefault`).
+ *      That translation is TYPE-branched, which is why the three `now-*`
+ *      verdicts are distinguished here rather than collapsed: a bare
+ *      `CURRENT_TIMESTAMP` in a `date` column resolves the calendar day in the
+ *      SERVER's timezone (a UTC-12 server records YESTERDAY, #4022) and in a
+ *      `time` column resolves it in the server's or the session's clock (#3994).
+ *   2. **Any other runtime token** (`current_user`, and whatever the spec adds
+ *      to `DEFAULT_VALUE_TOKENS` later) — resolved by the ENGINE at insert time
+ *      against the request context, with NO database counterpart, so nothing is
+ *      emitted. That omission is the contract: the engine deliberately leaves a
+ *      `current_user` field UNSET when there is no authenticated user, and a
+ *      column DEFAULT silently overrode that decision by writing the literal
+ *      string `'current_user'` into `lookup('sys_user')` columns (#4560).
+ *   3. **Objects** — Expression envelopes (`{ dialect, source }`), evaluated
+ *      app-side; never a column DEFAULT.
+ *   4. **Everything else** — a real literal, emitted verbatim.
+ *
+ * ⛔ The two token predicates are IMPORTED, never re-spelled: `isNowDefaultToken`
+ * is case- and whitespace-tolerant, and `isRuntimeDefaultToken` is what makes a
+ * token added tomorrow degrade to "no column default" instead of leaking its own
+ * spelling into the database. A transcription here would be a second vocabulary
+ * for one contract — the defect class this family of pins exists to close.
+ *
+ * ## What this deliberately does NOT emit, each because the driver does not
+ *
+ * - **A `multiple: true` field.** `createColumn` short-circuits on the flag and
+ *   returns before both the nullability line and this one, so a multi-value
+ *   column carries no DEFAULT on the platform either.
+ * - **An option-level `default: true`** on a `select`. `applyDeclaredColumnDefault`
+ *   states at length why that stays out of DDL (one resolver owns the precedence;
+ *   the `multiple` shape has no scalar DDL form; a retrofit would divide
+ *   deployments silently) — ⛔ do not restate the reasoning here, read it there.
+ * - **A non-finite number**, and any `typeof` a parsed config cannot hold at all
+ *   (`symbol`, `function`). `Infinity` and `NaN` have no literal that round-trips
+ *   through a numeric column; named rather than left to the renderer so the
+ *   omission is a decision and not a malformed statement.
+ */
+type DeclaredColumnDefault =
+  | { kind: 'none' }
+  | { kind: 'now' }
+  | { kind: 'now-date' }
+  | { kind: 'now-time' }
+  | { kind: 'literal'; value: string | number | bigint | boolean };
+
+function declaredColumnDefault(field: unknown, type: string): DeclaredColumnDefault {
+  const declaring = field as { defaultValue?: unknown; multiple?: unknown } | undefined;
+  if (declaring?.multiple) return { kind: 'none' };
+  const dv = declaring?.defaultValue;
+  if (dv === undefined || dv === null) return { kind: 'none' };
+  if (isNowDefaultToken(dv)) {
+    if (type === 'date') return { kind: 'now-date' };
+    if (type === 'time') return { kind: 'now-time' };
+    return { kind: 'now' };
+  }
+  if (isRuntimeDefaultToken(dv)) return { kind: 'none' };
+  if (typeof dv === 'object') return { kind: 'none' };
+  if (typeof dv === 'number' && !Number.isFinite(dv)) return { kind: 'none' };
+  if (typeof dv !== 'string' && typeof dv !== 'number' && typeof dv !== 'bigint' && typeof dv !== 'boolean') {
+    return { kind: 'none' };
+  }
+  return { kind: 'literal', value: dv };
+}
+
+/**
+ * {@link declaredColumnDefault} as the `--format sql` emitter spells it: the
+ * ` DEFAULT …` tail of a column definition, or `''`.
+ *
+ * PostgreSQL, and only PostgreSQL — the same claim `generateMigrationSql`'s own
+ * header already makes for `JSONB` / `TIMESTAMPTZ` / `CURRENT_TIMESTAMP`. The
+ * three `now-*` spellings are `SqlDriver.nowColumnDefault`'s Postgres arm, and
+ * `generate-declared-column-default.pin.test.ts` recomputes them from the
+ * driver's own builder rather than trusting these literals.
+ *
+ * ⭐ EVERY literal is quoted — number and boolean included — and that is a
+ * measurement, not a style choice. knex binds every default it is given as a
+ * quoted literal (`default '42'`, `default '9.99'`, `default '1'` for `true`),
+ * which is the form the driver's own tables therefore carry, and the two
+ * spellings do NOT collapse: PostgreSQL records an unquoted `DEFAULT 42` on a
+ * `DECIMAL(18,2)` column as `42` and the quoted one as `'42'::numeric`. Same
+ * value, permanently different default TEXT — the row #15521 already paid for
+ * once, where a schema differ comparing default text reported the audit pair
+ * forever. Booleans are the case where quoting looks wrong and is not: `'1'` and
+ * `'0'` are what knex emits, PostgreSQL normalises both to `true` / `false`, and
+ * a SQLite table built by the driver carries the quoted form verbatim — so one
+ * rule agrees with the driver on both dialects where two rules agree on one.
+ *
+ * The quote itself is doubled, SQL's own escape and the form
+ * `information_schema.column_default` reads back for the driver's own column.
+ */
+function columnDefaultSql(field: unknown, type: string): string {
+  const declared = declaredColumnDefault(field, type);
+  switch (declared.kind) {
+    case 'none': return '';
+    case 'now': return ' DEFAULT CURRENT_TIMESTAMP';
+    case 'now-date': return " DEFAULT (timezone('utc', now())::date)";
+    case 'now-time': return " DEFAULT (timezone('utc', now())::time(3))";
+    case 'literal': {
+      const bound = typeof declared.value === 'boolean'
+        ? (declared.value ? '1' : '0')
+        : String(declared.value);
+      return ` DEFAULT '${bound.replace(/'/g, "''")}'`;
+    }
+  }
+}
+
+/**
+ * {@link declaredColumnDefault} as the `--format ts` emitter spells it: the
+ * `.defaultTo(…)` link of the knex column chain, or `''`.
+ *
+ * Appended AFTER the nullability call because that is the order
+ * `SqlDriver.createColumn` applies them in — `col.notNullable()`, then
+ * `applyDeclaredColumnDefault`. knex builds both as independent modifiers on one
+ * `ColumnBuilder`, so there is no coupling to reconcile on this line; the
+ * coupling the audit-column block below records belongs to
+ * `table.timestamps(true, true)` alone — that HELPER compiles its second
+ * argument to `.notNullable().defaultTo(…)` and offers no spelling for one
+ * without the other, which is why those two columns are written out longhand.
+ * ⛔ Do not read that note as a constraint here.
+ *
+ * The two expression defaults are `db.raw` for the reason
+ * `generate-declared-unique-index.pin.test.ts` already measured one property
+ * over: knex's builder has no expression spelling, and `db.raw` is the seam the
+ * driver itself uses. They carry the PostgreSQL arm — this file's declared claim
+ * — so a `date`/`time` field defaulted to `NOW()` is the one emitted line that
+ * is not dialect-portable, and it is the line whose portable spelling
+ * (`db.fn.now()`) is measurably WRONG on the dialect the file does claim.
+ *
+ * A string is emitted through `JSON.stringify`, a valid TypeScript expression
+ * for every string, which escapes the quote, the backslash and the newline an
+ * authored default may legally contain. This emitter single-quotes IDENTIFIERS
+ * it has validated; a default VALUE is neither.
+ */
+function columnDefaultTs(field: unknown, type: string): string {
+  const declared = declaredColumnDefault(field, type);
+  switch (declared.kind) {
+    case 'none': return '';
+    case 'now': return '.defaultTo(db.fn.now())';
+    case 'now-date': return '.defaultTo(db.raw("(timezone(\'utc\', now())::date)"))';
+    case 'now-time': return '.defaultTo(db.raw("(timezone(\'utc\', now())::time(3))"))';
+    case 'literal':
+      return `.defaultTo(${typeof declared.value === 'string' ? JSON.stringify(declared.value) : String(declared.value)})`;
+  }
+}
+
+/**
  * The widest `varchar(n)` any dialect this platform speaks will declare —
  * `SqlDriver.MAX_VARCHAR_CHARS`, whose own comment records the measurement
  * (MySQL 8.0.46 refuses `varchar(16384)` with `ERROR 1074`; it is the LOWEST of
@@ -1547,12 +1711,20 @@ function tenantFieldOf(obj: Record<string, any>): string | null {
  *
  * ⭐ This is what the text family branches on, and it is read off the OBJECT'S
  * DECLARATIONS — `field.unique` and `indexes[]` — never off anything either
- * generator emits. A generated migration still emits no `CREATE INDEX`; that is
- * a fact about this generator's OUTPUT and it is not the question. The driver
- * asks what the object DECLARES, so a `Field.text({ unique: true, maxLength:
- * 100 })` is `varchar(100)` on the platform and must be `varchar(100)` here.
- * Reasoning from the emitted output instead ("no index is emitted, so nothing
- * is ever keyed") is how this arm was first got wrong.
+ * generator emits. The driver asks what the object DECLARES, so a
+ * `Field.text({ unique: true, maxLength: 100 })` is `varchar(100)` on the
+ * platform and must be `varchar(100)` here. Reasoning from the emitted output
+ * instead ("no index is emitted, so nothing is ever keyed") is how this arm was
+ * first got wrong.
+ *
+ * ⚠️ That reasoning is now wrong in a SECOND way, and the sentence that used to
+ * stand here — "a generated migration still emits no `CREATE INDEX`" — is no
+ * longer true: {@link uniqueIndexesForObject} emits the field-level ones
+ * (#16317). It is still not the question. The declaration sets this function
+ * reads are strictly WIDER than what that emitter emits — object-level
+ * `indexes[]` and the organization-scoped expression form are declared here and
+ * emitted nowhere — so deriving one from the other in either direction
+ * re-creates the defect this warning was first written for.
  *
  * ⚠️ Deliberately NOT filtered by which columns this generator goes on to emit,
  * for the same reason the driver's is not filtered by `physicalColumns`:
@@ -1611,6 +1783,156 @@ function indexKeyColumns(obj: Record<string, any>): ReadonlySet<string> {
     }
   }
   return out;
+}
+
+/**
+ * `driver-sql`'s `buildIndexName`, for a generated migration.
+ *
+ * The names have to agree character for character or the two producers do not
+ * converge: `syncDeclaredIndexes` skips an index whose NAME it already finds on
+ * the table, so a generated table carrying the same constraint under a
+ * different identifier gets a SECOND, redundant index on the first boot — and
+ * `schema-drift.ts` then reports the generator's one as an orphan to drop.
+ *
+ * Transcribed rather than imported for the reason every mirror in this file is
+ * (#5726): these generators are SYNCHRONOUS and a CLI production module may
+ * only `await import()` a driver package. `generate-declared-unique-index.pin.test.ts`
+ * is what keeps the transcription honest — it recomputes every name from the
+ * driver's own exported `uniqueIndexesFromFields` and compares.
+ */
+/**
+ * `driver-sql`'s `GLOBAL_TENANT` — the sentinel the ADR-0120 D3 NULL-safe
+ * organization key part folds a NULL organization onto.
+ *
+ * Transcribed for the same #5726 reason as the rest of this block, and it
+ * reaches only a COMMENT in the generated file: this format emits no expression
+ * key part, so the sentinel is here to NAME the index that was not emitted, not
+ * to build one. The pin compares it against the driver's own export.
+ */
+const GLOBAL_TENANT_KEY = '__global__';
+
+const INDEX_NAME_MAX = 60;
+/** Chars kept from `<prefix>_<table>` before the `_<hash8>` suffix of a truncated name. */
+const INDEX_NAME_HEAD = INDEX_NAME_MAX - 9;
+
+function buildIndexName(table: string, columns: string[], unique: boolean): string {
+  const prefix = unique ? 'uniq' : 'idx';
+  const base = `${prefix}_${table}_${columns.join('_')}`;
+  if (base.length <= INDEX_NAME_MAX) return base;
+  const hash = createHash('sha1').update(base).digest('hex').slice(0, 8);
+  return `${`${prefix}_${table}`.slice(0, INDEX_NAME_HEAD)}_${hash}`;
+}
+
+/** One index a FIELD-LEVEL `unique` declaration asks for. */
+interface MirroredUniqueIndex {
+  /** {@link buildIndexName}'s answer — the identifier the driver would use. */
+  name: string;
+  /** The key parts, in the driver's order (tenant column first when scoped). */
+  columns: string[];
+  /**
+   * The tenant column whose key part materializes as the ADR-0120 D3 NULL-safe
+   * expression `COALESCE(<column>, '__global__')` rather than as a bare column,
+   * or `null` for a plain single-column unique. An expression key part is what
+   * neither format emits — see {@link uniqueIndexesForObject}.
+   */
+  nullSafeColumn: string | null;
+}
+
+/**
+ * `driver-sql`'s `uniqueIndexesFromFields` — the FIELD-LEVEL `unique`
+ * declarations of one object, as concrete index descriptors (#16317).
+ *
+ * ⭐ This is the half of the answer {@link indexKeyColumns} already computed and
+ * threw away. That function resolves the same declarations into a flat SET of
+ * key COLUMNS, because sizing a column is all it was asked for; the index those
+ * same declarations imply needs the columns GROUPED, ordered and named, which
+ * is what this returns. The two read the same three predicates —
+ * {@link isUniqueScopeDeclared}, {@link isOrganizationScopedUnique} and
+ * {@link tenantFieldOf} — so they cannot disagree about which fields are keyed.
+ *
+ * Scoping rule, transcribed from the driver (ADR-0120 D1/D3):
+ *   - `unique: 'global'` → single-column `(field)`, platform-wide.
+ *   - `unique: true` / `'organization'` on a tenant-scoped table → composite
+ *     `(COALESCE(tenantField, '__global__'), field)`, tenant column FIRST.
+ *   - `unique: true` / `'organization'` with no tenant column → `(field)`.
+ *   - a unique declaration ON the tenant column itself stays single-column —
+ *     `(organization_id, organization_id)` is not a constraint.
+ *
+ * ⛔ OBJECT-LEVEL `indexes[]` is deliberately absent here. `normalizeDeclaredIndex`
+ * is the driver's other normalizer and reads the same token differently — a
+ * declared `unique: true` is taken VERBATIM as global there, a maintainer ruling
+ * rather than an oversight — so it is a second transcription with a second pin,
+ * not a loop added to this one. A generated migration still emits nothing for
+ * `indexes[]`.
+ */
+function uniqueIndexesForObject(obj: Record<string, any>): MirroredUniqueIndex[] {
+  const fields = (obj?.fields ?? {}) as Record<string, any>;
+  const table = String(obj?.name || 'unknown');
+  const tenantField = tenantFieldOf(obj);
+  const out: MirroredUniqueIndex[] = [];
+  for (const [name, field] of Object.entries(fields)) {
+    if (!isUniqueScopeDeclared(field?.unique)) continue;
+    const scoped =
+      isOrganizationScopedUnique(field.unique) && tenantField != null && tenantField !== name;
+    const columns = scoped ? [tenantField as string, name] : [name];
+    out.push({
+      name: buildIndexName(table, columns, true),
+      columns,
+      nullSafeColumn: scoped ? (tenantField as string) : null,
+    });
+  }
+  return out;
+}
+
+/**
+ * The subset of {@link uniqueIndexesForObject} a format may actually emit, and
+ * a line for every one it may not.
+ *
+ * Two exclusions, and BOTH are the driver's own behaviour rather than a
+ * convenience here:
+ *
+ *   1. A key part with no column. `syncDeclaredIndexes` skips a declared index
+ *      whose columns are not in `physicalColumns` and warns; the generator's
+ *      equivalent of "not materialized" is a field this file emits no column
+ *      for — a VIRTUAL `formula` (#14828). Emitting the index anyway produces
+ *      DDL that refuses to run at all.
+ *   2. An EXPRESSION key part. `COALESCE(<tenant>, '__global__')` is what the
+ *      driver builds through raw DDL precisely because knex's schema builder
+ *      cannot express it, and it is NOT interchangeable with the bare composite:
+ *      under SQL's NULL-distinct UNIQUE a bare `(organization_id, field)`
+ *      enforces NOTHING on rows without an organization, which on a
+ *      single-tenant stack is every row (#5030). So emitting the bare composite
+ *      here would ADVERTISE a constraint the table does not carry — worse than
+ *      emitting nothing, and the failure mode Prime Directive #10 names.
+ *
+ * ⛔ Neither exclusion is silent. A skipped index is named in the generated file
+ * itself, with what it would have keyed, because the operator reading that file
+ * is the only person who can act on it — "Absence must be loud".
+ */
+function partitionUniqueIndexes(
+  obj: Record<string, any>,
+  emittedColumns: ReadonlySet<string>,
+): { emit: MirroredUniqueIndex[]; skipped: Array<{ index: MirroredUniqueIndex; why: string }> } {
+  const emit: MirroredUniqueIndex[] = [];
+  const skipped: Array<{ index: MirroredUniqueIndex; why: string }> = [];
+  for (const index of uniqueIndexesForObject(obj)) {
+    const missing = index.columns.filter((c) => !emittedColumns.has(c));
+    if (missing.length > 0) {
+      skipped.push({ index, why: `no column is generated for ${missing.join(', ')}` });
+      continue;
+    }
+    if (index.nullSafeColumn !== null) {
+      skipped.push({
+        index,
+        why:
+          `its organization key part is COALESCE("${index.nullSafeColumn}", '${GLOBAL_TENANT_KEY}'), ` +
+          'an expression key part this format does not emit; the platform creates it at boot',
+      });
+      continue;
+    }
+    emit.push(index);
+  }
+  return { emit, skipped };
 }
 
 /**
@@ -1758,9 +2080,14 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
     // #16091 — resolved once per object, off the object's own declarations. See
     // {@link indexKeyColumns}: the text family's width depends on it.
     const keyColumns = indexKeyColumns(obj);
+    // #16317 — which columns this table actually gets, so a declared unique
+    // index over a column no field materialises is skipped rather than emitted
+    // as DDL that cannot run. Filled by the loop below, read after it.
+    const emittedColumns = new Set<string>(['id']);
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
+      const fType = String(fieldDef.type || 'text');
       const sqlType = fieldTypeToSql(
-        String(fieldDef.type || 'text'),
+        fType,
         !!fieldDef.multiple,
         fieldDef.maxLength,
         keyColumns.has(fieldName),
@@ -1773,7 +2100,13 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
       // storage constraint, never from `required`. See {@link declaredNotNull}
       // for the driver's own recorded reason; ⛔ do not restate it here.
       const notNull = declaredNotNull(fieldDef) ? ' NOT NULL' : '';
-      fieldLines.push(`  "${fieldName}" ${sqlType}${notNull}`);
+      // [#16294 cause 3] The column DEFAULT the field's `defaultValue` calls
+      // for. See {@link declaredColumnDefault} for the driver's own four cases
+      // and for the three it deliberately does not emit; ⛔ do not restate them
+      // here. Ordered after NOT NULL to match `createColumn`'s own sequence.
+      const columnDefault = columnDefaultSql(fieldDef, fType);
+      fieldLines.push(`  "${fieldName}" ${sqlType}${notNull}${columnDefault}`);
+      emittedColumns.add(fieldName);
     }
 
     // #15521 — TIMESTAMPTZ, not TIMESTAMP. Bare `TIMESTAMP` is `timestamp
@@ -1831,8 +2164,34 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
     // the driver moves it fails there instead of leaving these quietly wrong.
     fieldLines.push('  "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP');
     fieldLines.push('  "updated_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP');
+
+    // #16317 — the object's FIELD-LEVEL `unique` declarations, as the table
+    // constraints `driver-sql` creates for the same object. Emitted as an
+    // inline `CONSTRAINT ... UNIQUE` rather than as a following `CREATE UNIQUE
+    // INDEX` for two reasons: it is what knex's `table.unique(columns, {
+    // indexName })` — the driver's own call — compiles to on PostgreSQL, so
+    // both catalogs agree (`pg_indexes` AND `pg_constraint`, not just the
+    // first); and it stays inside this statement's `IF NOT EXISTS`, which a
+    // separate `ALTER TABLE ... ADD CONSTRAINT` has no spelling for.
+    //
+    // Before this, two rows with the same value in a `unique: true` field were
+    // REFUSED by the platform's table and ACCEPTED by both generated ones, with
+    // nothing reporting it — measured on live PostgreSQL 16.13, `pg_indexes`
+    // for one object driven through all three producers:
+    //
+    //   driver   probe_pkey, uniq_probe_keyed_unique
+    //   sql gen  probe_pkey
+    //   ts gen   probe_pkey
+    const { emit, skipped } = partitionUniqueIndexes(obj, emittedColumns);
+    for (const index of emit) {
+      const columns = index.columns.map((c) => `"${c}"`).join(', ');
+      fieldLines.push(`  CONSTRAINT "${index.name}" UNIQUE (${columns})`);
+    }
     lines.push(fieldLines.join(',\n'));
     lines.push(');');
+    for (const { index, why } of skipped) {
+      lines.push(`-- NOT EMITTED: UNIQUE index "${index.name}" on (${index.columns.join(', ')}) — ${why}.`);
+    }
     lines.push('');
   }
 
@@ -1876,6 +2235,9 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
     // {@link indexKeyColumns}: the text family's width depends on it.
     const keyColumns = indexKeyColumns(obj);
 
+    // #16317 — which columns this table actually gets; see the sql format above.
+    const emittedColumns = new Set<string>(['id']);
+
     lines.push(`  await db.schema.createTable('${tableName}', (table: any) => {`);
     // #15040 — the driver's own line for this column, emitted verbatim:
     // `table.string('id').primary()`. See `generateMigrationSql` above for the
@@ -1901,6 +2263,7 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
       // and not the spec's `isMultiValueField` value predicate.
       if (fieldDef.multiple) {
         lines.push(`    table.jsonb('${fieldName}')${required};`);
+        emittedColumns.add(fieldName);
         continue;
       }
 
@@ -2069,7 +2432,10 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
       // #14828 — the virtual answer: emit nothing at all for this field.
       if (colMethod === null) continue;
 
-      lines.push(`    ${colMethod}${required};`);
+      // [#16294 cause 3] The same verdict the sql format above renders, in
+      // knex's spelling. See {@link columnDefaultTs}.
+      lines.push(`    ${colMethod}${required}${columnDefaultTs(fieldDef, fType)};`);
+      emittedColumns.add(fieldName);
     }
 
     // #15521 — `driver-sql`'s own audit-column line, emitted verbatim modulo
@@ -2084,6 +2450,23 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
     // nullability moves here; the SQL format above pays the default-text row.
     lines.push("    table.timestamp('created_at').defaultTo(db.fn.now());");
     lines.push("    table.timestamp('updated_at').defaultTo(db.fn.now());");
+
+    // #16317 — the same FIELD-LEVEL `unique` declarations the sql format above
+    // emits, through the driver's OWN call: `syncDeclaredIndexes` builds a
+    // plain unique through `table.unique(columns, { indexName: name })`, and
+    // this is that line with `table` bound to the create-table builder instead
+    // of an alter-table one. The `indexName` is not decoration — it is what
+    // makes the driver recognise the constraint as already present on its first
+    // boot against a table this migration created, instead of adding a second
+    // one under its own name and then reporting this one as an orphan.
+    const { emit, skipped } = partitionUniqueIndexes(obj, emittedColumns);
+    for (const index of emit) {
+      const columns = index.columns.map((c) => `'${c}'`).join(', ');
+      lines.push(`    table.unique([${columns}], { indexName: '${index.name}' });`);
+    }
+    for (const { index, why } of skipped) {
+      lines.push(`    // NOT EMITTED: UNIQUE index '${index.name}' on (${index.columns.join(', ')}) — ${why}.`);
+    }
     lines.push('  });');
   }
 

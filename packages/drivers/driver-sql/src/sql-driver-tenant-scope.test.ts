@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, assert } from 'vitest';
 import { ObjectSchema } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
 
@@ -76,12 +76,14 @@ describe('SqlDriver tenant scope (organization_id)', () => {
       // org_b tries to update org_a's a1 → no-op
       await driver.update('account', 'a1', { tier: 'compromised' }, { tenantId: 'org_b' });
       const a1 = await driver.findOne('account', { where: { id: 'a1' } });
+      assert(a1 !== null, 'findOne answered the not-found arm for a seeded id');
       expect(a1.tier).toBe('gold');
     });
 
     it('updates own rows fine', async () => {
       await driver.update('account', 'a1', { tier: 'platinum' }, { tenantId: 'org_a' });
       const a1 = await driver.findOne('account', { where: { id: 'a1' } });
+      assert(a1 !== null, 'findOne answered the not-found arm for a seeded id');
       expect(a1.tier).toBe('platinum');
     });
   });
@@ -491,11 +493,13 @@ describe('SqlDriver tenant scope (organization_id)', () => {
       const unionOpts = { tenantId: 'org_a', tenantIds: ['org_a', 'org_b'] } as any;
       await driver.update('account', 'b1', { tier: 'platinum' }, unionOpts);
       const b1 = await driver.findOne('account', { where: { id: 'b1' } });
+      assert(b1 !== null, 'findOne answered the not-found arm for a seeded id');
       expect(b1.tier).toBe('platinum');
       // A tenant OUTSIDE the set stays untouchable — the widened wall still walls.
       await driver.create('account', { id: 'c1', organization_id: 'org_c', name: 'C1', tier: 'gold' });
       await driver.update('account', 'c1', { tier: 'compromised' }, unionOpts);
       const c1 = await driver.findOne('account', { where: { id: 'c1' } });
+      assert(c1 !== null, 'findOne answered the not-found arm for a seeded id');
       expect(c1.tier).toBe('gold');
     });
 

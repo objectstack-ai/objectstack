@@ -108,6 +108,25 @@ export interface LifecycleObjectLike {
   name: string;
   lifecycle?: Lifecycle;
   fields?: Record<string, unknown>;
+  /**
+   * [#16729] The object's tenancy posture, DECLARED here because the Archiver
+   * hands this very object to a driver that reads the key
+   * (`cold.syncSchema(object, obj)` below), and every driver resolves a
+   * uniqueness partition from it: `tenancy.enabled: false` means one row per
+   * INSTALL, its absence means one row per organization.
+   *
+   * The registry objects that reach the Archiver at runtime carry the block, so
+   * the pass-through already worked — but this type is PUBLISHED, and without
+   * the key an author writing a fresh `LifecycleObjectLike` literal (a test
+   * double, an embedder's registry) is refused by the type for spelling
+   * `tenancy` and therefore omits it. The object then reaches `syncSchema` as
+   * the `{ name, fields }` shape, which is exactly the partial re-registration
+   * `SqlDriver.computeAndRecordTenantField`'s sticky record exists to survive.
+   * Declaring the key is the same correction #16711 made where the shard leaf
+   * narrowed `indexes` and `tenancy` off the object it was handed: a type must
+   * not refuse a key the code below it reads.
+   */
+  tenancy?: { enabled?: boolean; tenantField?: string } | null;
 }
 
 export interface LifecycleLoggerLike {

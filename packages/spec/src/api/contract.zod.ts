@@ -90,6 +90,139 @@ export const ApiErrorSchema = lazySchema(() => z.object({
     + 'producer opted in at throw time; consumers render it to end users and keep their '
     + 'generic substitution for anything unmarked. Status-agnostic; never replaces `message`.',
   ),
+  /**
+   * The producer's declaration that the 5xx it named is a deliberate REFUSAL
+   * whose `message` is authored for the caller — so the boundary keeps that
+   * message verbatim instead of withholding it (#16335; director ruling,
+   * decision batch #58, 2026-09-06, option C: the refusal/fault distinction
+   * is a producer-side declaration on this envelope, not a status heuristic
+   * and not a second allow-list).
+   *
+   * ## The three cases, side by side
+   *
+   * The 5xx message discipline (#5811 / #5667 / #5437) has one rule per
+   * case. This field adds the third row; the first two are unchanged, and
+   * the second is still the DEFAULT:
+   *
+   * | the throw declares | `message` on the wire |
+   * |---|---|
+   * | **undeclared 5xx** — no `status`; the boundary's fallback 500 | HEURISTIC: `looksLikeInternalErrorLeak` (`@objectstack/types`) decides per message — our own bare `Error` stays legible (#5667), driver prose is withheld |
+   * | **declared fault** — `status >= 500`, with or without a `code`, nothing here | WITHHELD at every arm that reads the declaration (three, named below): `INTERNAL_ERROR_MESSAGE` in the body, `code` survives when declared, the full text reaches the operator's log (`logWithheldServerFault`, #5811) |
+   * | **declared refusal** — `status >= 500`, a `code`, and `refusal: true` | KEPT verbatim, bounded exactly as a 4xx message is (#5423), and not logged as an unhandled fault — once the three arms below read the field |
+   *
+   * A 4xx is addressed to the caller already, so the field is redundant on
+   * it and boundaries ignore it there. A throw that declares no `status`
+   * qualifies nothing — the field qualifies a DECLARED status, it never
+   * invents one — so the heuristic row runs.
+   *
+   * ## Semantics
+   *
+   *  - **Producer-side, at throw time.** The producer that composes a 5xx
+   *    refusal for its caller sets `refusal: true` on the thrown error beside
+   *    `status` and `code`. The measured case is the
+   *    `/meta/:type/:name/references` door's ADR-0110 D3 `501` ("Ask the
+   *    owning object instead: …"), which reached the wire as
+   *    `"Internal server error"` until the route-local patch in PR #16143,
+   *    which #16146 retires. Platform and driver code never sets it on a
+   *    fault.
+   *  - **Presence IS the declaration.** `true` is the only value. A fault has
+   *    its own spelling already (`status` + `code`, nothing here), so
+   *    `refusal: false` fails parse rather than becoming a third state every
+   *    consumer would have to interpret.
+   *  - **Read once, at the withhold arms — THREE, and not all in one
+   *    package.** Measured on the tree at #16335, the arms that withhold a
+   *    declared 5xx's prose BECAUSE it was declared are:
+   *      1. `@objectstack/rest` `declaredServerFaultAnswer`
+   *         (`error-response.ts`; its only two callers are the `/data`
+   *         classifier, #11718, which wraps it in `withDeclaredUserMessage`,
+   *         and the analytics dataset door, which calls it bare — so
+   *         `userMessage` rides the first and not the second);
+   *      2. `@objectstack/rest` `resolveErrorResponse`'s own 5xx passthrough
+   *         arm, reached through `handleRouteError` / `sendThrownError`. The
+   *         `/references` throw spells `status`, so it takes that function's
+   *         status passthrough into this arm; a `statusCode`-spelled 5xx
+   *         falls to `mapDataError` and arm 1 instead. Arms 1 and 2 compose
+   *         the same bytes;
+   *      3. `@objectstack/runtime` `errorResponseBase`
+   *         (`dispatcher-plugin.ts`), the kernel dispatcher plugin's thrown
+   *         exit, gated on `serverFaultProvenance(thrown) === 'declared'`
+   *         (`@objectstack/types`): any 5xx with a declared `status` or
+   *         `statusCode`, `code` or not. `objectstack serve` mounts it
+   *         (`createDispatcherPlugin`), it answers `POST /analytics/query`
+   *         among the dispatcher's routes, and it emits `ErrorResponseSchema`
+   *         — the envelope `EnhancedApiErrorSchema` describes. It never
+   *         consults arm 1, so moving the REST pair leaves it withholding.
+   *    Every other 5xx door on the tree (`HttpDispatcher`'s returned exit,
+   *    `endpointErrorAnswer`, `package-routes`' `sendThrownError`, the hono
+   *    auth door) reads no declaration and withholds by the leak heuristic
+   *    alone — the second row of the table above is the rule at these three
+   *    arms, not a platform-wide invariant. Each of the three keeps `message`
+   *    when the field is present and withholds it otherwise; the relay half
+   *    must move ALL THREE — #16146 for the REST pair, its sub-issue #17153
+   *    for the runtime exit. Until they land, a declared refusal is still
+   *    withheld at the wire, and this key is the contract they land against.
+   *
+   * ## Why a flag beside `message` is the right shape HERE, when
+   * ## `userMessage` above refused exactly that shape
+   *
+   * `userMessage` is a text-carrying field rather than a boolean because its
+   * consumer is the END-USER renderer — across the wire and every boundary
+   * in between — and #3821's protection (generic substitution unless marked)
+   * has to hold against a boundary that rewraps or substitutes `message` on
+   * the way: a mark separated from its text could be promoted onto platform
+   * prose. This field marks something else, and that argument does not
+   * transfer:
+   *
+   *  - **It qualifies the STATUS declaration, not a text.** It says "the
+   *    5xx I declared is a refusal", the way `code` already qualifies
+   *    `status` for `declaresServerFault`. Its only consumers are the three
+   *    withhold arms named above, each of which reads `status`, `code` and
+   *    this flag off the SAME thrown object in ONE read, before it composes a
+   *    body — the mark and the message it releases are never apart. There is no second channel to
+   *    promote prose into: the flag only switches the withhold off, and what
+   *    then reaches the wire is the same `message` a declared 4xx already
+   *    discloses.
+   *  - **A rewrap is fail-closed.** A boundary that rewraps `message` into a
+   *    NEW error drops the flag with it, and the 5xx is withheld as a fault.
+   *    The one rewrap that could carry the flag is one that also copies
+   *    `status` onto the rewrapped text — and a copied 4xx `status` already
+   *    discloses that text today, so this field adds no exposure a declared
+   *    status does not have. Measured on the tree at #16335: the QuickJS door
+   *    carries a CLOSED list of fields out of the VM
+   *    (`SANDBOX_ERROR_PASSTHROUGH`, `quickjs-runner.ts`) and this field is
+   *    not on it, so a sandboxed body's flag never leaves the VM and its 5xx
+   *    stays withheld; of the `Object.assign` error-composition sites under
+   *    `packages/**` (non-test), the ones that copy anything off a caught
+   *    error copy only `code` and/or `cause` (`drivers/driver-sql/src/sql-driver.ts`,
+   *    `objectql/src/engine.ts`'s autonumber-collision rewrap) and never
+   *    `status`, so the withhold still applies to them; the two overlay-delete
+   *    rewraps in `metadata-protocol/src/protocol.ts` DO copy `status` (with
+   *    a 500 fallback) onto a rewritten `message` and carry `code` and
+   *    `userMessage` through `carryCatalogedErrorCode` /
+   *    `carryDeclaredUserMessage` — nothing carries this flag, so a refusal
+   *    crossing them is withheld as a fault, and ⛔ the relay must not add a
+   *    `carryRefusal` there: that would put `overlayDeleteFailureMessage`'s
+   *    platform prose on the flag channel, the promotion the `userMessage`
+   *    note above refused;
+   *    and the one in-place rewrite of `message` on an error that keeps its
+   *    `status` and `code` (`runtime/src/domains/actions.ts`, installing the
+   *    sandbox `innerMessage`) is on a `SandboxError`, which cannot carry
+   *    the flag.
+   *  - **`userMessage` is orthogonal, not a fourth row.** Its audience is the
+   *    end user, it never replaces `message`, and it already rides a withheld
+   *    5xx at the `/data` and passthrough arms (`withDeclaredUserMessage`;
+   *    the analytics dataset door calls arm 1 bare). A producer may set both —
+   *    `userMessage` for the console, `refusal` to keep `message` for the
+   *    caller — and neither read consults the other.
+   */
+  refusal: z.literal(true).optional().describe(
+    'Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is '
+    + 'authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the '
+    + 'withhold arms read it, a declared refusal is still withheld). Absent (the default) on a '
+    + 'declared fault, whose '
+    + '`message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence '
+    + 'is the declaration — `true` is the only value.',
+  ),
   category: z.string().optional().describe('Error category (e.g. validation, authorization)'),
   /**
    * The numeric HTTP status, when a producer chooses to mirror it into the body.

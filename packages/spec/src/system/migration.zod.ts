@@ -170,61 +170,31 @@ export const FILE_REFERENCES_MIGRATION_ID = 'adr-0104-file-references';
 export const VALUE_SHAPES_MIGRATION_ID = 'adr-0104-value-shapes';
 
 /**
- * Well-known migration id: ADR-0030 notification convergence — this
- * deployment's legacy per-user `sys_notification` inbox rows split into
- * `sys_inbox_message` + `sys_notification_receipt`, and the `sys_notification`
- * row itself rewritten to the L2 event shape, by `migrateSysNotificationToEvent`
- * (`@objectstack/metadata/migrations`).
+ * ⚰️ RETIRED migration id: ADR-0030 notification convergence.
  *
- * Registered so that "has this cut-over run here?" is ANSWERABLE at all. The
- * cut-over is destructive and one-way, it is handed to operators as a call they
- * make themselves (`docs/handoff/adr-0030-notification-convergence.md`, under
- * "Data migration (not auto-run)"), and it shipped with no id — so a deployment
- * that ran it recorded nothing, and one that did not is indistinguishable from
- * one that did. A ledger row can only be keyed by an id; without one the
- * question has no place to be answered even in principle. That absence, not the
- * migration, is what this constant repairs.
+ * The runner this id stood for — `migrateSysNotificationToEvent` in
+ * `@objectstack/metadata/migrations` — is GONE, together with its barrel
+ * export, its tests, the ruled `sys_migration` receipt-claim matrix this
+ * docblock used to state, that matrix's pin, and this id's membership in
+ * {@link CREATION_ATTESTED_MIGRATION_IDS}. Nothing in the platform runs the
+ * cut-over, writes a row under this id, or reads one: pre-ADR-0030
+ * `sys_notification` rows are not carried by the platform on this line.
  *
- * What a run of it may claim in the ledger is RULED (maintainer 「同意」 to
- * decision batch #47 item 5, recorded on #15710 — the question batch #21
- * reserved when the id was registered under #14025). The two ids above take
- * their column semantics from an `os migrate` command that scans, self-checks,
- * and only then records; this migration has no such command and no self-check
- * — it reports `migrated` / `already_done` / `not_applicable` / `error` to its
- * caller and nothing else — so its claims are narrower than theirs:
+ * The constant survives as the NAME of rows already written under it — a
+ * deployment attested at birth, or one that made the operator call while the
+ * runner shipped, still holds `sys_migration` row `adr-0030-notification-event`
+ * and an operator reading that table needs the id to still mean something.
+ * ⛔ It is not a registration: writing a fresh row under it claims a fact no
+ * code in this repo can produce any more.
  *
- *   - `last_run_at`: set on every COMPLETED non-`error` run — `migrated`,
- *     `already_done` and `not_applicable` alike.
- *   - `applied_at`: set only on `migrated` (legacy inbox rows were rewritten).
- *   - `verified_at`: NEVER set by a run of this migration. `verified_at` means
- *     a self-check passed, and there is no self-check to pass.
- *   - `blocking`: `0` by construction — nothing counts discrepancies.
- *   - `details.outcome`: the four-valued result, verbatim.
- *   - an `error` run writes NO ledger claim at all.
- *
- * Receipt, not gate. Nothing reads a row under this id as a precondition, and
- * nothing may: a gate would need the self-check that does not exist. The row
- * is what an operator reads, in the shape `sys-migration.object.ts`
- * (`@objectstack/platform-objects`) already documents for the seed-tenancy
- * repair — `verified_at: null`, `blocking: 0` by construction — which is
- * exactly the shape {@link isDataMigrationFlagVerified} answers `false` to.
- *
- * Creation-attested. A datastore created after the cut-over has no legacy
- * inbox rows by construction, and its creator observed it come into being
- * with none — the same "true by birth, observably" argument
- * {@link CREATION_ATTESTED_MIGRATION_IDS} makes for its other members — so
- * this id is a member of that array. Leaving it out would make a fresh
- * store's ledger read "never ran" for a registered id, which is false. The
- * attestation is not a run: `attestFreshDatastore`
- * (`@objectstack/platform-objects`) writes one uniform shape for every member
- * — `details.attested: 'datastore-created-empty'`, `applied_at: null`,
- * `blocking: 0`, and `verified_at` set for the fact observed at birth — so on
- * a fresh store this row does read as verified, by birth and never by a run,
- * and it still gates nothing.
- *
- * Which caller writes the run receipt when the migration runs is the runner's
- * contract (`@objectstack/metadata/migrations`), decided in its own lane — not
- * here.
+ * ⛔ Do not re-add a runner, an `os migrate` sub-command, or a boot-time
+ * invoker under this id. Both were considered and refused: an operator door is
+ * a permanent surface for a migration with no measured demand, and an
+ * unattended boot-time data rewrite is the higher-variance shape. If a named
+ * deployment turns out to hold pre-ADR-0030 notification rows it needs, the
+ * migration returns as an operator-runnable sub-command shaped exactly like
+ * `files-to-references` / `value-shapes`, under its own card — ⛔ never as a
+ * quiet reintroduction here.
  */
 export const NOTIFICATION_EVENT_MIGRATION_ID = 'adr-0030-notification-event';
 
@@ -232,28 +202,32 @@ export const NOTIFICATION_EVENT_MIGRATION_ID = 'adr-0030-notification-event';
  * The migrations a datastore attests at CREATION rather than by scanning.
  *
  * Every fact these ids stand for — no legacy file value here, no malformed
- * stored value here, no legacy `sys_notification` inbox row here — is true by
- * construction of an empty store, and true *observably*: the creator watched
- * it come into being with no rows at all. That is the same observed-transition
- * discipline the gates run on, not version-gating in disguise; a store that
- * merely *looks* empty when found earns nothing, because "found empty" is an
- * inference and "created empty" is an observation.
+ * stored value here — is true by construction of an empty store, and true
+ * *observably*: the creator watched it come into being with no rows at all.
+ * That is the same observed-transition discipline the gates run on, not
+ * version-gating in disguise; a store that merely *looks* empty when found
+ * earns nothing, because "found empty" is an inference and "created empty" is
+ * an observation.
  *
  * Without this, every deployment born on a version that already ships the
  * migrations would start lax and stay lax until someone ran a command that is,
  * for them, a no-op — so the warn regime would never die out.
  *
- * The third member is the ADR-0030 cut-over
- * ({@link NOTIFICATION_EVENT_MIGRATION_ID}): a store created after it never
- * held a per-user inbox row for the migration to split, so the birth
- * observation settles that fact exactly as it settles the two ADR-0104 ones.
- * Its attestation row is the same uniform shape as theirs; what a RUN of that
- * migration may claim differs, and lives on the id's own docblock.
+ * ⚰️ The ADR-0030 cut-over ({@link NOTIFICATION_EVENT_MIGRATION_ID}) was the
+ * third member and is no longer one. Its runner was retired, so there is no
+ * longer a fact for a birth observation to settle here: attesting an id whose
+ * migration cannot run records a claim about a migration that does not exist.
+ * The id itself is kept as the name of rows already written under it, and
+ * ⛔ must not be re-added to this array without the runner coming back.
+ *
+ * Every member of this array is attested by `attestFreshDatastore`
+ * (`@objectstack/platform-objects`) in one uniform shape, so a member added
+ * here is a row written on every fresh store — a deliberate act, never a
+ * tidying-up.
  */
 export const CREATION_ATTESTED_MIGRATION_IDS = [
   FILE_REFERENCES_MIGRATION_ID,
   VALUE_SHAPES_MIGRATION_ID,
-  NOTIFICATION_EVENT_MIGRATION_ID,
 ] as const;
 
 export const DataMigrationFlagSchema = lazySchema(() => z.object({

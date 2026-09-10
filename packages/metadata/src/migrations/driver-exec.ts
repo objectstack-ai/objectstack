@@ -10,10 +10,12 @@
  * `(path, init)`. `SqlDriver` keeps its knex handle `protected`, so
  * `driver.raw` is `undefined` there too, and `SqliteWasmDriver` inherits that.
  * The result was a published, operator-documented migration path that refused
- * every driver the platform ships — quietly, because
- * `migrateSysNotificationToEvent` *returns* `{ status: 'error' }` rather than
- * throwing, and the message blamed the operator's driver instead of saying the
- * migration did not run.
+ * every driver the platform ships — quietly, because the helper that found the
+ * defect *returned* `{ status: 'error' }` rather than throwing, and the message
+ * blamed the operator's driver instead of saying the migration did not run.
+ * (That helper — the ADR-0030 notification cut-over — has since been retired
+ * whole; the surface argument below is what outlived it, and every remaining
+ * migration in this directory depends on it.)
  *
  * ## Why `execute` is tried FIRST
  *

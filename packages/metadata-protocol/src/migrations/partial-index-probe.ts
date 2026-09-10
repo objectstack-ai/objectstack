@@ -34,10 +34,20 @@
  * when a tightening fails differs per table (ADR-0120 D4 requires naming the
  * key that is not enforced and the consequence of it not being enforced), and
  * one generic sentence would be true of neither table. This module hands back
- * a classified status plus the driver's own text and stays out of the way.
+ * a classified status plus the OPERATOR-facing text and stays out of the way.
+ *
+ * ⚠️ That text is no longer simply "whatever the seam threw". Since #16019 the
+ * raw-SQL seam declares its own fault — `DATABASE_ERROR` / 500 with a COMPOSED
+ * message that discloses neither the statement nor the diagnostic — and carries
+ * the dialect error whole under a non-enumerable `cause`. Read bare, `detail`
+ * became *"the database refused to run a raw statement"* for every caller that
+ * stores it. `operatorFacingErrorText` (`@objectstack/types`, #16657) reads the
+ * dialect's own words back out of that chain, so a stored record still names
+ * `no such column: foo`. The envelope itself is left exactly as the driver
+ * declared it: this is a READ of the cause, never a widening of the disclosure.
  */
 
-import { isUniqueViolationError } from '@objectstack/types';
+import { isUniqueViolationError, operatorFacingErrorText } from '@objectstack/types';
 
 import { driverCanRunSql, resolveDriverExec } from './driver-exec.js';
 
@@ -356,12 +366,15 @@ export async function probeThenReplaceIndex(
     try {
         await exec(buildSql(probeIndexName));
     } catch (err: unknown) {
-        // `detail` is the OPERATOR-facing text and stays the driver's own prose.
+        // `detail` is the OPERATOR-facing text: the dialect's own prose, read
+        // out of the `cause` the raw seam attaches when it declares its fault
+        // (#16019/#16657 — see the module header). Callers STORE it, and a
+        // stored record is the only copy its reader ever gets.
         // The VERDICT is taken from the error object itself, so a conflict
         // reported on `code` / `errno` / `cause` with unhelpful prose is still
         // classified as one (#6699) — unwrapping first is exactly what the
         // migration onto the shared predicate exists to stop.
-        const detail = err instanceof Error ? err.message : String(err);
+        const detail = operatorFacingErrorText(err);
         await dropIndexQuietly(exec, probeIndexName);
         return { status: classifyIndexFailure(err), detail, failedAt: 'probe' };
     }
@@ -373,7 +386,7 @@ export async function probeThenReplaceIndex(
     try {
         await exec(buildSql(indexName));
     } catch (err: unknown) {
-        const detail = err instanceof Error ? err.message : String(err);
+        const detail = operatorFacingErrorText(err);
         return { status: 'failed', detail, failedAt: 'replace' };
     }
     return { status: 'created' };

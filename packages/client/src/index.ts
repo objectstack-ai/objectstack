@@ -1113,8 +1113,12 @@ export interface AuthPasswordChangeResult {
      * ⚠️ SECRET — an unsigned session token. When `revokeOtherSessions: true`
      * made the server rotate the caller's session this is the NEW session's
      * token (every other session is gone and the cookie the caller held is
-     * dead); `null` otherwise. A bearer-mode caller has to store it itself —
-     * this SDK does not.
+     * dead); `null` otherwise.
+     *
+     * A bearer-mode caller no longer has to store it by hand: `changePassword`
+     * adopts a non-null value into the client's own credential before it
+     * resolves, the way `login()` adopts the token it is handed. The field is
+     * unchanged and still echoed, for a caller that keeps its own store.
      */
     token: string | null;
     /** The caller, as better-auth's session held it when the write ran. */
@@ -1153,6 +1157,11 @@ export interface AuthTwoFactorVerificationResult {
      * `two-factor-rotated-token-echo` repairs the vendor's stale echo).
      * Through this SDK `verifyBackupCode` cannot send `disableSession`, so
      * the token is always present.
+     *
+     * `verifyTotp` adopts it into the client's own credential; `verifyBackupCode`
+     * does NOT, and the asymmetry is the wire fact rather than an omission —
+     * `/two-factor/verify-backup-code` never rotates, so what it echoes is the
+     * session the caller is already presenting.
      */
     token: string;
     /**
@@ -1437,6 +1446,77 @@ const DEFAULT_DATA_PREFIX = '/data';
  * value in every case where it can read one.
  */
 const DEFAULT_META_PREFIX = '/meta';
+
+/**
+ * The response header better-auth's `bearer()` plugin puts a freshly installed
+ * session token in — the SIGNED `<token>.<sig>` form, emitted on every response
+ * that stages a session cookie, and added to `Access-Control-Expose-Headers` by
+ * the plugin itself so a cross-origin caller can read it.
+ *
+ * Read on exactly one route (`twoFactor.disable`), for the reason
+ * {@link ObjectStackClient.adoptRotatedSessionToken} states. Not exported: it
+ * names a vendor wire detail, not a capability this SDK offers.
+ */
+const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
+
+/**
+ * Lift better-auth's bare `/get-session` answer into the `SessionResponse`
+ * envelope the two methods that call that route declare (#16760).
+ *
+ * `/api/v1/auth/*` is better-auth's own byte stream — plugin-auth mounts one
+ * catch-all straight onto its handler — and better-auth does not use
+ * ObjectStack's REST envelope. Measured against a real `AuthManager`
+ * (better-auth 1.7.2, organization plugin) over a real driver:
+ *
+ * ```
+ * GET /api/v1/auth/get-session  (signed in) -> 200 {"user":{…},"session":{…,"token":"…"}}
+ * GET /api/v1/auth/get-session  (anonymous) -> 200 null
+ * ```
+ *
+ * `auth.login` has carried the same lift for `/sign-in/email`'s own bare
+ * `{ token, user }` since long before this card; `auth.me` and
+ * `auth.refreshToken` never got it, so every caller writing to the declared
+ * `data.user` read `undefined` while the real payload sat on `.user` — which
+ * did not type-check.
+ *
+ * Three properties this deliberately has:
+ *
+ * - **`success` is filled, not only `data`.** `SessionResponseSchema` is
+ *   `BaseResponseSchema.extend(…)` and that base declares `success` as a
+ *   REQUIRED boolean, so a body carrying `data` alone still does not parse as
+ *   the type the method advertises. A producer that sent its own `success`
+ *   keeps it — the spread below runs after the default.
+ * - **The raw keys are kept, not replaced.** `{ …body, data }`, exactly as
+ *   `login` does. `.user` is the read the field has been using all along while
+ *   the declared `.data.user` was `undefined`, and dropping it would break
+ *   those callers in order to fix a type they were already working around.
+ * - **`data.token` is NOT synthesized from `session.token`.** The declared key
+ *   is optional, and the two spellings are not one string: `session.token` is
+ *   the UNSIGNED session token, while the `token` `login` puts there is the
+ *   SIGNED `token.signature` form `bearer()` hands out. Both authenticate, so
+ *   populating it would file two different credentials under one key depending
+ *   on which method produced the body.
+ *
+ * The `body &&` guard is what carries the anonymous answer: `null` is falsy and
+ * is returned untouched rather than wrapped into a signed-in-looking envelope
+ * that no session backs. That answer stays outside `SessionResponse`; closing
+ * it needs the published return annotation to widen, which is a different card.
+ */
+const normalizeSessionResponse = (raw: unknown): SessionResponse => {
+  const body = raw as { user?: unknown; session?: unknown; data?: unknown } | null;
+  // Already enveloped, or nothing recognisable to lift: hand it back untouched
+  // rather than inventing a `data` this response never carried.
+  if (!body || typeof body !== 'object') return body as unknown as SessionResponse;
+  if (body.data !== undefined) return body as unknown as SessionResponse;
+  if (body.user === undefined && body.session === undefined) {
+    return body as unknown as SessionResponse;
+  }
+  return {
+    success: true,
+    ...body,
+    data: { user: body.user, session: body.session },
+  } as unknown as SessionResponse;
+};
 
 export class ObjectStackClient {
   private baseUrl: string;
@@ -3428,12 +3508,34 @@ export class ObjectStackClient {
 
     /**
      * Invite a user to the organization.
+     *
+     * `role` is declared optional and STAYS optional — omitting it sends
+     * `'member'`. better-auth 1.7.2's body schema for
+     * `POST /organization/invite-member` makes `role` REQUIRED, so the shorter
+     * call the declaration advertises was refused before it reached any
+     * ObjectStack code. Measured against a real `AuthManager` (better-auth
+     * 1.7.2, organization plugin, `teams: { enabled: true }`) over a real
+     * `SqlDriver` (better-sqlite3):
+     *
+     * ```
+     * invite({ email, organizationId })                  -> 400 [body.role] Invalid input  (VALIDATION_ERROR)
+     * invite({ email, role: 'member', organizationId })   -> 200 status: 'pending'
+     * ```
+     *
+     * The default is `'member'` because {@link ObjectStackClient.organizations}
+     * `.invitations.resend` already substitutes exactly that over the same
+     * vendor endpoint: one family, one behaviour. It is also the least
+     * privileged name in the closed membership vocabulary (ADR-0108 D1 —
+     * `orgRoleGrade` floors at `member` and raises only for `owner`/`admin`),
+     * so the implicit choice cannot confer more reach than the caller asked
+     * for. Declaring `role` required instead would narrow a published request
+     * type to restate the vendor's requirement, and buy nothing.
      */
     invite: async (req: { email: string; role?: string; organizationId?: string }): Promise<OrganizationInvitationWire<'pending'>> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/invite-member`, {
         method: 'POST',
-        body: JSON.stringify(req),
+        body: JSON.stringify({ ...req, role: req.role ?? 'member' }),
       });
       return res.json();
     },
@@ -3821,10 +3923,47 @@ export class ObjectStackClient {
        *
        * Returns the freshly-issued `client_id` and `client_secret`.
        * The secret is only returned at creation time — store it securely.
+       *
+       * ## Why `name`, `scopes` and `metadata` are NOT declared here (#15447)
+       *
+       * They used to be, and the route silently dropped all three. Its body
+       * schema is `@better-auth/oauth-provider@1.7.2`'s, a zod object with no
+       * `catchall` — so zod's default `strip` — and none of the three is among
+       * its 21 members. A caller who set one got **HTTP 201 and a client that
+       * quietly did not have it**: no error, no receipt, nothing to notice.
+       * Driven end to end (real `betterAuth` + real `oauthProvider` over the
+       * real ObjectQL engine on a real socket, through this very client): each
+       * member came back absent from the response, absent from
+       * `applications.get`, absent from `applications.list`, and `null` in the
+       * `sys_oauth_application` row.
+       *
+       * A second, independent barrier stands behind the strip, so widening the
+       * SDK alone could never have made them arrive: the handler funnels the
+       * rest of the parsed body into the opaque-metadata envelope, and all
+       * three names are in `OPAQUE_METADATA_RESERVED_FIELDS`.
+       *
+       * ## ⚠️ They were the vendor's RECORD vocabulary, not typos
+       *
+       * The two near-misses look like misspellings of `client_name` and
+       * `scope` and are not — they are the names of the DB columns those two
+       * wire members write. Measured: `client_name: 'CTRL-…'` lands in the
+       * column literally named **`name`**, and `scope: 'openid profile email'`
+       * lands in the column literally named **`scopes`**, as a JSON array. So
+       * this type used to offer the record spelling and the wire spelling side
+       * by side, and only the wire one worked. The right prescription is the
+       * wire member, and for `scopes` it is not a rename: `scope` is a single
+       * space-delimited `string`, and posting an array is refused —
+       * `400 [body.scope] Invalid input: expected string, received array`.
+       *
+       * `metadata` has no reachable door at all: only the SERVER_ONLY
+       * `PATCH /admin/oauth2/update-client` honours it, and `better-call`'s
+       * router skips SERVER_ONLY endpoints, so over HTTP it answers 404 with a
+       * zero-byte body.
+       *
+       * Pinned by `oauth-applications-register-request-members.test.ts`.
        */
       register: async (req: {
         client_name?: string;
-        name?: string;
         redirect_uris: string[];
         token_endpoint_auth_method?: 'none' | 'client_secret_basic' | 'client_secret_post';
         grant_types?: string[];
@@ -3832,11 +3971,9 @@ export class ObjectStackClient {
         client_uri?: string;
         logo_uri?: string;
         scope?: string;
-        scopes?: string[];
         contacts?: string[];
         tos_uri?: string;
         policy_uri?: string;
-        metadata?: Record<string, unknown>;
       }): Promise<OAuthApplicationRegistration> => {
         const route = this.getRoute('auth');
         // The new oauth-provider package exposes `/oauth2/create-client`
@@ -4074,13 +4211,24 @@ export class ObjectStackClient {
     /**
      * Get current user session
      * Uses better-auth endpoint: GET /get-session
+     *
+     * The route answers bare (`{ user, session }`), so the answer is lifted
+     * into the declared `SessionResponse` envelope by
+     * {@link normalizeSessionResponse} — the same lift `login` has always
+     * carried. Read the payload off `data.user` / `data.session`; the raw
+     * `.user` / `.session` keys are kept alongside for callers written against
+     * the wire while the declared shape was unreachable.
+     *
+     * ⚠️ Anonymous is the one answer still outside the declared type: the route
+     * serves the literal `null` at 200 and it is returned as-is, because there
+     * is no `SessionResponse` value that means "nobody is signed in".
      */
     me: async (): Promise<SessionResponse> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/get-session`, {
             headers: { Origin: this.baseUrl },
         });
-        return res.json();
+        return normalizeSessionResponse(await res.json());
     },
 
     /**
@@ -4149,6 +4297,30 @@ export class ObjectStackClient {
      * Refresh an authentication token
      * Note: better-auth handles token refresh automatically via /get-session
      * @param _refreshToken - Not used (better-auth handles refresh automatically)
+     *
+     * ## Where the credential really is (#16760)
+     *
+     * This used to assign from `data.data?.token` — a read that could never
+     * resolve, on a route that has no top-level `token` at all. Measured
+     * signed-in against a real `AuthManager` (better-auth 1.7.2) over a real
+     * driver, the body's top level is exactly `user` and `session`, and the
+     * only credential in it is `session.token`:
+     *
+     * ```
+     * -> 200 {"user":{…},"session":{…,"token":"<unsigned>","expiresAt":"…"}}
+     * ```
+     *
+     * So the old read was not a consequence of the envelope being misdeclared
+     * — enveloping the body does not put a token at `data.token` either. It
+     * named a field this route does not produce, and the method returned
+     * successfully having captured nothing, which is the worst way for a
+     * credential call to fail.
+     *
+     * ⚠️ `session.token` is the UNSIGNED spelling, while `bearer()` hands
+     * clients the signed `token.signature` form. Both authenticate — the
+     * server strips the signature on the bearer branch before it looks the
+     * session up (`resolveActor`) — so storing this one keeps the caller
+     * signed in.
      */
     refreshToken: async (_refreshToken: string): Promise<SessionResponse> => {
       const route = this.getRoute('auth');
@@ -4157,9 +4329,10 @@ export class ObjectStackClient {
       const res = await this.fetch(`${this.baseUrl}${route}/get-session`, {
         method: 'GET'
       });
-      const data = await res.json();
-      if (data.data?.token) {
-        this.token = data.data.token;
+      const data = normalizeSessionResponse(await res.json());
+      const token = data?.data?.session?.token;
+      if (token) {
+        this.token = token;
       }
       return data;
     },
@@ -4205,8 +4378,10 @@ export class ObjectStackClient {
      * better-auth: POST /change-password.
      * Set `revokeOtherSessions: true` to invalidate every other session
      * after the change — the server then ROTATES the caller's session too and
-     * answers the new token in `token`; this SDK does not store it, so a
-     * bearer-mode caller must.
+     * answers the new token in `token`, and this SDK ADOPTS it (#16534), so a
+     * bearer-mode caller stays signed in across the change. Without
+     * `revokeOtherSessions` nothing rotates, the field is `null`, and the
+     * stored credential is left exactly as it was.
      */
     changePassword: async (req: {
       currentPassword: string;
@@ -4218,7 +4393,9 @@ export class ObjectStackClient {
         method: 'POST',
         body: JSON.stringify(req),
       });
-      return res.json();
+      const result = (await res.json()) as AuthPasswordChangeResult;
+      this.adoptRotatedSessionToken(result?.token);
+      return result;
     },
 
     /**
@@ -4414,8 +4591,11 @@ export class ObjectStackClient {
        * this browser for the configured trust period.
        *
        * On the enrolment lane the server rotates the session and answers the
-       * LIVE token in `token`; this SDK does not store it — a bearer-mode
-       * caller must, or its next call answers 401.
+       * LIVE token in `token`; this SDK ADOPTS it (#16534), so a bearer-mode
+       * caller stays signed in through enrolment instead of meeting a 401 on
+       * its next call. On the sign-in-challenge lane the same field carries
+       * the session the challenge just completed, and adopting it is how the
+       * SDK finishes signing in.
        */
       verifyTotp: async (req: { code: string; trustDevice?: boolean }): Promise<AuthTwoFactorVerificationResult> => {
         const route = this.getRoute('auth');
@@ -4423,16 +4603,21 @@ export class ObjectStackClient {
           method: 'POST',
           body: JSON.stringify(req),
         });
-        return res.json();
+        const result = (await res.json()) as AuthTwoFactorVerificationResult;
+        this.adoptRotatedSessionToken(result?.token);
+        return result;
       },
 
       /**
        * Disable 2FA for the current user. Requires the password again.
        *
        * ⚠️ The server ROTATES the caller's session on success and echoes only
-       * the receipt (the new token rides the `Set-Cookie` and the bearer
-       * plugin's `set-auth-token` header, neither of which this SDK reads), so
-       * a bearer-mode caller's stored token is dead after this call.
+       * the receipt — the new token rides the `Set-Cookie` and the bearer
+       * plugin's `set-auth-token` header. This SDK READS that header (#16534)
+       * and adopts the rotated session, which is the only route in the family
+       * where the credential is not in the body at all. A cookie-only
+       * deployment sends no such header; there is then nothing to adopt and
+       * the stored credential is left as it was.
        */
       disable: async (req: { password: string }): Promise<AuthStatusReceipt> => {
         const route = this.getRoute('auth');
@@ -4440,6 +4625,7 @@ export class ObjectStackClient {
           method: 'POST',
           body: JSON.stringify(req),
         });
+        this.adoptRotatedSessionToken(res.headers.get(SET_AUTH_TOKEN_HEADER));
         return res.json();
       },
 
@@ -6672,6 +6858,41 @@ export class ObjectStackClient {
     }
     // Already unwrapped or non-standard
     return body as T;
+  }
+
+  /**
+   * Adopt a session token the server rotated this client onto mid-request.
+   *
+   * Three better-auth routes ROTATE the caller's session on success: they mint
+   * a new session, install it in `Set-Cookie` (and, through `bearer()`, in the
+   * `set-auth-token` response header), and DELETE the row the caller was
+   * presenting — `changePassword({ revokeOtherSessions: true })`, the enrolment
+   * lane of `twoFactor.verifyTotp`, and `twoFactor.disable`. A browser carries
+   * the cookie across on its own; a bearer caller — this SDK's own mode — kept
+   * presenting the DELETED session's token, so its very next call answered
+   * `401 UNAUTHORIZED` (#16534).
+   *
+   * ⚠️ Called from those three routes ONLY, never from the shared `fetch`
+   * wrapper, and the narrowness is the design rather than an implementation
+   * detail. `set-auth-token` rides EVERY response that stages a session cookie,
+   * rotation or not — `POST /update-user` stages one to carry the updated user
+   * — and it carries the SIGNED `<token>.<sig>` spelling while every JSON
+   * `token` echo carries the UNSIGNED one. A wrapper-level read would therefore
+   * rewrite `this.token` into a different spelling of the SAME session on
+   * ordinary traffic: a stored credential that churns on writes that rotated
+   * nothing. Storing only where the server actually rotated keeps the stored
+   * value equal to the credential the caller was last granted.
+   *
+   * For the same reason `verifyBackupCode` does not call this: its lane never
+   * rotates, so its `token` echo is the session the caller already holds.
+   *
+   * `login()` / `register()` / `refreshToken()` keep their own assignments:
+   * those read a normalized `{ data: { token } }` envelope this SDK builds, and
+   * they establish a session rather than follow a rotation.
+   */
+  private adoptRotatedSessionToken(token: string | null | undefined): void {
+    if (typeof token !== 'string' || token.length === 0) return;
+    this.token = token;
   }
 
   private async fetch(url: string, options: RequestInit = {}): Promise<Response> {

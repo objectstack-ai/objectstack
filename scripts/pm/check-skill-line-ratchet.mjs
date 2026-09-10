@@ -874,6 +874,13 @@ export const CEILINGS = new Map([
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
   ['.claude/skills/pm-dispatch/references/lanes/spec.md', 43],
+  // domain:ui lane charter — the objectui execution seat's job description. It is
+  // the one lane the multi-repo charter ADDS beyond the domain table, and it was
+  // the only live lane in that directory carrying no versioned charter. A lane
+  // charter is read per seat session like every entry above. Set at the landed
+  // line count read from this ratchet's own run (headroom 0, same convention as
+  // above); it is a NEW file, so this is an added row and no other row moves.
+  ['.claude/skills/pm-dispatch/references/lanes/ui.md', 38],
   // repo:hotcrm lane charter (maintainer rulings 2026-08-20: exemplar-app repo —
   // platform capabilities implemented upstream, 展现平台能力, 不扩散需求, runs on
   // community edition). Set at landed line count (headroom 0, same convention).
@@ -1028,7 +1035,15 @@ export const CEILINGS = new Map([
   // convention as the entries above).
   // 86 → 41: the ownership excerpt rewritten by role in the same rules-only pass;
   // re-pinned at the landed count, headroom 0.
-  ['CLAUDE.md', 41],
+  // 41 → 5: the inlined never-miss digest left the file entirely — it is now a pure
+  // pointer at AGENTS.md, which carries every rule it used to restate. Maintainer
+  // ruling 2026-09-09, verbatim and untranslated: 「其次 claude.md 是不是直接让他阅读
+  // agents.md 即可，没必要维护两套。所有仓库都有类似的问题」 (program #17161, card
+  // #17162). A LOWERING, which needs no ruling of its own — quoted because the
+  // ruling is what emptied the file. Re-pinned at the landed count, headroom 0: the
+  // 36 lines of slack a shrink leaves behind are exactly the budget a future digest
+  // would re-accrete into, which is the growth this entry exists to price.
+  ['CLAUDE.md', 5],
 ]);
 
 /**
@@ -1299,6 +1314,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/devx.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/skills.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/spec.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/ui.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/director.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/triage.md', 0],

@@ -186,8 +186,11 @@ describe('My Work — the personal queue declares its filter in the key object-g
   it('still scopes the queue to the signed-in user', () => {
     // The spelling is only half the fix; the predicate is what makes the page
     // personal at all. `{current_user_id}` is the page-level identity token.
+    // Authored in the `ViewFilterRule` array form — the one filter orthography
+    // `object-grid.filter` declares since #15449 (ui#6206-B); the AST tuple
+    // this pin used to carry is refused at `filter.0` by the spec now.
     expect(workQueueGrid()!.properties!.filter).toEqual([
-      ['owner_id', '=', '{current_user_id}'],
+      { field: 'owner_id', operator: 'equals', value: '{current_user_id}' },
     ]);
   });
 });

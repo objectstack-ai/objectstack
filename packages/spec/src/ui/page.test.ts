@@ -15,6 +15,7 @@ import {
   type ElementDataSource,
   type InterfacePageConfig,
 } from './page.zod';
+import { ComponentPropsMap } from './component.zod';
 
 describe('PageComponentSchema', () => {
   it('should accept valid minimal component', () => {
@@ -630,7 +631,7 @@ describe('ElementDataSourceSchema', () => {
     const ds = ElementDataSourceSchema.parse({
       object: 'invoice',
       view: 'pending_review',
-      filter: { status: 'pending' },
+      filter: [{ field: 'status', operator: 'equals', value: 'pending' }],
       sort: [{ field: 'created_at', order: 'desc' }],
       limit: 50,
     });
@@ -654,6 +655,116 @@ describe('ElementDataSourceSchema', () => {
 });
 
 // ---------------------------------------------------------------------------
+// ElementDataSourceSchema `filter` — the ViewFilterRule ARRAY orthography
+// (ui#6206-B reaching the binding: #15442, decision batch #55, option A)
+// ---------------------------------------------------------------------------
+describe('ElementDataSourceSchema `filter` — one filter orthography platform-wide (ui#6206-B, #15442)', () => {
+  const RULES = [{ field: 'status', operator: 'equals', value: 'active' }];
+  const RECORD_FORM = { status: 'active' };
+  /** The objectui pin's own test authors write THIS at `dataSource.filter` — an AST tuple array. */
+  const TUPLE_ARRAY = [['amount', '>', 100]];
+  type ParseResult = { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; code: string }> } };
+  /** The issues a parse raised under `key` (top-level), whatever else it raised. */
+  const issuesUnder = (r: ParseResult, key: string) =>
+    r.success ? [] : r.error!.issues.filter((i) => i.path[0] === key);
+  /** The issues located EXACTLY at `path` (dotted) — `filter` is not `filter.0`. */
+  const issuesAt = (r: ParseResult, path: string) =>
+    r.success ? [] : r.error!.issues.filter((i) => i.path.join('.') === path);
+
+  it('accepts a ViewFilterRule[] filter — the acceptance criterion', () => {
+    // Before #15442 this exact value was REFUSED here (`invalid_type`, expected
+    // record): the binding alone said `FilterConditionSchema` while every
+    // `filter` door in ComponentPropsMap took the array. Measured at the
+    // objectui pin `53ded82b` before the declaration moved: the composition
+    // seam AND-combines the binding filter with the named view's rules through
+    // `mergeFilterNodes`, whose `toFilterNode` lowers a rule array to AST nodes.
+    const r = ElementDataSourceSchema.safeParse({ object: 'account', filter: RULES });
+    expect(r.success).toBe(true);
+    expect(r.data!.filter).toEqual(RULES);
+  });
+
+  it('the array carries the REAL ViewFilterRuleSchema, not a lookalike: operators normalize, value shapes are checked', () => {
+    // `ne` is a legacy spelling `normalizeFilterOperator` lowers to `not_equals`
+    // — a plain `z.array(z.object(...))` would have echoed it back unchanged.
+    const legacy = ElementDataSourceSchema.safeParse({
+      object: 'account',
+      filter: [{ field: 'status', operator: 'ne', value: 'done' }],
+    });
+    expect(legacy.success).toBe(true);
+    expect(legacy.data!.filter![0].operator).toBe('not_equals');
+    // `in` takes an array; a scalar is refused at `filter.0.value` by the rule's
+    // own superRefine — the value-shape check rides in with the schema.
+    const scalarIn = ElementDataSourceSchema.safeParse({
+      object: 'account',
+      filter: [{ field: 'status', operator: 'in', value: 'active' }],
+    });
+    expect(scalarIn.success).toBe(false);
+    expect(scalarIn.error!.issues.map((i) => i.path.join('.'))).toContain('filter.0.value');
+  });
+
+  it('the MongoDB-style record form — what this key alone used to accept — is REFUSED at the `filter` path', () => {
+    // Reverse verification of the convergence, asserted on the issue envelope
+    // rather than on a bare `success === false`: the refusal is located at
+    // `filter` and names the expected kind. Migration:
+    // `element-data-source-and-object-block-filter-rule-array`.
+    const r = ElementDataSourceSchema.safeParse({ object: 'account', filter: RECORD_FORM });
+    expect(r.success).toBe(false);
+    const atFilter = issuesUnder(r, 'filter');
+    expect(atFilter).toHaveLength(1);
+    expect(atFilter[0].code).toBe('invalid_type');
+    expect(atFilter[0]).toMatchObject({ expected: 'array', path: ['filter'] });
+    // An operator-object record and a `$or` group are the same form and get
+    // the same verdict — no arm accepts any spelling of the record.
+    const opRecord = ElementDataSourceSchema.safeParse({ object: 'account', filter: { amount: { $gt: 100 } } });
+    expect(issuesUnder(opRecord, 'filter').map((i) => i.code)).toEqual(['invalid_type']);
+    const group = ElementDataSourceSchema.safeParse({ object: 'account', filter: { $or: [{ status: 'active' }] } });
+    expect(issuesUnder(group, 'filter').map((i) => i.code)).toEqual(['invalid_type']);
+  });
+
+  it('the ObjectQL AST tuple array is refused too — at `filter.0`, not at `filter`', () => {
+    // The consumer's pinned tests author `[['amount', '>', 100]]` at this key
+    // (objectui `record-picker-element-data-source.test.tsx`). That shape was
+    // refused before (`invalid_type` at `filter`, expected record) and stays
+    // refused now — one hop deeper, because the array is the right container
+    // and the element is the wrong kind. The prescription is the rule object
+    // `{ field: 'amount', operator: 'greater_than', value: 100 }`; the
+    // seventeen off-spec authors at the pin are the seat's objectui follow-up.
+    const r = ElementDataSourceSchema.safeParse({ object: 'account', filter: TUPLE_ARRAY });
+    expect(r.success).toBe(false);
+    expect(issuesAt(r, 'filter')).toEqual([]);
+    expect(issuesAt(r, 'filter.0').map((i) => i.code)).toEqual(['invalid_type']);
+    expect(issuesAt(r, 'filter.0')[0]).toMatchObject({ expected: 'object' });
+  });
+
+  it('shares the array orthography with the props-map `filter` doors — one value, two keys, the same verdicts', () => {
+    // `element:record_picker` was the node that carried two orthographies at
+    // two keys (`properties.filter` the array, `dataSource.filter` the record)
+    // resolved through one `??` in the renderer. Each key is asked at ITS
+    // door: the binding through the real `PageComponentSchema` (which parses
+    // `dataSource` and leaves `properties` a bag — the props-map dispatch is
+    // the lint's, warning tier), and the props key through the picker's own
+    // `ComponentPropsMap` entry. The same rule array raises no issue at either;
+    // the same record is refused at both with the same code.
+    const binding = PageComponentSchema.safeParse({
+      type: 'element:record_picker',
+      properties: { object: 'account', filter: RULES },
+      dataSource: { object: 'account', filter: RULES },
+    });
+    expect(binding.success).toBe(true);
+    const bindingRecord = PageComponentSchema.safeParse({
+      type: 'element:record_picker',
+      properties: { object: 'account', filter: RULES },
+      dataSource: { object: 'account', filter: RECORD_FORM },
+    });
+    expect(issuesAt(bindingRecord, 'dataSource.filter').map((i) => i.code)).toEqual(['invalid_type']);
+    const picker = ComponentPropsMap['element:record_picker'];
+    expect(issuesAt(picker.safeParse({ object: 'account', filter: RULES }), 'filter')).toEqual([]);
+    expect(issuesAt(picker.safeParse({ object: 'account', filter: RECORD_FORM }), 'filter').map((i) => i.code))
+      .toEqual(issuesAt(bindingRecord, 'dataSource.filter').map((i) => i.code));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // PageComponent dataSource integration
 // ---------------------------------------------------------------------------
 describe('PageComponent dataSource integration', () => {
@@ -663,7 +774,7 @@ describe('PageComponent dataSource integration', () => {
       properties: { object: 'order', aggregate: 'sum', field: 'total' },
       dataSource: {
         object: 'order',
-        filter: { status: 'completed' },
+        filter: [{ field: 'status', operator: 'equals', value: 'completed' }],
         limit: 100,
       },
     });
@@ -759,12 +870,12 @@ describe('Page end-to-end', () => {
             {
               type: 'element:number',
               properties: { object: 'order', aggregate: 'count' },
-              dataSource: { object: 'order', filter: { status: 'pending' } },
+              dataSource: { object: 'order', filter: [{ field: 'status', operator: 'equals', value: 'pending' }] },
             },
             {
               type: 'element:number',
               properties: { object: 'order', aggregate: 'sum', field: 'total', format: 'currency', prefix: '$' },
-              dataSource: { object: 'order', filter: { status: 'completed' } },
+              dataSource: { object: 'order', filter: [{ field: 'status', operator: 'equals', value: 'completed' }] },
             },
             {
               type: 'element:divider',

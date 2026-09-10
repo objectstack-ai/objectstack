@@ -950,6 +950,30 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ヘッダー",
         helpText: "ダッシュボードヘッダー設定（title, subtitle, actions）"
       },
+      "header.showTitle": {
+        label: "タイトルを表示",
+        helpText: "ヘッダーにダッシュボードのタイトルを表示"
+      },
+      "header.showDescription": {
+        label: "説明を表示",
+        helpText: "ヘッダーにダッシュボードの説明を表示"
+      },
+      "header.actions": {
+        label: "操作ボタン",
+        helpText: "ヘッダーに表示する操作ボタン"
+      },
+      "header.actions.label": {
+        label: "ラベル"
+      },
+      "header.actions.actionUrl": {
+        label: "操作 URL"
+      },
+      "header.actions.actionType": {
+        label: "操作タイプ"
+      },
+      "header.actions.icon": {
+        label: "アイコン"
+      },
       widgets: {
         label: "ウィジェット",
         helpText: "位置とサイズを持つダッシュボードウィジェット"

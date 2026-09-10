@@ -810,6 +810,7 @@
     "resolveDocLocale (function)",
     "resolveFlowScreenTitle (function)",
     "resolveMetadataFormLabels (function)",
+    "resolveMetadataFormSchemaTitles (function)",
     "resolveMetadataTypeDescription (function)",
     "resolveMetadataTypeLabel (function)",
     "resolveObjectFieldLabels (function)",
