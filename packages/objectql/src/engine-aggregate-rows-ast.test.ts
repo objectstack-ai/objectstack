@@ -17,9 +17,10 @@
 // `find()`'s contract says nothing about those keys, and the drivers disagree
 // about them. `driver-sql` and `driver-rest` ignore them and return rows —
 // which is the only reason this path ever worked. `driver-memory` HONOURS
-// them (`find()` -> `performAggregation`), and so do the `aggregate(AST)`
-// faces of `driver-mongodb` / `driver-turso` behind it. Against a driver of
-// the second kind the one seam answered two different wrong things:
+// them: its `find()` funnels straight into the same `performAggregation` its
+// `aggregate(AST)` door uses. `driver-mongodb` and `driver-turso` carry the
+// same refusal on their own aggregation faces. Against a driver of the second
+// kind the one seam answered two different wrong things:
 //
 //   * the per-aggregation `filter` that ROUTED the call here was refused
 //     NOT_IMPLEMENTED/501 by the driver's own #10413 guard. That guard is

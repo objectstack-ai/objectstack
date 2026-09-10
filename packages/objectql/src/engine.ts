@@ -14040,9 +14040,11 @@ export class ObjectQL implements IObjectQLEngine {
         // down. `find()`'s contract says nothing about `groupBy` /
         // `aggregations`, and the drivers disagree about them: `driver-sql`
         // and `driver-rest` ignore both and return rows (which is the only
-        // reason this path has ever worked), while `driver-memory` — and the
-        // `aggregate(AST)` faces of `driver-mongodb` / `driver-turso` behind
-        // it — honour them. Sending the keys to a driver of the second kind
+        // reason this path has ever worked), while `driver-memory` honours
+        // them — its `find()` funnels straight into the same
+        // `performAggregation` its `aggregate(AST)` door uses, and
+        // `driver-mongodb` / `driver-turso` carry the same refusal on their
+        // own aggregation faces. Sending the keys to a driver of that kind
         // made this ONE seam answer two different wrong things:
         //
         //   * a per-aggregation `filter` (the key that ROUTED the call here)
