@@ -33,7 +33,6 @@
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
-    "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",

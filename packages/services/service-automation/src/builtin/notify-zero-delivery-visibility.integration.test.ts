@@ -27,19 +27,32 @@
  * the SAME data, through the two trigger families — and on both storage backends. So
  * every case below runs as a matrix:
  *
- *   trigger family  x  storage backend
+ *   trigger family  x  data layer
  *   ─────────────────────────────────────────────────────────────────────────
- *   `type: 'schedule'` cron tick             x  sqlite-wasm
- *   `POST /api/v1/automation/:name/trigger`  x  sqlite native (better-sqlite3)
+ *   `type: 'schedule'` cron tick             x  in-process (non-SQL) engine
+ *   `POST /api/v1/automation/:name/trigger`  x  SQL (ObjectQL + better-sqlite3)
  *
- * ⚠️ The card asks for "memory and sqlite". The mingo `InMemoryDriver`
- * (`@objectstack/driver-memory`) is investment-FROZEN and its consumer set is a
- * maintainer ruling, enforced by `pnpm check:driver-memory-census` — which
- * refuses a new binding and says in as many words that adding a ledger entry to
- * silence it is not this author's call. So the second backend here is
- * `@objectstack/driver-sqlite-wasm`: two genuinely different storage
- * implementations (native C and wasm), taken by MIGRATING rather than by
- * self-ledgering a frozen driver. Admitting the memory arm needs that ruling.
+ * ⚠️ DECLARED DEVIATION — the card asks for "memory and sqlite", and the SQL
+ * half is exactly that. The memory half is NOT the mingo `InMemoryDriver`, and
+ * neither substitute was available without a maintainer-only widening:
+ *
+ *   - `@objectstack/driver-memory` is investment-FROZEN and its consumer set is
+ *     a maintainer ruling. `pnpm check:driver-memory-census` refuses a new
+ *     binding and says in as many words that adding a ledger entry to silence
+ *     it is not this author's call.
+ *   - `@objectstack/driver-sqlite-wasm` (the migrate route) is outside this
+ *     package's SHRINK-ONLY type-source registry, and
+ *     `pnpm check:type-source-resolution` states that widening it is not the
+ *     fix and that `paths` is the measured-wrong tool here (this package's
+ *     `rootDir` is `src`, which is the TS6059 shape that gate names). Its own
+ *     remedy for that case is "do NOT take the dependency".
+ *
+ * So the second arm is an in-process `IDataEngine` — the same CLASS of store as
+ * the mingo driver (in-process, non-SQL, no schema sync) — stood up here rather
+ * than imported. It is a functional store, not a capture: the control case
+ * below requires it to actually deliver, so an arm that could not answer "yes"
+ * fails instead of passing quietly. Admitting the real memory driver needs the
+ * ruling named above.
  *
  * Neither family is hand-rolled here. The schedule arm is handed the literal
  * `AutomationContext` the production `ScheduleTrigger` builds for a fired
@@ -86,9 +99,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
-import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { SysMember, SysNotification } from '@objectstack/platform-objects';
 import {
     MessagingService,
     MemoryNotificationOutbox,
@@ -97,7 +108,7 @@ import {
     NotificationReceipt,
     NotificationPreference,
 } from '@objectstack/service-messaging';
-import type { AutomationContext } from '@objectstack/spec/contracts';
+import type { AutomationContext, IDataEngine } from '@objectstack/spec/contracts';
 import type { FlowRunSummary } from '@objectstack/spec/automation';
 import { AutomationEngine } from '../engine.js';
 import { registerNotifyNode } from './notify-node.js';
@@ -162,16 +173,79 @@ function apiTrigger(session: { userId: string; tenantId: string }): AutomationCo
 
 // ── The stack ───────────────────────────────────────────────────────────────
 
-type DriverKind = 'sqlite-wasm' | 'sqlite-native';
+type DriverKind = 'in-process' | 'sqlite';
 
-function makeDriver(kind: DriverKind) {
-    return kind === 'sqlite-wasm'
-        ? new SqliteWasmDriver({ filename: ':memory:' })
-        : new SqlDriver({
-              client: 'better-sqlite3',
-              connection: { filename: ':memory:' },
-              useNullAsDefault: true,
-          });
+/**
+ * The `sys_member` / `sys_notification` shapes this harness needs, declared as
+ * fixtures rather than imported from `@objectstack/platform-objects` — that
+ * package is outside this package's shrink-only type-source registry (see the
+ * deviation note in the header), and only two columns of each are load-bearing
+ * here anyway: what `RecipientResolver.resolveRole` filters on, and what
+ * `MessagingService.writeEvent` inserts.
+ */
+const MEMBER_FIXTURE = {
+    name: 'sys_member',
+    label: 'Member',
+    fields: {
+        user_id: { name: 'user_id', label: 'User', type: 'text' },
+        role: { name: 'role', label: 'Role', type: 'text' },
+        organization_id: { name: 'organization_id', label: 'Organization', type: 'text' },
+    },
+};
+
+const NOTIFICATION_FIXTURE = {
+    name: 'sys_notification',
+    label: 'Notification',
+    fields: {
+        // Exactly the columns `MessagingService.writeEvent` inserts — a fixture
+        // that drifts from the producer fails loudly on the SQL arm (an unknown
+        // field is refused there), which is the arm keeping this honest.
+        topic: { name: 'topic', label: 'Topic', type: 'text' },
+        payload: { name: 'payload', label: 'Payload', type: 'json' },
+        severity: { name: 'severity', label: 'Severity', type: 'text' },
+        dedup_key: { name: 'dedup_key', label: 'Dedup key', type: 'text' },
+        source_object: { name: 'source_object', label: 'Source object', type: 'text' },
+        source_id: { name: 'source_id', label: 'Source id', type: 'text' },
+        actor_id: { name: 'actor_id', label: 'Actor', type: 'text' },
+        organization_id: { name: 'organization_id', label: 'Organization', type: 'text' },
+        created_at: { name: 'created_at', label: 'Created at', type: 'datetime' },
+    },
+};
+
+const FIXTURES = [MEMBER_FIXTURE, NOTIFICATION_FIXTURE, InboxMessage, NotificationReceipt, NotificationPreference];
+
+/**
+ * An in-process, non-SQL `IDataEngine` — a real store (rows go in, `find` and
+ * `findOne` read them back through the same `where` the SQL arm uses), not a
+ * capture. This is the arm that stands in for the frozen mingo driver.
+ */
+function inProcessEngine(): IDataEngine {
+    const tables = new Map<string, Record<string, unknown>[]>();
+    let seq = 0;
+    const rowsOf = (object: string): Record<string, unknown>[] => {
+        const existing = tables.get(object);
+        if (existing) return existing;
+        const fresh: Record<string, unknown>[] = [];
+        tables.set(object, fresh);
+        return fresh;
+    };
+    const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean =>
+        Object.entries(where ?? {}).every(([k, v]) => row[k] === v);
+
+    return {
+        async insert(object: string, row: Record<string, unknown>) {
+            const stored = { ...row, id: row.id != null ? String(row.id) : `row_${++seq}` };
+            rowsOf(object).push(stored);
+            return stored;
+        },
+        async find(object: string, query?: { where?: Record<string, unknown>; limit?: number }) {
+            const hits = rowsOf(object).filter((r) => matches(r, query?.where));
+            return query?.limit ? hits.slice(0, query.limit) : hits;
+        },
+        async findOne(object: string, query?: { where?: Record<string, unknown> }) {
+            return rowsOf(object).find((r) => matches(r, query?.where));
+        },
+    } as unknown as IDataEngine;
 }
 
 /**
@@ -182,20 +256,29 @@ function makeDriver(kind: DriverKind) {
  * could not express it.
  */
 async function boot(kind: DriverKind) {
-    const driver = makeDriver(kind) as any;
-    if (typeof driver.connect === 'function') await driver.connect();
+    let data: IDataEngine;
+    let driver: any;
 
-    const data = new ObjectQL();
-    data.registerDriver(driver, true);
-    const PKG = '@objectstack/service-messaging';
-    for (const o of [SysMember, SysNotification, InboxMessage, NotificationReceipt, NotificationPreference]) {
-        data.registry.registerObject(o as any, PKG, PKG);
+    if (kind === 'sqlite') {
+        driver = new SqlDriver({
+            client: 'better-sqlite3',
+            connection: { filename: ':memory:' },
+            useNullAsDefault: true,
+        });
+        await driver.connect();
+        const ql = new ObjectQL();
+        ql.registerDriver(driver, true);
+        const PKG = '@objectstack/service-messaging';
+        for (const o of FIXTURES) ql.registry.registerObject(o as any, PKG, PKG);
+        await ql.syncSchemas();
+        data = ql as unknown as IDataEngine;
+    } else {
+        data = inProcessEngine();
     }
-    await data.syncSchemas();
 
     // The employer organization's admins — the ONLY members on the install.
     for (const userId of MANAGERS) {
-        await data.insert(
+        await (data as any).insert(
             'sys_member',
             { user_id: userId, role: 'admin', organization_id: ORG_EMPLOYER },
             { context: { isSystem: true } } as any,
@@ -290,7 +373,7 @@ function notifyNodeRow(s: FlowRunSummary) {
 
 const LINE = { flowName: 'nudge', runId: 'run_fixed', status: 'completed' };
 
-const DRIVERS: DriverKind[] = ['sqlite-wasm', 'sqlite-native'];
+const DRIVERS: DriverKind[] = ['in-process', 'sqlite'];
 
 describe.each(DRIVERS)('#17123 zero-delivery is distinguishable [driver=%s]', (kind) => {
     let stack: Awaited<ReturnType<typeof boot>> | undefined;
