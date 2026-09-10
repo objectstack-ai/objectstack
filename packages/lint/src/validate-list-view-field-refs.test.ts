@@ -427,10 +427,32 @@ describe('#14282 — a dotted key the FILTER door refuses, and the ones it serve
     expect(validateListViewFieldRefs(stackWith(mutate(filterOn('tags.0'))))).toEqual([]);
   });
 
-  it('a registry-injected head is NOT refused at a filter — its type is invisible here', () => {
-    // `created_at` resolves through skip 3 with no readable type, and
-    // `classifyDottedFilterHead` answers `null` for an unreadable head.
-    expect(validateListViewFieldRefs(stackWith(mutate(filterOn('created_at.x'))))).toEqual([]);
+  // [#16340] A registry-injected head IS judged now: the graph carries the
+  // registry's own definition for it, so the classifier reads the same
+  // `datetime` the DOOR reads. `assertFilterIsMaterializable` has always
+  // refused `created_at.x` with `400 INVALID_FIELD` — the linter was silent
+  // only because the type was missing here, which is the miss #16340 closed.
+  it('a registry-injected scalar head is refused at a filter, as the door refuses it', () => {
+    const findings = validateListViewFieldRefs(stackWith(mutate(filterOn('created_at.x'))));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(LIST_VIEW_FIELD_DOTTED);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].message).toContain('`datetime` field');
+    expect(findings[0].message).toContain('single scalar value');
+  });
+
+  it('an injected RELATION head is refused on the same axis as an authored one', () => {
+    const findings = validateListViewFieldRefs(stackWith(mutate(filterOn('owner_id.name'))));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('`lookup` field');
+    expect(findings[0].message).toContain("stores the related record's id");
+  });
+
+  it('⛔ the primary key is NOT refused — the driver provisions it and no table types it', () => {
+    // The one injected column with no definition behind it. An unreadable head
+    // is what `classifyDottedFilterHead` answers `null` for, and the door
+    // serves it, so the linter must not invent a refusal here.
+    expect(validateListViewFieldRefs(stackWith(mutate(filterOn('id.x'))))).toEqual([]);
   });
 
   it('the tab and user-filter tab presets are judged on the same axis', () => {

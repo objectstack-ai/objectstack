@@ -245,6 +245,36 @@ describe('validateDatasetReferences — include[] must name a RELATIONSHIP', () 
     expect(rules(stackWith({ include: ['duty'], dimensions: [], measures: [] }))).toEqual([]);
   });
 
+  // [#16340] An injected column is judged on the same axis as an authored one:
+  // the graph carries the registry's own definition for it. `owner_id` IS the
+  // `lookup` the registry declares, so an include naming it joins; `created_at`
+  // is a `datetime`, so an include naming it derives no join and every
+  // dimension written against that prefix addresses nothing — which is the
+  // finding, not a guess. Before this the rule bailed on the marker and said
+  // neither thing.
+  it('accepts an include naming an INJECTED relationship anchor', () => {
+    expect(rules(stackWith({ include: ['owner_id'], dimensions: [], measures: [] }))).toEqual([]);
+  });
+
+  it('refuses an include naming an injected column that is not a relationship', () => {
+    const findings = validateDatasetReferences(
+      stackWith({ include: ['created_at'], dimensions: [], measures: [] }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(DATASET_INCLUDE_UNKNOWN);
+    expect(findings[0].message).toContain('`datetime` field');
+    expect(findings[0].message).toContain('not a relationship');
+  });
+
+  it('⛔ leaves the primary key untyped — the driver provisions it, no table describes it', () => {
+    const findings = validateDatasetReferences(
+      stackWith({ include: ['id'], dimensions: [], measures: [] }),
+    );
+    expect(findings).toHaveLength(1);
+    // The untyped branch: "an ordinary field", not a guessed type.
+    expect(findings[0].message).toContain('an ordinary field');
+  });
+
   it('refuses a multi-hop include whose intermediate hop is not traversable', () => {
     const findings = validateDatasetReferences(
       stackWith({ include: ['status.owner'], dimensions: [], measures: [] }),
@@ -371,12 +401,15 @@ describe('validateDatasetReferences — the three skips', () => {
     ).toEqual([]);
   });
 
-  it('skips a hop THROUGH an injected column, whose target is registry-owned', () => {
+  it('skips a hop THROUGH an injected column, whose target the seam does not traverse', () => {
     // `owner_id` IS injected on this object (`ownership` omitted ⇒ both anchors)
-    // and IS a lookup at the registry — but its type and target are invisible
-    // here, so `owner_id.name` is unanswerable rather than a miss. Reporting it
-    // would be the false positive skip 3 exists to avoid; assuming it resolves
-    // would be the fail-open on the other side.
+    // and IS a lookup at the registry. [#16340] The slice now carries that
+    // target, but `resolveFieldPath` still answers `injected-hop` rather than
+    // walking it: traversing would newly judge every path through a platform
+    // anchor wherever `sys_user` is compiled in, which is a widening with its
+    // own findings to measure. Reporting the hop would be the false positive
+    // skip 3 exists to avoid; assuming it resolves would be the fail-open on
+    // the other side.
     expect(rules(stackWith({ dimensions: [{ name: 'o', field: 'owner_id.name' }], measures: [] }))).toEqual([]);
   });
 
