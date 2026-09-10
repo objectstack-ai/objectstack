@@ -185,15 +185,40 @@ import type { StrategyContext } from '@objectstack/spec/contracts';
 import type { DatasetScopedStrategyContext } from './strategies/types.js';
 
 /**
+ * [#16206] The dialect names a HOST may answer — the declared accept set of
+ * `AnalyticsServiceConfig.sqlDialect`, and the same three a `SqlDriver` answers
+ * from its own `dialectName`.
+ *
+ * ⛔ `'unknown'` is deliberately NOT in here. It is this file's RESIDUE arm —
+ * what a non-answer normalises to — never a name a host is asked to say, and
+ * putting it in the accept set would make "I don't know" indistinguishable from
+ * a considered answer at the one seam that exists to tell them apart.
+ *
+ * Spelled as a `const` tuple so {@link AcceptedSqlDialect} (what the compiler
+ * checks a host against) and {@link KNOWN_DIALECTS} (what the runtime checks it
+ * against) are ONE source: a widening cannot land in the type and miss the set,
+ * which is how a declared vocabulary drifts back into free text.
+ */
+export const ACCEPTED_SQL_DIALECTS = ['sqlite', 'postgres', 'mysql'] as const;
+
+/**
+ * [#16206] The vocabulary `AnalyticsServiceConfig.sqlDialect` accepts, stated
+ * on the type so a host reading the config learns the accept set without
+ * running anything — the ruled remedy for a hook that was declared as free
+ * text while only three spellings ever did anything.
+ */
+export type AcceptedSqlDialect = (typeof ACCEPTED_SQL_DIALECTS)[number];
+
+/**
  * The dialects this package's compilers distinguish — deliberately the same
  * four names `driver-sql`'s `SqlDialectName` carries, including `'unknown'`,
  * so a driver's own answer can be handed straight through with no second
  * mapping table to drift.
  */
-export type AnalyticsSqlDialect = 'sqlite' | 'postgres' | 'mysql' | 'unknown';
+export type AnalyticsSqlDialect = AcceptedSqlDialect | 'unknown';
 
 /** Every dialect this file has an arm for; anything else is `'unknown'`. */
-const KNOWN_DIALECTS = new Set<string>(['sqlite', 'postgres', 'mysql']);
+const KNOWN_DIALECTS = new Set<string>(ACCEPTED_SQL_DIALECTS);
 
 /**
  * Read a host's / driver's dialect answer as one of {@link AnalyticsSqlDialect}.
@@ -201,9 +226,34 @@ const KNOWN_DIALECTS = new Set<string>(['sqlite', 'postgres', 'mysql']);
  * Anything unrecognised — including `undefined` from a host that wired no hook
  * — is `'unknown'`, which compiles the pre-#15684 `LIKE`. "Cannot answer, do
  * not block": a name this file does not model must not silently pick an arm.
+ *
+ * [#16206] ⛔ The accept set stays these three: widening it to `driver-sql`'s
+ * knex-client aliases was refused by name (a second copy of that table is the
+ * drift this repo keeps paying for, and #11756 shows an unrecognised spelling is
+ * sometimes deliberate). What changed instead is that a WRONG answer no longer
+ * reads as NO answer — see {@link isUnrecognisedSqlDialectAnswer}.
  */
 export function normalizeSqlDialect(name: string | undefined | null): AnalyticsSqlDialect {
   return typeof name === 'string' && KNOWN_DIALECTS.has(name) ? (name as AnalyticsSqlDialect) : 'unknown';
+}
+
+/**
+ * [#16206] Did the host answer something, and is that something outside
+ * {@link ACCEPTED_SQL_DIALECTS}?
+ *
+ * The predicate behind the one diagnostic the hook owes its host. It lives HERE,
+ * beside the set it asks about, so "what counts as an out-of-contract answer"
+ * has a single definition rather than a second one re-derived at the logging
+ * site — the same reason {@link KNOWN_DIALECTS} is not spelled twice.
+ *
+ * ⛔ It is deliberately FALSE for `undefined`, `null` and `''`. The hook is
+ * OPTIONAL and "cannot answer" is a legal, silent answer that
+ * {@link sqlDialectFor} is tiered on; making a NON-answer loud would punish the
+ * hosts the tiering exists for. The diagnostic's whole subject is the host that
+ * DID answer and was not heard.
+ */
+export function isUnrecognisedSqlDialectAnswer(name: string | undefined | null): name is string {
+  return typeof name === 'string' && name.length > 0 && !KNOWN_DIALECTS.has(name);
 }
 
 /**
@@ -214,6 +264,14 @@ export function normalizeSqlDialect(name: string | undefined | null): AnalyticsS
  * the compilers cannot see this from the filter, the host can answer it from
  * the driver that will execute the statement, and a host that cannot answer
  * keeps the behaviour it had.
+ *
+ * [#16206] ⚠️ This function still answers `'unknown'` for a wrong answer and for
+ * no answer alike, and that is correct HERE: by the time a compiler asks, the
+ * only honest reading of an unmodelled name is "no arm for this". Telling the
+ * two apart is a job for the seam that OWNS the contract — `AnalyticsService`,
+ * where the host's config hook arrives and where the one `warn` is emitted
+ * ({@link isUnrecognisedSqlDialectAnswer}) — not for a per-predicate call the
+ * compilers make once per filter node.
  */
 export function sqlDialectFor(ctx: StrategyContext, objectName: string): AnalyticsSqlDialect {
   const hook = (ctx as DatasetScopedStrategyContext).sqlDialect;
