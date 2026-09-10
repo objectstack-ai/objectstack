@@ -442,15 +442,16 @@
 > **Amendment II.3 (2026-09, #16074 maintainer ruling, decision batch #59) —
 > a ROW-INVARIANT-IN-EFFECT rewrite is ADMITTED, and the ENGINE is what makes
 > it safe.**
-> _Amends D3's closing sentence in Addendum II above by ADDITION: the 2026-08
+> _Amends D3's closing sentences in Addendum II above by ADDITION: the 2026-08
 > text is left standing as the dated record of what was decided then, carrying
 > a forward pointer to here. This block RECORDS a decision already taken; it
 > takes none._
 >
 > **The ruling.** Maintainer reply, verbatim: 「16063 c,  其他同意」
-> (2026-09-06, decision batch #59, on this card #16074). Option 1 adopted: the
-> CONTRACT admits the shape. The three shipped provenance stamps are made
-> conforming by amending the contract, not by being changed to fit it.
+> (2026-09-06, decision batch #59, recorded on this card #16074 in comment
+> `5560086928`). Option 1 adopted: the CONTRACT admits the shape. The three
+> shipped provenance stamps are made conforming by amending the contract, not
+> by being changed to fit it.
 >
 > **What the rule now is.** On a predicate write (`multi: true`), per-row
 > `previous` is supplied so a guard can REFUSE (throw) **and** so a `before*`
@@ -473,9 +474,9 @@
 > batch is not judged at all. To an operator that refusal is an ADR-0112
 > envelope, `status: 400`, carrying `keys` (the sorted keys some rows' hooks
 > wrote and other rows' did not) and `rows` (how many rows the predicate
-> matched). So an
-> author does not have to be TRUSTED to be row-invariant; a hook that is not
-> gets a loud, whole-batch 400 instead of a half-stamped table.
+> matched). So an author does not have to be TRUSTED to be row-invariant; a
+> hook that is not gets a loud, whole-batch 400 instead of a half-stamped
+> table.
 >
 > **The three shapes the rule does NOT admit.**
 >

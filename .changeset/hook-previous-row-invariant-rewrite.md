@@ -4,7 +4,7 @@
 
 feat(spec): `HookContext` admits a row-invariant-in-effect rewrite by per-row `previous` on a predicate write, kept safe by the engine's key-divergence refusal (#16074)
 
-The `hook.zod.ts` contract said that on a predicate (`multi: true`) write the per-row `previous` is supplied *so a guard can REFUSE (throw), not so a rewrite can be aimed*. Three shipped `beforeUpdate` provenance stamps (`sys_email_template`, `sys_sharing_rule`, `sys_webhook`) read `ctx.previous` per row and write `customized: true` conditioned on it — inside the letter of what the engine allows, outside the stated purpose of the input they use. Director ruling, decision batch #59 (2026-09-06), option 1: **the contract admits the shape.**
+The `hook.zod.ts` contract said that on a predicate (`multi: true`) write the per-row `previous` is supplied *so a guard can REFUSE (throw), not so a rewrite can be aimed*. Three shipped `beforeUpdate` provenance stamps (`sys_email_template`, `sys_sharing_rule`, `sys_webhook`) read `ctx.previous` per row and write `customized: true` conditioned on it — inside the letter of what the engine allows, outside the stated purpose of the input they use. Maintainer ruling (recorded by the director seat, decision batch #59, 2026-09-06), option 1: **the contract admits the shape.**
 
 The amended D3 clause (`HookContextSchema.input` TSDoc, mirrored in `bulk-write-hook-conformance.ts`) now states:
 
