@@ -1873,14 +1873,27 @@ const CLONE_STRIP_FIELDS: readonly string[] = [
  * `(object, reason)` with the UNION of dropped field names.
  *
  * Used by the bulk-create surface (`createManyData`), whose `{ object, records,
- * count }` response has no per-row slot to hang a `droppedFields` on. The
- * create-side static-`readonly` strip is schema-uniform — every row drops the
- * same set — which makes an aggregated view faithful rather than lossy. (Since
- * #14147 that strip is the ENGINE's, which reports one event per CALL for it,
- * so the aggregation is over the runtime-owned per-row events.) Returns `[]` when nothing was dropped so callers can spread
+ * count }` response has no per-row slot to hang a `droppedFields` on — a union
+ * is the only view that response can represent, which is the whole reason this
+ * collapse exists. (Since #14147 that strip is the ENGINE's, which reports one
+ * event per CALL for it, so the aggregation is over the runtime-owned per-row
+ * events.)
+ *
+ * ⚠️ So read a name in a merged event as "AT LEAST ONE row dropped this field",
+ * never "every row dropped the same set". Maintainer ruling C (#14147) put the
+ * static-`readonly` strip INSIDE `engine.insert`, AFTER the `beforeInsert`
+ * hooks, where it exempts keys a hook itself assigned — recorded PER ROW and
+ * indexed per row at the call: `packages/objectql/src/engine.ts` hands
+ * `stripReadonlyFields` the option `hookWrittenKeys: rowHookWrittenKeys[i]`,
+ * and that option's only power is to turn a STRIP into a KEEP. A hook that
+ * stamps a protected key on some rows and not others therefore makes those rows
+ * drop DIFFERENT sets, so the union is faithful to the BATCH without being
+ * faithful to any one row.
+ *
+ * Returns `[]` when nothing was dropped so callers can spread
  * `...(x.length ? { droppedFields: x } : {})` and keep the omit-when-empty shape.
- * The per-row `insertMany`/`batch` paths keep row precision instead (they have a
- * per-row result to carry it).
+ * The per-row `insertMany`/`batch` paths carry their own per-row `droppedFields`
+ * instead — they have a per-row result to hang one on.
  */
 function mergeDroppedFieldEvents(events: DroppedFieldsEvent[]): DroppedFieldsEvent[] {
     if (events.length === 0) return [];
