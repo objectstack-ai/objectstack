@@ -2007,6 +2007,108 @@ describe('the four `object-*` `filter` doors — one filter orthography platform
   });
 });
 
+describe('`object-grid` / `object-calendar` `sort` — one sort orthography, the array (objectui#8221, decision batch #77, option B)', () => {
+  const SORT_DOORS = ['object-grid', 'object-calendar'] as const;
+  const ARRAY_FORM = [{ field: 'created_at', order: 'desc' }];
+  /**
+   * The legacy OData-ish clause `convertSortToQueryParams` honours at the
+   * objectui pin `53ded82b` (`core/src/utils/sort-query.ts:66-70`) and that
+   * `ObjectGrid.tsx:1845-1846` puts on `$orderby` verbatim. Retired by the
+   * ruling; refused here.
+   */
+  const STRING_FORM = 'created_at desc';
+  type ParseResult = { success: boolean; data?: { sort?: unknown }; error?: { issues: Array<{ path: PropertyKey[]; code: string }> } };
+  type Door = { shape?: Record<string, unknown>; safeParse: (v: unknown) => ParseResult };
+  const door = (type: string) => ComponentPropsMap[type as keyof typeof ComponentPropsMap] as unknown as Door;
+  const issuesAtPath = (r: ParseResult, path: string) =>
+    r.success ? [] : r.error!.issues.filter((i) => i.path.join('.') === path);
+
+  it.each(SORT_DOORS)('%s accepts a SortItem[] and echoes it — the acceptance criterion', (type) => {
+    const r = door(type).safeParse({ objectName: 'showcase_task', sort: ARRAY_FORM });
+    expect(r.success).toBe(true);
+    expect(r.data!.sort).toEqual(ARRAY_FORM);
+  });
+
+  it.each(SORT_DOORS)('%s carries the REAL SortItemSchema, not a lookalike: the direction enum and the required pair are checked', (type) => {
+    // `z.unknown()` echoed every one of these back with `success: true`.
+    const spelledOut = door(type).safeParse({ objectName: 'showcase_task', sort: [{ field: 'created_at', order: 'descending' }] });
+    expect(issuesAtPath(spelledOut, 'sort.0.order').map((i) => i.code)).toEqual(['invalid_value']);
+    const noDirection = door(type).safeParse({ objectName: 'showcase_task', sort: [{ field: 'created_at' }] });
+    expect(issuesAtPath(noDirection, 'sort.0.order').map((i) => i.code)).toEqual(['invalid_type']);
+    const noField = door(type).safeParse({ objectName: 'showcase_task', sort: [{ order: 'asc' }] });
+    expect(issuesAtPath(noField, 'sort.0.field').map((i) => i.code)).toEqual(['invalid_type']);
+  });
+
+  it.each(SORT_DOORS)('%s REFUSES the legacy string clause at the `sort` path — the shape the ruling retires', (type) => {
+    // Reverse verification on the issue envelope: located at `sort`, kind
+    // named. Before this change the same value parsed with zero issues on
+    // both doors (the card's measurement on `@objectstack/spec` 17.2.0, and
+    // the ablation in the landing PR re-runs it against this tree).
+    const r = door(type).safeParse({ objectName: 'showcase_task', sort: STRING_FORM });
+    expect(r.success).toBe(false);
+    const atSort = issuesAtPath(r, 'sort');
+    expect(atSort).toHaveLength(1);
+    expect(atSort[0].code).toBe('invalid_type');
+    expect(atSort[0]).toMatchObject({ expected: 'array' });
+  });
+
+  it.each(SORT_DOORS)('%s REFUSES a bare number at `sort` — the other value `z.unknown()` receipted', (type) => {
+    const r = door(type).safeParse({ objectName: 'showcase_task', sort: 3 });
+    expect(issuesAtPath(r, 'sort').map((i) => i.code)).toEqual(['invalid_type']);
+  });
+
+  it.each(SORT_DOORS)('%s still refuses an undeclared key BY NAME on the same call — the control the card keeps', (type) => {
+    // The control that makes the three readings above verdicts rather than a
+    // schema that reports nothing: key checking was never the thing that was
+    // missing on these doors, the VALUE was.
+    const r = door(type).safeParse({ objectName: 'showcase_task', sort: ARRAY_FORM, bogusProp: 1 });
+    expect(r.success).toBe(false);
+    expect(issuesAtPath(r, 'sort')).toEqual([]);
+    const unrecognized = r.error!.issues.filter((i) => i.code === 'unrecognized_keys') as Array<{ keys?: string[] }>;
+    expect(unrecognized.flatMap((i) => i.keys ?? [])).toContain('bogusProp');
+  });
+
+  it('`sort` agrees with `dataSource.sort` and with the picker shorthand — one shape, four doors', () => {
+    // The map's own copies are the same import (`SortItemSchema`), so this
+    // asks the question the copies could not: do the doors AGREE, value for
+    // value, with the binding every data-bound element already carries.
+    const viaBinding = ElementDataSourceSchema.parse({ object: 'showcase_task', sort: ARRAY_FORM });
+    for (const type of [...SORT_DOORS, 'element:record_picker']) {
+      const value = type === 'element:record_picker'
+        ? { object: 'showcase_task', sort: ARRAY_FORM }
+        : { objectName: 'showcase_task', sort: ARRAY_FORM };
+      const r = door(type).safeParse(value);
+      expect([type, r.success]).toEqual([type, true]);
+      expect([type, r.data!.sort]).toEqual([type, viaBinding.sort]);
+      const refused = door(type).safeParse({ ...value, sort: STRING_FORM });
+      expect([type, issuesAtPath(refused, 'sort').map((i) => i.code)]).toEqual([type, ['invalid_type']]);
+    }
+  });
+
+  it('the census: no `sort` door in ComponentPropsMap takes a string except `record:related_list`, whose string is a DIFFERENT dialect and was not ruled', () => {
+    // Asked over the WHOLE map by shape rather than by the two names above, so
+    // a future entry declaring `sort` as `z.unknown()` is caught here by name.
+    // Guarded the same way as its `filter` twin: the doors pinned above must
+    // be found, or the shape read has gone wrong and the loop is vacuous.
+    const doors = (Object.entries(ComponentPropsMap) as Array<[string, unknown]>)
+      .filter(([, schema]) => {
+        const shape = (schema as Door).shape;
+        return !!shape && 'sort' in shape;
+      })
+      .map(([type]) => type);
+    expect(doors).toEqual(expect.arrayContaining([...SORT_DOORS, 'element:record_picker', 'record:related_list']));
+    const stringTakers = doors.filter((type) => issuesAtPath(door(type).safeParse({ sort: STRING_FORM }), 'sort').length === 0);
+    // ⚠️ `record:related_list` is the ONE deliberate exception and it is pinned
+    // as such, not tolerated: its string is the `'field'` / `'-field'` form
+    // read by `RelatedList.normalizeSortSpec`, a different dialect that never
+    // reaches `convertSortToQueryParams` — measured by objectui#8221's own
+    // implementing round, which narrowed it, established the dialect and then
+    // reverted the narrowing byte-identically. Retiring it was not ruled and
+    // would delete working, spec-legal behaviour.
+    expect(stringTakers).toEqual(['record:related_list']);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Interactive Elements — element:text_input
 // ---------------------------------------------------------------------------
