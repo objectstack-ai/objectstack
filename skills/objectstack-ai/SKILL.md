@@ -68,17 +68,16 @@ conditions.
 ### Naming the tools: the resolution ladder
 
 A `skill.tools[]` entry resolves against the union of three sources
-(`packages/lint/src/validate-ai-tool-references.ts:148-171`):
+(`collectToolUniverse` in `packages/lint/src/validate-ai-tool-references.ts`):
 
 1. **`stack.tools[].name`** — records your own stack declares. ADR-0109: the
    default third-party path declares **none** (see *Tool metadata* below).
-2. **`PLATFORM_PROVIDED_TOOL_NAMES`** — the 30 statically-registered platform
-   tools, grouped by owning package in
-   `packages/spec/src/system/constants/platform-tool-names.ts:38-82` — 6 data /
-   knowledge tools from `service-ai` (`query_records`, `get_record`,
-   `query_data`, `aggregate_data`, `search_knowledge`, `visualize_data`) and 24
-   schema / metadata / package tools from `service-ai-studio`. Read that file for
-   the exact set: it is the registry the lint rule checks against.
+2. **`PLATFORM_PROVIDED_TOOL_NAMES`** — the statically-registered platform
+   tools, flattened from `PLATFORM_TOOLS_BY_PACKAGE` in
+   `packages/spec/src/system/constants/platform-tool-names.ts`: data /
+   knowledge tools from `service-ai`, schema / metadata / package tools from
+   `service-ai-studio`. Read that file for the exact set: it is the registry
+   the lint rule checks against.
 3. **`action_<name>`** — one tool per AI-exposed Action of your own stack
    (`PLATFORM_TOOL_FAMILY_PREFIXES`). **The default path** for anything your app
    does.
