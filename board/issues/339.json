@@ -1,0 +1,36 @@
+{
+  "number": 339,
+  "kind": "pull_request",
+  "title": "Add capability contract interfaces for HTTP and data persistence",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-28T05:00:40Z",
+  "updated_at": "2026-01-28T05:39:53Z",
+  "closed_at": "2026-01-28T05:34:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-28T05:34:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/339",
+  "body": "Implements abstract capability contracts (`IHttpServer`, `IDataEngine`) to decouple plugins from concrete HTTP framework and data layer implementations, completing the microkernel architecture foundation.\n\n## Changes\n\n### New Interfaces\n\n**`src/interfaces/http-server.ts`**\n- `IHttpServer`: Abstract HTTP routing (get, post, put, delete, patch, use, listen)\n- `IHttpRequest` / `IHttpResponse`: Generic request/response types\n- Enables plugins to work with Express, Fastify, Hono, or any HTTP framework\n\n**`src/interfaces/data-engine.ts`**\n- `IDataEngine`: Abstract CRUD operations (insert, find, update, delete)\n- `QueryOptions`: Flexible query filters, sorting, pagination\n- Enables plugins to work with ObjectQL, Prisma, TypeORM, or any data layer\n\n### Usage Example\n\n```typescript\nclass ApiPlugin implements Plugin {\n  name = 'api';\n  dependencies = ['http-server', 'data-engine'];\n  \n  async start(ctx: PluginContext) {\n    const server = ctx.getService<IHttpServer>('http-server');\n    const db = ctx.getService<IDataEngine>('data-engine');\n    \n    // Framework-agnostic - works with any HTTP/data implementation\n    server.post('/api/users', async (req, res) => {\n      const user = await db.insert('user', req.body);\n      res.status(201).json(user);\n    });\n  }\n}\n```\n\n### Supporting Files\n\n- `src/test-interfaces.ts`: Mock implementations demonstrating both interfaces\n- `src/index.ts`: Export new interfaces from package\n- `README.md`: API documentation with code examples\n\n## Design Notes\n\nFollows Dependency Inversion Principle: plugins depend on stable abstractions rather than volatile concrete implementations. Concrete adapters (Hono, Express, ObjectQL) implement these interfaces and register themselves via the service registry.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 全局设定 (System Context)\n> \n> 在开始之前，先给 AI 输入这段上下文，确立架构基调：\n> \n> Context: I am building \"ObjectStack\", an enterprise-grade low-code platform. Architecture: Microkernel Architecture (Plugin-based). Package Name: @objectstack/core (The runtime kernel). Design Philosophy: The Core only defines Interfaces (Contracts) and manages the Lifecycle. Actual business logic (like HTTP Servers or Database connections) must be implemented in Plugins. Tech Stack: TypeScript, Node.js.\n> \n> 第一步：构建内核与基础类型 (The Kernel & Types)\n> \n> 目标：建立没有任何业务逻辑的纯净运行时。\n> \n> 📋 Prompt 1\n> \n> Task: Create the foundation for @objectstack/core.\n> \n> Requirements:\n> \n> Define Interfaces (src/types.ts):\n> \n> Plugin: Must have name, version?, dependencies? (string[]), and lifecycle methods init(ctx) and start(ctx).\n> \n> PluginContext: The interface for the object passed to plugins. It must support:\n> \n> registerService(name: string, instance: any): To register a capability.\n> \n> getService<T>(name: string): To retrieve a capability (throw error if not found).\n> \n> hook(event: string, handler: Function) and trigger(event: string, data: any).\n> \n> Implement Kernel (src/kernel.ts):\n> \n> Create class ObjectKernel.\n> \n> Implement use(plugin) to add plugins to a registry.\n> \n> Implement bootstrap():\n> \n> Phase 1: Validate dependencies (ensure required plugins are present).\n> \n> Phase 2: Call init() on all plugins sequentially.\n> \n> Phase 3: Call start() on all plugins.\n> \n> Constraint: Keep this file generic. Do NOT import Express, Database libraries, or any business logic here.\n> \n> 第二步：定义核心能力契约 (The Contracts)\n> \n> 目标：在 Core 中制定“法律”，规定 HTTP 服务和数据引擎应该长什么样，但不写具体实现。\n> \n> 📋 Prompt 2\n> \n> Task: Define the standard capabilities contracts in @objectstack/core.\n> \n> Context: We need standard interfaces so plugins can interact without knowing the underlying implementation (Dependency Inversion).\n> \n> Requirements:\n> \n> Create src/interfaces/http-server.ts:\n> \n> Define interface IHttpServer.\n> \n> It should define generic methods for routing: get(path, handler), post(path, handler), use(path, handler).\n> \n> It should define listen(port).\n> \n> Note: Do not use Express types directly here, keep it abstract if possible, or use generic Request/Response types.\n> \n> Create src/interfaces/data-engine.ts:\n> \n> Define interface IDataEngine.\n> \n> Methods:\n> \n> insert(objectName: string, data: any): Promise<any>\n> \n> find(objectName: string, query?: any): Promise<any[]>\n> \n> update(objectName: string, id: any, data: any): Promise<any>\n> \n> delete(objectName: string, id: any): Promise<boolean>\n> \n> Constraint: Only write TypeScript interface definitions. No class implementations yet.\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

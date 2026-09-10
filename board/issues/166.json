@@ -1,0 +1,33 @@
+{
+  "number": 166,
+  "kind": "pull_request",
+  "title": "Simplify MSW integration with config-driven auto-mocking",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-25T18:27:24Z",
+  "updated_at": "2026-01-26T00:34:18Z",
+  "closed_at": "2026-01-26T00:29:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-26T00:29:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/166",
+  "body": "## Problem\n\nUsers had to manually write 145+ lines of MSW handlers for each CRUD endpoint. Request was for auto-mocking all API endpoints at startup from a simple configuration.\n\n## Changes\n\n### Auto-Handler Generation\n- **`src/mocks/createMockHandlers.ts`**: Generates MSW handlers from object metadata (discovery, meta, CRUD endpoints)\n- **`objectstack.config.ts`**: Declarative data model definition\n- **`src/mocks/browser.ts`**: Reduced from 145 to 40 lines (72% reduction)\n\n### Implementation\n\n**Before:**\n```typescript\n// Manual handlers for each endpoint (145 lines)\nconst handlers = [\n  http.get('/api/v1/data/task', ({ request }) => {\n    const url = new URL(request.url);\n    const top = parseInt(url.searchParams.get('$top') || '100');\n    const tasks = Array.from(mockTasks.values());\n    // ... 20 more lines\n  }),\n  http.post('/api/v1/data/task', async ({ request }) => {\n    // ... 15 more lines\n  }),\n  // ... 5 more endpoints\n];\n```\n\n**After:**\n```typescript\n// Auto-generated from config (40 lines)\nexport async function startMockServer() {\n  seedData('task', [/* initial data */]);\n  const metadata = { objects: appConfig.objects.reduce(...) };\n  const handlers = createMockHandlers('/api/v1', metadata);\n  const worker = setupWorker(...handlers);\n  await worker.start({ onUnhandledRequest: 'bypass' });\n}\n```\n\n### Technical Details\n- Handles client path compatibility (`/api/v1` and `/api/v1/api/v1`)\n- In-memory Map-based storage with auto-ID generation\n- Supports all standard ObjectStack endpoints (discovery, meta, CRUD)\n\n## Result\n\n![Working Application](https://github.com/user-attachments/assets/140a897b-39e1-4fe2-80a9-fa1cf4335b70)\n\nAll CRUD operations verified: Create (201), Read (200), Update, Delete working with auto-generated handlers from single config file.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/blob/copilot/add-msw-integration-example/examples/ui/msw-react-crud/src/mocks/browser.ts\n> \n> 我理想中的plugin-msw在启动时就mock所有的API端口的所有请求。也做了这里所有需要的初始化。\n> \n> 如果换初始化插件的时候，有一些入口函数让我来做些设置，但是不要让我写这么复杂的代码\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

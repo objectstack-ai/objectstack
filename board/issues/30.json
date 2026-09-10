@@ -1,0 +1,37 @@
+{
+  "number": 30,
+  "kind": "pull_request",
+  "title": "feat: implement browser language detection and auto-redirect for homepage",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-19T14:29:24Z",
+  "updated_at": "2026-01-20T03:06:53Z",
+  "closed_at": "2026-01-20T03:02:47Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-20T03:02:47Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/30",
+  "body": "The homepage now redirects users to their language-preferred interface based on browser `Accept-Language` headers. Chinese users are redirected to `/cn`, while English users remain on `/` (the default).\n\n## Changes\n\n**Custom Middleware** (`apps/docs/middleware.ts`)\n- Replaced fumadocs default middleware with custom implementation\n- Maps Chinese language codes (`zh`, `zh-CN`, `zh-TW`, `zh-HK`) → `cn`\n- English (default): Internal rewrite to `/en`, URL stays `/`\n- Non-default languages: HTTP 307 redirect to localized path + cookie persistence\n- Cookie options: `sameSite: 'lax'`, `path: '/'`\n\n**Dependencies** (`apps/docs/package.json`)\n- Added `negotiator` for `Accept-Language` parsing\n- Added `@types/negotiator`\n\n## Implementation\n\n```typescript\nfunction getPreferredLanguage(request: NextRequest): string {\n  // Cookie first, then Accept-Language header\n  const cookieLocale = request.cookies.get('FD_LOCALE')?.value;\n  if (cookieLocale && SUPPORTED_LANGUAGES.includes(cookieLocale)) {\n    return cookieLocale;\n  }\n\n  const negotiator = new Negotiator({ headers: Object.fromEntries(request.headers.entries()) });\n  const browserLanguages = negotiator.languages().map(normalizeLanguage);\n  \n  return browserLanguages.find(lang => SUPPORTED_LANGUAGES.includes(lang)) \n    || i18n.defaultLanguage;\n}\n```\n\n## Behavior\n\n| Browser Language | URL Visited | Result |\n|-----------------|-------------|--------|\n| `en-US` | `/` | Stays on `/` (rewritten to `/en` internally) |\n| `zh-CN` | `/` | Redirects to `/cn` |\n| Any | `/en` | Redirects to `/` (strips default locale) |\n\n## Screenshots\n\n**English Homepage (`/`)**\n![English](https://github.com/user-attachments/assets/7f4e2527-7456-432a-af11-27210dea829c)\n\n**Chinese Homepage (`/cn`)**\n![Chinese](https://github.com/user-attachments/assets/3d9143eb-d392-41c6-bc93-56d181493688)\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 首页应根据当前的语言自动跳转到对应的语言界面\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

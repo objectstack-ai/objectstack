@@ -1,0 +1,33 @@
+{
+  "number": 84,
+  "kind": "pull_request",
+  "title": "Enhance FormSectionSchema with type-safe column constraints",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-23T09:35:30Z",
+  "updated_at": "2026-01-23T09:43:46Z",
+  "closed_at": "2026-01-23T09:43:46Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/84",
+  "body": "Improves form layout flexibility by adding `title` field and replacing string-based column enumeration with numeric constraints.\n\n## Changes\n\n- **FormSectionSchema** (`view.zod.ts`)\n  - Add `title: z.string().optional()` for section headers\n  - Replace `columns: z.enum(['1', '2', '3', '4']).transform()` with `z.number().min(1).max(4).default(2)`\n  - Mark `label` as legacy in favor of `title`\n  - Remove redundant `.optional()` on `collapsible` (default value implies optional)\n\n- **Tests** (`view.test.ts`)\n  - Update column values from strings to numbers\n  - Add test coverage for `title` field and column boundary validation\n\n## Example\n\n```typescript\n// Before: string-based enum with runtime transform\nconst section = {\n  label: 'Contact Info',\n  columns: '2',  // string\n  fields: ['name', 'email']\n}\n\n// After: type-safe numeric validation\nconst section = {\n  title: 'Contact Info',  // semantic naming\n  columns: 2,  // number with min(1).max(4)\n  fields: ['name', 'email']\n}\n```\n\nBackward compatible - existing schemas using `label` and numeric columns continue to work.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 2. 表单布局引擎 (优先级: 低)\n> \n> // 增强 view.zod.ts\n> FormLayoutSchema.extend({\n>   sections: z.array(z.object({\n>     title: z.string(),\n>     columns: z.number().min(1).max(4),\n>     fields: z.array(z.string()),\n>     collapsible: z.boolean().optional(),\n>   })),\n> });\n> 影响: 更灵活的表单设计\n> \n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

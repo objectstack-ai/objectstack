@@ -1,0 +1,37 @@
+{
+  "number": 441,
+  "kind": "pull_request",
+  "title": "Enforce snake_case validation for object field names",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T08:18:34Z",
+  "updated_at": "2026-01-31T08:57:57Z",
+  "closed_at": "2026-01-31T08:50:39Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T08:50:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/441",
+  "body": "AI-generated object definitions were using PascalCase field names (`FirstName`, `LastName`, `Company`) instead of the required snake_case convention (`first_name`, `last_name`, `company`), causing inconsistency with the platform's naming standards.\n\n## Changes\n\n- **ObjectSchema validation**: Added key validator to `fields` record using `z.record(z.string().regex(/^[a-z_][a-z0-9_]*$/), FieldSchema)` to enforce snake_case at parse time\n- **Test coverage**: Added validation tests for PascalCase, camelCase, kebab-case, and other invalid patterns\n- **Example fix**: Updated `msw-react-crud` example to use correct field names\n\n## Example\n\n**Before (rejected):**\n```typescript\nconst Lead = {\n  name: 'lead',\n  fields: {\n    FirstName: { type: 'text', label: '名' },  // ❌ Validation error\n    Company: { type: 'text', label: '公司' }\n  }\n};\n```\n\n**After (accepted):**\n```typescript\nconst Lead = {\n  name: 'lead',\n  fields: {\n    first_name: { type: 'text', label: '名' },  // ✅ Valid\n    company: { type: 'text', label: '公司' }\n  }\n};\n```\n\nError message: `Field names must be lowercase snake_case (e.g., \"first_name\", \"company\", \"annual_revenue\")`\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> ai生成的对象是这样的，是否应该约束字段名的格式。\n> const Lead = {\n>   name: 'lead',\n>   label: '线索',\n>   labelPlural: '线索',\n>   icon: 'user-plus',\n>   description: '潜在客户线索管理，包括线索打分、公海池和自动分配',\n>   enable: {\n>     searchable: true,\n>     trackHistory: true,\n>     activities: true,\n>     feeds: true,\n>     files: true,\n>     enableDuplicateDetection: true\n>   },\n>   fields: {\n>     // Basic Information\n>     FirstName: {\n>       type: 'text',\n>       label: '名',\n>       maxLength: 40\n>     },\n>     LastName: {\n>       type: 'text',\n>       label: '姓',\n>       required: true,\n>       maxLength: 80,\n>       searchable: true\n>     },\n>     Company: {\n>       type: 'text',\n>       label: '公司',\n>       required: true,\n>       maxLength: 255,\n>       searchable: true\n>     },\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

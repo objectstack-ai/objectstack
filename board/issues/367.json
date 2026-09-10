@@ -1,0 +1,38 @@
+{
+  "number": 367,
+  "kind": "pull_request",
+  "title": "Add configurable logger with Pino for Node.js and browser support",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-29T22:41:13Z",
+  "updated_at": "2026-01-29T23:32:10Z",
+  "closed_at": "2026-01-29T23:22:04Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-29T23:22:04Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/367",
+  "body": "Kernel requires logging that adapts to server (Node.js) and browser environments with configurable output formats, levels, and security controls.\n\n## Implementation\n\n**Universal Logger** (`packages/core/src/logger.ts`)\n- Runtime detection: Node.js vs browser, auto-selects defaults\n- **Node.js**: Integrated [Pino](https://github.com/pinojs/pino) - high-performance, low-overhead structured logging\n- **Browser**: Lightweight console-based logger\n- Formats: `json` (structured), `text` (simple), `pretty` (colored via pino-pretty)\n- File logging with rotation via Pino transports (Node.js only)\n- Sensitive data redaction with Pino's native redact feature\n- Child loggers with inherited context using Pino.child()\n- Distributed tracing support (traceId/spanId)\n\n**Kernel Integration** (`packages/core/src/kernel.ts`)\n- Logger config via constructor, injected into PluginContext\n- Replaced hardcoded `console` references\n\n**Schema Updates** (`packages/spec/src/system/logger.zod.ts`)\n- Applied `.optional().default()` pattern per repo standards\n\n**Dependencies** (`packages/core/package.json`)\n- Added `pino@^8.17.0` for Node.js logging\n- Added `pino-pretty@^10.3.0` for development-friendly output\n\n## Usage\n\n```typescript\n// Kernel with logger config\nconst kernel = new ObjectKernel({\n  logger: {\n    level: 'debug',\n    format: 'pretty',\n    file: './logs/app.log',  // Node.js only\n    redact: ['password', 'apiKey']\n  }\n});\n\n// Plugin receives configured logger (Pino in Node.js)\nconst plugin: Plugin = {\n  name: 'my-plugin',\n  init: async (ctx) => {\n    ctx.logger.info('Initialized', { version: '1.0.0' });\n    ctx.logger.error('Failed', error, { context: 'db' });\n  }\n};\n\n// Standalone logger\nconst logger = createLogger({ format: 'json' });\nconst childLogger = logger.child({ requestId: '123' });\nconst tracedLogger = logger.withTrace('trace-id', 'span-id');\n```\n\n## Technical Notes\n\n- **Node.js**: Uses Pino for production-grade logging with minimal overhead\n- **Browser**: Simple console implementation, no external dependencies\n- Pino provides native support for transports, rotation, child loggers, and redaction\n- `Logger` interface includes optional `destroy()` for resource cleanup\n- 23 tests covering both runtime environments\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 内核应该提供可配置的日志能力，但需要兼顾服务端和浏览器端的运行模式。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

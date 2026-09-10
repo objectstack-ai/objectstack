@@ -1,0 +1,36 @@
+{
+  "number": 307,
+  "kind": "pull_request",
+  "title": "Add comprehensive protocol documentation for 70 spec definitions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-27T07:57:22Z",
+  "updated_at": "2026-01-27T08:46:11Z",
+  "closed_at": "2026-01-27T08:41:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-27T08:41:29Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/307",
+  "body": "The repository lacked discoverable documentation for its 70 protocol specifications across 11 modules. Users had no quick way to navigate or understand the complete protocol inventory.\n\n## Changes\n\n**New Documentation Structure (English only)**\n\n- **PROTOCOL_INDEX.md** - Direct navigation to all 70 protocols with source links\n- **PROTOCOL_REFERENCE.md** - Complete inventory with descriptions, usage patterns, and naming conventions\n- **PROTOCOL_ORGANIZATION.md** - Visual diagrams showing module hierarchy, layer architecture, and dependencies\n\n**Updated Files**\n\n- **README.md** - Added protocol reference section with module breakdown statistics\n\n## Protocol Coverage\n\n```\nData Protocol:       8 protocols  (field, object, query, validation, filter, dataset, mapping, hook)\nUI Protocol:        10 protocols  (view, page, app, dashboard, report, action, component, block, theme, widget)\nSystem Protocol:    14 protocols  (manifest, datasource, driver, plugin, context, events, job, audit, logger, translation, feature, scoped-storage)\nAI Protocol:         8 protocols  (agent, model-registry, rag-pipeline, nlq, conversation, cost, predictive, orchestration)\nAPI Protocol:        6 protocols  (contract, endpoint, router, odata, realtime, discovery)\nAutomation:          7 protocols  (flow, workflow, approval, webhook, etl, sync, connector)\nAuth:                6 protocols  (identity, role, organization, policy, config, scim)\nPermission:          4 protocols  (permission, sharing, rls, territory)\nHub:                 5 protocols  (marketplace, composer, license, tenant, space)\nShared:              1 protocol   (identifiers)\nStack:               1 protocol   (stack)\n```\n\n## Navigation Example\n\n```typescript\n// Quick lookup in PROTOCOL_INDEX.md → src/data/field.zod.ts\nimport { FieldSchema } from '@objectstack/spec/data';\n\n// Detailed reference in PROTOCOL_REFERENCE.md\n// Visual structure in PROTOCOL_ORGANIZATION.md\n```\n\nAll documentation is cross-referenced and provided in English. Build generates 473 MDX API reference files in `content/docs/references/`.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 扫描目前所有的spec协议，更新文档\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 452,
+  "kind": "pull_request",
+  "title": "Fix ES module imports and CLI kernel reference",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/s"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-01T02:12:32Z",
+  "updated_at": "2026-02-01T02:33:18Z",
+  "closed_at": "2026-02-01T02:30:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-01T02:30:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/452",
+  "body": "Fixes ES module resolution failures and incorrect class import preventing CLI operation.\n\n## Changes\n\n**`@objectstack/cli`**\n- `ObjectStackKernel` → `ObjectKernel` in serve command (correct export from `@objectstack/core`)\n\n**`@objectstack/runtime@0.7.2`**\n- Add `.js` extension to `route-manager` import in `rest-server.ts`\n\n**`@objectstack/objectql@0.7.2`**\n- package.json: `main` and `types` now point to `dist/` instead of `src/`\n- Add `.js` extensions to all relative imports in `index.ts`, `plugin.ts`, `engine.ts`, `protocol.ts`\n\n## Example\n\n```typescript\n// Before (runtime)\nimport { RouteManager } from './route-manager';\n\n// After\nimport { RouteManager } from './route-manager.js';\n```\n\n```json\n// Before (objectql package.json)\n{\n  \"main\": \"src/index.ts\",\n  \"types\": \"src/index.ts\"\n}\n\n// After\n{\n  \"main\": \"dist/index.js\",\n  \"types\": \"dist/index.d.ts\"\n}\n```\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> Upstream Bug Fixes (pnpm patches)\n> \n> @objectstack/runtime@0.7.2: Missing .js extensions in ES module imports\n> \n> - import { RouteManager } from './route-manager';\n> + import { RouteManager } from './route-manager.js';\n> @objectstack/objectql@0.7.2: Wrong package.json entry points + missing .js extensions\n> \n> - \"main\": \"src/index.ts\",\n> - \"types\": \"src/index.ts\"\n> + \"main\": \"dist/index.js\",\n> + \"types\": \"dist/index.d.ts\"\n> CLI Integration\n> \n> Created objectstack.config.ts with plugin-based configuration:\n> \n> export default {\n>   plugins: [\n>     new ObjectQLPlugin(),\n>     new DriverPlugin(new KnexDriver({ ... }), 'default'),\n>   ],\n>   server: { port: 3000 }\n> };\n> Blocker: @objectstack/cli imports non-existent ObjectStackKernel (should be ObjectKernel). Current scripts continue using NestJS server. objectstack:serve script added for future use.\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

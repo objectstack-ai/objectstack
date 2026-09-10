@@ -1,0 +1,37 @@
+{
+  "number": 146,
+  "kind": "pull_request",
+  "title": "Release v0.3.3",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-25T05:41:29Z",
+  "updated_at": "2026-01-25T05:59:25Z",
+  "closed_at": "2026-01-25T05:56:31Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-25T05:56:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/146",
+  "body": "Patch release bumping all packages from 0.3.2 to 0.3.3 using Changesets.\n\n## Changes in This Release\n\n- Enhanced GitHub workflows (CI, release, PR automation)\n- Added protocol-specific prompt templates (data, UI, system, API, AI)\n- Updated changeset configuration for unified versioning\n- Added cursor rules and automation documentation\n\n## Technical Details\n\n- All 8 packages use fixed versioning (released together)\n- CHANGELOGs auto-generated via `changeset version`\n- Git tag `v0.3.3` created for this release\n- Packages ready for npm publish via GitHub Actions workflow\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 发一个版本\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

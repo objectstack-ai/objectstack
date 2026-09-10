@@ -1,0 +1,33 @@
+{
+  "number": 107,
+  "kind": "issue",
+  "title": "🔗 Broken links detected in documentation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "documentation"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-24T19:11:02Z",
+  "updated_at": "2026-01-31T01:01:38Z",
+  "closed_at": "2026-01-31T01:01:38Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/107",
+  "body": "Link checker found broken links in the documentation.\n\nPlease review the [workflow run](https://github.com/objectstack-ai/spec/actions/runs/21320162168) for details."
+}

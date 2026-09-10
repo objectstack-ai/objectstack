@@ -1,0 +1,36 @@
+{
+  "number": 375,
+  "kind": "pull_request",
+  "title": "Migrate existing plugins to capability manifest protocol",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T06:05:49Z",
+  "updated_at": "2026-01-30T06:28:42Z",
+  "closed_at": "2026-01-30T06:26:04Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-30T06:26:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/375",
+  "body": "Extends existing plugins with capability manifests introduced in #374 for cross-vendor interoperability and automated discovery.\n\n## Changes\n\n- **Memory Driver** (`com.objectstack.driver.memory`)\n  - Declares partial conformance to `com.objectstack.protocol.storage.v1` \n  - Documents 8 DriverInterface methods with implemented features (CRUD, pagination) vs unimplemented (filters, aggregations, transactions, joins)\n\n- **Hono Server** (`com.objectstack.server.hono`) \n  - Full conformance to HTTP + REST API protocols\n  - Exposes IHttpServer interface for route registration\n  - Defines extension points: `middleware` and `route` for plugin composition\n\n- **MSW Plugin** (`com.objectstack.plugin.msw`)\n  - Full conformance to mock service + REST API protocols  \n  - Provides ObjectStackServer testing interface\n  - Declares required dependency on ObjectQL engine with protocol constraints\n\n## Example\n\n```typescript\n// objectstack.config.ts\nconst HonoServerPlugin: ObjectStackManifest = {\n  id: 'com.objectstack.server.hono',\n  type: 'adapter',\n  \n  capabilities: {\n    implements: [\n      { protocol: { id: 'com.objectstack.protocol.http.v1', ... }, conformance: 'full' }\n    ],\n    provides: [\n      { id: 'com.objectstack.server.hono.interface.http_server', methods: [...] }\n    ],\n    extensionPoints: [\n      { id: 'com.objectstack.server.hono.extension.middleware', type: 'hook', ... }\n    ]\n  }\n};\n```\n\n## Naming Conventions\n\nAll IDs follow reverse domain notation:\n- Plugins: `com.objectstack.{type}.{name}`\n- Protocols: `{domain}.protocol.{name}.v{major}`  \n- Interfaces: `{plugin-id}.interface.{name}`\n- Extension Points: `{plugin-id}.extension.{name}`\n\nBackward compatible - manifests are declarative metadata, no runtime changes.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/374\n> 按照最新的插件规范改造目前系统的现有插件\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

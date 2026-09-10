@@ -1,0 +1,36 @@
+{
+  "number": 36,
+  "kind": "pull_request",
+  "title": "Fix homepage font color and add blog section with in-depth analytical articles using fumadocs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Copilot",
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-20T05:09:03Z",
+  "updated_at": "2026-01-20T08:56:09Z",
+  "closed_at": "2026-01-20T08:53:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-20T08:53:29Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36",
+  "body": "## Implementation Plan\n\n- [x] Analyze current homepage font colors and identify issues\n- [x] Fix homepage font color contrast issues\n  - Changed subtitle from `text-fd-muted-foreground` to `text-fd-foreground/80`\n  - Changed feature card descriptions from `text-fd-muted-foreground` to `text-fd-foreground/70`\n  - Changed persona card descriptions from `text-fd-muted-foreground` to `text-fd-foreground/70`\n  - Updated \"Built for Builders\" heading gradient for better contrast\n- [x] Configure fumadocs blog collection in source.config.ts\n- [x] Create blog content directory structure\n- [x] Add blog layout and pages using fumadocs\n- [x] Add blog navigation link to layout.config.tsx\n- [x] Create comprehensive analytical blog articles\n- [x] Test the blog functionality\n- [x] Verify all changes work correctly\n\n## Changes Made\n\n### 1. Homepage Font Color Improvements\nFixed text contrast issues to improve readability in light mode:\n- Hero subtitle: `text-fd-muted-foreground` → `text-fd-foreground/80`\n- Feature descriptions: `text-fd-muted-foreground` → `text-fd-foreground/70`\n- Persona descriptions: `text-fd-muted-foreground` → `text-fd-foreground/70`\n- \"Built for Builders\" heading: improved gradient contrast\n\n### 2. Blog Section Implementation\nSuccessfully integrated Fumadocs blog functionality:\n\n**Configuration:**\n- Updated `source.config.ts` to define blog collection with custom schema (author, date, tags)\n- Updated `app/source.ts` to export blog loader\n- Added \"Blog\" link to navigation in `layout.config.tsx`\n- Fixed schema validation: `z.string().or(z.date())` → `z.string().date()`\n\n**Pages:**\n- Created `/app/[lang]/blog/[[...slug]]/page.tsx` for both blog index and individual posts\n- Blog index displays all posts in a grid layout with metadata\n- Individual blog posts render with full MDX support and proper styling\n- Applied consistent font color improvements across all blog pages\n\n**Content:**\nCreated `/content/blog/` directory with 2 comprehensive analytical articles:\n\n#### Article 1: \"The Architecture of Metadata-Driven Systems: From Salesforce to ObjectStack\" (17,000+ words)\nA comprehensive analysis covering:\n- Part I: Understanding Metadata-Driven Architecture (runtime interpretation, declarative specification, schema evolution)\n- Part II: Case Study - Salesforce's Architecture (Universal Data Model, multi-tenancy, governor limits)\n- Part III: ObjectStack's Protocol-First Approach (Zod-first definition, database-agnostic adapters, Server-Driven UI)\n- Part IV: Architectural Comparison (performance implications, trade-off spectrum)\n- Part V: Building on ObjectStack (real-world implementation patterns for multi-tenant SaaS and IDPs)\n\n#### Article 2: \"Protocol-First Development: Why ObjectStack Chose Open Standards Over Proprietary Platforms\" (23,000+ words)\nAn in-depth exploration covering:\n- Part I: Platforms vs. Protocols - A Historical Perspective (Platform Era 2000-2020, Protocol Renaissance 2020+)\n- Part II: Why ObjectStack Chose Protocol-First (Zod over custom DSL, SQL/NoSQL over proprietary storage, open specification)\n- Part III: Technical Deep Dive - Protocol Design Patterns (schema versioning, extension points, adapter architecture)\n- Part IV: The Economics of Protocol-First (platform vs. protocol economics, long-term sustainability)\n- Part V: Real-World Implementation Guide (complete project management system example with code)\n\n**Features:**\n- Responsive grid layout for blog index\n- Post metadata display (date, author, tags)\n- \"Back to Blog\" navigation on individual posts\n- Full MDX rendering with Fumadocs components\n- SEO-friendly metadata generation\n- Consistent font colors for better readability\n- Comprehensive code examples with syntax highlighting\n- Technical tables and architectural comparisons\n\n## Screenshots\n\n### Homepage - Before Font Fix\n<img src=\"https://github.com/user-attachments/assets/af4a5de9-b187-41fa-8a77-be9ae0ac106e\">\n\n### Homepage - After Font Fix (with Blog Link)\n<img src=\"https://github.com/user-attachments/assets/4753b6fc-65b3-486c-a2e5-73aa504ce7c4\">\n\n### Blog Index Page - Updated with In-Depth Articles\n<img src=\"https://github.com/user-attachments/assets/2a927395-5e04-41cd-87fe-f665b121c28e\">\n\n### Individual Blog Post\n<img src=\"https://github.com/user-attachments/assets/e03393c5-d544-451e-b1b4-bbd95c9fc111\">\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 修正首页字体颜色，使用fumadocs增加 blog 板块\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

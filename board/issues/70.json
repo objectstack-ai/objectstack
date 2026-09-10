@@ -1,0 +1,36 @@
+{
+  "number": 70,
+  "kind": "pull_request",
+  "title": "Restructure documentation for independent protocol website with Fumadocs root categories",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-22T12:40:46Z",
+  "updated_at": "2026-01-22T15:57:14Z",
+  "closed_at": "2026-01-22T15:55:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-22T15:55:28Z",
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/70",
+  "body": "## Documentation Structure Restructuring\n\nSuccessfully restructured the documentation for the ObjectStack Protocol as an independent protocol website with proper Fumadocs root category organization.\n\n### Changes Made\n\n**1. Internal Documentation Organization**\n- Moved planning docs (DEVELOPMENT_ROADMAP.md, PRIORITIES.md, PLANNING_INDEX.md, etc.) to `/internal/planning/`\n- Created `/internal/README.md` to document the internal directory structure\n- Separated internal planning documents from public protocol documentation\n\n**2. Consolidated Documentation Structure**\n- Merged all technical documentation from `/docs/` into `/content/docs/`\n- Removed redundant `/docs/` directory\n- Created single source of truth for all documentation\n\n**3. Fumadocs Root Categories**\nEstablished seven clear top-level navigation categories with `\"root\": true`:\n- **Quick Start** - Essential first steps for getting started\n- **Tutorials** - Step-by-step learning guides\n- **Guides** - Developer how-to guides (includes migration)\n- **Concepts** - Philosophy and architectural concepts\n- **Specifications** - Protocol specifications (includes architecture deep dives)\n- **Standards** - Development standards and conventions\n- **References** - Complete API reference documentation\n\n**4. Hierarchical Organization**\n- `/content/docs/specifications/architecture/` - Architecture deep dives (ObjectQL, ObjectUI, ObjectOS)\n- `/content/docs/guides/migration/` - Version migration guides\n- `/content/docs/guides/advanced/` - Advanced technical guides (AI integration, security, performance)\n- `/content/docs/standards/` - Naming conventions, API design, error handling, authentication\n\n**5. Format and Navigation Improvements**\n- Converted all `.md` files to `.mdx` format with proper frontmatter\n- Created `meta.json` files for all sections with `\"root\": true` for top-level categories\n- Created index pages for improved navigation\n- Added title and description metadata to all documentation files\n\n**6. Link Updates**\n- Updated all cross-references in README.md, ARCHITECTURE.md, CONTRIBUTING.md, RELEASE_NOTES.md, and .github/prompts/README.md\n- Fixed all broken links to point to new locations\n- Updated GitHub repository links for moved files\n- Verified all navigation paths are working\n\n**7. Meta.json Verification and Fixes**\n- Verified all 41 meta.json files in the documentation structure\n- Removed incorrect `\"root\": true` flags from References sub-directories (data, ui, system, ai, api)\n- Added Chinese meta.json files for all 7 root categories (quick-start, tutorials, guides, concepts, specifications, standards, references)\n- Updated existing Chinese meta.json files to match English structure\n- Ensured proper hierarchical structure with no nested root categories\n\n### Final Documentation Structure\n\n```\ncontent/docs/\n├── quick-start/           [ROOT] Essential getting started guides\n├── tutorials/             [ROOT] Step-by-step learning\n├── guides/                [ROOT] Developer guides\n│   ├── advanced/          # AI integration, security, performance\n│   └── migration/         # Version migration guides\n├── concepts/              [ROOT] Philosophy and core concepts\n├── specifications/        [ROOT] Protocol specifications\n│   ├── architecture/      # ObjectQL, ObjectUI, ObjectOS deep dives\n│   ├── data/             # Data layer specs\n│   ├── ui/               # UI layer specs\n│   └── server/           # Server specs\n├── standards/             [ROOT] Development standards\n├── references/            [ROOT] Complete API reference\n│   ├── data/             # Data protocol reference\n│   ├── ui/               # UI protocol reference\n│   ├── system/           # System protocol reference\n│   ├── ai/               # AI protocol reference\n│   └── api/              # API protocol reference\n├── faq.mdx               # Frequently asked questions\n└── troubleshooting.mdx   # Troubleshooting guide\n```\n\n### Testing\n\n- ✅ Documentation site builds successfully\n- ✅ All 618 pages generated without errors\n- ✅ All internal links verified and working\n- ✅ Navigation structure properly configured with 7 root categories\n- ✅ All 41 meta.json files verified and corrected\n- ✅ Chinese versions available for all root categories\n- ✅ Hierarchical organization improves discoverability\n\n### Benefits\n\n1. **Clear Navigation**: Seven clear root categories make it easy to find information\n2. **Logical Grouping**: Related content is grouped together (architecture under specifications, migration under guides)\n3. **Scalability**: Structure supports future growth with clear categorization\n4. **Protocol-First**: Focus on protocol documentation with proper technical depth\n5. **User-Friendly**: Different user journeys (quick start, tutorials, references) are well-separated\n6. **Internationalization**: Complete Chinese support for all navigation\n7. **Correct Hierarchy**: No nested root categories, proper parent-child relationships\n\nThe documentation is now properly organized as an independent protocol website with clear separation between public documentation and internal planning materials, and a clean, scalable structure suitable for both new users and experienced developers.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 作为一个独立的协议网站重新评估调整整个文档的目录结构\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

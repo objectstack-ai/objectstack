@@ -1,0 +1,36 @@
+{
+  "number": 67,
+  "kind": "pull_request",
+  "title": "Restructure documentation following industry best practices",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-22T11:29:46Z",
+  "updated_at": "2026-01-22T12:26:21Z",
+  "closed_at": "2026-01-22T12:24:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-22T12:24:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/67",
+  "body": "Documentation lacked progressive disclosure and role-based onboarding. Structure did not follow patterns from React, Stripe, Kubernetes docs.\n\n## Changes\n\n### New Sections\n- **Quick Start** (`/docs/quick-start`) - 4 role-based paths (backend, frontend, architect, tutorial)\n- **Tutorials** (`/docs/tutorials`) - Learning path framework with categorized hands-on guides\n- **FAQ** (`/docs/faq`) - 20+ common questions \n- **Troubleshooting** (`/docs/troubleshooting`) - Debugging guide with solutions\n\n### Enhanced Navigation\n- Index pages for all specification sections (Data, UI, System protocols)\n- Main specifications overview with protocol versioning info\n- Updated root navigation: `quick-start → tutorials → guides → concepts → specifications → references`\n\n### Content Examples\n\nRole-based quick start pattern:\n```markdown\n/docs/quick-start\n  ├── index.mdx (role selector)\n  ├── build-first-app.mdx (10min tutorial)\n  ├── backend-developers.mdx (ORM comparison, query patterns)\n  ├── frontend-developers.mdx (SDUI, view types)\n  └── architects.mdx (architecture deep dive, multi-tenancy)\n```\n\nSpecification index structure:\n```markdown\n/docs/specifications\n  ├── index.mdx (protocol overview)\n  ├── /data/index.mdx (ObjectQL overview)\n  ├── /ui/index.mdx (ObjectUI overview)\n  └── /server/index.mdx (ObjectOS overview)\n```\n\n## Structure Change\n\n```diff\n  /docs\n+   /quick-start (5 files)\n+   /tutorials (framework)\n    /guides\n    /concepts\n-   /specifications (3 protocols)\n+   /specifications (3 protocols + 4 index pages)\n    /references\n+   faq.mdx\n+   troubleshooting.mdx\n```\n\nFiles: +21 created, 7 updated. Builds successfully (588 static pages).\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 从行业最佳实践角度审视，并优化现有/content/docs, 官网fumadocs目录结构，增加必要的文档调整或修改现有的文档\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

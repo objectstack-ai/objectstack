@@ -1,0 +1,37 @@
+{
+  "number": 54,
+  "kind": "pull_request",
+  "title": "Prepare v0.2.0 release for ObjectStack packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-21T07:26:36Z",
+  "updated_at": "2026-01-21T08:10:25Z",
+  "closed_at": "2026-01-21T08:10:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-21T08:10:25Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/54",
+  "body": "Prepares coordinated release of 7 packages in the monorepo using Changesets workflow.\n\n## Packages\n\n- `@objectstack/spec@0.2.0` - Core protocol definitions\n- `@objectstack/types@0.2.0` - Shared type definitions\n- `@objectstack/objectql@0.2.0` - Query language &amp; runtime\n- `@objectstack/runtime@0.2.0` - Execution environment\n- `@objectstack/client@0.2.0` - Client library\n- `@objectstack/driver-memory@0.2.0` - In-memory driver\n- `@objectstack/plugin-hono-server@0.2.0` - REST API server plugin\n\n## Changes\n\n- Created changeset documenting initial release features\n- Bumped versions via `changeset version` (0.1.x → 0.2.0 for all packages)\n- Generated CHANGELOGs for all packages with dependency updates\n- Tagged commit with `v0.2.0`\n\n## Release Automation\n\nMerging to `main` triggers `.github/workflows/release.yml` which builds and publishes to npm using `NPM_TOKEN` secret.\n\nBuild artifacts verified: 187 JSON schemas generated, TypeScript compilation clean across all packages.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 发一个版本\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

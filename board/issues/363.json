@@ -1,0 +1,37 @@
+{
+  "number": 363,
+  "kind": "pull_request",
+  "title": "chore: release v0.6.1 (patch)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-28T17:19:59Z",
+  "updated_at": "2026-01-28T19:37:46Z",
+  "closed_at": "2026-01-28T19:34:13Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-28T19:34:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/363",
+  "body": "Patch release bumping all packages from `0.6.0` to `0.6.1` for maintenance and stability improvements.\n\n## Changes\n\n- Bumped 11 core packages to `0.6.1`:\n  - `@objectstack/spec`, `@objectstack/client`, `@objectstack/driver-memory`\n  - `@objectstack/objectql`, `@objectstack/plugin-hono-server`, `@objectstack/plugin-msw`\n  - `@objectstack/runtime`, `@objectstack/types`, `@objectstack/ai-bridge`\n  - `@objectstack/cli`, `@objectstack/core`\n- Updated peer dependencies in plugins (e.g., `@objectstack/runtime: ^0.6.0` → `^0.6.1`)\n- Generated CHANGELOGs across monorepo\n- Updated root package and main CHANGELOG\n\n## Publishing\n\nReady to publish via `pnpm run release` once merged.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 发一个补丁版本\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

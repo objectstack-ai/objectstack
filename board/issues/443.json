@@ -1,0 +1,36 @@
+{
+  "number": 443,
+  "kind": "pull_request",
+  "title": "Add worker system and event bus protocols for backend services",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T09:01:52Z",
+  "updated_at": "2026-01-31T09:38:57Z",
+  "closed_at": "2026-01-31T09:36:44Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T09:36:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/443",
+  "body": "Implements backend service infrastructure protocols for task processing and event-driven architectures. REST/GraphQL server protocols already existed and required no changes.\n\n## Worker System (`worker.zod.ts`)\n\nPriority-based task queue system with retry logic and batch processing:\n\n```typescript\nconst task: Task = {\n  type: 'send_email',\n  payload: { to: 'user@example.com', template: 'welcome' },\n  priority: 'high',  // critical | high | normal | low | background\n  retryPolicy: {\n    maxRetries: 3,\n    backoffStrategy: 'exponential',\n    initialDelayMs: 1000,\n  },\n  queue: 'notifications',\n};\n\nconst batch: BatchTask = {\n  type: 'import_records',\n  items: customers,  // Array of items\n  batchSize: 100,\n  parallel: true,\n  stopOnError: false,\n};\n```\n\n- Task priority system (0-4) with queue management\n- Retry policies: exponential, linear, fixed backoff\n- Batch processing with progress callbacks\n- Queue configuration: concurrency, rate limiting, auto-scaling\n- Worker stats and monitoring\n\n## Event Bus Enhancements (`events.zod.ts`)\n\nExtended event system with sourcing, replay, and integration patterns:\n\n```typescript\nconst config: EventBusConfig = {\n  eventSourcing: {\n    enabled: true,\n    snapshotInterval: 100,\n    retention: 365,\n  },\n  queue: {\n    concurrency: 20,\n    priorityEnabled: true,\n    deadLetterQueue: 'failed_events',\n  },\n  webhooks: [{\n    eventPattern: 'order.*',\n    url: 'https://api.example.com/webhook',\n    retryPolicy: { maxRetries: 3 },\n  }],\n  messageQueue: {\n    provider: 'kafka',\n    topic: 'events',\n    partitionKey: 'metadata.tenantId',\n  },\n  realtime: {\n    protocol: 'websocket',\n    channels: [{ name: 'notifications', eventPattern: 'notification.*' }],\n  },\n};\n```\n\n- Event priority levels and filtering\n- Event sourcing with snapshots\n- Event replay with timestamp ranges\n- Dead letter queue for failed handlers\n- Webhook integration with auth and retry\n- Message queue adapters (Kafka, RabbitMQ, SQS, Pub/Sub)\n- Real-time broadcasting via WebSocket/SSE\n- Event logging with handler execution tracking\n\n## Test Coverage\n\n- 39 tests for worker system\n- 53 tests for event bus (enhanced from 13)\n- All 2,955 tests passing\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> REST API 服务器\n> \n> RESTful 路由自动生成\n> CRUD 端点\n> 批量操作端点\n> 元数据端点\n>  GraphQL 服务器\n> \n> Schema 自动生成\n> Resolver 自动生成\n> 订阅支持\n> DataLoader 集成\n> P0: 工作器 (Worker)\n> \n>  后台任务系统\n> \n> 任务队列\n> 任务调度\n> 任务重试\n> 任务优先级\n>  定时任务 (Cron Jobs)\n> \n> Cron 表达式解析\n> 任务调度器\n> 任务日志\n> 错误处理\n>  批处理作业\n> \n> P0: 事件总线 (Event Bus)\n> \n>  事件系统增强\n> \n> 事件类型定义\n> 事件优先级\n> 事件过滤\n> 事件持久化\n>  异步事件处理\n> \n> 事件队列\n> 事件重放\n> 死信队列\n> 事件源 (Event Sourcing)\n>  事件集成\n> \n> Webhook 支持\n> 消息队列集成 (Kafka, RabbitMQ)\n> 实时通知\n> 事件日志\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

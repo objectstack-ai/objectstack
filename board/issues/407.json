@@ -1,0 +1,37 @@
+{
+  "number": 407,
+  "kind": "pull_request",
+  "title": "Add HTTP server abstraction and REST API server with automatic endpoint generation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T17:28:01Z",
+  "updated_at": "2026-01-31T00:53:47Z",
+  "closed_at": "2026-01-31T00:53:46Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T00:53:46Z",
+  "comments": 19,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/407",
+  "body": "## Runtime HTTP Server & REST API Server Implementation ✅\n\n### Implementation Plan - COMPLETED\n\n- [x] 1. Define HTTP Server schema in `packages/spec/src/system/http-server.zod.ts`\n  - [x] 1.1. Create ServerConfigSchema with port, host, middleware options\n  - [x] 1.2. Create RouteRegistrationSchema for route metadata\n  - [x] 1.3. Create MiddlewareConfigSchema for middleware chains\n\n- [x] 2. Define REST API Server schema in `packages/spec/src/api/rest-server.zod.ts`\n  - [x] 2.1. Create RestServerConfigSchema with routing, CRUD, metadata endpoints\n  - [x] 2.2. Define endpoint generation patterns for auto-generated routes\n  - [x] 2.3. Define batch operation endpoints schema\n\n- [x] 3. Implement runtime HTTP server abstractions in `packages/runtime/src/`\n  - [x] 3.1. Create `http-server.ts` with unified server interface\n  - [x] 3.2. Create `middleware.ts` with middleware management\n  - [x] 3.3. Create `route-manager.ts` for route registration and management\n\n- [x] 4. Implement runtime REST API server in `packages/runtime/src/`\n  - [x] 4.1. Create `rest-server.ts` with REST API abstraction\n  - [x] 4.2. CRUD endpoint generation integrated in RestServer\n  - [x] 4.3. Metadata endpoint generation integrated in RestServer\n  - [x] 4.4. Batch operation endpoint generation integrated in RestServer\n\n- [x] 5. Update exports and integrate with existing plugin system\n  - [x] 5.1. Export new classes from `packages/runtime/src/index.ts`\n  - [x] 5.2. Ensure compatibility with existing IHttpServer interface in core\n\n- [x] 6. Documentation and examples\n  - [x] 6.1. Create comprehensive README with usage examples\n  - [x] 6.2. Create REST server usage example\n  - [x] 6.3. Create middleware manager usage example\n  - [x] 6.4. Create implementation summary\n\n- [x] 7. Address schema duplication feedback\n  - [x] 7.1. Evaluate schema duplication with existing API schemas\n  - [x] 7.2. Create shared HTTP schemas in `packages/spec/src/shared/http.zod.ts`\n  - [x] 7.3. Refactor to eliminate duplication\n\n- [x] 8. Address code review feedback\n  - [x] 8.1. Remove unused imports (IHttpRequest, IHttpResponse, HttpServer, RouteHandler, CrudOperation)\n  - [x] 8.2. Fix 304 Not Modified response to use `send()` instead of `json({})` for HTTP compliance\n  - [x] 8.3. Add fail-fast validation for string handlers (not yet implemented)\n  - [x] 8.4. Remove unused `resolveHandler` method\n\n---\n\n## 🔄 Code Quality Improvements\n\nFixed issues identified in automated code review:\n\n**1. Removed Unused Imports**\n- `http-server.ts`: Removed unused `IHttpRequest`, `IHttpResponse`\n- `rest-server.ts`: Removed unused `RouteHandler`, `CrudOperation`\n- `rest-server-example.ts`: Removed unused `HttpServer`\n\n**2. Fixed 304 Not Modified Response**\n- Changed from `res.status(304).json({})` to `res.status(304).send()`\n- Complies with HTTP specification requiring empty body for 304 responses\n- Improves performance by not sending unnecessary JSON\n\n**3. Added Fail-Fast Validation**\n- String handlers now fail immediately at registration with clear error message\n- Prevents runtime failures when string handler is actually invoked\n- Removed placeholder `resolveHandler` method that always threw errors\n\n**4. Field Name Standardization (Breaking Changes)**\n- `origin` → `origins` in CORS configuration\n- `dir` → `directory` in static mounts\n- Documented in `SCHEMA_DEDUPLICATION_SUMMARY.md`\n\n---\n\n## 📊 Final Deliverables\n\n### Protocol Schemas (Spec Package)\n1. **`http-server.zod.ts`** (~290 lines after deduplication)\n2. **`rest-server.zod.ts`** (~430 lines)\n3. **`shared/http.zod.ts`** (~135 lines) - Shared HTTP schemas\n\n### Runtime Implementation (Runtime Package)\n1. **`http-server.ts`** (~140 lines)\n2. **`middleware.ts`** (~210 lines)\n3. **`route-manager.ts`** (~265 lines, improved)\n4. **`rest-server.ts`** (~545 lines, improved)\n\n### Documentation\n1. **`HTTP_SERVER_README.md`** - Usage guide\n2. **`IMPLEMENTATION_SUMMARY_HTTP_SERVER.md`** - Implementation details\n3. **`SCHEMA_DEDUPLICATION_SUMMARY.md`** - Deduplication details\n\n**Total:** ~3,080 lines across 12 files (code quality improvements applied)\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 4. runtime 运行时环境 / Runtime Environment\n> \n> 4.1 当前状态 / Current State\n> \n> 已实现功能:\n> \n> ✅ 基础插件系统 (AppPlugin, DriverPlugin)\n> ✅ 能力接口 (IHttpServer, IDataEngine)\n> ✅ ObjectQL 集成\n> 文件结构:\n> \n> packages/runtime/src/\n> ├── index.ts                # 公共 API\n> ├── app-plugin.ts          # 应用插件\n> └── driver-plugin.ts       # 驱动插件\n> 4.2 待实现功能清单 / Features Roadmap\n> \n> P0: 服务器 (Server)\n> \n>  HTTP 服务器抽象\n> \n> 统一的服务器接口\n> 路由管理\n> 请求/响应处理\n> 中间件支持\n>  REST API 服务器\n> \n> RESTful 路由自动生成\n> CRUD 端点\n> 批量操作端点\n> 元数据端点\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

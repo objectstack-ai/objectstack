@@ -1,0 +1,38 @@
+{
+  "number": 165,
+  "kind": "pull_request",
+  "title": "Add MSW + React CRUD reference implementation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-25T17:57:25Z",
+  "updated_at": "2026-01-26T00:33:58Z",
+  "closed_at": "2026-01-26T00:30:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-26T00:30:49Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/165",
+  "body": "Demonstrates complete MSW browser integration with React components performing CRUD operations via `@objectstack/client`.\n\n## Implementation\n\n**New Example: `examples/ui/msw-react-crud/`**\n\n- **React Components**: TaskList (read/delete), TaskForm (create/update), TaskItem (display)\n- **MSW Handlers**: Mock all ObjectStack API endpoints (discovery, metadata, data CRUD) with in-memory storage\n- **Client Integration**: All operations use `@objectstack/client` SDK methods\n\n```typescript\n// MSW intercepts these calls transparently\nconst client = new ObjectStackClient({ baseUrl: '/api/v1' });\nawait client.connect();\n\nconst tasks = await client.data.find('task', { top: 100, sort: ['priority'] });\nawait client.data.create('task', { subject: 'New task', priority: 1 });\nawait client.data.update('task', id, { isCompleted: true });\nawait client.data.delete('task', id);\n```\n\n**Stack**: React 18 + TypeScript + Vite + MSW 2.0\n\n**Documentation**: README (API patterns, endpoint mapping), QUICKSTART (setup), CHANGELOG\n\n## Configuration\n\nUpdated `pnpm-workspace.yaml` to include `examples/ui/*` packages for proper workspace resolution.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> Adds complete example demonstrating MSW (Mock Service Worker) integration in frontend React components for API mocking and CRUD operations. Components use the official @objectstack/client package for all API calls, following ObjectStack best practices.\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 209,
+  "kind": "pull_request",
+  "title": "Refactor protocol docs: business value over code examples",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-26T03:53:58Z",
+  "updated_at": "2026-01-26T04:49:25Z",
+  "closed_at": "2026-01-26T04:46:14Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-26T04:46:14Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/209",
+  "body": "## Refactor Protocol Documentation to Focus on Business Value ✅\n\nBased on PR #207 feedback: \"concepts 每一个协议的介绍不需要粘贴协议文本，需要的是阐述为什么要定义这些协议，协议最终实现什么样的业务价值？\"\n\nSuccessfully refactored all 11 protocol documentation files to emphasize **WHY these protocols exist** and **WHAT business value they deliver**, instead of showing extensive TypeScript code examples.\n\n### Changes Summary\n\n**Removed (~1,600 lines):**\n- TypeScript schema definitions and interfaces\n- Detailed configuration code examples\n- Step-by-step implementation guides\n- Scattered code-heavy \"best practices\" sections\n- Unused icon imports\n\n**Added:**\n- **Why This Protocol Exists** - Real-world problems and solutions\n- **Business Value Delivered** - 4 cards per protocol with measurable outcomes\n- **What This Protocol Enables** - Key capabilities with business focus\n- **Real-World Use Cases** - Concrete scenarios (Challenge → Solution → Value)\n- **Integration explanations** - How protocols work together\n- Concrete business metrics throughout\n\n### Files Refactored\n\n- [x] protocol-data.mdx - Data modeling foundation\n- [x] protocol-driver.mdx - Database adapters\n- [x] protocol-permission.mdx - Access control\n- [x] protocol-ui.mdx - Server-driven UI\n- [x] protocol-system.mdx - Infrastructure services\n- [x] protocol-auth.mdx - Authentication & identity\n- [x] protocol-kernel.mdx - Plugin system\n- [x] protocol-hub.mdx - Multi-tenancy & marketplace\n- [x] protocol-ai.mdx - AI capabilities\n- [x] protocol-api.mdx - REST & realtime APIs\n- [x] protocol-automation.mdx - Workflows & automation\n- [x] Clean up unused icon imports\n- [x] Address code review feedback\n- [x] Fix build error in meta.json files\n- [x] Run security checks (N/A for docs-only changes)\n\n### Quality Assurance\n\n✅ Code review passed - addressed all feedback  \n✅ Consistent structure across all 11 files  \n✅ Business value emphasized with concrete metrics  \n✅ Technical references preserved for detailed docs  \n✅ Security checks passed (no code changes)  \n✅ Build error fixed - meta.json files now use flat string arrays\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/207\n> \n> concepts 每一个协议的介绍不需要粘贴协议文本，需要的是阐述为什么要定义这些协议，协议最终实现什么样的业务价值？\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

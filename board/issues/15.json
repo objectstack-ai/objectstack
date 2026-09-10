@@ -1,0 +1,33 @@
+{
+  "number": 15,
+  "kind": "pull_request",
+  "title": "Add missing Field.phone() helper and factory methods for Action/Dashboard/Report",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-19T11:51:04Z",
+  "updated_at": "2026-01-19T12:16:48Z",
+  "closed_at": "2026-01-19T12:16:48Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-19T12:16:48Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/15",
+  "body": "## Fix CRM Example TypeScript Build Errors ✅\n\n**Problem:** The CRM example has multiple TypeScript compilation errors preventing CI from passing.\n\n**Root Causes:**\n1. `Field.select()` signature mismatch - expects `string[]` but code passes `SelectOption[]` objects\n2. Missing `phone` field type helper in Field factory\n3. `Action`, `Dashboard`, and `Report` are only types, not runtime objects with `.create()` methods\n\n**Solution:**\n- [x] Add `phone` field type helper to Field factory\n- [x] Update `Field.select()`/`Field.multiselect()` to support both old and new API signatures (backward compatible)\n- [x] Add factory methods (`Action.create`, `Dashboard.create`, `Report.create`) using `z.input` for proper default handling\n- [x] Add comprehensive test coverage (12 new tests)\n- [x] Add JSDoc comments documenting the API\n- [x] Fix spread order in select/multiselect to avoid option duplication\n- [x] Security scan: ✅ No vulnerabilities\n- [x] Code review: ✅ Addressed feedback\n\n**Backward Compatibility:**\n```typescript\n// Old API (still works)\nField.select(['High', 'Low'], { label: 'Priority' })\n\n// New API (now supported)\nField.select({ \n  options: [{label: 'High Priority', value: 'high', color: '#FF0000'}], \n  label: 'Priority' \n})\n```\n\n**Test Results:** ✅ All 279 tests passing  \n**Build Status:** ✅ All packages build successfully (CRM, TODO, docs)  \n**Security:** ✅ No vulnerabilities detected\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21135959933/job/60779299734#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

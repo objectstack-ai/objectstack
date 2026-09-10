@@ -1,0 +1,33 @@
+{
+  "number": 250,
+  "kind": "pull_request",
+  "title": "docs: Document naming convention enforcement from PR #245",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-26T16:32:19Z",
+  "updated_at": "2026-01-26T23:52:56Z",
+  "closed_at": "2026-01-26T23:46:46Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-26T23:46:46Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/250",
+  "body": "PR #245 introduced three identifier schemas (`SystemIdentifierSchema`, `SnakeCaseIdentifierSchema`, `EventNameSchema`) enforcing lowercase snake_case for all machine identifiers across the protocol.\n\n## Changes\n\n### New Documentation\n- **`content/docs/developers/naming-conventions.mdx`** - Comprehensive guide covering all three schemas, validation patterns, Field.select() auto-conversion, and migration examples\n\n### Updated Core Docs\n- **README.md** - Naming rules in key standards section\n- **CONTRIBUTING.md** - Complete identifier reference table and rationale\n- **ARCHITECTURE.md** - Naming conventions section in package structure\n- **design-principles.mdx** - Added Principle V: Strict Naming Conventions\n- **terminology.mdx** - Machine identifier vs label definitions\n\n## Naming Convention Matrix\n\n| Type | Pattern | Example | Usage |\n|------|---------|---------|-------|\n| Machine Identifier | `snake_case` | `crm_account`, `sales_manager` | Objects, fields, roles |\n| Event Name | `dot.notation` | `user.created`, `order.paid` | Events, webhooks |\n| Schema Property | `camelCase` | `maxLength`, `isRequired` | TypeScript properties |\n| Label | Any case | `Sales Manager` | Display text |\n\n## Example\n\n```typescript\n// Correct\n{\n  name: 'sales_manager',      // Machine identifier\n  label: 'Sales Manager',     // Display label\n  maxLength: 100              // Schema property\n}\n\n// Auto-conversion\nField.select(['In Progress', 'Closed Won'])\n// → [\n//   { value: 'in_progress', label: 'In Progress' },\n//   { value: 'closed_won', label: 'Closed Won' }\n// ]\n```\n\nAll documentation cross-references the identifier schema pages in `/docs/references/shared/identifiers/`.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/245\n> \n> 基于这个修改更新相关文档\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

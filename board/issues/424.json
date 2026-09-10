@@ -1,0 +1,36 @@
+{
+  "number": 424,
+  "kind": "pull_request",
+  "title": "Update protocol and package documentation to reflect actual codebase (109 protocols, 12 packages)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T03:14:29Z",
+  "updated_at": "2026-01-31T04:07:37Z",
+  "closed_at": "2026-01-31T04:07:37Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T04:07:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/424",
+  "body": "Documentation claimed 70 protocols; actual count is 109 across 12 categories (55% undercount). Updated all reference pages with accurate inventory.\n\n## Changes\n\n### Protocol Reference Updates\n- **index.mdx**: Updated totals and expanded category listings\n  - Data: 8 → 16 protocols (+100%)\n  - System: 14 → 39 protocols (+179%)\n  - API: 6 → 13 protocols (+117%)\n  - Added Integration category (5 protocols)\n- **protocol-map.mdx**: Updated architecture diagram layer counts\n- **quick-reference.mdx**: Added comprehensive protocol tables for all categories\n- **README.md**: Updated protocol count reference\n\n### New Documentation\n- **packages.mdx**: Complete package reference covering all 12 packages\n  - Core packages (9): spec, core, runtime, objectql, client, client-react, cli, ai-bridge, types\n  - Plugins (3): driver-memory, plugin-hono-server, plugin-msw\n  - Includes dependency graph, installation guide, version matrix\n\n### Navigation\n- **meta.json**: Added packages, hub, integration, auth, shared pages to references navigation\n\n## Protocol Distribution\n\n| Category | Before | After |\n|----------|--------|-------|\n| Data | 8 | 16 |\n| System | 14 | 39 |\n| API | 6 | 13 |\n| Integration | - | 5 |\n| Others | 42 | 36 |\n| **Total** | **70** | **109** |\n\nBuild verified: 207 pages generated successfully.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 你是顶级的微内核架构师和企业管理软件架构师，扫描系统已有的所有软件包和协议更新文档官网的页面。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

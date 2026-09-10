@@ -1,0 +1,33 @@
+{
+  "number": 48,
+  "kind": "issue",
+  "title": "Please perform a final refactoring on PR #46 to consolidate the Authentication Architecture and resolve conflicts with the existing `identity.zod.ts`.",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-21T01:24:21Z",
+  "updated_at": "2026-01-21T11:28:25Z",
+  "closed_at": "2026-01-21T11:28:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/48",
+  "body": "The goal is to strictly separate \"Authentication\" (Providers/Strategies) from \"Identity\" (User Models).\n\n### Task 1: Migrate Authentication Providers (Resolve Conflicts)\nMigrate the legacy Enterprise Auth definitions from `packages/spec/src/system/identity.zod.ts` into the new `packages/spec/src/system/auth.zod.ts`.\n- Move `OIDCConfigSchema` to `auth.zod.ts`.\n- Move `SAMLConfigSchema` to `auth.zod.ts`.\n- Move `LDAPConfigSchema` to `auth.zod.ts`.\n- Add a new optional field `enterprise` to the main `AuthConfig` schema in `auth.zod.ts` to hold these configurations (e.g., `enterprise: z.object({ saml: ..., ldap: ... }).optional()`).\n\n### Task 2: Redefine Identity as User Model\nRefactor `packages/spec/src/system/identity.zod.ts` to become the dedicated **User Model Specification**.\n- Remove `AuthProviderSchema` and all auth-related configs from this file (since they are now in `auth.zod.ts`).\n- Create and export `UserSchema`:\n  - Fields: `id` (string), `email` (email), `emailVerified` (boolean), `name` (optional string), `image` (optional url), `createdAt` (date), `updatedAt` (date).\n- Create and export `AccountSchema` (for linking OAuth accounts).\n- Create and export `SessionSchema`.\n\n### Task 3: Define Wire Protocol & Constants\nCreate `packages/spec/src/system/auth-protocol.ts` (new file) to define the API contract:\n- Export `AUTH_CONSTANTS`:\n  - `HEADER_KEY`: 'Authorization'\n  - `TOKEN_PREFIX`: 'Bearer '\n  - `COOKIE_PREFIX`: 'os_'\n  - `CSRF_HEADER`: 'x-os-csrf-token'\n- Export `AuthHeaders` interface.\n\n### Task 4: Cleanup & Consistency\n- Ensure `packages/spec/src/index.ts` exports the new schemas from both `auth.zod.ts` (Configuration) and `identity.zod.ts` (Data Models).\n- Update `docs/AUTHENTICATION_STANDARD.md` to reflect that Enterprise Authentication (SAML/LDAP) is now part of this unified standard.\n\nThis refactoring will result in:\n1. `auth.zod.ts`: **How to login** (Config for OAuth, Email, SAML, better-auth driver settings).\n2. `identity.zod.ts`: **Who is logged in** (Standard User/Session data models).\n3. `auth-protocol.ts`: **How to communicate** (API constants)."
+}

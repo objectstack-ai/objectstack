@@ -1,0 +1,33 @@
+{
+  "number": 459,
+  "kind": "pull_request",
+  "title": "Release v0.7.3",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-01T08:02:45Z",
+  "updated_at": "2026-02-01T08:12:43Z",
+  "closed_at": "2026-02-01T08:12:43Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/459",
+  "body": "Patch release bumping all packages from 0.7.2 to 0.7.3.\n\n## Changes\n\n- **Version Bump**: All 14 packages synchronized to 0.7.3 via changesets\n- **Documentation**: Updated CHANGELOG.md and RELEASE_NOTES.md with 2026-02-01 release date\n\n## Packages\n\n@objectstack/spec, @objectstack/types, @objectstack/objectql, @objectstack/runtime, @objectstack/client, @objectstack/client-react, @objectstack/driver-memory, @objectstack/plugin-hono-server, @objectstack/plugin-msw, @objectstack/ai-bridge, @objectstack/cli, @objectstack/docs, @objectstack/core, @objectstack/metadata\n\n## Publishing\n\nMerging to `main` triggers automated npm publication via GitHub Actions release workflow.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 发一个版本\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

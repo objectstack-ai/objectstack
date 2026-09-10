@@ -1,0 +1,36 @@
+{
+  "number": 61,
+  "kind": "pull_request",
+  "title": "Add comprehensive AI prompt system for protocol development",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Copilot",
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-21T15:08:43Z",
+  "updated_at": "2026-01-21T15:26:24Z",
+  "closed_at": "2026-01-21T15:26:24Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-21T15:26:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/61",
+  "body": "Establishes structured AI context for GitHub Copilot and custom assistants across all ObjectStack protocol layers.\n\n## Architecture\n\n**Protocol Layer Prompts** (5 files, ~2,590 lines)\n- `data-protocol.prompt.md` - ObjectQL: Fields, Objects, Validation, Permissions, Workflows, Query AST\n- `ui-protocol.prompt.md` - ObjectUI: Views, Apps, Dashboards, Reports, Themes, Widgets\n- `system-protocol.prompt.md` - ObjectOS: Manifests, Plugins, Drivers, Identity, RBAC, i18n\n- `ai-protocol.prompt.md` - AI integration: Agents, Tools, RAG, Conversations, Model configs\n- `api-protocol.prompt.md` - API contracts: Envelopes, Requests, Error codes, REST/GraphQL\n\n**Development Role Prompts** (3 files, ~1,457 lines)\n- `testing-engineer.prompt.md` - Schema validation, edge cases, coverage patterns\n- `documentation-writer.prompt.md` - TSDoc, concept guides, API references, tutorials\n- `example-creator.prompt.md` - Full apps, feature demos, real-world scenarios\n\n**Navigation** (3 files)\n- `README.md` / `README.zh-CN.md` - Categorized index with quick commands\n- `OVERVIEW.md` - Visual guide and statistics\n\n## Structure\n\nEach prompt defines:\n- Role context and scope\n- Core responsibilities with Zod schema patterns\n- Quick interaction commands (e.g., \"Create Field Protocol\" → complete implementation)\n- Coding standards: `camelCase` config keys, `snake_case` machine names, Zod-first approach\n- 100+ runnable code examples\n\n## Example Usage\n\n```typescript\n// Prompt auto-loads when editing packages/spec/src/data/field.zod.ts\n// AI context includes:\n// - All 23+ field types (text, lookup, formula, etc.)\n// - Type-specific properties (reference, cascade, expression)\n// - Naming conventions and validation patterns\n// - Integration with Object schema\n\nexport const FieldSchema = z.object({\n  name: z.string().regex(/^[a-z_][a-z0-9_]*$/),  // snake_case enforced\n  type: FieldTypeSchema,\n  reference: z.string().optional(),  // Required for lookup type\n  // ... complete pattern provided by prompt\n});\n```\n\nPrompts integrate with GitHub Copilot's automatic context loading based on file path and task type.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 帮我生成所有需要的AI提示词\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

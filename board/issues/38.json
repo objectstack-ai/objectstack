@@ -1,0 +1,35 @@
+{
+  "number": 38,
+  "kind": "pull_request",
+  "title": "Verify TypeScript build passes - issue already resolved",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [
+    "Copilot",
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-20T07:55:19Z",
+  "updated_at": "2026-01-20T08:51:44Z",
+  "closed_at": "2026-01-20T08:51:44Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-20T08:51:44Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38",
+  "body": "## Fix TypeScript Build Error in Blog Page\n\n### Issue\nThe GitHub Actions CI build was failing with a TypeScript error:\n```\n./app/[lang]/blog/[[...slug]]/page.tsx:49:30\nType error: Property 'date' does not exist on type 'PageData'.\n```\n\n### Root Cause\nOn line 49 of the blog page, the code was accessing `post.data.date` directly without proper type casting.\n\n### Resolution\n**Issue Already Resolved**: This issue was fixed in PR #37 (commit `526ccb0`) which was merged into the base branch before this PR was created. The fix included:\n- Added `BlogPostData` interface with proper type definitions\n- Added type casting: `const postData = post.data as unknown as BlogPostData`\n- Updated all references to use `postData` instead of `post.data`\n\nThe current branch is based on the already-fixed code from PR #37.\n\n### Verification\n- ✅ Understand the issue from CI logs\n- ✅ Identify root cause in blog page code\n- ✅ Fix already applied in base branch (PR #37)\n- ✅ Build passes successfully (verified locally)\n  - TypeScript compilation: ✓ Compiled successfully\n  - Static pages generated: ✓ 336/336 pages\n  - All blog routes working: ✓ /[lang]/blog/[[...slug]]\n\nNo additional changes were needed since the issue was already resolved in the base branch.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21161689880/job/60857524435#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

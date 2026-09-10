@@ -1,0 +1,38 @@
+{
+  "number": 331,
+  "kind": "pull_request",
+  "title": "chore: unify all package versions to 0.4.2",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-27T15:44:48Z",
+  "updated_at": "2026-01-27T16:09:39Z",
+  "closed_at": "2026-01-27T16:09:39Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-01-27T16:09:39Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/331",
+  "body": "Unifies monorepo package versions to 0.4.2. Previously, core packages were split between 0.1.1 (ai-bridge, cli, docs) and 0.4.1 (spec, client, objectql, etc.).\n\n## Changes\n\n- **Changeset config**: Added `@objectstack/plugin-msw`, `@objectstack/ai-bridge`, `@objectstack/cli`, `@objectstack/docs` to fixed version group\n- **Version bump**: Applied patch changeset bumping all 11 core packages to 0.4.2\n- **Dependency updates**: Examples received transitive patch bumps (1.0.7-1.0.9)\n\nAll packages in the fixed group now maintain synchronized versions going forward.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 统一所有软件包的版本号，并发一个补丁版本\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

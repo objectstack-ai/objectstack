@@ -1,0 +1,37 @@
+{
+  "number": 436,
+  "kind": "pull_request",
+  "title": "Release v0.7.1",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T05:46:34Z",
+  "updated_at": "2026-01-31T06:05:43Z",
+  "closed_at": "2026-01-31T05:57:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T05:57:26Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/436",
+  "body": "Patch release bumping all packages from 0.7.0 to 0.7.1.\n\n## Changes\n\n- Created changeset for unified patch version bump\n- Updated 13 workspace packages and all examples to 0.7.1\n- Updated CHANGELOG.md with release entry dated 2026-01-31\n- Fixed `@objectstack/plugin-msw` runtime dependency version constraint\n\n## Packages Updated\n\nAll packages in the monorepo follow unified versioning per changeset configuration:\n- Core: `@objectstack/{spec,runtime,objectql,types,core,metadata}`\n- Clients: `@objectstack/{client,client-react}`\n- Plugins: `@objectstack/{driver-memory,plugin-hono-server,plugin-msw}`\n- Tooling: `@objectstack/{ai-bridge,cli,docs}`\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 发一个版本\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

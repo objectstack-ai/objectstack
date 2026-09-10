@@ -1,0 +1,37 @@
+{
+  "number": 456,
+  "kind": "pull_request",
+  "title": "Fix Zod v4 function schema API compatibility",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-01T06:17:40Z",
+  "updated_at": "2026-02-01T08:01:37Z",
+  "closed_at": "2026-02-01T08:01:19Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-02-01T08:01:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/456",
+  "body": "Zod v4 changed the function schema API from chainable methods to an object-based approach. The CI build failed because 80+ function definitions still used the v3 syntax.\n\n## API Change\n\n```typescript\n// Before (Zod v3)\nz.function().args(z.string()).returns(z.number())\n\n// After (Zod v4)\nz.function({\n  input: z.tuple([z.string()]),\n  output: z.number()\n})\n```\n\n## Files Updated\n\n- **data/** - `data-engine.zod.ts` (7), `driver.zod.ts` (24)\n- **system/** - `events.zod.ts` (4), `job.zod.ts` (1), `plugin.zod.ts` (18), `worker.zod.ts` (1)\n- **api/** - `protocol.zod.ts` (17)\n- **auth/** - `config.zod.ts` (7)\n- **ui/** - `widget.zod.ts` (1)\n\nSchema generation now completes successfully (939 schemas).\n\n> [!WARNING]\n>\n> <details>\n> <summary>Firewall rules blocked me from connecting to one or more addresses (expand for details)</summary>\n>\n> #### I tried to connect to the following addresses, but was blocked by firewall rules:\n>\n> - `https://api.github.com/repos/colinhacks/zod/releases/tags/v4.0.0`\n>   - Triggering command: `/usr/bin/curl curl -s REDACTED` (http block)\n> - `zod.dev`\n>   - Triggering command: `/home/REDACTED/work/_temp/ghcca-node/node/bin/node /home/REDACTED/work/_temp/ghcca-node/node/bin/node --enable-source-maps /home/REDACTED/work/_temp/copilot-developer-action-main/dist/index.js` (dns block)\n>\n> If you need me to access, download, or install something from one of these locations, you can either:\n>\n> - Configure [Actions setup steps](https://gh.io/copilot/actions-setup-steps) to set up my environment, which run before the firewall is enabled\n> - Add the appropriate URLs or hosts to the custom allowlist in this repository's [Copilot coding agent settings](https://github.com/objectstack-ai/spec/settings/copilot/coding_agent) (admins only)\n>\n> </details>\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21557959519/job/62117435052#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 14,
+  "kind": "pull_request",
+  "title": "feat: Comprehensive CRM example demonstrating all ObjectStack protocol features",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-19T11:19:58Z",
+  "updated_at": "2026-01-19T12:19:11Z",
+  "closed_at": "2026-01-19T12:19:11Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-19T12:19:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/14",
+  "body": "Created production-grade CRM example (~2,900 LOC) showcasing complete protocol surface area. Previous example only covered 3 basic objects with minimal features.\n\n## Objects Added\n\n**New:**\n- Lead - conversion tracking, status workflows\n- Case - SLA management, escalation automation  \n- Task - polymorphic relations, recurrence patterns\n\n**Enhanced (Account, Contact, Opportunity):**\n- All 24 field types: autonumber, formula, currency, select with colors, master-detail, etc.\n- Multiple view types: grid, kanban, calendar, gantt\n- Validation: script, uniqueness, state machines\n- Workflow automation: field updates, email alerts, state transitions\n\n## UI Components\n\n- **Actions** (10): Lead conversion, record cloning, bulk updates with parameters\n- **Dashboards** (3): 35+ widgets across sales/service/executive views (metrics, charts, tables)\n- **Reports** (8): Tabular, summary, matrix with embedded visualizations\n\n## Example\n\n```typescript\n// Opportunity with state machine validation and automated probability updates\nexport const Opportunity = ObjectSchema.create({\n  name: 'opportunity',\n  fields: {\n    stage: Field.select(['prospecting', 'qualification', 'proposal', 'negotiation', \n                         'closed_won', 'closed_lost']),\n    probability: Field.percent(),\n    amount: Field.currency(),\n    expected_revenue: Field.currency({ readonly: true }),\n  },\n  validations: [{\n    type: 'state_machine',\n    field: 'stage',\n    transitions: {\n      'prospecting': ['qualification', 'closed_lost'],\n      'qualification': ['needs_analysis', 'closed_lost'],\n      // ... enforces valid stage progressions\n    }\n  }],\n  workflows: [{\n    triggerType: 'on_create_or_update',\n    criteria: 'ISCHANGED(stage)',\n    actions: [\n      { type: 'field_update', field: 'probability', \n        value: 'CASE(stage, \"prospecting\", 10, \"closed_won\", 100, ...)' },\n      { type: 'field_update', field: 'expected_revenue', \n        value: 'amount * (probability / 100)' }\n    ]\n  }]\n});\n```\n\n## Protocol Coverage\n\n| Area | Before | After |\n|------|--------|-------|\n| Field Types | 5 | 24 |\n| View Types | 1 (grid) | 4 (grid, kanban, calendar, gantt) |\n| Validations | 0 | 4 types |\n| Workflows | 1 | Multiple per object |\n| UI Components | 0 | 21 (actions, dashboards, reports) |\n\nBilingual documentation (EN/中文) with learning resources and architecture patterns.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 给我一个能体现协议各项功能的crm例子\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

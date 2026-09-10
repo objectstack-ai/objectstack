@@ -1,0 +1,36 @@
+{
+  "number": 59,
+  "kind": "pull_request",
+  "title": "Validation Protocol: Cross-Field, Async, and Conditional validation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/l",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-21T13:45:18Z",
+  "updated_at": "2026-01-21T14:00:10Z",
+  "closed_at": "2026-01-21T14:00:10Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-21T14:00:10Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/59",
+  "body": "Implements comprehensive validation protocol enhancements: cross-field validation for multi-field business rules, async validation for remote checks, and conditional validation for context-aware rules.\n\n## Changes\n\n### Cross-Field Validation (17 tests)\n- Date range validation (`end_date > start_date`)\n- Amount comparisons with multiple fields\n- Complex expressions with AND/OR operators\n- Documented with Salesforce validation rule equivalents\n\n```typescript\n{\n  type: 'cross_field',\n  name: 'discount_limit',\n  condition: 'discount > (amount * 0.40)',\n  fields: ['discount', 'amount'],\n  message: 'Discount cannot exceed 40% of the amount'\n}\n```\n\n### Async Validation (14 tests)\n- Remote uniqueness checks via API endpoints\n- Timeout and debounce configuration\n- Seven documented use cases: email/username uniqueness, tax ID validation, credit card verification, address validation, domain availability, coupon validation\n\n```typescript\n{\n  type: 'async',\n  name: 'unique_email',\n  field: 'email',\n  validatorUrl: '/api/users/check-email',\n  debounce: 500,\n  timeout: 3000\n}\n```\n\n### Conditional Validation (14 tests)\n- \"Validate only if X\" patterns with `when`/`then`/`otherwise`\n- Nested conditionals for complex business logic\n- Role-based and region-specific validation\n\n```typescript\n{\n  type: 'conditional',\n  when: 'order_total > 10000',\n  then: {\n    type: 'script',\n    name: 'manager_approval_required',\n    condition: 'manager_approval_id = null'\n  }\n}\n```\n\n### Documentation\n- Module-level docs comparing ObjectStack to Salesforce patterns\n- Inline examples for each validation type\n- Best practices for async validation (timeouts, debouncing, caching)\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> Week 3: Validation Protocol Enhancement\n> \n>  Day 1-2: Cross-Field Validation\n> \n>  Define CrossFieldValidationSchema in validation.zod.ts\n>  Support expressions like \"end_date > start_date\"\n>  Write 15+ tests\n>  Document with Salesforce validation rule examples\n>  Day 3-4: Async Validation\n> \n>  Define AsyncValidationSchema in validation.zod.ts\n>  Support remote uniqueness checks via API\n>  Write 10+ tests with mock endpoints\n>  Document use cases (email uniqueness, username availability)\n>  Day 5: Conditional Validation\n> \n>  Add condition field to ValidationSchema\n>  Support \"validate only if X is true\" patterns\n>  Write 10+ tests\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

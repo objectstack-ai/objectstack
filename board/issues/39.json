@@ -1,0 +1,37 @@
+{
+  "number": 39,
+  "kind": "pull_request",
+  "title": "Redesign homepage based on shadcn and fumadocs specifications",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-20T08:56:05Z",
+  "updated_at": "2026-01-20T10:04:45Z",
+  "closed_at": "2026-01-20T10:04:40Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-20T10:04:40Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/39",
+  "body": "## Homepage Redesign - Based on shadcn & fumadocs Specifications\n\n### Goal\n重新开发首页，基于 shadcn 和 fumadocs 规范 (Redevelop homepage based on shadcn and fumadocs specifications)\n\n### Implementation Checklist\n\n- [x] **Setup Phase**\n  - [x] Install shadcn/ui dependencies (class-variance-authority, clsx, tailwind-merge)\n  - [x] Create components directory structure\n  - [x] Set up cn utility function for className merging\n  - [x] Update tailwind.config.js with shadcn theme configuration\n\n- [x] **Component Development**\n  - [x] Create reusable shadcn-style components (Button, Card, Badge)\n  - [x] Implement enhanced hero section with modern animations\n  - [x] Redesign feature cards with better visual hierarchy\n  - [x] Improve code preview component with syntax highlighting\n  - [x] Enhance persona cards with hover effects\n\n- [x] **Homepage Enhancement**\n  - [x] Update hero section with improved typography and spacing\n  - [x] Add gradient backgrounds and modern visual effects\n  - [x] Implement responsive grid layouts\n  - [x] Add smooth animations and transitions\n  - [x] Improve color scheme alignment with fumadocs theme\n\n- [x] **Testing & Validation**\n  - [x] Test responsive design on different screen sizes\n  - [x] Verify fumadocs integration\n  - [x] Ensure i18n translations work correctly (EN/CN)\n  - [x] Production build successful\n  - [x] TypeScript type checking passed\n  - [x] Code review feedback addressed\n  - [x] Fix light mode code visibility issues\n  - [x] Take screenshots of new design\n\n### Screenshots\n\n#### Desktop View (English)\n**Before:**\n<img src=\"https://github.com/user-attachments/assets/54191fb0-f16d-4fe2-9804-f438c1b469b5\">\n\n**After (Dark Mode):**\n<img src=\"https://github.com/user-attachments/assets/41e4521c-2f58-46e7-9f13-aeb313826c09\">\n\n**After (Light Mode):**\n<img src=\"https://github.com/user-attachments/assets/4d6511f2-a197-4727-9d93-7faade64fab4\">\n\n#### Mobile View (375px)\n<img src=\"https://github.com/user-attachments/assets/a65a2c8d-836d-411e-a486-cf4f01317d8d\">\n\n#### Chinese Version (中文)\n<img src=\"https://github.com/user-attachments/assets/3f838403-d56b-4bb7-9c06-c2cfa6669c5d\">\n\n### Key Improvements\n\n✨ **Modern shadcn/ui Component System**\n- Implemented reusable Button, Card, and Badge components\n- Used class-variance-authority for flexible component variants\n- Added cn utility for clean className merging\n\n🎨 **Enhanced Visual Design**\n- Better spacing and typography hierarchy\n- Improved color scheme with fumadocs theme variables\n- Gradient backgrounds and modern visual effects\n- Enhanced code preview with theme-aware syntax highlighting\n\n🚀 **Smooth Animations & Interactions**\n- Fade-in and slide animations on page load\n- Hover effects with scale transforms\n- Smooth transitions on all interactive elements\n- Pulsing badge indicator\n\n📱 **Responsive Design**\n- Mobile-first approach with breakpoints\n- Flexible grid layouts (1, 2, 3 columns)\n- Stack layout on mobile devices\n- Optimized typography for different screen sizes\n\n🌐 **i18n Support**\n- Full support for English and Chinese\n- All components respect language context\n- Consistent design across languages\n\n🎯 **Fumadocs Best Practices**\n- Uses fumadocs theme variables (--fd-*)\n- Integrates seamlessly with fumadocs-ui layouts\n- Follows fumadocs design patterns\n- Compatible with fumadocs navigation and search\n\n🌓 **Light/Dark Mode Support**\n- Theme-aware syntax highlighting in code previews\n- Proper contrast in both light and dark modes\n- Colors adapt automatically to theme changes\n- Fixed light mode code visibility with theme-responsive color values\n\n### Technical Details\n\n**New Dependencies:**\n- `class-variance-authority` - Component variant management\n- `clsx` - Conditional className utilities\n- `tailwind-merge` - Tailwind class merging\n\n**New Components:**\n- `components/ui/button.tsx` - Reusable button component\n- `components/ui/card.tsx` - Card component system\n- `components/ui/badge.tsx` - Badge component\n- `components/feature-card.tsx` - Feature showcase cards\n- `components/persona-card.tsx` - Persona profile cards\n- `components/code-preview.tsx` - Enhanced code preview with theme-aware colors\n- `components/hero-section.tsx` - Hero section component\n- `lib/utils.ts` - Utility functions\n\n**Updated Files:**\n- `app/[lang]/page.tsx` - Refactored to use new components\n- `tailwind.config.js` - Enhanced with shadcn theme config\n- `app/global.css` - Added CSS variables and utilities\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 基于shacn和fumadocs规范，重新开发首页\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

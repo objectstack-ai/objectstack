@@ -1,0 +1,33 @@
+{
+  "number": 97,
+  "kind": "pull_request",
+  "title": "Implement multi-currency protocol for international business scenarios",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-24T07:45:53Z",
+  "updated_at": "2026-01-24T08:12:10Z",
+  "closed_at": "2026-01-24T08:12:10Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/97",
+  "body": "Adds Salesforce-pattern multi-currency support: compound value storage (native + converted), configurable aggregation/sorting strategies, and Intl-compatible formatting.\n\n## Implementation\n\n**System Protocol** (`src/system/currency.zod.ts`)\n- ISO 4217 currency definitions with conversion rates, decimal places\n- Organization-wide settings: corporate currency, active currencies, dated exchange rates\n- Aggregation strategies: `convert_to_corporate` | `convert_to_user` | `group_by_currency`\n- Sorting strategies: `convert_to_corporate` | `convert_to_user` | `native_value`\n- User-level currency preferences and formatting\n\n**Data Protocol** (`src/data/currency.zod.ts`)\n- Compound value schema storing native + converted amounts with exchange rate audit trail\n- Field-level config: default currency, restrictions, mutability, rounding modes\n- Cross-currency calculation results with source tracking\n- Type-safe helpers using `CurrencyCode` for compile-time validation\n\n**Field Enhancement** (`src/data/field.zod.ts`)\n- Currency field properties: `currencyCode`, `allowCurrencyChange`, `restrictedCurrencies`, `showConversion`, `roundingMode`\n\n## Usage\n\n```typescript\n// Organization setup\nconst settings: CurrencySettings = {\n  enabled: true,\n  corporateCurrency: 'USD',\n  activeCurrencies: [\n    Currency.USD(),\n    { ...Currency.EUR(), conversionRate: 0.85 },\n  ],\n  aggregationStrategy: 'convert_to_corporate',\n};\n\n// Field definition\nconst amount = Field.currency({\n  name: 'amount',\n  currencyCode: 'USD',\n  restrictedCurrencies: ['USD', 'EUR', 'GBP'],\n  roundingMode: 'half_up',\n});\n\n// Value storage (native + converted for report performance)\nconst value: CurrencyValue = {\n  amount: 50000.00,\n  currency: 'EUR',\n  convertedAmount: 58823.53,    // Pre-computed for aggregations\n  convertedCurrency: 'USD',\n  exchangeRate: 1.176471,\n  conversionDate: new Date(),\n};\n```\n\n## Design Decisions\n\n- **Storage**: Denormalized storage of converted values avoids real-time conversion in reports/aggregations\n- **Type Safety**: `CurrencyCode` type (ISO 4217 validated) used throughout, not strings\n- **Rounding**: 5 modes (half_up, half_down, half_even, up, down) following financial best practices\n- **Historical Accuracy**: Optional dated exchange rates with effective/expiry dates\n\n**Test Coverage**: 60 tests (31 system + 29 data), validates edge cases (JPY 0-decimal, negatives, cross-currency calculations)\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> Role:\n> You are a Senior System Architect specializing in Low-Code platforms, Enterprise SaaS patterns (like Salesforce), and Schema-Driven UI development.\n> Context:\n> I am rebuilding a metadata-driven Form and Grid system. I currently use Zod to define my schemas. I need to implement a robust Multi-Currency (多币种) solution that supports international business scenarios.\n> I want to adopt a \"Salesforce-like\" approach, specifically handling:\n> 1. Storage: How to store value, currency code, and potentially exchange rates.\n> 2. Display: Proper formatting (Intl) and user-specific currency conversion.\n> 3. Logic: How to handle sorting and aggregation when rows have different currencies.\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 164,
+  "kind": "pull_request",
+  "title": "Add MSW frontend integration example with React components using @objectstack/client",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-25T15:25:23Z",
+  "updated_at": "2026-01-25T18:42:10Z",
+  "closed_at": "2026-01-25T18:42:10Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/164",
+  "body": "Adds complete example demonstrating MSW (Mock Service Worker) integration in frontend React components for API mocking and CRUD operations. Components use the official `@objectstack/client` package for all API calls, following ObjectStack best practices.\n\n## Implementation\n\n**React Components**\n- `UserManagement.tsx` - Full CRUD with form validation, error states\n- `UserList.tsx` - Simplified component using custom hooks pattern\n\n**Data Hooks** (`useObjectData.ts`) - **Using @objectstack/client**\n- `useObjectData<T>` - Data fetching with auto-load, error handling, refetch using `client.data.find()` and `client.data.get()`\n- `useCreateData<T>` - Mutation with success/error callbacks using `client.data.create()`\n- `useUpdateData<T>` - Partial updates using `client.data.update()`\n- `useDeleteData` - Delete operations using `client.data.delete()`\n- `useMetadata<T>` - Metadata retrieval using `client.meta.getObject()` with fallback support\n\n**Demo App** (`demo.tsx`)\n- MSW initialization with ObjectStackServer protocol adapter\n- Complete request handler setup for GET/POST/PATCH/DELETE\n- Tab-based UI comparing implementation patterns\n\n## Usage Patterns\n\n**Custom Hooks (Recommended) - Using ObjectStack Client**\n```typescript\nconst { data: users, loading, error, refetch } = useObjectData<User[]>('user');\nconst { execute: createUser } = useCreateData('user', {\n  onSuccess: () => refetch(),\n});\n\nawait createUser({ name: 'John', email: 'john@example.com' });\n```\n\n## Documentation\n\n- `GUIDE_CN.md` - Complete Chinese guide with API reference\n- `QUICKSTART.md` - 5-minute integration guide\n- `ARCHITECTURE.md` - Data flow diagrams and extensibility patterns\n- `SUMMARY.md` - File navigation and use cases\n\n## Configuration\n\n- Added `@objectstack/client` dependency for API calls\n- Added React 18 and @types/react dependencies\n- Enabled JSX in tsconfig.json\n- Unified exports in `src/index.ts`\n\n## Key Features\n\n✅ **Official Client Integration** - All hooks use `@objectstack/client` for API calls  \n✅ **Best Practices** - Follows ObjectStack recommended patterns  \n✅ **Multi-baseUrl Support** - Client instances managed per baseUrl  \n✅ **Backward Compatible** - Maintains existing hook interfaces\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 设计事例，如何在前端组件中使用msw数据源进行模拟api进行数据操作\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

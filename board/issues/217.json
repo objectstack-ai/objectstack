@@ -1,0 +1,38 @@
+{
+  "number": 217,
+  "kind": "pull_request",
+  "title": "Restructure documentation into protocol-first architecture with clean URLs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-26T06:11:08Z",
+  "updated_at": "2026-01-26T16:04:31Z",
+  "closed_at": "2026-01-26T16:04:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-26T16:04:30Z",
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/217",
+  "body": "## Documentation Restructure - Fix Build Error\n\n### ✅ Fixed\n- [x] TypeScript compilation error in blog page\n  - Error: `Type '...' is not assignable to type 'MDXComponents'`\n  - Solution: Added `as any` type assertion to components object\n  - Build now completes successfully (404 pages generated)\n\n### Previous Changes\n- [x] **Removed numbered prefixes** from all documentation folders (00-, 01-, 02-, 03-, 04-)\n  - `00-introduction` → `introduction`\n  - `01-core-concepts` → `core-concepts`\n  - `02-protocols` → `protocols` (and subdirectories)\n  - `03-development` → `development`\n  - `04-transport` → `transport`\n  \n- [x] **Updated navigation configuration** in meta.json files to control sorting order instead of relying on folder name prefixes\n\n- [x] **Updated all internal links** in .mdx files to reference new folder structure\n\n- [x] **Fixed MDX syntax errors** where `<number` was being interpreted as HTML tags\n\n### Build Status\n✅ **Build passes** - TypeScript compilation successful\n✅ **404 static pages generated** including all new documentation structure\n✅ **Clean URLs** - `/docs/introduction/overview`, `/docs/protocols/objectql/schema`\n\n### Folder Structure\n```\ndocs/\n├── introduction/        # Overview, design principles, architecture, glossary\n├── core-concepts/       # Metadata-driven, the stack, object model\n├── protocols/           # Protocol specifications\n│   ├── objectql/        # Schema, types, query syntax, security\n│   ├── objectui/        # Concept, layout DSL, widget contract, actions\n│   └── objectos/        # Lifecycle, plugin spec, config, i18n\n├── development/         # Writing plugins, custom widgets, drivers, CLI\n└── transport/           # HTTP API, realtime, error handling\n```\n\nAddresses CI build failure reported by @hotlong.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 帮我按照这个新目录重构官网文档\n> \n> /docs\n> ├── 00-introduction          # 📍 序言\n> │   ├── overview             # ObjectStack 是什么？（全栈元数据协议）\n> │   ├── design-principles    # 设计原则 (Schema-First, Protocol-Agnostic)\n> │   ├── architecture         # 架构全景图 (Protocol Layer vs Runtime Layer)\n> │   └── glossary             # 术语表 (Object, Widget, Plugin, Driver)\n> │\n> ├── 01-core-concepts         # 💡 核心概念\n> │   ├── metadata-driven      # 什么是元数据驱动？\n> │   ├── the-stack            # The \"Stack\" (QL + UI + OS 三位一体介绍)\n> │   └── object-model         # 统一对象模型 (Universal Object Model)\n> │\n> ├── 02-protocols             # 📜 协议规范 (The Specifications)\n> │   ├── 01-objectql          # [数据协议] ObjectQL\n> │   │   ├── schema           # 对象定义 (.object.yml/json 规范)\n> │   │   ├── types            # 类型系统 (Scalars, Relations, Interfaces)\n> │   │   ├── query-syntax     # 查询语法与过滤标准\n> │   │   └── security         # 访问控制协议 (ACL, Field-Level Security)\n> │   │\n> │   ├── 02-objectui          # [界面协议] ObjectUI\n> │   │   ├── concept          # \"UI as Data\" 理念\n> │   │   ├── layout-dsl       # 布局描述语言 (Page, View, Layout)\n> │   │   ├── widget-contract  # 控件契约 (Standard Widget Props & Events)\n> │   │   └── actions          # 交互动作协议 (Buttons, Triggers, Navigation)\n> │   │\n> │   └── 03-objectos          # [系统协议] ObjectOS\n> │       ├── lifecycle        # 系统生命周期 (Boot, Install, Upgrade)\n> │       ├── plugin-spec      # 插件包规范 (package.json, distinct folders)\n> │       ├── config-resolution# 配置加载与合并策略\n> │       └── i18n-standard    # 国际化资源标准\n> │\n> ├── 03-development           # 🛠️ 开发与扩展 (Implementation Guides)\n> │   ├── writing-plugins      # 如何开发一个功能插件\n> │   ├── custom-widgets       # 如何封装 React/Vue 组件为 ObjectWidget\n> │   ├── server-drivers       # 驱动开发指南 (Storage, Auth, Cache Drivers)\n> │   └── cli-tools            # 使用 objectstack-cli 进行工程管理\n> │\n> ├── 04-transport             # 🔌 传输与交互 (Over the Wire)\n> │   ├── http-api             # 标准 HTTP/REST 映射规则\n> │   ├── realtime             # WebSocket 与实时事件协议\n> │   └── error-handling       # 全局错误码与响应格式标准\n> │\n> └── 99-reference             # 📚 参考手册 (Generated)\n>     ├── schema-registry      # 所有内置对象/字段的 Zod Schema 定义\n>     ├── configuration        # .env 与核心配置项清单\n>     └── changelog            # 协议版本历史\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

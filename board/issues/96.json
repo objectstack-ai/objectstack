@@ -1,0 +1,37 @@
+{
+  "number": 96,
+  "kind": "pull_request",
+  "title": "chore: release v0.3.2",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-24T05:41:04Z",
+  "updated_at": "2026-01-24T05:56:19Z",
+  "closed_at": "2026-01-24T05:53:59Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-24T05:53:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/96",
+  "body": "Patch release for maintenance and stability improvements.\n\n## Changes\n\n- Bumped all packages from 0.3.1 → 0.3.2 via changesets\n- Updated CHANGELOGs across 18 workspace packages\n- Synchronized version across monorepo per fixed versioning strategy\n\n## Affected Packages\n\nCore:\n- `@objectstack/spec`, `@objectstack/types`, `@objectstack/objectql`\n- `@objectstack/runtime`, `@objectstack/client`\n- `@objectstack/driver-memory`\n- `@objectstack/plugin-hono-server`, `@objectstack/plugin-msw`\n\nExamples and docs also updated to maintain dependency consistency.\n\n## Release Workflow\n\nOn merge to `main`, GitHub Actions will publish to npm automatically.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 发一个版本\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

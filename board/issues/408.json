@@ -1,0 +1,33 @@
+{
+  "number": 408,
+  "kind": "pull_request",
+  "title": "Fix duplicate property in logger config object",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T17:29:56Z",
+  "updated_at": "2026-01-30T17:48:44Z",
+  "closed_at": "2026-01-30T17:47:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-30T17:47:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/408",
+  "body": "TypeScript compilation was failing with `TS1117: An object literal cannot have multiple properties with the same name` in `packages/core/src/logger.ts`.\n\n## Changes\n\n- Removed duplicate `name` property assignment in `ObjectLogger` constructor config initialization (line 36)\n\nThe config object was setting `name: config.name` twice - once at line 31 (correct) and again at line 36 (removed).\n\n```typescript\nthis.config = {\n    name: config.name,\n    level: config.level ?? 'info',\n    format: config.format ?? (this.isNode ? 'json' : 'pretty'),\n    redact: config.redact ?? ['password', 'token', 'secret', 'key'],\n    sourceLocation: config.sourceLocation ?? false,\n-   name: config.name,  // Duplicate removed\n    file: config.file,\n    rotation: config.rotation ?? {\n        maxSize: '10m',\n        maxFiles: 5\n    }\n};\n```\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21524624893/job/62024877321#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

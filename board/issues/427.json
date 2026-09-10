@@ -1,0 +1,36 @@
+{
+  "number": 427,
+  "kind": "pull_request",
+  "title": "Add comprehensive test coverage for API and Data protocol schemas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T04:08:56Z",
+  "updated_at": "2026-01-31T04:29:27Z",
+  "closed_at": "2026-01-31T04:26:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T04:26:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/427",
+  "body": "## Overview\n\nAdds test coverage for 7 previously untested protocol schemas in `packages/spec/src`. Total: **344 new tests** across API and Data protocols.\n\n## Changes\n\n### API Protocol Tests (242 tests)\n- **`odata.test.ts`** (64 tests) - OData v4 query syntax, filters, operators, response/error formats, metadata\n- **`protocol.test.ts`** (50 tests) - ObjectStack RPC protocol: discovery, metadata, CRUD, batch operations  \n- **`router.test.ts`** (40 tests) - Route definitions, categories, CORS, security, static mounts\n- **`rest-server.test.ts`** (42 tests) - REST API config, CRUD endpoints, metadata/batch endpoint generation\n- **`view-storage.test.ts`** (46 tests) - Saved views (list/kanban/calendar/chart), layouts, CRUD contracts\n\n### Data Protocol Tests (102 tests)\n- **`hook.test.ts`** (45 tests) - Hook lifecycle events, execution order, async/sync modes, error policies\n- **`data-engine.test.ts`** (57 tests) - Query/insert/update/delete options, aggregations, vector search, batch operations\n\n## Example\n\n```typescript\n// Before: No test coverage for OData schema\n// After: Comprehensive validation of query parameters and helper functions\n\ndescribe('ODataQuerySchema', () => {\n  it('should build complex queries', () => {\n    const query = ODataQuerySchema.parse({\n      $select: ['name', 'email'],\n      $filter: \"country eq 'US' and revenue gt 100000\",\n      $orderby: 'revenue desc',\n      $top: 10,\n      $expand: ['orders'],\n      $count: true,\n    });\n    \n    const url = OData.buildUrl('/api/customers', query);\n    // Validates URL encoding and parameter handling\n  });\n});\n```\n\nAll tests follow existing Zod validation patterns and cover success/error cases, defaults, edge cases, and real-world integration scenarios.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 完善objects ，API相关的测试用例\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

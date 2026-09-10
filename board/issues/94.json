@@ -1,0 +1,37 @@
+{
+  "number": 94,
+  "kind": "pull_request",
+  "title": "feat: enhance List and Form View protocols with detailed configuration schemas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-24T04:18:47Z",
+  "updated_at": "2026-01-24T05:40:51Z",
+  "closed_at": "2026-01-24T05:40:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-24T05:40:51Z",
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/94",
+  "body": "## Enhanced List View and Form View Protocol\n\n### Completed\n\n- [x] 1. Create `ListColumnSchema` for detailed column configuration\n  - [x] Add properties: `field`, `label`, `width`, `align`, `hidden`, `sortable`, `resizable`, `wrap`, `type`\n  - [x] Add validation: `width` must be positive\n  - [x] Add validation tests for negative/zero width\n- [x] 2. Update `ListViewSchema` to support enhanced columns\n  - [x] Support both string[] (legacy) and ListColumnSchema[] (new)\n  - [x] Add `resizable`, `striped`, `bordered` features\n  - [x] Add `selection` configuration (`type`: none/single/multiple)\n  - [x] Add `pagination` configuration (`pageSize`, `pageSizeOptions`)\n  - [x] Add validation: `pageSize` and `pageSizeOptions` must be positive integers\n  - [x] Add validation tests for negative/zero/non-integer values\n- [x] 3. Create `FormFieldSchema` for detailed form field configuration\n  - [x] Add properties: `field`, `label`, `placeholder`, `helpText`, `readonly`, `required`, `hidden`, `colSpan`\n  - [x] Add `dependsOn`, `visibleOn` for conditional logic\n  - [x] Add `widget` for custom component specification\n  - [x] Add validation: `colSpan` must be integer between 1-4\n  - [x] Add validation tests for colSpan boundary values\n- [x] 4. Update `FormSectionSchema` to support mixed field types\n  - [x] Allow `z.array(z.union([z.string(), FormFieldSchema]))`\n  - [x] Fix documentation error: fields type corrected to `(string | object)[]`\n- [x] 5. Add comprehensive tests for all new schemas\n  - [x] 86 view.test.ts tests (30 new validation tests added)\n  - [x] All 257 UI tests passing\n- [x] 6. Validate with build and existing tests\n- [x] 7. Address code review feedback with proper validation constraints\n- [x] 8. Merge ViewDataSchema from PR #95 for dual-mode support\n- [x] 9. Fix build errors and test failures\n\n### Summary\n\nAll enhancements have been successfully implemented, tested, and merged with the latest main branch changes. The changes maintain backward compatibility while enabling rich, metadata-driven configurations for frontend teams. Added comprehensive validation tests as requested in code review.\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> The current metadata-driven frontend protocol for Forms and Tables in `packages/spec/src/ui/view.zod.ts` is insufficiently detailed for building robust frontend controls.\n> \n> The following improvements are needed:\n> \n> 1.  **Enhanced List View Protocol (`ListViewSchema`)**:\n>     -   **Columns**: Upgrade `columns` from a simple string array to support a detailed configuration object (`ListColumnSchema`).\n>         -   Properties: `field` (name), `label`, `width`, `align` (left/center/right), `hidden`, `sortable`, `resizable`, `wrap`, `type` (renderer override).\n>     -   **Features**: Add `resizable` (columns), `striped` (rows), `bordered`.\n>     -   **Selection**: Add `selection` configuration (`type`: none/single/multiple).\n>     -   **Pagination**: Add `pagination` configuration (`pageSize`, `pageSizeOptions`).\n> \n> 2.  **Enhanced Form View Protocol (`FormViewSchema`)**:\n>     -   **Fields**: Upgrade `fields` in `FormSectionSchema` to support a detailed configuration object (`FormFieldSchema`).\n>         -   Properties: `field` (name), `label` override, `placeholder`, `helpText`, `readonly` override, `required` override, `hidden` override, `colSpan` (grid width).\n>     -   **Dependencies**: Add `dependsOn` (field name) and `visibleOn` (expression) to `FormFieldSchema` for conditional logic.\n>     -   **Controls**: Add `widget` property to `FormFieldSchema` to specify custom components.\n> \n> 3.  **Refactor `FormSectionSchema`**:\n>     -   Allow mixed types in `fields`: `z.array(z.union([z.string(), FormFieldSchema]))`.\n> \n> These changes will provide a comprehensive standard for the frontend team to implement rich, metadata-driven UI components.\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n*This pull request was created from Copilot chat.*\n>\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

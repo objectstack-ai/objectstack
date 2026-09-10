@@ -1,0 +1,35 @@
+{
+  "number": 438,
+  "kind": "pull_request",
+  "title": "Fix TypeScript compilation errors in examples/basic",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xl"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T06:36:28Z",
+  "updated_at": "2026-01-31T07:33:16Z",
+  "closed_at": "2026-01-31T07:28:05Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T07:28:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/438",
+  "body": "CI build failed with 83+ TypeScript errors in `examples/basic` due to examples using outdated schema patterns.\n\n## Changes\n\n**GraphQL protocols** (`api-protocols-example.ts`)\n- Added required properties to type definitions (`isInterface`, `authRequired`)\n- Fixed nested configuration structures (depth limits, complexity, persisted queries)\n\n**Hub & Marketplace** (`hub-marketplace-example.ts`)\n- Updated capability declarations to use `PluginCapability` structure with protocol references\n- Changed `license` from object to SPDX string identifier\n- Renamed `compatibility.objectstack` → `minObjectStackVersion`\n\n**Integration connectors** (`integration-connectors-example.ts`)\n- Replaced `subtype` with `provider` for all connector types\n- Moved nested `config` objects to top-level type-specific properties:\n  ```typescript\n  // Before\n  {\n    type: 'database',\n    subtype: 'postgres',\n    config: { host, port, database }\n  }\n  \n  // After\n  {\n    type: 'database',\n    provider: 'postgresql',\n    connectionConfig: { host, port, database },\n    poolConfig: { min, max, ... },\n    status: 'active',\n    enabled: true\n  }\n  ```\n\n**System protocols** (`system-protocols-example.ts`)\n- Changed job handlers from config objects to function references\n- Renamed `labels` → `labelNames` in metric definitions\n- Added required `enabled` property to all metrics\n- Fixed histogram bucket structures and tracing/caching configurations\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21539843052/job/62072490951#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

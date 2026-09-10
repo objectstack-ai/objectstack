@@ -1,0 +1,36 @@
+{
+  "number": 370,
+  "kind": "pull_request",
+  "title": "Re-scope transformation plan: protocol definitions only, implementations in separate repos",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T00:18:33Z",
+  "updated_at": "2026-01-30T00:52:01Z",
+  "closed_at": "2026-01-30T00:45:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-30T00:45:51Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/370",
+  "body": "PR #369's transformation plan incorrectly proposed building drivers and plugins within the spec repository. This repo defines protocols (Zod schemas, TypeScript types, JSON schemas) — implementations belong in separate plugin repositories.\n\n## Changes\n\n**V2 Documents** (protocol-focused)\n- `TRANSFORMATION_PLAN_V2.md` — 31 protocol definition tasks for this repo, references to 17+ implementation repos\n- `TECHNICAL_RECOMMENDATIONS_V2.md` — Complete Zod schema examples for missing protocols (GraphQL, Encryption, Cache, etc.)\n- `IMPLEMENTATION_CHECKLIST.md` — Part A: protocol work (this repo), Part B: driver/plugin work (separate repos)\n- `EVALUATION_SUMMARY.md` — Architecture clarification and document navigation\n- `DOCS_NAVIGATION.md` — Guide to all documents with reading paths\n\n**Architecture Separation**\n\n```\nTHIS REPO (objectstack-ai/spec)          SEPARATE REPOS\n├─ Zod schemas                           ├─ objectstack-ai/driver-postgres\n├─ TypeScript types (z.infer<>)         ├─ objectstack-ai/driver-mysql\n├─ JSON Schema generation                ├─ objectstack-ai/plugin-encryption\n└─ Protocol documentation                └─ objectstack-ai/connector-salesforce\n```\n\n**Protocol Work Identified** (this repo)\n- **P0**: SQL/NoSQL driver protocols, encryption, compliance, multi-tenancy, GraphQL (11 protocols)\n- **P1**: Object storage, message queue, search, vector DB, AI model registry (9 protocols)\n- **P2**: Logging, metrics, tracing, time-series, graph DB (7 protocols)\n\n**Example Protocol Definition**\n\n```typescript\n// packages/spec/src/system/encryption.zod.ts\nexport const EncryptionConfigSchema = z.object({\n  enabled: z.boolean().default(false),\n  algorithm: z.enum(['aes-256-gcm', 'aes-256-cbc', 'chacha20-poly1305']),\n  keyManagement: z.object({\n    provider: z.enum(['aws-kms', 'azure-key-vault', 'gcp-kms']),\n    rotationPolicy: KeyRotationPolicySchema.optional(),\n  }),\n  deterministicEncryption: z.boolean().default(false),\n});\n```\n\nOriginal documents archived as `.backup` files for reference.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/369\n> \n> 本项目是协议和框架项目，具体的实现通过插件方式在单独的子项目中完成，重新评估并安排计划\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

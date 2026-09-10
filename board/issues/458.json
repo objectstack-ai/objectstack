@@ -1,0 +1,35 @@
+{
+  "number": 458,
+  "kind": "pull_request",
+  "title": "Fix Zod v4 async function type inference in schema definitions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-02-01T07:41:47Z",
+  "updated_at": "2026-02-01T07:59:45Z",
+  "closed_at": "2026-02-01T07:59:45Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/458",
+  "body": "Zod v4's `z.function()` with `z.promise()` output incorrectly infers `MaybeAsync<T>` (union of `T | Promise<T>`) instead of `Promise<T>`, causing TypeScript errors in plugin and event handler schemas:\n\n```typescript\n// Before: Type error - MaybeAsync<void> not assignable to Promise<void>\nstorage: z.object({\n  set: z.function({\n    input: z.tuple([]).rest(z.any()),\n    output: z.promise(z.void())  // Infers as () => void | Promise<void>\n  }),\n})\n\n// After: Correct async inference\nstorage: z.object({\n  set: createAsyncFunctionSchema(\n    z.function({\n      input: z.tuple([]).rest(z.any()),\n      output: z.promise(z.void())  // Infers as () => Promise<void>\n    })\n  ),\n})\n```\n\n## Changes\n\n- **Added `createAsyncFunctionSchema` helper** in `shared/zod-helpers.ts` that wraps function schemas with `z.custom<>` to leverage Zod v4's `implementAsync` type parameter for correct Promise inference\n\n- **Updated async function definitions** in:\n  - `system/plugin.zod.ts`: Plugin lifecycle hooks and storage methods\n  - `system/events.zod.ts`: Event handler functions  \n  - `system/job.zod.ts`: Job handler functions\n\nSee: https://github.com/colinhacks/zod/issues/4143\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21559032847/job/62120041921#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

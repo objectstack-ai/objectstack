@@ -1,0 +1,36 @@
+{
+  "number": 19,
+  "kind": "pull_request",
+  "title": "Add language switch feature to support Chinese",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-19T12:48:42Z",
+  "updated_at": "2026-01-19T14:25:33Z",
+  "closed_at": "2026-01-19T14:25:33Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-19T14:25:33Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/19",
+  "body": "## Add Language Switcher to Documentation Site\n\n### Problem\n- Chinese translations exist (`/cn/docs`) but no UI to switch between languages\n- Users cannot discover or access the Chinese version from the English site\n- Homepage was missing the language switcher\n\n### Solution\nAdded a language switcher component to both the documentation pages and homepage, enabling users to toggle between English and Chinese versions throughout the entire site.\n\n### Changes Made\n\n1. **Added i18n configuration to RootProvider** (`apps/docs/app/[lang]/layout.tsx`)\n   - Configured locale and locales list with English and Chinese labels\n   - Language names: \"English\" and \"中文\"\n   - Created `LANGUAGE_NAMES` mapping object for easy maintenance when adding more languages\n\n2. **Enabled i18n in DocsLayout** (`apps/docs/app/[lang]/docs/layout.tsx`)\n   - Added `i18n` prop to enable language switcher in the documentation layout\n\n3. **Enabled i18n in HomeLayout** (`apps/docs/app/[lang]/page.tsx`)\n   - Added `i18n` prop to enable language switcher on the homepage\n\n### Automatic Language Detection\nThe middleware (`apps/docs/middleware.ts`) already handles automatic language detection:\n- Detects user's preferred language from browser settings or cookies\n- Redirects users to the appropriate localized version automatically\n- Stores language preference as a cookie for future visits\n\n### Screenshots\n\n**Before (English):** https://github.com/user-attachments/assets/dccc193a-25ae-4a03-947c-0712543a70ee\n**Before (Chinese - accessible only via direct URL):** https://github.com/user-attachments/assets/f15e83be-d18e-4010-8c6f-9342726b9a06\n\n**After (English docs with Language Switcher):** https://github.com/user-attachments/assets/4e2b49ba-9c18-4bae-986c-27dde98aa644\n**After (Chinese docs with Language Switcher):** https://github.com/user-attachments/assets/5fce241a-016f-4ba2-a768-7e427248bcbd\n**After (Homepage with Language Switcher):** https://github.com/user-attachments/assets/98a0a0fa-e35d-4471-b5a4-1d26dd3a6af8\n**Language Switcher Dropdown:** https://github.com/user-attachments/assets/bb329f19-750a-419c-9829-1782c1174578\n\n### Testing\n\n✅ Language switcher appears in both English and Chinese versions\n✅ Language switcher appears on homepage and all documentation pages\n✅ Dropdown shows both language options (English and 中文)\n✅ Clicking Chinese switches to `/cn/docs` or `/cn` with Chinese content\n✅ Clicking English switches to `/docs` or `/` with English content\n✅ Active language is highlighted in the dropdown\n✅ Code is maintainable and ready for adding more languages\n✅ Automatic language detection from browser settings works via middleware\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 增加语言切换的功能，而且目前无法显示中文网站\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 390,
+  "kind": "pull_request",
+  "title": "Resolve protocol naming conflicts: connector and cache protocols",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T13:58:00Z",
+  "updated_at": "2026-01-30T14:18:01Z",
+  "closed_at": "2026-01-30T14:08:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-30T14:08:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/390",
+  "body": "Two sets of protocol files shared identical names despite serving distinct purposes, causing import ambiguity and unclear usage patterns.\n\n## Changes\n\n### Connector Protocol Separation\n- Renamed `automation/connector.zod.ts` → `automation/trigger-registry.zod.ts`\n  - **Trigger Registry**: Lightweight automation triggers (webhooks, simple API calls)\n  - **Integration Connector**: Enterprise connectors (OAuth2, bidirectional sync, field mapping)\n- Updated exports in `automation/index.ts`\n\n### Cache Protocol Layering\n- Renamed `api/cache.zod.ts` → `api/http-cache.zod.ts`\n  - **HTTP Cache**: Protocol-level caching (ETag, Cache-Control headers)\n  - **Application Cache**: Data-layer caching (Redis, LRU, query results)\n- Updated 4 import statements across `api/protocol.ts`, `api/protocol.zod.ts`, and test files\n\n### Documentation\nAdded usage guidance inline to both protocol pairs clarifying architectural boundaries and decision criteria.\n\n## Example\n\n```typescript\n// Before: Ambiguous imports\nimport { Connector } from './automation/connector.zod';\nimport { Connector } from './integration/connector.zod'; // Name collision\n\n// After: Self-documenting imports\nimport { Connector } from './automation/trigger-registry.zod'; // Lightweight triggers\nimport { Connector } from './integration/connector.zod';       // Enterprise integration\n```\n\n## Impact\n- Zero breaking changes (all exports preserved via index files)\n- Establishes naming convention: `[layer]/[purpose]-[specificity].zod.ts`\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> Phase 1: Eliminate Redundancy\n> \n> 目标: 解决所有5个协议重复问题\n> 负责人: Architecture Team\n> 时间: 2周\n> \n> Task 1.1: 合并连接器协议\n> \n> 问题描述:\n> \n> automation/connector.zod.ts - 轻量级操作注册器\n> integration/connector.zod.ts - 完整的企业连接器规范\n> 两者职责重叠，使用场景不清\n> 解决方案:\n> \n> # Step 1: 重命名 automation connector\n> git mv automation/connector.zod.ts automation/trigger-registry.zod.ts\n> \n> # Step 2: 更新所有引用\n> # automation/trigger-registry.zod.ts 专注于：\n> # - 简单的操作触发器 (operations, triggers)\n> # - 快速集成（无需复杂认证）\n> # - 轻量级扩展\n> \n> # integration/connector.zod.ts 保持原样，专注于：\n> # - 完整的企业连接器（OAuth2, SAML等）\n> # - 复杂字段映射和数据转换\n> # - 双向同步、Webhook、速率限制\n> 文档更新:\n> \n> ## When to use Trigger Registry vs. Integration Connector?\n> \n> **Use `automation/trigger-registry.zod.ts` when:**\n> - Building simple automation triggers (e.g., \"when Slack message received, create task\")\n> - No complex authentication needed\n> - Lightweight, single-purpose integrations\n> \n> **Use `integration/connector.zod.ts` when:**\n> - Building enterprise-grade connectors (e.g., Salesforce, SAP, Oracle)\n> - Complex OAuth2/SAML authentication\n> - Bidirectional sync with field mapping and transformations\n> - Webhook management and rate limiting required\n> 验收标准:\n> \n>  automation/connector.zod.ts 重命名为 trigger-registry.zod.ts\n>  更新所有 import 语句\n>  添加使用场景文档\n>  所有测试通过\n> Task 1.2: 重命名缓存协议\n> \n> 问题描述:\n> \n> system/cache.zod.ts - 应用级缓存（Redis, Memory, CDN）\n> api/cache.zod.ts - HTTP 元数据缓存（ETag, Cache-Control）\n> 命名冲突，容易混淆\n> 解决方案:\n> \n> # 重命名 API 缓存协议\n> git mv api/cache.zod.ts api/http-cache.zod.ts\n> \n> # 或者更明确的命名\n> git mv api/cache.zod.ts api/response-cache.zod.ts\n> 文档更新:\n> \n> ## Caching in ObjectStack\n> \n> **Application Cache (`system/cache.zod.ts`)**\n> - Purpose: Cache computed data, query results, aggregations\n> - Technologies: Redis, Memcached, in-memory LRU\n> - Configuration: TTL, eviction policies, cache warming\n> - Use case: Cache expensive database queries\n> \n> **HTTP Cache (`api/http-cache.zod.ts`)**\n> - Purpose: Cache API responses at HTTP protocol level\n> - Technologies: HTTP headers (ETag, Last-Modified), CDN\n> - Configuration: Cache-Control headers, validation tokens\n> - Use case: Reduce API response time for repeated requests\n> 验收标准:\n> \n>  api/cache.zod.ts 重命名为 http-cache.zod.ts\n>  更新所有 import 语句\n>  添加缓存架构文档\n>  所有测试通过\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

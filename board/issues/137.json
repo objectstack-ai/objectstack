@@ -1,0 +1,36 @@
+{
+  "number": 137,
+  "kind": "pull_request",
+  "title": "Fix test data to match evolved schemas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/l",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-25T03:08:45Z",
+  "updated_at": "2026-01-25T05:40:55Z",
+  "closed_at": "2026-01-25T05:40:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-25T05:40:55Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/137",
+  "body": "Tests were failing because schemas evolved but test data wasn't updated. Three files affected:\n\n**sharing.test.ts**\n- Schema now uses discriminated unions requiring `type` field and structured `sharedWith` object\n- Updated from flat string values to typed objects:\n\n```typescript\n// Before\n{ name: 'rule', object: 'account', sharedWith: 'group_id' }\n\n// After  \n{ \n  name: 'rule',\n  object: 'account', \n  type: 'criteria',\n  condition: \"status = 'Active'\",\n  sharedWith: { type: 'group', value: 'group_id' }\n}\n```\n\n**driver.test.ts**\n- Added missing required methods to all driver mocks: `findStream`, `upsert`\n\n**plugin.test.ts**\n- Added missing required `drivers` field to all PluginContext mocks\n\nAll 64 tests in affected files now pass.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21325758073/job/61382513706#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 40,
+  "kind": "pull_request",
+  "title": "Hide blog menu from top navigation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-20T10:04:57Z",
+  "updated_at": "2026-01-20T10:16:49Z",
+  "closed_at": "2026-01-20T10:16:49Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-20T10:16:49Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/40",
+  "body": "Removed the Blog link from the site's top navigation menu.\n\n## Changes\n\n- Commented out Blog navigation item in `apps/docs/app/layout.config.tsx`\n\n```typescript\nlinks: [\n  {\n    text: 'Documentation',\n    url: '/docs/',\n    active: 'nested-url',\n  },\n  // Blog link commented out\n],\n```\n\n## Result\n\n![Navigation without blog menu](https://github.com/user-attachments/assets/c54eefa3-c01b-4fda-92f1-0b6fea3c6584)\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 隐藏首页顶部的博客菜单\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

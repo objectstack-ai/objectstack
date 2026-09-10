@@ -1,0 +1,38 @@
+{
+  "number": 43,
+  "kind": "pull_request",
+  "title": "Release version 0.1.x for ObjectStack Protocol packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-20T20:10:04Z",
+  "updated_at": "2026-01-20T23:19:20Z",
+  "closed_at": "2026-01-20T23:19:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-20T23:19:20Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/43",
+  "body": "- [x] Fix failing driver.test.ts by adding missing required fields (connect, disconnect, checkHealth, execute, count, beginTransaction, commit, rollback)\n- [x] Update all CHANGELOG files to accurately describe patch release changes instead of \"Initial release\"\n- [x] All 434 tests passing\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 发一个版本\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 395,
+  "kind": "pull_request",
+  "title": "Consolidate logger and storage protocols",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T14:53:03Z",
+  "updated_at": "2026-01-30T15:11:54Z",
+  "closed_at": "2026-01-30T15:05:03Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-30T15:05:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/395",
+  "body": "Merges redundant protocol definitions to reduce fragmentation while preserving backward compatibility.\n\n## Changes\n\n**Logger Protocol (`logger.zod.ts` → `logging.zod.ts`)**\n- Consolidated basic logger schemas (`LogLevel`, `LogFormat`, `LoggerConfigSchema`, `LogEntrySchema`) into logging protocol\n- Added hierarchical logger support to `LoggingConfigSchema`:\n  ```typescript\n  export const LoggingConfigSchema = z.object({\n    // ...existing fields\n    default: LoggerConfigSchema.optional(),        // Kernel's basic logger\n    loggers: z.record(LoggerConfigSchema).optional(), // Named component loggers\n  });\n  ```\n\n**Storage Protocol (`scoped-storage.zod.ts` → `object-storage.zod.ts`)**\n- Merged scoped storage into object storage protocol\n- Added `StorageScopeSchema` with lifecycle/tenancy scopes (`global`, `tenant`, `user`, `session`, `temp`, `cache`, `data`, `logs`, `config`, `public`)\n- Extended `ObjectStorageConfigSchema` with scope-aware fields:\n  ```typescript\n  export const ObjectStorageConfigSchema = z.object({\n    // ...existing fields\n    scope: StorageScopeSchema.optional().default('global'),\n    location: z.string().optional(),  // For local/scoped storage\n    quota: z.number().int().positive().optional(),\n    options: z.record(z.any()).optional(), // Provider-specific config\n  });\n  ```\n- Moved `FileMetadataSchema` to unified protocol\n\n## Deleted Files\n- `packages/spec/src/system/logger.zod.ts`\n- `packages/spec/src/system/scoped-storage.zod.ts`\n\nAll exports maintained through consolidated files. No breaking changes.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 📅 Phase 1: 修复冲突与重复 (Week 1-2)\n> \n> Week 1: 协议整合\n> \n> Task 1.1: 合并Logger协议 ⭐⭐⭐\n> \n> 文件:\n> \n> 删除: packages/spec/src/system/logger.zod.ts\n> 保留: packages/spec/src/system/logging.zod.ts\n> 重构: 将logger作为LoggingConfig的内部schema\n> 具体步骤:\n> \n> // logging.zod.ts\n> export const LoggerConfigSchema = z.object({\n>   name: z.string(),\n>   level: LogLevelSchema,\n>   format: LogFormatSchema,\n>   transports: z.array(LogTransportSchema),\n> });\n> \n> export const LoggingConfigSchema = z.object({\n>   default: LoggerConfigSchema,\n>   loggers: z.record(LoggerConfigSchema).optional(),\n>   // ... 其他logging系统配置\n> });\n> 预计工作量: 4小时\n> 风险: 低 - 仅内部重构\n> 验收标准:\n> \n>  所有测试通过\n>  导出API保持向后兼容\n>  文档更新完成\n> Task 1.2: 优化存储协议 ⭐⭐\n> \n> 文件:\n> \n> 合并: system/scoped-storage.zod.ts → system/object-storage.zod.ts\n> 保留: api/view-storage.zod.ts (UI层独立)\n> 重构方案:\n> \n> // object-storage.zod.ts\n> export const StorageScopeSchema = z.enum([\n>   'global',\n>   'tenant',\n>   'user',\n>   'session',\n> ]);\n> \n> export const ObjectStorageConfigSchema = z.object({\n>   provider: StorageProviderSchema,\n>   scope: StorageScopeSchema.default('global'),\n>   // ... 其他配置\n> });\n> 预计工作量: 6小时\n> 验收标准:\n> \n>  统一存储配置接口\n>  作用域支持完整\n>  迁移指南文档\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

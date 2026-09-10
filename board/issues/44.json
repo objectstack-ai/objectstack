@@ -1,0 +1,33 @@
+{
+  "number": 44,
+  "kind": "pull_request",
+  "title": "Update documentation to reflect current protocol implementation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-20T20:10:52Z",
+  "updated_at": "2026-01-20T23:39:37Z",
+  "closed_at": "2026-01-20T23:35:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-20T23:35:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/44",
+  "body": "Documentation was outdated and incomplete - guides showed only 3 basic field types while the protocol implements 30+, examples referenced non-existent features, and critical topics (workflows, validations, view configuration) lacked practical guides.\n\n## New Guides\n\n- **Field Types** (`field-types.mdx`) - Complete reference for all 30+ field types with configuration options and real-world examples (EN + CN)\n- **Workflows & Validation** (`workflows-validation.mdx`) - 7 validation types, workflow automation patterns, formula reference\n- **View Configuration** (`view-configuration.mdx`) - Grid, Kanban, Calendar, Gantt, Map views + Simple/Tabbed/Wizard forms\n\n## Updated Content\n\n- **Getting Started** - Replaced toy examples with realistic Account/Contact schema showing master-detail relationships, formulas, autonumbers, select options with colors\n- **README.md** - Architecture expanded from 3 to 5 modules (added AI and API protocols), examples table with status indicators\n- **TODO Example README** - Now accurately reflects implementation (7 field types including rating, color, code)\n- **Documentation Index** - Quick links section, updated architecture table\n\n## Examples\n\nBefore (Getting Started):\n```typescript\nfields: {\n  first_name: Field.text({ label: 'First Name', required: true }),\n  email: Field.text({ format: 'email' }),\n  type: Field.select(['Customer', 'Partner', 'Vendor']),\n}\n```\n\nAfter (Getting Started):\n```typescript\nfields: {\n  account_number: Field.autonumber({ format: 'ACC-{0000}' }),\n  full_name: Field.formula({ expression: 'CONCAT(first_name, \" \", last_name)' }),\n  account: Field.masterDetail('account', { deleteBehavior: 'cascade' }),\n  type: Field.select({\n    options: [\n      { label: 'Customer', value: 'customer', color: '#00AA00', default: true },\n      { label: 'Partner', value: 'partner', color: '#0000FF' },\n    ],\n  }),\n}\n```\n\nAll guides include practical examples from the CRM implementation, configuration tables, and cross-references to related documentation.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 根据最新的packages内核代码，和examples例子，更新所有相关的文档和教程\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

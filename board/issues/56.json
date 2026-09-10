@@ -1,0 +1,37 @@
+{
+  "number": 56,
+  "kind": "pull_request",
+  "title": "Add Multi-Organization protocol support for B2B SaaS multi-tenancy",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-21T11:28:43Z",
+  "updated_at": "2026-01-21T12:12:41Z",
+  "closed_at": "2026-01-21T12:12:41Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-21T12:12:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/56",
+  "body": "Adds native protocol support for multi-tenant B2B SaaS architectures where users belong to multiple organizations/workspaces, aligning with better-auth's organization plugin capabilities.\n\n## Changes\n\n### New Schemas (`system/organization.zod.ts`)\n- **Organization**: Core tenant model with `slug` (unique URL identifier), `logo`, and extensible `metadata`\n- **Member**: User-to-organization mapping with flexible `role` strings (owner, admin, member, etc.)\n- **Invitation**: Workflow support with status enum (pending/accepted/rejected/expired) and `expiresAt` expiry\n\n### Session Context Switching\nAdded `activeOrganizationId?: string` to `SessionSchema` for tenant context tracking across requests.\n\n### Auth Configuration\nNew optional `organization` block in `AuthConfigSchema`:\n\n```typescript\nconst authConfig: AuthConfig = {\n  // ... existing config\n  organization: {\n    enabled: true,\n    allowUserToCreateOrg: true,  // User vs admin-only org creation\n    defaultRole: 'member',        // Role for invited members\n    creatorRole: 'owner',         // Role for org creator\n  }\n}\n```\n\n## Schema Design Notes\n- Organization `slug` enforces `[a-z0-9_-]+` pattern for URL-safe routing\n- Member `role` uses flexible strings vs enums to support custom RBAC schemes\n- All IDs are opaque strings to support various backend implementations\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> Based on the refactoring work in PR #55 of `objectstack-ai/spec`, I need to implement the Multi-Organization architecture in the protocol to align with `better-auth` capabilities.\n> \n> Please update the spec files to include Organization support.\n> \n> **Requirements:**\n> \n> 1.  **Create `packages/spec/src/system/organization.zod.ts`**:\n>     - Define `OrganizationSchema`: `id`, `name`, `slug` (unique), `logo`, `metadata`, timestamps.\n>     - Define `MemberSchema`: `id`, `organizationId`, `userId`, `role` (string), timestamps.\n>     - Define `InvitationSchema`: `id`, `organizationId`, `email`, `role`, `status` (pending/accepted/rejected), `expiresAt`, `inviterId`.\n> \n> 2.  **Update `packages/spec/src/system/identity.zod.ts`**:\n>     - Add `activeOrganizationId` (optional string) to `SessionSchema`. This is crucial for context switching in multi-tenant apps.\n> \n> 3.  **Update `packages/spec/src/system/auth.zod.ts`**:\n>     - Add an `organization` configuration block to `AuthConfigSchema`:\n>       ```typescript\n>       organization: z.object({\n>         enabled: z.boolean().default(false),\n>         allowUserToCreateOrg: z.boolean().default(true),\n>         defaultRole: z.string().default('member'),\n>         creatorRole: z.string().default('owner'),\n>       }).optional()\n>       ```\n> \n> 4.  **Export everything**: Ensure the new file is exported in `packages/spec/src/index.ts`.\n> \n> This addition ensures ObjectStack protocol natively supports B2B SaaS scenarios where users belong to multiple teams/workspaces.\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

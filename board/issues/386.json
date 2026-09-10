@@ -1,0 +1,36 @@
+{
+  "number": 386,
+  "kind": "pull_request",
+  "title": "Add WebSocket collaboration schemas and RLS integration to permission protocol",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T12:54:03Z",
+  "updated_at": "2026-01-30T13:17:34Z",
+  "closed_at": "2026-01-30T13:12:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-30T13:12:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/386",
+  "body": "Adds simplified WebSocket collaboration APIs and row-level security capabilities to the permission system. Complements existing comprehensive protocols with lightweight alternatives for common use cases.\n\n## Changes\n\n### WebSocket Protocol (`api/websocket.zod.ts`)\nAdded simplified schemas alongside existing comprehensive protocol:\n\n- **`WebSocketEventSchema`** - Basic event protocol (subscribe, data-change, presence-update, cursor-update)\n- **`SimplePresenceStateSchema`** - User presence tracking\n- **`SimpleCursorPositionSchema`** - Collaborative cursor position\n- **`WebSocketServerConfigSchema`** - Server-side feature toggles\n\n```typescript\n// Subscribe to real-time changes\nWebSocketEventSchema.parse({\n  type: 'subscribe',\n  channel: 'record.account.123',\n  payload: { events: ['created', 'updated'] },\n  timestamp: Date.now()\n});\n```\n\n### Permission Protocol (`permission/permission.zod.ts`)\nExtended `PermissionSetSchema` with row-level security:\n\n- **`RLSRuleSchema`** - Field-level access filters with context variable support\n- **`rls`** field - Array of RLS rules per permission set\n- **`contextVariables`** field - Runtime evaluation context\n\n```typescript\n// Permission set with tenant isolation\nPermissionSetSchema.parse({\n  name: 'standard_user',\n  objects: { account: { allowRead: true } },\n  rls: [{\n    name: 'tenant_isolation',\n    objectName: 'account',\n    operation: 'read',\n    filter: {\n      field: 'tenant_id',\n      operator: 'eq',\n      value: { contextVariable: 'current_user.tenant_id' }\n    }\n  }],\n  contextVariables: { access_level: 2 }\n});\n```\n\n## Implementation Notes\n\n- WebSocket schemas use Unix timestamps (ms) vs ISO 8601 for performance\n- RLS rules support 8 filter operators (eq, ne, in, nin, gt, gte, lt, lte)\n- Context variables enable dynamic filtering based on user session state\n- All schemas follow ObjectStack conventions (camelCase config, snake_case identifiers)\n- Generated JSON schemas and TypeScript types for IDE/tooling integration\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 4. API Protocol Completeness / API协议完整性\n> \n> 4.1 WebSocket Enhancement\n> \n> Current: packages/spec/src/api/websocket.zod.ts\n> Enhancement: Add collaboration features\n> \n> import { z } from 'zod';\n> \n> export const WebSocketEventSchema = z.object({\n>   type: z.enum([\n>     'subscribe',\n>     'unsubscribe',\n>     'data-change',\n>     'presence-update',\n>     'cursor-update',\n>     'error',\n>   ]),\n>   channel: z.string(),\n>   payload: z.any(),\n>   timestamp: z.number(),\n> });\n> \n> export const PresenceStateSchema = z.object({\n>   userId: z.string(),\n>   userName: z.string(),\n>   status: z.enum(['online', 'away', 'offline']),\n>   lastSeen: z.number(),\n>   metadata: z.record(z.any()).optional(),\n> });\n> \n> export const CursorPositionSchema = z.object({\n>   userId: z.string(),\n>   recordId: z.string(),\n>   fieldName: z.string(),\n>   position: z.number(),\n>   selection: z.object({\n>     start: z.number(),\n>     end: z.number(),\n>   }).optional(),\n> });\n> \n> export const WebSocketConfigSchema = z.object({\n>   enabled: z.boolean().default(false),\n>   path: z.string().default('/ws'),\n>   heartbeatInterval: z.number().default(30000),\n>   reconnectAttempts: z.number().default(5),\n>   presence: z.boolean().default(false),\n>   cursorSharing: z.boolean().default(false),\n> });\n> \n> export type WebSocketConfig = z.infer<typeof WebSocketConfigSchema>;\n> 5. Security Protocol Framework / 安全协议框架\n> \n> 5.1 Row-Level Security Enhancement\n> \n> Current: packages/spec/src/auth/permission.zod.ts\n> Enhancement: Add dynamic RLS rules\n> \n> import { z } from 'zod';\n> \n> export const RLSRuleSchema = z.object({\n>   name: z.string(),\n>   objectName: z.string(),\n>   operation: z.enum(['read', 'create', 'update', 'delete']),\n>   filter: z.object({\n>     field: z.string(),\n>     operator: z.enum(['eq', 'ne', 'in', 'nin', 'gt', 'gte', 'lt', 'lte']),\n>     value: z.union([\n>       z.string(),\n>       z.number(),\n>       z.boolean(),\n>       z.array(z.any()),\n>       z.object({ contextVariable: z.string() }),\n>     ]),\n>   }),\n>   enabled: z.boolean().default(true),\n>   priority: z.number().default(0),\n> });\n> \n> export const PermissionSchema = z.object({\n>   // ... existing fields\n>   \n>   // ✅ NEW: Row-level security\n>   rls: z.array(RLSRuleSchema).optional(),\n>   \n>   // ✅ NEW: Context-based access control\n>   contextVariables: z.record(z.any()).optional(),\n> });\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

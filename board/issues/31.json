@@ -1,0 +1,37 @@
+{
+  "number": 31,
+  "kind": "pull_request",
+  "title": "Add i18n support for homepage (国际化官网首页)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-20T03:03:07Z",
+  "updated_at": "2026-01-20T03:43:06Z",
+  "closed_at": "2026-01-20T03:43:06Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-20T03:43:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/31",
+  "body": "The homepage was hardcoded in English. This adds Chinese translations while leveraging the existing middleware and routing infrastructure.\n\n## Changes\n\n**Created `apps/docs/lib/homepage-i18n.ts`**\n- TypeScript interface `HomepageTranslations` defining all translatable strings\n- English and Chinese translation objects\n- `getHomepageTranslations(lang)` selector with fallback to English\n\n**Updated `apps/docs/app/[lang]/page.tsx`**\n- Changed to async function to extract `lang` from route params\n- Replaced hardcoded strings with translation variables\n- All sections now localized: hero, features, personas\n\n## Example\n\n```typescript\n// Before\n<h1>The ObjectStack Protocol</h1>\n\n// After\nconst t = getHomepageTranslations(lang);\n<h1>{t.hero.title.line1} <br/> {t.hero.title.line2}</h1>\n```\n\n## Screenshots\n\n**English (/):**\n![English](https://github.com/user-attachments/assets/c244c6ea-6695-4dc0-acaf-974c8484cab3)\n\n**Chinese (/cn):**\n![Chinese](https://github.com/user-attachments/assets/a3c7d545-bc8c-487b-b5fd-668901ee5891)\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 国际化官网首页\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

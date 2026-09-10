@@ -1,0 +1,33 @@
+{
+  "number": 7,
+  "kind": "pull_request",
+  "title": "Remove explicit pnpm version from workflows to fix version conflict",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-18T10:23:37Z",
+  "updated_at": "2026-01-18T10:56:19Z",
+  "closed_at": "2026-01-18T10:56:19Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-18T10:56:19Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/7",
+  "body": "The CI workflow failed because `pnpm/action-setup@v4` detected conflicting versions: `version: 10` in the workflow config vs `\"packageManager\": \"pnpm@10.28.0\"` in package.json.\n\n## Changes\n\n- Removed `version: 10` from `pnpm/action-setup@v4` in both CI and release workflows\n- The action now uses the version specified in package.json's `packageManager` field (10.28.0)\n\n```yaml\n# Before\n- name: Install pnpm\n  uses: pnpm/action-setup@v4\n  with:\n    version: 10\n\n# After\n- name: Install pnpm\n  uses: pnpm/action-setup@v4\n```\n\nReference: https://github.com/objectstack-ai/spec/actions/runs/21110164385/job/60707559636#step:4:1\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21110164385/job/60707559636#step:4:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

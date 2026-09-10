@@ -1,0 +1,36 @@
+{
+  "number": 45,
+  "kind": "pull_request",
+  "title": "Fix plugin test mocks to satisfy PluginContextSchema validation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-20T20:22:43Z",
+  "updated_at": "2026-01-20T21:40:41Z",
+  "closed_at": "2026-01-20T21:38:58Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-20T21:38:58Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/45",
+  "body": "CI failure in `plugin.test.ts` due to incomplete mock PluginContext objects. Zod validation rejected lifecycle hook invocations because mocks were missing required schema fields.\n\n## Changes\n\n- **Added missing required fields to all PluginContext test mocks:**\n  - `ql.query` function\n  - `os.getCurrentUser` and `os.getConfig` functions  \n  - `storage` object (get/set/delete)\n  - `i18n` object (t/getLocale)\n  - `app.router` object (get/post/use)\n  - Complete `logger` methods (debug/warn added to existing info/error)\n\n- **Updated 7 test cases** across PluginContextSchema validation tests and lifecycle scenario tests\n\n## Example\n\n```typescript\n// Before (incomplete, failed validation)\nawait parsed.onUninstall({\n  ql: { object: () => ({ dropTable: async () => {} }) },\n  os: {},\n  logger: { info: () => {}, error: () => {} },\n  metadata: {},\n  events: {},\n} as any);\n\n// After (complete, passes validation)\nawait parsed.onUninstall({\n  ql: { \n    object: () => ({ dropTable: async () => {} }),\n    query: async () => ({})\n  },\n  os: {\n    getCurrentUser: async () => ({ id: 'test-user' }),\n    getConfig: async () => 'test-config'\n  },\n  storage: { get: async () => null, set: async () => {}, delete: async () => {} },\n  i18n: { t: () => '', getLocale: () => 'en' },\n  logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },\n  metadata: {},\n  events: {},\n  app: { router: { get: () => {}, post: () => {}, use: () => {} } }\n} as any);\n```\n\nAll 17 plugin tests now pass.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21185704366/job/60940481482#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

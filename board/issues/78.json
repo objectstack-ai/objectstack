@@ -1,0 +1,36 @@
+{
+  "number": 78,
+  "kind": "pull_request",
+  "title": "Fix link check CI configuration error and broken documentation links",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-23T03:00:20Z",
+  "updated_at": "2026-01-23T04:05:01Z",
+  "closed_at": "2026-01-23T04:03:01Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-23T04:03:01Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/78",
+  "body": "Link check CI was failing due to two issues: invalid configuration in `lychee.toml` and broken links in the documentation.\n\n### Changes\n\n- **lychee.toml**: Changed `verbose = true` to `verbose = \"info\"` (lychee v0.21.0 expects a string log level)\n- **.gitignore**: Added `.lycheecache` to exclude lychee's cache directory\n- **Documentation links**: Fixed 7 broken links found by the link checker:\n  - Replaced 6 GitHub Discussions links with GitHub Issues (discussions not enabled for this repository)\n  - Replaced 1 non-existent `examples/task-manager` reference with `examples/todo`\n\n### Configuration Fix\n\n```toml\n# Before\nverbose = true\n\n# After\n# Accepts log level: \"error\", \"warn\", \"info\", \"debug\", \"trace\"\nverbose = \"info\"\n```\n\n### Broken Links Fixed\n\n**Files updated:**\n- `content/blog/metadata-driven-architecture.mdx`\n- `content/blog/protocol-first-development.mdx`\n- `content/docs/specifications/index.mdx`\n- `content/docs/tutorials.mdx`\n- `content/docs/troubleshooting.mdx`\n- `content/docs/faq.mdx`\n- `content/docs/quick-start/build-first-app.mdx`\n\nAll links now validate successfully with lychee v0.21.0.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 修正Link check ci\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

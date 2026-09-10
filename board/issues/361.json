@@ -1,0 +1,33 @@
+{
+  "number": 361,
+  "kind": "pull_request",
+  "title": "[WIP] Remove all Chinese documents from the project",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-28T11:21:25Z",
+  "updated_at": "2026-01-28T11:28:34Z",
+  "closed_at": "2026-01-28T11:26:38Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-28T11:26:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/361",
+  "body": "## Clean Up Chinese Documentation\n\n- [x] Delete Chinese README file: `.github/prompts/README.zh-CN.md`\n- [x] Delete Chinese client SDK documentation: `content/docs/references/client-sdk/index.cn.mdx`\n- [x] Delete Chinese meta.cn.json files:\n  - [x] `content/docs/references/ai/meta.cn.json`\n  - [x] `content/docs/references/api/meta.cn.json`\n  - [x] `content/docs/references/auth/meta.cn.json`\n  - [x] `content/docs/references/automation/meta.cn.json`\n  - [x] `content/docs/references/data/meta.cn.json`\n  - [x] `content/docs/references/driver/meta.cn.json`\n  - [x] `content/docs/references/meta.cn.json`\n  - [x] `content/docs/references/permission/meta.cn.json`\n  - [x] `content/docs/references/system/meta.cn.json`\n  - [x] `content/docs/references/ui/meta.cn.json`\n- [x] Verify all Chinese files are removed\n\n## Summary\nSuccessfully removed 12 Chinese documentation files from the repository:\n- 1 Chinese README (README.zh-CN.md)\n- 1 Chinese MDX documentation file (index.cn.mdx)\n- 10 Chinese meta.cn.json files\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 清理删除所有中文文档\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

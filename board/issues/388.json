@@ -1,0 +1,33 @@
+{
+  "number": 388,
+  "kind": "pull_request",
+  "title": "Protocol Architecture Audit: 90 Protocols Evaluated, 5 Duplicates Found, 14 Gaps Identified",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T13:26:06Z",
+  "updated_at": "2026-01-30T14:54:18Z",
+  "closed_at": "2026-01-30T14:54:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/388",
+  "body": "Comprehensive audit of ObjectStack's 90 protocol specifications reveals architectural debt in connector/cache/sync abstractions and missing enterprise features (notification, document management, change control, external lookups).\n\n## Deliverables\n\nFour-document analysis suite targeting different audiences:\n\n**`README_EVALUATION.md`** - Master index with resource/risk models  \n**`EVALUATION_EXECUTIVE_SUMMARY.md`** - 5min digest for decision-makers  \n**`PROTOCOL_EVALUATION_REPORT.md`** - 30min deep-dive: protocol inventory, competitive analysis (vs. Salesforce/ServiceNow), dependency graphs  \n**`PROTOCOL_IMPROVEMENT_ROADMAP.md`** - 12-month execution plan with Zod schema examples\n\n## Key Findings\n\n### Protocol Duplication (5 instances)\n- **Connector**: `automation/connector.zod.ts` (lightweight ops) vs `integration/connector.zod.ts` (enterprise-grade)\n- **Cache**: `system/cache.zod.ts` (app-level) vs `api/cache.zod.ts` (HTTP metadata) - naming collision\n- **Sync**: Three overlapping patterns (sync/etl/connector mappings)\n- **Webhook/Auth**: Scattered across 3 files each, no shared schemas\n\n### Organizational Debt\nSystem layer contains 28 files in flat structure. Proposed 7-subdirectory taxonomy:\n```\nsystem/\n├── core/           (manifest, context, features)\n├── drivers/        (SQL, NoSQL, datasources)\n├── plugins/        (lifecycle, capabilities)\n├── observability/  (logging, audit, tracing, metrics)\n├── infrastructure/ (cache, queues, search, storage)\n├── security/       (encryption, compliance, masking)\n└── runtime/        (events, jobs, engine)\n```\n\n### Missing Critical Protocols (14 total)\n**P0** - Notification management, Document versioning, Change management (ITIL), External lookups  \n**P1** - Config promotion, Analytics engine, Backup/DR, Custom metadata, Offline sync, Rate limiting  \n**P2** - Process mining, Knowledge base, Gamification, Cost allocation\n\n### Coverage Gaps\n- Test coverage: 77% overall (Automation 65%, Integration 60%, Hub 55%)\n- Salesforce feature parity: 85% (missing External Objects, Mobile SDK)\n- No protocol versioning/changelog system\n\n## 7-Phase Roadmap (12 months)\n\n**Phase 1** (2w) - Eliminate duplicates: Rename `api/cache` → `http-cache`, `automation/connector` → `trigger-registry`  \n**Phase 2** (3w) - P0 protocols with full Zod schemas, 90%+ test coverage  \n**Phase 3** (2w) - System layer restructure, update imports  \n**Phase 4** (6w) - P1 protocols  \n**Phase 5** (6w) - Test coverage → 90%  \n**Phase 6** (8w) - Protocol versioning with `PROTOCOL_METADATA` constants  \n**Phase 7** (24w) - P2 protocols\n\n## Quantified Impact\n\n| Metric | Current | Target | Delta |\n|--------|---------|--------|-------|\n| Protocols | 90 | 110 | +22% |\n| Duplicates | 5 | 0 | -100% |\n| Test Coverage | 77% | 90% | +17% |\n| SF Parity | 85% | 95% | +12% |\n\nEstimated effort: 155 person-weeks (5.5 FTE for 6 months peak, tapering to 2 FTE)\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 你是企业管理软件领域的顶级架构师，我希望编写的是全球企业管理软件的基础规范，采用微内核及插件式设计，按照全球最新最优秀软件的最佳实践，扫描目前完成的所有的协议，评估分类是否合理，是否有重复，是否有冲突，是否有分类或协议调整建议，是否有补充建议，编写报告以及下一步改进计划。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

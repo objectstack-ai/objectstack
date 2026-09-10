@@ -1,0 +1,33 @@
+{
+  "number": 371,
+  "kind": "pull_request",
+  "title": "Add GraphQL protocol schema and security specifications",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T01:09:54Z",
+  "updated_at": "2026-01-30T01:47:25Z",
+  "closed_at": "2026-01-30T01:41:03Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-30T01:41:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/371",
+  "body": "Implements GraphQL protocol definitions for auto-generating type-safe GraphQL APIs from ObjectQL metadata with production-grade security controls.\n\n## Schema Generation\n\n**Type System**\n- ObjectQL→GraphQL type mapping for all 44 field types\n- Type configuration with field customization, interfaces, directives\n- Helper function `mapFieldTypeToGraphQL()` for runtime mapping\n\n**Operations**\n- Query config: filtering (10+ operators), sorting, pagination (offset/cursor/relay)\n- Mutation config: CRUD + upsert, transaction control, lifecycle hooks\n- Subscription config: real-time events with filtering and payload customization\n- Resolver config: datasource, computed, script, proxy implementations\n- DataLoader config: N+1 prevention with batching/caching controls\n\n**Example Usage**\n```typescript\nimport { GraphQLConfig } from '@objectstack/spec/api';\n\nconst config = GraphQLConfig.create({\n  path: '/graphql',\n  schema: {\n    queries: [{\n      name: 'customers',\n      object: 'customer',\n      type: 'list',\n      pagination: { type: 'relay', maxLimit: 100 },\n      filtering: { operators: ['eq', 'contains', 'in'] }\n    }]\n  },\n  security: {\n    complexity: { maxComplexity: 5000 },\n    depthLimit: { maxDepth: 8 },\n    rateLimit: { strategy: 'cost_based' }\n  }\n});\n```\n\n## Security Controls\n\n- **Query Depth Limiting**: Max nesting levels with configurable violations handling\n- **Query Complexity**: Per-field scoring, list multipliers, custom calculators\n- **Rate Limiting**: Token bucket/fixed window/sliding window/cost-based strategies\n- **Persisted Queries**: APQ with SHA256/SHA1/MD5, query allow lists, multi-store support (memory/Redis/DB/file)\n\n## Files\n\n- `packages/spec/src/api/graphql.zod.ts` - 14 Zod schemas (983 lines)\n- `packages/spec/src/api/graphql.test.ts` - 77 test cases\n- Auto-generated JSON schemas and documentation\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 2.1 GraphQL Protocol / GraphQL协议\n> \n> In THIS Repo (Spec Definitions) / 在本仓库（规范定义）\n> \n> GraphQL Schema Generation Protocol\n> \n>  Create packages/spec/src/api/graphql.zod.ts\n>  GraphQL type mapping from ObjectQL\n>  Query generation configuration\n>  Mutation generation configuration\n>  Subscription configuration\n>  Resolver configuration schema\n>  DataLoader configuration schema\n>  GraphQL directive schema\n> GraphQL Security Protocol\n> \n>  Add to packages/spec/src/api/graphql.zod.ts\n>  Query depth limiting schema\n>  Query complexity calculation schema\n>  Rate limiting configuration\n>  Persisted query configuration\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

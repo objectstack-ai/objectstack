@@ -1,0 +1,33 @@
+{
+  "number": 446,
+  "kind": "pull_request",
+  "title": "Add comprehensive AI agent design for automated enterprise app development",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T17:41:52Z",
+  "updated_at": "2026-02-01T10:21:44Z",
+  "closed_at": "2026-02-01T10:21:44Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/446",
+  "body": "Delivers complete technical documentation for an AI agent system that generates enterprise management applications from natural language requirements using @objectstack/spec protocols.\n\n## Documentation Structure (5 files, 128KB, 4.6k lines)\n\n### 1. Metadata Protocol Reference (`业务开发元数据清单.md`)\n- Cataloged 108+ protocols across 9 categories (ObjectQL, ObjectUI, Automation, Auth, API, AI, System, Integration, Hub)\n- Priority classification (P0/P1/P2/P3) with business scenarios\n- Code templates for CRM, ERP, project management domains\n\n### 2. System Architecture (`AI-AGENT-设计方案.md`)\n- **4-layer architecture**: Agent orchestration → LLM routing → Knowledge/data → ObjectStack runtime\n- **6 core agents**: Requirement understanding, Architecture design, Metadata generation, Code generation, Testing validation, Optimization iteration\n- **RAG architecture**: Hybrid retrieval (vector + keyword), Cohere rerank, context enrichment\n- **Multi-model routing**: Task-based routing (GPT-4o/Claude 3.5/Llama 3), cost optimization (50%+ savings)\n- **4-layer validation**: Zod schema → Business rules → Best practices → Performance checks\n\n### 3. Implementation Roadmap (`AI-AGENT-开发计划.md`)\n- 12-week plan across 5 phases (Prep → Infrastructure → Core agents → Code gen → Optimization)\n- 60+ granular tasks with ownership assignments\n- Team structure: 9 engineers (1 tech lead, 2 AI, 2 backend, 2 frontend, 1 QA, 1 DevOps)\n- Budget: $4,122 infrastructure costs (OpenAI/Anthropic APIs, Pinecone, AWS RDS/EC2)\n- Risk mitigation for LLM hallucination, cost overrun, performance bottlenecks\n\n### 4. Documentation Index (`AI-AGENT-README.md`)\n- Quick navigation by role (product/technical/decision-maker)\n- Success metrics: 10-42x dev efficiency gain, 80%+ test coverage, 90% cost reduction\n- End-to-end CRM example: 8.5 min from requirements to runnable app\n\n## Key Technical Decisions\n\n**Metadata Validation Pipeline**:\n```typescript\n// Layer 1: Type safety via Zod\nServiceObjectSchema.parse(object);\n\n// Layer 2: Business rules\nif (Object.keys(object.fields).length < 1) error(\"Missing fields\");\n\n// Layer 3: Naming conventions\nif (!object.name.match(/^[a-z_][a-z0-9_]*$/)) warn(\"Use snake_case\");\n\n// Layer 4: Performance optimization\nif (lookupFields.length > 0) suggest(\"Add indexes on: \" + lookupFields);\n```\n\n**Model Routing Strategy**:\n- Architecture/reasoning tasks → GPT-4o (quality)\n- Code generation patterns → GPT-3.5-turbo (cost)\n- Long context (100k+ tokens) → Claude 3.5 Sonnet\n- Privacy/offline → Local Llama 3\n\n**RAG Retrieval Flow**:\n1. Vector search (semantic, top-20)\n2. Keyword search (exact, top-10)\n3. Hybrid combine + Cohere rerank\n4. Filter threshold > 0.75, return top-5\n\n## Expected Outcomes\n\n| Metric | Traditional | AI Agent | Improvement |\n|--------|------------|----------|-------------|\n| CRM dev time | 2-3 weeks | 2-4 hours | **42x** |\n| Test coverage | 50-70% | 80%+ | +30% |\n| Cost per project | $20k | $2k | **90%** |\n\n**Target**: Generate TypeScript apps with 80%+ test coverage, 100% type safety, validated against @objectstack/spec schemas in <10 minutes.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 我想开发一个agent，让他基于 @objectstack/spec 中规范去自我迭代开发企业管理软件。帮我整理跟业务开发相关的元素据清单和介绍。编写完整的设计方案和开发计划。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

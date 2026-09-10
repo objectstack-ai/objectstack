@@ -1,0 +1,33 @@
+{
+  "number": 1,
+  "kind": "pull_request",
+  "title": "Add metamodel interfaces for ObjectQL/ObjectUI contract",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-18T08:43:35Z",
+  "updated_at": "2026-01-18T09:09:17Z",
+  "closed_at": "2026-01-18T09:09:17Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-18T09:09:17Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/1",
+  "body": "Defines the type system shared between backend (ObjectQL) parser and frontend (ObjectUI) renderer.\n\n## Core Interfaces\n\n**`FieldType`** - 16 data types covering text, numeric, date/time, lookup, selection, and special fields (file, image, json)\n\n**`ObjectField`** - Field metadata with validation rules, constraints, lookup configuration, and display properties\n\n**`ObjectEntity`** - Complete entity definition including fields array, keys, UI hints, audit/soft-delete flags, and search configuration\n\n**`ObjectView`** - View configuration supporting 10 presentation types (list, form, detail, card, kanban, calendar, chart, map, timeline, custom) with columns, filters, sorting, and layouts\n\n## Usage Example\n\n```typescript\nimport { ObjectEntity } from '@objectstack/spec';\n\nconst userEntity: ObjectEntity = {\n  name: 'User',\n  label: 'User',\n  pluralLabel: 'Users',\n  fields: [\n    { name: 'email', label: 'Email', type: 'email', required: true, unique: true },\n    { name: 'role', label: 'Role', type: 'select', options: [\n      { value: 'admin', label: 'Administrator' },\n      { value: 'user', label: 'User' }\n    ]},\n    { name: 'manager', label: 'Manager', type: 'lookup', \n      lookupEntity: 'User', lookupDisplayField: 'name' }\n  ],\n  primaryKey: 'id',\n  displayField: 'email'\n};\n```\n\n## Implementation Notes\n\n- TSDoc comments on all properties for IntelliSense\n- Extensibility via `metadata` fields without core schema changes\n- Pure TypeScript, platform-agnostic (Node.js/Browser/Electron compatible)\n- Type guard `isFieldType()` for runtime validation\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> Please create a src/types/meta directory.\n> Define the Metamodel interfaces: ObjectEntity, ObjectField, and ObjectView.\n> These interfaces will be the contract shared between the backend (ObjectQL) parser and the frontend (ObjectUI) renderer.\n> Include specific types for FieldType (e.g., text, number, lookup).\"\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

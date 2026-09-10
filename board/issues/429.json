@@ -1,0 +1,33 @@
+{
+  "number": 429,
+  "kind": "pull_request",
+  "title": "Sync pnpm-lock.yaml with metadata package dependencies",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T04:32:40Z",
+  "updated_at": "2026-01-31T04:48:34Z",
+  "closed_at": "2026-01-31T04:46:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/429",
+  "body": "CI failing on install step: `pnpm-lock.yaml` missing entries for `packages/metadata` dependencies added in 2831c2f.\n\n### Changes\n\n- Updated lockfile with metadata package dependencies (chokidar, glob, js-yaml, vitest, workspace packages)\n- Added auto-generated JSON schemas for `metadata-loader.zod.ts` definitions (12 files in `packages/spec/json-schema/system/`)\n\nThe metadata package was added with its package.json but lockfile wasn't regenerated, causing frozen-lockfile CI checks to fail.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21538777333/job/62069717224#step:7:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

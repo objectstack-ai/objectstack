@@ -1,0 +1,38 @@
+{
+  "number": 93,
+  "kind": "pull_request",
+  "title": "Add MSW plugin for API mocking in testing and development",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-24T03:36:06Z",
+  "updated_at": "2026-01-24T04:15:53Z",
+  "closed_at": "2026-01-24T04:10:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-24T04:10:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/93",
+  "body": "Implements Mock Service Worker integration for ObjectStack, enabling browser and Node.js API mocking without server infrastructure.\n\n## Implementation\n\n**New Package: `@objectstack/plugin-msw`**\n- `MSWPlugin` - Runtime plugin implementing automatic handler generation for all ObjectStack endpoints\n- `ObjectStackServer` - Simplified mock API for common CRUD operations\n- Auto-generates handlers for discovery, metadata, data, and UI protocol endpoints\n\n**Example Package: `@objectstack/example-msw-demo`**\n- Browser standalone usage pattern\n- Runtime integration pattern\n\n## Usage\n\n**Browser Mode** (standalone):\n```typescript\nimport { setupWorker } from 'msw/browser';\nimport { http, HttpResponse } from 'msw';\nimport { ObjectStackServer } from '@objectstack/plugin-msw';\n\nObjectStackServer.init(protocol);\n\nconst handlers = [\n  http.get('/api/user/:id', async ({ params }) => {\n    const result = await ObjectStackServer.getUser(params.id);\n    return HttpResponse.json(result.data, { status: result.status });\n  })\n];\n\nexport const worker = setupWorker(...handlers);\n```\n\n**Runtime Integration**:\n```typescript\nconst kernel = new ObjectStackKernel([\n  new MSWPlugin({ baseUrl: '/api/v1', logRequests: true })\n]);\n```\n\n## Endpoints Mocked\n\n- `/api/v1` - Discovery\n- `/api/v1/meta[/:type[/:name]]` - Metadata access\n- `/api/v1/data/:object[/:id]` - CRUD operations (GET, POST, PATCH, DELETE)\n- `/api/v1/ui/view/:object` - UI protocol\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 新增插件，支持 msn\n> \n> // mocks/browser.js\n> import { setupWorker, rest } from 'msw';\n> import { ObjectStackServer } from '../server/mock-db';\n> \n> // 1. 初始化模拟服务端\n> ObjectStackServer.init();\n> \n> // 2. 定义路由处理器 (Handlers)\n> // 这就像是 Express/Koa 的路由定义，但运行在 Service Worker 中\n> const handlers = [\n>   \n>   // 拦截 GET /api/user/:id\n>   rest.get('/api/user/:id', async (req, res, ctx) => {\n>     const { id } = req.params;\n>     \n>     // 调用本地逻辑\n>     const result = await ObjectStackServer.getUser(id);\n> \n>     // 返回构建的 Response\n>     return res(\n>       ctx.status(result.status),\n>       ctx.json(result.data)\n>     );\n>   }),\n> \n>   // 拦截 POST /api/user\n>   rest.post('/api/user', async (req, res, ctx) => {\n>     const body = await req.json();\n>     \n>     // 调用本地逻辑\n>     const result = await ObjectStackServer.createUser(body);\n> \n>     return res(\n>       ctx.status(result.status),\n>       ctx.json(result.data)\n>     );\n>   }),\n> ];\n> \n> // 3. 创建 Worker 实例\n> export const worker = setupWorker(...handlers);\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

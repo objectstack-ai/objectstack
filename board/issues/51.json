@@ -1,0 +1,35 @@
+{
+  "number": 51,
+  "kind": "pull_request",
+  "title": "[WIP] Fix issues in action run step",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-21T04:21:39Z",
+  "updated_at": "2026-01-21T04:30:24Z",
+  "closed_at": "2026-01-21T04:29:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-21T04:29:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/51",
+  "body": "- [x] Understand the problem - build failing due to incompatible `supports` property in InMemoryDriver\n- [x] Review the updated `DriverCapabilitiesSchema` to understand all required fields\n- [x] Update the `InMemoryDriver.supports` property to include all required capabilities\n- [x] Address code review feedback - set capabilities to match actual implementation\n- [x] Test the build to ensure it passes\n- [x] Run security checks - no issues found\n\n## Summary\nFixed GitHub Actions build failure caused by missing query operation capabilities in the `InMemoryDriver.supports` property. The `DriverCapabilitiesSchema` was recently expanded to include granular query capabilities (`queryFilters`, `queryAggregations`, `querySorting`, `queryPagination`, `queryWindowFunctions`, `querySubqueries`), but the driver implementation was not updated to match.\n\nUpdated the driver to declare all required capabilities, setting values based on the actual implementation:\n- `queryPagination: true` - Basic pagination is implemented\n- `jsonFields: true`, `arrayFields: true` - Native JS support\n- All other query capabilities set to `false` as they are not yet implemented\n\nBuild now passes successfully ✅\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21195398236/job/60975300968#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

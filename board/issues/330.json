@@ -1,0 +1,33 @@
+{
+  "number": 330,
+  "kind": "pull_request",
+  "title": "Document new manifest package types for microkernel architecture",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-27T15:38:34Z",
+  "updated_at": "2026-01-27T15:56:23Z",
+  "closed_at": "2026-01-27T15:51:54Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-27T15:51:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/330",
+  "body": "PR #328 extended the manifest schema with three package types (`objectql`, `gateway`, `adapter`) to support microkernel architecture. Documentation was incomplete.\n\n## Changes\n\n### Reference Documentation\n- **Manifest schema references**: Updated type enum to `'app' | 'plugin' | 'driver' | 'module' | 'objectql' | 'gateway' | 'adapter'`\n- **PROTOCOL_REFERENCE.md**: Added package type definitions and microkernel features\n\n### Architecture Documentation  \n- **ARCHITECTURE.md**: New section \"Package Types & Microkernel Architecture\"\n  - Package hierarchy: `adapter → gateway → kernel → objectql → driver → database`\n  - Lifecycle ordering: adapter prep → objectql init → driver connect → gateway register → app/plugin load\n  - Cardinality constraints: adapters are singleton, gateways multiplex\n\n### Developer Guides\n- **writing-plugins.mdx**: Added package type selection guidance with use cases\n\n## Package Type Definitions\n\n| Type | Role | Cardinality | Examples |\n|------|------|-------------|----------|\n| `adapter` | HTTP server container | Singleton | Express, Hono, Fastify |\n| `gateway` | API protocol translator | Multiple | GraphQL, REST, RPC |\n| `objectql` | Core data engine | Singleton | Query AST, business logic |\n| `driver` | Database/service adapter | Multiple | Postgres, MongoDB, S3 |\n\nKey distinction: **adapter** = runtime host (Express vs Hono), **gateway** = protocol (GraphQL vs REST). Multiple gateways can coexist on one adapter.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/328\n> \n> 更新相关文档\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

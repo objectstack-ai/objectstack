@@ -1,0 +1,33 @@
+{
+  "number": 372,
+  "kind": "pull_request",
+  "title": "[WIP] Implement agent for enterprise software development",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T01:34:25Z",
+  "updated_at": "2026-01-30T01:38:42Z",
+  "closed_at": "2026-01-30T01:38:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/372",
+  "body": "## Autonomous Agent Development System for Enterprise Software\n\n### Overview\nCreate an autonomous agent system that can design, develop, test, and iterate on enterprise management software (like CRM) using the ObjectStack protocol framework. The system should handle the full development lifecycle from product design to continuous improvement and versioning.\n\n### Implementation Plan\n\n- [ ] **Phase 1: Core Agent Protocol Extensions**\n  - [ ] Create Development Lifecycle Agent schema (`development-lifecycle.zod.ts`)\n  - [ ] Create Product Design Agent schema (`product-design.zod.ts`)\n  - [ ] Create Development Agent schema with code generation capabilities\n  - [ ] Create Testing & QA Agent schema\n  - [ ] Create Release Management Agent schema\n\n- [ ] **Phase 2: Multi-Agent Orchestration System**\n  - [ ] Create Agent Team schema for coordinating multiple agents\n  - [ ] Create Development Pipeline schema for lifecycle management\n  - [ ] Create Iteration & Feedback Loop schema\n  - [ ] Create Version Control & Release schema\n\n- [ ] **Phase 3: CRM Development Example**\n  - [ ] Create autonomous CRM development configuration\n  - [ ] Define product requirements agent\n  - [ ] Define schema generation agent\n  - [ ] Define testing agent\n  - [ ] Define release automation\n\n- [ ] **Phase 4: Documentation & Testing**\n  - [ ] Add comprehensive tests for new schemas\n  - [ ] Create documentation for agent development system\n  - [ ] Create example prompt templates\n  - [ ] Add integration examples\n\n### Key Features\n1. **Product Design Phase**: Agent analyzes requirements and creates technical specifications\n2. **Development Phase**: Agent generates ObjectStack configurations (Objects, Fields, Views, Workflows)\n3. **Testing Phase**: Agent creates and runs validation tests\n4. **Iteration Phase**: Agent analyzes feedback and improves the application\n5. **Release Phase**: Agent manages versioning and deployment\n\n### Technical Approach\n- Extend existing AI Agent protocol in `packages/spec/src/ai/`\n- Follow Zod-first approach with runtime validation\n- Use camelCase for config keys, snake_case for identifiers\n- Build on existing orchestration and agent schemas\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 基于我的协议框架如何开发一个agent，让他自主编写企业管理软件，比如CRM，要求从产品设计开始到开发测试到不停的功能完善迭代，不停地修改测试，并且发新版本\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

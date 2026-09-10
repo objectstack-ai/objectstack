@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "repo": "objectstack-ai/objectstack",
+  "generated_at": "2026-09-10T13:45:28.654Z",
+  "since": null,
+  "since_reason": "no previous manifest — the first run is full",
+  "next_since": null,
+  "resume": {
+    "since": "2026-02-01T14:43:39Z",
+    "stopped_by": "budget",
+    "reason": "the per-run budget of 800 requests is spent"
+  },
+  "counts": {
+    "issues_open": 0,
+    "issues_closed": 137,
+    "pulls_open": 0,
+    "pulls_closed": 268,
+    "records": 405
+  },
+  "board": {
+    "open_issues_count": null,
+    "open_pull_requests": null,
+    "read_at": null
+  },
+  "count_check": {
+    "verdict": "pending",
+    "expected": 0,
+    "archived": 0,
+    "shortfall": null,
+    "surplus": null,
+    "gone_ledger": 0,
+    "ok": null
+  },
+  "requests": 800,
+  "run": {
+    "numbers_read": 405,
+    "files_written": 851,
+    "walk_complete": false
+  }
+}

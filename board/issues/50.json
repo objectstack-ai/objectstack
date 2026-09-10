@@ -1,0 +1,33 @@
+{
+  "number": 50,
+  "kind": "issue",
+  "title": "统一查询语言设计规范 (Unified Query DSL Specification)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-21T04:19:34Z",
+  "updated_at": "2026-01-21T04:59:01Z",
+  "closed_at": "2026-01-21T04:59:01Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/50",
+  "body": "这是一份基于行业最佳实践（参考 Prisma, Strapi, TypeORM, LoopBack）起草的通用查询语言（Generic Query DSL）设计规范文档。\n你可以直接将这份文档作为你团队内部的技术规格说明书（Spec）使用。\n统一查询语言设计规范 (Unified Query DSL Specification)\n版本: 1.0.0\n状态: 草案 (Draft)\n目标: 定义一套基于 JSON 的、跨数据库兼容的查询语法标准，用于前端与后端 API 的数据筛选交互。\n1. 核心设计原则\n * 声明式 (Declarative): 前端只描述“要什么数据”，不描述“如何查询数据库”。\n * 后端无关性 (Database Agnostic): 语法不包含特定数据库（如 SQL 或 Mongo）的专用指令。所有指令在后端通过适配器层（Adapter Layer）转换。\n * 类型安全 (Type Safety): 结构必须能被 TypeScript 静态推断。\n * 默认约定优于配置 (Convention over Configuration): 提供隐式写法以简化常见查询。\n2. 语法结构定义\n查询对象（Filter Object）是一个递归的树状结构。\n2.1 基础结构\n一个合法的查询对象由以下三种元素组成：\n * 隐式相等 (Implicit Equality): key: value\n * 显式操作符 (Explicit Operators): key: { $op: value }\n * 逻辑组合 (Logical Groups): $and, $or, $not\n2.2 完整示例\n{\n  \"where\": {\n    \"status\": \"active\",                     // 隐式相等 (AND)\n    \"age\": { \"$gte\": 18 },                  // 显式比较 (AND)\n    \"$or\": [                                // 逻辑分支\n      { \"role\": \"admin\" },\n      { \"email\": { \"$contains\": \"@company.com\" } }\n    ],\n    \"profile\": {                            // 关联查询 (Relation)\n      \"verified\": true\n    }\n  }\n}\n\n3. 操作符标准 (Operator Standards)\n为了保证跨库兼容，必须严格限制支持的操作符清单。不要直接透传数据库指令。\n3.1 比较操作符 (Comparison)\n| 操作符 | 描述 | SQL 映射示例 | MongoDB 映射示例 | 数据类型限制 |\n|---|---|---|---|---|\n| $eq | 等于 (默认) | = | $eq | Any |\n| $ne | 不等于 | <> 或 != | $ne | Any |\n| $gt | 大于 | > | $gt | Number, Date |\n| $gte | 大于等于 | >= | $gte | Number, Date |\n| $lt | 小于 | < | $lt | Number, Date |\n| $lte | 小于等于 | <= | $lte | Number, Date |\n3.2 集合与区间 (Set & Range)\n| 操作符 | 描述 | SQL 映射示例 | MongoDB 映射示例 |\n|---|---|---|---|\n| $in | 在列表中 | IN (?, ?, ?) | $in: [...] |\n| $nin | 不在列表中 | NOT IN (...) | $nin: [...] |\n| $between | 区间 (闭合) | BETWEEN ? AND ? | $gte AND $lte |\n3.3 字符串专用 (String Specific)\n注意：此处需在后端处理大小写敏感（Case Sensitivity）配置。\n| 操作符 | 描述 | SQL 映射示例 | MongoDB 映射示例 |\n|---|---|---|---|\n| $contains | 包含 | LIKE %?% | $regex |\n| $startsWith | 前缀匹配 | LIKE ?% | $regex |\n| $endsWith | 后缀匹配 | LIKE %? | $regex |\n3.4 逻辑操作符 (Logical)\n| 操作符 | 描述 | SQL 映射 | MongoDB 映射 |\n|---|---|---|---|\n| $and | 逻辑与 | (A AND B) | $and |\n| $or | 逻辑或 | (A OR B) | $or |\n| $not | 逻辑非 | NOT (A) | $not |\n3.5 特殊检查 (Special)\n| 操作符 | 描述 | SQL 映射 | MongoDB 映射 |\n|---|---|---|---|\n| $null | 是否为空 | IS NULL (true) / IS NOT NULL (false) | field: null |\n| $exist | 字段是否存在 | (通常用于 NoSQL) | $exists |\n4. 解析与执行流程 (Architecture)\n这是实现跨数据库的核心架构逻辑。\n阶段一：标准化 (Normalization Pass)\n在进入适配器之前，必须将所有“语法糖”转换为“标准 AST 结构”。这能极大简化后续适配器的编写难度。\n规则：\n * 将所有 key: value 转换为 key: { $eq: value }。\n * 将同级的所有 Key 合并入 $and 数组。\n输入：\n{ \"age\": 18, \"role\": \"admin\" }\n\n标准化后输出 (Internal IR):\n{\n  \"$and\": [\n    { \"age\": { \"$eq\": 18 } },\n    { \"role\": { \"$eq\": \"admin\" } }\n  ]\n}\n\n阶段二：适配器转换 (Adapter Translation)\n使用 Visitor Pattern 遍历标准化后的对象。\nSQL Adapter 伪逻辑：\n * 遍历对象。\n * 遇到 $and/$or: 递归生成子 SQL，用 AND/OR 连接，并包裹括号。\n * 遇到字段 { age: { $gt: 18 } }:\n   * 提取字段名 age (需做安全校验，防 SQL 注入)。\n   * 提取操作符 $gt -> 映射为 >。\n   * 提取值 18 -> 存入 Parameters 数组，SQL 中替换为占位符 ? 或 $1。\n5. 关联查询规范 (Relation / Join)\n这是 ObjectQL 的核心优势，利用 JSON 的嵌套特性表达 SQL JOIN。\n规则：\n如果一个 Key 对应的值是对象（且不是操作符对象），则视为关联查询。\n输入：\n{\n  \"department\": {\n    \"name\": { \"$eq\": \"IT\" }\n  }\n}\n\nSQL Adapter 行为：\n * 检测到 department 是关联字段。\n * 自动执行 INNER JOIN department ON users.dept_id = department.id。\n * 添加 WHERE 条件：department.name = 'IT'。\n6. TypeScript 定义 (Interfaces)\n直接提供给前端使用的类型定义。\n// 基础标量类型\ntype Scalar = string | number | boolean | Date | null;\n\n// 操作符定义\ntype FilterOperators<T> = {\n  $eq?: T;\n  $ne?: T;\n  $in?: T[];\n  $nin?: T[];\n  $gt?: T; // 仅限 number/date\n  $lt?: T;\n  $contains?: string; // 仅限 string\n  $startsWith?: string;\n  $not?: FilterOperators<T>;\n};\n\n// 递归过滤器定义\nexport type Filter<T> = {\n  [K in keyof T]?: \n    | T[K]                        // 隐式相等\n    | FilterOperators<T[K]>       // 显式操作符\n    | Filter<T[K]>;               // 关联表嵌套 (Join)\n} & {\n  $and?: Filter<T>[];\n  $or?: Filter<T>[];\n};\n\n7. 安全性与边界限制 (Security Guardrails)\n在实现解析器时，必须强制执行以下规则以防止恶意攻击：\n * 最大深度限制 (Max Depth): 防止深度嵌套导致的堆栈溢出（建议限制为 5-6 层）。\n * 字段白名单 (Field Whitelist): 解析器必须检查 Key 是否存在于定义的 Schema 中，禁止查询数据库中存在但未开放 API 的字段（如 password_hash, salt）。\n * 数组长度限制: $in 操作符的数组长度不得超过 1000（防止 SQL 性能问题）。\n * 禁止全表扫描: 强制要求查询必须包含索引字段（可选的高级配置）。\n下一步行动建议\n * 定义 Schema: 确定你的实体模型（Model）。\n * 编写 Normalizer: 实现阶段一的“标准化函数”，这一步是通用的。\n * 选择 ORM/QueryBuilder: 你的后端是用 TypeORM, Prisma, Knex 还是原生 SQL？这决定了 Adapter 的写法。"
+}

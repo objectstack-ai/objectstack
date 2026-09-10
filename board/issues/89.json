@@ -1,0 +1,37 @@
+{
+  "number": 89,
+  "kind": "pull_request",
+  "title": "Add audit log schema and multi-tenant isolation strategies",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-23T14:53:34Z",
+  "updated_at": "2026-01-23T15:48:24Z",
+  "closed_at": "2026-01-23T15:48:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-23T15:48:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/89",
+  "body": "Adds compliance audit logging specification and documents three multi-tenant isolation patterns with operational trade-offs.\n\n## Audit Log Schema (`audit.zod.ts`)\n\nComplete audit event specification supporting SOX/HIPAA/GDPR compliance:\n\n```typescript\nconst auditConfig: AuditConfig = {\n  name: 'production_audit',\n  label: 'Production Audit',\n  storage: { type: 'clickhouse' },\n  retentionPolicy: { retentionDays: 180 },\n  suspiciousActivityRules: [{\n    id: 'brute_force',\n    eventTypes: ['auth.login_failed'],\n    condition: { threshold: 5, windowSeconds: 600 },\n    actions: ['alert', 'lock_account']\n  }],\n  compliance: {\n    standards: ['gdpr', 'sox', 'hipaa'],\n    immutableLogs: true\n  }\n};\n```\n\n**Event Coverage:**\n- Data operations: CRUD, bulk ops, import/export\n- Authentication: login, MFA, password resets, session management\n- Authorization: permission grants, role assignments, policy changes\n- Security: access denials, breach detection, API key lifecycle\n\n**Architecture:**\n- 8 severity levels (debug → emergency)\n- Actor/target/change tracking with geographic context\n- Configurable retention with archive support\n- Pre-built suspicious activity detection rules\n- Field redaction for sensitive data\n- Multiple storage backends (PostgreSQL, Elasticsearch, ClickHouse, S3)\n\n## Multi-Tenant Isolation Strategies (`tenant.zod.ts`)\n\nDocuments three isolation patterns with decision matrix:\n\n### Row-Level (RLS)\nPostgreSQL policies, shared schema. **Use for:** cost-sensitive SaaS.\n- ✅ Simple backups, efficient resources, easy migration\n- ❌ RLS misconfiguration risk, noisy neighbors\n\n### Schema-Level  \nSeparate schema per tenant. **Use for:** enterprise B2B with compliance needs.\n- ✅ Better isolation, per-tenant permissions, simplified queries\n- ❌ Complex migrations across N schemas\n\n### Database-Level\nSeparate database per tenant. **Use for:** regulated industries (healthcare, finance).\n- ✅ Complete isolation, per-tenant encryption, strict compliance\n- ❌ Connection pool exhaustion, operational complexity\n\nEach strategy includes configuration schemas for connection pooling, migrations, backups, and encryption.\n\n```typescript\nconst isolationConfig: TenantIsolationConfig = {\n  strategy: 'isolated_schema',\n  schema: { namingPattern: 'tenant_{tenant_id}' },\n  migrations: { strategy: 'parallel', maxConcurrent: 10 },\n  performance: { poolPerSchema: false }\n};\n```\n\n## Security Policy Schema\n\nAdds compliance requirements per tenant:\n- Encryption: at-rest, in-transit, field-level\n- Access control: MFA requirements, SSO, IP whitelisting\n- Compliance standards: SOX, HIPAA, GDPR, PCI-DSS, ISO 27001\n- Data residency: region restrictions\n\n## Test Coverage\n- 43 audit schema tests\n- 39 tenant isolation tests\n- Zero CodeQL security findings\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 1. 审计日志架构（合规阻塞）\n> \n> 文件: packages/spec/src/system/audit.zod.ts（新建）\n> 工作量: 3 天\n> 影响: SOX、HIPAA、GDPR 合规所需\n> \n> 为什么关键: 没有审计跟踪 = 无法追踪谁在何时做了什么 = 合规失败\n> \n> 功能需求:\n> \n> 记录所有数据操作（创建、读取、更新、删除）\n> 记录认证事件（登录、登出、密码重置）\n> 记录授权变更（权限授予、角色分配）\n> 支持 180 天保留期（GDPR 6 个月要求）\n> 可疑活动告警（如：10 分钟内 5 次登录失败）\n> 2. 多租户隔离策略（安全阻塞）\n> \n> 文件: packages/spec/src/system/tenant.zod.ts（扩展现有）\n> 工作量: 5 天\n> 影响: 安全的多租户、数据隔离\n> \n> 为什么关键: 当前 tenant.zod.ts 缺少隔离策略文档。存在跨租户数据泄露风险。\n> \n> 需要文档化三种隔离策略:\n> \n> 行级隔离（推荐）：每个表添加 tenant_id + PostgreSQL RLS\n> \n> ✅ 优点：简单备份、成本效益高、易于迁移\n> ❌ 缺点：RLS 配置错误可能导致数据泄露\n> 模式级隔离（企业版）：为每个租户创建独立 schema\n> \n> ✅ 优点：更好隔离、易于调试\n> ❌ 缺点：复杂备份、迁移成本高\n> 数据库级隔离（受监管行业）：为每个租户创建独立数据库\n> \n> ✅ 优点：完美隔离、符合监管要求\n> ❌ 缺点：昂贵、连接池限制\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

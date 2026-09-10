@@ -1,0 +1,33 @@
+{
+  "number": 304,
+  "kind": "pull_request",
+  "title": "Fix Zod schema input types for fields with defaults",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-27T06:51:51Z",
+  "updated_at": "2026-01-27T07:11:17Z",
+  "closed_at": "2026-01-27T07:11:16Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-01-27T07:11:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/304",
+  "body": "TypeScript compilation failed because Zod schemas with `.default()` without `.optional()` require fields in input types, breaking user configurations that omit defaulted fields.\n\n## Changes\n\n- **app.zod.ts, object.zod.ts**: Changed `.default(value)` → `.optional().default(value)` for `active`, `isDefault`, `isSystem`, `abstract`, `datasource`\n- **stack.zod.ts**: Changed `defineStack` parameter type from `z.infer<>` (output) to `z.input<>` (input)\n\n## Impact\n\nConfigurations can now omit fields with defaults:\n\n```typescript\n// Before: TypeScript error - missing required properties 'active', 'isSystem', 'abstract', 'datasource'\nexport const TodoTask = ObjectSchema.create({\n  name: 'todo_task',\n  label: 'Todo Task',\n  fields: { /* ... */ }\n});\n\n// After: Works correctly - defaults applied at runtime\nexport const TodoTask = ObjectSchema.create({\n  name: 'todo_task',\n  label: 'Todo Task',\n  fields: { /* ... */ }\n  // active, isSystem, abstract, datasource are optional\n});\n```\n\nPattern applies to all Zod schemas with runtime defaults throughout the spec package.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21387277207/job/61566130355#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

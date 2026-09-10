@@ -1,0 +1,30 @@
+{
+  "number": 47,
+  "kind": "issue",
+  "title": "Please expand the current Authentication Standard specification to include the \"Wire Protocol\" (API contracts) and \"Data Contracts\" (Interfaces).",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-21T01:08:18Z",
+  "updated_at": "2026-01-31T01:01:18Z",
+  "closed_at": "2026-01-31T01:01:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/47",
+  "body": "This is crucial to ensure that any driver (better-auth, Auth0, etc.) implementing this spec provides a consistent API experience for frontend clients.\n\nPlease perform the following tasks:\n\n1. **Create Constants File (`packages/spec/src/system/authentication-constants.ts`)**:\n   - Define and export an `AUTH_CONSTANTS` object.\n   - It must include standard keys for API communication:\n     - `HEADER_KEY`: Set to `'Authorization'`.\n     - `TOKEN_PREFIX`: Set to `'Bearer '`.\n     - `COOKIE_PREFIX`: Set to `'os_'` (for consistent cookie namespacing).\n     - `CSRF_HEADER`: Set to `'x-os-csrf-token'`.\n\n2. **Create Types File (`packages/spec/src/system/authentication-types.ts`)**:\n   - Define `interface StandardUser`: This represents the normalized user object that all drivers must return.\n     - Required fields: `id`, `email`, `emailVerified` (boolean), `createdAt`, `updatedAt`.\n     - Optional fields: `name`, `image`.\n     - Allow index signature `[key: string]: any` for driver-specific extensions.\n   - Define `interface StandardSession`:\n     - Required fields: `id`, `userId`, `expiresAt`, `token`.\n     - Optional fields: `ipAddress`, `userAgent`.\n\n3. **Update Exports (`packages/spec/src/index.ts`)**:\n   - Export everything from the new `authentication-constants.ts` and `authentication-types.ts` files.\n\n4. **Update Documentation (`docs/AUTHENTICATION.md`)**:\n   - Add a new section titled \"**API & Wire Protocol**\".\n   - Document that all implementations MUST accept the standard Bearer token header.\n   - Document the `StandardUser` interface, explaining that plugins/drivers must map their internal user representation to this standard interface.\n\n5. **Refinement**:\n   - Ensure the naming consistency with the existing `authentication.zod.ts`."
+}

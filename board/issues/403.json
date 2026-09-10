@@ -1,0 +1,33 @@
+{
+  "number": 403,
+  "kind": "pull_request",
+  "title": "Add comprehensive development roadmap for 6 core packages (2026)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T16:37:56Z",
+  "updated_at": "2026-02-01T09:24:54Z",
+  "closed_at": "2026-02-01T09:24:54Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/403",
+  "body": "Creates actionable development plans for core packages with 83+ prioritized features, API designs, and quarterly implementation timeline through 2026.\n\n## Documentation Structure\n\n**6 files, 2,598 lines, bilingual (CN/EN)**\n\n- `DEVELOPMENT_PLAN.md` (1,348 lines) - Main roadmap with API designs and test strategies\n- `DEVELOPMENT_PLAN_SUMMARY.md` - Executive summary and key insights\n- `PR_397_DELIVERABLES.md` - Deliverables checklist and content breakdown\n- `TASK_COMPLETION_REPORT.md` - Completion report and workflow review\n- `README_PR_397.md` - Quick navigation guide\n- `docs/planning/README.md` - Documentation index\n\n## Package Coverage (83+ Features)\n\nEach package includes current state analysis, P0/P1/P2 prioritized features, API design examples, and test plans:\n\n- **core** (12+): Plugin hot reload, middleware system, performance monitoring\n- **objectql** (15+): SQL builder, AST parser, query optimizer, cross-object queries\n- **runtime** (18+): HTTP/REST/GraphQL server, worker system, event bus, middleware\n- **client** (14+): Type-safe query builder, React Hooks, offline support, Vue/Svelte adapters\n- **cli** (16+): Scaffolding (`os init`), migration (`os migrate`), code generation\n- **types** (8+): Runtime interfaces (IHttpServer, IDataEngine), type guards\n\n## Implementation Timeline\n\n```\nQ1 → Foundation (hot reload, SQL builder, server abstraction, type-safe queries) → v0.7.0\nQ2 → Advanced (optimizer, transactions, workers, React Hooks, migration) → v0.8.0\nQ3 → Extensions (federation, microservices, Vue/Svelte, dev tools) → v1.0.0\nQ4 → Production (performance, enterprise features, commercialization) → v1.1.0\n```\n\n## Success Metrics\n\n| Dimension | Q1 → Q4 |\n|---|---|\n| NPM weekly downloads | 500 → 10K |\n| GitHub stars | 300 → 5K |\n| Code coverage | 70% → 90% |\n| Contributors | 5 → 50 |\n| Plugins | 3 → 25 |\n\n## API Design Examples\n\n**Type-safe query builder:**\n```typescript\nconst tasks = await client\n  .table<TodoTask>('todo_task')\n  .where('priority', '>=', 2)\n  .orderBy('priority', 'desc')\n  .select('subject', 'priority')\n  .execute();\n// Type: Pick<TodoTask, 'subject' | 'priority'>[]\n```\n\n**React Hooks:**\n```typescript\nfunction TaskList() {\n  const { data, loading } = useQuery('todo_task', {\n    where: { status: 'active' }\n  });\n  const { mutate } = useMutation('todo_task');\n  // ...\n}\n```\n\n**CLI scaffolding:**\n```bash\nos init my-app --template crm\nos generate object todo_task --fields \"subject:text,priority:number\"\nos migrate create add_priority_field\n```\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/397\n> \n> 进一步规划以下仓库的具体开发内容清单，编写详细的报告和开发计划\n> \n> core 微内核 插件加载器、依赖注入、生命周期\n> objectql 查询引擎 SQL 构建器、查询优化器、AST 解析器\n> runtime 运行时环境 服务器、工作器、事件总线、中间件\n> client 客户端 SDK API 客户端、类型安全查询、React Hooks\n> cli 命令行工具 脚手架、迁移、代码生成\n> types 共享类型 运行时环境接口\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

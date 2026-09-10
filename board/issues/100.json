@@ -1,0 +1,36 @@
+{
+  "number": 100,
+  "kind": "pull_request",
+  "title": "Add copy entire page as markdown feature to documentation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-24T10:25:52Z",
+  "updated_at": "2026-01-25T02:32:30Z",
+  "closed_at": "2026-01-25T02:32:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/100",
+  "body": "Implements functionality to copy entire documentation pages as raw Markdown content, addressing user request to copy complete articles rather than just individual code blocks.\n\n## Changes Made\n\n### New Component\n- **`apps/docs/components/copy-page-markdown.tsx`**: Client-side component that handles copying page content to clipboard\n  - Uses Navigator Clipboard API for copy functionality\n  - Provides visual feedback with state transition: \"Copy as Markdown\" → \"Copied!\" (resets after 2 seconds)\n  - Styled with Tailwind CSS using consistent design tokens from the documentation theme\n  - Uses lucide-react icons (Copy/Check) for visual indicators\n\n### Updated Component\n- **`apps/docs/app/[lang]/docs/[[...slug]]/page.tsx`**: Server-side page component\n  - Reads raw MDX file content directly from filesystem at build/render time\n  - Attempts multiple file path patterns to locate the correct MDX file (handles different language versions and directory structures)\n  - Passes raw markdown content to the CopyPageMarkdown component as a prop\n  - Integrated button into page header layout using flexbox, positioned next to the page title\n  - Button only renders when markdown content is successfully loaded\n\n## Feature Description\n\nUsers can now copy the entire raw Markdown content of any documentation page by clicking the \"Copy as Markdown\" button located in the top-right corner of each page, adjacent to the page title. This allows users to easily export documentation content for offline use, editing, or sharing.\n\n### Button Placement\n```\n┌───────────────────────────────────────────────────┐\n│  Client SDK          [📋 Copy as Markdown]        │\n│  The official TypeScript client for ObjectStack  │\n│───────────────────────────────────────────────────│\n│  ## Features                                       │\n│  - Auto-Discovery                                  │\n│  ...                                               │\n└───────────────────────────────────────────────────┘\n```\n\n## Technical Approach\n\n1. Server-side reads the raw MDX file content from the filesystem using Node.js `fs` module\n2. Multiple file path patterns are checked to handle different documentation structures and language variants\n3. Content is passed as a prop to the client-side component\n4. Client component uses the Clipboard API to copy content when button is clicked\n5. Visual feedback is provided through React state management and conditional rendering\n\n## Known Pre-existing Issue\n\n⚠️ The documentation site currently has a widespread `lucide-react` module resolution error that prevents pages from loading in development mode. This issue **is not caused by this PR** - it is a pre-existing configuration problem where MDX files directly import `lucide-react` but the server-side rendering context cannot properly resolve the module during compilation.\n\n**Error**: `Module not found: Can't resolve 'lucide-react'` appears in multiple files including:\n- `content/docs/concepts/*.mdx`\n- `content/docs/specifications/**/*.mdx`  \n- `content/docs/index.mdx`\n\nThis configuration issue needs to be resolved separately for the documentation site to function properly. Once fixed, the \"Copy as Markdown\" feature will work as intended.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 文档查看页应支持复制码当markdown\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

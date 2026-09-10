@@ -1,0 +1,36 @@
+{
+  "number": 101,
+  "kind": "pull_request",
+  "title": "Clarify Plugin Lifecycle terminology to distinguish from database Triggers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-24T11:31:33Z",
+  "updated_at": "2026-01-24T11:55:31Z",
+  "closed_at": "2026-01-24T11:54:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/101",
+  "body": "Reviewed all Zod schemas to assess whether an old \"hook\" specification needed preservation. No separate hook specification exists in the codebase. Found terminology overlap: Plugin Lifecycle used \"hook\" in descriptions, creating confusion with database Triggers which serve a different purpose.\n\n## Changes\n\n- **Renamed type**: `PluginLifecycleHooks` → `PluginLifecycleCallbacks`\n- **Updated descriptions**: \"Hook called on...\" → \"Lifecycle callback on...\"\n- **Added analysis doc**: `HOOK_TRIGGER_CLARIFICATION.md` documenting the semantic differences\n\n## Semantic Distinction\n\n```typescript\n// Database-level business logic hooks (before/after CRUD operations)\nexport const TriggerSchema = z.object({\n  timing: z.enum(['before', 'after']),\n  action: z.enum(['insert', 'update', 'delete']),\n  execute: z.function().args(TriggerContextSchema)...\n});\n\n// Plugin system lifecycle callbacks (install/enable/disable/uninstall)\nexport const PluginLifecycleSchema = z.object({\n  onInstall: z.function().describe('Lifecycle callback on plugin installation'),\n  onEnable: z.function().describe('Lifecycle callback when plugin is enabled'),\n  ...\n});\n```\n\n## Recommendation\n\nDo not implement the planned `hooks.zod.ts` (Hook Registry Protocol) mentioned in the roadmap. Current `Trigger` specification already covers database-level extension points (beforeObjectCreate, afterRecordSave, etc.). Adding a separate hook registry would be redundant.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 审核所有的zod，我们之前有定义一个类似现在trigger的hook规范，现在还需要保留吗\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

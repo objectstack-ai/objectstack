@@ -1,0 +1,35 @@
+{
+  "number": 426,
+  "kind": "pull_request",
+  "title": "[WIP] Update specification documentation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T03:59:42Z",
+  "updated_at": "2026-01-31T04:20:48Z",
+  "closed_at": "2026-01-31T04:07:20Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T04:07:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/426",
+  "body": "## Fix TypeScript Build Errors in examples/basic\n\n### Summary\nThe CI build is failing because examples/basic has TypeScript compilation errors due to outdated code that doesn't match the current API specifications. These errors are preventing the build from completing successfully.\n\n### Root Cause\nThe example files reference types and properties that either:\n- Don't exist (ODataConfig, RealtimeConfig, BatchConfig)\n- Have been renamed (autoGenerate → autoGenerateTypes)\n- Have different structures than expected\n\n### Checklist\n- [x] Analyzed build failure from CI logs\n- [x] Identified all TypeScript errors across example files  \n- [ ] Fix api-protocols-example.ts (remove non-existent types, fix property names)\n- [ ] Fix hub-marketplace-example.ts (use correct type names)\n- [ ] Fix integration-connectors-example.ts (ensure proper imports)\n- [ ] Fix system-protocols-example.ts (fix type names and properties)\n- [ ] Verify build passes locally\n- [ ] Run code review\n- [ ] Run CodeQL security check\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21538269705/job/62068109817#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

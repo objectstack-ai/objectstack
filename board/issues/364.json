@@ -1,0 +1,38 @@
+{
+  "number": 364,
+  "kind": "pull_request",
+  "title": "Reorganize examples: add protocol examples, remove obsolete files",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-29T00:48:07Z",
+  "updated_at": "2026-01-29T03:22:44Z",
+  "closed_at": "2026-01-29T03:22:44Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-29T03:22:44Z",
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/364",
+  "body": "## Summary: Fixed All TypeScript Type Errors and Cleaned Examples Directory\n\n### Problem\n1. The copilot-pull-request-reviewer bot identified 9 TypeScript compilation errors in the basic examples\n2. The examples directory contained a README.md file when it should only contain directories\n\n### Solution\n1. Systematically fixed all type mismatches by reviewing actual schema definitions\n2. Removed README.md from examples root directory\n\n### Changes Made\n\n#### 1. auth-permission-example.ts\n- **User type**: Removed fields that don't exist in spec (authProvider, avatar, timezone, locale, active, lastLogin, roles)\n- **Role type**: Removed permissions field (roles only define hierarchy, not permissions)\n- **PermissionSet type**: Complete restructure from array-based to record-based\n  - Changed `objectPermissions` array to `objects` record\n  - Changed field names: `allowCreate`, `allowRead`, `allowEdit`, `allowDelete`, `allowTransfer`, `allowRestore`, `allowPurge`, `viewAllRecords`, `modifyAllRecords`\n  - Changed `fieldPermissions` array to `fields` record with `readable`/`editable` fields\n- **RowLevelSecurity → RowLevelSecurityPolicy**: Changed type name and structure to use `using` clause instead of `rule` object\n- Fixed PermissionChecker to remove unused variable warning\n\n#### 2. ai-rag-example.ts\n- **RAGPipeline → RAGPipelineConfig**: Changed type name\n- **RAGDocument → DocumentChunk + DocumentMetadata**: Split into two separate types\n- **RAGQuery → RAGQueryRequest**: Changed type name\n- **RAGResult → RAGQueryResponse**: Changed type name\n- Restructured all example data to match actual schemas\n- Updated field names (`processingTimeMs` instead of `retrievalTime`, `results` instead of `chunks`)\n- Updated RAG pipeline configuration structure to match actual schema\n\n#### 3. automation-example.ts\n- **ETLProcess → ETLPipeline**: Changed type name to match spec\n\n#### 4. api-discovery-example.ts\n- **ApiDiscoveryResponse → DiscoveryResponse**: Changed type name\n- **Complete restructure** of discovery response:\n  - Old: `system`, `endpoints`, `capabilities`, `auth`, `objects`, `features`, `links`\n  - New: `name`, `version`, `environment`, `routes`, `features`, `locale`\n- Simplified AdaptiveClient class to work with actual schema\n- Updated generateSystemPromptFromDiscovery to use correct fields\n\n#### 5. tsconfig.json\n- Removed `extends` to avoid inheritance issues with root tsconfig\n\n#### 6. examples directory structure\n- **Removed examples/README.md** - examples directory now contains only subdirectories\n- Each example subdirectory has its own README with specific documentation\n\n### Testing\n- All type errors have been fixed\n- Examples now correctly import and use types from @objectstack/spec\n- Examples require `@objectstack/spec` to be built first for full typecheck\n- examples/ directory now contains only folders as required\n\n### Commits\n- 3d70a95: Fix TypeScript type errors in basic examples to match actual spec schemas\n- 31a75e4: Fix tsconfig.json to not extend from root\n- (current): Remove README.md from examples root - keep only directories\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 整理现有example，根据平台最新的功能，添加必要的example，并清理无用的文件\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

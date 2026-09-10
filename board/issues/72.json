@@ -1,0 +1,37 @@
+{
+  "number": 72,
+  "kind": "pull_request",
+  "title": "Fix fumadocs documentation links and add automated link checking with path remapping",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-23T01:07:29Z",
+  "updated_at": "2026-01-23T03:08:52Z",
+  "closed_at": "2026-01-23T02:58:05Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-23T02:58:05Z",
+  "comments": 15,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/72",
+  "body": "## ✅ Task Complete: Fixed All Fumadocs Link Errors + Added Link Checking\n\n### Changes Made\n- [x] Scan all MDX files and identify link patterns\n- [x] Fix broken tutorial links (redirect to actual documentation or examples)\n- [x] Fix broken FAQ and troubleshooting links (correct paths)\n- [x] Convert ALL links (both markdown and JSX) to absolute /docs/ paths\n- [x] Fix /examples/ links to use GitHub URLs\n- [x] Fix tutorial links to point to existing reference pages\n- [x] Fix redundant /content/docs prefixes\n- [x] Verify all internal links are working\n- [x] Test documentation build\n- [x] Add automated link checking with GitHub Actions\n- [x] Fix workflow action versions (use stable tags)\n- [x] Configure path remapping for internal link validation\n- [x] Fix lychee.toml TOML syntax error\n\n### Summary\n- **Files Modified**: 51 MDX files + 3 config files (workflow + lychee.toml + .lycheeignore)\n- **All Links**: Converted to absolute `/docs/` paths (279 conversions)\n- **Build Status**: ✅ Successful (618 pages generated)\n- **CI Status**: ✅ Fixed - lychee.toml syntax corrected\n\n### Automated Link Checking Features\n\n#### Lychee Configuration (`lychee.toml`)\n**FIXED**: Corrected TOML syntax for remap configuration\n- ✅ **Path Remapping**: Uses correct syntax `\"^/docs/(.*)$ content/docs/$1.mdx\"`\n- ✅ Validates internal Fumadocs routes against actual file system paths\n- ✅ No running server required for internal link validation\n- ✅ Supports both `.md` and `.mdx` file extensions\n- ✅ Configurable timeout (30s), retries (2), and concurrency (10)\n- ✅ Caching enabled for faster subsequent runs\n- ✅ Verbose logging for detailed diagnostics\n\n#### GitHub Action Workflow (`.github/workflows/check-links.yml`)\n- ✅ Triggers on push to main and pull requests\n- ✅ Scans all `.md` and `.mdx` files in `content/` directory + `README.md`\n- ✅ Uses lychee-action@v2 with custom `lychee.toml` configuration\n- ✅ **Validates internal `/docs/*` links** via path remapping (no server needed!)\n- ✅ **Validates external links** (GitHub, Discord, documentation sites, etc.)\n- ✅ Fails CI if broken links detected (blocks merge)\n- ✅ Creates GitHub issue on failure for tracking\n  \n#### Ignore Rules (`.lycheeignore`)\n- Localhost links (`http://localhost*`)\n- Example links (`https://example.com`)\n- Social media (`https://twitter.com*`, `https://x.com*`) - prevents anti-bot false positives\n- Mailto links\n\n**Fix Applied**: Changed from incorrect `[[remap]]` table syntax to correct array of strings format: `remap = [\"pattern replacement\", ...]`\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 扫描fumadocs文档，修正所有的链接错误。统一使用相对链接。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 16,
+  "kind": "pull_request",
+  "title": "[WIP] Update action workflow steps for better execution",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-19T11:53:18Z",
+  "updated_at": "2026-01-19T11:59:32Z",
+  "closed_at": "2026-01-19T11:59:11Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-19T11:59:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/16",
+  "body": "## Fix CI Build Failure - YAML Frontmatter Errors in Chinese Documentation\n\nThe build was failing due to YAML syntax errors in two Chinese MDX files caused by improper use of quotation marks in the frontmatter.\n\n### Errors Fixed:\n- [x] Fix `content/docs/concepts/security_architecture.cn.mdx` - Bad YAML indentation on line 2-3 (Chinese quotes in description)\n- [x] Fix `content/docs/index.cn.mdx` - Unexpected character at line 26 (Chinese quotes in JSX attribute)\n\n### Root Cause:\nChinese quotation marks (`\"` and `\"`) in YAML frontmatter and JSX attributes were causing parsing errors.\n\n### Solution Applied:\n1. **security_architecture.cn.mdx**: Properly escaped the Chinese quotation marks in the YAML frontmatter description by using single quotes around the entire value\n2. **index.cn.mdx**: Replaced Chinese quotation marks with angle quotation marks (「」) in the JSX Card component description attribute\n\n### Verification:\n✅ Build now passes successfully locally\n✅ All MDX files parse correctly\n✅ No other Chinese MDX files have similar issues\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21136072482/job/60779479696#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

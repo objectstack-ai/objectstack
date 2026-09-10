@@ -1,0 +1,33 @@
+{
+  "number": 284,
+  "kind": "pull_request",
+  "title": "Migrate fumadocs navigation from root:true to --- separator",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-27T02:27:04Z",
+  "updated_at": "2026-01-27T04:25:47Z",
+  "closed_at": "2026-01-27T04:22:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-27T04:22:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/284",
+  "body": "Fumadocs deprecated `root: true` for top-level menu sections. The new pattern uses `---` as an explicit separator in the parent navigation.\n\n## Changes\n\n- **Main navigation** (`content/docs/meta.json`): Added `---` separator before references section\n- **References metadata** (`content/docs/references/meta.json`): Replaced `root: true` + `label` with `title`\n- **Doc generator** (`packages/spec/scripts/build-docs.ts`): Updated to emit new format\n- **`.gitignore`**: Added `package-lock.json` (project uses pnpm)\n\n## Before/After\n\n```diff\n// content/docs/meta.json\n  \"pages\": [\n    \"introduction\",\n    \"objectql\",\n    \"objectui\",\n    \"objectos\",\n    \"developers\",\n+   \"---\",\n    \"references\"\n  ]\n\n// content/docs/references/meta.json\n- \"label\": \"Protocol Reference\",\n- \"root\": true,\n+ \"title\": \"Protocol Reference\",\n  \"pages\": [ ... ]\n```\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> fumadocs 第一层菜单作废 root:true,使用 --- 分割\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

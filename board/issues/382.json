@@ -1,0 +1,35 @@
+{
+  "number": 382,
+  "kind": "pull_request",
+  "title": "Implement server-side batch operations, metadata caching, and view storage APIs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/l"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T11:28:56Z",
+  "updated_at": "2026-01-30T12:26:15Z",
+  "closed_at": "2026-01-30T12:19:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-30T12:19:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/382",
+  "body": "Client aligned to PR #380 API spec but server implementation was missing. This adds the server-side protocol methods and HTTP routes.\n\n## Protocol Extensions\n\n**Interface** (`packages/spec/src/api/protocol.ts`)\n- Batch operations: `batchData`, `createManyData`, `updateManyData`, `deleteManyData`\n- Metadata caching: `getMetaItemCached` with ETag support\n- View storage: `createView`, `getView`, `listViews`, `updateView`, `deleteView`\n\n**Implementation** (`packages/objectql/src/protocol.ts`)\n- Batch ops support atomic transactions with per-record error reporting\n- ETag generation using browser-compatible hash (removed Node crypto dependency)\n- View storage uses in-memory Map (DB-agnostic interface)\n\n## HTTP Routes\n\nAdded 10 endpoints in `packages/plugins/plugin-hono-server/src/hono-plugin.ts`:\n\n```typescript\n// Batch operations\nPOST /api/v1/data/:object/batch\nPOST /api/v1/data/:object/{createMany,updateMany,deleteMany}\n\n// Enhanced metadata with ETag\nGET /api/v1/meta/:type/:name  // Returns 304 if If-None-Match matches\n\n// View storage CRUD\nGET/POST /api/v1/ui/views\nGET/PATCH/DELETE /api/v1/ui/views/:id\n```\n\n## Critical Fixes\n\n**Hono adapter body parsing** (`adapter.ts`): Request body was parsed twice, leaving empty object. Now parses JSON first, falls back to parseBody only for non-JSON content types.\n\n**Browser compatibility** (`protocol.ts`): Replaced `crypto.createHash()` with simple string hash function to work in browser environments.\n\n## Example Usage\n\n```typescript\n// Batch create with atomic transaction\nconst response = await fetch('/api/v1/data/contact/batch', {\n  method: 'POST',\n  body: JSON.stringify({\n    operation: 'create',\n    records: [{ data: { name: 'Alice' } }, { data: { name: 'Bob' } }],\n    options: { atomic: true, returnRecords: true }\n  })\n});\n\n// Metadata caching\nconst r1 = await fetch('/api/v1/meta/object/contact');\nconst etag = r1.headers.get('ETag');\nconst r2 = await fetch('/api/v1/meta/object/contact', {\n  headers: { 'If-None-Match': etag }\n});\n// Returns 304 if unchanged\n\n// View storage\nawait fetch('/api/v1/ui/views', {\n  method: 'POST',\n  body: JSON.stringify({\n    name: 'active_contacts',\n    object: 'contact',\n    type: 'list',\n    query: { where: { status: 'active' } }\n  })\n});\n```\n\nAll responses conform to schemas in `batch.zod.ts`, `cache.zod.ts`, `view-storage.zod.ts`. Errors use `StandardErrorCode` from `errors.zod.ts`.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 任务：为 ObjectStack 服务端实现 PR #380 的批量操作、元数据缓存和视图存储 API\n> \n> 背景\n> \n> 客户端已对齐 PR #380 的 API 规范，但服务端实现滞后。需要扩展协议接口、实现业务逻辑并注册 HTTP 路由。\n> \n> 需要修改的文件\n> \n> 1. packages/spec/src/api/protocol.ts\n> \n> 扩展 IObjectStackProtocol 接口，添加：\n> \n> batchData(object: string, request: BatchUpdateRequest): Promise<BatchUpdateResponse>\n> createManyData(object: string, records: any[]): Promise<any[]>\n> updateManyData(object: string, request: UpdateManyRequest): Promise<BatchUpdateResponse>\n> deleteManyData(object: string, request: DeleteManyRequest): Promise<BatchUpdateResponse>\n> getMetaItemCached(type: string, name: string, cacheRequest?: MetadataCacheRequest): Promise<MetadataCacheResponse>\n> View storage methods: createView, getView, listViews, updateView, deleteView\n> 2. packages/objectql/src/protocol.ts\n> \n> 在 ObjectStackProtocolImplementation 类中实现上述方法：\n> \n> 批量操作需要支持 atomic 事务（如果底层 driver 支持）\n> 元数据缓存需要计算 ETag（可用 MD5 hash）并检查 ifNoneMatch\n> 错误处理需要返回标准化的错误格式（参考 packages/spec/src/api/errors.zod.ts）\n> 3. packages/plugins/plugin-hono-server/src/hono-plugin.ts\n> \n> 在 start() 方法中注册新路由：\n> \n> // Batch operations\n> this.server.post('/api/v1/data/:object/batch', async (req, res) => { ... });\n> this.server.post('/api/v1/data/:object/createMany', async (req, res) => { ... });\n> this.server.post('/api/v1/data/:object/updateMany', async (req, res) => { ... });\n> this.server.post('/api/v1/data/:object/deleteMany', async (req, res) => { ... });\n> \n> // Metadata caching (enhance existing route)\n> this.server.get('/api/v1/meta/:type/:name', async (req, res) => {\n>   // Check If-None-Match header, return 304 if matches\n> });\n> \n> // View storage\n> this.server.post('/api/v1/ui/views', async (req, res) => { ... });\n> this.server.get('/api/v1/ui/views/:id', async (req, res) => { ... });\n> this.server.get('/api/v1/ui/views', async (req, res) => { ... });\n> this.server.patch('/api/v1/ui/views/:id', async (req, res) => { ... });\n> this.server.delete('/api/v1/ui/views/:id', async (req, res) => { ... });\n> 技术要求\n> \n> 所有请求/响应需要符合 packages/spec/src/api/batch.zod.ts、cache.zod.ts、view-storage.zod.ts 中的 schema\n> 错误响应使用 StandardErrorCode 和 ErrorCategory（参考 errors.zod.ts）\n> 批量操作的 atomic: true 模式需要支持事务回滚（如果 driver 支持）\n> ETag 生成使用内容的 MD5 hash，格式为 \"<hash>\" 或 W/\"<hash>\"\n> View storage 需要持久化（可先用内存存储，后续扩展到数据库）\n> 验证步骤\n> \n> TypeScript 编译通过\n> 使用 @objectstack/client 测试所有新 API 端点\n> 验证批量操作的 atomic 和 non-atomic 模式\n> 验证 ETag 缓存（304 响应）\n> 验证标准化错误格式\n> 编码规范\n> \n> 遵循 ObjectStack 命名约定：配置属性用 camelCase，机器名用 snake_case\n> 使用 Zod schema 进行请求验证\n> 添加详细的日志记录（使用 ctx.logger）\n> 参考现有 CRUD 实现的错误处理模式\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

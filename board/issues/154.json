@@ -1,0 +1,38 @@
+{
+  "number": 154,
+  "kind": "pull_request",
+  "title": "Add comprehensive UI protocol examples in examples/ui",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-25T07:26:13Z",
+  "updated_at": "2026-01-25T09:32:45Z",
+  "closed_at": "2026-01-25T09:26:59Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-25T09:26:59Z",
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/154",
+  "body": "Creates a comprehensive set of UI Protocol examples organized into three separate sub-packages under `examples/ui/`:\n\n## Sub-Packages\n\n### 1. metadata-examples/\nTypeScript/JSON metadata configurations demonstrating UI structure definitions:\n- **view.examples.ts** - 17 examples: Grid, Kanban, Calendar, Gantt views with various data providers (object, API, static)\n- **page.examples.ts** - 9 page layouts: Record, Home, App, and Utility pages demonstrating component composition patterns\n- **dashboard.examples.ts** - 6 comprehensive dashboards: Sales, Service, Executive, Marketing, and Team productivity with widget compositions\n- **action.examples.ts** - 22 examples: Modal, Flow, Script, URL, and Batch actions covering common business operations\n- **app.examples.ts** - 7 applications: Simple to comprehensive apps with hierarchical navigation and permission-based access\n- **theme.examples.ts** - 7 themes: Light, dark, colorful, minimal, and WCAG AAA compliant variants\n\n### 2. custom-components/\nReact component implementations showing how to build custom UI components:\n- **CustomButton.tsx** - Flexible button component with multiple variants, sizes, and theming support\n- **CustomDataGrid.tsx** - Advanced data grid with sorting, filtering, pagination, and row selection\n- **Component registry system** - Pattern for registering and retrieving components by type name\n\n### 3. react-renderer/\nDemonstrates how to render UI metadata using React:\n- **PageRenderer** - Renders complete Page metadata with region layouts\n- **ComponentRenderer** - Renders individual components with error boundaries\n- **Template expression resolver** - Handles data binding with `{field.path}` syntax\n- **SimpleApp** - Complete integration example showing metadata rendering\n\n## Organization\n\nAll three sub-packages have their own `package.json`, `tsconfig.json`, and comprehensive README documentation, creating a clean separation between:\n1. The \"what\" (metadata defining UI structure)\n2. The \"implementation\" (custom React components)\n3. The \"how\" (rendering engine)\n\n## Testing\n\n- ✅ All examples build successfully with TypeScript\n- ✅ Workspace configuration updated to include all sub-packages\n- ✅ Each sub-package can be built independently\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 新建前端实现的相关例子 在 examples/ui 文件夹下创建\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 87,
+  "kind": "pull_request",
+  "title": "Add formula function library documentation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l"
+  ],
+  "assignees": [
+    "Copilot",
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-23T10:52:59Z",
+  "updated_at": "2026-01-23T11:05:53Z",
+  "closed_at": "2026-01-23T11:05:53Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-01-23T11:05:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/87",
+  "body": "Formula fields existed with `expression: z.string()` but lacked function reference documentation, making them unusable without implementation knowledge.\n\n## Changes\n\nCreated `/packages/spec/docs/formula-functions.md` documenting 20 formula functions across 4 categories:\n\n- **Text Functions** (5): `UPPER`, `LOWER`, `CONCATENATE`, `TEXT`, `LEN`\n- **Math Functions** (5): `SUM`, `AVERAGE`, `ROUND`, `CEILING`, `FLOOR`  \n- **Date Functions** (6): `TODAY`, `NOW`, `YEAR`, `MONTH`, `DAY`, `ADDDAYS`\n- **Logical Functions** (4): `IF`, `AND`, `OR`, `NOT`, `ISBLANK`\n\nEach function includes:\n- Parameter types and return values\n- Multiple practical examples\n- Type compatibility matrix\n- Real-world use cases (price calculations, conditional logic, date arithmetic)\n\n## Usage\n\n```typescript\nimport { Field } from '@objectstack/spec/data';\n\nconst totalPrice = Field.formula({\n  name: 'total_price',\n  expression: 'ROUND(unit_price * quantity, 2)'\n});\n\nconst discountedPrice = Field.formula({\n  name: 'discounted_price',\n  expression: 'IF(quantity >= 100, ROUND(price * 0.85, 2), price)'\n});\n```\n\nAligns with industry standards (Salesforce: 100+ functions, ServiceNow: 50+ functions).\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 2. Formula Function Library Undocumented (field.zod.ts)\n> \n> Current State:\n> \n> Formula fields exist with expression: z.string() but no function reference\n> No documentation of available functions (SUM, AVG, TEXT, DATE, etc.)\n> Missing:\n> \n> Function signature documentation\n> Data type compatibility matrix\n> Example formulas\n> Industry Comparison:\n> \n> Salesforce: 100+ formula functions documented (TEXT, DATE, MATH, LOGICAL, ADVANCED)\n> ServiceNow: 50+ GlideSystem functions\n> Recommendation: Create packages/spec/docs/formula-functions.md with complete function library:\n> \n> # Formula Function Library\n> \n> ## Text Functions\n> - `UPPER(text)` - Converts to uppercase\n> - `LOWER(text)` - Converts to lowercase\n> - `CONCATENATE(text1, text2, ...)` - Joins text strings\n> - `TEXT(number)` - Converts number to text\n> - `LEN(text)` - Returns text length\n> \n> ## Math Functions\n> - `SUM(field1, field2, ...)` - Adds numbers\n> - `AVERAGE(field1, field2, ...)` - Calculates average\n> - `ROUND(number, decimals)` - Rounds to decimal places\n> - `CEILING(number)` - Rounds up to integer\n> - `FLOOR(number)` - Rounds down to integer\n> \n> ## Date Functions\n> - `TODAY()` - Current date\n> - `NOW()` - Current date/time\n> - `YEAR(date)` - Extract year\n> - `MONTH(date)` - Extract month\n> - `DAY(date)` - Extract day\n> - `ADDDAYS(date, days)` - Add days to date\n> \n> ## Logical Functions\n> - `IF(condition, true_value, false_value)` - Conditional logic\n> - `AND(condition1, condition2, ...)` - Logical AND\n> - `OR(condition1, condition2, ...)` - Logical OR\n> - `NOT(condition)` - Logical NOT\n> - `ISBLANK(field)` - Check if field is null/empty\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

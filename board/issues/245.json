@@ -1,0 +1,33 @@
+{
+  "number": 245,
+  "kind": "pull_request",
+  "title": "Enforce lowercase snake_case for all machine identifiers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-26T16:05:56Z",
+  "updated_at": "2026-01-26T16:34:42Z",
+  "closed_at": "2026-01-26T16:29:13Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-26T16:29:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/245",
+  "body": "Machine identifiers (object names, field names, roles, permissions, actions, etc.) now require lowercase snake_case. Event names use dot notation (`user.created`).\n\n## Changes\n\n**New schemas** (`src/shared/identifiers.zod.ts`):\n- `SystemIdentifierSchema` - allows underscores and dots: `/^[a-z][a-z0-9_.]*$/`\n- `SnakeCaseIdentifierSchema` - strict snake_case: `/^[a-z][a-z0-9_]*$/`  \n- `EventNameSchema` - event names with dots: `/^[a-z][a-z0-9_.]*$/`\n\n**Updated schemas**:\n- Data: `SelectOption.value`, `Mapping.name`, `Field.select()` helper\n- Auth/Permission: `Role.name`, `PermissionSet.name`, `Territory.name`\n- Automation: `WorkflowRule.name`, `Webhook.name`, `Event.name`\n- UI: `App.name`, `Page.name`, `Action.name`, `NavigationItem.id`, `ListView.name`\n\n**Field.select() auto-conversion**:\n```typescript\n// Automatically converts to lowercase snake_case\nField.select(['In Progress', 'Closed Won'])\n// → [{ label: 'In Progress', value: 'in_progress' }, \n//    { label: 'Closed Won', value: 'closed_won' }]\n```\n\n## Examples\n\n```typescript\n// Valid\n{ name: 'sales_manager', label: 'Sales Manager' }      // Role\n{ name: 'app_crm', label: 'CRM' }                      // App\n{ name: 'user.created', payload: {...} }               // Event\n{ value: 'in_progress', label: 'In Progress' }         // Select option\n\n// Invalid (will fail validation)\n{ name: 'SalesManager' }    // PascalCase\n{ name: 'sales-manager' }   // kebab-case\n{ name: 'Sales Manager' }   // spaces\n{ name: '_internal' }       // leading underscore\n```\n\n## Impact\n\nAll machine identifiers must now be lowercase. Labels remain case-insensitive for display.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 在构建像 Salesforce 或 ObjectStack 这样高度抽象的元数据驱动系统时，**“区分人类读的（Label）”与“机器读的（API Name）”**是核心原则。\n> 凡是属于**“机器标识符 (Machine Identifier)”的元数据，为了保证跨平台兼容性、URL 友好性和代码一致性，都强烈建议强制全小写（通常配合下划线 snake_case 或中划线 kebab-case）**。\n> 除了数据表（Object Name）和字段（Field Name），以下 5 类元数据也必须严格遵守“全小写”规则：\n> 1. 权限与组织架构 (Security & Org)\n> 在代码中判断权限时，我们不希望因为大小写导致安全漏洞。\n>  * 角色代码 (Role API Name)\n>    * ❌ SalesManager, CEO\n>    * ✅ sales_manager, ceo, region_east_vp\n>    * 场景：if (user.role === 'sales_manager')\n>  * 权限集/简档 (Permission Set / Profile Name)\n>    * ❌ Read_Only, SystemAdmin\n>    * ✅ read_only, system_admin, standard_user\n>  * 共享规则组 (Public Group)\n>    * ✅ all_internal_users\n> 2. 自动化逻辑与事件 (Logic & Events)\n> 这些标识符通常会作为字符串在不同的系统间传递（例如 webhook），必须消除大小写歧义。\n>  * 触发器/动作名称 (Action/Trigger Name)\n>    * ❌ OnCloseDeal, SendEmail\n>    * ✅ on_close_deal, send_welcome_email, approve_contract\n>    * 注意：这是指在元数据中注册的 Action ID。具体的 JS 函数名可以用小驼峰 (onCloseDeal)，但配置 ID 必须小写。\n>  * 系统事件/消息队列 (Event Keys)\n>    * ❌ OrderCreated, User.Login\n>    * ✅ order.created, user.login_success, alarm.high_cpu\n>    * 理由：Kafka、RabbitMQ 等中间件的主题通常推荐使用点分小写格式。\n>  * API URL 路径 (RESTful Routes)\n>    * ❌ /api/v1/Account/GetInfo\n>    * ✅ /api/v1/crm_account/summary\n>    * 理由：URL 标准虽然对路径部分区分大小写，但惯例是全小写（kebab-case），避免用户手动输入时出错。\n> 3. 应用结构与菜单 (App Structure)\n>  * 应用 ID (Application ID)\n>    * ❌ CRM, FinanceApp\n>    * ✅ app_crm, app_finance, app_portal\n>  * 菜单/页面 ID (Menu/Page Key)\n>    * ❌ Page_Dashboard, SettingsMenu\n>    * ✅ page_dashboard, menu_settings_general\n>    * 场景：前端路由通常映射为 /admin/page_dashboard，大写在浏览器地址栏非常违和。\n> 4. 选项列表值 (Select/Enum Values)\n> 这是最容易踩坑的地方。Label 是给用户看的，Value 是存数据库的。\n>  * 枚举值 (Value)\n>    * ❌ New, In Progress, Closed_Won\n>    * ✅ new, in_progress, closed_won\n>    * 理由：存入数据库的值如果是 In Progress，查询时 WHERE status = 'in progress' 可能会失败。统一小写存储，前端展示时再映射 Label。\n> 5. 文件与包管理 (File System)\n>  * 文件名 (Physical File Names)\n>    * ❌ AccountController.ts, Logo.png\n>    * ✅ account_controller.ts, logo.png\n>    * 理由：除了前面提到的跨平台问题，前端引入图片资源时大小写极其敏感。\n>  * NPM 包名\n>    * 强制规定必须小写（npm 官方标准）。\n> 总结：一套通用的命名策略\n> 建议你在开发指引中定义一个通用的 ApiName 概念，适用于上述所有场景。\n> | 概念 | 命名风格 | 示例 | 适用范围 |\n> |---|---|---|---|\n> | ApiName / ID | snake_case | crm_account, btn_submit, role_admin | 所有元数据 ID、数据库表、URL路径、事件名 |\n> | Label / Title | Title Case | Client Account, Submit Form | 用户界面显示的文本 |\n> | Code Class | PascalCase | AccountService, LeadComponent | JS/TS 类定义、React 组件 |\n> | Code Variable | camelCase | accountList, isValid | JS/TS 内部变量 |\n> 对应的 Zod 校验策略更新\n> 你可以将之前的 SnakeCaseString 升级为通用的 SystemIdentifierSchema，应用到所有上述字段中：\n> // 通用系统标识符校验\n> export const SystemIdentifierSchema = z.string()\n>   .min(2)\n>   .regex(/^[a-z][a-z0-9_.]*$/, { // 允许点号用于 event (user.login)\n>      message: \"系统标识符必须全小写 (允许下划线或点号), e.g. 'sys_admin' or 'order.paid'\" \n>   });\n> \n> // 应用于不同场景\n> const RoleSchema = z.object({\n>   name: SystemIdentifierSchema, // ✅ sales_manager\n>   label: z.string(),            // Sales Manager\n> });\n> \n> const EnumOptionSchema = z.object({\n>   value: SystemIdentifierSchema, // ✅ new\n>   label: z.string(),             // New\n> });\n> \n> 一句话总结：除了类名（Class）和组件名（Component），凡是需要持久化存储、网络传输或作为配置 Key 的，通通小写。\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 440,
+  "kind": "pull_request",
+  "title": "feat: implement CLI plugin system with Zod-first protocol schema",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T06:59:14Z",
+  "updated_at": "2026-01-31T07:33:08Z",
+  "closed_at": "2026-01-31T07:33:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/440",
+  "body": "Adds extensible plugin architecture to ObjectStack CLI, enabling command extensions without core package modifications. Supports P0 roadmap features (scaffolding, migration, code generation) through distributed plugin packages.\n\n## Architecture\n\n**Protocol Schema** (`@objectstack/spec/cli`)\n- Zod schemas for plugin manifests, commands, and runtime context\n- Recursive subcommand support with lazy evaluation\n- Lifecycle hooks (`onLoad`, `onUnload`) for resource management\n\n**Plugin Discovery**\n- Multi-location search: `~/.objectstack/plugins/`, `./.objectstack/plugins/`, `node_modules/`\n- Symlink resolution via `fs.stat()` for development workflows\n- Naming convention: `cli-plugin-*` prefix required\n\n**Runtime Context**\n- Logger, config manager, package manager detection\n- File I/O and command execution utilities\n- Configuration persistence in `~/.objectstack/config.json`\n\n## Plugin Example\n\n```typescript\nimport type { CLIPlugin } from '@objectstack/spec/cli';\n\nconst plugin: CLIPlugin = {\n  metadata: {\n    id: '@org/cli-plugin-scaffold',\n    name: 'Scaffold Plugin',\n    version: '1.0.0',\n    license: 'MIT',\n  },\n  commands: [{\n    name: 'generate',\n    description: 'Generate components',\n    subcommands: [{\n      name: 'object',\n      arguments: [{ name: 'name', required: true }],\n      options: [{ flags: '-o, --output <path>' }],\n    }],\n  }],\n};\n\nexport default plugin;\n```\n\n## Plugin Management\n\n```bash\nos plugin list [--all]           # Discovery across all search paths\nos plugin info <name>            # Package metadata and location\n```\n\n## Reference Implementation\n\n`@objectstack/cli-plugin-scaffold` demonstrates:\n- Project initialization with templates (`os init --template crm`)\n- Code generation (`os generate object|view|app|plugin`)\n- Configuration management (`os config list|get|set`)\n\n## Type Safety Notes\n\nZod function schemas require `z.ZodType<any>` for recursive structures and use `unknown[]` for function arguments. Runtime validation remains intact; type assertions documented inline.\n\n## Security\n\nCodeQL scan: 0 vulnerabilities\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 我在构建cli，未来我希望能够实现很多扩展，但我不希望都在这个项目里面开发，我希望通过插件的方式能够扩展。我要开发后续这些功能。6. cli 命令行工具 / CLI Tool\n> \n> 6.1 当前状态 / Current State\n> \n> 已实现功能:\n> \n> ✅ 基础命令框架 (Commander.js)\n> ✅ 配置编译 (compile 命令)\n> 文件结构:\n> \n> packages/cli/src/\n> ├── bin.ts                  # CLI 入口\n> ├── index.ts               # 导出\n> └── commands/\n>     └── compile.ts         # 编译命令\n> 6.2 待实现功能清单 / Features Roadmap\n> \n> P0: 脚手架 (Scaffolding)\n> \n>  项目初始化\n> \n> os init - 创建新项目\n> 模板选择 (CRM, Helpdesk, Custom)\n> 包管理器检测 (npm, pnpm, yarn)\n> Git 初始化\n>  代码生成\n> \n> os generate object - 生成对象定义\n> os generate view - 生成视图配置\n> os generate app - 生成应用配置\n> os generate plugin - 生成插件骨架\n>  配置管理\n> \n> os config list - 列出配置\n> os config set - 设置配置\n> os config get - 获取配置\n> 环境配置管理\n> P0: 迁移 (Migration)\n> \n>  数据库迁移\n> \n> os migrate create - 创建迁移文件\n> os migrate up - 执行迁移\n> os migrate down - 回滚迁移\n> os migrate status - 迁移状态\n>  Schema 迁移\n> \n> Schema 版本管理\n> 字段添加/删除/修改\n> 数据转换\n> 迁移历史\n>  数据迁移\n> \n> 数据导入 (os import)\n> 数据导出 (os export)\n> 数据转换\n> 批量操作\n> P0: 代码生成 (Code Generation)\n> \n>  TypeScript 类型生成\n> \n> Schema → TypeScript 类型\n> API 客户端生成\n> Zod Schema 生成\n> GraphQL Schema 生成\n>  API 文档生成\n> \n> OpenAPI/Swagger\n> GraphQL Schema\n> API 使用示例\n> Postman Collection\n>  表单生成器\n> \n> React 表单组件\n> Vue 表单组件\n> 表单验证\n> 样式主题\n> P1: 开发工具\n> \n>  开发服务器\n> \n> os dev - 启动开发服务器\n> 热重载 (Hot Reload)\n> 错误提示\n> 调试模式\n>  构建工具\n> \n> os build - 生产构建\n> 代码优化\n> Tree Shaking\n> 打包配置\n>  测试工具\n> \n> os test - 运行测试\n> 测试覆盖率\n> 性能测试\n> E2E 测试\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

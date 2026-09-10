@@ -1,0 +1,33 @@
+{
+  "number": 207,
+  "kind": "pull_request",
+  "title": "Align concept documentation with 11-namespace protocol architecture and add individual protocol pages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-26T03:19:57Z",
+  "updated_at": "2026-01-26T04:03:09Z",
+  "closed_at": "2026-01-26T03:52:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-26T03:52:07Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/207",
+  "body": "Documentation described an outdated 3-layer \"Trinity\" (ObjectQL/ObjectOS/ObjectUI). Codebase now defines 11 protocol namespaces in `@objectstack/spec/src/index.ts`.\n\n## Changes\n\n**Architecture & Terminology**\n- Documented all 11 protocol namespaces: Data, Driver, Permission, UI, System, Auth, Kernel, Hub, AI, API, Automation\n- Mapped protocols to three architectural layers (Data/Control/View) with clear ownership\n- Added protocol dependency graph\n- Replaced generic \"ObjectQL/ObjectOS\" references with specific protocols (e.g., \"Automation Protocol\" for workflows, \"Data Protocol\" for schemas)\n- Added missing governance terms (OWD, Territory)\n\n**Individual Protocol Documentation Pages**\n- Created dedicated documentation page for each of the 11 protocol namespaces under a \"Protocol Namespaces\" submenu\n- Each protocol page includes:\n  - Overview with visual cards highlighting key features\n  - Detailed component descriptions with TypeScript code examples\n  - Practical use cases demonstrating real-world applications\n  - Best practices for implementation\n  - Links to detailed API reference documentation\n\n**Protocol Pages Created:**\n- `protocol-data.mdx` - Objects, fields, queries, validation rules\n- `protocol-driver.mdx` - Database adapters, query compilation, capabilities\n- `protocol-permission.mdx` - CRUD, field-level security, sharing rules, territories\n- `protocol-ui.mdx` - Apps, views, dashboards, reports, themes\n- `protocol-system.mdx` - Event bus, job scheduling, i18n, audit logging\n- `protocol-auth.mdx` - Identity, authentication strategies, sessions, roles, organizations\n- `protocol-kernel.mdx` - Plugin system, manifest, lifecycle management\n- `protocol-hub.mdx` - Multi-tenancy, marketplace, licensing, deployment\n- `protocol-ai.mdx` - AI agents, RAG pipelines, NLQ, predictive models\n- `protocol-api.mdx` - REST contracts, API discovery, realtime subscriptions\n- `protocol-automation.mdx` - Workflows, flows, webhooks\n\n**Example**\n\nBefore:\n```markdown\n### ObjectOS (The Kernel)\nThe runtime environment that orchestrates the ecosystem.\n```\n\nAfter:\n```markdown\n### Kernel Protocol\nPlugin system and runtime management. Includes Plugin lifecycle, Manifest definition, Logger configuration, and Runtime Context. The core of ObjectOS.\n\n### System Protocol\nInfrastructure services including Event Bus, Job Scheduling, Translation (i18n), and Audit Logging.\n\n### Auth Protocol\nIdentity and access management including User accounts, Sessions, Roles, Organization structure...\n```\n\nAll changes synchronized across English and Chinese documentation.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 根据最新的协议分类，重新整理文档概念章节的内容\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

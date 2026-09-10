@@ -1,0 +1,33 @@
+{
+  "number": 161,
+  "kind": "pull_request",
+  "title": "Add examples scaffolding for 9 protocol categories",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-25T14:31:26Z",
+  "updated_at": "2026-01-25T14:56:00Z",
+  "closed_at": "2026-01-25T14:48:21Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-25T14:48:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/161",
+  "body": "Creates `metadata-examples` folder structure for Automation, Auth, Permission, AI, API, Driver, Hub, Kernel, and System protocols. Existing Data and UI protocols already had this structure; these 9 were missing.\n\n## Structure\n\nEach category follows the established pattern:\n\n```\nexamples/{category}/metadata-examples/\n├── README.md              # Protocol documentation and usage\n├── package.json           # @objectstack/example-{category}\n├── tsconfig.json          # TypeScript config\n└── src/\n    ├── index.ts           # Exports all examples\n    └── *.examples.ts      # Placeholder example files\n```\n\n## Categories Added\n\n- **Automation** (3 files) - Flow, Workflow, Webhook\n- **Auth** (5 files) - Config, Identity, Organization, Policy, Role\n- **Permission** (3 files) - Permission, Sharing, Territory\n- **AI** (8 files) - Agent, Conversation, Cost, Model Registry, NLQ, Orchestration, Predictive, RAG Pipeline\n- **API** (5 files) - Contract, Discovery, Endpoint, Realtime, Router\n- **Driver** (4 files) - Datasource, Driver, Mongo, Postgres\n- **Hub** (5 files) - Composer, License, Marketplace, Space, Tenant\n- **Kernel** (5 files) - Context, Logger, Manifest, Plugin, Scoped Storage\n- **System** (4 files) - Audit, Events, Job, Translation\n\nExample files contain TODO comments marking where concrete examples will be added (mirroring the comprehensive examples in Data/UI protocols).\n\n**78 files created**\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> Create Automation category examples folder\n>  Create Auth category examples folder\n>  Create Permission category examples folder\n>  Create AI category examples folder\n>  Create API category examples folder\n>  Create Driver category examples folder\n>  Create Hub category examples folder\n>  Create Kernel category examples folder\n>  Create System category examples folder\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

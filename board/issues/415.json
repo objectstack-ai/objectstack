@@ -1,0 +1,33 @@
+{
+  "number": 415,
+  "kind": "pull_request",
+  "title": "Add type-safe query builder and React hooks package",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T01:13:19Z",
+  "updated_at": "2026-01-31T01:38:18Z",
+  "closed_at": "2026-01-31T01:33:20Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T01:33:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/415",
+  "body": "Implements P0 client SDK features: type-safe query construction and declarative React hooks for data fetching/mutations.\n\n## Changes\n\n### Type-Safe Query Builder (`@objectstack/client`)\n- Added fluent API for building queries with TypeScript generics\n- Filter builder with type-safe field names: `equals()`, `greaterThan()`, `in()`, `like()`, etc.\n- Query builder with `select()`, `where()`, `orderBy()`, `limit()`, `paginate()`\n- Compiles to existing `QueryAST` schema - no runtime changes\n\n### React Hooks Package (`@objectstack/client-react`)\nNew package with:\n- **Data hooks**: `useQuery`, `useMutation`, `usePagination`, `useInfiniteQuery`\n- **Metadata hooks**: `useObject`, `useView`, `useFields`, `useMetadata`\n- **Context**: `ObjectStackProvider`, `useClient`\n\nAuto-handles loading/error states, refetching, caching. ETag support for metadata.\n\n### Examples\nUpdated `msw-react-crud` with hooks-based components demonstrating pagination and mutations.\n\n## Usage\n\n```tsx\nimport { ObjectStackProvider, usePagination, useMutation } from '@objectstack/client-react';\n\nfunction TaskList() {\n  const { data, page, nextPage, previousPage } = usePagination<Task>('todo_task', {\n    pageSize: 10,\n    sort: ['priority', '-created_at']\n  });\n\n  const { mutate: deleteTask } = useMutation('todo_task', 'delete', {\n    onSuccess: () => refetch()\n  });\n\n  return (\n    <div>\n      {data?.value.map(task => <TaskItem task={task} onDelete={() => deleteTask({ id: task.id })} />)}\n      <Pagination page={page} onNext={nextPage} onPrev={previousPage} />\n    </div>\n  );\n}\n\n// Type-safe query builder\nconst query = createQuery<Task>('todo_task')\n  .select('id', 'subject', 'priority')\n  .where(b => b.equals('is_completed', false).greaterThan('priority', 2))\n  .orderBy('created_at', 'desc')\n  .limit(10)\n  .build();\n```\n\n## Package Details\n- `@objectstack/client-react@0.6.1` - peer dep: `react >=18.0.0`\n- Zero breaking changes, all additive\n- CodeQL: 0 vulnerabilities\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> client 客户端 SDK / Client SDK\n> \n> 5.1 当前状态 / Current State\n> \n> 已实现功能:\n> \n> ✅ 基础 CRUD 操作\n> ✅ 元数据访问 (Meta API)\n> ✅ 批量操作 (Batch Operations)\n> ✅ 视图存储 (View Storage)\n> ✅ 元数据缓存 (ETag-based caching)\n> ✅ 标准化错误处理\n> 文件结构:\n> \n> packages/client/src/\n> └── index.ts                # 客户端实现\n> 5.2 待实现功能清单 / Features Roadmap\n> \n> P0: 类型安全查询 (Type-Safe Queries)\n> \n>  类型生成器\n> \n> Schema → TypeScript 类型\n> 自动类型推导\n> 泛型支持\n> 类型校验\n>  类型安全查询构建器\n> \n> Fluent API\n> 编译时类型检查\n> 智能代码补全\n> 类型安全的过滤器\n>  运行时类型验证\n> \n> Zod 集成\n> 请求验证\n> 响应验证\n> 错误类型\n> P0: React Hooks\n> \n>  数据查询 Hooks\n> \n> useQuery - 查询数据\n> useMutation - 修改数据\n> useInfiniteQuery - 无限滚动\n> usePagination - 分页查询\n>  元数据 Hooks\n> \n> useObject - 获取对象schema\n> useView - 获取视图配置\n> useFields - 获取字段列表\n> useMetadata - 通用元数据\n>  实时数据 Hooks\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

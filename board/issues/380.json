@@ -1,0 +1,37 @@
+{
+  "number": 380,
+  "kind": "pull_request",
+  "title": "Implement ObjectStack kernel API specifications (P0/P1/P2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T09:42:41Z",
+  "updated_at": "2026-01-30T10:06:56Z",
+  "closed_at": "2026-01-30T10:06:56Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-30T10:06:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/380",
+  "body": "Implements batch operations, metadata caching, error standardization, full-text search, and view persistence APIs to support ObjectUI requirements.\n\n## Batch Operations (`batch.zod.ts`)\n\nAdded `updateMany`/`deleteMany` with atomic transaction support:\n\n```typescript\n// POST /api/v1/data/{object}/batch\n{\n  operation: 'update',\n  records: [\n    { id: '1', data: { status: 'active' } },\n    { id: '2', data: { status: 'active' } }\n  ],\n  options: {\n    atomic: true,           // rollback on any failure\n    returnRecords: true,    // include full records in response\n    continueOnError: false  // stop on first error\n  }\n}\n```\n\nMax 200 records/batch. Partial success handling with per-record error details.\n\n## Metadata Cache Control (`cache.zod.ts`)\n\nETag-based conditional requests for metadata endpoints:\n\n```typescript\n// Request with If-None-Match header\nconst response = await client.meta.getCached('account', {\n  ifNoneMatch: '\"686897696a7c876b7e\"'\n});\n\n// Returns 304 Not Modified if unchanged\nif (response.notModified) {\n  // use cached version\n} else {\n  // update cache with response.data, response.etag\n}\n```\n\nSelective invalidation by target type (object/field/permission/layout).\n\n## Error Standardization (`errors.zod.ts`)\n\n50+ machine-readable error codes with categorization, HTTP status mapping, and retry guidance:\n\n```typescript\n{\n  code: 'validation_error',\n  message: 'Validation failed for 2 fields',\n  category: 'validation',\n  httpStatus: 400,\n  retryable: false,\n  fieldErrors: [\n    { field: 'email', code: 'invalid_format', value: 'not-an-email' },\n    { field: 'age', code: 'value_out_of_range', value: 150, constraint: { max: 120 } }\n  ]\n}\n```\n\n## Full-Text Search (extended `query.zod.ts`)\n\nAdded `search` parameter with fuzzy matching, field boosting, and language analysis:\n\n```typescript\n{\n  object: 'article',\n  search: {\n    query: 'machine learning',\n    fields: ['title', 'content'],\n    fuzzy: true,\n    boost: { title: 2.0, content: 1.0 },\n    language: 'en',\n    highlight: true\n  },\n  where: { published: true },\n  limit: 10\n}\n```\n\n## View Persistence (`view-storage.zod.ts`)\n\nSave/share UI configurations for list, kanban, calendar, chart views. Supports column layouts, filters, sorting, and per-user defaults.\n\n## Notes\n\n- Field-level permissions, GraphQL, audit logs already existed\n- WebSocket/SSE realtime subscriptions already implemented\n- Aggregation queries (`$groupby`, `$aggregate`) already supported\n- Added 85 tests, all 2164 tests passing\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 5️⃣ ObjectStack 内核需求\n> \n> 为充分发挥 ObjectUI 的能力，建议 @objectstack 内核 提供以下功能：\n> \n> 5.1 必需功能\n> \n> 功能\t优先级\t说明\n> 批量更新 API\tP0\tclient.data.updateMany(resource, records[])\n> 元数据缓存控制\tP0\tclient.meta.getCached() 或 ETag 支持\n> 错误码标准化\tP0\t统一错误响应格式\n> WebSocket/SSE 支持\tP1\t实时数据订阅\n> 字段级权限\tP1\t支持字段级读/写权限\n> 批量操作事务\tP1\t原子性批量操作\n> 5.2 增强功能\n> \n> 功能\t优先级\t说明\n> GraphQL 端点\tP2\t可选的 GraphQL API\n> 全文搜索\tP2\t$search 参数支持\n> 聚合查询\tP2\t$groupby, $aggregate\n> 视图定义存储\tP2\t存储 UI 视图配置\n> 审计日志\tP2\t数据变更历史\n> 5.3 API 规范建议\n> \n> 批量更新 API\n> \n> // POST /api/v1/data/{object}/batch\n> {\n>   \"operation\": \"update\",\n>   \"records\": [\n>     { \"id\": \"1\", \"name\": \"Updated Name 1\" },\n>     { \"id\": \"2\", \"name\": \"Updated Name 2\" }\n>   ],\n>   \"options\": {\n>     \"atomic\": true,  // 事务性\n>     \"returnRecords\": true\n>   }\n> }\n> \n> // Response\n> {\n>   \"success\": true,\n>   \"updated\": 2,\n>   \"records\": [...],\n>   \"errors\": []\n> }\n> 实时订阅 API\n> \n> // WebSocket: ws://api/v1/realtime\n> {\n>   \"action\": \"subscribe\",\n>   \"resource\": \"contacts\",\n>   \"filters\": { \"status\": \"active\" },\n>   \"events\": [\"create\", \"update\", \"delete\"]\n> }\n> \n> // 服务器推送\n> {\n>   \"event\": \"update\",\n>   \"resource\": \"contacts\",\n>   \"data\": { \"id\": \"123\", \"name\": \"John Doe\" },\n>   \"timestamp\": \"2026-01-29T12:00:00Z\"\n> }\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

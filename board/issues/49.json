@@ -1,0 +1,37 @@
+{
+  "number": 49,
+  "kind": "pull_request",
+  "title": "Add granular query operation capabilities to driver schema",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-21T02:37:12Z",
+  "updated_at": "2026-01-21T04:30:55Z",
+  "closed_at": "2026-01-21T04:30:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-21T04:30:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/49",
+  "body": "Drivers currently can only declare high-level capabilities (transactions, joins, full-text search). No mechanism exists to specify support for individual query operations, preventing ObjectQL from determining whether to push operations to the driver or compute in-memory.\n\n## Changes\n\n**Schema Enhancements**\n- Added 6 query capability flags to `DriverCapabilitiesSchema` and `DatasourceCapabilities`:\n  - `queryFilters` - WHERE clause support\n  - `queryAggregations` - GROUP BY/aggregation functions  \n  - `querySorting` - ORDER BY support\n  - `queryPagination` - LIMIT/OFFSET support\n  - `queryWindowFunctions` - Window functions with OVER clause\n  - `querySubqueries` - Nested SELECT support\n\n**Test Coverage**\n- Updated all driver test fixtures with new capability flags\n- Added memory driver example demonstrating limited query support\n- Added realistic capability matrices for PostgreSQL, MongoDB, Salesforce, and Redis\n\n**Generated Artifacts**\n- Updated JSON schemas and documentation\n\n## Example\n\n```typescript\n// Memory driver - compute all operations in-memory\nconst memoryDriver: DriverInterface = {\n  supports: {\n    queryFilters: false,\n    queryAggregations: false,\n    querySorting: false,\n    queryPagination: false,\n    queryWindowFunctions: false,\n    querySubqueries: false,\n    // ...\n  }\n};\n\n// PostgreSQL - push all operations to database\nconst postgresDriver: DriverInterface = {\n  supports: {\n    queryFilters: true,\n    queryAggregations: true,\n    querySorting: true,\n    queryPagination: true,\n    queryWindowFunctions: true,\n    querySubqueries: true,\n    // ...\n  }\n};\n```\n\nObjectQL can now inspect these flags to determine whether to push query operations to the driver or handle them in-memory.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 如何约定driver已经实现的能力比如目前的内存驱动实际上不支持查询条件\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 17,
+  "kind": "pull_request",
+  "title": "Add comprehensive GitHub Actions automation infrastructure",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Copilot",
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-19T12:22:15Z",
+  "updated_at": "2026-01-19T12:48:06Z",
+  "closed_at": "2026-01-19T12:48:05Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-19T12:48:05Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17",
+  "body": "Implements production-grade CI/CD, security scanning, and maintenance automation for the repository.\n\n## Workflows\n\n### CI/CD\n- **ci.yml**: Parallel test/build jobs with coverage artifacts, build verification, pnpm caching\n- **lint.yml**: TypeScript type checking on all PRs\n- **docs.yml**: Auto-deploy documentation to GitHub Pages on changes\n\n### Security\n- **codeql.yml**: Weekly JavaScript/TypeScript security scanning + on-demand\n- **validate-deps.yml**: Dependency audits (fails on high-severity), lockfile verification, outdated tracking\n\n### Automation\n- **pr-automation.yml**: Size labels (xs/s/m/l/xl), 9 auto-labels by file path, changeset validation\n- **stale.yml**: Daily cleanup (issues: 60d→14d, PRs: 30d→7d)\n\n## Configuration\n\n- **dependabot.yml**: Weekly dependency updates (grouped minor/patch), GitHub Actions version updates\n- **labeler.yml**: Auto-labeling rules for protocol:data/ui/system/ai, documentation, ci/cd, dependencies, tests, tooling\n\n## Documentation\n\n- **WORKFLOWS.md**: Comprehensive workflow reference\n- **AUTOMATION.md**: Quick reference and commands\n- **WORKFLOW_DIAGRAM.md**: Visual flow diagrams\n- **COMPLETION_SUMMARY.md**: Implementation details and setup guide\n\n## Key Technical Decisions\n\n- Pinned action versions (v1.10.1, v5.0.0, v9.0.0) for supply chain security\n- Explicit pnpm 10.28.0 across all workflows for consistency\n- Fail-fast on high-severity vulnerabilities (security compliance)\n- Directory existence checks before operations (robustness)\n- Minimal permissions per workflow (least privilege)\n\n## Post-Merge Setup Required\n\n1. Add `NPM_TOKEN` secret for npm publishing\n2. Enable GitHub Pages: Settings → Pages → Source: GitHub Actions\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 添加必要的自动化工作流\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

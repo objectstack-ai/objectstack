@@ -1,0 +1,33 @@
+{
+  "number": 216,
+  "kind": "pull_request",
+  "title": "[WIP] Refactor and reorganize official documentation structure",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-26T05:57:25Z",
+  "updated_at": "2026-01-26T06:06:16Z",
+  "closed_at": "2026-01-26T06:05:53Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/216",
+  "body": "## Documentation Restructuring Plan\n\nReorganizing official website documentation according to the new standardized structure that better aligns with the codebase:\n\n### Phase 1: Understand Current State\n- [x] Explore existing documentation structure in `content/docs/`\n- [x] Review codebase structure in `packages/spec/src/`\n- [x] Understand Fumadocs navigation system (meta.json files)\n\n### Phase 2: Create New Structure (7 Main Sections)\n- [ ] Create `01-concepts/` - Core concepts (from common & existing concepts)\n  - [ ] what-is-objectql (ObjectQL concept)\n  - [ ] schema-definition (JSON/YAML schema definition)\n  - [ ] architecture (System + Driver + UI architecture)\n- [ ] Create `02-core-protocol/` - Core protocol layer (from ql & core)\n  - [ ] objectql-syntax (Query, Mutation, Subscription)\n  - [ ] type-system (Scalar, Object, Interface, Union)\n  - [ ] error-codes (Zod Error Map)\n  - [ ] security-model (ACL, RLS)\n- [ ] Create `03-system-contract/` - System-level contract\n  - [ ] plugin-lifecycle (PluginContext, onInstall, onEnable) ✨\n  - [ ] event-bus (System Events, Hooks)\n  - [ ] metadata-registry (Metadata registration)\n  - [ ] logger-interface (Unified logging)\n- [ ] Create `04-ui-protocol/` - Frontend/Interaction protocol\n  - [ ] widget-contract (FieldWidgetProps - widget.zod.ts) ✨\n  - [ ] view-schema (Layout, Page, Component)\n  - [ ] interaction-flow (Actions, Navigations)\n  - [ ] theme-variables (Styles & theme)\n- [ ] Create `05-driver-interface/` - Driver development guide\n  - [ ] storage-driver (Memory, Excel, Redis, SQL)\n  - [ ] auth-provider (Authentication drivers)\n  - [ ] file-system (File system abstraction)\n- [ ] Create `06-api-reference/` - Auto-generated reference docs\n  - [ ] zod-schemas (Auto-generated from .zod.ts)\n  - [ ] typescript-types (Core Interface definitions)\n  - [ ] cli-commands (CLI usage)\n- [ ] Create `07-guides/` - Scenario-based tutorials\n  - [ ] building-plugin (\"How to build an ObjectStack plugin\")\n  - [ ] custom-widget (\"How to create custom Field Widget\")\n  - [ ] deploy-strategy (Docker, Serverless deployment)\n\n### Phase 3: Migrate Existing Content\n- [ ] Map existing docs to new structure\n- [ ] Update meta.json files for navigation\n- [ ] Update cross-references and links\n\n### Phase 4: Verification\n- [ ] Test documentation site builds\n- [ ] Verify all links work\n- [ ] Review navigation flow\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 参考这个目录，规范重新整理官网文档\n> \n> /docs\n> ├── 01-concepts              # 核心概念 (对应 packages/spec/src/common)\n> │   ├── what-is-objectql     # ObjectQL 理念：SQL/NoSQL/Files 的统一虚拟化\n> │   ├── schema-definition    # 如何用 JSON/YAML 定义数据 (Schema First)\n> │   └── architecture         # 架构概览：System + Driver + UI 的三角关系\n> │\n> ├── 02-core-protocol         # 核心协议层 (对应 packages/spec/src/ql & core)\n> │   ├── objectql-syntax      # ObjectQL 语法规范 (Query, Mutation, Subscription)\n> │   ├── type-system          # 类型系统 (Scalar, Object, Interface, Union)\n> │   ├── error-codes          # 标准错误码定义 (Zod Error Map)\n> │   └── security-model       # 权限与访问控制 (ACL, RLS)\n> │\n> ├── 03-system-contract       # 系统级契约 (对应 packages/spec/src/system)\n> │   ├── plugin-lifecycle     # 插件开发规范 (PluginContext, onInstall, onEnable) ✨重点\n> │   ├── event-bus            # 系统事件总线 (System Events, Hooks)\n> │   ├── metadata-registry    # 元数据注册机制\n> │   └── logger-interface     # 统一日志接口规范\n> │\n> ├── 04-ui-protocol           # 前端/交互协议 (对应 packages/spec/src/ui)\n> │   ├── widget-contract      # 控件契约 (FieldWidgetProps - widget.zod.ts) ✨重点\n> │   ├── view-schema          # 视图描述协议 (Layout, Page, Component)\n> │   ├── interaction-flow     # 前端交互动作定义 (Actions, Navigations)\n> │   └── theme-variables      # 样式与主题变量规范\n> │\n> ├── 05-driver-interface      # 驱动开发指南 (对应 packages/spec/src/driver - 假设)\n> │   ├── storage-driver       # 存储驱动接口 (Memory, Excel, Redis, SQL)\n> │   ├── auth-provider        # 认证驱动接口\n> │   └── file-system          # 文件系统抽象层\n> │\n> ├── 06-api-reference         # 自动生成的参考文档\n> │   ├── zod-schemas          # 从 .zod.ts 自动生成的 JSON Schema 文档\n> │   ├── typescript-types     # 核心 Interface 定义\n> │   └── cli-commands         # CLI 工具链使用说明\n> │\n> └── 07-guides                # 场景化教程\n>     ├── building-plugin      # \"如何从零开发一个 ObjectStack 插件\"\n>     ├── custom-widget        # \"如何为 React/Vue 封装自定义 Field Widget\"\n>     └── deploy-strategy      # 部署策略 (Docker, Serverless)\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 323,
+  "kind": "pull_request",
+  "title": "[WIP] Update home page version number to match @objectstack/spec",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-27T11:45:32Z",
+  "updated_at": "2026-01-27T12:00:42Z",
+  "closed_at": "2026-01-27T11:55:09Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-27T11:55:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/323",
+  "body": "## Plan: Update Homepage Version Display\n\n- [x] Create a utility to import @objectstack/spec version from package.json\n- [x] Update homepage-i18n.ts to use the dynamic version instead of hardcoded values\n- [x] Verify the version is correctly displayed on both English and Chinese homepages\n- [x] Test the build to ensure no errors\n- [x] Optimize to use a constant instead of function calls (code review feedback)\n\n## Changes Made\n\n1. Created `/apps/docs/lib/version.ts` - Exports `SPEC_VERSION` constant that reads the version from `@objectstack/spec` package.json once at module initialization\n2. Updated `/apps/docs/lib/homepage-i18n.ts`:\n   - Imported `SPEC_VERSION` constant\n   - Changed English version from hardcoded `v0.3.3 (Draft)` to `SPEC_VERSION` (returns `v0.4.1`)\n   - Changed Chinese version from hardcoded `v1.0` to `SPEC_VERSION` (returns `v0.4.1`)\n3. Build verified successfully - version `v0.4.1` now appears in the homepage badge\n\nThe homepage now automatically displays the correct version from `@objectstack/spec` package (v0.4.1) instead of hardcoded values. The version is computed once at module initialization for optimal performance.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 官网首页显示的版本号应该对应 @objectstack/spec 的版本号\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

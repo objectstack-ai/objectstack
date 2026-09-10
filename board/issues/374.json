@@ -1,0 +1,37 @@
+{
+  "number": 374,
+  "kind": "pull_request",
+  "title": "Add plugin ecosystem protocol for vendor interoperability",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T01:43:15Z",
+  "updated_at": "2026-01-30T06:04:43Z",
+  "closed_at": "2026-01-30T06:04:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-30T06:04:43Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/374",
+  "body": "Establishes standardized protocols for plugin discovery, capability declaration, and cross-vendor interoperability in the ObjectStack microkernel architecture.\n\n## Core Protocols\n\n### Plugin Capability Manifest (`system/plugin-capability.zod.ts`)\n- **Protocol implementation**: Declare conformance levels (full/partial/experimental/deprecated) with certification support\n- **Interface contracts**: Define service methods, events, and stability guarantees\n- **Dependency resolution**: SemVer constraints with required capability validation\n- **Extension points**: 7 types (action/hook/widget/provider/transformer/validator/decorator) with cardinality control\n\n### Plugin Registry (`hub/plugin-registry.zod.ts`)\n- Vendor trust levels (official/verified/community/unverified)\n- Quality metrics (test coverage, documentation score, security scan results)\n- Conformance test tracking per protocol\n- Search/filter by protocols, categories, trust level, ratings\n\n## Naming Convention\n\nDistinguishes package vs. code-level identifiers:\n- **Packages** (plugins, protocols): kebab-case with reverse domain → `com.acme.crm.customer-management`\n- **Code** (interfaces, extensions): snake_case → `contact_service`, `customer_validator`\n\n## Interoperability Patterns\n\n```typescript\n// Protocol Implementation\ncapabilities: {\n  implements: [{\n    protocol: { id: 'com.objectstack.protocol.storage.v1', version: { major: 1, minor: 0, patch: 0 } },\n    conformance: 'full',\n    certified: true\n  }],\n  \n  // Interface Provision\n  provides: [{\n    id: 'com.acme.crm.interface.customer_service',\n    methods: [{ name: 'getCustomer', async: true, returnType: 'Customer' }],\n    events: [{ name: 'customerCreated', payload: 'Customer' }]\n  }],\n  \n  // Dependency with capability requirements\n  requires: [{\n    pluginId: 'com.objectstack.driver.postgres',\n    version: '^1.0.0',\n    requiredCapabilities: ['com.objectstack.protocol.storage.v1']\n  }],\n  \n  // Extension points\n  extensionPoints: [{\n    id: 'com.acme.crm.extension.customer_validator',\n    type: 'validator',\n    cardinality: 'multiple',\n    contract: { input: 'Customer', output: 'ValidationResult' }\n  }]\n}\n```\n\n## Documentation\n\nAll documentation unified in English:\n- Architecture guide: `/content/docs/developers/plugin-ecosystem.mdx`\n- Implementation summary: `/IMPLEMENTATION_SUMMARY.md`\n- Reference implementation: `/examples/plugin-advanced-crm/`\n\n## Integration\n\nExtends `ManifestSchema` with optional `capabilities` field for backward compatibility. Registry schemas exported via `@objectstack/spec/hub`.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 你顶牛的微内核系统架构师，我所有的功能都是用插件开发的，如何表达一个插件实现的具体协议以及实现的程度，包括在整个生态中插件可能是需要互相调用的，如何确定这个命名规范，如何确保不同厂商编写的插件能够互相调用互相协作，如何构建这个生态帮我编写设计文档\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

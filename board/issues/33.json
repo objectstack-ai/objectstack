@@ -1,0 +1,36 @@
+{
+  "number": 33,
+  "kind": "pull_request",
+  "title": "Fix CI test failures: syntax error and undefined schema references",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-20T03:31:32Z",
+  "updated_at": "2026-01-20T03:40:19Z",
+  "closed_at": "2026-01-20T03:40:19Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-20T03:40:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/33",
+  "body": "CI tests were failing due to a syntax error in field tests and references to non-existent MenuItem schemas.\n\n## Changes\n\n- **`field.test.ts`**: Removed duplicate closing brace at line 151\n  ```diff\n  -    });\n       });\n     });\n  ```\n\n- **`manifest.test.ts`**: Removed MenuItem test suite that referenced undefined `MenuItemSchema` and `MenuItem` types from `manifest.zod.ts`\n  - Navigation items are properly defined in `app.zod.ts` via `NavigationItemSchema`\n  - Removed 26 lines of invalid test code\n\n## Impact\n\nAll 273 tests now pass. Build completes successfully.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21158118783/job/60847665392#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

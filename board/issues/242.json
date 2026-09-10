@@ -1,0 +1,33 @@
+{
+  "number": 242,
+  "kind": "pull_request",
+  "title": "Fix TypeScript errors in SCIM and RLS helper functions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-26T15:40:35Z",
+  "updated_at": "2026-01-26T16:04:36Z",
+  "closed_at": "2026-01-26T16:00:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-26T16:00:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/242",
+  "body": "TypeScript compilation errors in `src/auth/scim.zod.ts` and `src/permission/rls.zod.ts` blocking CI builds.\n\n## Changes\n\n**RLS Helpers**: Added explicit `priority: 0` to factory functions\n- Zod `.default(0)` doesn't make the field optional in `z.infer<>` types\n- Affects: `ownerPolicy`, `tenantPolicy`, `rolePolicy`, `allowAllPolicy`\n\n**SCIM Helper**: Type assertion for generic `Resources` field\n- Changed `resources` to `resources as Array<SCIMResource | Record<string, any>>`\n- Generic `T[]` requires explicit cast to satisfy union type constraint\n\n```typescript\n// Before: TS2741 - Property 'priority' is missing\nownerPolicy: (object: string): RowLevelSecurityPolicy => ({\n  name: `${object}_owner_access`,\n  // ...\n  enabled: true,\n}),\n\n// After\nownerPolicy: (object: string): RowLevelSecurityPolicy => ({\n  name: `${object}_owner_access`,\n  // ...\n  enabled: true,\n  priority: 0,\n}),\n```\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21363404121/job/61488478743#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 449,
+  "kind": "pull_request",
+  "title": "Add DevOps Agent with GitHub and Vercel integrations for autonomous development",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T17:50:27Z",
+  "updated_at": "2026-01-31T19:07:18Z",
+  "closed_at": "2026-01-31T19:03:12Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T19:03:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/449",
+  "body": "Enables AI-driven autonomous software development: agent reads ObjectStack specs, generates code, manages Git workflow, deploys to Vercel, and self-iterates on improvements.\n\n## Core Components\n\n### GitHub Connector (`src/integration/connector/github.zod.ts`)\n- Repository management, branch protection, PR automation\n- GitHub Actions workflow integration, release management\n- Webhook support for real-time events\n\n### Vercel Connector (`src/integration/connector/vercel.zod.ts`)\n- Multi-region deployments with preview/production environments\n- Edge functions, domain management, environment variables\n- Monitoring integration (analytics, speed insights, log drains)\n\n### DevOps Agent (`src/ai/devops-agent.zod.ts`)\n- Code generation from ObjectStack specifications\n- CI/CD pipeline orchestration (build, test, lint, security scan, deploy)\n- Version management (semver, changelog generation)\n- Deployment strategies (rolling, blue-green, canary) with auto-rollback\n- Self-iteration capabilities for continuous optimization\n\n## Usage\n\n```typescript\nimport { DevOpsAgent, GitHubConnector, VercelConnector } from '@objectstack/spec';\n\nconst devopsAgent: DevOpsAgent = {\n  name: 'enterprise_devops',\n  role: 'Senior Full-Stack DevOps Engineer',\n  \n  developmentConfig: {\n    specificationSource: 'packages/spec',\n    codeGeneration: {\n      targets: ['frontend', 'backend', 'api', 'tests'],\n      validationMode: 'strict',\n    },\n  },\n  \n  integrations: {\n    github: {\n      connector: 'github_main',\n      repository: { owner: 'org', name: 'app' },\n      pullRequest: { autoCreate: true, requireReviews: true },\n    },\n    vercel: {\n      connector: 'vercel_prod',\n      project: 'app',\n      deployment: { requireApproval: true },\n    },\n  },\n  \n  selfIteration: {\n    enabled: true,\n    optimizationGoals: ['code_quality', 'performance', 'security'],\n  },\n};\n```\n\nThe agent autonomously handles: spec → code → tests → PR → CI → review → merge → deploy → monitor → optimize.\n\n## Schema Structure\n\nAll schemas follow Zod-first pattern with full TypeScript inference. Naming: `camelCase` for configuration properties, `snake_case` for identifiers.\n\nSee `examples/devops-agent-example.ts` for production configuration.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 我想开发一个agent，让他基于 @objectstack/spec 中规范去自我迭代开发企业管理软件,集成GitHub和vercel,实现自动化迭代和版本发布\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

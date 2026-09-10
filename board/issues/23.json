@@ -1,0 +1,34 @@
+{
+  "number": 23,
+  "kind": "pull_request",
+  "title": "chore(ci)(deps): bump codelytv/pr-size-labeler from 1.10.1 to 1.10.3",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-19T12:48:55Z",
+  "updated_at": "2026-02-01T03:04:18Z",
+  "closed_at": "2026-02-01T03:04:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-02-01T03:04:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/23",
+  "body": "Bumps [codelytv/pr-size-labeler](https://github.com/codelytv/pr-size-labeler) from 1.10.1 to 1.10.3.\n<details>\n<summary>Release notes</summary>\n<p><em>Sourced from <a href=\"https://github.com/codelytv/pr-size-labeler/releases\">codelytv/pr-size-labeler's releases</a>.</em></p>\n<blockquote>\n<h2>v1.10.3</h2>\n<h2>What's Changed</h2>\n<ul>\n<li>fix: use the add label API rather than patching the entire issue by <a href=\"https://github.com/manishprivet\"><code>@​manishprivet</code></a> in <a href=\"https://redirect.github.com/CodelyTV/pr-size-labeler/pull/89\">CodelyTV/pr-size-labeler#89</a></li>\n</ul>\n<h2>New Contributors</h2>\n<ul>\n<li><a href=\"https://github.com/manishprivet\"><code>@​manishprivet</code></a> made their first contribution in <a href=\"https://redirect.github.com/CodelyTV/pr-size-labeler/pull/89\">CodelyTV/pr-size-labeler#89</a></li>\n</ul>\n<p><strong>Full Changelog</strong>: <a href=\"https://github.com/CodelyTV/pr-size-labeler/compare/v1.10.2...v1.10.3\">https://github.com/CodelyTV/pr-size-labeler/compare/v1.10.2...v1.10.3</a></p>\n<h2>Bug fixes for max PR comments</h2>\n<h2>What's Changed</h2>\n<ul>\n<li>fix: Comment on PR only if the XL label is new by <a href=\"https://github.com/leocencetti\"><code>@​leocencetti</code></a> in <a href=\"https://redirect.github.com/CodelyTV/pr-size-labeler/pull/83\">CodelyTV/pr-size-labeler#83</a></li>\n<li>make github_token to optional by <a href=\"https://github.com/134130\"><code>@​134130</code></a> in <a href=\"https://redirect.github.com/CodelyTV/pr-size-labeler/pull/87\">CodelyTV/pr-size-labeler#87</a></li>\n</ul>\n<h2>New Contributors</h2>\n<ul>\n<li><a href=\"https://github.com/leocencetti\"><code>@​leocencetti</code></a> made their first contribution in <a href=\"https://redirect.github.com/CodelyTV/pr-size-labeler/pull/83\">CodelyTV/pr-size-labeler#83</a></li>\n<li><a href=\"https://github.com/134130\"><code>@​134130</code></a> made their first contribution in <a href=\"https://redirect.github.com/CodelyTV/pr-size-labeler/pull/87\">CodelyTV/pr-size-labeler#87</a></li>\n</ul>\n<p><strong>Full Changelog</strong>: <a href=\"https://github.com/CodelyTV/pr-size-labeler/compare/v1.10.1...v1.11.0\">https://github.com/CodelyTV/pr-size-labeler/compare/v1.10.1...v1.11.0</a></p>\n</blockquote>\n</details>\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/CodelyTV/pr-size-labeler/commit/4ec67706cd878fbc1c8db0a5dcd28b6bb412e85a\"><code>4ec6770</code></a> fix: use the add label API rather than patching the entire issue (<a href=\"https://redirect.github.com/codelytv/pr-size-labeler/issues/89\">#89</a>)</li>\n<li><a href=\"https://github.com/CodelyTV/pr-size-labeler/commit/1c3422395d899286d5ee2c809fd5aed264d5eb9b\"><code>1c34223</code></a> make github_token to optional (<a href=\"https://redirect.github.com/codelytv/pr-size-labeler/issues/87\">#87</a>)</li>\n<li><a href=\"https://github.com/CodelyTV/pr-size-labeler/commit/2f1c419d06406a93f7911d460ff90ddea9ca02a7\"><code>2f1c419</code></a> fix: Comment on PR only if the XL label is new (<a href=\"https://redirect.github.com/codelytv/pr-size-labeler/issues/83\">#83</a>)</li>\n<li>See full diff in <a href=\"https://github.com/codelytv/pr-size-labeler/compare/v1.10.1...v1.10.3\">compare view</a></li>\n</ul>\n</details>\n<br />\n\n\n[![Dependabot compatibility score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=codelytv/pr-size-labeler&package-manager=github_actions&previous-version=1.10.1&new-version=1.10.3)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot merge` will merge this PR after your CI passes on it\n- `@dependabot squash and merge` will squash and merge this PR after your CI passes on it\n- `@dependabot cancel merge` will cancel a previously requested merge and block automerging\n- `@dependabot reopen` will reopen this PR if it is closed\n- `@dependabot close` will close this PR and stop Dependabot recreating it. You can achieve the same result by closing it manually\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore this major version` will close this PR and stop Dependabot creating any more for this major version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this minor version` will close this PR and stop Dependabot creating any more for this minor version (unless you reopen the PR or upgrade to it yourself)\n- `@dependabot ignore this dependency` will close this PR and stop Dependabot creating any more for this dependency (unless you reopen the PR or upgrade to it yourself)\n\n\n</details>"
+}

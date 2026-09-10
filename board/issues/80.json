@@ -1,0 +1,37 @@
+{
+  "number": 80,
+  "kind": "pull_request",
+  "title": "Add modern field types (slider, qrcode, geolocation) with configuration schemas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-23T05:42:53Z",
+  "updated_at": "2026-01-23T06:28:22Z",
+  "closed_at": "2026-01-23T06:23:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-23T06:23:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/80",
+  "body": "Extends field type system with modern UI controls to match enterprise platform capabilities. Cross-field validation already exists in `CrossFieldValidationSchema` - added usage examples.\n\n## New Field Types\n\n**`slider`** - Numeric range with visual feedback\n```typescript\nField.slider({\n  min: 0, max: 100, step: 5,\n  showValue: true,\n  marks: { '0': 'Low', '50': 'Medium', '100': 'High' }\n})\n```\n\n**`qrcode`** - Multi-format barcode support (QR, EAN13, Code128, UPC-A/E, Code39)\n```typescript\nField.qrcode({\n  barcodeFormat: 'qr',\n  qrErrorCorrection: 'M',  // L|M|Q|H\n  displayValue: true,\n  allowScanning: true\n})\n```\n\n**`geolocation`** - GPS coordinates (alias for existing `location` type)\n```typescript\nField.geolocation({\n  displayMap: true,\n  allowGeocoding: true\n})\n```\n\n## Cross-Field Validation Examples\n\nAdded `examples/modern-fields/src/event.object.ts` demonstrating validation patterns:\n\n```typescript\nvalidation: [\n  {\n    type: 'cross_field',\n    condition: 'end_date > start_date',\n    fields: ['start_date', 'end_date'],\n    message: 'End date must be after start date'\n  },\n  {\n    type: 'cross_field',\n    condition: 'current_attendees <= max_capacity',\n    fields: ['current_attendees', 'max_capacity'],\n    message: 'Attendees cannot exceed capacity'\n  }\n]\n```\n\n## Schema Changes\n\n- `FieldType` enum: Added `slider`, `qrcode`, `geolocation`\n- `FieldSchema`: Added config properties (`step`, `showValue`, `marks`, `barcodeFormat`, `qrErrorCorrection`, `displayValue`, `allowScanning`)\n- Factory helpers: `Field.slider()`, `Field.qrcode()`, `Field.geolocation()`\n- Generated 231 JSON schemas with updated field definitions\n\n## Examples\n\n- `examples/modern-fields/src/product.object.ts` - Product catalog with barcodes, stock sliders, warehouse geolocation\n- `examples/modern-fields/src/event.object.ts` - Event management with 6 cross-field validation rules\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 1. 字段类型扩展 (优先级: 中等)\n> \n> // 建议添加更多现代字段类型\n> type: 'geolocation'    // GPS 坐标 {lat, lng, accuracy}\n> type: 'address'        // 结构化地址 (street, city, state, country, zip)\n> type: 'richtext'       // 富文本编辑器 (Quill/TipTap)\n> type: 'code'           // 代码编辑器 (语法高亮)\n> type: 'color'          // 颜色选择器\n> type: 'rating'         // 星级评分 (1-5)\n> type: 'slider'         // 数值滑块\n> type: 'signature'      // 数字签名\n> type: 'qrcode'         // 二维码/条形码\n> 影响: 提升 UI 组件丰富度，竞争力对标 Salesforce\n> \n> 2. 跨字段验证 (优先级: 高)\n> \n> // 目前验证规则主要针对单个字段，需要支持跨字段依赖\n> ValidationSchema.extend({\n>   crossFieldRules: z.array(z.object({\n>     condition: z.string().describe('e.g., \"end_date > start_date\"'),\n>     errorMessage: z.string(),\n>   })).optional(),\n> });\n> 影响: 业务逻辑完整性\n> \n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

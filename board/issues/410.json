@@ -1,0 +1,35 @@
+{
+  "number": 410,
+  "kind": "pull_request",
+  "title": "Fix TypeScript strict null checking errors in REST server normalization",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T00:28:29Z",
+  "updated_at": "2026-01-31T00:51:52Z",
+  "closed_at": "2026-01-31T00:51:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T00:51:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/410",
+  "body": "TypeScript strict mode was failing with 17 null-checking errors in `rest-server.ts` because `Required<RestServerConfig>` only makes top-level properties required, not nested ones. The normalized config still had optional nested properties despite receiving defaults.\n\n## Changes\n\n**Type System Fix**\n- Replaced `Required<RestServerConfig>` with explicit `NormalizedRestServerConfig` type\n- Defines actual post-normalization structure: defaults → required, truly optional → optional\n- Example: `version: string`, `basePath: string`, but `apiPath: string | undefined`\n\n**Normalization Logic**\n- Added type assertions to prevent `{}` type inference: `(config.api ?? {}) as Partial<RestApiConfig>`\n- Normalized all nested objects with defaults (operations, endpoints, etc.)\n\n**Import Renames**\n- `IObjectStackProtocol` → `ObjectStackProtocol` in plugin-hono-server and plugin-msw\n\n```typescript\n// Before\nprivate normalizeConfig(config: RestServerConfig): Required<RestServerConfig> {\n  const api = config.api;  // TypeScript sees this as possibly undefined\n  return {\n    api: {\n      version: api?.version ?? 'v1',  // Lots of optional chaining\n      ...\n    }\n  }\n}\n\n// After\ntype NormalizedRestServerConfig = {\n  api: {\n    version: string;           // Required after normalization\n    basePath: string;\n    apiPath: string | undefined;  // Truly optional\n    enableCrud: boolean;\n    ...\n  };\n  ...\n};\n\nprivate normalizeConfig(config: RestServerConfig): NormalizedRestServerConfig {\n  const api = (config.api ?? {}) as Partial<RestApiConfig>;\n  return {\n    api: {\n      version: api.version ?? 'v1',  // No optional chaining needed\n      ...\n    }\n  }\n}\n```\n\n**Note:** plugin-hono-server and plugin-msw have additional API signature mismatches requiring method call updates (separate from this fix).\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21527954108/job/62036372559#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

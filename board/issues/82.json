@@ -1,0 +1,37 @@
+{
+  "number": 82,
+  "kind": "pull_request",
+  "title": "Add multi-tenant protocol with isolation levels and quota management",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-23T07:30:24Z",
+  "updated_at": "2026-01-23T08:22:42Z",
+  "closed_at": "2026-01-23T08:22:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-23T08:22:42Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/82",
+  "body": "Implements tenant protocol for SaaS deployments with configurable data isolation strategies and resource quotas.\n\n## Changes\n\n- **`src/system/tenant.zod.ts`**: Core tenant schema with three isolation modes\n  - `shared_schema`: Row-level isolation (single DB, single schema)\n  - `isolated_schema`: Schema-per-tenant (single DB, separate schemas)\n  - `isolated_db`: Database-per-tenant (maximum isolation)\n  \n- **Quota management**: `maxUsers`, `maxStorage` (bytes), `apiRateLimit` (requests/min)\n\n- **Customization support**: Arbitrary tenant-specific configuration via `customizations` record\n\n## Usage\n\n```typescript\nimport { TenantSchema, TenantIsolationLevel } from '@objectstack/spec/system';\n\nconst tenant = TenantSchema.parse({\n  id: 'tenant_acme',\n  name: 'Acme Corp',\n  isolationLevel: 'isolated_schema',\n  quotas: {\n    maxUsers: 100,\n    maxStorage: 10737418240, // 10GB\n    apiRateLimit: 1000\n  },\n  customizations: {\n    theme: 'dark',\n    features: { analytics: true }\n  }\n});\n```\n\nFollows established patterns: Zod-first definitions, camelCase config keys, snake_case enum values, inferred TypeScript types.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 1. 多租户协议 (优先级: 高)\n> \n> // 建议新增: src/system/tenant.zod.ts\n> export const TenantSchema = z.object({\n>   id: z.string(),\n>   name: z.string(),\n>   isolationLevel: z.enum(['shared_schema', 'isolated_schema', 'isolated_db']),\n>   customizations: z.record(z.any()).optional(),\n>   quotas: z.object({\n>     maxUsers: z.number().optional(),\n>     maxStorage: z.number().optional(),\n>     apiRateLimit: z.number().optional(),\n>   }).optional(),\n> });\n> 影响: SaaS 部署必需\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

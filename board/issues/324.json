@@ -1,0 +1,33 @@
+{
+  "number": 324,
+  "kind": "pull_request",
+  "title": "Merge main into PR #215 with conflict resolution",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-27T13:14:18Z",
+  "updated_at": "2026-01-27T13:26:52Z",
+  "closed_at": "2026-01-27T13:26:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/324",
+  "body": "Merges latest main branch (e77b1d6) into the metadata extension protocol PR branch. Resolved 4 conflicts that arose from parallel development.\n\n## Conflict Resolutions\n\n**packages/spec/src/data/field.zod.ts**\n- Merged both imports: `ExtensionsMapSchema` (PR) + `SystemIdentifierSchema` (main)\n- Both required for respective features\n\n**content/docs/references/system/meta.json**\n- Added both \"extension\" (PR) and \"feature\" (main) to pages array\n- Documentation for separate system features\n\n**packages/spec/json-schema/hub/ComposerResponse.json**\n- Accepted main branch version (2794 lines vs PR's 482 lines)\n- Main schema significantly more complete with inline definitions\n\n**packages/spec/json-schema/kernel/Manifest.json**\n- Accepted deletion from main\n- File relocated to `system/Manifest.json` as part of schema reorganization\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/215\n> \n> 合并组主分支最新代码并解决决冲突\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

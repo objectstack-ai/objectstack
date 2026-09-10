@@ -1,0 +1,37 @@
+{
+  "number": 53,
+  "kind": "pull_request",
+  "title": "Standardize filter syntax to MongoDB-style and complete documentation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-21T05:01:47Z",
+  "updated_at": "2026-01-21T06:36:01Z",
+  "closed_at": "2026-01-21T06:32:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-21T06:32:55Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/53",
+  "body": "## Filter Documentation & Code Standardization - COMPLETED ✅\n\n### Issues Identified\n- [x] Two different filter systems exist: array-based (old) vs MongoDB-style (new)\n- [x] Documentation is incomplete and missing examples\n- [x] All examples use the old array-based system\n- [x] Operator naming is inconsistent\n- [x] Report filters use a hybrid format\n- [x] Build error fixed\n\n### Documentation Updates Completed ✅\n- [x] Update QueryFilter documentation with comprehensive examples\n- [x] Update NormalizedFilter documentation with usage guide\n- [x] Update FilterCondition documentation with real-world examples\n- [x] Update FilterOperator documentation to align with new system and migration guide\n- [x] Update FilterNode documentation with deprecation notice\n\n### Code Updates Completed ✅\n- [x] Update DashboardWidget schema to use FilterCondition\n- [x] Update Report schema to use FilterCondition (removed old filter + filterItems)\n- [x] Update all dashboard tests to use modern filter syntax\n- [x] Update client-test.ts example to use MongoDB-style filters with correct 'filters' property\n- [x] Update CRM dashboard filters (14 filters converted)\n- [x] Update CRM report filters (6 reports converted)\n- [x] Fix build error: changed 'where' to 'filters' in QueryOptions\n- [x] All tests passing, build successful\n\n### Summary of Changes\n- **5 documentation files** updated with comprehensive examples and migration guides\n- **3 schema files** updated to use FilterCondition\n- **3 example files** updated to modern syntax\n- **Build fixed** - all packages compile successfully\n\n### Migration Notes\n- Old array-based syntax: `[['field', '=', 'value']]` → New: `{ field: 'value' }`\n- Old inequality: `[['stage', '!=', 'won'], ['stage', '!=', 'lost']]` → New: `{ stage: { $nin: ['won', 'lost'] } }`\n- Old Report structure with filter + filterItems → New: single `filter` object with FilterCondition\n- Client SDK uses `filters` property (not `where`) for MongoDB-style filters\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 更新filter相关的文档，规范相关的代码相关的例子\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

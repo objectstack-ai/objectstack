@@ -1,0 +1,38 @@
+{
+  "number": 62,
+  "kind": "pull_request",
+  "title": "Add edge case test coverage for query and validation schemas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-21T16:27:47Z",
+  "updated_at": "2026-01-21T17:11:48Z",
+  "closed_at": "2026-01-21T17:11:28Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-21T17:11:28Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/62",
+  "body": "## Week 4: Testing & Documentation - Comprehensive Test Coverage ✅\n\n### Summary\nSuccessfully added comprehensive edge case tests to achieve and maintain 100% test coverage for both `query.zod.ts` and `validation.zod.ts`. Also fixed CI build issues in the documentation site.\n\n### Completed Tasks\n- [x] Review existing test coverage for query.zod.ts (Currently at 100%)\n- [x] Review existing test coverage for validation.zod.ts (Currently at 100%)\n- [x] Add edge case tests for query.zod.ts (null handling, type coercion, boundary conditions)\n- [x] Add edge case tests for validation.zod.ts (null handling, type coercion, boundary conditions)\n- [x] Verify all tests pass (819 tests passing)\n- [x] Verify coverage remains at 90%+ (Both files at 100%)\n- [x] Code review completed (No issues found)\n- [x] Security scan completed (No vulnerabilities found)\n- [x] Fix CI build failures (Documentation build errors resolved)\n\n### Test Coverage Achieved\n- **query.zod.ts**: 100% (Statements/Branch/Functions/Lines)\n- **validation.zod.ts**: 100% (Statements/Branch/Functions/Lines)\n- **Total Tests**: 819 passed (26 test files)\n\n### Edge Cases Added\n\n#### query.zod.ts (23 new tests):\n- Null/undefined values in filter expressions\n- Empty arrays for fields, aggregations, joins\n- Type coercion (numbers, booleans, strings in filters)\n- Optional field handling with undefined properties\n- Boundary conditions (zero values, large pagination)\n- Complex nested filters and having clauses\n- Optional properties in window functions\n- Default values verification\n- Invalid input rejection tests\n\n#### validation.zod.ts (30 new tests):\n- Null/undefined with proper defaults\n- Empty arrays/strings in validation fields\n- All format types (email, url, phone, json)\n- Complex state machine transitions (20+ states)\n- Timeout edge cases (100ms to 60s)\n- Debounce edge cases (0ms to 5s)\n- Nested conditional validations\n- Boundary conditions (long names, many fields)\n- Comprehensive params handling\n\n### CI Build Fixes\n- Fixed syntax error in `content/docs/index.cn.mdx` (Chinese quotation marks)\n- Replaced `fumadocs-ui` Callout components with Markdown blockquotes to resolve Turbopack module resolution issues\n- All builds now passing (packages, docs, examples)\n\n### Quality Assurance\n- ✅ All tests passing\n- ✅ 100% code coverage\n- ✅ No code review issues\n- ✅ No security vulnerabilities\n- ✅ No breaking changes\n- ✅ CI build passing\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> Week 4: Testing & Documentation\n> \n>  Day 1-3: Comprehensive Test Coverage\n> \n>  Ensure query.zod.ts reaches 90%+ coverage\n>  Ensure validation.zod.ts reaches 90%+ coverage\n>  Add edge case tests (null handling, type coercion)\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

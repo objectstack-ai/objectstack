@@ -1,0 +1,36 @@
+{
+  "number": 37,
+  "kind": "pull_request",
+  "title": "Fix TypeScript build error for blog frontmatter fields",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-20T07:11:52Z",
+  "updated_at": "2026-01-20T07:54:35Z",
+  "closed_at": "2026-01-20T07:54:35Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-20T07:54:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37",
+  "body": "The CI build was failing because blog posts used custom frontmatter fields (`date`, `author`, `tags`) that weren't typed in the fumadocs-mdx schema. Type casts (`as any`) masked this until TypeScript compilation.\n\n## Changes\n\n**`source.config.ts`**\n- Configure blog schema via `docs.schema` property with extended frontmatter\n- Use `z.coerce.string()` for date field to handle YAML's auto-parsing to Date objects\n\n**`source.ts`**\n- Remove `as any` casts to enable type inference\n\n**`page.tsx`**\n- Add `BlogPostData` interface and type assertions for custom fields\n- Preserve original `page.data.body` access for MDX component\n\n```typescript\n// Before: unsafe cast hid the missing schema\nexport const blog = defineDocs({\n  dir: '../../content/blog',\n}) as any;\n\n// After: explicit schema configuration\nconst blogSchema = frontmatterSchema.extend({\n  date: z.coerce.string().optional(),\n  author: z.string().optional(),\n  tags: z.array(z.string()).optional(),\n});\n\nexport const blog = defineDocs({\n  dir: '../../content/blog',\n  docs: { schema: blogSchema },\n});\n```\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21161689880/job/60857524435#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

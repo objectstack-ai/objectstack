@@ -1,0 +1,33 @@
+{
+  "number": 13,
+  "kind": "pull_request",
+  "title": "[WIP] Add Chinese version of the documentation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-19T11:15:36Z",
+  "updated_at": "2026-01-19T12:00:36Z",
+  "closed_at": "2026-01-19T12:00:23Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-19T12:00:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/13",
+  "body": "## Plan: Add Chinese (cn) Translations\n\n- [x] Understand the repository structure and i18n configuration\n- [x] Create Chinese translation for main index page (index.cn.mdx)\n- [x] Create Chinese translations for meta.json files (meta.cn.json)\n  - [x] Root docs meta.cn.json\n  - [x] Guides meta.cn.json\n  - [x] Concepts meta.cn.json\n  - [x] Specifications meta.cn.json (root and subcategories)\n- [x] Create Chinese translations for guide pages\n  - [x] getting-started.cn.mdx\n  - [x] installation.cn.mdx\n  - [x] project-structure.cn.mdx\n- [x] Create Chinese translations for concept pages\n  - [x] manifesto.cn.mdx\n  - [x] core-values.cn.mdx\n  - [x] architecture.cn.mdx\n  - [x] enterprise-patterns.cn.mdx\n  - [x] terminology.cn.mdx\n  - [x] security_architecture.cn.mdx\n  - [x] ai-codex.cn.mdx\n- [x] Create Chinese translations for specification pages\n  - [x] Specifications meta files (all subcategories)\n  - [x] Key specification files (architecture files for data/ui/server)\n- [ ] Test the documentation site with Chinese translations\n- [ ] Code review and final verification\n\n**Note:** The `references/` directory is auto-generated from JSON schemas and should NOT be translated as per the requirements.\n\n**Translation Coverage:**\n- ✅ Complete: Index, Guides, Concepts, Specification meta files\n- ✅ Key pages: All main architecture documents\n- ℹ️ Remaining specification pages can be translated as needed in the future\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 添加中文版本，注意自动生成的文档不需要处理references\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

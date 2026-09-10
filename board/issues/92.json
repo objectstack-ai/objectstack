@@ -1,0 +1,37 @@
+{
+  "number": 92,
+  "kind": "pull_request",
+  "title": "Release v0.3.1",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-23T18:16:43Z",
+  "updated_at": "2026-01-24T00:29:35Z",
+  "closed_at": "2026-01-24T00:27:13Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-24T00:27:13Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/92",
+  "body": "Patch release bumping all packages from 0.3.0 → 0.3.1.\n\n## Changes\n\n- **Organized zod schema files** by folder structure for better maintainability\n- **Updated documentation** across project\n\n## Packages Released\n\nAll 7 packages use fixed versioning and release together:\n- @objectstack/spec\n- @objectstack/client\n- @objectstack/driver-memory\n- @objectstack/objectql\n- @objectstack/plugin-hono-server\n- @objectstack/runtime\n- @objectstack/types\n\n## Publishing\n\nMerge to main triggers automated publishing via GitHub Actions. Requires `NPM_TOKEN` secret configured.\n\nManual publishing alternative:\n```bash\npnpm run release\n```\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> 发一个版本\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

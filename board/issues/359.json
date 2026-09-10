@@ -1,0 +1,36 @@
+{
+  "number": 359,
+  "kind": "pull_request",
+  "title": "Fix link checker CI by excluding Fumadocs framework patterns",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-28T10:26:56Z",
+  "updated_at": "2026-01-28T11:26:53Z",
+  "closed_at": "2026-01-28T11:26:53Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-28T11:26:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/359",
+  "body": "Lychee link checker was failing with 272 errors because it treated Fumadocs framework files and routing patterns as broken file paths.\n\nFumadocs uses `meta.json` files containing page identifiers (`\"agent\"`, `\"orchestration\"`) and relative links (`./agent`) that resolve to `.mdx` files at runtime. Lychee attempted to validate these as `file://` paths without extensions.\n\n## Changes\n\n- **`.lycheeignore`**: Added `**/meta.json` and `**/meta.cn.json` patterns\n- **`check-links.yml`**: Added explicit `--exclude-path` flags for meta files\n- **`lychee.toml`**: Excluded `file://**/content/docs/**` pattern to skip Fumadocs relative links\n\nExternal HTTP/HTTPS link checking remains unchanged.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21434498273/job/61721754472#step:3:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

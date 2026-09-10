@@ -1,0 +1,33 @@
+{
+  "number": 302,
+  "kind": "pull_request",
+  "title": "Organize ObjectStackCapabilitiesSchema by architectural layer with generic property names",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-27T06:32:24Z",
+  "updated_at": "2026-01-27T07:57:15Z",
+  "closed_at": "2026-01-27T07:53:54Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-27T07:53:54Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/302",
+  "body": "Previous `ObjectStackCapabilitiesSchema` was a flat structure mixing capabilities across architectural layers. This made it unclear which features belonged to data layer, UI layer, or system layer.\n\n## Changes\n\n**Subsystem-specific schemas** (`packages/spec/src/stack.zod.ts`):\n- `ObjectQLCapabilitiesSchema`: Data layer (50+ fields) - query operations, advanced SQL features, field types, business logic, driver support\n- `ObjectUICapabilitiesSchema`: UI layer (15+ fields) - view types, analytics, customization, responsive/accessibility\n- `ObjectOSCapabilitiesSchema`: System layer (30+ fields) - API protocols, real-time, security, platform services, multi-tenancy\n\n**Hierarchical structure with generic property names**:\n```typescript\nconst capabilities: ObjectStackCapabilities = {\n  data: {\n    queryWindowFunctions: true,\n    vectorSearch: true,      // AI/RAG\n    supportedDrivers: ['postgresql', 'mongodb']\n  },\n  ui: {\n    kanbanView: true,\n    customThemes: false\n  },\n  system: {\n    version: '1.0.0',\n    environment: 'production',\n    graphqlApi: true,\n    multiTenant: true,\n    limits: { maxObjects: 1000 }\n  }\n};\n```\n\n**Property naming**:\n- Uses generic category names (`data`, `ui`, `system`) instead of product-specific names\n- Reduces brand coupling and improves universal understanding\n- Type names remain unchanged (`ObjectQLCapabilities`, `ObjectUICapabilities`, `ObjectOSCapabilities`) for backward compatibility\n\n**Documentation** (`content/docs/objectos/runtime-capabilities.mdx`):\n- Capability reference tables by subsystem\n- Environment-specific configuration examples (production/dev/AI-focused)\n- Progressive enhancement patterns\n- Updated to reflect generic property names\n\n**Examples** (`examples/capabilities-example.ts`):\n- Three deployment scenarios with helper functions\n- Capability checking utilities\n- Updated helper function signatures to use `'data' | 'ui' | 'system'`\n\n## Impact\n\n- AI agents can now respect subsystem-specific constraints during code generation\n- Frontends can discover capabilities per layer for progressive enhancement\n- Clear separation enables environment-specific capability profiles\n- Generic naming improves maintainability and reduces product-specific coupling\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> ObjectStackCapabilitiesSchema\n> \n> 系统实现分了三个子项目如何区分,或者我如何在此项目中各自描述各自的系统实现\n> \n> objectql objectui, objectos\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 445,
+  "kind": "pull_request",
+  "title": "chore: version packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T10:43:59Z",
+  "updated_at": "2026-01-31T10:53:40Z",
+  "closed_at": "2026-01-31T10:53:40Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T10:53:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/445",
+  "body": "This PR was opened by the [Changesets release](https://github.com/changesets/action) GitHub action. When you're ready to do a release, you can merge this and the packages will be published to npm automatically. If you're not ready to do a release yet, that's fine, whenever you add more changesets to main, this PR will be updated.\n\n\n# Releases\n## @objectstack/ai-bridge@0.7.2\n\n### Patch Changes\n\n-   fb41cc0: Patch release: Updated documentation and JSON schemas\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n\n## @objectstack/cli@0.7.2\n\n### Patch Changes\n\n-   fb41cc0: Patch release: Updated documentation and JSON schemas\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n    -   @objectstack/core@0.7.2\n    -   @objectstack/plugin-hono-server@0.7.2\n\n## @objectstack/client@0.7.2\n\n### Patch Changes\n\n-   fb41cc0: Patch release: Updated documentation and JSON schemas\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n    -   @objectstack/core@0.7.2\n\n## @objectstack/client-react@0.7.2\n\n### Patch Changes\n\n-   fb41cc0: Patch release: Updated documentation and JSON schemas\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n    -   @objectstack/core@0.7.2\n    -   @objectstack/client@0.7.2\n\n## @objectstack/core@0.7.2\n\n### Patch Changes\n\n-   fb41cc0: Patch release: Updated documentation and JSON schemas\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n\n## @objectstack/metadata@0.7.2\n\n### Patch Changes\n\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n    -   @objectstack/core@0.7.2\n    -   @objectstack/types@0.7.2\n\n## @objectstack/objectql@0.7.2\n\n### Patch Changes\n\n-   fb41cc0: Patch release: Updated documentation and JSON schemas\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n    -   @objectstack/core@0.7.2\n    -   @objectstack/types@0.7.2\n\n## @objectstack/driver-memory@0.7.2\n\n### Patch Changes\n\n-   fb41cc0: Patch release: Updated documentation and JSON schemas\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n    -   @objectstack/core@0.7.2\n\n## @objectstack/plugin-hono-server@0.7.2\n\n### Patch Changes\n\n-   fb41cc0: Patch release: Updated documentation and JSON schemas\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n    -   @objectstack/core@0.7.2\n    -   @objectstack/types@0.7.2\n\n## @objectstack/plugin-msw@0.7.2\n\n### Patch Changes\n\n-   fb41cc0: Patch release: Updated documentation and JSON schemas\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n    -   @objectstack/types@0.7.2\n    -   @objectstack/objectql@0.7.2\n    -   @objectstack/runtime@0.7.2\n\n## @objectstack/runtime@0.7.2\n\n### Patch Changes\n\n-   fb41cc0: Patch release: Updated documentation and JSON schemas\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n    -   @objectstack/core@0.7.2\n    -   @objectstack/types@0.7.2\n\n## @objectstack/spec@0.7.2\n\n### Patch Changes\n\n-   fb41cc0: Patch release: Updated documentation and JSON schemas\n\n## @objectstack/types@0.7.2\n\n### Patch Changes\n\n-   fb41cc0: Patch release: Updated documentation and JSON schemas\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n\n## @objectstack/example-ai-analyst@0.7.2\n\n### Patch Changes\n\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n\n## @objectstack/example-ai-codegen@0.7.2\n\n### Patch Changes\n\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n\n## @objectstack/example-ai-sales@0.7.2\n\n### Patch Changes\n\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n\n## @objectstack/example-ai-support@0.7.2\n\n### Patch Changes\n\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n\n## @objectstack/example-basic@0.7.2\n\n### Patch Changes\n\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n    -   @objectstack/core@0.7.2\n\n## @objectstack/example-crm@0.7.2\n\n### Patch Changes\n\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n\n## @objectstack/example-host@0.7.2\n\n### Patch Changes\n\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/objectql@0.7.2\n    -   @objectstack/runtime@0.7.2\n    -   @objectstack/driver-memory@0.7.2\n    -   @objectstack/plugin-hono-server@0.7.2\n    -   @objectstack/example-crm@0.7.2\n    -   @objectstack/plugin-bi@0.7.2\n    -   @objectstack/example-todo@0.7.2\n\n## @objectstack/example-msw-react-crud@0.7.2\n\n### Patch Changes\n\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n    -   @objectstack/objectql@0.7.2\n    -   @objectstack/runtime@0.7.2\n    -   @objectstack/client@0.7.2\n    -   @objectstack/client-react@0.7.2\n    -   @objectstack/driver-memory@0.7.2\n    -   @objectstack/plugin-msw@0.7.2\n    -   @objectstack/example-todo@0.7.2\n\n## @objectstack/plugin-bi@0.7.2\n\n### Patch Changes\n\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n\n## @objectstack/example-todo@0.7.2\n\n### Patch Changes\n\n-   Updated dependencies [fb41cc0]\n    -   @objectstack/spec@0.7.2\n    -   @objectstack/client@0.7.2\n\n## @objectstack/docs@0.7.2\n\n\n"
+}

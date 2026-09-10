@@ -1,0 +1,33 @@
+{
+  "number": 12,
+  "kind": "pull_request",
+  "title": "Add comprehensive test suite for Zod schema validation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-19T10:15:30Z",
+  "updated_at": "2026-01-19T11:16:03Z",
+  "closed_at": "2026-01-19T11:14:45Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-19T11:14:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/12",
+  "body": "Implements production-ready test coverage for ObjectStack protocol specifications using Vitest.\n\n## Changes\n\n**Testing Infrastructure**\n- Vitest configuration with coverage reporting (`vitest.config.ts`)\n- Test scripts: `test`, `test:watch`, `test:coverage`\n- TypeScript compilation excludes test files\n\n**Test Coverage: 263 tests across 13 schemas**\n- Data Protocol (120 tests): `field`, `object`, `validation`, `permission`, `workflow`, `flow`\n- UI Protocol (97 tests): `view`, `app`, `action`, `dashboard`\n- System Protocol (26 tests): `manifest`, `role`\n- AI Protocol (20 tests): `agent`\n\n**Test Structure**\n- Co-located `.test.ts` files alongside schema definitions\n- Validates: schema constraints (snake_case, regex, enums), default values, discriminated unions\n- Real-world examples from CRM, HR, Sales, Support, AI domains\n\n## Example\n\n```typescript\nimport { describe, it, expect } from 'vitest';\nimport { ObjectSchema } from './object.zod';\n\ndescribe('ObjectSchema', () => {\n  it('should enforce snake_case naming', () => {\n    expect(() => ObjectSchema.parse({\n      name: 'account',      // valid\n      fields: {}\n    })).not.toThrow();\n    \n    expect(() => ObjectSchema.parse({\n      name: 'AccountName',  // invalid\n      fields: {}\n    })).toThrow();\n  });\n});\n```\n\n**Documentation**\n- Updated README with testing guide and best practices\n- Test patterns documented for future schema additions\n\nAll 263 tests passing with 100% coverage on tested schemas.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 编写测试\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

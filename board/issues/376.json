@@ -1,0 +1,37 @@
+{
+  "number": 376,
+  "kind": "pull_request",
+  "title": "feat: Add WebSocket and real-time collaboration protocol specifications",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T06:29:24Z",
+  "updated_at": "2026-01-30T07:11:24Z",
+  "closed_at": "2026-01-30T07:03:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-30T07:03:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/376",
+  "body": "Implements comprehensive Zod schemas for WebSocket-based real-time communication and collaborative editing, addressing requirements for event subscriptions, filtering, presence tracking, and conflict-free collaboration.\n\n## WebSocket Event Protocol (`api/websocket.zod.ts`)\n\n**Event Subscriptions**: Wildcard pattern matching (`record.*`, `*.created`) via `EventPatternSchema`, distinct from dot-notation `EventNameSchema` for actual events.\n\n**Advanced Filtering**: Recursive `EventFilterSchema` with explicit `ZodType` annotation to resolve circular reference. Supports 13 operators (eq, ne, gt, gte, lt, lte, in, nin, contains, startsWith, endsWith, exists, regex) with AND/OR/NOT combinators.\n\n**Presence & Collaboration**: Enhanced presence tracking (4 states: online/away/busy/offline) with device detection. Cursor positions with line/column tracking. Edit operations (insert/delete/replace) with version tracking for OT.\n\n**Protocol Messages**: 10 discriminated union message types with `WebSocketMessageSchema` for type-safe parsing.\n\n```typescript\n// Subscription with wildcard and advanced filtering\nconst subscription: EventSubscription = {\n  subscriptionId: uuid(),\n  events: ['record.*', '*.created'],\n  objects: ['account', 'contact'],\n  filters: {\n    and: [\n      { conditions: [{ field: 'amount', operator: 'gte', value: 1000 }] },\n      { or: [\n        { conditions: [{ field: 'status', operator: 'eq', value: 'active' }] },\n        { conditions: [{ field: 'priority', operator: 'in', value: ['high', 'urgent'] }] }\n      ]}\n    ]\n  }\n};\n```\n\n## Real-Time Collaboration Protocol (`system/collaboration.zod.ts`)\n\n**Operational Transformation**: `OTComponentSchema` discriminated union (insert/delete/retain) with attribute support for rich text formatting.\n\n**CRDT Types**: \n- LWW-Register with vector clocks for causality tracking\n- G-Counter (grow-only) and PN-Counter (increment/decrement)\n- OR-Set with unique addition identifiers for conflict-free removal\n- Text CRDT with Lamport timestamps for operation ordering\n\n**Cursor Sharing**: `CollaborativeCursorSchema` with selection ranges (anchor/focus), visual styling (10 color presets + custom), and typing indicators.\n\n**Awareness State**: `AwarenessUserStateSchema` tracks user activity (active/idle/viewing/disconnected), current document/view, and session lifecycle events.\n\n**Collaboration Sessions**: Supports 4 modes (ot/crdt/lock/hybrid) with configurable conflict resolution, snapshot intervals, and idle timeouts.\n\n```typescript\n// Text CRDT operation with causality tracking\nconst operation: TextCRDTOperation = {\n  operationId: uuid(),\n  replicaId: 'replica-1',\n  position: 42,\n  insert: 'new text',\n  timestamp: '2024-01-15T10:30:00Z',\n  lamportTimestamp: 156,  // For operation ordering\n};\n```\n\n## Technical Notes\n\n- Renamed `PresenceStatus` → `WebSocketPresenceStatus` to avoid export collision with `realtime.zod.ts`\n- All schemas follow Zod-first pattern with `z.infer<>` type derivation\n- JSON schemas auto-generated for 64 types (29 collaboration, 27 websocket, 8 shared)\n- Test coverage: 62 tests (websocket) + 71 tests (collaboration) = 133 new tests\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 2.2 Real-Time Protocol / 实时通信协议\n> \n> In THIS Repo (Spec Definitions) / 在本仓库（规范定义）\n> \n> WebSocket Event Protocol\n> \n>  Enhance packages/spec/src/api/websocket.zod.ts\n>  Event subscription schema\n>  Event filtering schema\n>  Presence tracking schema\n>  Collaborative editing protocol\n> Real-Time Collaboration Protocol\n> \n>  Create packages/spec/src/system/collaboration.zod.ts\n>  Operational transformation schema\n>  CRDT (Conflict-free Replicated Data Type) schema\n>  Cursor sharing schema\n>  Awareness state schema\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

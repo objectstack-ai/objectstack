@@ -1,0 +1,35 @@
+{
+  "number": 366,
+  "kind": "pull_request",
+  "title": "[WIP] Fix action step error in CI workflow",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xl"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-29T02:01:13Z",
+  "updated_at": "2026-01-29T02:29:48Z",
+  "closed_at": "2026-01-29T02:24:14Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-29T02:24:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/366",
+  "body": "## Fix TypeScript Build Errors in examples/basic\n\n### Problem\nThe `examples/basic` package has TypeScript compilation errors due to:\n1. Incorrect imports from `@objectstack/spec` (namespace structure not followed)\n2. Type mismatches in example code\n3. Missing/incorrect property names in type definitions\n\n### Plan\n- [x] Investigate CI build failure logs\n- [x] Identify root cause: imports need to use namespaced structure\n- [x] Update all example files to use correct namespace imports\n  - [x] ai-rag-example.ts - Use AI.* namespace\n  - [x] api-discovery-example.ts - Use API.* namespace\n  - [x] auth-permission-example.ts - Use Auth.* and Permission.* namespace\n  - [x] automation-example.ts - Use Automation.* namespace\n  - [x] stack-definition-example.ts - Fix type mismatches\n- [x] Fix remaining type errors in examples\n  - [x] ai-rag-example.ts - Add missing required properties\n  - [x] auth-permission-example.ts - Fix RLS and Territory types\n  - [x] automation-example.ts - Fix workflow criteria and action types\n  - [x] stack-definition-example.ts - Fix Object, Dashboard, Workflow types\n- [x] Build and verify all fixes locally\n- [x] Ensure CI passes\n\n### Changes Made\n\n#### ai-rag-example.ts\n- ✅ Updated imports to use `AI` namespace\n- ✅ Added missing vector store properties (`batchSize`, `connectionPoolSize`, `timeout`)\n- ✅ Added missing RAG query request properties (`includeMetadata`, `includeSources`)\n- ✅ Fixed agent knowledge configuration (changed from pipeline to indexes/topics)\n- ✅ Fixed tool types (added required `type` field)\n\n#### api-discovery-example.ts\n- ✅ Updated imports to use `API` namespace\n\n#### auth-permission-example.ts\n- ✅ Updated imports to use `Auth` and `Permission` namespaces\n- ✅ Added missing `priority` field to RLS policies\n- ✅ Fixed Territory schema (removed invalid fields, added required fields)\n- ✅ Fixed User type usage (added roles as extended property)\n\n#### automation-example.ts\n- ✅ Updated imports to use `Automation` namespace\n- ✅ Changed all `criteria` from objects to formula strings\n- ✅ Changed all action types from camelCase to snake_case\n- ✅ Fixed workflow rule structure and properties\n- ✅ Fixed approval process structure\n- ✅ Removed invalid Flow and ETLPipeline examples\n\n#### stack-definition-example.ts\n- ✅ Added required `id` and `type` fields to manifest\n- ✅ Changed `fields` from arrays to Record (object) format\n- ✅ Fixed reference fields (string instead of object)\n- ✅ Fixed View schema structure\n- ✅ Fixed Dashboard widgets\n- ✅ Fixed workflow actions\n- ✅ Fixed agent configuration\n\n### Verification\n✅ All examples now compile successfully with TypeScript\n✅ Full project build passes\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21462696282/job/61818343953#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

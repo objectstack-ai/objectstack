@@ -1,0 +1,37 @@
+{
+  "number": 377,
+  "kind": "pull_request",
+  "title": "Add connector protocols with authentication, sync, webhooks, and templates",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T08:01:20Z",
+  "updated_at": "2026-01-30T09:15:48Z",
+  "closed_at": "2026-01-30T09:04:18Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-30T09:04:18Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/377",
+  "body": "Implements external system integration protocols with comprehensive authentication, data synchronization, and connector templates for SaaS, databases, file storage, and message queues.\n\n## Core Protocol (`integration/connector.zod.ts`)\n\n**Authentication** - Discriminated union supporting:\n- OAuth2 (all grant types), JWT (HS/RS/ES algorithms), SAML (SSO)\n- API Key (header/query param), Basic, Bearer, None\n\n**Data Sync** - Bidirectional with conflict resolution:\n- Strategies: `full`, `incremental`, `upsert`, `append_only`\n- Conflict resolution: `source_wins`, `target_wins`, `latest_wins`, `manual`\n- Real-time via webhooks, scheduled via cron, batch processing\n\n**Field Mapping** - Source → target with transformations:\n```typescript\n{\n  sourceField: 'FirstName',\n  targetField: 'first_name',\n  dataType: 'string',\n  transform: { type: 'uppercase' },\n  syncMode: 'bidirectional'\n}\n```\n\n**Webhooks** - Event-driven with HMAC verification:\n- Events: `record.created`, `record.updated`, `sync.completed`, etc.\n- Retry with exponential backoff, custom headers, signature algorithms\n\n**Rate Limiting** - Multiple strategies:\n- `token_bucket`, `sliding_window`, `fixed_window`, `leaky_bucket`\n- Upstream rate limit header detection, burst capacity\n\n## Connector Templates\n\n**SaaS** (`integration/connector/saas.zod.ts`):\n- Providers: Salesforce, HubSpot, Stripe, Zendesk, ServiceNow, etc.\n- OAuth token refresh, API versioning, object discovery, pagination\n- Examples: Salesforce (OAuth2 + incremental sync), HubSpot (API key)\n\n**Database** (`integration/connector/database.zod.ts`):\n- Providers: PostgreSQL, MySQL, MongoDB, Snowflake, BigQuery, Redshift\n- CDC (log-based, trigger-based), connection pooling, SSL/TLS, read replicas\n- Examples: PostgreSQL (CDC + replication slot), MongoDB (change streams)\n\n**File Storage** (`integration/connector/file-storage.zod.ts`):\n- Providers: S3, Azure Blob, GCS, Dropbox, Box, OneDrive, Google Drive\n- Multipart uploads, versioning, lifecycle policies, encryption\n- Content processing: text extraction, thumbnails, virus scanning\n- Examples: S3 (KMS encryption + thumbnails), Google Drive (OAuth2)\n\n**Message Queue** (`integration/connector/message-queue.zod.ts`):\n- Providers: Kafka, RabbitMQ, SQS, Pub/Sub, Azure Service Bus, NATS\n- Consumer/producer configs, acknowledgment modes, delivery guarantees\n- DLQ, partitioning, schema registry (Avro), SASL auth\n- Examples: Kafka (consumer groups + exactly-once), RabbitMQ (routing keys)\n\n## Schema Generation\n\n60+ JSON schemas auto-generated for IDE autocomplete and validation. All schemas follow `camelCase` for config keys, `snake_case` for machine names per ObjectStack conventions.\n\n## Directory Structure\n\nAll connector protocols are organized in the dedicated `integration` namespace:\n- **Location**: `packages/spec/src/integration/`\n- **Exports**: Available via `@objectstack/spec/integration` or `Integration` namespace\n- **Organization**: Keeps `system` directory focused on core system-level configurations\n\nThe `integration` namespace is established as the dedicated location for all external system connection protocols, separate from automation workflows and system configuration.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 2.3 Connector Protocols / 连接器协议\n> \n> In THIS Repo (Spec Definitions) / 在本仓库（规范定义）\n> \n> External System Connector Protocol\n> \n>  Enhance packages/spec/src/system/connector.zod.ts\n>  Authentication method schema (OAuth2, API Key, JWT, SAML)\n>  Data synchronization configuration\n>  Field mapping schema\n>  Webhook configuration schema\n>  Rate limiting and retry configuration\n> Specific Connector Templates\n> \n>  Create connector protocol templates\n>  SaaS connector protocol template\n>  Database connector protocol template\n>  File storage connector protocol template\n>  Message queue connector protocol template\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

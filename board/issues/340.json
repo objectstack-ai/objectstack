@@ -1,0 +1,33 @@
+{
+  "number": 340,
+  "kind": "pull_request",
+  "title": "Clarify ObjectQL and Hono as canonical implementations of capability contracts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-28T05:24:53Z",
+  "updated_at": "2026-01-28T05:32:19Z",
+  "closed_at": "2026-01-28T05:32:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/340",
+  "body": "PR #339 introduced `IHttpServer` and `IDataEngine` interfaces but didn't establish which implementations are canonical for ObjectStack. Feedback specified: ObjectQL is the data engine, Hono is HTTP.\n\n## Changes\n\n**Interface documentation** (`data-engine.ts`, `http-server.ts`)\n- Added primary implementation annotations identifying ObjectQL and Hono as canonical\n- Listed alternative implementations (Prisma/TypeORM, Express/Fastify)\n\n**README** (`packages/runtime/README.md`)\n- Updated API reference to specify primary implementations\n- Reordered examples to show canonical implementations first\n\n**Test fixtures** (`test-interfaces.ts`)\n- Added header clarifying ObjectQL/Hono are production implementations\n- Noted mocks are for interface contract testing only\n\n```typescript\n/**\n * IDataEngine - Standard Data Engine Interface\n * \n * **Primary Implementation:** ObjectQL (@objectstack/objectql)\n * - ObjectQL is the canonical data engine for ObjectStack\n * - Provides metadata-driven CRUD operations with driver abstraction\n * \n * **Alternative Implementations:** Prisma, TypeORM, Mongoose, etc.\n */\nexport interface IDataEngine { ... }\n```\n\nDocumentation-only changes. Dependency Inversion Principle maintained - interfaces remain abstract, alternatives still supported.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/339\n> \n> @copilot objectql 就是 data engine hono 就是 http,\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

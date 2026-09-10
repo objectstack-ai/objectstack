@@ -1,0 +1,33 @@
+{
+  "number": 402,
+  "kind": "pull_request",
+  "title": "Add comprehensive development roadmap for 6 core repositories",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T16:00:09Z",
+  "updated_at": "2026-01-31T02:52:01Z",
+  "closed_at": "2026-01-31T02:52:01Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/402",
+  "body": "Creates detailed development planning for ObjectStack's microkernel architecture transition from monorepo to distributed ecosystem. Addresses the question from PR #397: what specific development tasks each core repository should implement.\n\n## Deliverables\n\n**CORE_REPOSITORIES_DEVELOPMENT_PLAN.md** (544 lines)\n- Current implementation status analysis for each repository (10-70% complete)\n- ~160 features catalogued across P0/P1/P2 priorities\n- API specifications and directory structures for each repo\n- 3-phase timeline: Q1 infrastructure → Q2 production features → Q3 enterprise capabilities\n\n**DEVELOPMENT_SUMMARY.md** (233 lines)\n- Executive overview with effort estimates (1-6 weeks per repo)\n- Success metrics: code quality, performance, developer experience\n- Technology stack decisions and next actions\n\n## Repository Planning Breakdown\n\n### @objectstack/core (3-5 weeks, 60% complete)\n- P0: Enhanced plugin loader, DI optimization (factory/singleton/scoped), graceful shutdown\n- P1: Hot reload, performance monitoring, error isolation\n- P2: Plugin sandbox, dependency graph visualizer\n\n### @objectstack/objectql (4-6 weeks, 30% complete)\n- P0: Complete SQL builder (SELECT/JOIN/GROUP BY/window functions), AST parser, driver abstraction\n- P1: Query optimizer (rewrite rules, index advisor), query planner, result cache\n- P2: Full-text search, geospatial, JSON queries\n\n### @objectstack/runtime (3-5 weeks, 20% complete)\n- P0: HTTP server adapter (Hono/Express), middleware stack, event bus, RESTful data endpoints\n- P1: Worker pool, WebSocket/SSE, session management, multi-strategy auth\n- P2: HTTP caching, rate limiting, OpenTelemetry integration\n\n### @objectstack/client (2-4 weeks, 70% complete)\n- P0: Type-safe query builder with inference, React Hooks (useQuery/useMutation/useInfiniteQuery)\n- P1: Real-time subscriptions, offline IndexedDB queue, optimistic updates\n- P2: Vue Composables, Svelte Stores, DevTools\n\n### @objectstack/cli (1-3 weeks, 10% complete)\n- P0: Project scaffolding (`os init`), code generation (`os generate`), dev server, build\n- P1: Migration manager (`os migrate`), plugin manager, deployment (`os deploy`)\n- P2: Testing harness, diagnostics (`os doctor`), data import/export\n\n### @objectstack/types (1 week, 40% complete)\n- P0: Complete contract interfaces (Kernel, Runtime, Driver, EventBus, Worker)\n- P1: HTTP, Session, Cache interfaces\n\n## Timeline\n\n**Phase 1** (Q1 2026, 2 months): P0 features → basic apps runnable  \n**Phase 2** (Q2 2026, 2 months): P1 features → production-ready  \n**Phase 3** (Q3 2026, 2 months): P2 features → enterprise-grade\n\nTotal: 6 months, ~160 features across 6 repositories\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/397\n> \n> 进一步规划以下仓库的具体开发内容清单，编写详细的报告\n> \n> core\t微内核\t插件加载器、依赖注入、生命周期\n> objectql\t查询引擎\tSQL 构建器、查询优化器、AST 解析器\n> runtime\t运行时环境\t服务器、工作器、事件总线、中间件\n> client\t客户端 SDK\tAPI 客户端、类型安全查询、React Hooks\n> cli\t命令行工具\t脚手架、迁移、代码生成\n> types\t共享类型\t运行时环境接口\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

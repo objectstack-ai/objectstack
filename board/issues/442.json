@@ -1,0 +1,36 @@
+{
+  "number": 442,
+  "kind": "pull_request",
+  "title": "Add missing documentation for core protocol schemas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T08:55:06Z",
+  "updated_at": "2026-01-31T09:39:21Z",
+  "closed_at": "2026-01-31T09:37:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T09:37:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/442",
+  "body": "Recent codebase addition (PR #441) introduced 110+ schema files. This PR closes documentation gaps for 8 critical schemas and fixes structural issues.\n\n## New Documentation (8 files, 2,325 lines)\n\n**Data Protocol**\n- `driver-postgres.mdx` - PostgreSQL connection config (SSL, pooling, timeouts)\n- `driver-mongo.mdx` - MongoDB connection config (replica sets, auth, capabilities)\n\n**System Protocol**\n- `plugin-lifecycle-events.mdx` - Event schemas for kernel/plugin/service/hook lifecycle\n- `startup-orchestrator.mdx` - Plugin startup with health checks, rollback, parallelization\n- `plugin-validator.mdx` - Validation errors/warnings with error code registry\n- `metadata-loader.mdx` - Multi-backend metadata loading (FS, HTTP, S3, DB)\n- `service-registry.mdx` - DI container with singleton/transient/scoped services\n\n**Integration Protocol**\n- `connector-file-storage.mdx` - S3/Azure/GCS connector with multipart uploads, versioning\n\n## Fixes\n\n- Removed duplicate `data/search-engine.mdx` (correct version in `system/`)\n- Fixed `automation/connector.mdx` source path reference (automation → integration)\n- Updated `data/meta.json` and `integration/meta.json` for navigation\n\nEach file includes Zod schema references, TypeScript examples, property tables, usage patterns, and best practices.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 扫描最近的修改内容，对必要的文档进行更新\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

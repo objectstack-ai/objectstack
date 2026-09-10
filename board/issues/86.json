@@ -1,0 +1,37 @@
+{
+  "number": 86,
+  "kind": "pull_request",
+  "title": "Extend workflow actions: 2→10 action types",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-23T10:28:51Z",
+  "updated_at": "2026-01-23T10:50:37Z",
+  "closed_at": "2026-01-23T10:50:37Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-01-23T10:50:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/86",
+  "body": "Extends workflow automation from 2 action types (field update, email) to 10 types for multi-channel notification and integration support.\n\n## Added Actions\n\n**Messaging & Notifications:**\n- `sms_notification` - Twilio/Vonage SMS with provider selection\n- `slack_message` - Channel messages with mentions and threading\n- `teams_message` - Microsoft Teams with team/channel routing\n- `push_notification` - Mobile push with deep linking\n\n**Integrations:**\n- `http_call` - REST API calls with auth (Basic, Bearer, OAuth2, API Key)\n- `webhook_trigger` - Outbound webhooks with retry logic\n- `task_creation` - Create records on any object with field mapping\n\n**Extensibility:**\n- `custom_script` - JavaScript/TypeScript/Python execution with timeout control\n\n## Implementation\n\nAll schemas follow Zod-first pattern with discriminated unions for type safety:\n\n```typescript\nexport const WorkflowActionSchema = z.discriminatedUnion('type', [\n  FieldUpdateActionSchema,\n  EmailAlertActionSchema,\n  SmsNotificationActionSchema,\n  SlackMessageActionSchema,\n  TeamsMessageActionSchema,\n  HttpCallActionSchema,\n  WebhookTriggerActionSchema,\n  TaskCreationActionSchema,\n  PushNotificationActionSchema,\n  CustomScriptActionSchema,\n]);\n```\n\nExample multi-channel workflow:\n\n```typescript\n{\n  name: 'notify_high_value_deal',\n  objectName: 'opportunity',\n  triggerType: 'on_create',\n  criteria: 'amount > 100000',\n  actions: [\n    { type: 'email_alert', template: 'deal_alert', recipients: [...] },\n    { type: 'sms_notification', provider: 'twilio', message: '...', recipients: [...] },\n    { type: 'slack_message', channel: '#sales-wins', message: '...', mentions: [...] },\n    { type: 'webhook_trigger', url: 'https://...', payload: {...} }\n  ]\n}\n```\n\n## Artifacts\n\n- JSON schemas auto-generated for all action types\n- TypeScript types derived via `z.infer<>`\n- MDX documentation generated for each schema\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 4. 工作流动作扩展\n> \n> 文件: packages/spec/src/data/workflow.zod.ts\n> 工作量: 3 天\n> 当前状态: 只有字段更新 + 邮件动作\n> 目标: 10+ 动作类型\n> \n> 新增动作类型:\n> \n> SMS 通知（Twilio、Vonage）\n> Slack/Teams 消息\n> HTTP 调用（REST API 集成）\n> Webhook 触发\n> 任务创建\n> 推送通知\n> 自定义脚本\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

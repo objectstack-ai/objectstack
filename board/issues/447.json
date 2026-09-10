@@ -1,0 +1,33 @@
+{
+  "number": 447,
+  "kind": "pull_request",
+  "title": "Add AI Agent development guide for automated enterprise software generation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T17:41:58Z",
+  "updated_at": "2026-01-31T19:07:48Z",
+  "closed_at": "2026-01-31T19:07:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/447",
+  "body": "Enables developers to build AI agents that automatically generate enterprise management software (CRM, ERP, HRM, etc.) from natural language requirements using ObjectStack specifications.\n\n## Documentation Suite (62.8KB, Chinese)\n\n**`content/docs/ai/README.md`** - Navigation hub\n- Quick start patterns (CLI, API, online IDE)\n- Learning paths (beginner → advanced)\n- Architecture overview\n\n**`content/docs/ai/agent-development-guide.md`** - Core reference\n- **61 metadata types** cataloged across 8 layers:\n  - Data (ObjectQL): Object, Field (28 types), Validation, Hook, Query, Filter, Driver\n  - UI (ObjectUI): View (7 types), Dashboard, Report, Action, Chart (10 types)\n  - Automation: Workflow, Flow, Approval, ETL, Trigger\n  - AI: Agent, RAG Pipeline, Model Registry, NLQ\n  - System (ObjectOS): Manifest, Plugin, Events, Metrics, Cache, Job\n  - Auth: Permission, RLS, Role, Territory\n  - API: REST, GraphQL, WebSocket, Batch\n  - Integration: Connectors\n- 5-module agent architecture (NLP → Architecture Design → Code Gen → Validation → Iteration)\n- 16-week implementation plan\n\n**`content/docs/ai/metadata-checklist.md`** - Quick reference\n- Structured lookup by layer with usage scenarios, code snippets, file locations\n- Completion tracking: 50/61 (82%) implemented\n\n**`content/docs/ai/implementation-examples.md`** - Working examples\n- Complete inventory/sales/purchase management system generation\n- Three integration patterns with runnable code\n\n## Example Usage\n\n```typescript\nconst agent = new ObjectStackAgent({\n  llm: { provider: 'openai', model: 'gpt-4' }\n});\n\nconst result = await agent.generate({\n  requirement: `进销存管理系统包括:\n    - 商品管理 (Product, Category, Brand)\n    - 库存管理 (Warehouse, Inventory)\n    - 采购/销售管理 (Purchase/Sales Orders)\n    - 仪表板 (销售趋势, 库存预警)`\n});\n\n// Generates: 9 Objects, 3 Views, 1 Dashboard, TypeScript code\n```\n\n## Design Decisions\n\n- **Zod-first metadata**: Runtime validation + type inference for all 61 metadata types\n- **DDD alignment**: Business entities map directly to ObjectStack Object schema\n- **Template-based generation**: Ensures consistency with ObjectStack conventions (camelCase config, snake_case data)\n- **Multi-stage validation**: Zod schema → TypeScript compilation → ESLint → business logic checks\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 我想开发一个agent，让他基于 @objectstack/spec 中规范去自我迭代开发企业管理软件。帮我整理跟业务开发相关的元素据清单和介绍。编写完整的设计方案和开发计划。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 83,
+  "kind": "pull_request",
+  "title": "Add AI workflow automation and predictive analytics protocols",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-23T08:31:29Z",
+  "updated_at": "2026-01-23T09:34:35Z",
+  "closed_at": "2026-01-23T09:34:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-23T09:34:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/83",
+  "body": "Adds two AI protocol specifications to enable intelligent automation and ML-powered decision making in ObjectStack applications.\n\n## AI Workflow Automation (`ai/workflow-automation.zod.ts`)\n\n**Core capabilities:**\n- **Triggers:** record_created, record_updated, field_changed, scheduled, manual, webhook, batch\n- **AI Tasks:** classify, extract, summarize, generate, predict, translate, sentiment, entity_recognition, anomaly_detection, recommendation\n- **Execution:** Sequential/parallel modes, batch processing, conditional execution, retry logic\n- **Post-processing:** Field updates, notifications, flow triggers, webhooks\n\n**Example usage:**\n```typescript\nconst workflow: AIWorkflowAutomation = {\n  name: 'auto_triage_tickets',\n  objectName: 'support_ticket',\n  trigger: 'record_created',\n  aiTasks: [\n    {\n      type: 'classify',\n      inputFields: ['description'],\n      outputField: 'category',\n      classes: ['bug', 'feature', 'question']\n    },\n    {\n      type: 'sentiment',\n      inputFields: ['description'],\n      outputField: 'urgency_score'\n    }\n  ],\n  postActions: [{\n    type: 'field_update',\n    name: 'route_to_team',\n    config: { /* ... */ }\n  }]\n}\n```\n\n## Predictive Analytics (`ai/predictive.zod.ts`)\n\n**Model types:** classification, regression, clustering, forecasting, anomaly_detection, recommendation, ranking\n\n**Features:**\n- Feature engineering with 8 transformation types (normalize, one-hot encode, log transform, etc.)\n- Hyperparameters for tree-based, neural network, clustering, time-series algorithms\n- Training configuration: cross-validation, early stopping, GPU support\n- Evaluation metrics: accuracy/precision/recall/F1/AUC, MSE/RMSE/MAE/R², silhouette score, MAPE\n- Auto-retraining with drift detection\n- Model explainability\n\n**Example usage:**\n```typescript\nconst model: PredictiveModel = {\n  name: 'lead_conversion_predictor',\n  type: 'classification',\n  objectName: 'lead',\n  target: 'converted',\n  features: [\n    { name: 'engagement_score', field: 'engagement_score', dataType: 'numeric', transformation: 'standardize' },\n    { name: 'company_size', field: 'employee_count', dataType: 'numeric', transformation: 'log_transform' },\n    { name: 'industry', field: 'industry', dataType: 'categorical', transformation: 'one_hot_encode' }\n  ],\n  hyperparameters: { numTrees: 200, maxDepth: 8, learningRate: 0.1 },\n  autoRetrain: true,\n  enableExplainability: true\n}\n```\n\n## Technical notes\n\n- All schemas follow Zod-first design with runtime validation and TypeScript inference\n- 75 test cases cover real-world scenarios (support automation, lead scoring, document processing, forecasting)\n- Generated 18 JSON schemas and 18 MDX documentation files\n- Resolved naming collision with existing license `Feature` schema by using `ModelFeature`\n- No breaking changes: all 1401 existing tests pass\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 管理\n> ⚠️ 需要增强的部分\n> \n> 1. AI 工作流自动化 (优先级: 中等)\n> \n> // 建议新增: src/ai/workflow-automation.zod.ts\n> export const AIWorkflowSchema = z.object({\n>   trigger: z.enum(['record_created', 'field_changed', 'scheduled']),\n>   aiTasks: z.array(z.object({\n>     type: z.enum(['classify', 'extract', 'summarize', 'generate', 'predict']),\n>     model: z.string(),\n>     inputFields: z.array(z.string()),\n>     outputField: z.string(),\n>   })),\n> });\n> 影响: 智能业务流程自动化\n> \n> 2. 预测分析协议 (优先级: 低)\n> \n> // 建议新增: src/ai/predictive.zod.ts\n> export const PredictiveModelSchema = z.object({\n>   type: z.enum(['classification', 'regression', 'clustering', 'forecasting']),\n>   features: z.array(z.string()),\n>   target: z.string(),\n>   hyperparameters: z.record(z.any()).optional(),\n> });\n> 影响: 数据驱动决策\n> \n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 311,
+  "kind": "pull_request",
+  "title": "chore: release v0.4.1 - fix version synchronization",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-27T08:58:49Z",
+  "updated_at": "2026-01-27T09:37:34Z",
+  "closed_at": "2026-01-27T09:37:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-27T09:37:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/311",
+  "body": "Version 0.4.1 release addressing package version drift. `@objectstack/plugin-msw` was at 0.3.3 while other packages had moved to 0.4.0.\n\n## Changes\n\n- **Version synchronization**: Bumped all fixed-group packages to 0.4.1\n  - `@objectstack/plugin-msw` 0.3.3 → 0.4.1\n  - Core packages: 0.4.0 → 0.4.1\n- **Peer dependencies**: Updated runtime references from `^0.3.3` to `^0.4.1` in plugins\n- **Changesets**: Applied version bump via changeset workflow\n- **Documentation**: Generated CHANGELOGs for all packages\n\n## Affected Packages\n\nAll packages in fixed versioning group:\n- @objectstack/spec\n- @objectstack/types\n- @objectstack/client\n- @objectstack/driver-memory\n- @objectstack/objectql\n- @objectstack/plugin-hono-server\n- @objectstack/plugin-msw\n- @objectstack/runtime\n\nMerging to `main` will trigger automated npm publish via GitHub Actions.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 发版本\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

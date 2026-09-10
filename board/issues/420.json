@@ -1,0 +1,33 @@
+{
+  "number": 420,
+  "kind": "pull_request",
+  "title": "Fix docs build: escape MDX table expressions and flatten meta.json structure",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T02:07:34Z",
+  "updated_at": "2026-01-31T02:17:12Z",
+  "closed_at": "2026-01-31T02:15:36Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T02:15:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/420",
+  "body": "CI build failed on main with MDX parsing errors and invalid meta.json schema.\n\n## Changes\n\n**MDX syntax fix** (`ai-development-guide.mdx`)\n- Wrapped bare `{}` in table cells with backticks to prevent JSX interpretation\n- Affected 6 cells in field types table (lookup, master_detail, avatar, image, file, json)\n\n```diff\n-| `lookup` | Lookup relationship | { id: \"123\", name: \"...\" } |\n+| `lookup` | Lookup relationship | `{ id: \"123\", name: \"...\" }` |\n```\n\n**meta.json structure fix** (`developers/meta.json`)\n- Removed unsupported nested object in pages array\n- Flattened AI pages into top-level array after separator\n\n```diff\n  \"pages\": [\n    \"cli-tools\",\n    \"---\",\n-   {\n-     \"title\": \"🤖 AI-Driven Development\",\n-     \"pages\": [\"ai-development-guide\", \"ai-quick-reference\", \"ai-erp-tutorial\"]\n-   }\n+   \"ai-development-guide\",\n+   \"ai-quick-reference\",\n+   \"ai-erp-tutorial\"\n  ]\n```\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21536832133/job/62064123335#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

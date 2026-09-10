@@ -1,0 +1,37 @@
+{
+  "number": 328,
+  "kind": "pull_request",
+  "title": "Add objectql, gateway, and adapter package types to manifest schema",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-27T15:09:59Z",
+  "updated_at": "2026-01-27T15:20:21Z",
+  "closed_at": "2026-01-27T15:17:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-27T15:17:02Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/328",
+  "body": "Extends the manifest type system to support microkernel architecture by distinguishing between runtime containers (adapters), API protocols (gateways), and core engine (objectql).\n\n## Changes\n\n### Schema Extension\nExtended `ManifestSchema.type` enum with three new values:\n\n```typescript\ntype: z.enum([\n  'app',        // Business application\n  'plugin',     // General extension\n  'driver',     // Southbound: DB/external service adapters\n  'module',     // Shared code library\n  'objectql',   // Core engine: Data layer implementation\n  'gateway',    // Northbound: API protocol (GraphQL, REST, RPC)\n  'adapter'     // Runtime container (Express, Hono, Fastify, Serverless)\n])\n```\n\n### Architectural Rationale\n\n**Adapter** (singleton): HTTP server container at the outermost layer. One per runtime instance.\n\n**Gateway** (multiplicity): Protocol translation layer. Multiple can coexist (e.g., GraphQL + REST simultaneously).\n\n**ObjectQL**: Core query engine and business logic layer, separated from both transport and protocol concerns.\n\nThis enables proper lifecycle ordering: Adapter → ObjectQL Engine → Drivers → Gateways → Business Apps.\n\n### Test Coverage\nAdded manifest validation tests for:\n- ObjectQL engine package\n- GraphQL/REST gateway packages  \n- Express/Hono adapter packages\n\n### Generated Artifacts\n- JSON Schema automatically updated with new enum values\n- API documentation regenerated\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/326\n> \n> 这是一个非常好的架构思考。将 `Express`/`Hono`（HTTP 服务容器）和 `GraphQL`/`REST`（API 协议）从核心剥离，通过插件注册，完全符合 **微内核 (Microkernel)** 或 **六边形架构 (Hexagonal Architecture)** 的设计理念。\n> \n> 针对您提到的两类需求（API 协议 和 HTTP 服务容器），建议在 `driver` 和 `plugin` 之外，再增加两个明确的类型：**`gateway`** 和 **`adapter`**。\n> \n> ### 建议修改方案\n> \n> 在 `packages/spec/src/system/manifest.zod.ts` 中，扩展 `type` 枚举：\n> \n> ```typescript\n> type: z.enum([\n>   'app',        // 业务应用\n>   'plugin',     // 通用功能扩展\n>   'driver',     // 南向接口：数据库/外部服务适配 (Postgres, Mongo, S3)\n>   'module',     // 代码库/共享模块\n>   'objectql',   // 核心引擎：数据层实现\n>   'gateway',    // 北向接口：API 协议入口 (GraphQL, REST, RPC, OData)\n>   'adapter'     // 宿主适配：运行时容器 (Express, Hono, Fastify, Serverless)\n> ]).describe('Type of package'),\n> ```\n> \n> ### 为什么建议这样分类？\n> \n> 这不仅仅是命名的区别，更关乎 **启动生命周期 (Lifecycle)** 和 **基数约束 (Cardinality)**：\n> \n> #### 1. `adapter` (适配器) - 对应 Express, Hono\n> *   **角色**: **容器/宿主 (Host)**。它们负责启动 HTTP 服务器，监听端口，处理原始 Request/Response 对象。\n> *   **特性**:\n>     *   **排他性 (Singleton)**: 通常一个运行时实例只能有一个 HTTP Server Adapter（要么是 Express，要么是 Hono，不能同时接管同一个端口）。\n>     *   **启动顺序**: 最先初始化（或者最后启动监听），位于架构的最外层。\n> *   **示例**: `@objectstack/adapter-express`, `@objectstack/adapter-hono`, `@objectstack/adapter-lambda`\n> \n> #### 2. `gateway` (网关) - 对应 GraphQL, REST, OData\n> *   **角色**: **协议转换 (Protocol)**。它们将外部请求转换为 ObjectStack 内部的 `Call`。\n> *   **特性**:\n>     *   **共存性 (Multiplicity)**: 你可以在同一个实例中同时开启 GraphQL 和 REST API。\n>     *   **依赖性**: 依赖 `objectql` 引擎和 `adapter` 提供的路由能力。\n> *   **示例**: `@objectstack/gateway-graphql`, `@objectstack/gateway-rest`, `@objectstack/gateway-trpc`\n> \n> ### 架构图示 (洋葱模型)\n> \n> 增加这两种类型后，您的系统 Manifest 结构将非常清晰地对应每一层：\n> \n> ```text\n> External Request (Browser/Mobile)\n>       │\n>       ▼\n> [ Adapter ]  <-- type: 'adapter' (Express/Hono) 负责接收 HTTP 请求\n>       │\n>       ▼\n> [ Gateway ]  <-- type: 'gateway' (GraphQL/REST) 负责解析协议\n>       │\n>       ▼\n> [ Kernel  ]  <-- 核心调度\n>       │\n>       ▼\n> [ ObjectQL]  <-- type: 'objectql' (Query Engine) 负责业务逻辑\n>       │\n>       ▼\n> [ Driver  ]  <-- type: 'driver' (Postgres/Mongo) 负责持久化\n>       │\n>       ▼\n>  Database\n> ```\n> \n> ### 总结\n> \n> 是的，非常有必要增加。这样做可以让 `Kernel` 的启动逻辑更加严谨：\n> \n> 1.  先加载 **Adapter** 准备环境。\n> 2.  初始化 **ObjectQL** 引擎。\n> 3.  加载 **Driver** 连接数据库。\n> 4.  加载 **Gateway** 注册路由到 Adapter。\n> 5.  最后加载 **App/Plugin** 里的业务逻辑。\n> \n> 如果您同意这个分类，我可以为您创建一个 PR，将 `manifest.zod.ts` 中的类型定义更新为包含 `objectql`, `gateway`, 和 `adapter`。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

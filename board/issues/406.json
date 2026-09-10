@@ -1,0 +1,38 @@
+{
+  "number": 406,
+  "kind": "pull_request",
+  "title": "feat(core): Add production-grade plugin lifecycle management and DI",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T16:54:26Z",
+  "updated_at": "2026-01-30T17:35:13Z",
+  "closed_at": "2026-01-30T17:27:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-30T17:27:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/406",
+  "body": "Implements microkernel architecture for plugin lifecycle management, dependency injection with service factories, and operational resilience.\n\n## Core Changes\n\n### PluginLoader (`plugin-loader.ts`, 451 lines)\n- Async plugin loading with semver validation\n- Service factory registration with lifecycle control (singleton/transient/scoped)\n- Circular dependency detection for service graphs\n- Plugin health check framework\n- Scope management for request-bound services\n\n### EnhancedObjectKernel (`enhanced-kernel.ts`, 455 lines)\n- Extends `ObjectKernel` without breaking changes\n- Plugin startup timeout with automatic rollback on failure\n- Graceful shutdown with timeout and duplicate signal prevention\n- Performance metrics (plugin startup times)\n- Custom shutdown handler registration\n\n## Usage Example\n\n```typescript\nimport { EnhancedObjectKernel, ServiceLifecycle } from '@objectstack/core';\n\nconst kernel = new EnhancedObjectKernel({\n  defaultStartupTimeout: 30000,\n  gracefulShutdown: true,\n  rollbackOnFailure: true\n});\n\n// Register service with lifecycle control\nkernel.registerServiceFactory(\n  'database',\n  async (ctx) => await connectToDatabase(),\n  ServiceLifecycle.SINGLETON\n);\n\n// Plugin with health check and timeout\nconst plugin: PluginMetadata = {\n  name: 'api',\n  version: '1.0.0',\n  startupTimeout: 10000,\n  dependencies: ['database'],\n  async healthCheck() {\n    return { healthy: await checkConnection() };\n  }\n};\n\nawait kernel.use(plugin);\nawait kernel.bootstrap(); // Validates, resolves deps, starts with timeout\nawait kernel.checkPluginHealth('api'); // Runtime health monitoring\nawait kernel.shutdown(); // Graceful cleanup\n```\n\n## Architecture\n\n**Service Lifecycles:**\n- Singleton: Single shared instance\n- Transient: New instance per request  \n- Scoped: Instance per scope (e.g., HTTP request)\n\n**Lifecycle Flow:**\n1. Plugin validation (version, structure)\n2. Dependency resolution (topological sort)\n3. Init phase (service registration)\n4. Start phase (with timeout, rollback on failure)\n5. Running (health checks, metrics)\n6. Shutdown (reverse order, cleanup)\n\n**Stubs for future implementation:**\n- Plugin signature verification (framework in place)\n- Zod config validation (schema support added)\n\n## Test Coverage\n\n72 tests (25 plugin loader + 24 enhanced kernel + 23 original)\n- Service lifecycle management\n- Timeout and rollback scenarios\n- Circular dependency detection\n- Health check system\n- Graceful shutdown\n\n## Documentation\n\n- `ENHANCED_FEATURES.md` - Complete API reference\n- `examples/enhanced-kernel-example.ts` - Working demonstration\n- `IMPLEMENTATION_SUMMARY.md` - Architecture decisions\n\n## Dependencies\n\nAdded `zod@^3.22.0` for schema validation framework\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 核心使命: 提供插件化的微内核架构，管理插件生命周期、依赖注入和事件通信。\n> \n> Core Mission: Provide a plugin-based microkernel architecture managing plugin lifecycle, dependency injection, and event communication.\n> \n> 1.2 当前实现状态 / Current Implementation Status\n> \n> ✅ 已完成 / Completed:\n> \n> ObjectKernel 类（插件生命周期管理）\n> 插件依赖解析（拓扑排序）\n> 服务注册表（依赖注入）\n> Hook 系统（事件通信）\n> Logger 抽象（pino 集成）\n> 基础契约接口（HTTP Server, Data Engine, Logger）\n> 🟡 部分完成 / Partially Completed:\n> \n> 测试覆盖率（约 60%）\n> 错误处理机制\n> \n> P0 - 必需功能 / Essential Features\n> \n>  插件加载器增强\n> \n>  支持异步插件加载\n>  插件版本兼容性检查\n>  插件签名验证（安全性）\n>  插件配置验证（使用 Zod）\n>  依赖注入系统优化\n> \n>  支持工厂函数注册\n>  支持单例/瞬态/作用域服务\n>  循环依赖检测和报告\n>  延迟加载服务\n>  生命周期管理完善\n> \n>  优雅关闭（Graceful Shutdown）\n>  插件启动超时控制\n>  启动失败回滚机制\n>  插件健康检查\n> P1 - 重要功能 / Important Features\n> \n>  插件热重载: 监听插件文件变化、安全的插件卸载\n>  性能监控: 插件初始化时间跟踪、服务调用性能统计\n>  错误处理与恢复: 插件错误隔离、错误上报机制\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

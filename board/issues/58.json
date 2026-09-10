@@ -1,0 +1,37 @@
+{
+  "number": 58,
+  "kind": "pull_request",
+  "title": "Query Protocol: Add comprehensive test coverage and documentation for aggregations, joins, and window functions",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-21T12:53:13Z",
+  "updated_at": "2026-01-21T13:28:33Z",
+  "closed_at": "2026-01-21T13:28:33Z",
+  "closed_by": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "merged_at": "2026-01-21T13:28:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/58",
+  "body": "Implements Week 1-2 roadmap: comprehensive testing and documentation for ObjectQL query capabilities (aggregations, joins, window functions, subqueries).\n\n## Changes\n\n### Test Coverage (`query.test.ts`)\nExpanded from 28 to 85 tests covering:\n- **Aggregations** (24 tests): COUNT/SUM/AVG/MIN/MAX, COUNT DISTINCT, GROUP BY (single/multiple fields), HAVING clauses\n- **Joins** (27 tests): INNER/LEFT/RIGHT/FULL OUTER, multi-table joins, self-joins, subquery joins\n- **Window Functions** (25 tests): ROW_NUMBER, RANK, DENSE_RANK, LAG/LEAD, aggregate window functions, frame specifications (ROWS/RANGE)\n\n### Documentation (`query.zod.ts`)\nEnhanced JSDoc with SQL/SOQL comparison examples and performance considerations:\n\n```typescript\n/**\n * Aggregation Function Enum\n * \n * Performance Considerations:\n * - COUNT(*) is typically faster than COUNT(field) as it doesn't check for nulls\n * - COUNT DISTINCT may require additional memory for tracking unique values\n * - Window aggregates (with OVER clause) can be more efficient than subqueries\n * \n * @example\n * // SQL: SELECT region, SUM(amount) FROM sales GROUP BY region\n * {\n *   object: 'sales',\n *   aggregations: [{ function: 'sum', field: 'amount', alias: 'total_sales' }],\n *   groupBy: ['region']\n * }\n */\n```\n\n### Reference Guide (`QUERY_PROTOCOL_GUIDE.md`)\nComplete guide with 50+ examples demonstrating:\n- Aggregation patterns with SQL equivalents\n- Join strategies with SOQL comparisons\n- Window function use cases (ranking, time-series analysis, running totals)\n- Subquery patterns in joins and filters\n\n## Example Usage\n\n```typescript\n// Customer lifetime value with rankings\n{\n  object: 'customer',\n  joins: [{ type: 'left', object: 'order', on: ['customer.id', '=', 'order.customer_id'] }],\n  aggregations: [\n    { function: 'count', field: 'order.id', alias: 'order_count' },\n    { function: 'sum', field: 'order.amount', alias: 'lifetime_value' }\n  ],\n  groupBy: ['customer.id'],\n  windowFunctions: [{\n    function: 'rank',\n    alias: 'customer_rank',\n    over: { orderBy: [{ field: 'lifetime_value', order: 'desc' }] }\n  }]\n}\n```\n\n## Notes\n- Driver capability flags (`queryAggregations`, `queryWindowFunctions`, `querySubqueries`, `joins`) already present in `driver.zod.ts`\n- All schemas existed; enhancements are documentation and test coverage only\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> Week 1-2: Query Protocol Enhancement\n> \n>  Day 1-3: Aggregation Support\n> \n>  Define AggregationSchema in query.zod.ts\n>  Add support for: COUNT, SUM, AVG, MIN, MAX, GROUP BY, HAVING\n>  Write 20+ tests for aggregation scenarios\n>  Document with SQL comparison examples\n>  Day 4-7: Join Support\n> \n>  Define JoinSchema in query.zod.ts\n>  Add support for: INNER, LEFT, RIGHT, FULL OUTER joins\n>  Write 25+ tests for join scenarios\n>  Document with Salesforce SOQL comparison examples\n>  Day 8-10: Subqueries & Window Functions\n> \n>  Define SubquerySchema in query.zod.ts\n>  Add window function support (ROW_NUMBER, RANK, LAG, LEAD)\n>  Write 20+ tests\n>  Update driver.zod.ts to reflect capability flags\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

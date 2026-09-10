@@ -1,0 +1,36 @@
+{
+  "number": 378,
+  "kind": "pull_request",
+  "title": "Add Observability Protocol: Logging, Metrics, Tracing",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T09:05:48Z",
+  "updated_at": "2026-01-30T09:48:25Z",
+  "closed_at": "2026-01-30T09:42:27Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-30T09:42:27Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/378",
+  "body": "Implements comprehensive observability protocols for structured logging, metrics collection, and distributed tracing to enable production-grade monitoring across ObjectStack components.\n\n## Logging Protocol (`logging.zod.ts`)\n\n- **Multi-destination routing**: Console, file, HTTP, Elasticsearch, CloudWatch, Datadog, Splunk, Loki, Kafka, Redis\n- **Structured enrichment**: Static/dynamic fields, trace correlation, caller context, host metadata\n- **Advanced features**: Sampling, buffering, rotation, redaction, per-destination filtering\n\n```typescript\nconst config: LoggingConfig = {\n  name: 'production_logging',\n  destinations: [\n    { type: 'console', level: 'info' },\n    { \n      type: 'http', \n      http: { \n        url: 'https://logs.example.com',\n        batch: { maxSize: 500, flushInterval: 5000 }\n      }\n    }\n  ],\n  enrichment: {\n    staticFields: { environment: 'production' },\n    addCaller: true\n  }\n};\n```\n\n## Metrics Protocol (`metrics.zod.ts`)\n\n- **Prometheus-compatible types**: Counter, Gauge, Histogram, Summary\n- **Time-series primitives**: Data points, aggregations (sum/avg/min/max/p50/p95/p99)\n- **SLI/SLO framework**: Error budgets, burn rate alerts, compliance tracking\n- **Export targets**: Prometheus, OpenMetrics, InfluxDB, StatsD, Datadog, CloudWatch\n\n```typescript\nconst slo: ServiceLevelObjective = {\n  name: 'api_availability',\n  sli: 'http_success_rate',\n  target: 99.9,\n  period: { type: 'rolling', duration: 2592000 },\n  errorBudget: {\n    alertThreshold: 80,\n    burnRateWindows: [\n      { window: 3600, threshold: 14.4 }  // 1hr window, 14.4x burn rate\n    ]\n  }\n};\n```\n\n## Tracing Protocol (`tracing.zod.ts`)\n\n- **W3C Trace Context**: Full standard compliance with 128-bit trace IDs, trace flags, trace state\n- **OpenTelemetry spans**: Events, links, semantic attributes, instrumentation metadata\n- **Sampling strategies**: always_on, trace_id_ratio, parent_based, rate_limiting, rule-based\n- **Context propagation**: W3C, B3, Jaeger, X-Ray format support\n- **OTLP exporters**: HTTP/gRPC with batching, compression, retry\n\n```typescript\nconst config: TracingConfig = {\n  name: 'production_tracing',\n  sampling: {\n    type: 'parent_based',\n    parentBased: {\n      root: 'trace_id_ratio',\n      rootRatio: 0.1\n    },\n    rules: [\n      { \n        name: 'always_trace_errors',\n        match: { attributes: { 'http.status_code': 500 } },\n        decision: 'record_and_sample'\n      }\n    ]\n  },\n  openTelemetry: {\n    exporter: { type: 'otlp_http', endpoint: 'https://otel.example.com/v1/traces' },\n    resource: { serviceName: 'api-server', serviceVersion: '2.0.0' }\n  }\n};\n```\n\n## Implementation Notes\n\n- **LogLevel conflict resolution**: Existing `logger.zod.ts` exports base LogLevel; new protocol exports ExtendedLogLevel with 'trace'\n- **Naming conventions**: camelCase for config properties, snake_case for identifiers (per ObjectStack standards)\n- **Type derivation**: All TypeScript types use `z.infer` from Zod schemas\n- **Test coverage**: 95 new tests covering schemas, defaults, validation, edge cases\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 3.3 Observability Protocol / 可观测性协议\n> \n> In THIS Repo (Spec Definitions) / 在本仓库（规范定义）\n> \n> Logging Protocol\n> \n>  Create packages/spec/src/system/logging.zod.ts\n>  Log level enum\n>  Structured log schema\n>  Log enrichment configuration\n>  Log destination configuration (file, console, external service)\n> Metrics Protocol\n> \n>  Create packages/spec/src/system/metrics.zod.ts\n>  Metric type enum (counter, gauge, histogram, summary)\n>  Metric aggregation configuration\n>  Time-series data schema\n>  Performance SLI/SLO schema\n> Tracing Protocol\n> \n>  Create packages/spec/src/system/tracing.zod.ts\n>  Trace context propagation schema\n>  Span schema\n>  Trace sampling configuration\n>  OpenTelemetry compatibility schema\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

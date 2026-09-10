@@ -1,0 +1,38 @@
+{
+  "number": 325,
+  "kind": "pull_request",
+  "title": "Generate Zod protocol documentation at file level with consolidated schemas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-27T14:24:58Z",
+  "updated_at": "2026-01-28T05:51:26Z",
+  "closed_at": "2026-01-28T05:41:09Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-28T05:41:09Z",
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/325",
+  "body": "## Enhanced Zod Protocol Documentation Display\n\n### Problem Statement\n本文档官网的核心目的是介绍spec中的zod协议，设计一个方案，在文档中更好地展示每一个协议\n\n**Translation:** \"The core purpose of this documentation website is to introduce the Zod protocols in spec. Design a solution to better display each protocol in the documentation.\"\n\n### Solution Overview\n\nThis PR implements documentation at the **zod file level** - one documentation page per `.zod.ts` file containing all schemas from that file.\n\n### Documentation Structure\n\n**Before:** Separate MDX file for each schema export\n- 447 individual schema documentation files\n- Organized in subdirectories (e.g., `/data/field/Field.mdx`, `/data/field/FieldType.mdx`)\n- Complex navigation with many nested levels\n\n**After:** One MDX file per zod file\n- 70 consolidated documentation files (one per zod file)\n- Flat directory structure (e.g., `/data/field.mdx` contains all 8 schemas from `field.zod.ts`)\n- Simplified navigation matching source code structure\n- No fumadocs-ui component imports (components provided globally via MDX config)\n\n### Key Features\n\n#### 1. **Consolidated Schema Documentation**\nEach `.mdx` file contains:\n- Source file reference\n- TypeScript usage example with all exports\n- Individual sections for each schema (separated by horizontal rules)\n- Property tables for object schemas\n- Allowed values for enum schemas\n\n#### 2. **Simplified Navigation**\n- Category overview pages list zod files (not individual schemas)\n- Flat file structure (no subdirectories)\n- Direct links to zod files\n\n#### 3. **Better Organization**\nMatches the actual code structure where multiple related schemas are defined in a single `.zod.ts` file.\n\n#### 4. **Build Compatibility**\n- Removed explicit fumadocs-ui component imports\n- Components (`<Callout>`, `<Cards>`, `<Card>`) available through MDX global config\n- Fixes Next.js build errors\n\n### Example Output\n\n**field.mdx** (8 schemas in one file):\n```markdown\n# Field\n\n<Callout type=\"info\">\nSource: `packages/spec/src/data/field.zod.ts`\n</Callout>\n\n## TypeScript Usage\n```typescript\nimport { FieldSchema, FieldTypeSchema, SelectOptionSchema, ... } from '@objectstack/spec/data';\n```\n\n---\n\n## Address\n### Properties\n[table]\n\n---\n\n## Field\n### Properties\n[table]\n```\n\n### Files Changed\n\n**Modified:**\n- `packages/spec/scripts/build-docs.ts` - Removed fumadocs-ui import generation\n- All category `meta.json` files - Simplified to list zod files\n\n**Generated:**\n- 70 zod-level MDX files (one per `.zod.ts` file)\n- 10 category overview pages\n\n**Removed:**\n- All subdirectories under category folders\n- 447 individual schema MDX files\n\n### Impact\n\n| Metric | Before | After | Change |\n|--------|--------|-------|--------|\n| MDX files | 447 individual | 70 consolidated | -84% |\n| Directory depth | 3 levels | 2 levels | Flatter |\n| Files per schema | 1 | 0.14 (avg ~7 schemas/file) | Grouped |\n| Navigation complexity | High (447 links) | Low (70 links) | Simpler |\n| Build errors | Import errors | ✅ Fixed | Compatible |\n\n### Benefits\n\n1. **Matches source code structure** - Documentation mirrors the actual `.zod.ts` files\n2. **Easier navigation** - Fewer files to browse, clearer organization\n3. **Better context** - Related schemas shown together\n4. **Simpler maintenance** - One file per source file makes updates easier\n5. **Faster builds** - 84% fewer files to generate and process\n6. **Build compatibility** - No import errors, components available globally\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 本文档官网的核心目的是介绍spec中的zod协议，设计一个方案，在文档中更好地展示每一个协议\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

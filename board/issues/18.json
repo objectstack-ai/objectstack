@@ -1,0 +1,33 @@
+{
+  "number": 18,
+  "kind": "pull_request",
+  "title": "[WIP] Add support for default language configuration",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-19T12:24:45Z",
+  "updated_at": "2026-01-19T12:49:44Z",
+  "closed_at": "2026-01-19T12:46:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-19T12:46:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/18",
+  "body": "## ✅ i18n Support for Documentation Site\n\nThis PR implements internationalization (i18n) support for the ObjectStack documentation site, enabling automatic language detection and multi-language content delivery.\n\n### 🎯 Features Implemented\n\n1. **Default Language Configuration** - English (`en`) set as default\n2. **Language Catalog** - Support for English and Chinese (`cn`)\n3. **Automatic Language Detection** - Middleware detects user's browser language\n4. **Clean URL Structure** - Default language URLs hide locale prefix (e.g., `/docs` instead of `/en/docs`)\n5. **Localized Content** - Full support for existing Chinese (`.cn.mdx`) translations\n\n### 🏗️ Architecture Changes\n\n#### Configuration Files\n- **`apps/docs/lib/i18n.ts`** - i18n configuration with Fumadocs\n  - Default language: `en`\n  - Supported languages: `['en', 'cn']`\n  - Hide locale for default language: `hideLocale: 'default-locale'`\n\n- **`apps/docs/middleware.ts`** - Language detection and routing middleware\n  - Detects browser language preferences\n  - Handles automatic redirection\n  - Stores language preference in cookies\n\n#### Structural Changes\n- **Restructured App Directory** - Moved routes under `[lang]` dynamic segment\n  - `app/[lang]/page.tsx` - Homepage with language parameter\n  - `app/[lang]/docs/layout.tsx` - Docs layout with language-specific page tree\n  - `app/[lang]/docs/[[...slug]]/page.tsx` - Documentation pages with language routing\n\n- **Updated Source Loader** - Integrated i18n configuration with Fumadocs loader\n\n### 📸 Screenshots\n\n**English Documentation (Default - `/docs`)**\n![English Docs](https://github.com/user-attachments/assets/543374b3-9e77-4e61-9892-bc7aae46e63f)\n\n**Chinese Documentation (`/cn/docs`)**\n![Chinese Docs](https://github.com/user-attachments/assets/c8bddd0b-a238-40c1-b9a7-3106d766f925)\n\n### 🔄 URL Structure\n\n| Language | URL Pattern | Example |\n|----------|-------------|---------|\n| English (default) | `/docs/...` | `/docs/guides/getting-started` |\n| Chinese | `/cn/docs/...` | `/cn/docs/guides/getting-started` |\n\n### ✅ Testing\n\n- [x] Build successful with i18n configuration\n- [x] English docs accessible at `/docs` (no language prefix)\n- [x] Chinese docs accessible at `/cn/docs` (with language prefix)\n- [x] Navigation between languages works correctly\n- [x] Page metadata properly localized\n- [x] Sidebar navigation translated based on language\n- [x] All existing Chinese (`.cn.mdx`) content renders correctly\n\n### 📝 Checklist\n\n- [x] Create i18n configuration file (`apps/docs/lib/i18n.ts`)\n- [x] Update source configuration to use i18n (`apps/docs/app/source.ts`)\n- [x] Create middleware for automatic language detection and redirection (`apps/docs/middleware.ts`)\n- [x] Restructure app with `[lang]` dynamic route for language support\n- [x] Update root layout for i18n\n- [x] Update docs layout for language routing\n- [x] Update docs pages to accept language parameter\n- [x] Build successfully with i18n support\n- [x] Test language detection and redirection\n- [x] Verify existing Chinese content works with new i18n setup\n\n### 🚀 Next Steps\n\nThe i18n infrastructure is now in place. Future enhancements could include:\n- Language switcher UI component\n- Additional language support\n- Automatic language detection from Accept-Language headers\n- RTL language support\n\n---\n\n**Translation Note:** 文档站点现已支持配置默认语言(English)和语言清单(English/Chinese)，首页可根据用户的浏览器语言自动转向相应语言版本。\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 文档站点支持配置默认语言和语言清单，首页可根据用户的语言自动转。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

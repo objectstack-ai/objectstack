@@ -1,0 +1,37 @@
+{
+  "number": 55,
+  "kind": "pull_request",
+  "title": "Refactor: Separate authentication configuration from identity data models",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-21T09:12:44Z",
+  "updated_at": "2026-01-21T11:33:16Z",
+  "closed_at": "2026-01-21T11:28:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-21T11:28:24Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/55",
+  "body": "Resolves architectural confusion between authentication providers/strategies (configuration) and user identity models (runtime data).\n\n## Changes\n\n### Migrated enterprise auth to `auth.zod.ts`\n- Moved `OIDCConfigSchema`, `SAMLConfigSchema`, `LDAPConfigSchema` from identity.zod.ts\n- Added `enterprise` field to `AuthConfigSchema`:\n  ```typescript\n  enterprise: {\n    oidc?: { issuer, clientId, clientSecret, ... },\n    saml?: { entryPoint, cert, issuer, ... },\n    ldap?: { url, bindDn, searchBase, ... }\n  }\n  ```\n\n### Redefined `identity.zod.ts` as data models\nRemoved authentication configuration schemas. Replaced with runtime data models:\n- `UserSchema`: Core identity (id, email, emailVerified, name, image, timestamps) - minimal and identity-focused\n- `AccountSchema`: Links external OAuth/OIDC/SAML providers to users\n- `SessionSchema`: Session state with device fingerprinting\n- `VerificationTokenSchema`: Email verification and password reset tokens\n\n### Created `auth-protocol.ts`\nWire protocol constants and interfaces:\n- `AUTH_CONSTANTS`: Standard headers, prefixes, cookies (`Authorization`, `Bearer `, `os_*`)\n- `AuthHeaders`, `AuthResponse`, `AuthError`, `TokenPayload` interfaces\n- `AUTH_ERROR_CODES`: Standard error codes\n\n### Added database field mapping for driver compatibility\n- Created `DatabaseMappingSchema` to map ObjectStack standard field names (Auth.js conventions) to driver-specific field names\n- Added `mapping` field to `AuthConfigSchema` with pre-configured better-auth defaults\n- Exported `BETTER_AUTH_FIELD_MAPPINGS` constant for maintainability\n- Default mappings bridge the gap between ObjectStack and better-auth:\n  - `sessionToken` → `token`\n  - `expires` → `expiresAt`\n  - `providerAccountId` → `accountId`\n  - `provider` → `providerId`\n- Fully customizable for any authentication driver (Auth.js, Passport, custom implementations)\n\n### Updated exports and documentation\n- Added enterprise SSO examples to `AUTHENTICATION_STANDARD.md`\n- Added database field mapping configuration section with examples\n- Updated index exports to reflect new 3-file structure\n\n## Architecture\n\n```\nBefore: identity.zod.ts (mixed concerns)\n├── AuthProviderSchema (config + data)\n├── OIDC/SAML/LDAP configs\n└── [no user data models]\n\nAfter: Clean separation\n├── auth.zod.ts → Configuration (how to login + field mappings)\n├── identity.zod.ts → Data models (who is logged in)  \n└── auth-protocol.ts → Wire protocol (how to communicate)\n```\n\n## Driver Agnostic Design\n\nThe spec now supports any authentication driver through field mapping:\n- Default mappings for better-auth compatibility (via `BETTER_AUTH_FIELD_MAPPINGS`)\n- Customizable mappings for other drivers\n- Clean separation between spec fields (Auth.js conventions) and driver-specific fields\n\n## Breaking Changes\n\n`AuthProvider` schema removed. Consumers should use:\n- `AuthConfig` with optional `enterprise` and `mapping` fields for configuration\n- `User`, `Account`, `Session` schemas for runtime data\n- `AUTH_CONSTANTS` for protocol constants\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> \n> ----\n> \n> *This section details on the original issue you should resolve*\n> \n> <issue_title>Please perform a final refactoring on PR #46 to consolidate the Authentication Architecture and resolve conflicts with the existing `identity.zod.ts`.</issue_title>\n> <issue_description>The goal is to strictly separate \"Authentication\" (Providers/Strategies) from \"Identity\" (User Models).\n> \n> ### Task 1: Migrate Authentication Providers (Resolve Conflicts)\n> Migrate the legacy Enterprise Auth definitions from `packages/spec/src/system/identity.zod.ts` into the new `packages/spec/src/system/auth.zod.ts`.\n> - Move `OIDCConfigSchema` to `auth.zod.ts`.\n> - Move `SAMLConfigSchema` to `auth.zod.ts`.\n> - Move `LDAPConfigSchema` to `auth.zod.ts`.\n> - Add a new optional field `enterprise` to the main `AuthConfig` schema in `auth.zod.ts` to hold these configurations (e.g., `enterprise: z.object({ saml: ..., ldap: ... }).optional()`).\n> \n> ### Task 2: Redefine Identity as User Model\n> Refactor `packages/spec/src/system/identity.zod.ts` to become the dedicated **User Model Specification**.\n> - Remove `AuthProviderSchema` and all auth-related configs from this file (since they are now in `auth.zod.ts`).\n> - Create and export `UserSchema`:\n>   - Fields: `id` (string), `email` (email), `emailVerified` (boolean), `name` (optional string), `image` (optional url), `createdAt` (date), `updatedAt` (date).\n> - Create and export `AccountSchema` (for linking OAuth accounts).\n> - Create and export `SessionSchema`.\n> \n> ### Task 3: Define Wire Protocol & Constants\n> Create `packages/spec/src/system/auth-protocol.ts` (new file) to define the API contract:\n> - Export `AUTH_CONSTANTS`:\n>   - `HEADER_KEY`: 'Authorization'\n>   - `TOKEN_PREFIX`: 'Bearer '\n>   - `COOKIE_PREFIX`: 'os_'\n>   - `CSRF_HEADER`: 'x-os-csrf-token'\n> - Export `AuthHeaders` interface.\n> \n> ### Task 4: Cleanup & Consistency\n> - Ensure `packages/spec/src/index.ts` exports the new schemas from both `auth.zod.ts` (Configuration) and `identity.zod.ts` (Data Models).\n> - Update `docs/AUTHENTICATION_STANDARD.md` to reflect that Enterprise Authentication (SAML/LDAP) is now part of this unified standard.\n> \n> This refactoring will result in:\n> 1. `auth.zod.ts`: **How to login** (Config for OAuth, Email, SAML, better-auth driver settings).\n> 2. `identity.zod.ts`: **Who is logged in** (Standard User/Session data models).\n> 3. `auth-protocol.ts`: **How to communicate** (API constants).</issue_description>\n> \n> ## Comments on the Issue (you are @copilot in this section)\n> \n> <comments>\n> </comments>\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n- Fixes objectstack-ai/spec#48\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 439,
+  "kind": "pull_request",
+  "title": "[WIP] Add scaffolding and migration commands to CLI tool",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T06:56:14Z",
+  "updated_at": "2026-01-31T06:58:00Z",
+  "closed_at": "2026-01-31T06:57:40Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/439",
+  "body": "## CLI Tool Implementation Plan\n\n### Understanding\nThis task involves implementing a comprehensive CLI tool for ObjectStack with the following feature areas:\n1. **P0 Scaffolding**: Project initialization, code generation, configuration management\n2. **P0 Migration**: Database migration, schema migration, data import/export\n3. **P0 Code Generation**: TypeScript types, API docs, form generation\n4. **P1 Development Tools**: Dev server, build tools, test tools\n\n### Implementation Checklist\n\n**Phase 1: Project Structure & Foundation**\n- [x] Explore existing CLI structure\n- [x] Understand existing compile command\n- [x] Review spec schemas and patterns\n- [ ] Create command structure for new features\n- [ ] Add necessary dependencies\n\n**Phase 2: P0 Scaffolding Commands**\n- [ ] Implement `os init` command (project initialization)\n  - [ ] Add template support (CRM, Helpdesk, Custom)\n  - [ ] Add package manager detection\n  - [ ] Add Git initialization\n- [ ] Implement `os generate` commands\n  - [ ] `os generate object` - generate object definition\n  - [ ] `os generate view` - generate view configuration\n  - [ ] `os generate app` - generate app configuration\n  - [ ] `os generate plugin` - generate plugin skeleton\n- [ ] Implement `os config` commands\n  - [ ] `os config list` - list configuration\n  - [ ] `os config set` - set configuration\n  - [ ] `os config get` - get configuration\n\n**Phase 3: P0 Migration Commands**\n- [ ] Implement `os migrate` commands\n  - [ ] `os migrate create` - create migration file\n  - [ ] `os migrate up` - execute migration\n  - [ ] `os migrate down` - rollback migration\n  - [ ] `os migrate status` - migration status\n- [ ] Implement data import/export\n  - [ ] `os import` - data import\n  - [ ] `os export` - data export\n\n**Phase 4: P0 Code Generation Commands**\n- [ ] Implement type generation\n  - [ ] Schema → TypeScript types\n  - [ ] Zod Schema generation\n- [ ] Implement API documentation generation\n  - [ ] OpenAPI/Swagger generation\n- [ ] Implement form generation\n  - [ ] React form components\n\n**Phase 5: P1 Development Tools**\n- [ ] Implement `os dev` - development server\n- [ ] Implement `os build` - production build\n- [ ] Implement `os test` - test runner\n\n**Phase 6: Testing & Documentation**\n- [ ] Add tests for all commands\n- [ ] Update documentation\n- [ ] Add examples\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 6. cli 命令行工具 / CLI Tool\n> \n> 6.1 当前状态 / Current State\n> \n> 已实现功能:\n> \n> ✅ 基础命令框架 (Commander.js)\n> ✅ 配置编译 (compile 命令)\n> 文件结构:\n> \n> packages/cli/src/\n> ├── bin.ts                  # CLI 入口\n> ├── index.ts               # 导出\n> └── commands/\n>     └── compile.ts         # 编译命令\n> 6.2 待实现功能清单 / Features Roadmap\n> \n> P0: 脚手架 (Scaffolding)\n> \n>  项目初始化\n> \n> os init - 创建新项目\n> 模板选择 (CRM, Helpdesk, Custom)\n> 包管理器检测 (npm, pnpm, yarn)\n> Git 初始化\n>  代码生成\n> \n> os generate object - 生成对象定义\n> os generate view - 生成视图配置\n> os generate app - 生成应用配置\n> os generate plugin - 生成插件骨架\n>  配置管理\n> \n> os config list - 列出配置\n> os config set - 设置配置\n> os config get - 获取配置\n> 环境配置管理\n> P0: 迁移 (Migration)\n> \n>  数据库迁移\n> \n> os migrate create - 创建迁移文件\n> os migrate up - 执行迁移\n> os migrate down - 回滚迁移\n> os migrate status - 迁移状态\n>  Schema 迁移\n> \n> Schema 版本管理\n> 字段添加/删除/修改\n> 数据转换\n> 迁移历史\n>  数据迁移\n> \n> 数据导入 (os import)\n> 数据导出 (os export)\n> 数据转换\n> 批量操作\n> P0: 代码生成 (Code Generation)\n> \n>  TypeScript 类型生成\n> \n> Schema → TypeScript 类型\n> API 客户端生成\n> Zod Schema 生成\n> GraphQL Schema 生成\n>  API 文档生成\n> \n> OpenAPI/Swagger\n> GraphQL Schema\n> API 使用示例\n> Postman Collection\n>  表单生成器\n> \n> React 表单组件\n> Vue 表单组件\n> 表单验证\n> 样式主题\n> P1: 开发工具\n> \n>  开发服务器\n> \n> os dev - 启动开发服务器\n> 热重载 (Hot Reload)\n> 错误提示\n> 调试模式\n>  构建工具\n> \n> os build - 生产构建\n> 代码优化\n> Tree Shaking\n> 打包配置\n>  测试工具\n> \n> os test - 运行测试\n> 测试覆盖率\n> 性能测试\n> E2E 测试\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 95,
+  "kind": "pull_request",
+  "title": "Add ViewDataSchema for dual-mode data sourcing in Forms and Tables",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-24T04:23:15Z",
+  "updated_at": "2026-01-24T04:53:41Z",
+  "closed_at": "2026-01-24T04:49:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-24T04:49:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/95",
+  "body": "Forms and Tables need to support both protocol-driven (auto-wired to ObjectStack APIs) and custom modes (explicit data sources). This adds a unified `data` configuration to enable both patterns without schema duplication.\n\n## Changes\n\n**New Schemas:**\n- `ViewDataSchema`: Discriminated union on `provider` field with three modes:\n  - `object`: Protocol mode - binds to ObjectStack object by name\n  - `api`: Custom API mode - explicit read/write endpoints\n  - `value`: Static mode - inline data array\n- `HttpRequestSchema`: API endpoint configuration (url, method, headers, params, body)\n- `HttpMethodSchema`: HTTP method enum\n\n**Schema Updates:**\n- `ListViewSchema`: Added optional `data: ViewDataSchema`\n- `FormViewSchema`: Added optional `data: ViewDataSchema`\n\n## Usage\n\n```typescript\n// Protocol mode (default behavior, backward compatible)\nconst listView: ListView = {\n  columns: ['name', 'status'],\n  data: {\n    provider: 'object',\n    object: 'account'\n  }\n};\n\n// Custom API mode\nconst customList: ListView = {\n  columns: ['name', 'email'],\n  data: {\n    provider: 'api',\n    read: { url: '/api/contacts', method: 'GET' },\n    write: { url: '/api/contacts', method: 'POST' }\n  }\n};\n\n// Static data mode\nconst staticForm: FormView = {\n  data: {\n    provider: 'value',\n    items: [{ name: 'Demo', type: 'Customer' }]\n  },\n  sections: [{ fields: ['name', 'type'] }]\n};\n```\n\n**Type Safety Notes:**\n- Discriminated union enforces provider-specific fields\n- Uses `z.unknown()` over `z.any()` for params/body/items\n- `data` property is optional - existing configs unchanged\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> The frontend components for Forms and Tables need to support two distinct operating modes:\n> 1.  **Standard Protocol**: Automatically connects to the ObjectStack Metadata and Data APIs based on a bound `object`.\n> 2.  **Custom/Traditional**: Operates like a traditional component where data sources (API URLs) or static data are explicitly provided, and metadata (columns/fields) is fully defined in the schema rather than inferred.\n> \n> To support this **without splitting** the schemas into two separate files (keeping a unified definition), please modify `packages/spec/src/ui/view.zod.ts`:\n> \n> 1.  **Create a `ViewDataSchema`**:\n>     -   Define a configuration object for data sourcing.\n>     -   `provider`: Enum `['object', 'api', 'value']` (Default: `'object'`).\n>     -   `object`: String (Target object for `'object'` provider).\n>     -   `read`: Configuration for fetching data (URL, method, params) - used for `'api'` provider.\n>     -   `write`: Configuration for submitting data (URL, method) - used for forms or editable tables.\n>     -   `items`: `z.array(z.any())` (Static data for `'value'` provider).\n> \n> 2.  **Update `ListViewSchema`**:\n>     -   Add `data`: `ViewDataSchema.optional()`.\n>     -   Ensure `columns` uses the enhanced `ListColumnSchema` (from the previous context/PR).\n> \n> 3.  **Update `FormViewSchema`**:\n>     -   Add `data`: `ViewDataSchema.optional()`.\n>     -   Ensure `sections` (or `fields`) uses the enhanced `FormFieldSchema` (from the previous context/PR).\n> \n> This allows a single schema to define both \"smart\" model-driven views and \"dumb\" custom views.\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n*This pull request was created from Copilot chat.*\n>\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

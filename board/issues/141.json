@@ -1,0 +1,33 @@
+{
+  "number": 141,
+  "kind": "pull_request",
+  "title": "Fix query tests after schema migration to object-based filter syntax",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-25T05:02:59Z",
+  "updated_at": "2026-01-25T05:21:05Z",
+  "closed_at": "2026-01-25T05:17:22Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-25T05:17:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/141",
+  "body": "Query schema evolved from array-based to object-based filter syntax (MongoDB-style operators), but tests still used old array format causing 40+ validation failures.\n\n### Changes\n\n**Removed obsolete schema references**\n- Deleted imports and tests for `FilterOperator` and `LogicOperator` (removed from schema)\n\n**Migrated join ON clauses** (35 instances)\n```typescript\n// Before\non: ['order.customer_id', '=', 'c.id']\n\n// After  \non: { 'order.customer_id': { $eq: { $field: 'c.id' } } }\n\n// Complex conditions\non: { $and: [\n  { 'order.customer_id': { $eq: { $field: 'c.id' } } },\n  { 'order.status': 'active' }\n] }\n```\n\n**Migrated HAVING clauses** (8 instances)\n```typescript\n// Before\nhaving: ['order_count', '>', 5]\n\n// After\nhaving: { order_count: { $gt: 5 } }\n```\n\n**Fixed field name**\n- `sort` → `orderBy` (schema property)\n\nResult: 105/105 query tests passing\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21327218395/job/61386508022#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

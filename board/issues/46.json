@@ -1,0 +1,37 @@
+{
+  "number": 46,
+  "kind": "pull_request",
+  "title": "Add authentication protocol specification",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-21T00:11:26Z",
+  "updated_at": "2026-01-21T02:36:26Z",
+  "closed_at": "2026-01-21T02:36:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-21T02:36:25Z",
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/46",
+  "body": "## Authentication Standard Specification\n\n**Status: All Review Issues Fixed**\n\n### Summary\n\nFixed all inconsistencies identified by code review - updated type names, file paths, and examples throughout tests and documentation.\n\n### Changes Made\n\n**1. File Renaming:**\n- ✅ `authentication.zod.ts` → `auth.zod.ts`\n- ✅ `authentication.test.ts` → `auth.test.ts`  \n- ✅ `AUTHENTICATION.md` → `AUTHENTICATION_STANDARD.md`\n\n**2. Symbol Renaming (Shorter Names):**\n- ✅ `AuthenticationConfigSchema` → `AuthConfigSchema`\n- ✅ `AuthenticationConfig` → `AuthConfig`\n- ✅ `AuthenticationProviderSchema` → `StandardAuthProviderSchema` (to avoid conflict with identity.zod.ts)\n- ✅ `AuthenticationProvider` → `StandardAuthProvider`\n- ✅ `AuthStrategy` (already short, kept as-is)\n\n**3. Schema Updates:**\n- ✅ Added `driver` field to `AuthConfig` (string, default: 'better-auth')\n- ✅ Updated schema descriptions to refer to \"the authentication system\" instead of specifically \"better-auth\"\n- ✅ Changed provider type literal from `'authentication'` to `'standard_auth'` to avoid conflicts\n\n**4. Documentation Updates:**\n- ✅ Updated title to \"ObjectStack Authentication Standard\"\n- ✅ Stated this is the standard protocol for authentication in ObjectStack\n- ✅ Mentioned that `better-auth` is the \"Reference Implementation\" (Default Driver)\n- ✅ Updated all code examples to use new names\n- ✅ Added section on Implementation Drivers\n\n**5. Bug Fixes (Latest Commit):**\n- ✅ Fixed test imports: `AuthenticationConfig` → `AuthConfig`, `AuthenticationProvider` → `StandardAuthProvider`\n- ✅ Fixed all documentation references: `BetterAuthConfig` → `AuthConfig`, `BetterAuthStrategy` → `AuthStrategy`\n- ✅ Fixed file path references: `auth-better.zod.ts` → `auth.zod.ts`, `auth-better.test.ts` → `auth.test.ts`\n- ✅ Fixed misleading example: `name: 'better_auth'` → `name: 'main_auth'`\n- ✅ Fixed JSON schema reference: `BetterAuthConfig.json` → `AuthConfig.json`\n\n### Architecture\n\n**Clear Interface/Driver Separation:**\n- `AuthConfig` is the interface (standard specification)\n- `driver` field specifies the implementation ('better-auth', 'auth-js', 'passport', 'custom')\n- better-auth is the default/reference implementation\n\n**No Naming Conflicts:**\n- `StandardAuthProviderSchema` doesn't conflict with `AuthProviderSchema` in identity.zod.ts\n- identity.zod.ts handles legacy OIDC/SAML/LDAP providers\n- auth.zod.ts handles modern standard authentication protocol\n\n### Quality Assurance\n\n✅ **Tests**: All 46 tests passing  \n✅ **Build**: TypeScript compilation successful  \n✅ **Exports**: Updated in packages/spec/src/index.ts  \n✅ **JSON Schemas**: Auto-generated successfully  \n✅ **Documentation**: Auto-generated and manually updated  \n✅ **Code Review**: All 12 review issues fixed\n\n### Files Changed\n\n- `packages/spec/src/system/auth.zod.ts` - Renamed from authentication.zod.ts, added driver field\n- `packages/spec/src/system/auth.test.ts` - Renamed, updated imports and type references\n- `packages/spec/src/index.ts` - Updated export path\n- `docs/AUTHENTICATION_STANDARD.md` - Renamed and fixed all type/path references\n- Auto-generated JSON schemas and MDX documentation\n\nAll review feedback addressed: type name consistency, correct file paths, and clear examples.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 写一个better-auth身份认证插件\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 434,
+  "kind": "pull_request",
+  "title": "Bump all packages to v0.7.0",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T05:25:34Z",
+  "updated_at": "2026-01-31T05:39:01Z",
+  "closed_at": "2026-01-31T05:39:01Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T05:39:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/434",
+  "body": "Unified version bump across monorepo from 0.6.1 to 0.7.0.\n\n## Changes\n\n- Updated `version` field to `0.7.0` in 25 package.json files:\n  - Root monorepo\n  - 14 packages (`packages/*`)\n  - 10 examples (`examples/*`)\n  - 1 docs app (`apps/docs`)\n\nMonorepo uses changesets with fixed versioning - all packages remain synchronized.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 统一所有软件包的版本号,发一个0.7版本\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

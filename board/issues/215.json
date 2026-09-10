@@ -1,0 +1,33 @@
+{
+  "number": 215,
+  "kind": "pull_request",
+  "title": "Add metadata extension protocol for plugin extensibility",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-26T05:13:30Z",
+  "updated_at": "2026-01-27T14:24:02Z",
+  "closed_at": "2026-01-27T14:24:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/215",
+  "body": "Plugins need a standard way to extend core metadata (Objects, Fields) with custom properties without modifying base schemas.\n\n## Changes\n\n### Extension Protocol (`src/system/extension.zod.ts`)\n- **ExtensionsMap**: Namespaced key-value store (`plugin_id.property_name`)\n- **ExtensionDefinition**: Metadata registry for declaring extension schemas\n- **Extension utilities**: Type-safe helpers (`get`, `set`, `has`, `remove`)\n- Recursive type-safe schema supporting nested objects/arrays\n\n### Schema Integration\n- Added optional `extensions` field to `FieldSchema` and `ObjectSchema`\n- Fully backward compatible - existing schemas unchanged\n\n### AI Extensions (Reference Implementation)\n- **Field extensions** (9): Vector indexing, auto-summarization, sentiment analysis\n- **Object extensions** (15): RAG enablement, AI agents, predictive analytics, auto-classification\n\n## Usage\n\n```typescript\nimport { ObjectSchema, Extension } from '@objectstack/spec';\n\n// Extend a field with AI capabilities\nconst field = {\n  name: 'description',\n  type: 'textarea',\n  extensions: {\n    'ai_assistant.vectorIndexed': true,\n    'ai_assistant.embeddingModel': 'text-embedding-3-small',\n    'ai_assistant.chunkSize': 512\n  }\n};\n\n// Extend an object with RAG and agent support\nconst object = {\n  name: 'customer_inquiry',\n  fields: { /* ... */ },\n  extensions: {\n    'ai_assistant.enableRAG': true,\n    'ai_assistant.contextFields': ['title', 'description'],\n    'ai_assistant.agentEnabled': true,\n    'ai_assistant.agentName': 'support_assistant'\n  }\n};\n\n// Type-safe access\nconst ragEnabled = Extension.get(object.extensions, 'ai_assistant.enableRAG', false);\n```\n\n## Documentation\n- User guide: `content/docs/guides/metadata-extensions.mdx`\n- Example: `examples/ai-customer-service/` (complete AI-powered support system)\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 设计一套规范如何扩展标准的元数据定义，比如我需要开发一个AI插件，给对象或字段上扩展新的属性\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

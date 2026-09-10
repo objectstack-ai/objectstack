@@ -1,0 +1,33 @@
+{
+  "number": 338,
+  "kind": "pull_request",
+  "title": "我们将集中精力打造 @objectstack/core (ObjectOS) 的核心运行时，确保它在没有任何 UI 的情况下也能完美处理依赖注入、生命周期管理、多服务端口调度以及带有沙箱机制的数据引擎。\n\n以下是为你重新梳理的纯后端开发序列 AI 提示词（Prompts）。\n\n第一阶段：内核地基 (The Foundation)\n\n目标：构建类型安全的微内核，实现插件加载、依赖管理和上下文传递。\n\nPrompt 1: Initialize Microkernel Core\n\nContext: I a...",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-28T04:50:48Z",
+  "updated_at": "2026-01-28T04:58:31Z",
+  "closed_at": "2026-01-28T04:58:11Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/338",
+  "body": "- [ ] Review current implementation in packages/runtime\n- [ ] Create errors.ts with ObjectStackError class for clear debugging\n- [ ] Update mini-kernel.ts to use ObjectStackError instead of generic Error\n- [ ] Update index.ts to export error classes\n- [ ] Build and test the changes\n- [ ] Update documentation if needed\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 我们将集中精力打造 @objectstack/core (ObjectOS) 的核心运行时，确保它在没有任何 UI 的情况下也能完美处理依赖注入、生命周期管理、多服务端口调度以及带有沙箱机制的数据引擎。\n> \n> 以下是为你重新梳理的纯后端开发序列 AI 提示词（Prompts）。\n> \n> 第一阶段：内核地基 (The Foundation)\n> \n> 目标：构建类型安全的微内核，实现插件加载、依赖管理和上下文传递。\n> \n> Prompt 1: Initialize Microkernel Core\n> \n> Context: I am building the backend for \"ObjectStack\", a low-code platform using a Microkernel Architecture. The core package is named @objectstack/core.\n> \n> Task: Create the fundamental ObjectKernel class and TypeScript interfaces.\n> \n> Requirements:\n> \n> Interfaces (types.ts):\n> \n> Plugin: Must include name (string), dependencies? (string[]), init(ctx), start(ctx), and destroy().\n> \n> PluginContext: The object passed to plugins. It must support:\n> \n> registerService(name, instance): Register a singleton.\n> \n> getService<T>(name): Retrieve a service (throw if missing).\n> \n> hook(event, handler): Register an event listener.\n> \n> trigger(event, payload): Async event emitter.\n> \n> Kernel Logic (kernel.ts):\n> \n> Implement use(plugin) to register plugins.\n> \n> Implement bootstrap():\n> \n> First, validate that all dependencies declared by plugins are present.\n> \n> Run init() for all plugins (sequentially or parallel).\n> \n> Then, run start() for all plugins.\n> \n> Error Handling: Use a custom ObjectStackError class for clear debugging.\n> \n> Output: Provide types.ts, errors.ts, and kernel.ts. Do NOT include any UI logic.\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

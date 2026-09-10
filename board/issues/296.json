@@ -1,0 +1,33 @@
+{
+  "number": 296,
+  "kind": "pull_request",
+  "title": "Add vector field type for AI/ML embeddings",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-27T04:36:18Z",
+  "updated_at": "2026-01-27T05:19:40Z",
+  "closed_at": "2026-01-27T05:13:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-27T05:13:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/296",
+  "body": "Adds `vector` field type to support semantic search, RAG, and similarity matching workflows. QueryAST extensions (`having`, `distinct`, `windowFunctions`) and other modern field types (`location`, `json`) already existed.\n\n## Changes\n\n- **FieldType enum**: Added `'vector'` type for embedding storage\n- **VectorConfigSchema**: Configuration for dimensions (1-10K), distance metrics (cosine/euclidean/dotProduct/manhattan), normalization, and index types (hnsw/ivfflat/flat)\n- **Field factory**: Added `Field.vector()` helper with sensible defaults\n- **Tests**: 19 tests covering OpenAI (1536d), image (512d), and RAG (768d) use cases\n\n## Example\n\n```typescript\nimport { Field, Object } from '@objectstack/spec';\n\nconst Article = Object.define({\n  name: 'article',\n  fields: {\n    title: Field.text({ name: 'title' }),\n    content: Field.textarea({ name: 'content' }),\n    \n    // OpenAI text-embedding-ada-002 for semantic search\n    embedding: Field.vector(1536, {\n      name: 'embedding',\n      vectorConfig: {\n        distanceMetric: 'cosine',\n        normalized: true,\n        indexed: true,\n        indexType: 'hnsw'\n      }\n    })\n  }\n});\n```\n\nDriver implementations can leverage existing capability flag `vectorSearch` (PostgreSQL/pgvector, MongoDB Atlas, Pinecone, etc.).\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 协议扩展建议 (Protocol Enhancement Suggestions)\n> \n> 需要在 @objectstack/spec 中添加以下扩展（全部为可选字段，保持向后兼容）：\n> \n> 扩展 1: 扩展 QueryAST 支持高级查询\n> \n> // 建议添加到 @objectstack/spec/src/data/query.ts\n> export interface QueryAST {\n>   object: string;\n>   fields?: string[];\n>   where?: FilterCondition;\n>   orderBy?: SortNode[];\n>   limit?: number;\n>   offset?: number;\n>   groupBy?: string[];\n>   aggregations?: AggregationNode[];\n>   \n>   // 🆕 新增字段\n>   having?: FilterCondition;  // For filtering aggregated results\n>   distinct?: boolean | string[];  // DISTINCT queries\n>   windowFunctions?: WindowFunction[];  // Window functions (SQL)\n> }\n> \n> // 🆕 新类型定义\n> export interface WindowFunction {\n>   function: 'ROW_NUMBER' | 'RANK' | 'DENSE_RANK' | 'LAG' | 'LEAD' | 'SUM' | 'AVG';\n>   partitionBy?: string[];\n>   orderBy?: SortNode[];\n>   frame?: {\n>     type: 'ROWS' | 'RANGE';\n>     start: 'UNBOUNDED PRECEDING' | 'CURRENT ROW' | number;\n>     end: 'UNBOUNDED FOLLOWING' | 'CURRENT ROW' | number;\n>   };\n>   alias: string;\n> }\n> 影响评估:\n> \n> ✅ 向后兼容（新字段为可选）\n> ✅ 支持高级数据库功能\n> ⚠️ 需要更新所有驱动实现\n> 扩展 2: 扩展 FieldType 包含常用现代类型\n> \n> // 建议添加到 @objectstack/spec/src/data/field.ts\n> export type FieldType = \n>   // ... existing types\n>   | 'vector'      // 🆕 Vector embeddings for AI/ML\n>   | 'location'    // 🆕 Geographic location (lat/lng)\n>   | 'json';       // 🆕 Structured JSON data (already supported informally)\n> 理由:\n> \n> vector: AI 时代必备（语义搜索、RAG）\n> location: 地理位置服务普遍需求\n> json: 已被广泛使用但未正式定义\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

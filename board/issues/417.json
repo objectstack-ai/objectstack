@@ -1,0 +1,33 @@
+{
+  "number": 417,
+  "kind": "pull_request",
+  "title": "[WIP] Update specification documentation for clarity",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-31T01:44:17Z",
+  "updated_at": "2026-01-31T02:00:21Z",
+  "closed_at": "2026-01-31T01:57:17Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-31T01:57:17Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/417",
+  "body": "## Fix missing showDataLabels in chart configurations\n\n### Problem\nBuild failing in GitHub Actions (run #21536535900) due to TypeScript errors:\n- `ChartConfigSchema` defines `showDataLabels` with `.optional().default(false)`\n- TypeScript requires this field in chart configurations when using `Report` type\n- 5 chart configurations in `examples/crm/src/ui/reports.ts` were missing the `showDataLabels` property\n- Examples/host build was failing with error TS2741\n\n### Root Cause\nZod's type inference behavior with `.optional().default()`:\n- Field is **optional** in the **input type** (`z.input<>`) - can be omitted\n- Field is **required** in the **output type** (`z.infer<>`) - always has value after parsing\n- The `Report` type was using `z.infer<>`, making it the output type\n- Configuration files need the input type to allow omitting fields with defaults\n\n### Solution\nFollowing the pattern established by `defineStack` and API request types:\n1. Added new input types: `ReportInput`, `ReportColumnInput`, `ReportGroupingInput`, `ReportChartInput`\n2. These use `z.input<>` instead of `z.infer<>` to allow optional fields with defaults\n3. Updated CRM example to use `ReportInput` instead of `Report`\n4. Added documentation explaining when to use each type\n\n### Changes\n- [x] Analyze the build failure from GitHub Actions\n- [x] Identify the root cause in Zod type inference\n- [x] Add `ReportInput` and related input types in `packages/spec/src/ui/report.zod.ts`\n- [x] Update CRM reports to use `ReportInput` type in `examples/crm/src/ui/reports.ts`\n- [x] Build spec package successfully\n- [x] Build CRM example successfully  \n- [x] Build host example successfully (was the failing one)\n- [x] Run full build successfully\n- [x] Run tests - all 2460 tests passed\n- [x] Code review - no issues found\n- [x] Security scan - no vulnerabilities found\n\n### Pattern Established\nConfiguration types should use Input types to allow optional fields with defaults:\n- `defineStack()` uses `z.input<>` for configuration\n- API request types use `z.input<>` \n- Output/runtime types use `z.infer<>`\n\n### Security Summary\nNo security vulnerabilities found in the changes.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 引用: https://github.com/objectstack-ai/spec/actions/runs/21536535900/job/62063308186#step:8:1\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

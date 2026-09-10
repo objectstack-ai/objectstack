@@ -1,0 +1,35 @@
+{
+  "number": 151,
+  "kind": "pull_request",
+  "title": "Migrate examples to latest protocol: remove deprecated fields and UI config",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/l"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-25T06:58:24Z",
+  "updated_at": "2026-01-25T07:24:57Z",
+  "closed_at": "2026-01-25T07:24:57Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-25T07:24:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/151",
+  "body": "Examples were using deprecated protocol fields (`nameField`, `feedEnabled`) and mixing data/UI layers (`list_views`, `form_views` in object definitions).\n\n## Changes\n\n**Protocol field migrations:**\n- `nameField` → `titleFormat` with template expressions (`'{name}'`, `'{account_number} - {name}'`)\n- `feedEnabled` → `enable.feeds` (moved to capabilities block)\n- Added `compactLayout` for card/hover/lookup field selection\n- Standardized `enable` block with `activities` and `mru` capabilities\n\n**Separation of concerns:**\n- Removed 545 lines of UI configuration from object definitions\n- `list_views` and `form_views` belong in UI layer, not data layer\n\n**Example:**\n```typescript\n// Before\nexport const Account = ObjectSchema.create({\n  nameField: 'name',\n  enable: {\n    feedEnabled: true,\n    trackHistory: true,\n  },\n  list_views: { /* ... */ },\n  form_views: { /* ... */ },\n});\n\n// After\nexport const Account = ObjectSchema.create({\n  titleFormat: '{account_number} - {name}',\n  compactLayout: ['account_number', 'name', 'type', 'owner'],\n  enable: {\n    trackHistory: true,\n    apiEnabled: true,\n    feeds: true,\n    activities: true,\n    mru: true,\n  },\n});\n```\n\n## Scope\n\n9 object files updated:\n- CRM: account, contact, opportunity, lead, case, task\n- Modern fields: product, event\n- Todo: task\n\nNet -497 lines. TypeScript compiles clean.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 去最新的协议重新优化examples\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

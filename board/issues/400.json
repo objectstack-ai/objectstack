@@ -1,0 +1,33 @@
+{
+  "number": 400,
+  "kind": "pull_request",
+  "title": "[WIP] Restructure multi-package projects for better maintenance",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T15:35:48Z",
+  "updated_at": "2026-01-30T15:52:32Z",
+  "closed_at": "2026-01-30T15:52:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/400",
+  "body": "## Monorepo Reorganization: 4 Core Packages ✅ COMPLETE\n\nSuccessfully reorganized from fragmented packages into 4 logical groups per user request.\n\n### All Tasks Completed ✅\n- [x] Review current package structure  \n- [x] Identify protocol vs implementation split\n- [x] Map current packages to target structure\n- [x] Create @objectstack/objectui package\n- [x] Create @objectstack/objectos package\n- [x] Merge core → objectos/kernel\n- [x] Merge runtime → objectos/runtime\n- [x] Merge client → objectos/client\n- [x] Merge cli → objectos/cli\n- [x] Merge ai-bridge → objectos/ai-bridge\n- [x] Merge types → objectos/types\n- [x] Update objectql dependencies to use objectos\n- [x] Update plugin dependencies to use objectos\n- [x] Update import paths in objectos\n- [x] Update import paths in objectql\n- [x] Update import paths in plugins\n- [x] Update examples to use new package names\n- [x] Fix TypeScript build errors\n- [x] Test builds for spec, objectos, objectql, objectui\n- [x] Remove old packages (core, runtime, client, cli, ai-bridge, types)\n- [x] Update README with reorganization notice\n- [x] Create comprehensive migration documentation\n- [x] Fix circular dependency between objectos and objectql\n- [x] Fix duplicate dependencies in examples\n- [x] Code review completed\n\n### Final Package Structure\n\n```\npackages/\n├── spec/           # Protocol definitions (Zod schemas, types)\n├── objectql/       # Data query engine\n├── objectui/       # UI layer (placeholder for future)\n├── objectos/       # OS layer (merged 6 packages)\n│   ├── kernel/     # ← core\n│   ├── runtime/    # ← runtime\n│   ├── client/     # ← client\n│   ├── cli/        # ← cli\n│   ├── ai-bridge/  # ← ai-bridge\n│   └── types/      # ← types\n└── plugins/        # Official plugins\n```\n\n### Successfully Built & Tested\n\n✅ **@objectstack/spec** - Protocol definitions  \n✅ **@objectstack/objectos** - OS layer (kernel, runtime, client, cli, ai-bridge)  \n✅ **@objectstack/objectql** - Data query engine  \n✅ **@objectstack/objectui** - UI layer (placeholder)\n\n### Migration Summary\n\n**Removed packages** (merged into objectos):\n- `@objectstack/core` → `@objectstack/objectos/kernel`\n- `@objectstack/runtime` → `@objectstack/objectos/runtime`\n- `@objectstack/client` → `@objectstack/objectos/client`\n- `@objectstack/cli` → `@objectstack/objectos/cli`\n- `@objectstack/ai-bridge` → `@objectstack/objectos/ai-bridge`\n- `@objectstack/types` → `@objectstack/objectos/types`\n\n**Updated references**:\n- All package.json dependencies updated\n- All import statements updated (packages, plugins, examples)\n- TypeScript configurations updated\n- Build configurations updated\n- Fixed circular dependencies\n- Removed duplicate dependencies\n\n### Documentation\n\n- ✅ Created [MONOREPO_REORGANIZATION.md](./MONOREPO_REORGANIZATION.md) with complete migration guide\n- ✅ Updated [README.md](./README.md) with reorganization notice\n- ✅ All builds passing\n- ✅ Code review completed\n\n## Benefits Achieved\n\n1. ✅ **Simpler Maintenance**: 4 packages instead of 7+ fragmented packages\n2. ✅ **Clear Boundaries**: Protocol (spec) vs Implementation (objectql, objectui, objectos)\n3. ✅ **Easier Onboarding**: Developers can understand architecture quickly\n4. ✅ **Flexible Growth**: Each package can grow independently while maintaining cohesion\n5. ✅ **Monorepo Advantages**: Atomic commits, shared tooling, easier refactoring\n6. ✅ **No Circular Dependencies**: Clean dependency graph\n\n---\n\n**Ready for review and merge!** 🎉\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 拉取请求: https://github.com/objectstack-ai/spec/pull/397\n> \n> 我不想拆得那么细，维护不过来，不考虑现有的代码，我计划创建了几个多包项目，spec, objectql, objectui, objectos, 帮我重新规划，需要的话可以再创建新的项目\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

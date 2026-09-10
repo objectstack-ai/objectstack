@@ -1,0 +1,33 @@
+{
+  "number": 368,
+  "kind": "pull_request",
+  "title": "feat: Add structured logging throughout core for plugin developer debuggability",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-29T23:23:43Z",
+  "updated_at": "2026-01-30T00:01:43Z",
+  "closed_at": "2026-01-29T23:56:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-29T23:56:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/368",
+  "body": "Plugin developers lacked visibility into runtime behavior. Most packages used `console.log` or had no logging at all.\n\n## Changes\n\n**Logging Infrastructure**\n- Replaced `console.log` with structured logger (Pino for Node.js, console fallback for browser)\n- Added logger to packages: `objectql`, `driver-memory`, `runtime`, `client`, `plugin-hono-server`, `plugin-msw`\n\n**ObjectQL Engine** (`packages/objectql/src/engine.ts`)\n- Data operations: find, insert, update, delete with query details and result counts\n- Driver registration and resolution\n- Hook execution with handler counts and error tracking\n\n**Driver & Plugins**\n- Memory driver: CRUD operations with table statistics\n- Runtime plugins: Lifecycle events (init, start, destroy)\n- HTTP plugins: Request/response logging with status codes\n- Client: HTTP calls with configurable debug mode\n\n## Example\n\nBefore:\n```typescript\nconsole.log(`[ObjectQL] Registered driver: ${driver.name}`);\n```\n\nAfter:\n```typescript\nthis.logger.info('Registered driver', { \n  driverName: driver.name, \n  version: driver.version\n});\nthis.logger.debug('Find operation starting', { object, query });\nthis.logger.debug('Find operation completed', { object, resultCount: 5 });\n```\n\nLog levels: `debug` (operations), `info` (lifecycle), `warn` (issues), `error` (failures with stack traces)\n\n## Dependencies\nAdded `@objectstack/core` to `client` and `examples/basic` packages (required for logger import).\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 完善整个内核的日志，添加必要的调试日志，让插件开发者更容易融入生态。\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

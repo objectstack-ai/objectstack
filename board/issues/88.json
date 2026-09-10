@@ -1,0 +1,36 @@
+{
+  "number": 88,
+  "kind": "pull_request",
+  "title": "Add AI conversation memory and cost tracking protocols",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-23T11:51:12Z",
+  "updated_at": "2026-01-23T14:56:35Z",
+  "closed_at": "2026-01-23T14:51:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-23T14:51:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/88",
+  "body": "Implements two core AI protocols: conversation state management with token budgeting, and comprehensive cost tracking with multi-level budget enforcement.\n\n## Conversation Protocol (`conversation.zod.ts`)\n\n**Multi-turn conversation state** with token-aware context management:\n\n- Message schema supporting multimodal content (text, image, file) and tool calls\n- Token budget strategies: FIFO, importance-based, semantic similarity, sliding window, summarization\n- Automatic context pruning with configurable reserves and buffers\n- Session lifecycle with context preservation and analytics\n\n```typescript\nconst session: ConversationSession = {\n  id: 'session-1',\n  context: { sessionId: 'session-1', userId: 'user-1', agentId: 'support_agent' },\n  tokenBudget: {\n    maxTokens: 8192,\n    strategy: 'sliding_window',\n    slidingWindowSize: 20,\n    enableSummarization: true,\n  },\n  messages: [...],\n  tokens: { totalTokens: 230, budgetRemaining: 7962, budgetPercentage: 0.028 },\n};\n```\n\n## Cost Protocol (`cost.zod.ts`)\n\n**Granular cost tracking** with hierarchical budget enforcement:\n\n- Cost entry tracking by model, provider, operation, user, agent, object\n- Budget types: global, user, agent, object, project, department\n- Alert system with threshold warnings and anomaly detection\n- Cost analytics with multi-dimensional breakdowns\n- Optimization recommendations based on usage patterns\n\n```typescript\nconst budget: BudgetLimit = {\n  type: 'user',\n  scope: 'user-123',\n  maxCost: 100,\n  period: 'monthly',\n  softLimit: 80,\n  warnThresholds: [0.5, 0.75, 0.9],\n  enforced: true,\n  allowRollover: true,\n};\n```\n\nBoth protocols export TypeScript types derived from Zod schemas for runtime validation and type safety.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 8. AI 对话记忆\n> \n> 文件: packages/spec/src/ai/conversation.zod.ts\n> 工作量: 3 天\n> 功能: 多轮 AI 对话，令牌预算管理\n> \n> 9. AI 成本跟踪\n> \n> 文件: packages/spec/src/ai/cost.zod.ts\n> 工作量: 3 天\n> 功能: 监控和控制 AI API 成本\n> \n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

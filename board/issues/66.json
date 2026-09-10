@@ -1,0 +1,36 @@
+{
+  "number": 66,
+  "kind": "pull_request",
+  "title": "Complete documentation structure optimization with guides, standards, and templates",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-22T10:00:14Z",
+  "updated_at": "2026-01-22T11:31:36Z",
+  "closed_at": "2026-01-22T11:28:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-22T11:28:48Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/66",
+  "body": "# Documentation Structure Optimization\n\nComprehensive optimization of the ObjectStack Protocol documentation following industry best practices from Kubernetes, Salesforce, and ServiceNow.\n\n## Changes Made\n\n### Root Documentation\n- **CONTRIBUTING.md** - Complete contributor guidelines with coding standards, PR checklist, and development workflow\n- **CODE_OF_CONDUCT.md** - Community standards based on Contributor Covenant 2.0\n- **CHANGELOG.md** - Version tracking template following Keep a Changelog format\n- **README.md** - Updated with improved navigation to all documentation resources\n\n### Technical Documentation Hub (`docs/`)\n- **README.md** - Central documentation hub with clear navigation paths\n- **architecture/** - Deep technical dives into protocol layers\n  - `data-layer.md` - ObjectQL architecture and query protocol\n  - `ui-layer.md` - ObjectUI server-driven UI protocol\n  - `system-layer.md` - ObjectOS runtime kernel and plugins\n- **standards/** - Coding standards and conventions\n  - `naming-conventions.md` - camelCase vs snake_case rules\n  - `api-design.md` - RESTful API design principles\n  - `error-handling.md` - Consistent error handling patterns\n- **guides/** - Practical how-to guides\n  - `security/best-practices.md` - Security guidelines and checklist\n  - `performance/optimization.md` - Query optimization and caching strategies\n  - `ai-integration/quick-start.md` - AI features integration guide\n- **migration/** - Version migration guides\n  - `v0-to-v1.md` - Migration guide for version upgrades\n\n## Documentation Structure\n\n```\n├── CONTRIBUTING.md              # Contributor guidelines\n├── CODE_OF_CONDUCT.md          # Community standards\n├── CHANGELOG.md                # Version history\n├── README.md                   # Main entry point\n├── docs/                       # Technical documentation\n│   ├── README.md              # Documentation hub\n│   ├── architecture/          # Protocol layer deep dives\n│   ├── guides/                # Practical guides\n│   ├── standards/             # Coding standards\n│   └── migration/             # Migration guides\n└── content/docs/              # User-facing documentation (Fumadocs)\n    ├── concepts/\n    ├── guides/\n    ├── references/\n    └── specifications/\n```\n\n## Benefits\n\n- **Industry-Aligned**: Follows best practices from leading platforms\n- **Developer-Friendly**: Clear navigation and comprehensive examples\n- **Maintainable**: Separation of concerns between technical and user documentation\n- **Scalable**: Ready for bilingual support (EN/CN)\n- **Comprehensive**: Covers security, performance, migration, and AI integration\n\nAll documentation is production-ready and follows consistent formatting standards.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 从行业最佳实践角度审视，并优化现有整个文档目录结构，增加必要的文档调整或修改现有的文档\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💡 You can make Copilot smarter by setting up custom instructions, customizing its development environment and configuring Model Context Protocol (MCP) servers. Learn more [Copilot coding agent tips](https://gh.io/copilot-coding-agent-tips) in the docs."
+}

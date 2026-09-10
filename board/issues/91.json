@@ -1,0 +1,33 @@
+{
+  "number": 91,
+  "kind": "pull_request",
+  "title": "Auto-organize documentation by zod source files",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-23T15:59:18Z",
+  "updated_at": "2026-01-23T18:05:07Z",
+  "closed_at": "2026-01-23T18:04:04Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-23T18:04:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/91",
+  "body": "Documentation was generated flat within category roots (88 files in `/ai/`), making navigation difficult. Now automatically organizes into subfolders matching source `.zod.ts` files.\n\n## Implementation\n\n- **Auto-detection**: Scans `src/{category}/*.zod.ts` files to build `schema → zodFile` mapping\n- **Removes hardcoded subcategories**: Replaced 74-line `SUB_CATEGORIES` config with dynamic `ZOD_FILE_TITLES` lookup\n- **Clean rebuild**: Purges old flat structure before generation to prevent stale files\n- **Complete coverage**: All 49 zod files mapped to human-readable titles\n\n## Structure Change\n\n**Before:**\n```\n/content/docs/references/ai/\n  Agent.mdx\n  CostEntry.mdx\n  ModelRegistry.mdx\n  ... (88 files)\n```\n\n**After:**\n```\n/content/docs/references/ai/\n  agent/           (Agents)\n    Agent.mdx\n    AIKnowledge.mdx\n  cost/            (Cost Management)\n    CostEntry.mdx\n    BudgetLimit.mdx\n  model-registry/  (Model Registry)\n    ModelRegistry.mdx\n  ... (8 folders)\n```\n\nApplies to all categories: `data` (12 folders), `ui` (7 folders), `system` (19 folders), `ai` (8 folders), `api` (1 folder).\n\n## Files Modified\n\n- `packages/spec/scripts/build-docs.ts` - Rewritten to scan zod files instead of using hardcoded mappings\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 生成官网文档的时候要不要再按每一个zod文件分子文件夹？\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

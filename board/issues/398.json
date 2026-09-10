@@ -1,0 +1,33 @@
+{
+  "number": 398,
+  "kind": "pull_request",
+  "title": "Add repository reorganization plan: 8 packages → 4 packages",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-30T15:27:12Z",
+  "updated_at": "2026-01-30T15:34:51Z",
+  "closed_at": "2026-01-30T15:34:51Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/398",
+  "body": "Current monorepo has 8 packages with fragmented responsibilities causing maintenance overhead. Most packages are trivially small (<10 files), and the intended `objectui` and `objectos` packages exist only as documentation.\n\n## Added\n\n**REORGANIZATION_PLAN.md** - Comprehensive consolidation strategy with bilingual documentation (CN/EN)\n\n## Proposed Structure\n\nConsolidate from 8 packages to 4 aligned with intended architecture:\n\n- **@objectstack/spec** (keep) - Protocol definitions only, remove UI/System schemas\n- **@objectstack/objectql** (expand) - Data engine + contracts from core\n- **@objectstack/objectui** (new) - Extract UI schemas from spec + add runtime\n- **@objectstack/objectos** (new) - Merge core + runtime + types + client + cli + ai-bridge + system schemas\n\n**Reduction**: 8 packages → 4 packages (50% decrease)\n\n## Migration Impact\n\nBreaking changes to import paths:\n\n```typescript\n// Before\nimport { AppSchema } from '@objectstack/spec/ui';\nimport { ObjectKernel } from '@objectstack/core';\n\n// After  \nimport { AppSchema } from '@objectstack/objectui';\nimport { ObjectKernel } from '@objectstack/objectos';\n```\n\n## Decision Points\n\n1. Approve 4-package structure vs alternatives\n2. Version strategy (recommend v0.7.0 for breaking change)\n3. Migration tooling (codemod provision)\n4. Deprecated package handling strategy\n\nSee REORGANIZATION_PLAN.md for complete implementation roadmap, file-level mappings, and phased execution plan.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 我不想拆得那么细，维护不过来，目前我已经创建了几个多包项目，spec, objectql, objectui, objectos, 基于这个目前的状态，帮我重新规划，需要的话可以再创建新的项目\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n✨ Let Copilot coding agent [set things up for you](https://github.com/objectstack-ai/spec/issues/new?title=✨+Set+up+Copilot+instructions&body=Configure%20instructions%20for%20this%20repository%20as%20documented%20in%20%5BBest%20practices%20for%20Copilot%20coding%20agent%20in%20your%20repository%5D%28https://gh.io/copilot-coding-agent-tips%29%2E%0A%0A%3COnboard%20this%20repo%3E&assignees=copilot) — coding agent works faster and does higher quality work when set up for your repo.\n"
+}

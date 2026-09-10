@@ -1,0 +1,33 @@
+{
+  "number": 336,
+  "kind": "pull_request",
+  "title": "Consolidate root markdown files into structured docs hierarchy",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-28T04:22:48Z",
+  "updated_at": "2026-01-28T04:54:29Z",
+  "closed_at": "2026-01-28T04:49:31Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-01-28T04:49:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/336",
+  "body": "Root directory contained 18 markdown files with scattered documentation. Consolidated into `content/docs/` structure, retaining only essential repository files.\n\n## Changes\n\n**New documentation pages:**\n- `content/docs/developers/mini-kernel.mdx` - Consolidated 5 MINI_KERNEL_*.md files + ADVANCED_FEATURES.md + OBJECTQL_PLUGIN_QUICKSTART.md into comprehensive plugin architecture guide\n- `content/docs/references/index.mdx` - Protocol reference index (70 protocols across 11 modules), merged from PROTOCOL_INDEX.md + PROTOCOL_REFERENCE.md\n- `content/docs/introduction/releases.mdx` - Latest features and protocol extensions, migrated from PROTOCOL_EXTENSIONS_COMPLETED.md\n\n**Simplified root:**\n- `README.md` - Reduced from 190 to 75 lines, now points to docs\n- Removed 14 redundant markdown files\n- Retained essential files: README, CONTRIBUTING, CODE_OF_CONDUCT, CHANGELOG, RELEASE_NOTES, LICENSE\n\n**Navigation updates:**\n- Added mini-kernel to `developers/meta.json`\n- Added releases to `introduction/meta.json`\n\n## Structure\n\n```\nRoot: 18 files → 6 files (essential only)\n\ncontent/docs/\n├── introduction/releases.mdx     ← NEW\n├── developers/mini-kernel.mdx    ← NEW\n└── references/index.mdx          ← NEW\n```\n\nAll content preserved. No broken links. Documentation site structure unchanged (605 files intact).\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 整理根目录markdown，必要的内容更新到docs对应的章节\n> \n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}

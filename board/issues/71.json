@@ -1,0 +1,37 @@
+{
+  "number": 71,
+  "kind": "pull_request",
+  "title": "Add Implementation-Agnostic Component Protocol with Plugin Support",
+  "state": "closed",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "Copilot",
+    "id": 198982749,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests"
+  ],
+  "assignees": [
+    "Copilot",
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-01-22T13:30:03Z",
+  "updated_at": "2026-01-23T03:44:02Z",
+  "closed_at": "2026-01-23T03:44:02Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/71",
+  "body": "Implements a generic, implementation-agnostic UI component schema that defines \"how to describe a UI tree\" rather than \"what properties each component has\". This allows UI implementations to evolve independently while maintaining structural compatibility.\n\n## Design Philosophy\n\n**Protocol Layer Responsibility**: Define the tree structure (id, type, props, children, events, style, meta)  \n**Implementation Layer Responsibility**: Define what each component type means and how to render it\n\nThis separation of concerns ensures the protocol remains stable while UI implementations can innovate freely.\n\n## Schema Structure\n\n**Generic Component Node** with flexible, extensible properties:\n\n```typescript\nexport const ComponentSchema = z.object({\n  id: z.string().optional(),                 // Unique component instance identifier\n  type: z.string(),                          // Extensible component type identifier\n  props: z.record(z.unknown()).optional(),   // Implementation-defined properties\n  children: z.lazy(() => z.array(ComponentSchema)).optional(),  // Recursive nesting\n  events: z.record(z.function()).optional(), // Event handler bindings\n  style: z.record(z.string()).optional(),    // Custom CSS styles\n  meta: z.record(z.unknown()).optional(),    // Editor/designer metadata\n});\n```\n\n## Key Features\n\n**1. Extensible Component Types**\n- `type` is a flexible string, allowing custom component types without protocol changes\n- No rigid enum constraining component innovation\n\n**2. Generic Props Container**\n- `props` accepts any key-value pairs via `z.record(z.unknown())`\n- Protocol carries data without validating business logic\n- UI implementations define their own prop requirements\n\n**3. Recursive Composition**\n- `children` supports unlimited nesting depth via `z.lazy()`\n- Enables complex component trees for enterprise UIs\n\n**4. Standard Event & Style Support**\n- `events` for event handler bindings\n- `style` for custom CSS styling\n- These remain protocol-standard across all components\n\n**5. Component Instance Identification**\n- `id` field provides unique identifiers for component instances\n- Essential for rendering engines, diff algorithms, and drag-drop editors\n- First-class field for direct engine-layer management\n\n**6. Editor & Plugin Metadata**\n- `meta` field stores editor/designer-specific information\n- Separates rendering props from non-rendering metadata\n- Supports position data, locked states, binding paths, and plugin-specific data\n- Prevents pollution of component props with editor-only information\n\n## Usage Examples\n\n**Simple Component**:\n```typescript\nconst button: Component = {\n  type: 'button',\n  props: {\n    label: 'Click me',\n    variant: 'primary',\n    customProp: 'any value'\n  }\n}\n```\n\n**Component with ID and Metadata** (for visual editors):\n```typescript\nconst editableCard: Component = {\n  id: 'user-profile-card',\n  type: 'card',\n  props: {\n    title: 'User Profile',\n    subtitle: 'Account Details'\n  },\n  meta: {\n    x: 100,\n    y: 200,\n    locked: false,\n    bindingPath: 'user.profile'\n  }\n}\n```\n\n**Nested Component Tree**:\n```typescript\nconst form: Component = {\n  type: 'form',\n  props: { action: '/submit' },\n  children: [\n    {\n      type: 'input',\n      props: { name: 'username', placeholder: 'Enter username' }\n    },\n    {\n      type: 'button',\n      props: { type: 'submit', label: 'Login' }\n    }\n  ]\n}\n```\n\n**Custom Components** (no protocol changes needed):\n```typescript\nconst customWidget: Component = {\n  type: 'my-custom-widget',\n  props: {\n    config: { foo: 'bar' },\n    data: [1, 2, 3]\n  }\n}\n```\n\n## Files Changed\n\n- `packages/spec/src/ui/component.zod.ts` - Generic component schema (~95 lines, reduced from ~970 lines)\n- `packages/spec/src/ui/component.test.ts` - Structural validation tests\n- `packages/spec/src/ui/index.ts` - Export configuration\n- Auto-generated: JSON schema and MDX reference docs\n\n## Testing\n\n24 structural tests validate:\n- Component type extensibility (any string accepted)\n- Arbitrary prop passing (any key-value pairs)\n- Recursive nesting (3+ levels deep)\n- Event binding patterns\n- Style property handling\n- Real-world component trees (forms, tables, menus, modals)\n- Component instance identification with `id` field\n- Editor metadata with `meta` field\n- Complex nested metadata structures\n\nAll tests passing ✅\n\n## Benefits\n\n✅ **Decoupled**: Protocol and implementation evolve independently  \n✅ **Extensible**: New component types without protocol changes  \n✅ **Maintainable**: Simple, focused protocol definition  \n✅ **Future-proof**: Adaptable to any UI framework or library  \n✅ **Editor-Ready**: Built-in support for visual editors and plugin systems  \n✅ **Engine-Friendly**: First-class `id` field for efficient component tracking\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n\n\n\n<!-- START COPILOT ORIGINAL PROMPT -->\n\n\n\n<details>\n\n<summary>Original prompt</summary>\n\n> 任务 4.2: 组件库协议\n> \n> 文件: packages/spec/src/ui/component.zod.ts\n> 负责人: UI 协议负责人\n> 工作量: 3 天\n> 依赖: 无\n> \n> 实现要点:\n> \n> // 可复用 UI 组件定义\n> export const ComponentType = z.enum([\n>   'card',\n>   'tabs',\n>   'accordion',\n>   'modal',\n>   'drawer',\n>   'timeline',\n>   'stepper',\n>   'breadcrumb',\n>   'alert',\n>   'badge',\n>   'tooltip',\n>   'popover',\n> ]);\n> \n> export const ComponentSchema = z.object({\n>   type: ComponentType,\n>   props: z.record(z.any()).optional(),\n>   children: z.lazy(() => z.array(ComponentSchema)).optional(),\n>   events: z.record(z.function()).optional(),\n>   style: z.record(z.string()).optional(),\n> });\n> \n> // 卡片组件\n> export const CardComponentSchema = ComponentSchema.extend({\n>   type: z.literal('card'),\n>   props: z.object({\n>     title: z.string().optional(),\n>     subtitle: z.string().optional(),\n>     image: z.string().url().optional(),\n>     actions: z.array(z.any()).optional(),\n>   }).optional(),\n> });\n> \n> // 标签页组件\n> export const TabsComponentSchema = ComponentSchema.extend({\n>   type: z.literal('tabs'),\n>   props: z.object({\n>     tabs: z.array(z.object({\n>       label: z.string(),\n>       icon: z.string().optional(),\n>       content: ComponentSchema.optional(),\n>     })),\n>     defaultTab: z.number().int().min(0).optional(),\n>   }),\n> });\n> 验收标准:\n> \n>  定义所有常用组件\n>  支持组件嵌套 (children)\n>  支持事件绑定\n>  文档包含渲染示例\n\n\n</details>\n\n\n\n<!-- START COPILOT CODING AGENT TIPS -->\n---\n\n💬 We'd love your input! Share your thoughts on Copilot coding agent in our [2 minute survey](https://gh.io/copilot-coding-agent-survey).\n"
+}
