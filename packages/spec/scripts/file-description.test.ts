@@ -311,7 +311,7 @@ describe('findModuleDocBlock — #13263: an import injected between a block and 
   });
 
   it('keeps a header written ABOVE the imports, even with a declaration right after them', () => {
-    // `system/doc.zod.ts`, `cloud/template-manifest.zod.ts`,
+    // `system/doc.zod.ts`, `marketplace/template-manifest.zod.ts`,
     // `api/error-code-ledger.zod.ts`. The codemod injects AFTER the last
     // import, so a block preceding every import preceded them beforehand too —
     // the position is the proof, and dropping this limb blanks all three.
@@ -1298,7 +1298,7 @@ describe('renderFileDescription — #6420: a bare path in parentheses still link
  * `identity/auth.zod.ts` — matched nothing on either side and fell through as
  * plain prose. Not a link, and not the code-span fallback either: nine such
  * references on four published pages (`api/realtime-shared:19,21`,
- * `cloud/package:17,18`, `identity/identity:13`,
+ * `marketplace/package:17,18` (then `cloud/package`), `identity/identity:13`,
  * `system/security-context:14,16,17,18`), which is the one outcome of the three
  * that is simply wrong.
  *
@@ -1336,7 +1336,7 @@ describe('renderFileDescription — #6484: a same-directory path resolves agains
    */
   const PAGES: Record<string, readonly string[]> = {
     api: ['auth', 'realtime', 'realtime-shared', 'websocket'],
-    cloud: ['environment-package', 'package', 'package-version'],
+    marketplace: ['package', 'package-version'],
     identity: ['identity', 'organization'],
     system: ['cache', 'encryption', 'security-context'],
   };
@@ -1363,14 +1363,15 @@ describe('renderFileDescription — #6484: a same-directory path resolves agains
     );
   });
 
-  it('links a same-directory path mid-sentence — the published `cloud/package` line', () => {
-    // `packages/spec/src/cloud/package.zod.ts:15` verbatim. A different
+  it('links a same-directory path mid-sentence — the published `marketplace/package` line', () => {
+    // `packages/spec/src/marketplace/package.zod.ts:15` verbatim (`cloud/package`
+    // until #16325 relocated the package format). A different
     // position from the `@see` case above (inside a list item, in ordinary
     // parentheses), so neither published page can regress on its own.
     expect(
-      describedBy('cloud', '- `sys_package_version` — immutable release snapshots (see package-version.zod.ts)'),
+      describedBy('marketplace', '- `sys_package_version` — immutable release snapshots (see package-version.zod.ts)'),
     ).toBe(
-      '- `sys_package_version` — immutable release snapshots (see [package-version.zod.ts](/docs/references/cloud/package-version))',
+      '- `sys_package_version` — immutable release snapshots (see [package-version.zod.ts](/docs/references/marketplace/package-version))',
     );
   });
 
@@ -1567,7 +1568,7 @@ describe('corpus — no reference source donates a symbol comment to its page', 
       .toBe('MySQL / MariaDB driver configuration — the `config` slot of a `datasource`');
     expect(openingOf('data/driver/sqlite.zod.ts'))
       .toBe('SQLite driver configuration — the `config` slot of a `datasource` whose');
-    expect(openingOf('cloud/template-manifest.zod.ts'))
+    expect(openingOf('marketplace/template-manifest.zod.ts'))
       .toBe('`objectstack.manifest.json` — on-disk descriptor for a template / package');
     expect(openingOf('system/doc.zod.ts'))
       .toBe('Package Documentation Metadata Protocol (ADR-0046)');

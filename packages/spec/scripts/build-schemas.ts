@@ -79,12 +79,12 @@ import {
 import * as AI from '../src/ai';
 import * as API from '../src/api';
 import * as Automation from '../src/automation';
-import * as Cloud from '../src/cloud';
 import * as Contracts from '../src/contracts';
 import * as Data from '../src/data';
 import * as Identity from '../src/identity';
 import * as Integration from '../src/integration';
 import * as Kernel from '../src/kernel';
+import * as Marketplace from '../src/marketplace';
 import * as QA from '../src/qa';
 import * as Security from '../src/security';
 import * as Shared from '../src/shared';
@@ -96,8 +96,8 @@ import * as UI from '../src/ui';
 // packages/spec/src/index.ts). Build subpath-by-subpath instead so every
 // category folder under json-schema/ gets populated.
 const Protocol: Record<string, Record<string, unknown>> = {
-  AI, API, Automation, Cloud, Contracts, Data, Identity, Integration,
-  Kernel, QA, Security, Shared, Studio, System, UI,
+  AI, API, Automation, Contracts, Data, Identity, Integration,
+  Kernel, Marketplace, QA, Security, Shared, Studio, System, UI,
 };
 
 /** The package root — every generated artifact below is resolved from here. */

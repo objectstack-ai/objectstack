@@ -128,7 +128,20 @@ export const docsRedirects = [
   ['/docs/guides/metadata', '/docs/concepts/metadata-driven'],
   ['/docs/guides/solutions', '/docs'],
   ['/docs/guides/cheatsheets', '/docs/getting-started/quick-reference'],
+  // `content/docs/references/cloud/` retired with the `@objectstack/spec/cloud`
+  // subpath (#16325). The package & marketplace format pages moved to
+  // `references/marketplace/`; the environment-artifact page documents the
+  // `system/` declaration it only ever re-exported; the cloud control plane's
+  // own contract pages (environment, environment-package, tenant,
+  // developer-portal, marketplace-admin, app-store) have no successor page —
+  // section index, same as the cloud-artifact-api entry above.
+  ['/docs/references/cloud/marketplace', '/docs/references/marketplace/marketplace'],
+  ['/docs/references/cloud/package', '/docs/references/marketplace/package'],
+  ['/docs/references/cloud/package-version', '/docs/references/marketplace/package-version'],
+  ['/docs/references/cloud/template-manifest', '/docs/references/marketplace/template-manifest'],
+  ['/docs/references/cloud/environment-artifact', '/docs/references/system/environment-artifact'],
   // folder moves (wildcards — keep after exact entries)
+  ['/docs/references/cloud/:path*', '/docs/references'],
   ['/docs/guides/runtime-services/:path*', '/docs/kernel/runtime-services/:path*'],
   ['/docs/guides/contracts/:path*', '/docs/kernel/contracts/:path*'],
   // ObjectOS layer-name retirement: the System Protocol section is now "kernel"

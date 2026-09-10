@@ -75,7 +75,7 @@
  *   imports is where the codemod cannot have put it: the injection point is
  *   after the last import, so a block preceding every import was preceding them
  *   before the codemod ran too. Without that half, `api/error-code-ledger`,
- *   `cloud/template-manifest` and `system/doc` — three real headers whose
+ *   `marketplace/template-manifest` and `system/doc` — three real headers whose
  *   imports happen to be followed directly by a declaration — lose their
  *   opening paragraph.
  * - **A comment directly against the block's far side still ends the preamble.**

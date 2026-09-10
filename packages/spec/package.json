@@ -167,24 +167,24 @@
         "default": "./dist/studio/index.js"
       }
     },
-    "./cloud": {
+    "./marketplace": {
       "browser": {
         "import": {
-          "types": "./dist/cloud/index.d.mts",
-          "default": "./dist/browser/cloud/index.mjs"
+          "types": "./dist/marketplace/index.d.mts",
+          "default": "./dist/browser/marketplace/index.mjs"
         },
         "require": {
-          "types": "./dist/cloud/index.d.ts",
-          "default": "./dist/browser/cloud/index.js"
+          "types": "./dist/marketplace/index.d.ts",
+          "default": "./dist/browser/marketplace/index.js"
         }
       },
       "import": {
-        "types": "./dist/cloud/index.d.mts",
-        "default": "./dist/cloud/index.mjs"
+        "types": "./dist/marketplace/index.d.mts",
+        "default": "./dist/marketplace/index.mjs"
       },
       "require": {
-        "types": "./dist/cloud/index.d.ts",
-        "default": "./dist/cloud/index.js"
+        "types": "./dist/marketplace/index.d.ts",
+        "default": "./dist/marketplace/index.js"
       }
     },
     "./qa": {

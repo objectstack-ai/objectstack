@@ -107,7 +107,16 @@ import type {
     DuplicatePackageResponse,
 } from '@objectstack/spec/api';
 import type { ResolvedBook } from '@objectstack/spec/system';
-import type { Environment } from '@objectstack/spec/cloud';
+// [#16325] `Environment` — the camelCase row type that used to be the
+// obvious-looking (and false) binding for `client.environments.*` — is no
+// longer a name `@objectstack/spec` offers from ANY entry: the cloud control
+// plane's row contracts left with the `./cloud` subpath and live in the cloud
+// repo beside their producer. The near-miss is therefore pinned at the import
+// rather than at a member read (regression guard 2 below): the day a row type
+// called `Environment` reappears on the package-format subpath, this line
+// stops erroring and the unused directive goes red.
+// @ts-expect-error `Environment` is not exported by `@objectstack/spec/marketplace` (#16325)
+import type { Environment as _RetiredSpecEnvironmentRow } from '@objectstack/spec/marketplace';
 
 declare const client: ObjectStackClient;
 declare const scoped: ScopedEnvironmentClient;
@@ -1036,23 +1045,22 @@ export async function returnTypePrecisionPins14314(): Promise<void> {
  *    (`restoredVersion`) whose false declaration this family just paid to
  *    remove.
  *
- * 2. `Environment` is the obvious-looking binding for `client.environments.*` and
- *    is camelCase, while the `/api/v1/cloud/*` control plane those methods
- *    call speaks snake_case (measured from this repo's own CLI consumers:
- *    `p.display_name`, `p.organization_id`, `p.is_default`). Binding it would
- *    typecheck, be false, and break those callers.
+ * 2. `Environment` WAS the obvious-looking binding for `client.environments.*`
+ *    — camelCase, while the `/api/v1/cloud/*` control plane those methods call
+ *    speaks snake_case (measured from this repo's own CLI consumers:
+ *    `p.display_name`, `p.organization_id`, `p.is_default`); binding it would
+ *    have typechecked, been false, and broken those callers. Since #16325 the
+ *    row contract is not published by `@objectstack/spec` at all — it left
+ *    with the `./cloud` subpath — so the guard moved from a member read
+ *    (`specEnvironmentRow.display_name`, which needs the type to exist) to the
+ *    `@ts-expect-error`'d import at the top of this file. The former
+ *    `environmentIsNotTheCloudWireRow` pin had no subject left to read.
  */
 declare const commitRollbackPayload: RollbackToPackageCommitResponse;
-declare const specEnvironmentRow: Environment;
 
 export function commitRollbackResponseIsNotTheVersionRollbackShape(): void {
     // @ts-expect-error the COMMIT-rollback payload carries no version identity
     void commitRollbackPayload.restoredVersion;
-}
-
-export function environmentIsNotTheCloudWireRow(): void {
-    // @ts-expect-error the control plane sends `display_name`; this row declares `displayName`
-    void specEnvironmentRow.display_name;
 }
 
 /**

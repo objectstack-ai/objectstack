@@ -2739,9 +2739,9 @@ export class ObjectStackClient {
    * environment-scoped `packages` block nested inside it, keeps its erased
    * `any` DELIBERATELY (#12036).
    *
-   * `@objectstack/spec/cloud` does declare row contracts that look like the
-   * obvious binding — `Environment`, `EnvironmentCredential`,
-   * `EnvironmentPackageInstallation` — and they are camelCase
+   * Until #16325 `@objectstack/spec/cloud` declared row contracts that looked
+   * like the obvious binding — `Environment`, `EnvironmentCredential`,
+   * `EnvironmentPackageInstallation` — and they were camelCase
    * (`displayName`, `organizationId`, `isDefault`, `databaseUrl`; zero
    * snake_case keys across all three schemas). The `/api/v1/cloud/*` control
    * plane this namespace calls speaks **snake_case**: the in-repo CLI
@@ -2856,8 +2856,9 @@ export class ObjectStackClient {
       //   OPTIONAL (the producer's own "absence stays absence" contract), and
       //   all three are typed as the INLINE WIRE SHAPE.
       //
-      // ⛔ Inline, and NOT bound to `@objectstack/spec/cloud`'s
-      // `ProvisionEnvironmentResponseSchema`. That is the namespace docblock's
+      // ⛔ Inline, and NOT bound to `ProvisionEnvironmentResponseSchema`
+      // (declared by `@objectstack/spec/cloud` until #16325; the cloud repo's
+      // own declaration since). That is the namespace docblock's
       // #11925/#12036 constraint applied to the response side: those contracts
       // are camelCase row types for a control plane that speaks snake_case on
       // `/api/v1/cloud/*`, so binding them would typecheck and be false. The

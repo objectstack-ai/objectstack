@@ -14,7 +14,8 @@ import {
 // Before this change `PackageDependency` / `PackageDependencySchema` were each
 // exported by TWO entry points for TWO different declarations:
 //
-//   ./cloud  — the DECLARATION form an author writes into a package manifest:
+//   ./cloud  — since #16325 ./marketplace — the DECLARATION form an author
+//     writes into a package manifest:
 //     `{ packageId, versionRange, optional }`, embedded in
 //     `PackageManifestSchema.dependencies[]` → `sys_package_version.manifest_json`;
 //   ./kernel — the RESOLVER form the dependency resolver walks:
@@ -28,7 +29,10 @@ import {
 // key defaulted or missing: the #4411 trap in its most dangerous form (ADR-0104
 // silent-strip class). Two concepts, not two spellings ⇒ ADR-0112 D9(a), route
 // ruled by the maintainer on #4741: the KERNEL side is renamed
-// `ResolvedPackageDependency(Schema)`, the cloud side keeps the bare name.
+// `ResolvedPackageDependency(Schema)`, the cloud side keeps the bare name
+// (the package-format half of `./cloud` moved to `./marketplace` at #16325;
+// the owner below is that entry, same declaration, same file under its new
+// directory).
 // `RENAMED_DEFS` carries `kernel/PackageDependency` →
 // `kernel/ResolvedPackageDependency` (4 authorable keys, all four still
 // present under the new def ⇒ zero tombstone, zero ADR-0087 conversion).
@@ -37,7 +41,7 @@ import {
 // a no-op until #5286 (tsconfig excluded `**/*.test.ts`; vitest never enables `typecheck`),
 // so the load-bearing pin is the compiler-API test below, with anti-vacuity
 // guards. Sabotage-verified in the PR: S1 resurrecting the old kernel const,
-// and S2 re-exporting the cloud declaration from ./kernel under the bare name
+// and S2 re-exporting the marketplace declaration from ./kernel under the bare name
 // (green to the dual-source gate — one declaration, many entries — but a lie
 // to anyone reading `./kernel`, and independently rejected at BUILD time by
 // RENAMED_DEFS invariant 3, "the source def is still emitted").
@@ -47,7 +51,7 @@ describe('[#4741] PackageDependency dual-source retirement (C7)', () => {
     // enumerate package.json's exports map and build its own `ts.createProgram`
     // right here; `export-origins/` IS that resolution, computed once at build
     // time and checked in — #4796.)
-    for (const needed of ['./cloud', './kernel']) {
+    for (const needed of ['./marketplace', './kernel']) {
       expect(EXPORT_ENTRY_POINTS, `exports map must include ${needed}`).toContain(needed);
     }
     expect(EXPORT_ENTRY_POINTS.length).toBeGreaterThan(10);
@@ -87,7 +91,7 @@ describe('[#4741] PackageDependency dual-source retirement (C7)', () => {
     }
 
     // 3. The bare `PackageDependency(Schema)` now has exactly ONE owner:
-    //    ./cloud, declared in cloud/package-version.zod.ts. Not merely "the
+    //    ./marketplace, declared in marketplace/package-version.zod.ts. Not merely "the
     //    same declaration everywhere" — NO other entry may export the bare name
     //    at all. A re-export from ./kernel would share the declaration (green
     //    to the dual-source gate, which judges by symbol identity) while
@@ -97,14 +101,14 @@ describe('[#4741] PackageDependency dual-source retirement (C7)', () => {
     //    the symbol itself is honest. Exact equality, not a subset check.
     for (const name of ['PackageDependencySchema', 'PackageDependency']) {
       const holders = holderOriginsOf(name);
-      expect(holders.map((h) => h.sub), `${name} must be owned by ./cloud alone`).toEqual(['./cloud']);
-      expect(originFile(holders[0].origin)).toBe('src/cloud/package-version.zod.ts');
+      expect(holders.map((h) => h.sub), `${name} must be owned by ./marketplace alone`).toEqual(['./marketplace']);
+      expect(originFile(holders[0].origin)).toBe('src/marketplace/package-version.zod.ts');
     }
   });
 
   it('keeps the runtime namespaces consistent with the compiler view', async () => {
     const kernel = await import('./index');
-    const cloud = await import('../cloud/index');
+    const marketplace = await import('../marketplace/index');
 
     // Renamed-away side — the old const is gone from ./kernel at runtime too.
     expect('PackageDependencySchema' in kernel, 'kernel must not export PackageDependencySchema').toBe(false);
@@ -128,15 +132,15 @@ describe('[#4741] PackageDependency dual-source retirement (C7)', () => {
 
     // The namespace object published for SBOM / conflict reporting follows the
     // rename — it must not keep handing out the resolver schema under the name
-    // this change gave back to ./cloud.
+    // this change gave back to ./cloud (./marketplace since #16325).
     expect('PackageDependency' in kernel.PluginSecurityProtocol).toBe(false);
     expect(kernel.PluginSecurityProtocol.ResolvedPackageDependency).toBe(
       kernel.ResolvedPackageDependencySchema,
     );
 
-    // cloud side — untouched shape, and still the manifest declaration form.
-    expect('PackageDependencySchema' in cloud).toBe(true);
-    const declared = cloud.PackageDependencySchema.parse({
+    // marketplace side — untouched shape, and still the manifest declaration form.
+    expect('PackageDependencySchema' in marketplace).toBe(true);
+    const declared = marketplace.PackageDependencySchema.parse({
       packageId: 'com.objectstack.core',
       versionRange: '^1.0.0',
     });
@@ -149,7 +153,7 @@ describe('[#4741] PackageDependency dual-source retirement (C7)', () => {
 
   it('proves the two shapes were never interchangeable — the silent-strip trap', async () => {
     const { ResolvedPackageDependencySchema } = await import('./plugin-security.zod');
-    const { PackageDependencySchema } = await import('../cloud/package-version.zod');
+    const { PackageDependencySchema } = await import('../marketplace/package-version.zod');
 
     // Zero shared keys: this is WHY the name had to move rather than converge.
     // If a future edit ever makes the key sets overlap, this assertion fails
