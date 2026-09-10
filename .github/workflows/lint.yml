@@ -2407,6 +2407,26 @@ jobs:
       - name: Quick-reference section counts match their tables
         run: pnpm check:quick-reference-counts
 
+      # #17388: three hand-written pages enumerate @objectstack/spec's importable
+      # subpaths or its protocol namespaces, and nothing read any of them. When
+      # #16325 step 3 deleted the ./cloud exports entry and added ./marketplace,
+      # every MECHANICAL counter of that set moved with it -- the anti-vacuity
+      # floor pin, the alias-coverage pin, export-origins, root-meta, llms.txt,
+      # quick-reference counts, ~25 in all -- and all three prose enumerations
+      # kept advertising cloud and never listed marketplace, until a human swept
+      # for them. Step 2 of that same chain was FAILed in review by exactly this
+      # class of unlisted counter.
+      # It holds TWO derived sets, not one: the exports map's 16 bare ./<name>
+      # entries, and the 15 of those whose declared CATEGORY_TITLES title ends in
+      # " Protocol" (meta-spelling is a subpath and is titled "Vocabulary", not a
+      # protocol). Display names come from that same declaration, so the #5853
+      # "Qa Protocol" class of wrong-but-stable spelling is a finding here too.
+      # It lives in this job with the other docs guards: the edit that breaks it
+      # is a docs edit, so a packages/** paths filter would blind it to its own
+      # failure mode.
+      - name: Hand-written spec enumerations match the exports map
+        run: pnpm check:docs-spec-enumerations
+
       # #11752: the "Overlay whitelist (shared-DB tenancy invariant)" table in
       # metadata-lifecycle.mdx is a hand-kept copy of DEFAULT_METADATA_TYPE_REGISTRY
       # sitting directly under the sentence that calls the registry the single

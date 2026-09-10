@@ -104,6 +104,27 @@ export interface AdminUserEndpointDeps {
    * is registered.
    */
   getTenancy?(): { defaultOrgId(): Promise<string | null> } | undefined;
+  /**
+   * ADR-0093 D1 — the deployment's membership policy, read LIVE through
+   * `AuthManager.getMembershipPolicy()` (never a captured option).
+   *
+   * This endpoint used to hand the reconciler a literal `'auto'`, which made
+   * it the one membership-writing path that did not consult the policy: an
+   * `invite-only` deployment's `user.create.after` reconciler correctly bound
+   * nobody, and then this endpoint-side belt-and-suspenders call bound them
+   * anyway. The failure direction was OPEN — it GRANTED the membership the
+   * policy exists to withhold, and answered `membershipCreated: true` while
+   * doing it. ADR-0093 D1 enumerates the `invite-only` flows as a closed set
+   * and refuses "which endpoint created the user" as a determinant, so the
+   * endpoint reads the policy like every other consumer.
+   *
+   * Optional, and absent ⇒ `'auto'`: that is the accessor's OWN default
+   * (`this.config.membershipPolicy ?? 'auto'`), so a host that wires no
+   * policy dep — lean embeddings, the package's own mock-deps tests — keeps
+   * byte-identical behaviour. The real mount in `auth-plugin.ts` always
+   * wires it.
+   */
+  getMembershipPolicy?(): MembershipPolicy;
   logger?: { warn(msg: string): void };
 }
 
@@ -153,7 +174,7 @@ export interface EndpointResult {
 
 import { CREDENTIAL_ISSUER } from './backfill-account-issuer.js';
 import { generatePlaceholderEmail } from './placeholder-email.js';
-import { reconcileMembership } from './reconcile-membership.js';
+import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import { resolveDefaultOrgId } from './tenancy-service.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
@@ -299,7 +320,8 @@ async function stampMustChangePassword(
 }
 
 /**
- * Bind an admin-created user to the organization (single-org membership).
+ * Bind an admin-created user to the organization (single-org membership),
+ * SUBJECT TO the deployment's membership policy.
  *
  * ADR-0093 D2 — this now delegates to the shared membership reconciler, the
  * single owner of the "every new user gets a membership" invariant. The
@@ -311,10 +333,22 @@ async function stampMustChangePassword(
  * org is the single-org default (resolveDefaultOrgId); multi-org resolves to
  * none, so this no-ops there just as before.
  *
+ * ADR-0093 D1 — the policy comes from {@link AdminUserEndpointDeps.getMembershipPolicy},
+ * the same live accessor the sign-up and backfill seams read. It used to be a
+ * literal `'auto'`, which made double-coverage anything but harmless under
+ * `invite-only`: the hook skipped by policy and this call bound regardless, so
+ * the endpoint GRANTED the membership the policy was set to withhold. D1
+ * enumerates the `invite-only` flows as a closed set and refuses "which
+ * endpoint created the user" as a determinant — an admin-created account is
+ * not an implicit invitation.
+ *
  * Returns the shape the response/audit consumed pre-ADR-0093:
  * `membershipCreated` is true only when THIS call inserted the row (a `bound`
  * outcome); a `yielded` outcome (the hook or a race already bound it) reports
- * the org with `membershipCreated: false`.
+ * the org with `membershipCreated: false`. Under `invite-only` the reconciler
+ * answers `policy-skip` before it looks at any org, so the caller reports no
+ * organization and `membershipCreated: false` — the account is created, the
+ * membership is not.
  */
 async function bindUserToSoleOrganization(
   deps: AdminUserEndpointDeps,
@@ -327,8 +361,11 @@ async function bindUserToSoleOrganization(
   // in a multi-org deployment. Fallback (no tenancy wired: lean embeddings,
   // legacy mocks) keeps the single-org resolution.
   const tenancy = deps.getTenancy?.();
+  // ADR-0093 D1 — read the live policy, never a literal. Absent dep ⇒ `auto`,
+  // which is the accessor's own default, so unwired hosts are unchanged.
+  const policy: MembershipPolicy = deps.getMembershipPolicy?.() ?? 'auto';
   const result = await reconcileMembership(engine, userId, {
-    policy: 'auto',
+    policy,
     resolveTargetOrg: () => (tenancy ? tenancy.defaultOrgId() : resolveDefaultOrgId(engine)),
     logger: deps.logger
       ? { warn: (msg, meta) => deps.logger?.warn(`${msg} ${meta ? JSON.stringify(meta) : ''}`.trim()) }
@@ -535,7 +572,8 @@ export async function runAdminCreateUser(
 
   // Match the invite / add-member flows: give the new user a membership so a
   // single-org deployment shows them under the Default Organization instead of
-  // as a member-less account. No-op in multi-org (≥2 orgs) — see the helper.
+  // as a member-less account. No-op in multi-org (≥2 orgs), and no-op under
+  // `membershipPolicy: 'invite-only'` (ADR-0093 D1) — see the helper.
   const membership = await bindUserToSoleOrganization(deps, userId);
 
   await writeAdminAudit(deps, {
