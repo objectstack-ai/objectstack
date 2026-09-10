@@ -94,6 +94,29 @@ export interface McpDataBridge {
       orderBy?: Array<{ field: string; order: 'asc' | 'desc' }>;
     },
   ): Promise<unknown>;
+  /**
+   * [ADR-0090 D10 — maintainer ruling 2026-09-08, #16549] Is a read on `object`
+   * NARROWED by the agent ceiling the caller runs under?
+   *
+   * The transport half of the ruling's consequence (2), and it exists because
+   * the deceived consumer on this surface is the **AI itself**: a delegated
+   * `query_records` answering `total: 0` with no note is read by the agent as a
+   * fact about the data, and it then tells a decision-maker "there are no
+   * opportunities this quarter". A narrowed count must arrive WITH the
+   * narrowing stated.
+   *
+   * OPTIONAL, with the same graceful-degradation contract as
+   * {@link McpDataBridge.listObjectsDiagnosed} and
+   * {@link McpDataBridge.aggregate}: a bridge bound to a principal that cannot
+   * be delegated (the stdio API-key host), or wired to a security service
+   * predating the probe, omits this member and the tool renders exactly what it
+   * rendered before.
+   *
+   * ⛔ `{ narrowed: false }` and "cannot say" are deliberately the same RENDERED
+   * outcome — neither may manufacture a warning. The tool states a narrowing
+   * only where one was established.
+   */
+  diagnoseDelegation?(object: string): Promise<{ narrowed: boolean; statement?: string } | undefined>;
   get(object: string, id: string): Promise<unknown>;
   create(object: string, data: Record<string, unknown>): Promise<unknown>;
   update(object: string, id: string, data: Record<string, unknown>): Promise<unknown>;
@@ -229,6 +252,26 @@ function textResult(value: unknown) {
 
 function errorResult(message: string) {
   return { content: [{ type: 'text' as const, text: message }], isError: true as const };
+}
+
+/**
+ * [ADR-0090 D10 — ruling 2026-09-08, consequence 2] Attach the D10 narrowing
+ * notice to a query result WITHOUT reshaping it.
+ *
+ * The bridge's `query` is typed `Promise<unknown>`, and the shape that ships is
+ * the protocol's `{ object, records, total }` — so the object case adds two
+ * keys beside the existing ones, mirroring `list_objects`' `partial` / `warning`
+ * pair so a client branches on the same vocabulary on both tools. Anything that
+ * is NOT a plain object (a bare array from some future bridge) keeps its own
+ * shape and carries the notice alongside: inventing a `records` wrapper there
+ * would break a caller to deliver a warning about breaking callers.
+ */
+function withDelegationNotice(value: unknown, statement: string): unknown {
+  const notice = { delegationNarrowed: true as const, warning: statement };
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    return { ...(value as Record<string, unknown>), ...notice };
+  }
+  return { result: value, ...notice };
 }
 
 function jsonText(value: unknown): string {
@@ -494,7 +537,19 @@ export function registerObjectTools(
             offset,
             orderBy,
           });
-          return textResult(result);
+          // [ADR-0090 D10 — ruling 2026-09-08, consequence 2] A delegated read
+          // the agent ceiling NARROWED is served with the narrowing stated. The
+          // rows are still served — a partial answer is the most useful true
+          // thing here, exactly as in `list_objects` above; what is withheld is
+          // the implicit claim that this count describes the object.
+          //
+          // ⛔ The probe may never fail the query it annotates: it is caught
+          // into "no statement", which is byte-for-byte the pre-#16549 render.
+          const diagnosed = typeof bridge.diagnoseDelegation === 'function'
+            ? await bridge.diagnoseDelegation(objectName).catch(() => undefined)
+            : undefined;
+          if (!diagnosed?.narrowed || !diagnosed.statement) return textResult(result);
+          return textResult(withDelegationNotice(result, diagnosed.statement));
         } catch (err) {
           return errorResult(messageOf(err));
         }

@@ -570,6 +570,30 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
             if (o?.orderBy) query.orderBy = o.orderBy;
             return await callData('query', { object, query }, driver, envId, ec);
         },
+        /**
+         * [ADR-0090 D10 — maintainer ruling 2026-09-08, #16549] The
+         * delegated-read diagnostic, asked of THIS request's security service
+         * about THIS request's principal.
+         *
+         * `query_records` renders it only where a narrowing was ESTABLISHED, so
+         * every "cannot say" path answers `{ narrowed: false }` and the tool
+         * renders exactly what it rendered before: no security service in this
+         * deployment, a service predating the probe (feature-detected — the
+         * availability rule `ISecurityService` states at the top of its own
+         * file), or a throwing probe. ⛔ A diagnostic must never fail the read
+         * it annotates.
+         */
+        diagnoseDelegation: async (object: string) => {
+            try {
+                const security: any = await deps.resolveService(context, 'security', envId);
+                if (typeof security?.describeDelegationNarrowing !== 'function') {
+                    return { narrowed: false };
+                }
+                return await security.describeDelegationNarrowing(object, ec);
+            } catch {
+                return { narrowed: false };
+            }
+        },
         get: async (object: string, id: string) => {
             const res: any = await callData('get', { object, id }, driver, envId, ec);
             return res?.record ?? res ?? null;
