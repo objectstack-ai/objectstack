@@ -11991,6 +11991,276 @@ export function h57RowSubject(entry) {
 }
 
 // ---------------------------------------------------------------------------
+// H58 — a `pm:queue` card whose own text declares it is a RULING, a DECISION
+// or a RECORD (#17417).
+//
+// ## The defect, in the filing card's measurement
+//
+// `pm:queue` carries two incompatible meanings. Seats label a card `pm:queue`
+// to mean 「triaged, registered, do not lose this」, and the execution seat's
+// card-selection total order reads every one of them as 「ready to hand to a
+// dev」. There is no third state for 「triaged, and deliberately not work」, so
+// the queue label absorbs it — 「a card that is `pm:queue` in the sense of
+// 'triaged and registered' being read by the candidate query as 'ready for a
+// dev'」, in the words of the second seat to measure it.
+//
+// Three independent seats measured the cost. One refill run could not dispatch
+// four `pm:queue` cards in a row and later recorded 6 of 6. A second seat
+// raised the same shape on five cards in one round and flagged its own rate as
+// 「a rate worth naming rather than absorbing」. The largest single sample — one
+// triage fire answering ten cards — found five of this exact shape. The price
+// of ONE instance is a dev round: a card was filed for work that had merged
+// 19.9 hours earlier, a dev was dispatched, spent a full round, and correctly
+// returned `premise_still_valid: false` with zero files changed.
+//
+// ## ⭐ The datum that shapes this row — it argues AGAINST a new state
+//
+// Every one of the five was resolved into a state that ALREADY EXISTS:
+// `tracking`, `needs-user-decision`, closed, or a corrected `pm:queue`. Not one
+// of them needed a state the protocol does not have. So the failure is not a
+// missing state — it is that ruling-shaped and record-shaped cards are GRADED
+// into `pm:queue` when the correct existing state was available at grading
+// time, which makes it a triage-discipline problem and not a state-machine
+// design problem. ⛔ This row therefore proposes NO fifth state and asks for no
+// new label: its remedy sentence enumerates exactly those four dispositions.
+//
+// ## The anchors are MEASURED as HEADINGS — and one candidate was REFUSED
+//
+// The three spellings the filing card names were re-read on the live cards
+// before being frozen here, and the reading moved the set:
+//
+//   objectui#8449  `## Why it is a ruling, not a mechanical fix`      HEADING ✓
+//   objectui#8365  `## Why this is a decision, not a mechanical fix`  HEADING ✓
+//   objectui#8429  「Both are dispositions」                            PROSE ✗
+//   objectui#7089  `## 5. Two rulings of mine you may want to overturn` HEADING ✓
+//   objectui#7233  `## 8. Two rulings of mine you may want to overturn` HEADING ✓
+//
+// 「Both are dispositions」 is NOT a heading on the card it was measured on: it
+// is a sentence inside a paragraph under that card's `## What this card is NOT
+// asking for`. A heading-anchored reader can therefore never match it, and
+// admitting it would be an anchor nobody writes — `PROSE_BLOCKER_ANCHORS`'s own
+// rule, for its own reason: an anchor nobody writes buys only false rows, and a
+// row is worth reading only while every heading it names was written by a seat.
+// So it is recorded here and deliberately absent from the set.
+//
+// The handover pair contributed a spelling the filing card did not quote. Their
+// bodies carry no marker in the card's three spellings at all; what BOTH carry
+// is a section 「Two rulings of mine you may want to overturn」, which is a card
+// declaring itself a RECORD of rulings exactly as squarely as the other two
+// declare themselves a ruling. That is the spelling measured on the live cards,
+// so that is the spelling pinned.
+//
+// ## Why HEADINGS, and only headings
+//
+// A marker quoted in prose, in a table, in a code span, in a blockquote or
+// inside a fence is a card TALKING ABOUT the shape rather than declaring it —
+// and the filing card is itself the specimen: its body quotes all three of the
+// spellings it names, in prose and in a table, and must produce no row. Section
+// headings are where a card declares what it IS. So the scan is line-anchored
+// on an ATX heading outside fenced code, which refuses every one of those
+// shapes structurally rather than by a list of exceptions.
+//
+// ## What this row is NOT
+//
+// ⛔ Not a gate: report-only, exit codes untouched, nothing blocked, no label
+// written. ⛔ Not a verdict on which carrier is wrong — the label is triage's
+// and the heading is the author's, and deciding between them belongs to the
+// seat that owns the second one. H54 holds the same posture one field over: it
+// reads a `[Decision]` TITLE against the same label, this reads the BODY and
+// the THREAD, and a card wearing both fires both because they are two readings
+// and not one restated.
+//
+// ## Quota — this row buys NOTHING
+//
+// The population is the `pm:queue` label page the sweep's loop already
+// consumes (`SEEN_LABEL_PAGES`), so membership and the BODY are free and no
+// card outside the listing can reach the row. The THREAD is read only where
+// another row already paid for it (`commentCache.get`, never a fetch), so a
+// queued card nobody bought a thread for is judged on its body ALONE and its
+// second channel is UNREAD rather than empty. That split is not visible per
+// card — it would take an UNJUDGED row on every queued card to say it, which
+// would flood the board — so it is disclosed on the summary line, which is
+// where this row's coverage lives.
+// ---------------------------------------------------------------------------
+
+/**
+ * The heading spellings by which a card declares its own deliverable is a
+ * ruling, a decision or a record, each frozen beside the live instance it was
+ * MEASURED on so a reader can check the anchor against the card that wrote it.
+ *
+ * ⛔ Never extend this list from imagination — `PROSE_BLOCKER_ANCHORS`'s rule,
+ * for its reason. Extend it when a new spelling is measured AS A HEADING on a
+ * live card, and record where it was measured. A spelling measured in prose
+ * (「Both are dispositions」, see the banner) is not a candidate for this list at
+ * all: this reader cannot see prose, by design.
+ *
+ * The regexes match the distinctive HEAD of each measured heading rather than
+ * the whole line, so a card writing 「Why this is a decision」 with no tail still
+ * fires and a numbered heading (「5. Two rulings of mine…」) is not defeated by
+ * its ordinal. Case-insensitive for `DECISION_TITLE_PREFIX`'s reason: one
+ * author's one intent, and a carrier missed on its capitalisation would read as
+ * a clean queue (#4690).
+ */
+export const H58_RULING_MARKER_ANCHORS = Object.freeze([
+  Object.freeze({
+    heading: /\bwhy it is a ruling\b/iu,
+    spelling: 'Why it is a ruling, not a mechanical fix',
+    instance: 'objectui#8449',
+  }),
+  Object.freeze({
+    heading: /\bwhy this is a decision\b/iu,
+    spelling: 'Why this is a decision, not a mechanical fix',
+    instance: 'objectui#8365',
+  }),
+  Object.freeze({
+    heading: /\brulings of mine you may want to overturn\b/iu,
+    spelling: 'Two rulings of mine you may want to overturn',
+    instance: 'objectui#7089 + objectui#7233',
+  }),
+]);
+
+/**
+ * The ceiling on that frozen set.
+ *
+ * A cap on the ANCHOR SET rather than on requests — this row buys none — and it
+ * is what keeps 「measured, then frozen」 from drifting into 「whatever seemed
+ * plausible」. Five is the room the measured population needs plus headroom for
+ * two more measured spellings; a sixth is not a one-line edit but an argument
+ * about whether the set is still a set of readings.
+ */
+export const H58_MARKER_ANCHOR_CAP = 5;
+
+/**
+ * An ATX heading line: up to three leading spaces, one to six `#`, whitespace,
+ * then the text. A blockquoted heading (`> ## …`) cannot match, which is one of
+ * the four shapes this row must refuse and the only one the fence stripper does
+ * not already remove.
+ */
+const H58_HEADING_LINE = /^[ \t]{0,3}(#{1,6})[ \t]+(.+)$/u;
+
+/**
+ * Every anchor this text carries AS A HEADING, in the order written, deduped by
+ * anchor so a card repeating a spelling names it once.
+ *
+ * Fenced code is blanked first through `stripMarkdownCode`'s `{ inline: false }`
+ * reading — the same fence parser H17 uses, deliberately shared rather than
+ * re-derived — so a marker inside a fence contributes nothing while an inline
+ * code span on the heading itself survives to be undecorated. Decoration is
+ * removed with `undecorateProseLine` for H4's reason: authors format these
+ * lines, and a decorated one means what the bare one means.
+ *
+ * Exported for the self-test: the anchor set and the heading anchoring are the
+ * whole design, and a spelling that silently stopped matching would cost every
+ * row without costing a case.
+ *
+ * @param {string} text
+ * @returns {{ spelling: string, instance: string, heading: string }[]}
+ */
+export function rulingMarkerHeadings(text) {
+  const out = [];
+  const claimed = new Set();
+  for (const raw of stripMarkdownCode(text, { inline: false }).split(/\r?\n/)) {
+    const m = H58_HEADING_LINE.exec(raw);
+    if (!m) continue;
+    const written = undecorateProseLine(m[2]).trim();
+    for (const anchor of H58_RULING_MARKER_ANCHORS) {
+      if (claimed.has(anchor.spelling)) continue;
+      if (!anchor.heading.test(written)) continue;
+      claimed.add(anchor.spelling);
+      out.push({ spelling: anchor.spelling, instance: anchor.instance, heading: `${m[1]} ${written}` });
+    }
+  }
+  return out;
+}
+
+/**
+ * Does H58 speak about this card at all?
+ *
+ * H54's gate exactly, and for H54's reasons: ⛔ ISSUES only (the subject is the
+ * DISPATCH POOL and a PR is not in it), a CLOSED card is out (a card nobody can
+ * dispatch is a card nothing over-reads as capacity, and `pm:queue` on one is
+ * residue the closed census already counts), and an unreadable `labels` is out
+ * rather than read as unlabelled (#4690 on the one field that decides
+ * membership).
+ */
+export function h58SpeaksAbout(issue) {
+  if (issue?.pull_request) return false;
+  if (issue?.state === 'closed') return false;
+  if (!Array.isArray(issue?.labels)) return false;
+  return labelNames(issue).includes('pm:queue');
+}
+
+/**
+ * H58 — null when clean, else the finding sentence.
+ *
+ * ## Three input states for the thread, never two (#4690)
+ *
+ *   - `undefined` — no thread was in hand this sweep. The BODY was still judged
+ *     (it rides in on the label page), so the row is a real reading of the
+ *     first channel and the sentence says the second went unread.
+ *   - `null` — the thread was consulted and UNREADABLE. Same sentence,
+ *     different cause, and neither is 「the thread carries no marker」.
+ *   - `string[]` — both channels judged, for real.
+ *
+ * @param {object} issue — a card from a listing this sweep already holds.
+ * @param {string[]|null|undefined} commentBodies — the thread, if one is in hand.
+ */
+export function h58QueuedRulingRow(issue, commentBodies) {
+  if (!h58SpeaksAbout(issue)) return null;
+  const bodies = Array.isArray(commentBodies) ? commentBodies : [];
+  const hits = rulingMarkerHeadings(issue?.body).map((hit) => ({ ...hit, where: 'the card BODY' }));
+  const claimed = new Set(hits.map((hit) => hit.spelling));
+  for (let i = 0; i < bodies.length; i++) {
+    for (const hit of rulingMarkerHeadings(bodies[i])) {
+      if (claimed.has(hit.spelling)) continue;
+      claimed.add(hit.spelling);
+      hits.push({ ...hit, where: `COMMENT ${i + 1} of ${bodies.length}` });
+    }
+  }
+  if (hits.length === 0) return null;
+  const where = hits.map((hit) => `「${hit.heading}」 in ${hit.where}`).join('; ');
+  const anchors = hits.map((hit) => `「${hit.spelling}」 (measured on ${hit.instance})`).join(', ');
+  const channel =
+    commentBodies === undefined
+      ? ' ⚠️ Only the BODY was read for this card — no comment thread was in hand this sweep, so a ' +
+        'marker written in a COMMENT is UNREAD rather than absent.'
+      : commentBodies === null
+        ? " ⚠️ This card's comment thread could NOT be read this sweep, so the second channel is " +
+          'UNJUDGED rather than empty.'
+        : ` Both channels were read (${bodies.length} comment(s) in hand).`;
+  return (
+    '`pm:queue` while the card\'s own text declares it is NOT queue work — ' +
+    `${where}. Anchor(s): ${anchors}. ` +
+    'The label puts this card in the DISPATCH pool, which the card-selection order reads as 「ready ' +
+    'to hand to a dev」; the heading declares the deliverable is a RULING, a DECISION or a RECORD. ' +
+    'The two meanings 「triaged and registered」 and 「ready for a dev」 are carried by ONE label, and ' +
+    'the selection order reads the second. Measured across three seats: one refill run could not ' +
+    'dispatch four queued cards in a row (6 of 6 by its own later count), a second raised the shape ' +
+    'on five cards in one round, and one triage fire found five of ten. The price of one instance is ' +
+    'a dev round — a card filed for work that had merged 19.9 hours earlier, dispatched, and ' +
+    'correctly returned `premise_still_valid: false` with zero files changed. ' +
+    '⛔ This row does NOT say which carrier is wrong: the label is the triage seat\'s and the heading ' +
+    'is the author\'s, and choosing between them is the seat\'s judgement, not a patrol\'s. ' +
+    'Remedy, and it belongs to the TRIAGE seat on its per-fire read — dispose the card into the state ' +
+    'that already fits: `tracking` for a handover or a record, `needs-user-decision` for a decision ' +
+    'still unruled (carrying its four-facet analysis at the moment the label lands), CLOSED when the ' +
+    'card has already done its whole job (「这张卡已经完成了它自己的全部工作」, measured), or a corrected ' +
+    '`pm:queue` when the heading is stale and the work really is mechanical. ' +
+    '⛔ No new state and no new label: all five measured instances resolved into one of exactly those ' +
+    'four, so the vocabulary is already sufficient and a fifth is the remedy this card\'s own evidence ' +
+    'argues against. ⛔ And no dev round until that disposition is written — a queued body is a ' +
+    'SNAPSHOT, and acting on one that declares itself a ruling costs a full round to establish that it ' +
+    'could not be picked up.' +
+    channel +
+    ' Report-only: this row writes no label, relabels nothing, and its verdict is a disagreement ' +
+    'between two carriers — ⛔ never a finding that the card is mislabelled. ' +
+    '⚠️ It reads HEADINGS only, and only the frozen measured set: a card declaring itself in prose, in ' +
+    'a table, in a code span, in a blockquote or inside a fence is invisible here by design, so a ' +
+    'quiet board is a LOWER BOUND and never a proof that no queued card is a ruling.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -12284,6 +12554,16 @@ export const SWEEP_COUNT_KEYS = [
   'refUnjudged',
   'refDeferred',
   'refFloor',
+  // H58's coverage pair plus its body-only half (#17417). `rulingMarkerJudged`
+  // is how many open `pm:queue` cards had their BODY judged — never zero on a
+  // board with a queue, because the body rides in on a label page the sweep
+  // already consumed — and the other two split that population by whether the
+  // SECOND channel was in hand. This row buys no fetch, so the split is the only
+  // reading that separates "no queued card declares itself a ruling" from "most
+  // of the threads were never read".
+  'rulingMarkerJudged',
+  'rulingMarkerThreadRead',
+  'rulingMarkerUnread',
   'refBeyond',
 ];
 
@@ -12736,6 +13016,19 @@ export function summaryLine(counts, findingCount) {
     // a reader cannot see is the exact failure this row exists to end — so the
     // clause names them rather than only counting them.
     `Scheduled non-blocking workflows (H57): ${h57PopulationClause(counts)} ` +
+    // H58's coverage reading (#17417). UNCONDITIONAL like every other window's,
+    // and it carries the two disclosures this row owes. It BUYS NOTHING, so the
+    // second channel is read only where another row already paid for it; and the
+    // body-only/body+thread split is the only place a reader can see how much of
+    // that channel went unread, because an UNJUDGED row on every queued card
+    // would flood the board rather than inform it.
+    `Queued ruling markers (H58): ${counts.rulingMarkerJudged ?? 0} open \`pm:queue\` card(s) had ` +
+    `their BODY judged against ${H58_RULING_MARKER_ANCHORS.length} frozen heading anchor(s) — ` +
+    `${counts.rulingMarkerThreadRead ?? 0} with a comment thread ALREADY in hand, ` +
+    `${counts.rulingMarkerUnread ?? 0} on the body ALONE. It fetches NOTHING of its own, so a card ` +
+    'whose thread no other row bought has an UNREAD second channel rather than a clean one, and the ' +
+    'rows are a LOWER BOUND. It matches ATX HEADINGS outside fenced code only: a marker quoted in ' +
+    'prose, in a table, in a code span or in a blockquote is invisible here by design. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -12796,6 +13089,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h51Handoff', 'Contract-review handoffs (H51): '],
   ['h53Carrier', 'Carriers without increment (H53): '],
   ['h57Scheduled', 'Scheduled non-blocking workflows (H57): '],
+  ['h58RulingMarkers', 'Queued ruling markers (H58): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -13266,6 +13560,32 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // objectui#8126 sat at 234 scheduled runs and zero successes for eight months
   // with nothing anywhere saying so.
   H57: 'stall',
+
+  // H58 is a `state` (#17417), and the other three bands are refused on their
+  // own criteria rather than on this subject's vocabulary.
+  //
+  // ⛔ NOT `gate`: that band exists for the row that can tell a STRIPPED gate
+  // from an ungated card — an ABSENCE reading as a green light, where 「被剥」 and
+  // 「从未挂过」 are indistinguishable in the evidence. Here nothing was stripped
+  // and nothing is absent: both carriers are PRESENT and legible, a label and a
+  // heading, and they disagree. That is H54's refusal, taken for H54's reason.
+  // ⛔ NOT `stall`: that band's criterion is forward motion STOPPED with nothing
+  // else to move it, and BOTH halves fail. Whether a card in this shape is
+  // stopped is UNMEASURED by this row — it sits in the dispatch pool and any
+  // seat may pick it up at any hour, which is the defect and not a halt — and
+  // something else DOES move it: the triage seat's per-fire read, which is
+  // exactly what disposed all five measured instances. H4 is `stall` because a
+  // blocked card with no machine-readable line is one the unlock scan can NEVER
+  // free; nothing here is waiting on a scan.
+  // ⛔ NOT `inventory`: the row alarms about ONE card, not a population. The
+  // population reading — how many queued cards were judged, and how many on the
+  // body alone — is a summary clause and takes no band at all (H39's shape).
+  //
+  // What is left is `state`'s criterion exactly: two carriers contradicting each
+  // other on a LIVE card, readable and repairable from the board, the repair
+  // being one disposition into a state that already exists. And it is H54's
+  // band, the row this one is the body-and-thread half of.
+  H58: 'state',
 
   H5: 'inventory',
   H6: 'inventory',
@@ -16599,6 +16919,29 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       if (releaseRows !== undefined) stats.releaseJudged = (stats.releaseJudged ?? 0) + 1;
       const releaseDesync = h47ReleaseRecordDesync(issue, releaseRows);
       if (releaseDesync) findings.push([issue, 'H47', releaseDesync]);
+    }
+    // H58 (#17417) — the queued card whose own text says it is not queue work.
+    // At the FOOT of this iteration for H47's reason and no other: it reads the
+    // thread out of `commentCache`, which every gate above this line fills, so
+    // judged beside H54 at the top the cache would be empty on every iteration
+    // and the row would report every card body-only forever while looking
+    // perfectly healthy — #4690, self-inflicted by placement.
+    //
+    // ⛔ It buys NOTHING: `commentCache.get` never fetches. The BODY is never
+    // unjudged — it rides in on the label page this loop already consumed — so
+    // unlike H47's pair these counters split a JUDGED population by channel
+    // rather than saying whether the row ran, and `rulingMarkerUnread` is the
+    // second channel going unread rather than a card going unread.
+    if (h58SpeaksAbout(issue)) {
+      stats.rulingMarkerJudged = (stats.rulingMarkerJudged ?? 0) + 1;
+      const markerRows = commentCache.get(issue.number);
+      if (markerRows === undefined) stats.rulingMarkerUnread = (stats.rulingMarkerUnread ?? 0) + 1;
+      else stats.rulingMarkerThreadRead = (stats.rulingMarkerThreadRead ?? 0) + 1;
+      const declaresRuling = h58QueuedRulingRow(
+        issue,
+        markerRows === undefined ? undefined : markerRows.map((c) => c?.body ?? ''),
+      );
+      if (declaresRuling) findings.push([issue, 'H58', declaresRuling]);
     }
   }
 
@@ -25329,6 +25672,173 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H57 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
   t('H57 band: a gate row still outranks it', familyRank('H31') < familyRank('H57'), true);
   t('H57 band: …and it outranks an inventory row', familyRank('H57') < familyRank('H14'), true);
+
+  // -- H58 — a `pm:queue` card whose own text declares it a RULING (#17417) ---
+  // ⛔ The self-test never touches GitHub. Every heading below is a spelling
+  // MEASURED on a live card (the banner's table says which), the refused
+  // candidate included — it is exercised here precisely BECAUSE it must not
+  // fire.
+  const H58_RULING = '## Why it is a ruling, not a mechanical fix';
+  const H58_DECISION = '## Why this is a decision, not a mechanical fix';
+  const H58_HANDOVER = '## 5. Two rulings of mine you may want to overturn';
+  const H58_REFUSED = 'Both are dispositions, and picking one is a ruling this card leaves open.';
+  const card58 = (extra = {}) => ({
+    number: 8449,
+    state: 'open',
+    labels: [{ name: 'pm:queue' }],
+    assignees: [],
+    title: 'bug(plugin-kanban): swimlanes below the fold are UNREACHABLE',
+    body: `## Measured (Chromium 1194, three swimlanes)\n\nthe document does not scroll.\n\n${H58_RULING}\n\nthree arms, none mechanical.\n`,
+    ...extra,
+  });
+  const h58 = (extra = {}, comments) => h58QueuedRulingRow(card58(extra), comments);
+  const h58row = (extra = {}, comments) => String(h58QueuedRulingRow(card58(extra), comments) ?? '');
+
+  // ⭐ The positive control, in each measured spelling and in each channel.
+  t('H58 fires: a queued card whose BODY carries the ruling heading', typeof h58(), 'string');
+  t('H58 fires: …the decision spelling too', typeof h58({ body: `## What\n\n${H58_DECISION}\n\nthe two readings differ.\n` }), 'string');
+  t('H58 fires: …and the handover/record spelling, ordinal and all', typeof h58({ body: `## 4. Open state you inherit\n\n${H58_HANDOVER}\n\nboth are mine.\n` }), 'string');
+  t('H58 fires: a marker in a COMMENT fires when the body is clean', typeof h58({ body: '## What\n\nnothing here.\n' }, ['graded p2', H58_DECISION]), 'string');
+  t('H58 fires: …and the row names WHICH comment', h58row({ body: '## What\n\nnothing here.\n' }, ['graded p2', H58_DECISION]).includes('COMMENT 2 of 2'), true);
+  t('H58 fires: a body marker is reported against the BODY, not a comment', h58row().includes('in the card BODY'), true);
+  t('H58 fires: …quoting the heading AS WRITTEN, depth included', h58row().includes(`「${H58_RULING}」`), true);
+  t('H58 fires: …and naming the anchor with the live card it was measured on', h58row().includes('measured on objectui#8449'), true);
+  t('H58 fires: two distinct markers are both named', h58row({ body: `${H58_RULING}\n\n${H58_DECISION}\n` }).includes('objectui#8365'), true);
+  t('H58 fires: …while one spelling written twice is named once', (h58row({ body: `${H58_RULING}\n\ntext\n\n${H58_RULING}\n` }).match(/objectui#8449/g) ?? []).length, 1);
+
+  // ⛔ The SILENT half — the four quoting shapes this row refuses structurally,
+  // plus the population gates. Length-pinned and driven whole: a fixture that
+  // stops being exercised fails here rather than going quiet.
+  const NEGATIVES58 = [
+    ['an ordinary queued card with no marker at all', { body: '## What\n\na `groupBy` survives the lane resolve.\n' }],
+    ['the same words in PROSE — a card talking about the shape, not declaring it', { body: `## The finding\n\nIts heading reads Why it is a ruling, not a mechanical fix.\n` }],
+    ['…inside an inline CODE SPAN in prose', { body: '## The finding\n\nthe `Why it is a ruling, not a mechanical fix` heading is the marker.\n' }],
+    ['…inside a BLOCKQUOTED heading — a card quoting another card', { body: `## The finding\n\n> ${H58_RULING}\n` }],
+    ['…inside a FENCED block', { body: `## The finding\n\n\`\`\`\n${H58_RULING}\n\`\`\`\n` }],
+    ['…inside a tilde-fenced block, the other fence spelling', { body: `## The finding\n\n~~~\n${H58_RULING}\n~~~\n` }],
+    ['…in a TABLE cell', { body: `## The measurements\n\n| card | body |\n|:--|:--|\n| objectui#8365 | *"Why this is a decision, not a mechanical fix"* |\n` }],
+    ['⛔ 「Both are dispositions」 — measured in PROSE on its own card, so never an anchor', { body: `## What this card is NOT asking for\n\n${H58_REFUSED}\n` }],
+    ['a card with NO pm:queue — nothing over-reads it as capacity', { labels: [{ name: 'tracking' }] }],
+    ['a CLOSED card — the queue label on it is residue', { state: 'closed' }],
+    ['a PULL REQUEST — the dispatch pool is cards, ⛔ never PRs', { pull_request: { url: 'x' } }],
+    ['an unreadable `labels` — ⛔ never read as unlabelled', { labels: undefined }],
+    ['an empty body', { body: '' }],
+    ['a missing body, which must not crash', { body: undefined }],
+  ];
+  t('H58 controls: the negative table is exercised WHOLE — fourteen fixtures, none quietly dropped', NEGATIVES58.length, 14);
+  for (const [why, extra] of NEGATIVES58) t(`H58 silent: ${why}`, h58(extra), null);
+  t('H58: the predicate does not crash on a missing card either', h58QueuedRulingRow(undefined), null);
+  t('H58 silent: a marker quoted in a COMMENT rather than headed there', h58({ body: '## What\n\nnothing.\n' }, ['it says "Why this is a decision, not a mechanical fix" in prose']), null);
+
+  // ⚠️ The negatives above are only worth their line while the fixtures really
+  // carry the words. Without these, deleting the phrase from a fixture would
+  // turn a live control into a vacuous pass.
+  t('H58 controls: the PROSE fixture really contains the phrase', NEGATIVES58[1][1].body.includes('Why it is a ruling, not a mechanical fix'), true);
+  t('H58 controls: …the FENCED one too', NEGATIVES58[4][1].body.includes('Why it is a ruling, not a mechanical fix'), true);
+  t('H58 controls: …the TABLE one too', NEGATIVES58[6][1].body.includes('Why this is a decision, not a mechanical fix'), true);
+  t('H58 controls: …and the refused candidate really says it', NEGATIVES58[7][1].body.includes('Both are dispositions'), true);
+
+  // ⭐ The filing card's OWN body shape — it quotes all three spellings, in the
+  // three shapes it uses (italic prose, a table cell, prose), under headings of
+  // its own. It must produce NO row, and that is the acceptance this row was
+  // cut for.
+  const H58_FILING_BODY = [
+    '## The finding',
+    '',
+    'Cards are labelled `pm:queue` to mean 「triaged, registered, do not lose this」.',
+    '',
+    '## The measurements, from three independent seats',
+    '',
+    '#8449 (*"Why it is a ruling, not a mechanical fix"*, three arms), #8429 (*"Both are dispositions"*).',
+    '',
+    '| card | what it actually was | disposed as |',
+    '|:--|:--|:--|',
+    '| objectui#8365 | its own body: *"Why this is a decision, not a mechanical fix"* | `needs-user-decision` |',
+    '',
+    '## Why it costs more than a re-read',
+    '',
+    'A `pm:queue` body is a snapshot.',
+  ].join('\n');
+  t('H58 control: the filing card quotes all three spellings…', ['Why it is a ruling', 'Why this is a decision', 'Both are dispositions'].every((s) => H58_FILING_BODY.includes(s)), true);
+  t("H58 control: …and its own body produces NO row", h58({ body: H58_FILING_BODY }), null);
+
+  // The heading scanner, read on its own — depth, indent and order.
+  t('H58 scan: an `h3` heading matches and is returned AS WRITTEN', rulingMarkerHeadings('### Why this is a decision')[0].heading, '### Why this is a decision');
+  t('H58 scan: `h6` matches too', rulingMarkerHeadings('###### Why it is a ruling').length, 1);
+  t('H58 scan: ⛔ seven hashes is not a heading', rulingMarkerHeadings('####### Why it is a ruling').length, 0);
+  t('H58 scan: ⛔ nor a hash with no space after it', rulingMarkerHeadings('##Why it is a ruling').length, 0);
+  t('H58 scan: three leading spaces still open a heading', rulingMarkerHeadings('   ## Why it is a ruling').length, 1);
+  t('H58 scan: ⛔ four do not — that is an indented code block', rulingMarkerHeadings('    ## Why it is a ruling').length, 0);
+  t('H58 scan: decoration on the heading is read through', rulingMarkerHeadings('## **Why it is a ruling**, not a mechanical fix').length, 1);
+  t('H58 scan: …a backticked heading too', rulingMarkerHeadings('## `Why this is a decision`').length, 1);
+  t('H58 scan: two distinct anchors come back in the order written', rulingMarkerHeadings(`${H58_DECISION}\n\n${H58_RULING}`).map((h) => h.instance).join(','), 'objectui#8365,objectui#8449');
+  t('H58 scan: CRLF bodies read the same', rulingMarkerHeadings('## Why it is a ruling\r\n').length, 1);
+  t('H58 scan: an empty text is not a crash', rulingMarkerHeadings(undefined).length, 0);
+
+  // The anchor set — measured, frozen, capped, and checkable from outside.
+  t('H58 anchors: the set is at or under its declared cap', H58_RULING_MARKER_ANCHORS.length <= H58_MARKER_ANCHOR_CAP, true);
+  t('H58 anchors: …and the cap is 5, so a sixth is an argument rather than an edit', H58_MARKER_ANCHOR_CAP, 5);
+  t('H58 anchors: every anchor names the live card it was measured on', H58_RULING_MARKER_ANCHORS.every((a) => /objectui#\d+/u.test(a.instance)), true);
+  t('H58 anchors: every declared spelling fires against its OWN regex', H58_RULING_MARKER_ANCHORS.every((a) => a.heading.test(a.spelling)), true);
+  t('H58 anchors: …and every one of them fires as a real heading', H58_RULING_MARKER_ANCHORS.every((a) => rulingMarkerHeadings(`## ${a.spelling}`).length === 1), true);
+  t('H58 anchors: ⛔ 「Both are dispositions」 is NOT in the set — it was measured in PROSE', H58_RULING_MARKER_ANCHORS.some((a) => a.heading.test('Both are dispositions')), false);
+  t('H58 anchors: the set is frozen', Object.isFrozen(H58_RULING_MARKER_ANCHORS), true);
+
+  // Three input states for the thread, never two (#4690).
+  t('H58 thread: an UNCONSULTED channel says the thread was not in hand', h58row().includes('no comment thread was in hand'), true);
+  t('H58 thread: an UNREADABLE one says so instead, and never "empty"', h58row({}, null).includes('could NOT be read'), true);
+  t('H58 thread: a READ one reports both channels judged', h58row({}, ['graded p2']).includes('Both channels were read (1 comment(s) in hand)'), true);
+  t('H58 thread: …and an empty thread is a real reading, not an unread one', h58row({}, []).includes('Both channels were read (0 comment(s) in hand)'), true);
+
+  // Population — the same three-input-states care every row here takes.
+  t('H58 population: an open `pm:queue` card is in', h58SpeaksAbout(card58()), true);
+  t('H58 population: a closed one is out', h58SpeaksAbout(card58({ state: 'closed' })), false);
+  t('H58 population: a PR is out', h58SpeaksAbout(card58({ pull_request: { url: 'x' } })), false);
+  t('H58 population: an unreadable `labels` is out, never read as unlabelled', h58SpeaksAbout(card58({ labels: undefined })), false);
+  t('H58 population: a missing card is out, never a crash', h58SpeaksAbout(undefined), false);
+  t('H58 population: it is the label page the sweep already lists', SEEN_LABEL_PAGES.includes('pm:queue'), true);
+
+  // Adjacency — ⛔ this row restates no neighbour's verdict on its own specimen.
+  t('H58 adjacency: H54 is silent — the title carries no `[Decision]` prefix', h54DecisionTitledQueueCard(card58()), null);
+  t('H58 adjacency: H24 is silent — the card is UNASSIGNED, correct for `pm:queue`', h24QueuedWithAssignee(card58()), null);
+  t('H58 adjacency: H3 is silent — one pm state label, not two', h3QueueAndDispatched(card58()), false);
+  t('H58 adjacency: a card wearing BOTH carriers fires both — two readings, not one restated', [typeof h58({ title: '[Decision] the unwrap door' }), typeof h54DecisionTitledQueueCard(card58({ title: '[Decision] the unwrap door' }))].join(','), 'string,string');
+
+  // The row's own sentence — the halves the direction requires.
+  t('H58 row: it reports a DISAGREEMENT rather than a verdict', h58row().includes('does NOT say which carrier is wrong'), true);
+  t('H58 row: it names the two meanings the one label carries', h58row().includes('「triaged and registered」 and 「ready for a dev」'), true);
+  t('H58 row: the remedy names the reader — the TRIAGE seat, on its per-fire read', h58row().includes('belongs to the TRIAGE seat on its per-fire read'), true);
+  t('H58 row: …and the four EXISTING dispositions, all of them', ['`tracking`', '`needs-user-decision`', 'CLOSED', 'corrected `pm:queue`'].every((s) => h58row().includes(s)), true);
+  t('H58 row: ⛔ no fifth state is proposed — the card\'s own datum', h58row().includes('⛔ No new state and no new label'), true);
+  t('H58 row: ⛔ and no dev round until the disposition is written', h58row().includes('no dev round until that disposition is written'), true);
+  t('H58 row: report-only — it writes nothing and relabels nothing', h58row().includes('writes no label, relabels nothing'), true);
+  t('H58 row: it declares what it CANNOT see, so a reader does not over-trust it', h58row().includes('a quiet board is a LOWER BOUND'), true);
+  t('H58 row: not a loud finding', isLoudFinding(h58row()), false);
+
+  // Census and forwarding.
+  t('H58 census: every count key rides the enumerated forwarding contract', ['rulingMarkerJudged', 'rulingMarkerThreadRead', 'rulingMarkerUnread'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  const SUM58 = saidBy('h58RulingMarkers', summaryLine({ rulingMarkerJudged: 96, rulingMarkerThreadRead: 11, rulingMarkerUnread: 85 }, 0));
+  t('H58 census: the judged population is reported', SUM58.includes('96 open `pm:queue` card(s) had'), true);
+  t('H58 census: …the half with a thread in hand', SUM58.includes('11 with a comment thread ALREADY in hand'), true);
+  t('H58 census: …and the half judged on the body ALONE', SUM58.includes('85 on the body ALONE'), true);
+  t('H58 census: it states that the row buys nothing', SUM58.includes('fetches NOTHING of its own'), true);
+  t('H58 census: …that an unbought thread is UNREAD rather than clean', SUM58.includes('UNREAD second channel rather than a clean one'), true);
+  t('H58 census: …and that only HEADINGS are matched', SUM58.includes('ATX HEADINGS outside fenced code only'), true);
+  t('H58 census: the clause renders on a zero run — silence is never absence', saidBy('h58RulingMarkers', summaryLine({}, 0)).includes('0 open `pm:queue` card(s) had'), true);
+  t('H58 census: the anchor count in the clause comes from the frozen set', saidBy('h58RulingMarkers', summaryLine({}, 0)).includes(`against ${H58_RULING_MARKER_ANCHORS.length} frozen heading anchor(s)`), true);
+
+  // Band.
+  t('H58 band: registered as a STATE row — the repair is on the board', familyBand('H58'), 'state');
+  t('H58 band: ⛔ NOT `gate` — both carriers are PRESENT, so no absence reads as a green light', familyBand('H58') === 'gate', false);
+  t('H58 band: ⛔ NOT `stall` — the triage fire moves these cards, and none is claimed stopped', familyBand('H58') === 'stall', false);
+  t('H58 band: ⛔ NOT `inventory` — the row alarms per card; the census is a clause', familyBand('H58') === 'inventory', false);
+  t('H58 band: …and it is H54\'s band, the row this one is the body half of', familyBand('H58'), familyBand('H54'));
+  t('H58 band: the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H58'), true);
+  t('H58 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H58 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H58 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H58 band: a gate row still outranks it, so H31/H35 survive the trim longer', familyRank('H31') < familyRank('H58'), true);
+  t('H58 band: …and it outranks an inventory row', familyRank('H58') < familyRank('H14'), true);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.
