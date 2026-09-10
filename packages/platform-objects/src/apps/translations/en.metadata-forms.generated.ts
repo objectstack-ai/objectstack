@@ -950,6 +950,30 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Header",
         helpText: "Dashboard header config (title, subtitle, actions)"
       },
+      "header.showTitle": {
+        label: "Show Title",
+        helpText: "Show dashboard title in header"
+      },
+      "header.showDescription": {
+        label: "Show Description",
+        helpText: "Show dashboard description in header"
+      },
+      "header.actions": {
+        label: "Actions",
+        helpText: "Header action buttons"
+      },
+      "header.actions.label": {
+        label: "Label"
+      },
+      "header.actions.actionUrl": {
+        label: "Action URL"
+      },
+      "header.actions.actionType": {
+        label: "Action Type"
+      },
+      "header.actions.icon": {
+        label: "Icon"
+      },
       widgets: {
         label: "Widgets",
         helpText: "Dashboard widgets with position and sizing"

@@ -113,6 +113,21 @@ async function bootAnalytics(security?: () => unknown) {
   return { service: registered.analytics as AnalyticsService, reads, error };
 }
 
+/**
+ * A working security service's ROW-SCOPE half, carried by every double below
+ * that is meant to represent one.
+ *
+ * `getReadFilter` is a REQUIRED member of `ISecurityService`, and since #16918
+ * the ROW-SCOPE bridge in the same `plugin.ts` refuses the query when the
+ * registered service does not expose it — the sibling three-way of the one
+ * this file measures. `undefined` is that method's documented answer for "no
+ * row restriction on this object", so a double carrying it stays minimal AND
+ * conforming, and every object-level verdict asserted below is reached exactly
+ * as it was before. The deny-path doubles need none: the object-level gate runs
+ * first and refuses before the row half is ever asked.
+ */
+const rowScopeOpen = { getReadFilter: async () => undefined };
+
 const runProbe = (service: AnalyticsService) =>
   service.queryDataset(probe as never, { measures: ['cnt'] } as never, CALLER);
 
@@ -170,7 +185,7 @@ describe('analytics admission bridge — resolving the "security" service', () =
 
   it('asks canReadObject when the service has it, and serves an ADMITTED caller', async () => {
     const canReadObject = vi.fn(() => true);
-    const { service, reads } = await bootAnalytics(() => ({ canReadObject }));
+    const { service, reads } = await bootAnalytics(() => ({ ...rowScopeOpen, canReadObject }));
 
     const result = await runProbe(service);
     expect(result.rows).toEqual([{ cnt: 24 }]);
@@ -190,6 +205,7 @@ describe('analytics admission bridge — resolving the "security" service', () =
 
   it('falls back to explain for a service that predates canReadObject — both verdicts', async () => {
     const admitted = await bootAnalytics(() => ({
+      ...rowScopeOpen,
       explain: async () => ({ allowed: true }),
     }));
     expect((await runProbe(admitted.service)).rows).toEqual([{ cnt: 24 }]);

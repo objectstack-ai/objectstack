@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, assert } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -61,6 +61,7 @@ describe('SqliteWasmDriver (in-memory)', () => {
     const [alice] = await driver.find('users', { where: { name: 'Alice' } });
     expect(alice).toBeDefined();
     const fetched = await driver.findOne('users', { where: { id: alice.id } });
+    assert(fetched !== null, 'findOne answered the not-found arm for a seeded id');
     expect(fetched.name).toBe('Alice');
   });
 
@@ -74,6 +75,7 @@ describe('SqliteWasmDriver (in-memory)', () => {
     const [bob] = await driver.find('users', { where: { name: 'Bob' } });
     await driver.update('users', bob.id, { age: 18 });
     const updated = await driver.findOne('users', { where: { id: bob.id } });
+    assert(updated !== null, 'findOne answered the not-found arm for a seeded id');
     expect(updated.age).toBe(18);
   });
 

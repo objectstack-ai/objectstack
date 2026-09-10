@@ -59,7 +59,7 @@
  * `$containsAny`), which would open the closed `FILTER_OPERATORS` set.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, assert } from 'vitest';
 import { SqlDriver } from '../src/index.js';
 import { FILTER_OPERATORS, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { FilterCondition } from '@objectstack/spec/data';
@@ -386,6 +386,7 @@ describe('[#7398] SqlDriver refuses scalar-comparison operators on JSON/multi-va
 
     it('the write faces really did not write — a refusal is not a half-applied mutation', async () => {
       const row = await driver.findOne('team', { where: { id: 't1' } });
+      assert(row !== null, 'findOne answered the not-found arm for a seeded id');
       expect(row.name).toBe('Alpha');
       expect(await driver.count('team', {})).toBe(1);
     });

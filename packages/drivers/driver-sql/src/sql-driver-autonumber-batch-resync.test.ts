@@ -154,7 +154,9 @@ describe('[#6943] batch and upsert re-seed a stale autonumber counter', () => {
     const numbers = await allNumbers();
     expect(new Set(numbers).size).toBe(numbers.length); // no duplicate anywhere in the table
     // Every row of the batch sits above the seeded range it straddled.
-    for (const r of created) expect(Number(r.case_number.slice('CASE-'.length))).toBeGreaterThan(39);
+    // [#15267] `bulkCreate()` resolves to `Record<string, unknown>[]` now, so the
+    // record number is read as the string it is rather than off an `any`.
+    for (const r of created) expect(Number(String(r.case_number).slice('CASE-'.length))).toBeGreaterThan(39);
   });
 
   it('re-seeds only the counter that went stale, leaving a co-tenant in the same batch alone', async () => {

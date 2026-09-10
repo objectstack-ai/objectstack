@@ -4,15 +4,15 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import {
   resolveAuthzContext,
   isAuthzStoreUnavailableError,
-  // [#15349] The three symbols the ADMISSION posture read needs, and nothing
-  // more. `effectiveTenancyPosture` reads the posture IN FORCE off the
-  // `tenancy` service (ADR-0093 D4/D5: a deployment that REQUESTS `isolated`
-  // without the enterprise organizations runtime is `single` in force), while
-  // `isServiceNotRegisteredError` / `AuthzStoreUnavailableError` are the two
-  // halves of #13906 decision 1 option A's classification.
-  effectiveTenancyPosture,
-  isServiceNotRegisteredError,
-  AuthzStoreUnavailableError,
+  // [#16013] The ADMISSION posture read is ONE call now: the shared
+  // classification owns #13906 decision 1 option A (branded "never registered"
+  // stays quiet, every other rejection is the ADR-0112 outage) and reads the
+  // posture IN FORCE off the `tenancy` service (ADR-0093 D4/D5: a deployment
+  // that REQUESTS `isolated` without the enterprise organizations runtime is
+  // `single` in force). What stays HERE is the wiring fact -- see
+  // `resolveAdmissionTenancyPosture` for why this seam's quiet answer is its
+  // own argument and not the helper's.
+  classifyAdmissionTenancyPosture,
   type TenancyPostureSource,
 } from '@objectstack/core';
 import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
@@ -525,17 +525,21 @@ export class SharingServicePlugin implements Plugin {
    * (`undefined` means "run no posture-conditional refusal at all", while
    * `'single'` is a posture that is present and simply enforces no wall).
    *
-   * ## The classification, #13906 decision 1 option A
+   * ## The classification — #13906 decision 1 option A, no longer written here
    *
-   * - **Never registered** ⇒ branded (`isServiceNotRegisteredError`), quiet
-   *   `undefined`. An embedding with no `plugin-auth` is a SUPPORTED
-   *   composition and its behaviour here is exactly what it was.
-   * - **Registered and unable to answer** ⇒ `AuthzStoreUnavailableError`
-   *   (ADR-0112 `SERVICE_UNAVAILABLE` / 503). Admission was never DECIDED, so
-   *   it must not be answered. `verifiedContextFromRequest`'s `catch` already
-   *   re-raises this brand rather than laundering it into a 401 (#13279), and
-   *   the routes' own `catch` answers `err.status` — so the outage reaches the
-   *   wire as a 503.
+   * [#16013] `classifyAdmissionTenancyPosture` (`@objectstack/core`) owns the
+   * branded/unbranded decision for every admission seam: never registered ⇒
+   * quiet `undefined`; every other rejection ⇒ `AuthzStoreUnavailableError`
+   * (ADR-0112 `SERVICE_UNAVAILABLE` / 503), because admission was never DECIDED
+   * and must not be answered. One tested classification, so it cannot decay
+   * into a silent `catch` at one seam while five others stay correct.
+   *
+   * ⚠️ What that decision MEANS at this door is still this door's own. Quiet
+   * arm: an embedding with no `plugin-auth` is a SUPPORTED composition and its
+   * behaviour here is exactly what it was. Loud arm:
+   * `verifiedContextFromRequest`'s `catch` already re-raises this brand rather
+   * than laundering it into a 401 (#13279), and the routes' own `catch` answers
+   * `err.status` — so the outage reaches the wire as a 503.
    *
    * ⚠️ The brand exists only on the ASYNC resolution path: `PluginContext.getService`
    * throws two UNBRANDED plain `Error`s (`… not found` and `… is async - use
@@ -558,16 +562,9 @@ export class SharingServicePlugin implements Plugin {
       | { getServiceAsync?: <T>(name: string, scopeId?: string) => Promise<T> }
       | undefined;
     if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
-    try {
-      return effectiveTenancyPosture(
-        await kernel.getServiceAsync<TenancyPostureSource>('tenancy'),
-      );
-    } catch (err) {
-      if (!isServiceNotRegisteredError(err)) {
-        throw new AuthzStoreUnavailableError('tenancy', err);
-      }
-      return undefined;
-    }
+    return classifyAdmissionTenancyPosture(() =>
+      kernel.getServiceAsync!<TenancyPostureSource>('tenancy'),
+    );
   };
 
   async init(ctx: PluginContext): Promise<void> {

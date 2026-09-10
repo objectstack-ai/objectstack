@@ -278,12 +278,30 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
       expect(structuralConditionRefusal(null)).toBeUndefined();
     });
 
-    it('admits an envelope with no dialect, and an ast-only one', () => {
+    it('admits an envelope with no dialect, and an `ast` BESIDE a string `source`', () => {
       // `evaluateCondition` already treats an envelope with no dialect as CEL,
-      // and `ExpressionSchema`'s own refine is `source` OR `ast` — read here,
-      // not re-derived.
+      // and reads `source` — an `ast` next to it changes nothing it evaluates.
       expect(structuralConditionRefusal({ source: 'record.rating >= 4' })).toBeUndefined();
-      expect(structuralConditionRefusal({ dialect: 'cel', ast: { kind: 'const' } })).toBeUndefined();
+      expect(structuralConditionRefusal({ dialect: 'cel', source: 'record.rating >= 4', ast: { kind: 'const' } })).toBeUndefined();
+    });
+
+    it('REFUSES an `ast`-only envelope — the #15792 admission, revisited by #15807', () => {
+      // FLIPPED. This admitted `{ dialect: 'cel', ast }` because the spec still
+      // admitted the shape at `edge.condition` and refusing it here would have
+      // decided #15430's question from the consumer side. #15807 decided it at
+      // the producer (`FlowEdgeSchema.condition` composes the evaluated input
+      // form), and the engine never read `ast` — so an `ast`-only envelope in a
+      // structural slot is exactly the silent-`false` population this refusal
+      // exists for, on `config.condition` (still an open record) as on the edge.
+      for (const value of [{ dialect: 'cel', ast: { kind: 'const', value: true } }, { ast: { kind: 'const' } }]) {
+        const refusal = structuralConditionRefusal(value);
+        expect(refusal?.message.startsWith(STRUCTURAL_CONDITION_SHAPE_REFUSAL)).toBe(true);
+        expect(refusal?.message).toContain('Found an object carrying an `ast` but no string `source`');
+        expect(refusal?.message).toContain('the engine evaluates `source`, never `ast`');
+        expect(refusal?.source).toBe('');
+      }
+      // The sentence itself now says why, so the prescription travels with the refusal.
+      expect(STRUCTURAL_CONDITION_SHAPE_REFUSAL).toContain('an envelope carrying only an `ast` is not evaluable');
     });
 
     it('refuses the values measured to register clean and answer a silent false', () => {
@@ -299,7 +317,7 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
       // `{ source: 1 }` is the one that did not even reach the silent `false`:
       // it threw a bare `TypeError: exprStr.trim is not a function`.
       expect(structuralConditionRefusal({ source: 1 })?.message)
-        .toContain('neither a string `source` nor an `ast`');
+        .toContain('Found an object carrying no string `source`');
       // An envelope carrying neither — `ExpressionSchema`'s refine rejects it
       // too, and the evaluator reads it as an empty condition.
       expect(structuralConditionRefusal({ dialect: 'cel' })).toBeDefined();

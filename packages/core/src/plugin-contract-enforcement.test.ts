@@ -44,7 +44,7 @@ import { ObjectKernel } from './kernel.js';
 import { LiteKernel } from './lite-kernel.js';
 import { PluginLoader } from './plugin-loader.js';
 import { ObjectLogger } from './logger.js';
-import { PLUGIN_UI_REQUIRED_KEY_MISSING } from '@objectstack/spec/kernel';
+import { PLUGIN_UI_REQUIRED_KEY_MISSING, PluginSchema } from '@objectstack/spec/kernel';
 import type { Plugin, PluginContext } from './types.js';
 
 /** A kernel that registers plugins and installs no process signal handlers. */
@@ -343,16 +343,19 @@ describe('F — a `ui` plugin owes `staticPath` and `slug`, refused at kernel.us
     });
 });
 
-describe('E — `version` is DELIBERATELY not enforced from the schema', () => {
+describe('E — `version` is the NINTH enforced key, and admitting it refused nothing (#16365)', () => {
     /**
-     * `PluginSchema.version` is `/^\d+\.\d+\.\d+$/` and refuses the prerelease
-     * and build-metadata forms SemVer 2.0.0 defines, while the loader's own
-     * `isValidSemanticVersion` — the check that has always run — accepts them,
-     * and `plugin-loader.test.ts` pins that acceptance deliberately. Enforcing
-     * the schema's narrower spelling would retire a pinned capability under a
-     * card that ruled on `type`, so the loader's check stays authoritative for
-     * this one key. These cases pin the exclusion so a later change to it is a
-     * decision rather than an accident.
+     * `version` used to be filtered out of this check. It was, because the two
+     * declarations disagreed: `PluginSchema.version` was `/^\d+\.\d+\.\d+$/`
+     * and refused the prerelease and build-metadata forms SemVer 2.0.0 defines,
+     * while `PluginLoader.isValidSemanticVersion` — the check the boot path has
+     * always run — accepted them, deliberately, pinned by `plugin-loader.test.ts`.
+     *
+     * #16365 settled that in `packages/spec` by WIDENING the schema onto the
+     * loader's grammar, character for character, so the exclusion had nothing
+     * left to exclude and `assertPluginContract` dropped it. These cases are the
+     * measurement that dropping it cost nothing: the three versions that were
+     * only loading BECAUSE of the exclusion still load without it.
      */
     it.each(['1.0.0-alpha.1', '1.0.0+20230101', '0.0.0-fixture'])(
         'still loads a plugin versioned %s',
@@ -364,12 +367,23 @@ describe('E — `version` is DELIBERATELY not enforced from the schema', () => {
         },
     );
 
-    it('and a version the LOADER refuses is still refused, by the loader', async () => {
+    it('a version the SCHEMA now accepts is one `PluginSchema` itself accepts — not just the loader', () => {
+        // The convergence, read at its source rather than inferred from a boot
+        // that has two checks in it. Were the schema still the narrow spelling,
+        // this would fail here while `use()` above stayed green on the loader.
+        for (const version of ['1.0.0-alpha.1', '1.0.0+20230101', '0.0.0-fixture']) {
+            expect(PluginSchema.safeParse({ name: 'x', version, init: () => {} }).success).toBe(true);
+        }
+    });
+
+    it('and a malformed version is STILL refused by the loader, with its own message', async () => {
         const kernel = makeKernel();
         const bad = fixture({ name: 'com.example.bad-version', version: 'v1.0.0' });
 
-        // Unchanged message and unchanged owner: this refusal is
-        // `validatePluginStructure`'s, not the contract check's.
+        // Unchanged message and unchanged owner. `validatePluginStructure` runs
+        // BEFORE the contract check, so on this kernel a malformed `version` is
+        // still the loader's refusal even though the schema would now refuse it
+        // too — the ORDER is the observable thing, and it did not move.
         const err = await refusal(kernel.use(bad));
         expect(err.message).toContain('Invalid semantic version');
         expect(err.message).not.toContain('PLUGIN_CONTRACT_VIOLATION');
@@ -477,18 +491,41 @@ describe('G — the SAME contract on LiteKernel.use() (#16721)', () => {
     });
 
     it.each(['1.0.0-alpha.1', '1.0.0+20230101', '0.0.0-fixture'])(
-        '`version` stays excluded from the schema check here too — %s loads',
+        '`version` is judged here too now, and %s passes it',
         (version) => {
-            // The convergence is on the SCHEMA. `LiteKernel` has never judged
-            // `version` (that is `PluginLoader.validatePluginStructure`'s, on the
-            // other kernel) and still does not; the exclusion group E pins for the
-            // loader holds on this path for the same measured reason.
+            // The convergence is on the SCHEMA, so #16365 reaches this kernel by
+            // the same route as the other eight keys. These three loaded before
+            // because `version` was excluded; they load now because the schema
+            // was widened onto the grammar that always accepted them.
             const kernel = makeLiteKernel();
             expect(kernel.use(fixture({ name: `com.example.lite-v-${version}`, version }))).toBe(kernel);
         },
     );
 
-    it('a version-less plugin loads — `version` is not among the eight keys', () => {
+    it('⭐ a malformed `version` is refused HERE for the first time — the last key where the kernels disagreed', () => {
+        // This is the behaviour change #16365 lands on `LiteKernel`, stated as a
+        // test because it is the one thing dropping the exclusion NARROWS.
+        //
+        // `LiteKernel` never ran `validatePluginStructure`, so while `version`
+        // was excluded from the schema check it was the ONE declared key this
+        // kernel did not judge at all: `version: 'v1.0.0'` registered here and
+        // was refused by `ObjectKernel` at boot — precisely the green-in-vitest,
+        // refused-in-production split #16721 converged the other eight keys to
+        // close. It now travels the ordinary envelope.
+        const kernel = makeLiteKernel();
+        const bad = fixture({ name: 'com.example.lite-bad-version', version: 'v1.0.0' });
+
+        const err = refusalSync(() => kernel.use(bad));
+        expect(err.message).toContain('PLUGIN_CONTRACT_VIOLATION');
+        expect(err.message).toContain("at 'version'");
+        expect((err as Error & { code?: string }).code).toBe('PLUGIN_CONTRACT_VIOLATION');
+    });
+
+    it('a version-less plugin loads — `version` is among the nine keys, but it is `.optional()`', () => {
+        // Absence is not a violation. `version` became the ninth ENFORCED key at
+        // #16365, which judges the value an author writes; `.optional()` is what
+        // admits writing none. ⇒ this case survived that change unaltered, and
+        // says why rather than counting keys.
         const kernel = makeLiteKernel();
         const versionless: Plugin = { name: 'com.example.lite-versionless', init: () => {} };
         expect(kernel.use(versionless)).toBe(kernel);

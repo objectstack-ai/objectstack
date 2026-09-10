@@ -297,9 +297,10 @@ export async function bootSchemaStack(
     // #9380 armed the three `kernel:ready` platform-table migrations on the
     // standalone stack (they had never run on a self-hosted install, because
     // the assembly deduced "cloud per-project kernel" from the `'proj_local'`
-    // the stack stamps). Every boot through THIS function inherits that default
-    // unless it is turned off here, and every one of them is a command that
-    // reports or applies exactly what the operator asked for:
+    // the stack stamped then — `'env_local'` since #13366). Every boot through
+    // THIS function inherits that default unless it is turned off here, and
+    // every one of them is a command that reports or applies exactly what the
+    // operator asked for:
     //
     //   • `os migrate plan` / `os migrate duplicates` boot deferred + read-only
     //     and are declared dry runs;

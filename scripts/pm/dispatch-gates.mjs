@@ -96,12 +96,13 @@
  * `runReconciliation` carries all three measurements and what defeats each.
  *
  * The capture idiom is the load-bearing half, and it is one line: RECORD THE
- * COMMAND THIS TOOL PRINTED, as it runs, byte for byte.
+ * COMMAND THIS TOOL PRINTED, as it runs, byte for byte — and record WHAT IT
+ * ANSWERED beside it.
  *
  *     node scripts/pm/dispatch-gates.mjs --commands > gates.list
  *     while IFS= read -r cmd; do
- *       eval "$cmd" > "logs/$n" 2>&1
- *       printf '%s\n' "$cmd" >> ran.list      # what RAN — pass or fail
+ *       eval "$cmd" > "logs/$n" 2>&1; status=$?          # BEFORE any pipe
+ *       printf '%s :: exit %d\n' "$cmd" "$status" >> ran.list
  *     done < gates.list
  *     node scripts/pm/dispatch-gates.mjs --ran ran.list      # exit 1 if any family is unrun
  *
@@ -110,6 +111,17 @@
  * be lenient about. ⛔ Do not build the record from log FILE NAMES: that is the
  * step that needs a slug, and the slug is where the first hand-built
  * reconciliation went wrong.
+ *
+ * ⭐ The `:: exit <code>` half is OPTIONAL and it is the difference between a
+ * measurement and a claim. A bare line says only "I ran it", and a gate that
+ * refused with `PREREQUISITE NOT MET` is indistinguishable there from one that
+ * passed — so the NOT-MEASURED count over bare lines is whatever the runner
+ * remembered to declare, which is a claim. Measured across four consecutive
+ * deliveries (#17204): the tool printed `0 NOT-MEASURED` on every one of them
+ * while 2, 2, 1 and 2 gates respectively had exited 3, the truth carried only
+ * by each runner's prose beside the tool's own line. With the code recorded the
+ * class is DERIVED here and cannot be forgotten; without it, every count this
+ * mode prints says `CLAIMED` in the same stroke.
  *
  * ## This tool answers about the tree it RUNS IN, and says so on every run
  *
@@ -428,6 +440,11 @@ import {
   isExtractConfigPath,
   isMetadataFormModulePath,
 } from '../i18n-bundle-surface.mjs';
+// The number a refusing gate exits with, READ from the one module that declares
+// it rather than spelled again here. `--ran` classifies a recorded exit code by
+// this constant, so a repo that ever renumbered the class would move this tool
+// with it instead of leaving a stale 3 behind in a second copy (#17204).
+import { EXIT_PREREQUISITE_NOT_MET } from '../import-prerequisite.mjs';
 import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
 import { invokedAs, isEntrypoint } from '../invoked-as.mjs';
 
@@ -555,14 +572,42 @@ const maskedModuleBody = memoiseMask((source) => maskSelfTests(maskedComments(so
  * unbounded under-mask measured above.
  *
  * Same projection as `blank` next door — spans become spaces, newlines and byte
- * offsets survive — so this composes onto `maskedModuleBody`'s output rather
- * than replacing it. The order is measured too, and it is the one that cannot
- * widen: masking `#` FIRST stops a `#` comment containing `@objectstack/*` from
- * opening a phantom JS block comment, which UNCOVERS code below it and adds
- * hints (2 on this tree — `scripts/downstream-smoke.sh` and
- * `.claude/hooks/guard-tree-enum.sh`). Masking `#` LAST can only blank more of
- * an already-masked body, so the shell hint set is a subset of today's by
- * construction.
+ * offsets survive — so this composes WITH the JS mask rather than replacing it.
+ *
+ * ## The ORDER, and why it is now `#` FIRST (#16744)
+ *
+ * Masking `#` LAST can only blank more of an already-masked body, so the shell
+ * hint set was a subset of the JS-masked one by CONSTRUCTION. That is why the
+ * card above took it: it could not widen, and widening was out of its scope.
+ * The price it left unpaid is the OTHER direction of the same "THIRD kind"
+ * defect. A `#` comment spelling `@objectstack/*`, a glob, or any other
+ * two-character block-comment opener is not a comment to the JS scanner — it
+ * opens a BLOCK comment that runs to the next terminator and blanks every line
+ * of real shell CODE in between, with nothing in the output saying a region was
+ * skipped. Re-measured per byte on `ce7bae8b`, over the 31 tracked `.sh` files:
+ * 12 of them hand a caller shell code as prose, 73,859 bytes in
+ * `scripts/pm/os-verify-lock.sh` alone.
+ *
+ * So `#` is masked FIRST now: shell prose never reaches the JS scanner and
+ * cannot open a phantom comment. This UNCOVERS the code below such a comment
+ * and therefore ADDS hints — 2 on this tree, `node_modules/@objectstack/spec/dist`
+ * in `scripts/downstream-smoke.sh` and one site in
+ * `.claude/hooks/guard-tree-enum.sh`, both of them real code the follow was
+ * blind to. ⛔ The shell hint set is therefore NOT a subset of the JS-masked one
+ * any more, and the live sweep in the self-test pins what the additions ARE —
+ * ⛔ never that there are none, which is the blindness this removed.
+ *
+ * The JS mask still RUNS on a shell source, and still runs BEFORE
+ * `maskSelfTests` as that function's header requires. Keeping it is the whole
+ * difference between this order and "do not run the JS scanner over a non-JS
+ * kind at all": the latter also drops the `//` masking pinned below on a `.sh`
+ * source, which is a reconciliation across both cards rather than this fix.
+ *
+ * Composed from the raw maskers rather than through `maskedModuleBody` — the
+ * intermediate is a DIFFERENT string on this path, so there is no half to
+ * share, and routing it through the JS memo would only fill that cache with
+ * shell-derived keys no JS caller can hit. The memo below is keyed on the raw
+ * source, so the whole chain is still derived once per source.
  */
 const SHELL_WORD_START = /[\s;&|()<>]/;
 
@@ -621,8 +666,10 @@ export function maskShellComments(source) {
   return blank(String(source), shellCommentSpans(String(source)));
 }
 
-/** `maskShellComments(maskedModuleBody(source))`, memoised — see the block above. */
-const maskedHashCommentBody = memoiseMask((source) => maskShellComments(maskedModuleBody(source)));
+/** `maskSelfTests(maskComments(maskShellComments(source)))`, memoised — see the block above. */
+const maskedHashCommentBody = memoiseMask((source) =>
+  maskSelfTests(maskComments(maskShellComments(source))),
+);
 
 // ── What a gate that IMPORTS this module inherits (#11556) ─────────────────
 //
@@ -1349,10 +1396,19 @@ export function jobFilterPopulation(job, filterStepsByOutputSource) {
 }
 
 /**
- * Every job in one workflow that resolves to a path population, with the check
- * families it invokes: `[{ job, name, outputs, paths, dropped, checks }]`.
+ * Every job in one workflow whose `if:` resolves to a path population, WITH the
+ * job's own text: `[{ job, name, text, outputs, paths, dropped }]`.
+ *
+ * ⛔ No check filter here, and that is the whole reason this is its own
+ * function. The caller below drops a job that invokes no discoverable check
+ * family, because a family is what IT is keying; `jobFilteredSteps` keeps
+ * exactly those jobs, because a job CI schedules for your path and whose work
+ * this derivation names no family for is the thing that reader is owed. Two
+ * callers, opposite dispositions, ONE walk — spelled twice they would be two
+ * readings of one workflow, which is the drift this file's whole contract
+ * refuses.
  */
-export function jobPathPopulations(workflowText, workflowFile) {
+export function jobFilterPopulations(workflowText) {
   const stepFilters = extractPathsFilterSteps(workflowText);
   if (stepFilters.size === 0) return [];
   const jobs = extractJobBlocks(workflowText);
@@ -1370,9 +1426,21 @@ export function jobPathPopulations(workflowText, workflowFile) {
   for (const job of jobs) {
     const population = jobFilterPopulation(job, byOutput);
     if (!population) continue;
-    const checks = [...new Set(extractCheckInvocations(job.text, workflowFile).map((i) => i.check))];
+    out.push({ job: job.id, name: job.name, text: job.text, ...population });
+  }
+  return out;
+}
+
+/**
+ * Every job in one workflow that resolves to a path population, with the check
+ * families it invokes: `[{ job, name, outputs, paths, dropped, checks }]`.
+ */
+export function jobPathPopulations(workflowText, workflowFile) {
+  const out = [];
+  for (const { text, ...population } of jobFilterPopulations(workflowText)) {
+    const checks = [...new Set(extractCheckInvocations(text, workflowFile).map((i) => i.check))];
     if (!checks.length) continue;
-    out.push({ job: job.id, name: job.name, ...population, checks });
+    out.push({ ...population, checks });
   }
   return out;
 }
@@ -2466,6 +2534,139 @@ export function alwaysRunSteps(entries) {
 }
 
 /**
+ * ⭐ The OTHER half of the same partition: every step of a CI job that YOUR
+ * paths schedule, which this derivation names no check family for.
+ *
+ * `alwaysRunSteps` above answers "what does CI run on every PR that I derive
+ * nothing for". It answers that question only for the jobs CI CANNOT narrow —
+ * it excludes a path-filtered workflow, and it excludes any job carrying an
+ * `if:`, which is every job whose schedule a `dorny/paths-filter` output
+ * decides. Those two exclusions are correct for the claim that tail makes
+ * ("CI runs this whatever your diff is") and they are exactly why the
+ * path-narrowed jobs had no reader at all: the family derivation looks INSIDE
+ * them for `check:*` invocations and reports what it finds, and nothing
+ * anywhere reported the rest of what those jobs run.
+ *
+ * ## The measured failure (#16285)
+ *
+ * `packages/qa/dogfood` routes to no gate family. A dev editing
+ * `packages/qa/dogfood/test/authz-probe-blind-spot.census.ts` derived 43
+ * commands with not one mention of dogfood on stdout, ran all 43, reconciled
+ * with `--ran`, and truthfully reported full coverage while
+ * `Dogfood Regression Gate (3/3)` was red on a test file in the very package
+ * they had edited. `--ran` cannot catch it: it reconciles against what the
+ * derivation produced, and the derivation never named the job.
+ *
+ * ⛔ The instance fix is REFUSED, and the count is why. Of the 74 workspace
+ * packages that declare a `test` script, ZERO are run by any of the 215
+ * `check:*` scripts in this tree — every one of them is run by a workflow job
+ * (`Test Core (N/6)` over the affected set, `Dogfood Regression Gate (N/3)`
+ * over the one package the partitioner excludes from it). So `packages/qa/
+ * dogfood` is not a missing edge, it is the first instance of a whole
+ * VOCABULARY this derivation did not have: its words are `check:*` families,
+ * and a workflow job watches a path just as much as a gate script does. A
+ * per-package edge would have to be re-derived for every one of the 74 and
+ * would still say nothing about the 75th.
+ *
+ * ## What is claimed for a row, and what is deliberately NOT
+ *
+ * Claimed: CI schedules this JOB for this path of yours, through the job
+ * `if:` this tool already resolves for the family derivation — and this step
+ * of it runs a command no discovered family accounts for. Both halves are
+ * read off the workflow text on every run; nothing here is listed.
+ *
+ * ⛔ NOT claimed: that a row is a test, a build or a setup step.
+ * `alwaysRunLines` refuses that classification for its own rows and the reason
+ * carries unchanged — every rule that separates them is a guess about a step's
+ * intent, and a guess in this position fabricates. `pnpm install
+ * --frozen-lockfile` and the sharded `turbo run test` sit in the same job and
+ * the reader judges which is which; what the tool states is only what it
+ * measured.
+ *
+ * ⛔ NOT a runnable command. Every row is CI's own shell, in CI's environment,
+ * with `${{ … }}` and `$RUNNER_TEMP` in it — so this block is OUTSIDE the
+ * runnable total and ⛔ never in `--commands`' stdout, for the reason
+ * `notRunnableRows` states one channel over: a stream a consumer executes must
+ * not carry a command that cannot run.
+ *
+ * ## What is excluded, and why each exclusion is the safe direction
+ *
+ *   - a job whose `if:` this tool cannot resolve to a filter output: it
+ *     contributes no population, exactly as it contributes none to the family
+ *     derivation, and a population guessed at would fabricate a schedule;
+ *   - a job whose population covers none of your paths: CI may skip it, so no
+ *     per-card claim is available;
+ *   - a step carrying an `if:`: counted and RETURNED, never silently dropped —
+ *     the claim is "CI runs this for your path", and a condition this walk did
+ *     not evaluate could falsify it, the same standard the tail holds;
+ *   - a step the family derivation DOES name a check family for: it is already
+ *     in the matched block above, and a row here would double-count it. The two
+ *     halves are disjoint by construction, which is what makes either count
+ *     mean anything.
+ */
+export function jobFilteredSteps(entries, paths) {
+  const rows = [];
+  const counts = {
+    populations: 0,
+    covering: 0,
+    named: 0,
+    steps: 0,
+    accounted: 0,
+    unaccounted: 0,
+    conditionalSteps: 0,
+  };
+  for (const { file, text } of entries) {
+    for (const job of jobFilterPopulations(text)) {
+      counts.populations += 1;
+      // Every path of yours this job's population covers, with the pattern that
+      // covered it — the same provenance the matched column carries, and for
+      // the same reason: a row is a claim and the reader is owed what backs it.
+      const hits = [];
+      for (const path of paths) {
+        const pattern = triggerListCovers(job.paths, path);
+        if (pattern) hits.push({ path, pattern });
+      }
+      if (hits.length === 0) continue;
+      counts.covering += 1;
+      const steps = [];
+      for (const step of extractStepBlocks(job.text)) {
+        // Continuations are SPLICED before the split, so a row is the command
+        // the shell sees rather than a fragment of its argv. It is the same
+        // reading `extractCheckInvocations` takes for the same body, and here
+        // it is what keeps the disclosure intact under the cap below: the
+        // dogfood job's test invocation is the FIFTH physical line of a
+        // backslash-continued command and the FIRST logical one, so unspliced
+        // it is the line the elision eats — a pointer that elides the one line
+        // the reader came for. ⛔ The always-runs tail is deliberately left
+        // reading physical lines: its rows are a disjoint set of jobs with
+        // their own pins, and changing a rendering this card does not touch is
+        // scope this card does not have.
+        const commands = runCommandTexts(step.text)
+          .flatMap((c) => joinLineContinuations(c).split('\n'))
+          .map((l) => l.trim())
+          .filter((l) => l !== '');
+        if (commands.length === 0) continue;
+        if (step.if) {
+          counts.conditionalSteps += 1;
+          continue;
+        }
+        counts.steps += 1;
+        if (extractCheckInvocations(step.text, file).length > 0) {
+          counts.accounted += 1;
+          continue;
+        }
+        counts.unaccounted += 1;
+        steps.push({ step: step.name, commands });
+      }
+      if (steps.length === 0) continue;
+      counts.named += 1;
+      rows.push({ workflow: file, job: job.name, outputs: job.outputs, hits, dropped: job.dropped, steps });
+    }
+  }
+  return { rows, counts };
+}
+
+/**
  * A workflow's OWN declaration that it deliberately has no check family to
  * discover — a whole-line comment anywhere in the workflow text:
  *
@@ -3039,8 +3240,9 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
     'scripts/symbol-anchors.mjs --self-test',
     'a shared grammar-and-extractor LIBRARY, invoked by CI only as its own self-test; its `git ls-files` runs over a '
       + 'corpus its caller passes in. The corpus walk it lends is exercised by its registrations — '
-      + 'check-adr-symbol-anchors.mjs, which declares ROOT_DIR_WATCH_HINTS = [docs/adr/**], and '
-      + 'check-scripts-symbol-anchors.mjs, which declares [scripts/**] — and each is placed by its own.',
+      + 'check-adr-symbol-anchors.mjs, which declares ROOT_DIR_WATCH_HINTS = [docs/adr/**], '
+      + 'check-scripts-symbol-anchors.mjs, which declares [scripts/**], and '
+      + 'check-spec-docblock-symbol-anchors.mjs, which declares [packages/spec/src/**] — and each is placed by its own.',
   ],
 ];
 
@@ -9985,6 +10187,75 @@ export function alwaysRunLines(rows, counts) {
 }
 
 /**
+ * The path-scheduled CI jobs, rendered (#16285) — printed BELOW the
+ * reconciliation, because everything under that total names something OUTSIDE
+ * this card's runnable answer and these rows are outside it by construction:
+ * they are CI's own shell, in CI's environment, and no local run of them is on
+ * offer.
+ *
+ * Placed directly ABOVE the always-runs tail because the two are the halves of
+ * one partition and the adjacency is the claim: the tail reads the jobs CI
+ * CANNOT narrow by path, this reads the jobs your paths narrow it TO. A reader
+ * meeting one and not the other has half the account of what CI runs.
+ *
+ * Rows carry the job NAME, which is what CI, branch protection and a red check
+ * call it — a lead a dev cannot find in the Checks tab is a lead they will not
+ * act on, the reason `extractJobBlocks` reads the name at all.
+ *
+ * The command transcript is capped and elided on `ALWAYS_RUN_COMMAND_CAP`, the
+ * tail's own cap and the same pointer text, because it is the same decision for
+ * the same reason: a row is a POINTER to a step, not a transcript of it, and a
+ * block nobody reads discloses nothing. ⛔ One cap, one spelling — a second
+ * constant here would be a second rule about one thing.
+ */
+export function jobFilteredStepLines(rows, counts) {
+  if (rows.length === 0) return [];
+  const { covering = 0, named = 0, steps = 0, accounted = 0, unaccounted = 0, conditionalSteps = 0 } = counts ?? {};
+  if (named !== rows.length) {
+    throw new Error(
+      `the path-scheduled job block counted ${named} job(s) with an unnamed step but carries ${rows.length} row(s)`,
+    );
+  }
+  if (accounted + unaccounted !== steps) {
+    throw new Error(
+      `the path-scheduled job block does not account for its own steps: ${accounted} accounted + ` +
+        `${unaccounted} unaccounted != ${steps} walked`,
+    );
+  }
+  const lines = [
+    `CI jobs YOUR paths schedule — ${covering} job(s) CI runs because one of your paths is in the population its \`if:\` reads,` +
+      ` ${named} of them carrying ${unaccounted} step(s) this derivation names NO check family for (over ${accounted} it does).`,
+    '  ⛔ NOT runnable and ⛔ NOT in --commands: every row is CI\'s own shell in CI\'s environment. They sit OUTSIDE the runnable',
+    '    total above — running every family named there does NOT cover them, which is the gap this block exists to close.',
+    '  ⛔ NOT classified into tests, builds and setup — the same refusal the always-runs tail makes, for the same reason: every rule',
+    '    that tells them apart is a guess about a step\'s intent. What is claimed for a row is only what was measured — YOUR path puts',
+    '    this job on the PR, and nothing above names a family for this step. The reader judges the rest.',
+    '  ⇒ The always-runs tail below is the OTHER half of this partition: it reads the jobs CI cannot narrow by path, this one reads',
+    '    the jobs your paths narrow it TO — and a job carrying an `if:` is excluded there, which is every job on this list.',
+  ];
+  if (conditionalSteps) {
+    lines.push(
+      `  Excluded as conditional, and sized rather than dropped: ${conditionalSteps} step(s) of these jobs carry an \`if:\`,` +
+        ' so CI may skip them and this block makes no claim about those.',
+    );
+  }
+  for (const row of rows) {
+    const via = row.hits.map((h) => `${h.path} ⇢ '${h.pattern}'`).join('; ');
+    const dropped = row.dropped ? `, ${row.dropped} glob(s) of it untranslatable and dropped` : '';
+    lines.push(
+      `  - [${row.workflow} · ${row.job}]   scheduled by ${via}   (job \`if:\` reads ${row.outputs.join(', ')}${dropped})`,
+    );
+    for (const { step, commands } of row.steps) {
+      lines.push(`      · ${step}`);
+      for (const command of commands.slice(0, ALWAYS_RUN_COMMAND_CAP)) lines.push(`          ${command}`);
+      const elided = commands.length - ALWAYS_RUN_COMMAND_CAP;
+      if (elided > 0) lines.push(`          … ${elided} more line(s) — read the step in ${row.workflow}`);
+    }
+  }
+  return lines;
+}
+
+/**
  * The whole-tree channel, rendered (#14189) — its own heading, identical on
  * every card, printed ABOVE the reconciliation because its commands are inside
  * that total.
@@ -10257,15 +10528,24 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  *   - clause ①, encoded below: a card editing the PM lane's PROTOCOL-SEMANTIC
  *     surfaces is `CONTRACT_REVIEW_TIER` — the pm-dispatch SKILL.md main file, every
  *     file carrying an enforced copy of the decision frame (the COPIES table
- *     of check:skill-frame-sync), and the dev-agent definition. Narrowed from
- *     "the whole skill tree, references included" by the maintainer's
- *     2026-08-20 ruling (「接受你的建议」— fable 当审计师用,不当施工队用):
- *     references-only surfaces carry NO path mandate any more (opus execution,
- *     compensated by the skill-face review at CONTRACT_REVIEW_TIER). Still a
- *     file-surface predicate, and exactly what this script takes as argv;
+ *     of check:skill-frame-sync), the dev-agent definition, and — since the
+ *     maintainer's 2026-09-10 ruling (「必须 fable的还包括对外发布的skills」) —
+ *     the whole published catalog `skills/**`, which ships verbatim to third
+ *     parties (`npx skills add objectstack-ai/objectstack/skills`,
+ *     `npm create objectstack`). Narrowed from "the whole skill tree,
+ *     references included" by the maintainer's 2026-08-20 ruling
+ *     (「接受你的建议」— fable 当审计师用,不当施工队用): references-only
+ *     surfaces carry NO path mandate any more (default-tier execution,
+ *     compensated by the skills seat's review at CONTRACT_REVIEW_TIER). Still
+ *     a file-surface predicate, and exactly what this script takes as argv;
  *   - clause ②, NOT encoded and deliberately not: a card that changes contract
- *     accept/reject behaviour or widens the public surface is also
- *     `CONTRACT_REVIEW_TIER`. That is judged from the card's CONTENT — what the change
+ *     accept/reject behaviour or widens the public surface is built at the
+ *     default tier and REVIEWED at `CONTRACT_REVIEW_TIER` — in the spec seat
+ *     only, since the 2026-09-10 ruling; every other lane's clause-② review is
+ *     that lane's own default-tier review plus the gates, and neither the
+ *     triage seat nor the maintainer-summoned director spawns a
+ *     contract-review-tier subagent for anything. That is judged from the
+ *     card's CONTENT — what the change
  *     does to the contract — and a path cannot answer it. An ordinary-looking
  *     surface (one package's source file) is the NORMAL shape of a clause-②
  *     card. The closest a path can honestly get is SUSPICION:
@@ -10284,7 +10564,12 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  * exemption (fable unavailable ⇒ opus, never lower) and the proactive
  * low-headroom downgrade — are claim-time judgments, not properties of the
  * file surface. This tool states the mandate; the seat records any exit and
- * its reason in the claim comment.
+ * its reason in the claim comment. ONE exit is path-shaped, and so it IS
+ * encoded: the one-line-class downgrade does not exist for a surface under
+ * `skills/**` — the 2026-09-10 ruling's 必须, because a closed enumeration
+ * beats a per-line "is this mechanical" call on a catalog third parties
+ * install — so that entry carries `oneLineExit: false` and `tierLines`
+ * refuses to offer the exit for any card whose surface hits it.
  *
  * ## Why the globs are matched with `hintCovers`, asymmetry included
  *
@@ -10318,7 +10603,14 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  * suspect glob below — are watch hints of this file's own source. Re-measured
  * on c48d46d70a over 6840 tracked files: `extractWatchHints` yields 9 hints
  * here, and the four globs of these two tables cover 1026 files between them
- * (1023 of that is the suspect glob's contract surface).
+ * (1023 of that is the suspect glob's contract surface). The `skills/**`
+ * entry (2026-09-10) adds one hint and the 47 tracked files under `skills/`
+ * (`git ls-files skills` on ebf9a489), one of which — the published PM
+ * skill — the table already covered. That skill was deleted on 2026-09-10
+ * (maintainer, verbatim: 「发布版 skills/objectstack-pm-dispatch 删」) and its
+ * own entry left with it — a dead glob is refused by the self-test — so the
+ * catalog is covered by `skills/**` alone and a catalog file hits exactly ONE
+ * entry; the frame-copy half of clause ① now names the internal copy only.
  *
  * They stay inert against a gate that RESOLVES to this file, because no check
  * family does — `check:pm-dispatch-gates` resolves to `check-dispatch-gates.mjs`
@@ -10338,7 +10630,8 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  *
  * The authority for the policy is the maintainer ruling quoted in the PM
  * dispatch skill (2026-08-10 three-tier ruling, clause ① of its 强制条款, as
- * narrowed to protocol semantics by the 2026-08-20 ruling quoted there).
+ * narrowed to protocol semantics by the 2026-08-20 ruling quoted there, and
+ * widened to the published `skills/**` catalog by the 2026-09-10 ruling).
  * This table is a machine-readable copy of ONE predicate from it, not a second
  * statement of the policy: when they disagree, the skill wins and this table is
  * the thing to fix. The frame-copy half of the predicate is DEFINED by another
@@ -10358,9 +10651,13 @@ export const MANDATORY_TIER_GLOBS = [
     why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and receives the decision frame the PM pastes into its prompt at dispatch time rather than carrying a copy of its own',
   },
   {
-    glob: 'skills/objectstack-pm-dispatch/SKILL.md',
+    glob: 'skills/**',
     tier: CONTRACT_REVIEW_TIER,
-    why: 'clause ① (2026-08-20 narrowing): the published PM skill carries one enforced copy of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
+    why: 'clause ① (2026-09-10 ruling, verbatim 「必须 fable的还包括对外发布的skills」): the published catalog ships verbatim to third parties by `npx skills add objectstack-ai/objectstack/skills` and `npm create objectstack`, so a wrong edit is installed elsewhere before anyone here reads it — and no one-line exemption applies under this root',
+    // The one-line-class mechanical-edit exit is a card-CONTENT judgment
+    // everywhere else; here the ruling closes it by PATH (a closed enumeration
+    // beats a per-line call on an installed catalog), so it is data, not prose.
+    oneLineExit: false,
   },
 ];
 
@@ -10407,7 +10704,7 @@ export function deriveTier(paths, globs = MANDATORY_TIER_GLOBS, suspectGlobs = S
   const suspects = [];
   for (const p of paths) {
     for (const g of globs) {
-      if (hintCovers(g.glob, p)) hits.push({ path: p, glob: g.glob, tier: g.tier, why: g.why });
+      if (hintCovers(g.glob, p)) hits.push({ path: p, glob: g.glob, tier: g.tier, why: g.why, oneLineExit: g.oneLineExit !== false });
     }
     for (const g of suspectGlobs) {
       if (hintCovers(g.glob, p)) suspects.push({ path: p, glob: g.glob, why: g.why });
@@ -10439,7 +10736,8 @@ export function tierLines(result) {
   }
   const clause2 =
     '  Clause ② is NOT reachable from paths: a card that changes contract accept/reject behaviour or widens the public' +
-    ' surface is fable-mandatory too, judged from the card CONTENT. This line is a FLOOR, never a clearance.';
+    ' surface owes a contract-review-tier REVIEW too (spec seat; default-tier build), judged from the card CONTENT.' +
+    ' This line is a FLOOR, never a clearance.';
   // The suspicion tail prints only on a hit — unlike the clause-② note above,
   // which prints always: "no suspicion" and "no suspect table" must not share a
   // spelling, and the note is what keeps silence from reading as a clearance.
@@ -10447,7 +10745,8 @@ export function tierLines(result) {
     ? []
     : [
         `  Clause ② SUSPECT surface — a hint, not a verdict: judge the tier from the card CONTENT as best you can` +
-          ` (a card changing contract accept/reject behaviour or widening the public surface is ${CONTRACT_REVIEW_TIER});` +
+          ` (a card changing contract accept/reject behaviour or widening the public surface is reviewed at ${CONTRACT_REVIEW_TIER}` +
+          ' in the spec seat, built at the default tier);' +
           ` whichever tier is dispatched, the PR's actual diff passes the clause-② enqueue gate before the card may enqueue.`,
         ...suspects.map((s) => `    - ${s.path} ⇢ '${s.glob}' — ${s.why}`),
       ];
@@ -10459,13 +10758,23 @@ export function tierLines(result) {
       ...suspicion,
     ];
   }
+  // The one-line-class exit is a card-CONTENT judgment for every mandated
+  // surface but one: a glob declared with `oneLineExit: false` (the published
+  // catalog, 2026-09-10 ruling) closes it by PATH, and one such hit closes it
+  // for the WHOLE card — the exit is taken per card, not per file.
+  const oneLineBarred = [...new Set(hits.filter((h) => h.oneLineExit === false).map((h) => h.glob))];
+  const oneLineExit =
+    oneLineBarred.length === 0
+      ? 'a one-line-class mechanical governed edit drops to opus execution (sonnet floor for pure one-liners at PM' +
+        ` discretion, compensated by the skill-face review at ${CONTRACT_REVIEW_TIER}) — judged from the card CONTENT,` +
+        ' never from paths'
+      : `the one-line-class mechanical-edit downgrade is ⛔ NOT available for this surface — ${oneLineBarred.map((g) => `'${g}'`).join(', ')}` +
+        ' carries no one-line exemption (the published catalog, 2026-09-10 ruling), and one such path closes the exit for the whole card';
   return [
     `Model tier — MANDATORY: ${tier} (derived from the file surface, not recalled).`,
     ...hits.map((h) => `  - ${h.path} ⇢ '${h.glob}' — ${h.why}`),
-    '  Exits, each recorded with its reason in the claim comment\'s `Container & model` line: a one-line-class' +
-      ' mechanical governed edit drops to opus execution (sonnet floor for pure one-liners at PM discretion,' +
-      ` compensated by the skill-face review at ${CONTRACT_REVIEW_TIER}) — judged from the card CONTENT, never from` +
-      ' paths; the measured quota exemption (fable unavailable ⇒ opus, never lower); the proactive low-headroom downgrade.',
+    `  Exits, each recorded with its reason in the claim comment's \`Container & model\` line: ${oneLineExit};` +
+      ' the measured quota exemption (fable unavailable ⇒ opus, never lower); the proactive low-headroom downgrade.',
     clause2,
     ...suspicion,
   ];
@@ -11060,6 +11369,7 @@ export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows 
  */
 export function familyReconciliation({
   matchedRows = [], kindGroups = [], alwaysRunsRows = [], rosterRows = [], widePopulationRows = [], pendingRows = [],
+  jobFilteredRows = [],
 } = {}) {
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   // The SAME expression commandsFor uses for its matched half. Written as a
@@ -11149,6 +11459,11 @@ export function familyReconciliation({
     // other way, and it is fixed the same way: by counting the array that
     // renders the block rather than by writing the name out.
     pendingChangeset: pendingRows.length,
+    // The FOURTH block size (#16285), carried on exactly the same terms as the
+    // three above: not a term of the total, never in the closure assertion, and
+    // read off the array `jobFilteredStepLines` renders so the enumeration
+    // cannot name a heading the output does not print.
+    jobFilteredJobs: jobFilteredRows.length,
   };
   if (recon.matched + recon.convention - recon.both + recon.alwaysRunsOnly !== recon.total) {
     throw new Error(
@@ -11198,12 +11513,24 @@ export function familyReconciliation({
  * Named in the order a plain run PRINTS them, so a reader walking down the
  * output meets the blocks in the order this list promised them.
  */
-export function outsideBlockNames({ artifactRosters = 0, widePopulation = 0, pendingChangeset = 0 } = {}) {
+export function outsideBlockNames({
+  artifactRosters = 0, widePopulation = 0, pendingChangeset = 0, jobFilteredJobs = 0,
+} = {}) {
   return [
     ...(artifactRosters > 0 ? [`the ${artifactRosters} artifact-roster famil(ies)`] : []),
     ...(widePopulation > 0 ? [`the ${widePopulation} declared WIDE-population famil(ies)`] : []),
     ...(pendingChangeset > 0 ? [`the ${pendingChangeset} pending-changeset famil(ies)`] : []),
     'the unreachable listing',
+    // The FOURTH conditional name (#16285), and the only one that is not last
+    // among the conditionals: the list is spelled in the order a plain run
+    // PRINTS the blocks, and this block prints between the unreachable listing
+    // and the always-runs tail, beside the partition half it belongs to. It
+    // arrives HERE and nowhere else for the reason this function exists at all:
+    // the same enumeration is rendered by three lanes, and a block a lane
+    // spells for itself is a block another lane forgets. Counted off the array
+    // that renders it, like the three above, so the name cannot outlive the
+    // heading.
+    ...(jobFilteredJobs > 0 ? [`the ${jobFilteredJobs} path-scheduled CI job(s)`] : []),
     'the always-runs tail',
   ];
 }
@@ -11236,6 +11563,7 @@ export function outsideBlockCounts(recon) {
     artifactRosters: recon?.artifactRosters ?? 0,
     widePopulation: recon?.widePopulation ?? 0,
     pendingChangeset: recon?.pendingChangeset ?? 0,
+    jobFilteredJobs: recon?.jobFilteredJobs ?? 0,
   };
 }
 
@@ -11372,6 +11700,43 @@ export const RUN_RECORD_UNMEASURED_MARKER = 'NOT-MEASURED';
 export const RUN_RECORD_REASON_SEPARATOR = ' :: ';
 
 /**
+ * The word that opens the OPTIONAL annotation a ran line may carry after the
+ * separator: `<command> :: exit <code>`.
+ *
+ * ## Why this is additive, and what "additive" had to mean here (#17204)
+ *
+ * The record format is a contract other seats write BY HAND — nothing in this
+ * repo writes a ran-file — so a change that invalidated existing records would
+ * not be a fix. Measured before it was written, and the three properties are
+ * the whole argument for this spelling:
+ *
+ *   • A record line that reconciles TODAY cannot be re-read tomorrow. This
+ *     annotation is recognised only as the TAIL of a line, after ` :: `, and no
+ *     command this tool derives contains that separator — so the only lines
+ *     whose reading changes are lines that already matched nothing.
+ *   • A record WITHOUT the annotation classifies byte-identically to before:
+ *     every bare line is a ran claim, exactly as it was.
+ *   • A record WITH it, handed to a tool that predates it, fails LOUD rather
+ *     than green — the whole line misses the derivation and the family reports
+ *     UNRUN, exit 1. The one direction a format change must never take is a
+ *     silent pass, and this one cannot take it.
+ *
+ * ## Why the tail and not a `NOT-MEASURED`-style prefix
+ *
+ * The prefix marker is a CLASS the runner declares; this is a DATUM their shell
+ * captured (`status=$?`). Keeping it at the tail keeps the capture idiom a
+ * one-line `printf` over `"$cmd"` — the command still leads the line, byte for
+ * byte, which is the property every comparison in this file rests on.
+ *
+ * The payload is matched exactly: `exit ` followed by digits, nothing else. A
+ * lenient reader (`EXIT 3`, `exit=3`, `3`) would be a second dialect of a field
+ * whose entire purpose is to be unambiguous, so a tail that opens with the
+ * separator and is not this shape is reported as MALFORMED and the line keeps
+ * its old reading — the direction that costs a rerun, never a false green.
+ */
+export const RUN_RECORD_EXIT_PREFIX = 'exit ';
+
+/**
  * A run record, parsed. One entry per line that claims something.
  *
  * ## The format is the tool's, and it is the exact strings `--commands` emits
@@ -11430,7 +11795,7 @@ export function parseRunRecord(text) {
       const rest = raw.slice(RUN_RECORD_UNMEASURED_MARKER.length + 1);
       const at = rest.indexOf(RUN_RECORD_REASON_SEPARATOR);
       if (at < 0) {
-        entries.push({ command: rest, claim: 'not-measured', reason: null, line, raw, malformed: `no '${RUN_RECORD_REASON_SEPARATOR.trim()}' and no reason after it` });
+        entries.push({ command: rest, claim: 'not-measured', reason: null, exitCode: null, line, raw, malformed: `no '${RUN_RECORD_REASON_SEPARATOR.trim()}' and no reason after it`, malformedKind: 'claim' });
         continue;
       }
       const reason = rest.slice(at + RUN_RECORD_REASON_SEPARATOR.length).trim();
@@ -11438,15 +11803,85 @@ export function parseRunRecord(text) {
         command: rest.slice(0, at),
         claim: 'not-measured',
         reason: reason || null,
+        exitCode: null,
         line,
         raw,
         malformed: reason ? null : 'an empty reason',
+        malformedKind: reason ? null : 'claim',
       });
       continue;
     }
-    entries.push({ command: raw, claim: 'ran', reason: null, line, raw, malformed: null });
+    const { command, exitCode, malformed } = ranLineExitAnnotation(raw);
+    entries.push({ command, claim: 'ran', reason: null, exitCode, line, raw, malformed, malformedKind: malformed ? 'exit' : null });
   }
   return entries;
+}
+
+/**
+ * A ran line split into its command and the exit code it recorded, if any.
+ *
+ * The separator is found from the RIGHT: the annotation is a tail, so a command
+ * that somehow contained the separator keeps all of itself and only the last
+ * segment is read as a candidate annotation. A tail that is not the exact
+ * `exit <digits>` shape leaves the command as the WHOLE line — its reading
+ * before this field existed — and reports itself, so a runner who spelled it
+ * `EXIT 3` learns that from the run instead of from a family silently landing
+ * outside the derivation.
+ */
+function ranLineExitAnnotation(raw) {
+  const at = raw.lastIndexOf(RUN_RECORD_REASON_SEPARATOR);
+  if (at < 0) return { command: raw, exitCode: null, malformed: null };
+  const tail = raw.slice(at + RUN_RECORD_REASON_SEPARATOR.length);
+  const digits = tail.startsWith(RUN_RECORD_EXIT_PREFIX) ? tail.slice(RUN_RECORD_EXIT_PREFIX.length) : null;
+  if (digits === null || !/^\d{1,3}$/.test(digits)) {
+    return {
+      command: raw,
+      exitCode: null,
+      malformed: `a '${RUN_RECORD_REASON_SEPARATOR.trim()}' tail that is not an exit code ('${tail}')`,
+    };
+  }
+  return { command: raw.slice(0, at), exitCode: Number(digits), malformed: null };
+}
+
+/**
+ * What a record's NOT-MEASURED count RESTS on — the one question the headline
+ * used to answer by not asking it (#17204).
+ *
+ * ## The two channels, and why they are counted apart
+ *
+ * A family this record accounts for arrives through one of three doors, and
+ * only the first is a measurement the runner could not have forgotten to make:
+ *
+ *   CODED   the line carries `:: exit <code>`. The CLASS is derived here, from
+ *           a datum their shell captured. ⛔ This tool still did not run the
+ *           gate — it read a number — but the number is not a judgement, and
+ *           `exit 3` cannot be left undeclared by a runner in a hurry.
+ *   SILENT  a bare line: "I ran it". A gate that refused with its own unmet
+ *           prerequisite is INDISTINGUISHABLE here from one that passed, so
+ *           every NOT-MEASURED count over silent families is a floor at best
+ *           and, when every family is silent, a claim outright.
+ *   CLAIMED the `NOT-MEASURED … :: <reason>` line. Declared, reasoned, and
+ *           still the runner's own classification — which is why it keeps its
+ *           own block, its own count, and the word CLAIMED in both sentences.
+ *
+ * ## Why the class is `silent`-driven and not `claimed`-driven
+ *
+ * A hidden refusal can only live in a SILENT family: a claimed one is already
+ * counted, and a coded one is classified by its code. So the kind below turns
+ * on `silent` alone, and the floor it reports is a floor over exactly those
+ * families — not over the record's line count, which is a different number and
+ * would make the sentence unfalsifiable.
+ */
+export function runRecordEvidence({ coded = 0, silent = 0, notMeasured = [] } = {}) {
+  const derivedFromExit = notMeasured.filter((entry) => entry.source === 'exit-code').length;
+  const claimed = notMeasured.length - derivedFromExit;
+  const accounted = coded + silent + claimed;
+  let kind;
+  if (accounted === 0) kind = 'none';
+  else if (coded === 0) kind = 'claimed';
+  else if (silent === 0) kind = 'derived';
+  else kind = 'floor';
+  return { coded, silent, claimed, derivedFromExit, accounted, kind };
 }
 
 /**
@@ -11540,14 +11975,30 @@ export function runReconciliation({
 } = {}) {
   const derivedSet = new Set(derived);
   const ranClaims = new Set();
+  const recordedExits = new Map();
+  const exitContradictions = [];
   const unmeasuredClaims = new Map();
   const malformed = [];
   for (const entry of record) {
     if (entry.claim === 'ran') {
+      if (entry.malformed) malformed.push({ line: entry.line, raw: entry.raw, why: entry.malformed, kind: entry.malformedKind ?? 'exit' });
       ranClaims.add(entry.command);
+      if (typeof entry.exitCode === 'number') {
+        const held = recordedExits.get(entry.command);
+        if (!held) {
+          recordedExits.set(entry.command, { code: entry.exitCode, line: entry.line });
+        } else if (held.code !== entry.exitCode) {
+          exitContradictions.push({ command: entry.command, held: held.code, also: entry.exitCode, line: entry.line });
+          // Resolved the way the ran/claim contradiction beside it is: the
+          // reading that costs a rerun, never the one that costs a false green.
+          // Two lines disagreeing about one family is a record defect either
+          // way, and it is REPORTED — the resolution is not a repair.
+          if (entry.exitCode === EXIT_PREREQUISITE_NOT_MET) recordedExits.set(entry.command, { code: entry.exitCode, line: entry.line });
+        }
+      }
       continue;
     }
-    if (entry.malformed) malformed.push({ line: entry.line, raw: entry.raw, why: entry.malformed });
+    if (entry.malformed) malformed.push({ line: entry.line, raw: entry.raw, why: entry.malformed, kind: entry.malformedKind ?? 'claim' });
     if (!unmeasuredClaims.has(entry.command)) unmeasuredClaims.set(entry.command, entry);
   }
   // A command claimed BOTH ways is read as run — running it is the stronger
@@ -11557,14 +12008,43 @@ export function runReconciliation({
   const ran = [];
   const unrun = [];
   const notMeasured = [];
+  // The two halves of the evidence question, counted over the families this
+  // record ACCOUNTS FOR rather than over its lines: `coded` is what the runner
+  // measured and wrote down, `silent` is what their line merely asserts. A
+  // hidden refusal can only live in `silent`, which is why that number and not
+  // the line count is what the rendering quotes (#17204).
+  let coded = 0;
+  let silent = 0;
   for (const command of [...derivedSet].sort()) {
     if (ranClaims.has(command)) {
+      const recorded = recordedExits.get(command);
+      if (!recorded) {
+        silent += 1;
+        ran.push(command);
+        continue;
+      }
+      coded += 1;
+      // ⭐ The card's whole subject: the class is DERIVED from the recorded
+      // code, so a runner cannot fail to declare it. This is not the tool
+      // measuring the gate — it did not run it — it is the tool reading a
+      // datum the runner captured, which is a strictly different thing from
+      // the runner's own classification of it.
+      if (recorded.code === EXIT_PREREQUISITE_NOT_MET) {
+        notMeasured.push({
+          command,
+          reason: `recorded ${RUN_RECORD_EXIT_PREFIX}${recorded.code} on line ${recorded.line} — PREREQUISITE NOT MET`,
+          line: recorded.line,
+          source: 'exit-code',
+          exitCode: recorded.code,
+        });
+        continue;
+      }
       ran.push(command);
       continue;
     }
     const claim = unmeasuredClaims.get(command);
     if (claim && claim.reason) {
-      notMeasured.push({ command, reason: claim.reason, line: claim.line });
+      notMeasured.push({ command, reason: claim.reason, line: claim.line, source: 'claim', exitCode: null });
       continue;
     }
     unrun.push({
@@ -11622,6 +12102,12 @@ export function runReconciliation({
     nearMiss,
     malformed,
     conflicts,
+    exitContradictions,
+    // ⭐ Computed ONCE, here, and read by both sentences that quote it. The
+    // count line and the verdict line used to be free to say different things
+    // about the same number because each wrote its own words; the class below
+    // is the single expression both of them render (#17204).
+    evidence: runRecordEvidence({ coded, silent, notMeasured }),
     recordEntries: record.length,
     ok: unrun.length === 0,
   };
@@ -11670,15 +12156,26 @@ export function runReconciliationLines(recon, outside = {}) {
     `  The ${recon.derivedTotal} is THIS tree's derivation, recomputed in this process from the same expression --commands prints —` +
       ' never read back from your record. A family you never wrote down is still counted, which is what an arithmetic over your own list cannot do.',
   );
+  lines.push(...runRecordEvidenceLines(recon.evidence ?? runRecordEvidence({})));
   if (recon.unrun.length > 0) {
     lines.push(`  ⛔ UNRUN (${recon.unrun.length}) — derived for these paths, and the record does not account for them:`);
     for (const { command, why } of recon.unrun) lines.push(`    - ${command}   [${why}]`);
   }
-  if (recon.notMeasured.length > 0) {
+  const derivedNotMeasured = recon.notMeasured.filter((entry) => entry.source === 'exit-code');
+  const claimedNotMeasured = recon.notMeasured.filter((entry) => entry.source !== 'exit-code');
+  if (derivedNotMeasured.length > 0) {
     lines.push(
-      `  ${marker} (${recon.notMeasured.length}) — the RUNNER's claim, recorded with a reason. ⛔ This tool did not measure them and cannot verify the reason:`,
+      `  ${marker} · DERIVED (${derivedNotMeasured.length}) — your record carries ${RUN_RECORD_EXIT_PREFIX}${EXIT_PREREQUISITE_NOT_MET} for these,`
+        + ` the number a gate refusing its own prerequisite exits with. ⛔ This tool did not run them either — it classified the code YOU recorded,`
+        + ' which is the one channel here that cannot be left undeclared:',
     );
-    for (const { command, reason } of recon.notMeasured) lines.push(`    - ${command}   [${reason}]`);
+    for (const { command, reason } of derivedNotMeasured) lines.push(`    - ${command}   [${reason}]`);
+  }
+  if (claimedNotMeasured.length > 0) {
+    lines.push(
+      `  ${marker} · CLAIMED (${claimedNotMeasured.length}) — the RUNNER's claim, recorded with a reason. ⛔ This tool did not measure them and cannot verify the reason:`,
+    );
+    for (const { command, reason } of claimedNotMeasured) lines.push(`    - ${command}   [${reason}]`);
     lines.push(
       `    ⚠️ ${marker} is for a gate that REFUSES with its own stated prerequisite. A run the OS killed is not that —` +
         ' a cap kill (exit 143) leaves no verdict and the family is simply unrun. The two are easy to conflate under time pressure, and one of them was.',
@@ -11715,11 +12212,28 @@ export function runReconciliationLines(recon, outside = {}) {
         ' Record the command as --commands emits it, byte for byte. ⛔ A matcher that resolved this difference is how a reconciliation reported 0 over a set the raw comparison scored 36.',
     );
   }
-  for (const { line, raw, why } of recon.malformed) {
-    lines.push(`  ⚠️ line ${line} claims ${marker} with ${why}: '${raw}'. Spelling: ${marker} <command>${RUN_RECORD_REASON_SEPARATOR}<reason>.`);
+  for (const { line, raw, why, kind } of recon.malformed) {
+    lines.push(
+      kind === 'exit'
+        ? `  ⚠️ line ${line} carries ${why}: '${raw}'. Read as a command in full, so it pairs with nothing.`
+          + ` Spelling: <command>${RUN_RECORD_REASON_SEPARATOR}${RUN_RECORD_EXIT_PREFIX}<code>.`
+        : `  ⚠️ line ${line} claims ${marker} with ${why}: '${raw}'. Spelling: ${marker} <command>${RUN_RECORD_REASON_SEPARATOR}<reason>.`,
+    );
+  }
+  for (const { command, held, also, line } of recon.exitContradictions ?? []) {
+    lines.push(
+      `  ⚠️ '${command}' is recorded with TWO different exit codes (${held}, then ${also} on line ${line}).`
+        + ` Read as ${held === EXIT_PREREQUISITE_NOT_MET || also === EXIT_PREREQUISITE_NOT_MET ? EXIT_PREREQUISITE_NOT_MET : held}`
+        + ' — the reading that costs a rerun rather than a false green; fix the record so it states one thing.',
+    );
   }
   for (const command of recon.conflicts) {
-    lines.push(`  ⚠️ '${command}' is recorded BOTH as run and as ${marker}. Read as run; fix the record so it states one thing.`);
+    const derivedHere = recon.notMeasured.some((entry) => entry.command === command && entry.source === 'exit-code');
+    lines.push(
+      derivedHere
+        ? `  ⚠️ '${command}' is recorded BOTH as run and as ${marker}. Read as ${marker}, derived from its recorded ${RUN_RECORD_EXIT_PREFIX}${EXIT_PREREQUISITE_NOT_MET}; fix the record so it states one thing.`
+        : `  ⚠️ '${command}' is recorded BOTH as run and as ${marker}. Read as run; fix the record so it states one thing.`,
+    );
   }
   // ⭐ The enumeration READ from the one place it exists, not a prose copy.
   // This sentence used to spell three of the five blocks a plain run prints,
@@ -11735,10 +12249,77 @@ export function runReconciliationLines(recon, outside = {}) {
   );
   lines.push(
     recon.ok
-      ? `✓ dispatch-gates --ran: ${recon.derivedTotal} derived famil(ies) accounted for — ${recon.ran.length} run, ${recon.notMeasured.length} ${marker}.`
+      ? `✓ dispatch-gates --ran: ${recon.derivedTotal} derived famil(ies) accounted for — ${recon.ran.length} run,`
+        + ` ${recon.notMeasured.length} ${marker}${notMeasuredEvidenceTerm(recon)}.`
       : `✗ dispatch-gates --ran: ${recon.unrun.length} of ${recon.derivedTotal} derived famil(ies) UNRUN.`,
   );
   return lines;
+}
+
+/**
+ * The evidence block, printed under the counts it qualifies.
+ *
+ * It is unconditional wherever there is anything to qualify, and that is the
+ * point: a note that appears only when something is wrong is a note a reader
+ * learns to skip, and the state this card was filed about — `0 NOT-MEASURED`
+ * over three gates that had exited 3 — looked exactly like nothing being wrong.
+ */
+function runRecordEvidenceLines(evidence) {
+  const marker = RUN_RECORD_UNMEASURED_MARKER;
+  const spelling = `<command>${RUN_RECORD_REASON_SEPARATOR}${RUN_RECORD_EXIT_PREFIX}<code>`;
+  const capture = `Record it as \`${spelling}\`, capturing $? BEFORE any pipe.`;
+  const { coded, silent, claimed, accounted, kind } = evidence;
+  if (kind === 'none') return [];
+  if (kind === 'derived') {
+    return [
+      `  EXIT CODES — all ${accounted} accounted famil(ies) carry one, so the ${marker} count above is DERIVED from them`
+        + `${claimed > 0 ? `, bar ${claimed} reasoned claim(s) counted beside them` : ''}. ⛔ This tool ran none of them; it read the codes you recorded.`,
+    ];
+  }
+  if (kind === 'claimed') {
+    return [
+      `  ⛔ EXIT CODES — 0 of the ${accounted} accounted famil(ies) carry one. A bare line says only "I ran it", and a gate that exited`
+        + ` ${EXIT_PREREQUISITE_NOT_MET} is indistinguishable here from one that exited 0 — so the ${marker} count above is the RUNNER'S CLAIM`
+        + `${claimed > 0
+          ? `: it is the ${claimed} they DECLARED, and a refusal they did not declare is invisible here.`
+          : `, and nothing in this record can raise it above the zero it declares.`}`
+        + ` ${capture}`,
+    ];
+  }
+  return [
+    `  ⚠️ EXIT CODES — ${coded} of the ${accounted} accounted famil(ies) carry one; ${silent} famil(ies) say only "I ran it".`
+      + ` The ${marker} count above is a FLOOR over those ${silent}, not a total. ${capture}`,
+  ];
+}
+
+/**
+ * The parenthetical the ✓ line carries after its NOT-MEASURED count — the
+ * sentence this card is about.
+ *
+ * ⭐ It is a FUNCTION of the same `evidence` the block above renders, so the two
+ * cannot drift; and it is never empty when there is evidence to state, because
+ * the defect was a zero that read as a measurement. The incentive it removes is
+ * the one the card names: a runner who records nothing used to get the cleanest
+ * line in the file, cleaner than one who annotated honestly and was rewarded
+ * with a non-zero count. After this, the annotated run is the clean one.
+ */
+function notMeasuredEvidenceTerm(recon) {
+  const evidence = recon.evidence ?? runRecordEvidence({});
+  const { coded, silent, claimed, derivedFromExit, accounted, kind } = evidence;
+  const code = EXIT_PREREQUISITE_NOT_MET;
+  if (kind === 'none') return '';
+  if (kind === 'derived') {
+    if (recon.notMeasured.length === 0) {
+      return ` (a DERIVED zero — all ${accounted} recorded an exit code and none of them is ${code})`;
+    }
+    return ` (${derivedFromExit} DERIVED from a recorded ${RUN_RECORD_EXIT_PREFIX}${code}${claimed > 0 ? `, ${claimed} claimed` : ''})`;
+  }
+  if (kind === 'claimed') {
+    return ` (⛔ CLAIMED — ${silent} of ${accounted} recorded no exit code, so this`
+      + ` ${recon.notMeasured.length === 0 ? 'zero' : 'count'} is what the runner declared, not what the record shows)`;
+  }
+  return ` (⛔ a FLOOR — ${derivedFromExit} derived from ${RUN_RECORD_EXIT_PREFIX}${code}${claimed > 0 ? `, ${claimed} claimed` : ''};`
+    + ` ${silent} of ${coded + silent + claimed} recorded no exit code)`;
 }
 
 /**
@@ -11755,7 +12336,7 @@ export function runReconciliationLines(recon, outside = {}) {
  * That distinction is the card's own subject matter: what is left out of a list
  * must be visible in the list.
  */
-export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], widePopulationRows = [], rosters = [] }) {
+export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const { otherCommands, ...spelling } = spellingSplit(commands);
   return {
@@ -11804,6 +12385,17 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
         workflows: [...entry.workflows],
       })),
     },
+    // IN this document and ⛔ NOT in `commands` (#16285) — the same disposition
+    // as `widePopulation` above and for a stricter reason: these rows are not
+    // check families at all. They are CI's own steps, in CI's environment, in
+    // jobs THIS CARD'S PATHS schedule, that no discovered family accounts for.
+    // Its own key so a machine consumer reads the omission the human block
+    // names rather than inferring it from an absence — the whole contract of
+    // this document. `counts` travels beside the rows because the block's
+    // heading is arithmetic (how many jobs cover, how many steps are accounted
+    // for) and a consumer that had to recount it could name a set the rows do
+    // not contain.
+    jobFilteredSteps: { jobs: jobFiltered.rows, counts: jobFiltered.counts },
     counts,
   };
 }
@@ -11827,13 +12419,13 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
  * and the declared WIDE population was not mentioned in it at all. It reads
  * `outsideBlockNames` now, with the counts this function already holds (#16795).
  */
-function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], widePopulationRows = [], rosters = [] }) {
+function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
   const identity = repoIdentity();
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const split = spellingSplit(commands);
 
   if (mode === 'json') {
-    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, widePopulationRows, rosters }), null, 2));
+    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, widePopulationRows, rosters, jobFiltered }), null, 2));
   } else {
     for (const command of commands) console.log(command);
   }
@@ -11907,6 +12499,27 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
         'they are derived against a path that does not exist yet. Write the changeset, then derive again.',
     );
   }
+  // The SIXTH thing stdout deliberately omits (#16285), and the one a consumer
+  // of THIS lane is least able to infer: it is not a check family at all, so no
+  // key on any row above hints that it exists. The jobs are NAMED one per line
+  // rather than counted, for the reason the NOT MEASURED lines above are: a
+  // count says something is missing; it does not say that the thing missing is
+  // the CI job that runs the tests of the package this card edits — which is
+  // exactly the report this block was filed on.
+  if (jobFiltered.rows.length) {
+    console.error(
+      `  + ${jobFiltered.rows.length} CI job(s) are scheduled BY YOUR PATHS and run ${jobFiltered.counts.unaccounted} step(s) no family above names` +
+        ` — ${mode === 'json' ? 'under jobFilteredSteps, not in commands' : 'NOT above'}. They are CI's own shell in CI's environment,` +
+        ' so there is no local invocation to hand you, and running every command on stdout does ⛔ NOT cover them.',
+    );
+    for (const row of jobFiltered.rows) {
+      console.error(
+        `      ⊘ NOT MEASURED — [${row.workflow} · ${row.job}] ${row.steps.length} step(s):` +
+          ` ${row.steps.map((s) => s.step).join(' · ')}`,
+      );
+    }
+    console.error('      ⇒ Run without --commands/--json to see each step printed as CI spells it.');
+  }
   // The FOURTH thing stdout deliberately omits (#14880), on stderr for exactly
   // the reason the three above are: the block is prose, and prose in the stream
   // a consumer executes is the harvest hazard this mode exists to make
@@ -11929,6 +12542,7 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
       artifactRosters: rosters.length,
       widePopulation: widePopulationRows.length,
       pendingChangeset: pending.length,
+      jobFilteredJobs: jobFiltered.rows.length,
     })} are each OUTSIDE the ${commands.length} command(s) on stdout. Run without --commands/--json to see every one of them named.`,
   );
 }
@@ -12065,6 +12679,12 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // and this comes back empty. See pendingChangesetFamilies for the round of
   // five dispatches that measured the gap.
   const pending = pendingChangesetFamilies([...byCheck], new Set(matched.keys()));
+  // Read from the SAME `workflowEntries` the discovery and the always-runs tail
+  // read, for the reason they share it: a block derived from a second read
+  // could describe a different revision of a workflow than the families it is
+  // printed beside, and the whole point of this block is that it states what
+  // the family list does not cover (#16285).
+  const jobFiltered = jobFilteredSteps(workflowEntries, paths);
 
   if (mode === 'ran') {
     // Built from the SAME four expressions the other renderings read, in this
@@ -12099,6 +12719,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       artifactRosters: rosters.length,
       widePopulation: widePopulationRows.length,
       pendingChangeset: pending.length,
+      jobFilteredJobs: jobFiltered.rows.length,
     })) console.log(line);
     return recon.ok ? 0 : 1;
   }
@@ -12112,6 +12733,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       alwaysRunsRows,
       widePopulationRows,
       rosters,
+      jobFiltered,
       counts: {
         discovered: byCheck.size,
         workflows: workflows.length,
@@ -12139,6 +12761,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // output does not contain (#16398, #16795).
   const recon = familyReconciliation({
     matchedRows, kindGroups, alwaysRunsRows, rosterRows: rosters, widePopulationRows, pendingRows: pending,
+    jobFilteredRows: jobFiltered.rows,
   });
 
   console.log(`dispatch-gates: ${byCheck.size} check famil(ies) discovered across ${workflows.length} workflow file(s) — derived at runtime, nothing listed in this script.\n`);
@@ -12392,6 +13015,21 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // pass — see `unreachableLines` for the CI failure that made that concrete.
   console.log('');
   for (const line of unreachableLines(unreachable, swept.length)) console.log(line);
+
+  // The path-scheduled CI jobs (#16285), printed on EVERY run for the reason
+  // the unreachable listing and the always-runs tail are: neither is about the
+  // card's paths at all and both print unconditionally, while THIS one is about
+  // the card's paths and is the block whose absence was measured — a truthful
+  // "N derived, N run, 0 NOT-MEASURED" report standing for three hours beside a
+  // red gate in the very package the card edited. Directly ABOVE the always-runs
+  // tail because the two are the halves of ONE partition — the tail reads the
+  // jobs CI cannot narrow by path, this reads the jobs your paths narrow it TO
+  // — and a reader meeting one without the other has half the account.
+  const jobFilteredOut = jobFilteredStepLines(jobFiltered.rows, jobFiltered.counts);
+  if (jobFilteredOut.length) {
+    console.log('');
+    for (const line of jobFilteredOut) console.log(line);
+  }
 
   // The always-runs tail prints on every run for the same reason and with the
   // same standing: it is not about the card's paths either, and the family list
@@ -15242,6 +15880,46 @@ function selfTest() {
     shHints(shJsComment).length === 0,
     shHints(shJsComment),
   );
+  // ── The PHANTOM BLOCK COMMENT the order used to open (#16744) ─────────────
+  //
+  // The other direction of the same "THIRD kind" defect, and the card's whole
+  // acceptance criterion: two sources that differ in FOUR CHARACTERS OF PROSE,
+  // both of which must read the one hint their code spells. The first carries a
+  // block-comment opener inside a `#` comment; while `#` was masked LAST that
+  // opener reached the JS scanner and blanked the real `DEST=` line under it.
+  //
+  // ⛔ The control is not decoration. A change that only makes the first row
+  // fire — by disabling the mask, or by dropping the JS scanner on this kind —
+  // takes the second row down with it or leaves it as the ONLY row that fires.
+  // Both rows read 1, or this is not the fix.
+  const shPhantom = '# published @objectstack/* packages\nDEST="node_modules/@objectstack/spec/dist"\n';
+  const shPhantomControl = '# published packages\nDEST="node_modules/@objectstack/spec/dist"\n';
+  t(
+    '⭐ a `/*` inside a `#` comment no longer opens a block comment over the shell code below it',
+    shHints(shPhantom, 'scripts/x.sh').join() === 'node_modules/@objectstack/spec/dist',
+    shHints(shPhantom, 'scripts/x.sh'),
+  );
+  t(
+    '⭐ CONTROL: the same code under a comment with NO opener still reads its one hint — the mask was fixed, not switched off',
+    shHints(shPhantomControl, 'scripts/x.sh').join() === 'node_modules/@objectstack/spec/dist',
+    shHints(shPhantomControl, 'scripts/x.sh'),
+  );
+  // The span, not just the line: an unterminated opener ran to the END OF FILE,
+  // so the cost was every hint below it rather than the one line beside it.
+  const shPhantomSpan =
+    '# everything below this line is /* invisible\n'
+    + 'bash "scripts/one.sh"\n'
+    + 'bash "scripts/two.sh"\n';
+  t(
+    '…and it ran to END OF FILE, so the recovered span is every hint below the comment, not one line',
+    shHints(shPhantomSpan, 'scripts/x.sh').join() === 'scripts/one.sh,scripts/two.sh',
+    shHints(shPhantomSpan, 'scripts/x.sh'),
+  );
+  t(
+    '…non-vacuously: the JS-kind control on the same bytes still loses both, which is what this order costs a `.sh` file',
+    shHints(shPhantomSpan, 'scripts/x.sh.mjs').length === 0,
+    shHints(shPhantomSpan, 'scripts/x.sh.mjs'),
+  );
   // KIND-SCOPED, in both directions. The same bytes on a `.mjs` path must keep
   // spelling their hint: `#` is not a comment in JavaScript, and a mask that
   // fired there would be a widening rather than this card's narrowing.
@@ -15329,24 +16007,45 @@ function selfTest() {
   let shellShrank = 0;
   let shellBefore = 0;
   let shellAfter = 0;
+  const shellAddedProse = [];
   for (const f of liveShellFiles) {
     const src = readFileSync(nodePath.join(ROOT, f), 'utf8');
     const masked = extractWatchHints(src, f, { tree: hintTree });
     const unmasked = extractWatchHints(src, `${f}.mjs`, { tree: hintTree });
     shellBefore += unmasked.length;
     shellAfter += masked.length;
-    if (masked.some((h) => !unmasked.includes(h))) shellGrew++;
+    const added = masked.filter((h) => !unmasked.includes(h));
+    // An ADDED hint is admissible only if it is spelled in CODE: its literal has
+    // to survive the `#` mask. One spelled only inside a `#` comment would be
+    // the FABRICATING direction arriving through the very reorder that fixed
+    // the under-mask, so it is collected by name rather than counted.
+    const code = maskShellComments(src);
+    for (const h of added) if (!code.includes(h)) shellAddedProse.push([f, h]);
+    if (added.length) shellGrew++;
     else if (masked.length < unmasked.length) shellShrank++;
   }
   t(
-    `⭐ LIVE: over ${liveShellFiles.length} tracked .sh file(s) the mask never ADDS a hint — ${shellBefore} spelled without it, ${shellAfter} with`,
-    liveShellFiles.length > 0 && shellGrew === 0 && shellAfter < shellBefore,
-    JSON.stringify({ files: liveShellFiles.length, shellBefore, shellAfter, shellGrew, shellShrank }),
+    `⭐ LIVE: over ${liveShellFiles.length} tracked .sh file(s) every hint the \`#\` mask ADDS is spelled in CODE — ${shellBefore} hints without the mask, ${shellAfter} with`,
+    liveShellFiles.length > 0 && shellAddedProse.length === 0 && shellAfter < shellBefore,
+    JSON.stringify({ files: liveShellFiles.length, shellBefore, shellAfter, shellGrew, shellShrank, shellAddedProse }),
   );
   t(
     '…non-vacuously: at least one live file really loses a hint, so the sweep is not passing over an instrument that changed nothing',
     shellShrank >= 1,
     JSON.stringify({ shellShrank }),
+  );
+  // ⛔ This case replaced a `shellGrew === 0` pin (#16132), and the replacement
+  // is the point of #16744 rather than a relaxation of it. That spelling was
+  // true only because `#` was masked LAST, which left shell prose to reach the
+  // JS scanner first: a `#` comment containing `/*` opened a phantom block
+  // comment over the real code below it, so the code could not spell a hint in
+  // EITHER column and the difference read 0. Masking `#` FIRST uncovers that
+  // code, so additions are now expected — and the honest invariant is what they
+  // ARE, not that there are none.
+  t(
+    '…and the additions really happen, so the case above is not a subset test wearing a code test\'s name',
+    shellGrew >= 1,
+    JSON.stringify({ shellGrew }),
   );
   // The card's sharpest specimen, both ends. DEPARTURE alone would stay green
   // on a mask that emptied the file, so the ARRIVAL half names a live shell
@@ -15362,6 +16061,26 @@ function selfTest() {
     '…non-vacuously: that path IS spelled in the file, inside a `#` comment, and the unmasked control still reads it',
     extractWatchHints(liveBumpSrc, 'scripts/bump-objectui.sh.mjs', { tree: hintTree }).includes(
       'docs/releases-maintenance.md',
+    ),
+  );
+  // ⭐ LIVE RECOVERY (#16744): the site the card named, both ends. The `.mjs`
+  // control is what makes it a recovery rather than an ordinary arrival — the
+  // JS-only path STILL cannot read this line, because the phantom comment the
+  // header's `@objectstack/*` opens is what hid it, and that is precisely what
+  // masking `#` first removes.
+  const liveDownstream = 'scripts/downstream-smoke.sh';
+  const liveDownstreamSrc = readFileSync(nodePath.join(ROOT, liveDownstream), 'utf8');
+  t(
+    '⭐ LIVE RECOVERY: a path spelled in real shell CODE under a `#` comment carrying a block-comment opener is read again',
+    extractWatchHints(liveDownstreamSrc, liveDownstream, { tree: hintTree }).includes(
+      'node_modules/@objectstack/spec/dist',
+    ),
+    extractWatchHints(liveDownstreamSrc, liveDownstream, { tree: hintTree }),
+  );
+  t(
+    '…non-vacuously: the JS-kind control on the same bytes still cannot see it, so a phantom comment is what was hiding it',
+    !extractWatchHints(liveDownstreamSrc, `${liveDownstream}.mjs`, { tree: hintTree }).includes(
+      'node_modules/@objectstack/spec/dist',
     ),
   );
   const liveShardSelfTest = 'scripts/ci/select-shard-packages.selftest.sh';
@@ -18729,7 +19448,7 @@ function selfTest() {
     'and the tier-table file globs are not inheritable either',
     ownPopulation.length > 0
       && !ownPopulation.includes('.claude/agents/os-dev.md')
-      && !ownPopulation.includes('skills/objectstack-pm-dispatch/SKILL.md'),
+      && !ownPopulation.includes('skills/**'),
   );
   // Cost of the mechanism on this tree, pinned so it cannot grow unnoticed: the
   // marker is an opt-out, and an opt-out that spreads is how a real population
@@ -20549,7 +21268,6 @@ function selfTest() {
   const fableOf = (paths) => deriveTier(paths);
   t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === CONTRACT_REVIEW_TIER);
-  t('the published PM skill (one enforced frame copy) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).mandatory === false);
   const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/agents/os-dev.md']);
   t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === CONTRACT_REVIEW_TIER);
@@ -20562,6 +21280,29 @@ function selfTest() {
   t('a surface declared as an ANCESTOR of a mandatory file IS mandated — the safe direction here', fableOf(['.claude/skills']).mandatory === true);
   t('the pm-dispatch DIRECTORY (ancestor of its SKILL.md) is mandated — a card declaring the directory may touch the main file', fableOf(['.claude/skills/pm-dispatch']).mandatory === true);
   t('another skill under the same parent is not mandated', fableOf(['.claude/skills/verify/SKILL.md']).mandatory === false);
+  // The published catalog (2026-09-10 ruling): the whole `skills/` root is
+  // mandated as data, it does not leak into the internal `.claude/skills` tree,
+  // and it is the one surface whose one-line-class exit is closed by path.
+  const catalogHit = fableOf(['skills/objectstack-data/SKILL.md']);
+  t('a published catalog SKILL.md is mandated, by the skills/** entry', catalogHit.tier === CONTRACT_REVIEW_TIER && catalogHit.hits.some((h) => h.glob === 'skills/**'));
+  t('a second published catalog file is mandated the same way', fableOf(['skills/objectstack-ai/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
+  t('a generated references file under a published skill is mandated too — the mandate is the ROOT, not the SKILL.md files', fableOf(['skills/objectstack-data/references/_index.md']).mandatory === true);
+  // The published PM skill's own entry left with the file (2026-09-10 ruling,
+  // 「发布版 skills/objectstack-pm-dispatch 删」): the "own entry AND skills/**"
+  // shape has no subject any more, and what is pinned instead is that a
+  // catalog file is covered by exactly ONE entry — the root — so no second
+  // per-file entry under `skills/` has quietly returned.
+  t('a catalog file is covered by exactly ONE entry — skills/** — now that the published PM skill and its own entry are gone', catalogHit.hits.length === 1 && catalogHit.hits[0].glob === 'skills/**');
+  t('no per-file entry for the deleted published PM skill survives it, and its old path carries the root mandate only', !MANDATORY_TIER_GLOBS.some((g) => g.glob.includes('objectstack-pm-dispatch')) && fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).hits.every((h) => h.glob === 'skills/**'));
+  t('skills/** does NOT reach the internal .claude/skills tree — a pm-dispatch references file still carries no mandate', fableOf(['.claude/skills/pm-dispatch/references/core-rules.md']).mandatory === false);
+  t('the skills/** entry is declared with its one-line exit switched off, as data', MANDATORY_TIER_GLOBS.some((g) => g.glob === 'skills/**' && g.oneLineExit === false && g.tier === CONTRACT_REVIEW_TIER));
+  t('every other mandatory entry keeps the one-line exit open (the flag is an opt-out, absent by default)', MANDATORY_TIER_GLOBS.filter((g) => g.glob !== 'skills/**').every((g) => g.oneLineExit === undefined) && catalogHit.hits.every((h) => h.glob !== 'skills/**' || h.oneLineExit === false));
+  const catalogLines = tierLines(catalogHit).join('\n');
+  t('the published-catalog rendering refuses the one-line-class exit, in those words', catalogLines.includes('one-line-class') && catalogLines.includes('NOT available') && catalogLines.includes('no one-line exemption'));
+  t('and does not offer the opus-execution drop the other mandated surfaces get', !catalogLines.includes('drops to opus execution'));
+  t('while still naming the two exits that survive, so a downgrade needs a stated reason', catalogLines.includes('quota exemption') && catalogLines.includes('opus, never lower') && catalogLines.includes('proactive low-headroom'));
+  const mixedCatalog = tierLines(fableOf(['.claude/skills/pm-dispatch/SKILL.md', 'skills/objectstack-ai/SKILL.md'])).join('\n');
+  t('a mixed surface with ONE published-catalog path loses the one-line exit for the whole card', !mixedCatalog.includes('drops to opus execution') && mixedCatalog.includes('closes the exit for the whole card'));
   // The rendering is where the invariant is actually delivered: the claim
   // comment quotes THESE lines.
   const mandLines = tierLines(mixed).join('\n');
@@ -21377,6 +22118,17 @@ function selfTest() {
   t('and pointing the flag at a checkout refuses instead of retargeting', wrongShapeRun.status === 2 && (wrongShapeRun.stdout ?? '').trim() === '');
   const valuelessRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG]);
   t('a valueless assertion refuses rather than deriving as though it were absent', valuelessRun.status === 2);
+  // The published catalog on the real CLI (2026-09-10 ruling): the mandate
+  // prints for a catalog file and stays absent for an internal references
+  // file — the two acceptance paths, measured end to end rather than on the
+  // pure function alone.
+  const catalogCli = runCli(['--tier', 'skills/objectstack-data/SKILL.md']);
+  t('⭐ --tier on a published catalog SKILL.md prints the MANDATE, naming the skills/** entry', catalogCli.status === 0 && (catalogCli.stdout ?? '').includes('MANDATORY') && (catalogCli.stdout ?? '').includes("'skills/**'"));
+  t('and refuses the one-line-class exit on stdout, where the claim comment reads it', (catalogCli.stdout ?? '').includes('NOT available') && !(catalogCli.stdout ?? '').includes('drops to opus execution'));
+  const catalogAiCli = runCli(['--tier', 'skills/objectstack-ai/SKILL.md']);
+  t('⭐ a second catalog SKILL.md prints the same mandate', catalogAiCli.status === 0 && (catalogAiCli.stdout ?? '').includes('MANDATORY') && (catalogAiCli.stdout ?? '').includes("'skills/**'"));
+  const internalRefsCli = runCli(['--tier', '.claude/skills/pm-dispatch/references/core-rules.md']);
+  t('⭐ --tier on an internal pm-dispatch references file still prints NO mandate', internalRefsCli.status === 0 && (internalRefsCli.stdout ?? '').includes('no path-derived mandate') && !(internalRefsCli.stdout ?? '').includes('MANDATORY'));
 
   // ── The entry guard (#9757) ───────────────────────────────────────────────
   //
@@ -21711,6 +22463,206 @@ function selfTest() {
     }),
   );
   t('the live tail renders without refusing', alwaysRunLines(liveTail.rows, liveTail.counts).length > 0);
+
+  // ── The OTHER half of that partition: the jobs YOUR paths schedule (#16285) ─
+  //
+  // The tail above excludes a path-filtered workflow and every job carrying an
+  // `if:` — which is every job a `dorny/paths-filter` output schedules. Those
+  // exclusions are right for the claim the tail makes and they are exactly why
+  // nothing reported what those jobs run: the family derivation looks INSIDE
+  // them for `check:*` invocations, and the rest of their work had no reader.
+  //
+  // FIXTURE first, so every branch is pinned on input this tree may not hold
+  // tomorrow; the LIVE half below is the card's own acceptance baseline and
+  // cannot be faked by a fixture. ⛔ Neither half touches the network.
+  const jobWf = [
+    'name: Fixture',
+    'on:',
+    '  pull_request:',
+    'jobs:',
+    '  filter:',
+    '    outputs:',
+    "      core: ${{ steps.changes.outputs.core || 'true' }}",
+    "      docs: ${{ steps.changes.outputs.docs || 'true' }}",
+    '    steps:',
+    '      - uses: dorny/paths-filter@v4',
+    '        id: changes',
+    '        with:',
+    '          filters: |',
+    '            core:',
+    "              - 'packages/**'",
+    '            docs:',
+    "              - 'content/**'",
+    '  suite:',
+    '    name: Suite (1/2)',
+    "    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' }}",
+    '    steps:',
+    '      - name: Setup',
+    '        uses: actions/checkout@v4',
+    '      - name: A discoverable family',
+    '        run: pnpm check:engine-double-contract',
+    '      - name: Run the package suite',
+    '        run: |',
+    '          pnpm turbo run test \\',
+    '            --filter=@objectstack/dogfood',
+    '      - name: Conditional, so no claim is made about it',
+    "        if: github.event_name == 'push'",
+    '        run: pnpm exec turbo run build',
+    '  docs-only:',
+    '    name: Docs Only',
+    "    if: ${{ !cancelled() && needs.filter.outputs.docs != 'false' }}",
+    '    steps:',
+    '      - name: Never claimed for a packages path',
+    '        run: pnpm docs:build',
+    '  unresolvable:',
+    '    name: Unresolvable',
+    "    if: github.event_name == 'push'",
+    '    steps:',
+    '      - name: Never claimed at all',
+    '        run: pnpm lint',
+  ].join('\n');
+
+  const jobFixture = jobFilteredSteps([{ file: 'fixture.yml', text: jobWf }], ['packages/qa/dogfood/test/x.test.ts']);
+  const jobRowNames = jobFixture.rows.map((r) => r.job);
+  t('a job whose declared population covers one of your paths is named — by the name CI calls it', jobRowNames.includes('Suite (1/2)'));
+  t('a job whose population covers NONE of your paths is not named', !jobRowNames.includes('Docs Only'));
+  t(
+    'a job whose `if:` resolves to no filter output contributes no population at all — a schedule guessed at would fabricate',
+    !jobRowNames.includes('Unresolvable') && jobFixture.counts.populations === 2,
+  );
+  // ⛔ Every reader below DEGRADES to a failing case rather than a TypeError. The
+  // ablation that proves these cases can fail removes the very row they read, and
+  // a battery that throws there stops before the LIVE controls underneath it are
+  // decided — turning "this pin can fail" into "this pin was never reached".
+  const suiteRow = jobFixture.rows.find((r) => r.job === 'Suite (1/2)') ?? { steps: [], hits: [], outputs: [] };
+  const suiteSteps = suiteRow.steps.map((s) => s.step);
+  t('the step CI runs that no family names IS listed — the whole point of the block', suiteSteps.includes('Run the package suite'));
+  t(
+    'a step whose family the derivation names is NOT listed — the two halves are disjoint',
+    !suiteSteps.includes('A discoverable family') && jobFixture.counts.accounted === 1,
+  );
+  t(
+    'a conditional STEP is excluded and COUNTED, never silently dropped',
+    !suiteSteps.includes('Conditional, so no claim is made about it') && jobFixture.counts.conditionalSteps === 1,
+  );
+  t(
+    'a `uses:` step with no command is neither counted nor listed',
+    !suiteSteps.includes('Setup') && jobFixture.counts.steps === 2,
+  );
+  t('the block accounts for every step it walked', jobFixture.counts.accounted + jobFixture.counts.unaccounted === jobFixture.counts.steps);
+  t(
+    'the row carries the provenance the claim rests on — YOUR path and the pattern that covered it',
+    suiteRow.hits.length === 1
+      && suiteRow.hits[0].path === 'packages/qa/dogfood/test/x.test.ts'
+      && suiteRow.hits[0].pattern === 'packages/**'
+      && suiteRow.outputs.includes('filter.core'),
+  );
+  const suiteRun = suiteRow.steps.find((s) => s.step === 'Run the package suite') ?? { commands: [] };
+  t(
+    'a shell line-continuation is spliced, so a row is the command the shell sees rather than a fragment of its argv',
+    suiteRun.commands.length === 1 && suiteRun.commands[0] === 'pnpm turbo run test --filter=@objectstack/dogfood',
+  );
+
+  const jobLines = jobFilteredStepLines(jobFixture.rows, jobFixture.counts);
+  t('the rendered block sizes itself against the jobs your paths schedule', (jobLines[0] ?? '').includes('1 job(s) CI runs because one of your paths'));
+  t('the rendered block refuses to be read as runnable', jobLines.some((l) => l.includes('NOT in --commands')));
+  t('the rendered block refuses to classify its rows into tests, builds and setup', jobLines.some((l) => l.includes('NOT classified into tests, builds and setup')));
+  t('the rendered block names the always-runs tail as the other half of one partition', jobLines.some((l) => l.includes('OTHER half of this partition')));
+  t('an excluded conditional step is sized in the rendering rather than left as an absence', jobLines.some((l) => l.includes('1 step(s) of these jobs carry an `if:`')));
+  t('a block with no rows renders NOTHING — a zero heading would invite a hunt for rows that are not there', jobFilteredStepLines([], jobFixture.counts).length === 0);
+
+  const longJobRow = [{
+    workflow: 'a.yml',
+    job: 'J',
+    outputs: ['filter.core'],
+    hits: [{ path: 'p/x.ts', pattern: 'p/**' }],
+    dropped: 0,
+    steps: [{ step: 'S', commands: Array.from({ length: 30 }, (_, i) => `line ${i}`) }],
+  }];
+  const longJobCounts = { covering: 1, named: 1, steps: 1, accounted: 0, unaccounted: 1, conditionalSteps: 0 };
+  const longJobLines = jobFilteredStepLines(longJobRow, longJobCounts);
+  t(
+    'a long step is elided to a pointer rather than transcribed, on the TAIL\'s own cap and in its own words',
+    longJobLines.some((l) => l.includes(`${30 - ALWAYS_RUN_COMMAND_CAP} more line(s) — read the step in a.yml`)),
+  );
+  t('the elision still prints the capped head of the command', longJobLines.filter((l) => /^ {10}line \d+$/.test(l)).length === ALWAYS_RUN_COMMAND_CAP);
+
+  const refusedJobBlock = (rows, counts) => {
+    try {
+      jobFilteredStepLines(rows, counts);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  t(
+    'a block whose row count contradicts its own job count refuses rather than prints a total nobody can trust (#4690)',
+    refusedJobBlock(longJobRow, { ...longJobCounts, named: 2 }),
+  );
+  t('a block whose step counts do not add up refuses', refusedJobBlock(longJobRow, { ...longJobCounts, steps: 5 }));
+
+  // ── LIVE, on this tree: the card's own acceptance baseline ────────────────
+  //
+  // ⛔ No count is pinned. The number of path-scheduled jobs moves with every
+  // workflow edit and a frozen one would go stale with nothing failing — the
+  // defect this whole file is about. What is pinned is the CLASS and its two
+  // controls.
+  const liveWorkflows = readdirSync(nodePath.join(ROOT, '.github/workflows'))
+    .filter((f) => /\.ya?ml$/.test(f))
+    .map((f) => ({ file: f, text: readFileSync(nodePath.join(ROOT, '.github/workflows', f), 'utf8') }));
+  const dogfoodCard = 'packages/qa/dogfood/test/authz-probe-blind-spot.census.ts';
+  const liveJobFiltered = jobFilteredSteps(liveWorkflows, [dogfoodCard]);
+  // ⭐ THE POSITIVE CONTROL. This exact change set derived 43 commands with zero
+  // mentions of dogfood while `Dogfood Regression Gate (3/3)` was red on a test
+  // file in the same package. Both halves are asserted, for the reason the tail's
+  // own retirement case states: the job being named is only meaningful while the
+  // family derivation still names nothing for the step that runs its suite —
+  // either half alone goes green for the wrong reason.
+  const dogfoodRow = liveJobFiltered.rows.find((r) => r.job.startsWith('Dogfood Regression Gate'));
+  t(
+    'LIVE: the change set that produced a false "authored to green" claim now names the CI job that runs the package it edits',
+    Boolean(dogfoodRow),
+  );
+  t(
+    '...and names the invocation itself, not just the job — the one line the reader came for',
+    Boolean(dogfoodRow) && dogfoodRow.steps.some((s) => s.commands.some((c) => c.includes('run test') && c.includes('--filter=@objectstack/dogfood'))),
+  );
+  t(
+    '...while the family derivation still names NO check family for that step, which is why the block has to exist',
+    Boolean(dogfoodRow)
+      && dogfoodRow.steps.every((s) => extractCheckInvocations(s.commands.join('\n'), dogfoodRow.workflow).length === 0),
+  );
+  // ⭐ THE NEGATIVE CONTROL. A path no job's declared population covers must be
+  // pointed at NO job. Without it every case above is satisfied by a walk that
+  // names every job for every card, which is the "22 leads is the same as none"
+  // failure this file's header prices.
+  t(
+    'LIVE: a repo-root document no job filter covers is pointed at no job at all',
+    jobFilteredSteps(liveWorkflows, ['ROADMAP.md']).rows.length === 0,
+  );
+  t(
+    '...and that negative is not a broken walk — the same walk finds jobs for a packages path',
+    liveJobFiltered.rows.length > 0,
+  );
+  // The partition, live: every row is a step the family derivation names nothing
+  // for, so a row that yields an invocation would mean this block and the family
+  // list double-count the same step.
+  t(
+    'LIVE: no row yields a check invocation — this block and the family list are disjoint',
+    liveJobFiltered.rows.every((r) => r.steps.every((s) => extractCheckInvocations(s.commands.join('\n'), r.workflow).length === 0)),
+  );
+  t('the live block renders without refusing', jobFilteredStepLines(liveJobFiltered.rows, liveJobFiltered.counts).length > 0);
+  // ⛔ The block sits OUTSIDE the runnable total, and the enumeration that says
+  // so is `outsideBlockNames` — the one place the list of outside blocks exists.
+  t(
+    'the block is NAMED among what sits outside the runnable total, and only while it has rows',
+    outsideBlockNames({ jobFilteredJobs: 3 }).includes('the 3 path-scheduled CI job(s)')
+      && !outsideBlockNames({ jobFilteredJobs: 0 }).some((n) => n.includes('path-scheduled')),
+  );
+  t(
+    'and the count reaches that enumeration off the ARRAY that renders the block, never a recount of it',
+    outsideBlockCounts(familyReconciliation({ jobFilteredRows: [{}, {}] })).jobFilteredJobs === 2,
+  );
 
   // ── The seam between this tool and its caller (#13462) ────────────────────
   //
@@ -22392,6 +23344,43 @@ function selfTest() {
       unreasoned.every((e) => e.malformed && e.reason === null) && unreasoned[0].command === 'pnpm check:a' && unreasoned[1].command === 'pnpm check:b',
     );
 
+    // ── The OPTIONAL exit-code annotation (#17204) ──────────────────────────
+    //
+    // ⭐ The compatibility property FIRST, because it is the condition the
+    // shape was chosen under: the record format is written BY HAND by other
+    // seats, so a field that re-read any line they have already written would
+    // not be a fix. Every case below is about a line NOT changing.
+    const preExisting = parseRunRecord(
+      ['pnpm check:a', '  pnpm check:b', `${marker} pnpm check:c${sep}refuses without a built dist`, '# note', ''].join('\n'),
+    );
+    t(
+      '⭐ a record written before this field existed parses byte-identically — same commands, same classes, no exit code',
+      preExisting.length === 3
+        && preExisting[0].command === 'pnpm check:a' && preExisting[0].claim === 'ran' && preExisting[0].exitCode === null
+        && preExisting[1].command === '  pnpm check:b' && preExisting[1].exitCode === null
+        && preExisting[2].claim === 'not-measured' && preExisting[2].command === 'pnpm check:c' && preExisting[2].reason === 'refuses without a built dist',
+    );
+    const coded = parseRunRecord(['pnpm check:a :: exit 0', 'pnpm check:b :: exit 3', 'node scripts/check-c.mjs --flag :: exit 143'].join('\n'));
+    t(
+      'a recorded exit code is split off the tail, leaving the command byte-exact on the left of it',
+      coded.map((e) => e.command).join('|') === 'pnpm check:a|pnpm check:b|node scripts/check-c.mjs --flag'
+        && coded.map((e) => e.exitCode).join('|') === '0|3|143',
+    );
+    t('and the line is still a ran claim — the annotation is a datum, not a class', coded.every((e) => e.claim === 'ran' && !e.malformed));
+    // ⛔ The lenient reader, refused. A second dialect of a field whose whole
+    // purpose is to be unambiguous is worse than no field.
+    for (const tail of ['EXIT 3', 'exit=3', 'exit 3 ', '3', 'exit three', 'exit 1234']) {
+      const bad = parseRunRecord(`pnpm check:a${sep}${tail}`)[0];
+      t(
+        `a '${tail}' tail is MALFORMED, and the line keeps its pre-field reading in full`,
+        bad.malformed !== null && bad.exitCode === null && bad.command === `pnpm check:a${sep}${tail}`,
+      );
+    }
+    t(
+      'the separator is found from the RIGHT, so only the tail is ever read as an annotation',
+      parseRunRecord(`pnpm check:a${sep}note${sep}exit 3`)[0].command === `pnpm check:a${sep}note`,
+    );
+
     // ── The classes ────────────────────────────────────────────────────────
     const derived = ['node scripts/check-b.mjs', 'pnpm check:a', 'pnpm check:c'];
     const full = runReconciliation({ derived, record: parseRunRecord(derived.join('\n')) });
@@ -22452,6 +23441,91 @@ function selfTest() {
     );
     t('and the run says why, naming the cap kill it would otherwise absorb', unexplained.unrun[0].why.includes('cap-killed'));
     t('the malformed line is reported against its line number too', unexplained.malformed.length === 1 && unexplained.malformed[0].line === 1);
+
+    // ── ⭐ DERIVED from the recorded code, not declared by the runner (#17204) ──
+    //
+    // ONE world, recorded three ways. The gate `pnpm check:c` refused with its
+    // own unmet prerequisite in every one of them; what differs is only what
+    // the runner wrote down. Measured across four consecutive deliveries, the
+    // first shape — the sloppy one — printed `0 NOT-MEASURED` while 2, 2, 1 and
+    // 2 gates had exited 3.
+    const world = ['pnpm check:a', 'pnpm check:b', 'pnpm check:c'];
+    const sloppyRecord = world.join('\n');
+    const codedRecord = ['pnpm check:a :: exit 0', 'pnpm check:b :: exit 1', 'pnpm check:c :: exit 3'].join('\n');
+    const claimedRecord = ['pnpm check:a', 'pnpm check:b', `${marker} pnpm check:c${sep}refuses on an unbuilt tree`].join('\n');
+    const sloppyRun = runReconciliation({ derived: world, record: parseRunRecord(sloppyRecord) });
+    const codedRun = runReconciliation({ derived: world, record: parseRunRecord(codedRecord) });
+    const claimedRun = runReconciliation({ derived: world, record: parseRunRecord(claimedRecord) });
+    t(
+      '⭐ POSITIVE: a run CONTAINING an exit-3 gate reports it, and the class came off the code rather than a declaration',
+      codedRun.notMeasured.length === 1 && codedRun.notMeasured[0].command === 'pnpm check:c' && codedRun.notMeasured[0].source === 'exit-code',
+    );
+    t(
+      'a RED gate is still RUN — this mode answers what you RAN, never whether it passed, and only the refusal class moves',
+      codedRun.ran.join('|') === 'pnpm check:a|pnpm check:b' && codedRun.ok,
+    );
+    // ⭐ THE NEGATIVE CONTROL, and it is half the card: a change that reported
+    // everything as NOT-MEASURED would look "more careful" and pass a
+    // positive-only acceptance while being exactly as useless as a zero.
+    const noRefusal = runReconciliation({
+      derived: world,
+      record: parseRunRecord(['pnpm check:a :: exit 0', 'pnpm check:b :: exit 1', 'pnpm check:c :: exit 0'].join('\n')),
+    });
+    t(
+      '⭐ NEGATIVE CONTROL: a run genuinely WITHOUT a refusal still reports ZERO, with every family run',
+      noRefusal.notMeasured.length === 0 && noRefusal.ran.length === 3 && noRefusal.evidence.kind === 'derived',
+    );
+    t(
+      'the sloppy record reports the same zero it always did — this field cannot invent a refusal out of a bare line',
+      sloppyRun.notMeasured.length === 0 && sloppyRun.ran.length === 3 && sloppyRun.ok,
+    );
+    t(
+      '...and the difference between those two zeroes is the EVIDENCE class, which is where it belongs',
+      sloppyRun.evidence.kind === 'claimed' && sloppyRun.evidence.silent === 3 && sloppyRun.evidence.coded === 0
+        && noRefusal.evidence.coded === 3 && noRefusal.evidence.silent === 0,
+    );
+    t(
+      'a hand-written claim stays CLAIMED and is counted apart from a derived one, in the same run',
+      claimedRun.notMeasured.length === 1 && claimedRun.notMeasured[0].source === 'claim'
+        && claimedRun.evidence.claimed === 1 && claimedRun.evidence.derivedFromExit === 0,
+    );
+    const floor = runReconciliation({
+      derived: world,
+      record: parseRunRecord(['pnpm check:a :: exit 3', 'pnpm check:b', 'pnpm check:c :: exit 0'].join('\n')),
+    });
+    t(
+      'a PARTLY annotated record is a floor, not a total, and the two halves are counted separately',
+      floor.evidence.kind === 'floor' && floor.evidence.coded === 2 && floor.evidence.silent === 1 && floor.notMeasured.length === 1,
+    );
+
+    // Two lines disagreeing about one family: reported, and resolved toward the
+    // rerun in BOTH orders — a first-wins rule would make the resolution depend
+    // on which line the runner happened to append first.
+    for (const [first, second] of [['exit 0', 'exit 3'], ['exit 3', 'exit 0']]) {
+      const twoCodes = runReconciliation({
+        derived: ['pnpm check:a'],
+        record: parseRunRecord([`pnpm check:a${sep}${first}`, `pnpm check:a${sep}${second}`].join('\n')),
+      });
+      t(
+        `a family recorded '${first}' then '${second}' reads as ${marker} and the contradiction is REPORTED, not resolved silently`,
+        twoCodes.notMeasured.length === 1 && twoCodes.notMeasured[0].source === 'exit-code' && twoCodes.exitContradictions.length === 1,
+      );
+    }
+    const bothChannels = runReconciliation({
+      derived: ['pnpm check:a'],
+      record: parseRunRecord([`pnpm check:a${sep}exit 3`, `${marker} pnpm check:a${sep}refuses without a built dist`].join('\n')),
+    });
+    t(
+      'a family recorded through BOTH channels reads as the derived class, and the contradiction is still reported',
+      bothChannels.notMeasured.length === 1 && bothChannels.notMeasured[0].source === 'exit-code' && bothChannels.conflicts.length === 1,
+    );
+    // The malformed tail is reported like the malformed claim beside it, and it
+    // costs the family: the line stays whole, so it pairs with nothing.
+    const badTail = runReconciliation({ derived: ['pnpm check:a'], record: parseRunRecord(`pnpm check:a${sep}EXIT 3`) });
+    t(
+      'a malformed exit tail leaves the family UNRUN and says so — the direction that costs a rerun, never a false green',
+      !badTail.ok && badTail.unrun.length === 1 && badTail.malformed.length === 1 && badTail.malformed[0].kind === 'exit',
+    );
 
     // ── What the TOOL classifies, so no prose has to ────────────────────────
     // ⭐ The value-bearing spelling is the LIVE one — `pr-automation.yml`
@@ -22531,9 +23605,85 @@ function selfTest() {
     t('it states where the denominator came from — the claim an arithmetic cannot make', redText.includes('recomputed in this process'));
     t('every unrun family is NAMED, never just counted', short.unrun.every(({ command }) => redText.includes(command)));
     t('the verdict is one line and it is the LAST one', redLines[redLines.length - 1].startsWith('✗ dispatch-gates --ran:'));
-    const greenText = runReconciliationLines(full).join('\n');
-    t('and the green verdict is the same line in the same place', greenText.trim().endsWith('3 derived famil(ies) accounted for — 3 run, 0 NOT-MEASURED.'));
+    const greenLines = runReconciliationLines(full);
+    const greenText = greenLines.join('\n');
+    t(
+      'and the green verdict is the same line in the same place, still naming the derived total and the two counts',
+      greenLines[greenLines.length - 1].startsWith('✓ dispatch-gates --ran: 3 derived famil(ies) accounted for — 3 run, 0 NOT-MEASURED'),
+    );
     t('the rendering discloses what this number does NOT cover', greenText.includes('always-runs tail'));
+
+    // ── ⭐ #17204: the zero says WHICH KIND OF ZERO IT IS ────────────────────
+    //
+    // `full`'s record is the idiom every seat writes today: the command, bare.
+    // Its zero is therefore the runner's silence, and the verdict line — the
+    // one a reviewer's eye lands on, beside a ✓ — has to say so in the same
+    // stroke. It printed `0 NOT-MEASURED.` full stop, on four consecutive
+    // deliveries where 2, 2, 1 and 2 gates had exited 3.
+    t(
+      '⭐ a zero over a record with no exit codes is marked CLAIMED on the verdict line itself',
+      greenLines[greenLines.length - 1].endsWith(
+        '0 NOT-MEASURED (⛔ CLAIMED — 3 of 3 recorded no exit code, so this zero is what the runner declared, not what the record shows).',
+      ),
+    );
+    t(
+      'and the block above it says the same thing where the counts are, naming the spelling that fixes it',
+      greenText.includes('⛔ EXIT CODES — 0 of the 3 accounted famil(ies) carry one')
+        && greenText.includes('`<command> :: exit <code>`'),
+    );
+
+    // ⭐⭐ THE INCENTIVE INVERSION, PINNED — the defect this card is really
+    // about. Three renderings of ONE world (`pnpm check:c` refused in all
+    // three), side by side, as a reviewer would read them:
+    //
+    //   sloppy   — no annotation at all           → today: the CLEANEST line
+    //   claimed  — annotated by hand, with reason → today: `1 NOT-MEASURED`
+    //   coded    — the exit codes recorded        → today: indistinguishable
+    //                                               from sloppy, since the
+    //                                               field did not exist
+    //
+    // ⛔ Rewarding the first with the tidiest output is what trained seats to
+    // stop annotating. The assertion is not that the words changed: it is that
+    // the sloppy rendering is no longer the clean one, and that the ONLY
+    // rendering with no warning on it is the one that recorded the evidence.
+    const verdictOf = (recon) => runReconciliationLines(recon).at(-1);
+    const sloppyVerdict = verdictOf(sloppyRun);
+    const codedVerdict = verdictOf(codedRun);
+    const claimedVerdict = verdictOf(claimedRun);
+    t(
+      '⭐ the SLOPPY run — the one that annotated nothing — no longer gets the clean line: its zero carries ⛔ CLAIMED',
+      sloppyVerdict.includes('0 NOT-MEASURED (⛔ CLAIMED') && sloppyVerdict.includes('3 of 3 recorded no exit code'),
+    );
+    t(
+      '⭐ the CODED run — the same world, evidence recorded — is the only one of the three with no ⛔ on its verdict',
+      !codedVerdict.includes('⛔') && codedVerdict.includes('1 NOT-MEASURED (1 DERIVED from a recorded exit 3)')
+        && sloppyVerdict.includes('⛔') && claimedVerdict.includes('⛔'),
+    );
+    t(
+      'and the hand-written claim still counts — it is marked CLAIMED, not erased, because the path an exit code cannot express survives',
+      claimedVerdict.includes('1 NOT-MEASURED (⛔ CLAIMED') && runReconciliationLines(claimedRun).join('\n').includes(`${marker} · CLAIMED (1)`),
+    );
+    t(
+      'the derived refusal gets its own block, naming the recorded code and the line it was read from',
+      runReconciliationLines(codedRun).join('\n').includes(`${marker} · DERIVED (1)`)
+        && runReconciliationLines(codedRun).join('\n').includes('recorded exit 3 on line 3 — PREREQUISITE NOT MET'),
+    );
+    // The NEGATIVE beside every positive, in the rendering too: an honest zero
+    // must still read as a zero, and it must read as a BETTER one.
+    const noRefusalVerdict = verdictOf(noRefusal);
+    t(
+      '⭐ NEGATIVE CONTROL, rendered: a run genuinely without a refusal still ends in a zero — and it is a DERIVED zero, with no ⛔',
+      noRefusalVerdict.endsWith('3 run, 0 NOT-MEASURED (a DERIVED zero — all 3 recorded an exit code and none of them is 3).')
+        && !noRefusalVerdict.includes('⛔'),
+    );
+    t(
+      'a partly annotated record calls its count a FLOOR on both lines, and names how many are silent',
+      verdictOf(floor).includes('⛔ a FLOOR') && runReconciliationLines(floor).join('\n').includes('⚠️ EXIT CODES — 2 of the 3 accounted famil(ies) carry one'),
+    );
+    t(
+      'the malformed exit tail is reported with the spelling that repairs it, and is never read as a claim',
+      runReconciliationLines(badTail).join('\n').includes(`Spelling: <command>${sep}exit <code>.`),
+    );
     t(
       `the ${marker} block warns about the cap kill the category absorbs`,
       runReconciliationLines(claimed).join('\n').includes('exit 143'),
@@ -22570,7 +23720,7 @@ function selfTest() {
     // ⭐ Pinned NAME BY NAME and with a NEGATIVE beside every positive, because
     // the weak shape is what failed before: a case asking only for a substring
     // stayed green for the whole time the sentence was naming three of five.
-    const laneCounts = { artifactRosters: 2, widePopulation: 1, pendingChangeset: 3 };
+    const laneCounts = { artifactRosters: 2, widePopulation: 1, pendingChangeset: 3, jobFilteredJobs: 4 };
     const outsideOf = (lines) => (lines.find((l) => l.includes('This answers ONE link')) ?? '');
     const ranAllBlocks = outsideOf(runReconciliationLines(full, laneCounts));
     for (const name of [
@@ -22578,23 +23728,25 @@ function selfTest() {
       'the 1 declared WIDE-population famil(ies)',
       'the 3 pending-changeset famil(ies)',
       'the unreachable listing',
+      'the 4 path-scheduled CI job(s)',
       'the always-runs tail',
     ]) {
       t(`--ran's disclaimer names "${name}" — every block a plain run prints, not a subset`, ranAllBlocks.includes(name));
     }
     t('and spells them in PRINT order, as the one phrase the human lane spells', ranAllBlocks.includes(
       'the 2 artifact-roster famil(ies), the 1 declared WIDE-population famil(ies), the 3 pending-changeset famil(ies),'
-        + ' the unreachable listing and the always-runs tail are each outside the derived total',
+        + ' the unreachable listing, the 4 path-scheduled CI job(s) and the always-runs tail are each outside the derived total',
     ));
     // The NEGATIVE: at zero rows those three blocks are not printed by the run
     // this sentence points at, so naming them would send a reader to headings
     // that are not there — the same defect facing the other way.
-    const ranNoBlocks = outsideOf(runReconciliationLines(full, { artifactRosters: 0, widePopulation: 0, pendingChangeset: 0 }));
+    const ranNoBlocks = outsideOf(runReconciliationLines(full, { artifactRosters: 0, widePopulation: 0, pendingChangeset: 0, jobFilteredJobs: 0 }));
     t(
-      '--ran names NONE of the three conditional blocks on a derivation that has none',
+      '--ran names NONE of the four conditional blocks on a derivation that has none',
       !ranNoBlocks.toLowerCase().includes('artifact-roster')
         && !ranNoBlocks.toLowerCase().includes('wide-population')
-        && !ranNoBlocks.toLowerCase().includes('pending-changeset'),
+        && !ranNoBlocks.toLowerCase().includes('pending-changeset')
+        && !ranNoBlocks.toLowerCase().includes('path-scheduled'),
     );
     t('...while still naming the two that print unconditionally', ranNoBlocks.includes('the unreachable listing and the always-runs tail'));
 
@@ -22632,6 +23784,17 @@ function selfTest() {
         { check: 'check:r1', command: 'pnpm check:r1', workflows: ['w.yml'], artifacts: [], dir: 'scripts', coversYourPath: false, checkerHealth: null },
         { check: 'check:r2', command: 'pnpm check:r2', workflows: ['w.yml'], artifacts: [], dir: 'scripts', coversYourPath: false, checkerHealth: null },
       ],
+      jobFiltered: {
+        rows: Array.from({ length: 4 }, (_, i) => ({
+          workflow: 'w.yml',
+          job: `Job ${i}`,
+          outputs: ['filter.core'],
+          hits: [{ path: 'scripts/pm/dispatch-gates.mjs', pattern: 'scripts/**' }],
+          dropped: 0,
+          steps: [{ step: 'Run it', commands: ['pnpm turbo run test'] }],
+        })),
+        counts: { populations: 4, covering: 4, named: 4, steps: 4, accounted: 0, unaccounted: 4, conditionalSteps: 0 },
+      },
       ...over,
     })).find((l) => l.includes('Not a complete account of what CI runs')) ?? '';
     const commandsAllBlocks = laneTwo();
@@ -22640,6 +23803,7 @@ function selfTest() {
       'the 1 declared WIDE-population famil(ies)',
       'the 3 pending-changeset famil(ies)',
       'the unreachable listing',
+      'the 4 path-scheduled CI job(s)',
       'the always-runs tail',
     ]) {
       t(`--commands' closing disclaimer names "${name}" — every block outside the command list, where it used to name one`, commandsAllBlocks.includes(name));
@@ -22651,12 +23815,15 @@ function selfTest() {
     // The NEGATIVE, for the reason the --ran one is there: a sentence that
     // cannot drop a name is the same broken instrument as one that cannot add
     // one, pointed the other way.
-    const commandsNoBlocks = laneTwo({ rosters: [], widePopulationRows: [], pending: [] });
+    const commandsNoBlocks = laneTwo({
+      rosters: [], widePopulationRows: [], pending: [], jobFiltered: { rows: [], counts: {} },
+    });
     t(
-      '--commands names NONE of the three conditional blocks when the run has none of them',
+      '--commands names NONE of the four conditional blocks when the run has none of them',
       !commandsNoBlocks.toLowerCase().includes('artifact-roster')
         && !commandsNoBlocks.toLowerCase().includes('wide-population')
-        && !commandsNoBlocks.toLowerCase().includes('pending-changeset'),
+        && !commandsNoBlocks.toLowerCase().includes('pending-changeset')
+        && !commandsNoBlocks.toLowerCase().includes('path-scheduled'),
     );
     t('...while still naming the two that print unconditionally', commandsNoBlocks.includes('the unreachable listing and the always-runs tail'));
     // ⛔ And the stream stays a STREAM: the accounting is stderr-only, so a
@@ -22676,6 +23843,14 @@ function selfTest() {
           kindGroups: [], pending: [{ check: 'check:p1' }], counts: {}, alwaysRunsRows: [],
           widePopulationRows: [{ check: 'check:w1', command: 'pnpm check:w1', workflows: ['w.yml'], reason: 'whole root', refused: null }],
           rosters: [],
+          jobFiltered: {
+            rows: [{
+              workflow: 'w.yml', job: 'Job 0', outputs: ['filter.core'], dropped: 0,
+              hits: [{ path: 'scripts/pm/dispatch-gates.mjs', pattern: 'scripts/**' }],
+              steps: [{ step: 'Run it', commands: ['pnpm turbo run test'] }],
+            }],
+            counts: { populations: 1, covering: 1, named: 1, steps: 1, accounted: 0, unaccounted: 1, conditionalSteps: 0 },
+          },
         });
       } finally {
         console.log = realLog;
@@ -22732,6 +23907,49 @@ function selfTest() {
       const redOut = red.stdout ?? '';
       t('⭐ dropping ONE line from that record exits 1 — a verdict a report cannot paraphrase', red.status === 1);
       t('and the run names exactly the family that was dropped', redOut.includes('UNRUN (1)') && redOut.includes(dropped));
+
+      // ── ⭐ #17204 END TO END: the exit code reaches the verdict ────────────
+      //
+      // Every unit case above stays green if the MODE never passes the parsed
+      // codes through — the same shape #15115 measured one bucket over, where
+      // a defaulted parameter kept a class's own tests green while the live run
+      // still got it wrong. Only a real run reads the wiring, and the record
+      // here is this tool's own `--commands` output with a code appended to
+      // each line, which is the capture idiom the header prescribes.
+      const codedPath = nodePath.join(ranTmp, 'ran-coded.list');
+      writeFileSync(codedPath, `${rows.map((cmd) => `${cmd} :: exit 0`).join('\n')}\n`);
+      const codedRun = runCli([RAN_FLAG, codedPath, ranCard]);
+      const codedOut = codedRun.stdout ?? '';
+      t(
+        '⭐ NEGATIVE CONTROL, end to end: a real record whose codes are all 0 still reconciles green with a ZERO',
+        codedRun.status === 0 && codedOut.includes(`${rows.length} run, 0 NOT-MEASURED`),
+      );
+      t(
+        'and the zero is marked DERIVED — the reward for recording the evidence is the clean line',
+        codedOut.includes(`(a DERIVED zero — all ${rows.length} recorded an exit code and none of them is 3)`),
+      );
+      const refusedPath = nodePath.join(ranTmp, 'ran-refused.list');
+      const refused = rows[0];
+      writeFileSync(
+        refusedPath,
+        `${rows.map((cmd) => `${cmd} :: exit ${cmd === refused ? 3 : 0}`).join('\n')}\n`,
+      );
+      const refusedRun = runCli([RAN_FLAG, refusedPath, ranCard]);
+      const refusedOut = refusedRun.stdout ?? '';
+      t(
+        '⭐ POSITIVE, end to end: one recorded exit 3 in a real run reaches the HEADLINE — ⛔ never a zero',
+        refusedRun.status === 0
+          && refusedOut.includes(`${rows.length - 1} run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3)`)
+          && !refusedOut.includes('0 NOT-MEASURED'),
+      );
+      t(
+        'and the refusing family is NAMED under its own block, with the line the code was read from',
+        refusedOut.includes(`${RUN_RECORD_UNMEASURED_MARKER} · DERIVED (1)`) && refusedOut.includes(refused),
+      );
+      t(
+        'the SAME real run recorded bare — today\'s idiom — reports a zero that says CLAIMED on the verdict line',
+        greenOut.includes(`0 NOT-MEASURED (⛔ CLAIMED — ${rows.length} of ${rows.length} recorded no exit code`),
+      );
 
       // The refusals, and the unreadable input. All three exit before the tree
       // walk, so they cost nothing to assert.
@@ -23165,8 +24383,9 @@ if (invokedDirectly) {
       } catch (err) {
         console.error(`dispatch-gates: could not read the run record '${argv.runRecord}' — ${err.message}`);
         console.error(
-          `  ${RAN_FLAG} takes a file of the commands you ran, one per line, exactly as --commands emits them.` +
-            ' Capture them as you run, never by slugging log file names back into family names.',
+          `  ${RAN_FLAG} takes a file of the commands you ran, one per line, exactly as --commands emits them` +
+            ` — optionally with what each ANSWERED: \`<command>${RUN_RECORD_REASON_SEPARATOR}${RUN_RECORD_EXIT_PREFIX}<code>\`, so a refusal is` +
+            ' derived rather than declared. Capture them as you run, never by slugging log file names back into family names.',
         );
         process.exit(2);
       }

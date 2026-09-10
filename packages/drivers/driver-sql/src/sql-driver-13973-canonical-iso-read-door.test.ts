@@ -66,7 +66,7 @@
  * milliseconds — what `String(Date)` does — would be visible too.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, assert } from 'vitest';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { SqlDriver } from './index.js';
 import {
@@ -224,6 +224,7 @@ function measure(cell: DialectCell): void {
 
     it('§A3 findOne(), and the rows update() and create() return, present the same shape', async () => {
       const one = await driver.findOne(TABLE, { where: { id: 'r1' } }, OPTS);
+      assert(one !== null, 'findOne answered the not-found arm for a seeded id');
       expect(one, 'findOne returned nothing').toBeTruthy();
       for (const col of INSTANT_COLUMNS) expectCanonicalInstant(one[col], `findOne ${col}`);
       expect(one.closed_at).toBe(CLOSED_AT[1]);
@@ -267,6 +268,7 @@ function measure(cell: DialectCell): void {
       // (`readback.first()` → `formatOutput`), so its return is a whole row and
       // the guard applies unqualified.
       const before = await driver.findOne(TABLE_RETURNS, { where: { id: 'w0' } }, OPTS);
+      assert(before !== null, 'findOne answered the not-found arm for a seeded id');
       expect(before, 'the seed row is missing').toBeTruthy();
       const merged = await driver.upsert(TABLE_RETURNS, { id: 'w0', title: 'write row 0 (merged)' }, undefined, OPTS);
       const inserted = await driver.upsert(
@@ -556,6 +558,7 @@ describe('#13973 §D — find(), distinct() and aggregate() present the audit co
     await driver.create(T_RAW, { id: 'x1', n: 2 }, OPTS);
     await (driver as any).knex(T_RAW).where('id', 'x1').update({ updated_at: '2026-01-10 09:00:00' });
     const legacy = await driver.findOne(T_RAW, { where: { id: 'x1' } }, OPTS);
+    assert(legacy !== null, 'findOne answered the not-found arm for a seeded id');
     expect(legacy.updated_at).toBe('2026-01-10T09:00:00.000Z');
     const distinct = await driver.distinct(T_RAW, 'updated_at', undefined, OPTS);
     expect(distinct).toContain('2026-01-10T09:00:00.000Z');

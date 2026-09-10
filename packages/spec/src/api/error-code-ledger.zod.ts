@@ -106,22 +106,32 @@
  * ONE shape, no second list: a `door: 'none'` code is a row like any other —
  * the string under the package that stamps it, and a comment that states its
  * `status` and the reachability reading ("no HTTP door on this tree; the
- * thrown value is the boundary"). The dispatcher vocabulary's `boot-refusal`
- * verdict (`packages/runtime/src/dispatcher-error-vocabulary.ts`) records
- * that same reachability for the codes NOT yet registered, and a row here
- * ratchets its vocabulary row out exactly as a `pending-registration`
- * registration does. What registration changes for such a code is the face,
+ * thrown value is the boundary"). Until #16649 the dispatcher vocabulary
+ * (`packages/runtime/src/dispatcher-error-vocabulary.ts`) carried a
+ * `boot-refusal` verdict that recorded that same reachability for the codes
+ * NOT yet registered; it is RETIRED, because the gate below now refuses it —
+ * and every verdict like it — under any published package's `src/`. The one
+ * verdict that still parks a site there is `pending-registration`, and only
+ * outside `packages/spec/src/**`, under the dated allowance spelled out below.
+ * So a `door: 'none'` code has no resting place short of a row here, and the
+ * ratchet is the one `pending-registration` already had: a row here makes the
+ * site vanish from that scan. What registration changes
+ * for such a code is the face,
  * not the wire: nothing demotes today, and if a door ever does answer with
  * it, `error.code` carries the specific code instead of the status-derived
  * member plus `declaredCode`. The `declaredCode` demotion (#9106) stays for
  * genuinely unknown / third-party spellings only.
  *
- * `packages/spec/src/**` is held to this mechanically:
- * `check:dispatcher-error-vocabulary` refuses to classify a stamp site under
- * that tree as anything but `foreign-vocabulary` (a different vocabulary that
- * merely spells itself `code`) or `runtime-pinned` — a `boot-refusal` or
- * `pending-registration` row for a spec site is a finding
- * (`spec-face-unregistered`), and the only way out is the row here.
+ * EVERY published package's `src/**` is held to this mechanically — #16649
+ * widened the rule from `packages/spec/src/**` alone, which is all #16449
+ * could afford to measure. `check:dispatcher-error-vocabulary` refuses to
+ * classify a stamp site under one as anything but `foreign-vocabulary` (a
+ * different vocabulary that merely spells itself `code`) or `runtime-pinned`,
+ * and the only way out is the row here. Under `packages/spec/src/**` that is
+ * the whole rule, so a `pending-registration` row for a spec site is a finding
+ * (`spec-face-unregistered`); outside it, a `pending-registration` row keeps a
+ * named, dated allowance owed to #8846 and any OTHER verdict is a finding
+ * (`published-face-unregistered`).
  *
  * A code emitted by several packages is listed once per emitting package —
  * the union dedupes; the per-package rows are provenance, not identity.
@@ -326,8 +336,10 @@ export const ERROR_CODE_LEDGER = {
     // one code, one wording (`analyticsDateRangeRefusalMessage`, the #5240
     // convention); `VALIDATION_FAILED` would say "malformed body" at one
     // moment and nothing a driver could speak at the other. Registered under
-    // the door that names the wire vocabulary; each driver adds its own
-    // provenance row when its refusal lands.
+    // the door that names the wire vocabulary. #16322 landed that second
+    // moment as ONE shared constructor in `@objectstack/core` rather than a
+    // refusal per driver — so it carries a single PROVENANCE_WAIVERS entry for
+    // that package below, not a row under each backend.
     'ANALYTICS_DATE_RANGE_UNRECOGNIZED',
     // [#16293] The AI-facing action doors refuse a call against an action
     // whose AUTHOR declared `ai.requiresConfirmation: true` when the request
@@ -1618,5 +1630,19 @@ export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
       'the dependency-light package so BOTH doors recognise one shape; the throws are ' +
       'served under the emitting doors\' own registrations (runtime\'s dispatcher exits, ' +
       'rest\'s `mapDataError` — both packages list the code).',
+  },
+  {
+    package: '@objectstack/core',
+    code: 'ANALYTICS_DATE_RANGE_UNRECOGNIZED',
+    registeredUnder: '@objectstack/runtime',
+    reason: 'Shared constructor one package over, the #8016 shape (#16322): ' +
+      '`analyticsDateRangeUnrecognizedError` (utils/analytics-date-range.ts) spells the ' +
+      'string ONCE so driver-memory\'s cube face and BOTH service-analytics strategies ' +
+      'refuse identically — which is the property the card\'s shared conformance fixture ' +
+      'exists to hold, and which two independent refusals could not give. Core ships no ' +
+      'HTTP door; the wire emission stays runtime\'s, whose row names this exact second ' +
+      'moment. ⛔ Deliberately ONE waiver rather than a row per driver: with one ' +
+      'constructor there is one stamp site, and rows for packages that stamp nothing ' +
+      'would be the dead weight this file\'s gate refuses.',
   },
 ];

@@ -214,6 +214,11 @@ import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, str
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
 // why neither end may move.
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
+// [#17219] The hide pass's other half: when a hook faults reaching THROUGH a
+// key that pass withheld, this names the key, says the platform withheld it,
+// and points at `ctx.previous` — the module owns the measurement and the
+// reason the explanation cannot be composed any further downstream.
+import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
 import {
   divergingHookPayloadKeys,
   MultiUpdateHookKeyDivergenceError,
@@ -470,6 +475,60 @@ interface IssuedAutonumber {
   readonly field: string;
   /** `object.field.<scope>` key in {@link ObjectQL.autonumberCounters}. */
   readonly counterKey: string;
+}
+/**
+ * [#17052] The write doors' failure META, assembled at the call site because
+ * the level moved off `error`.
+ *
+ * ## Why the level moved
+ *
+ * `insert` / `update` / `delete` each end in a `catch` whose next statement is
+ * `throw e`. AGENTS.md → *Degradation log levels* calls that shape out by name:
+ * "a failure handed to the CALLER is not a degradation at all … Do not bolt a
+ * `logger.error` onto such a site". The requester IS told — the throw is the
+ * answer — so an `error` line is a second, louder report of a fact the caller
+ * already has, and nothing downstream can tell it apart from a real one. The
+ * measured cost was a healthy first boot of every fresh project printing
+ * `ERROR Insert operation failed` while `@better-auth/oauth-provider` seeded
+ * `sys_oauth_resource` and treated the UNIQUE collision as the no-op its own
+ * docblock declares it to be.
+ *
+ * ## Why the diagnosis needs this helper to survive the move
+ *
+ * The `Logger` contract (`packages/spec/src/contracts/logger.ts`) gives an
+ * `Error` slot to `error` and `fatal` ONLY: `warn(message, meta?)` has two
+ * parameters, not three. Handing the redacted driver error to `warn` as `meta`
+ * does not merely lose the slot — `Error.message` and `Error.stack` are
+ * NON-ENUMERABLE, so every logger that renders meta by spreading it would
+ * serialize `{}` and the entry would arrive carrying nothing at all. That is
+ * exactly the loss #14095 refused (the failing column, MySQL's index name, the
+ * driver's own frames) arriving one level down.
+ *
+ * So the two shaped-by-ruling properties are preserved by building the meta the
+ * way `ObjectLogger.write()` builds it from the slot — `{ …meta, error: {
+ * message, stack } }` — rather than by handing over the Error:
+ *
+ *   - **#8682** the value redaction still runs: callers pass
+ *     `redactBoundStatement(...)`, and it is that result's `message`/`stack`
+ *     that are read here.
+ *   - **#14095** the log still takes the driver's error (the envelope's
+ *     `cause`), not the envelope: callers still choose which value to hand in.
+ *
+ * The non-Error branch mirrors `ObjectLogger.writeErrorLike()`'s own fallback
+ * (`{ ...errorOrMeta, ...meta }`, the later argument winning), so a thrown
+ * non-Error — or a `DuplicateRecordError` with no `cause` — renders as it did.
+ *
+ * @param logged The value to report — already redacted by the caller.
+ * @param meta   The entry's own meta (`object`, and `developerMessage` on the
+ *               delete door).
+ */
+function writeFailureLogMeta(
+  logged: unknown,
+  meta: Record<string, unknown>,
+): Record<string, unknown> {
+  return logged instanceof Error
+    ? { ...meta, error: { message: logged.message, stack: logged.stack } }
+    : { ...(logged as Record<string, unknown> | undefined), ...meta };
 }
 
 /**
@@ -9714,10 +9773,16 @@ export class ObjectQL implements IObjectQLEngine {
    * move this noise rather than remove it. What the demotion drops is the
    * duplicate and its stack; the classification survives in the meta.
    *
-   * ⛔ Deliberately READS only. `insert`/`update`/`delete` keep their
-   * unconditional `error`: a write to a table that does not exist is not a
-   * normal answer for any caller — nothing landed, and the row the caller
-   * believes it stored is gone.
+   * ⛔ Deliberately READS only — and the write doors have since moved for a
+   * DIFFERENT reason, so this fence still holds but its old sentence does not.
+   * #17052 dropped `insert`/`update`/`delete` to `warn` because each of those
+   * catches rethrows: the caller IS told, which is AGENTS.md's third legal
+   * answer ("a failure handed to the CALLER is not a degradation at all"), and
+   * "the row the caller believes it stored is gone" was never true of a
+   * rethrowing door. That argument is about DELIVERY and applies to this frame
+   * too — `find`'s catch also rethrows — but the level here was set by a
+   * separate ruling that weighed the driver's own surviving `warn` against a
+   * second line, so moving it is its own card rather than a rider on #17052.
    */
   private reportFindFailure(object: string, error: unknown): void {
     if (isMissingTableError(error, object)) {
@@ -10970,8 +11035,19 @@ export class ObjectQL implements IObjectQLEngine {
         // column, MySQL's index name, the driver's own frames. So the log takes
         // the `cause`; the caller's answer does not move, because `e` is what
         // is rethrown one line down, with that same error still on it.
+        //
+        // [#17052] …and the LEVEL is `warn`, not `error`. The next statement is
+        // `throw e`: the requester was told, so AGENTS.md's third legal answer
+        // applies — "a failure handed to the CALLER is not a degradation at
+        // all". Both properties above survive the move, because
+        // `writeFailureLogMeta` rebuilds the `{ error: { message, stack } }`
+        // context the `error` slot used to build (see its header: `warn` has no
+        // slot, and an Error's fields are non-enumerable).
         const logged = e instanceof DuplicateRecordError ? e.cause : e;
-        this.logger.error('Insert operation failed', redactBoundStatement(logged) as Error, { object });
+        this.logger.warn(
+          'Insert operation failed',
+          writeFailureLogMeta(redactBoundStatement(logged), { object }),
+        );
         throw e;
       }
     });
@@ -11298,12 +11374,96 @@ export class ObjectQL implements IObjectQLEngine {
        // Single-row by construction: `update()` takes one payload, so there is
        // no partial-row mode to carry the verdict into — unlike `insert()`, the
        // refusal is simply thrown. One element in, one verdict out.
+       //
+       // [#16344] Hoisted from its old site below the dispatch ladder: the
+       // declared-field door and the pre-hook read-only pass both need this
+       // schema, and ONE lookup answering both is one fact rather than two that
+       // can drift.
+       const updateSchema = this._registry.getObject(object);
        const undeclared = undeclaredWriteFieldErrors(
          object,
-         this._registry.getObject(object) as { fields?: unknown } | undefined,
+         updateSchema as { fields?: unknown } | undefined,
          [opCtx.data],
        )[0];
        if (undeclared) throw undeclared;
+
+       // ── [#16344] HIDE caller-forged read-only values from the hooks ──────
+       //
+       // The invariant, in the maintainer-confirmed ruling's words:「交给生命
+       // 周期钩子的记录,就是它打算持久化的那条记录。」A hook handed a value
+       // the engine has ALREADY decided will not be stored can derive a column
+       // that IS stored, and that derived write is the HOOK's own — so nothing
+       // downstream takes it back.
+       //
+       // Measured on this change's base, with a control, in
+       // `engine-readonly-hook-input.test.ts`: one
+       // `PATCH { actual_value: 380, target_value: 1, weight: 1 }` against a
+       // `readonly` `target_value` committed `target_value = 400` — the strip
+       // DID work — beside a hook-derived trace reading `目标 1`. A row whose
+       // own audit trail cites a value it does not contain, with no error, no
+       // warning and a 200. The strip was never the defect; its POSITION was.
+       //
+       // ⭐ HIDE, not strip, and that word is the whole design. The enforcement
+       // point stays exactly where #2948 / #5591 / #14088 put it — after the
+       // hooks, where it is the only pass that can tell a hook's stamp from a
+       // caller's forgery (`hookWrittenKeys`). Moving it here instead would
+       // delete every server-side stamp a `beforeUpdate` makes to a read-only
+       // column, which is #5591 reintroduced. So this pass takes the caller's
+       // values out of the HOOKS' view only, and the confluence below hands
+       // them straight back before anything engine-owned reads the payload.
+       //
+       // What that buys: the post-hook declared-field door,
+       // `normalizeMultiValueFields`, `validateRecord`, the `readonlyWhen`
+       // strip, the static strip and therefore `onFieldsDropped`, the WARN and
+       // `strictReadonlyWrites` all see the payload they see today, and say the
+       // identical thing about it. ⛔ Feeding those channels from HERE instead
+       // is the shape to avoid: it would report — and under strict REFUSE — a
+       // whole-record write-back whose read-only key a hook goes on to restamp
+       // (the #5591 idiom), turning a write that succeeds today into a 400.
+       //
+       // ⛔ A hook that legitimately needs the caller's submission reads
+       // `ctx.submitted` (bound below) — the ruling's second half, and the
+       // reason nothing degrades: plugin-auth's ADR-0092 identity write guard
+       // names the non-whitelisted keys from THERE, so its 403 still says which
+       // field it refused.
+       //
+       // Placed BEFORE the recording is armed: a pass running inside that
+       // window is an ENGINE write recorded as a HOOK write, which is the
+       // laundering the seal note below exists to make impossible.
+       //
+       // ⛔ `id` is excluded — ADDRESSING IS NOT PAYLOAD (#8093), and the
+       // non-scalar case has its own owner further down (#6435), which reads
+       // the key where it already looks. Excluded through `supplied`, the one
+       // input that decides eligibility, so this pass never forms a second
+       // opinion about what an address is.
+       //
+       // ⛔ `readonlyWhen` is NOT hidden and must not be: a conditional lock is
+       // judged against the prior record — per ROW on the predicate path, where
+       // one shared payload cannot carry a per-row verdict — and #9107
+       // deliberately leaves it hook-writable.
+       let readonlyHiddenFromHooks: Record<string, unknown> | undefined;
+       if (!opCtx.context?.isSystem) {
+         const preHookPayload = opCtx.data as Record<string, unknown> | null | undefined;
+         if (preHookPayload && typeof preHookPayload === 'object') {
+           const suppliedDataOnly: Record<string, unknown> = { ...suppliedValues };
+           delete suppliedDataOnly.id;
+           // No logger, deliberately: this pass is SILENT by construction. The
+           // strip below owns every word said about these keys.
+           const hidden = stripReadonlyFields(
+             updateSchema as any, preHookPayload, suppliedDataOnly, undefined,
+             { preserveAudit: opCtx.context?.preserveAudit === true },
+           ) as Record<string, unknown>;
+           if (hidden !== preHookPayload) {
+             readonlyHiddenFromHooks = {};
+             for (const k of Object.keys(preHookPayload)) {
+               if (!(k in hidden)) readonlyHiddenFromHooks[k] = preHookPayload[k];
+             }
+             // Kept in step with the hook payload, which the recording below
+             // arms over: the two must not name different objects.
+             opCtx.data = hidden as any;
+           }
+         }
+       }
 
        // ── [#14088] ARM the hook-write recording ────────────────────────────
        //
@@ -11345,6 +11505,25 @@ export class ObjectQL implements IObjectQLEngine {
           object,
           event: 'beforeUpdate',
           input: { id, data: hookWrites?.payload ?? opCtx.data, options: opCtx.options },
+          // [#16344] The caller's submission AS SENT — the other half of the
+          // ruling, and the channel that keeps a submission-reading guard whole
+          // now that `input.data` is the persist image. It is the #5591
+          // snapshot, which is already a COPY taken at engine entry before any
+          // middleware or hook stamp, so nothing a hook does can rewrite it and
+          // no hook write can leak back through it into the payload.
+          //
+          // Frozen at the boundary rather than trusted: `previous` is the only
+          // other read-only-by-contract member and it is a live driver row, so
+          // "diagnostics only" would otherwise be enforced by nothing. A hook
+          // that assigns here fails loudly in strict mode instead of silently
+          // editing a record of what the caller sent.
+          //
+          // Bound ONCE, on the batch context: `dispatchPerRowBeforeHooks`,
+          // `dispatchUnscopedMultiWriteHooks` and `buildPerRowAfterContexts`
+          // all build their contexts by spreading this one, so every dispatch
+          // of this write — both phases, every matched row — carries the same
+          // submission, which is what it is: one caller write, one submission.
+          submitted: Object.freeze({ ...suppliedValues }) as Record<string, unknown>,
           session: this.buildSession(opCtx.context),
           provenance: this.buildProvenance(opCtx.context),
           // [#13644] The declared referential-cleanup marker. Conditional
@@ -11426,7 +11605,6 @@ export class ObjectQL implements IObjectQLEngine {
            scope: {},
        };
 
-       const updateSchema = this._registry.getObject(object);
        // Pre-update snapshot. Exposed to hooks via `hookContext.previous` in
        // BOTH phases now (the HookContext contract documents `previous` for
        // update/delete) and reused for object-level validation rules and the
@@ -11528,7 +11706,13 @@ export class ObjectQL implements IObjectQLEngine {
            // permanently true here: it states the invariant, and the invariant
            // outlives this call site.
            if (priorRecord) hookContext.previous = coerceBooleanFields(updateSchema as any, priorRecord as any) as any;
-           await this.triggerHooks('beforeUpdate', hookContext);
+           // [#17219] All three `beforeUpdate` dispatch sites inside the hide
+           // window share one wrapper, so a hook that faults reaching THROUGH a
+           // key this pass withheld names that key instead of surfacing the
+           // platform's own contract enforcement as the author's crash. It
+           // rethrows the original error untouched on every other path.
+           await dispatchHooksExplainingWithheldReadonly(readonlyHiddenFromHooks, 'beforeUpdate',
+             () => this.triggerHooks('beforeUpdate', hookContext));
            // The retired lever, refused. Everything above — `previous`, and
            // below it the `readonlyWhen` strip and every validation rule — was
            // computed against the row the ladder chose.
@@ -11599,7 +11783,8 @@ export class ObjectQL implements IObjectQLEngine {
            // predicate is unscoped.
            const rawWhere = (hookContext.input.options as { where?: unknown } | undefined)?.where;
            if (rawWhere === undefined || rawWhere === null) {
-               await this.dispatchUnscopedMultiWriteHooks('beforeUpdate', object, hookContext);
+               await dispatchHooksExplainingWithheldReadonly(readonlyHiddenFromHooks, 'beforeUpdate',
+                 () => this.dispatchUnscopedMultiWriteHooks('beforeUpdate', object, hookContext));
            }
            const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
            readPriorRows = async () => {
@@ -11631,7 +11816,8 @@ export class ObjectQL implements IObjectQLEngine {
                // [D1] Zero matched rows is zero dispatches — a batch that
                // changed nothing is not a record change.
                if (perRowBeforeHooks && rows.length > 0) {
-                   await this.dispatchPerRowBeforeHooks(object, 'beforeUpdate', rows, hookContext);
+                   await dispatchHooksExplainingWithheldReadonly(readonlyHiddenFromHooks, 'beforeUpdate',
+                     () => this.dispatchPerRowBeforeHooks(object, 'beforeUpdate', rows, hookContext));
                }
            }
        }
@@ -11660,7 +11846,78 @@ export class ObjectQL implements IObjectQLEngine {
        // deliberately keeps the pre-#14088 over-strip instead.
        const sealedHookWrites = hookWrites?.seal(hookContext.input.data);
        if (sealedHookWrites) hookContext.input.data = sealedHookWrites.data as any;
-       const hookWrittenKeys = sealedHookWrites?.hookWrittenKeys;
+       let hookWrittenKeys = sealedHookWrites?.hookWrittenKeys;
+
+       // ── [#16344] HAND BACK what was hidden from the hooks ────────────────
+       //
+       // The other end of the pre-hook pass above, on the SAME confluence and
+       // for the same reason: this is the line at which the payload has stopped
+       // being the hooks' and has not yet been read by anything engine-owned.
+       // Restoring HERE rather than at each branch's strip is what keeps the
+       // change invisible below — one site covers both branches, so the two can
+       // never end up with different notions of what the hooks were shown.
+       //
+       // ⛔ Only keys the payload does not already hold. A hook that wrote one
+       // of these columns owns the value standing on it, and putting the
+       // caller's back over it is precisely the forgery the recording refuses.
+       //
+       // Placed AFTER the seal, deliberately: a hand-back inside the recording
+       // window would enter the record as a hook write, and the static strip
+       // below reads that record for provenance — so the caller's own forgery
+       // would be handed the one credential (`hookWrittenKeys`) that stops it
+       // being stripped. The exact laundering #14088 exists to prevent.
+       //
+       // ⛔ ...and SET-TO-UNDEFINED of a hidden key is a NO-OP, not a hook
+       // write. A hook that assigns a hidden key from the payload it was shown
+       // (`data.x = data.x`, the shape #14088's own pin names) reads
+       // `undefined` and RE-CREATES the key holding it. Left alone, three
+       // mechanisms agree the wrong way: the recorder's `set` trap counts it as
+       // a hook write, the hand-back below skips the key because `k in target`,
+       // and the strip keeps it on that record — so a driver is handed
+       // `{ x: undefined }`. On the memory driver that ERASES the stored
+       // read-only value; on a knex-backed one `formatInput` does not drop
+       // `undefined` and `builder.update(payload)` hands knex an undefined
+       // binding, a bare compile-time `Error` OUTSIDE the ADR-0112 envelope.
+       // Neither is "the record the engine intends to persist", which is the
+       // whole subject of this card.
+       //
+       // Undoing it here — delete the key, drop it from the record, let the
+       // ordinary hand-back put the caller's value back for the strip to judge
+       // — makes the write read EXACTLY as it would have with no hook at all:
+       // stripped, `onFieldsDropped` reporting it, the WARN said, and
+       // `strictReadonlyWrites` refusing. That identity IS the invariant this
+       // hide/hand-back pair exists to hold.
+       //
+       // ⛔ Dropping the key from `hookWrittenKeys` is NOT optional and is not
+       // tidiness: leaving it there while handing the caller's value back over
+       // it would credit the caller's forgery with hook provenance — the exact
+       // laundering the note above refuses, arrived at from the other side. The
+       // narrowing reaches only keys THIS pass hid, and only the one value no
+       // driver can store; a hook write of any real value is untouched, so the
+       // recorder's deliberate blindness to VALUE (#14088) is unchanged for
+       // every key a hook can actually see.
+       if (readonlyHiddenFromHooks) {
+         const restoreTargets = new Set<Record<string, unknown> | null | undefined>([
+           hookContext.input.data as Record<string, unknown> | null | undefined,
+           opCtx.data as Record<string, unknown> | null | undefined,
+         ]);
+         const undoneSelfAssigns = new Set<string>();
+         for (const target of restoreTargets) {
+           if (!target || typeof target !== 'object') continue;
+           for (const [k, v] of Object.entries(readonlyHiddenFromHooks)) {
+             if (k in target && target[k] === undefined) {
+               delete target[k];
+               undoneSelfAssigns.add(k);
+             }
+             if (!(k in target)) target[k] = v;
+           }
+         }
+         if (undoneSelfAssigns.size > 0 && hookWrittenKeys !== undefined) {
+           const narrowed = new Set(hookWrittenKeys);
+           for (const k of undoneSelfAssigns) narrowed.delete(k);
+           hookWrittenKeys = narrowed;
+         }
+       }
 
        // ── [#13657] The POST-hook half of the declared-field door ──────────
        //
@@ -12338,8 +12595,14 @@ export class ObjectQL implements IObjectQLEngine {
           // only, so logging the envelope would silently drop the failing
           // column and the driver's own frames. The log takes the `cause`;
           // `e` is what is rethrown one line down, unchanged.
+          //
+          // [#17052] The insert door's twin here too: the level is `warn`,
+          // because `throw e` on the next line IS the answer to the caller.
           const logged = e instanceof DuplicateRecordError ? e.cause : e;
-          this.logger.error('Update operation failed', redactBoundStatement(logged) as Error, { object });
+          this.logger.warn(
+            'Update operation failed',
+            writeFailureLogMeta(redactBoundStatement(logged), { object }),
+          );
           throw e;
        }
      });
@@ -13788,11 +14051,18 @@ export class ObjectQL implements IObjectQLEngine {
           // `developerMessage` is read off the ORIGINAL error: it is written by
           // our own throw sites (#7307), never by a driver, so it carries no
           // statement and the redaction has no opinion about it.
+          // [#17052] The third write door, moved with its two siblings: this
+          // catch also ends in `throw e`, so the caller is told and the entry
+          // is not a degradation report. `developerMessage` keeps its place in
+          // the meta and the redaction is unchanged.
           const devDetail = (e as any)?.developerMessage;
-          this.logger.error('Delete operation failed', redactBoundStatement(e) as Error, {
-            object,
-            ...(typeof devDetail === 'string' && devDetail.length > 0 ? { developerMessage: devDetail } : {}),
-          });
+          this.logger.warn(
+            'Delete operation failed',
+            writeFailureLogMeta(redactBoundStatement(e), {
+              object,
+              ...(typeof devDetail === 'string' && devDetail.length > 0 ? { developerMessage: devDetail } : {}),
+            }),
+          );
           throw e;
       }
     });
@@ -14034,7 +14304,42 @@ export class ObjectQL implements IObjectQLEngine {
         // drivers that have no native aggregation support (driver-rest,
         // driver-memory, partial SQL drivers), and is the path that honours a
         // non-UTC reference timezone.
-        const raw = await driver.find(object, ast, this.buildDriverOptions(object, opCtx.context));
+        //
+        // [#16642] The `find` call asks for ROWS, so the aggregation keys this
+        // path is about to evaluate ITSELF are stripped from the AST it sends
+        // down. `find()`'s contract says nothing about `groupBy` /
+        // `aggregations`, and the drivers disagree about them: `driver-sql`
+        // and `driver-rest` ignore both and return rows (which is the only
+        // reason this path has ever worked), while `driver-memory` honours
+        // them — its `find()` funnels straight into the same
+        // `performAggregation` its `aggregate(AST)` door uses, and
+        // `driver-mongodb` / `driver-turso` carry the same refusal on their
+        // own aggregation faces. Sending the keys to a driver of that kind
+        // made this ONE seam answer two different wrong things:
+        //
+        //   * a per-aggregation `filter` (the key that ROUTED the call here)
+        //     was refused NOT_IMPLEMENTED/501 by the driver's own #10413
+        //     guard — a refusal aimed at direct callers, raised against the
+        //     engine's own lowering, so `service-analytics` answered 501 for
+        //     a measure `filter` on the memory driver while sqlite answered
+        //     the number (#16642);
+        //   * a date-bucketed `groupBy` came back ALREADY grouped, on the raw
+        //     timestamp, and `applyInMemoryAggregation` then aggregated those
+        //     GROUP rows a second time — a count of buckets reported under
+        //     the author's own measure name, i.e. a plausible wrong number
+        //     rather than a refusal.
+        //
+        // Both driver refusals document themselves as "unreachable through
+        // `engine.aggregate`, which lowers in memory for every driver"
+        // (`driver-memory`'s `refusePerAggregationFilter`, `driver-sql`'s
+        // `unsupportedAggregationFilterError`); this is the line that makes
+        // that true. `having` goes with them: `applyHaving` below is the
+        // authority on it and no driver evaluates it in `find`.
+        const rowsAst: QueryAST = { ...ast };
+        delete rowsAst.groupBy;
+        delete rowsAst.aggregations;
+        delete rowsAst.having;
+        const raw = await driver.find(object, rowsAst, this.buildDriverOptions(object, opCtx.context));
         return applyHaving(applyInMemoryAggregation(raw, ast, tz), ast.having);
       });
 
@@ -14707,7 +15012,23 @@ export class ObjectRepository implements IScopedObjectRepository {
     });
   }
 
-  async findOne(query: any = {}): Promise<any> {
+  /**
+   * [#16786] Declared `Promise<Record<string, any> | null>`, not `Promise<any>`.
+   *
+   * `IScopedObjectRepository.findOne` has declared that shape since #16231's
+   * ruling A landed (PR #16783), and `IDataEngine.findOne` — the call this
+   * method forwards to, one line down — declares it too. This method sat
+   * between two narrow declarations and re-widened the value back to `any` on
+   * the way out, so `implements IScopedObjectRepository` stayed satisfied (a
+   * wider return always satisfies a narrower one) while every call site that
+   * reaches a repository through the CLASS rather than the interface kept
+   * reading `any` — `ObjectQL.createContext(…).object(n).findOne(…)` among
+   * them, which is exported.
+   *
+   * ⛔ Not a narrowing of the contract: the contract already said this. This
+   * is the implementation coming back to the declaration it published.
+   */
+  async findOne(query: any = {}): Promise<Record<string, any> | null> {
     return this.engine.findOne(this.objectName, {
       ...query,
       context: this.context,
@@ -14725,7 +15046,18 @@ export class ObjectRepository implements IScopedObjectRepository {
     return this.insert(data);
   }
 
-  async update(data: any, options: any = {}): Promise<any> {
+  /**
+   * [#16786] Declared `Promise<Record<string, any> | number | null>`, the same
+   * re-widening as {@link findOne} and repaired the same way: the record for
+   * the single-record form, the affected-row count for the predicate form
+   * (`{ where, multi: true }`), `null` when the write matched nothing.
+   *
+   * ⛔ `updateById` is deliberately NOT touched here. Its `Promise<any>` is
+   * what `IScopedObjectRepository.updateById` itself declares, so the class
+   * matches its contract and there is no drift to repair on this side; that
+   * member is `packages/spec`'s to narrow and stays open on #16786.
+   */
+  async update(data: any, options: any = {}): Promise<Record<string, any> | number | null> {
     return this.engine.update(this.objectName, data, {
       ...options,
       context: this.context,

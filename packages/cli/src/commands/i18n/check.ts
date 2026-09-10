@@ -1,5 +1,44 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+/**
+ * `os i18n check` — the coverage gate.
+ *
+ * ## The platform `metadataForms.*` baseline, across all three commands
+ *
+ * `collectExpectedEntries` walks the Studio metadata-form registries
+ * unconditionally, identically for every config — ~773 keys that
+ * `@objectstack/platform-objects` translates and the runtime serves. Three
+ * commands see that family and each has to say something about it. They used
+ * to say three different things, and this one said nothing at all, which is
+ * how `--strict` / `--threshold` — the two flags whose entire purpose is CI
+ * gating — became unusable for an application package: every app read ~39%
+ * with its own surface fully translated, and the only way to "fix" the number
+ * was to ship a copy of the platform's bundle that would override it and go
+ * stale at the next upgrade.
+ *
+ *   command             what the baseline does to it     default        opt-in / out
+ *   ------------------  -------------------------------  -------------  ---------------------------
+ *   os lint             adds findings to the report      hidden         --include-platform
+ *   os i18n extract     adds a companion FILE / JSON      emitted        --no-metadata-forms
+ *                       member                                          (`metadataFormsCounts`
+ *                                                                       reports its size either way)
+ *   os i18n check       moves the coverage DENOMINATOR   auto: counted  --include-platform /
+ *                                                        only when      --no-include-platform
+ *                                                        this stack
+ *                                                        ships their
+ *                                                        translations
+ *
+ * ⚠️ The three differ because the OUTPUTS differ, and reading the table as
+ * three dialects of one setting is the mistake it exists to prevent: `lint`
+ * reports findings and can fold at the report seam; `extract` writes files and
+ * chooses a file set; only `check` publishes a **percentage**, so for it the
+ * question is which keys are in the denominator. That is also why this command
+ * is the one that can answer it without a flag — ownership of the baseline is
+ * observable from the config's own bundles ({@link stackAuthorsMetadataForms}),
+ * so an app gets its own number and `platform-objects`, which ships those
+ * translations, keeps being gated on them.
+ */
+
 import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import { normalizeStackInput } from '@objectstack/spec';
@@ -15,6 +54,7 @@ import {
   emitJson,
   isExitSignal,
   errorCodeFields,
+  isReportedError,
 } from '../../utils/format.js';
 import { computeI18nCoverage, COVERAGE_SURFACE_PHRASE } from '../../utils/i18n-coverage.js';
 
@@ -51,6 +91,7 @@ export default class I18nCheck extends Command {
     '$ os i18n check ./objectstack.config.ts',
     '$ os i18n check --locales=en,zh-CN,ja-JP',
     '$ os i18n check --strict --threshold=95',
+    '$ os i18n check --include-platform',
     '$ os i18n check --json',
   ];
 
@@ -77,6 +118,25 @@ export default class I18nCheck extends Command {
     'show-keys': Flags.boolean({
       description: 'List every missing key (otherwise the first 20 per locale are shown)',
     }),
+    // The same flag NAME and the same default as `os lint`, deliberately: this
+    // command was the odd one out of three, and a third vocabulary for one
+    // decision is what made an author go read the source to find out whether
+    // the platform bucket counts. `os i18n extract` spells its half
+    // `--no-metadata-forms`, which selects an emitted FILE SET rather than a
+    // gated population — see the table in the module note at the top of this
+    // file.
+    //
+    // `allowNo` gives the third state a percentage gate needs. Absent, the
+    // decision is `auto` — observed from the config, so neither an app nor the
+    // platform package has to discover a flag to get the right number.
+    // `--include-platform` forces the baseline in; `--no-include-platform`
+    // forces it out, for a package that ships a partial baseline and does not
+    // intend to own the rest of it.
+    'include-platform': Flags.boolean({
+      allowNo: true,
+      description:
+        'Count platform built-in metadata forms toward coverage (default: only when this stack ships their translations — the platform packages own them otherwise)',
+    }),
   };
 
   async run(): Promise<void> {
@@ -97,6 +157,14 @@ export default class I18nCheck extends Command {
         defaultLocale: flags['default-locale'],
         locales: flags.locales ? flags.locales.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
         strict: flags.strict,
+        // Unset ⇒ `auto`. ⛔ Not `?? false`: an absent boolean and an explicit
+        // `--no-include-platform` are different requests here, and collapsing
+        // them would delete the observed-ownership default that makes this
+        // command usable without a flag on both sides.
+        platformMetadataForms:
+          flags['include-platform'] === undefined
+            ? 'auto'
+            : flags['include-platform'] ? 'include' : 'exclude',
       });
 
       const thresholdViolations = flags.threshold !== undefined
@@ -123,6 +191,17 @@ export default class I18nCheck extends Command {
         console.log(
           `    ${stat.locale.padEnd(nameWidth)} ${bar} ${tone(pct.toFixed(1).padStart(5) + '%')}` +
           chalk.dim(`  (${stat.translated}/${stat.expected}, missing ${stat.missing})`),
+        );
+      }
+      // Printed under the table, where the denominator it explains is: every
+      // number above was computed without these keys. Same sentence shape as
+      // `os lint`'s, and rendered from the same two fields `--json` carries in
+      // `platformMetadataForms`, so the two faces cannot disagree.
+      if (report.platformMetadataForms.excludedKeys > 0) {
+        console.log(
+          chalk.dim(
+            `    platform built-ins: ${report.platformMetadataForms.excludedKeys} key(s) not counted — rerun with --include-platform to gate them here`,
+          ),
         );
       }
       console.log('');
@@ -186,8 +265,13 @@ export default class I18nCheck extends Command {
         await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
         process.exit(1);
       }
-      console.log('');
-      printError(error.message || String(error));
+      // [#15547] `resolveConfigPath()` already wrote its refusal and hint
+      // lines to stderr before throwing; printing the sentence again here
+      // would put a second copy on stdout.
+      if (!isReportedError(error)) {
+        console.log('');
+        printError(error.message || String(error));
+      }
       process.exit(1);
     }
   }

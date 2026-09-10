@@ -2,6 +2,10 @@
 
 import type { RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+// The contract's own list of kernel-resolved context keys an app may never
+// supply. Consumed — not redeclared — so this merge and `stageRlsMembership`'s
+// resolver screen can never disagree about which keys are reserved.
+import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
 // [ADR-0056 D4 / ADR-0058 D1] `isSupportedRlsExpression` and `sqlPredicateToCel`
 // used to be DEFINED in this file. #4983 hoisted them into `@objectstack/formula`
 // — verbatim, behaviour-preserving — because `@objectstack/lint` must ask the
@@ -22,7 +26,7 @@ import type { CelFilterFailReason } from '@objectstack/formula';
  * {@link isEmptyMembershipFilter} then refuses — same silent denial, so it
  * joins the same vocabulary rather than staying unnamed.
  */
-type RlsDropReason = CelFilterFailReason | 'empty-membership';
+type RlsDropReason = CelFilterFailReason | 'empty-membership' | 'unknown-field';
 
 /** A dropped policy's cause: the compiler's reason plus its human `detail`. */
 interface RlsDropCause {
@@ -62,6 +66,29 @@ interface RLSUserContext {
    */
   org_user_ids?: string[];
   /**
+   * [ADR-0105 D2] Every organization the caller holds a valid membership in —
+   * the `group` posture's union org scope. RLS expressions reference it as
+   * `<org column> IN (current_user.accessible_org_ids)`, whether that column is
+   * `organization_id` or an app's own (`employer_org`, say).
+   *
+   * Sourced from `ExecutionContext.accessible_org_ids`, which the runtime
+   * already computes for the Layer 0 tenancy wall. Like {@link org_user_ids}
+   * this set is CORE-resolved and PRE-resolved — pre-resolved precisely so the
+   * compiler needs no subquery support — and for the same reason it is
+   * reserved: `RESERVED_RLS_MEMBERSHIP_KEYS` refuses it from an app's
+   * `rlsMembership` bag, because a wall an app could redefine would not be a
+   * wall.
+   *
+   * ⚠️ Reserving a key obliges someone to FILL it. Until #16518 nobody did:
+   * `packages/spec` declared the key's SHAPE (`accessible_org_ids?: string[]`)
+   * and named core as its resolver, an app was refused from supplying it, and
+   * this interface did not carry it — so every predicate naming it dropped out
+   * and `RLS_DENY_FILTER` returned zero rows with no error raised. An empty
+   * list is indistinguishable from "this user really has no data", which is how
+   * that shape survived three green static gates.
+   */
+  accessible_org_ids?: string[];
+  /**
    * The caller's unique, auth-enforced email. RLS expressions reference it as
    * `current_user.email` for human-readable, *seedable* owner scoping
    * (`owner = current_user.email`). Email is exposed because it is UNIQUE; the
@@ -70,6 +97,149 @@ interface RLSUserContext {
    */
   email?: string;
   [key: string]: unknown;
+}
+
+/**
+ * The declared-column set a compiled policy is judged against.
+ *
+ * Supplied by the caller because only the caller can resolve it (the plugin's
+ * `getObjectFieldNames`, which prefers ObjectQL's live SchemaRegistry over the
+ * boot-time metadata artifact). `undefined` means "not resolvable here", and a
+ * compile with no guard behaves exactly as it did before the guard existed —
+ * a schema that cannot be loaded must not manufacture denials.
+ */
+export interface RlsFieldGuard {
+  /** Every column the object declares, exactly as `getObjectFieldNames` builds it. */
+  declared: ReadonlySet<string>;
+}
+
+/** {@link judgeCompiledFields}' answer. */
+type RlsFieldVerdict =
+  | { ok: true }
+  | { ok: false; detail: string };
+
+/**
+ * Every column a compiled {@link https://www.mongodb.com/docs Mongo-style}
+ * FilterCondition NAMES — at any depth, in any polarity. `null` means the tree
+ * contains a shape this walker does not model, which is a REFUSAL, not an
+ * empty answer.
+ *
+ * ## Why the compiled filter and not the predicate text
+ *
+ * This is the whole point of the seam. A source-text matcher has to enumerate
+ * the spellings of negation (`!=`, `!(…)`, `not in`, an arm after the first),
+ * and the one it has not been told about is the one that gets through — which
+ * is the defect one level over, not its repair. The compiled tree has no
+ * spellings: `cel-to-filter.ts` lowers `!` to `$not`, `||` to `$or`, `&&` to
+ * `$and`, and every column it names lands as a plain object key whatever
+ * position the author wrote it in. Walking that is positional-agnostic by
+ * construction, and it stays correct when the pushdown compiler learns a new
+ * source form, because a new form still has to lower into this same shape.
+ *
+ * ## The rules, and where they differ from the ingress collector
+ *
+ * Two collectors already answer "which columns does this filter name" —
+ * `collectFilterFieldKeys` (`@objectstack/metadata-protocol`) and
+ * `collectFilterFieldNames` (`@objectstack/objectql`). This one keeps their
+ * first rule verbatim and INVERTS their second, deliberately:
+ *
+ * - **`$and` / `$or` / `$not` are combinators, recursed into; a non-`$` key is
+ *   a column.** Same as both.
+ * - ⚠️ **Any OTHER `$`-prefixed key at NODE level REFUSES here** (`null`),
+ *   where the ingress collectors skip it without descending. Their direction is
+ *   right for a gate that must not invent 400s on caller input; it is wrong
+ *   here, because the input is not caller input — it is THIS compiler's own
+ *   output, which emits `$and` / `$or` / `$not` and nothing else at node level.
+ *   An unmodelled combinator therefore means the tree grew a shape this guard
+ *   has not been taught, and leaving the columns beneath it unexamined is
+ *   precisely the fail-open this guard exists to close.
+ * - **A field key's value is scanned only for `{ $field: … }` references** —
+ *   the field-to-field comparison `cel-to-filter.ts` emits — which name a
+ *   second real column. Other nested keys are a cross-object condition the RLS
+ *   compiler refuses at lowering time (`classify` throws `unsupported` on any
+ *   `.`-chain), so they cannot appear; they are ignored rather than refused so
+ *   this walker never denies on a shape it merely does not produce.
+ */
+function collectRlsFilterColumns(
+  node: unknown,
+  out: Set<string> = new Set(),
+  depth = 0,
+): Set<string> | null {
+  // A self-referential filter must not hang the read path. Unlike the ingress
+  // collector — which returns what it has — overrunning the bound REFUSES,
+  // because an unexamined subtree is an unguarded column.
+  if (depth > 32) return null;
+  if (node === null || typeof node !== 'object' || Array.isArray(node)) return null;
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (key === '$and' || key === '$or') {
+      if (!Array.isArray(value)) return null;
+      for (const arm of value) {
+        if (collectRlsFilterColumns(arm, out, depth + 1) === null) return null;
+      }
+      continue;
+    }
+    if (key === '$not') {
+      if (collectRlsFilterColumns(value, out, depth + 1) === null) return null;
+      continue;
+    }
+    if (key.startsWith('$')) return null;
+    out.add(key);
+    collectFieldReferences(value, out, depth + 1);
+  }
+  return out;
+}
+
+/** Collect `{ $field: 'other_column' }` right-hand references out of an operator bag. */
+function collectFieldReferences(spec: unknown, out: Set<string>, depth: number): void {
+  if (depth > 32 || spec === null || typeof spec !== 'object') return;
+  if (Array.isArray(spec)) {
+    for (const item of spec) collectFieldReferences(item, out, depth + 1);
+    return;
+  }
+  for (const [key, value] of Object.entries(spec as Record<string, unknown>)) {
+    if (key === '$field') {
+      if (typeof value === 'string' && value !== '') out.add(value);
+      continue;
+    }
+    collectFieldReferences(value, out, depth + 1);
+  }
+}
+
+/**
+ * Does every column this compiled policy names exist on the object?
+ *
+ * The security question underneath: a predicate naming a column the object does
+ * not declare cannot narrow anything, and in a NEGATION-carrying position it
+ * does not merely fail to narrow — it WIDENS, because a row that has no such
+ * column satisfies "column != x" under the settled include-direction ruling
+ * (`noValueSatisfiesNegation`, driver-memory / driver-mongodb). That ruling is
+ * correct for an ordinary user query and is deliberately untouched; what is
+ * wrong is lowering an undeclared column into a filter AT ALL from a policy
+ * compiler. So the phantom is stopped here, before any matcher sees it.
+ */
+function judgeCompiledFields(
+  filter: Record<string, unknown>,
+  guard: RlsFieldGuard,
+): RlsFieldVerdict {
+  const named = collectRlsFilterColumns(filter);
+  if (named === null) {
+    return {
+      ok: false,
+      detail:
+        'the compiled predicate contains a filter shape this guard does not model, so the columns it ' +
+        `names could not be enumerated and the policy was refused rather than trusted (compiled to ${JSON.stringify(filter)})`,
+    };
+  }
+  const missing = [...named].filter((column) => !guard.declared.has(column));
+  if (missing.length === 0) return { ok: true };
+  return {
+    ok: false,
+    detail:
+      `the predicate names ${missing.length === 1 ? 'a column' : 'columns'} the object does not declare ` +
+      `(${missing.map((m) => `"${m}"`).join(', ')}), so it cannot narrow anything; in a negation-carrying ` +
+      'position it would instead WIDEN the policy to every row the tenant wall admits, so the policy was ' +
+      'refused',
+  };
 }
 
 /**
@@ -261,11 +431,22 @@ export class RLSCompiler {
    *   active organization). The caller must treat this as "deny by
    *   default" — its `id` comparison naturally yields zero rows on
    *   select/update/delete, which is the safe fail-closed answer.
+   *
+   * `fieldGuard` is the object's declared-column set. When supplied, a policy
+   * whose compiled predicate names a column the object does not declare is
+   * DROPPED — in every position and every polarity, judged on the compiled
+   * tree rather than on the predicate's text ({@link judgeCompiledFields}) —
+   * and joins the same fail-closed path as any other dropped policy. It is the
+   * ONE seam both faces pass through: the read layer compiles `using` here and
+   * the ADR-0058 D4 write gate compiles `check` here, so the two can no longer
+   * disagree about what a phantom column means. Omit it and the compile behaves
+   * exactly as it did before the guard existed.
    */
   compileFilter(
     policies: RowLevelSecurityPolicy[],
     executionContext?: ExecutionContext,
     clause: 'using' | 'check' = 'using',
+    fieldGuard?: RlsFieldGuard,
   ): Record<string, unknown> | null {
     if (policies.length === 0) return null;
 
@@ -274,6 +455,13 @@ export class RLSCompiler {
       organization_id: executionContext?.tenantId,
       positions: executionContext?.positions,
       org_user_ids: (executionContext as any)?.org_user_ids,
+      // [ADR-0105 D2 / #16518] The caller's union org scope, copied from the
+      // execution context exactly as `org_user_ids` is. Both are core-resolved
+      // membership sets the runtime pre-resolves so this compiler never has to
+      // issue a subquery; the ONLY reason this line was missing is that nobody
+      // wrote it, and its absence made every predicate naming the key fail
+      // closed to zero rows in silence.
+      accessible_org_ids: (executionContext as any)?.accessible_org_ids,
       // Unique identifier — safe for ownership predicates (see RLSUserContext).
       email: (executionContext as any)?.email,
     };
@@ -283,10 +471,43 @@ export class RLSCompiler {
     // into `ExecutionContext.rlsMembership`. Merge each set under its key
     // so `field IN (current_user.<key>)` resolves without subquery support.
     // Arrays only; a missing/empty set still fails closed downstream.
-    // We never let a membership key clobber the named fields above.
+    //
+    // A RESERVED key is refused BY NAME, never by "was this field already
+    // defined". The two tests are not the same test, and the difference is
+    // the whole guarantee: `userCtx[key] === undefined` asks whether the
+    // KERNEL happened to resolve a value on THIS request, so on any request
+    // where it did not — an anonymous caller, a principal with no active
+    // organization, a deployment that resolves no `org_user_ids` — the bag
+    // won the name and supplied the authorization vocabulary itself. The
+    // direction is WIDENING: with the key unresolved the predicate would
+    // have joined `deniedBy` and returned {@link RLS_DENY_FILTER} (zero
+    // rows), so a reserved-key entry converted a denial into a satisfiable
+    // filter over attacker-chosen values.
+    //
+    // `RESERVED_RLS_MEMBERSHIP_KEYS` is the contract's own list of "context
+    // keys a membership resolver may never supply … they are resolved by the
+    // kernel and carry authorization meaning an app must not be able to
+    // redefine" (`@objectstack/spec/contracts`). `stageRlsMembership`
+    // screens a RESOLVER's answer against it, but that screen covers only
+    // one producer and only when it runs: it returns at its first line when
+    // no `rls-membership-resolver` is registered, which is every deployment
+    // that has not opted into the ADR-0105 D11 seam, and it never screens
+    // the bag it SEEDS from an already-present `context.rlsMembership` at
+    // all. This merge is the choke point both faces pass through — the read
+    // layer compiles `using` here and the ADR-0058 D4 write gate compiles
+    // `check` here — so the refusal belongs here, where it holds for every
+    // producer including ones outside this repo.
+    //
+    // No new drop reason: a reserved key that is not merged leaves its
+    // variable unresolved, so the predicate takes the existing
+    // unresolved-variable path, joins `deniedBy`, warns with the vocabulary
+    // that already exists and fails CLOSED. Refusing is silent here on
+    // purpose — the observable event is the policy drop, which is already
+    // reported one loop below.
     const membership = (executionContext as any)?.rlsMembership;
     if (membership && typeof membership === 'object') {
       for (const [key, value] of Object.entries(membership)) {
+        if (RESERVED_RLS_MEMBERSHIP_KEYS.includes(key)) continue;
         if (Array.isArray(value) && userCtx[key] === undefined) {
           userCtx[key] = value;
         }
@@ -314,7 +535,17 @@ export class RLSCompiler {
       applicable++;
       const outcome = this.compileExpressionOutcome(predicate, userCtx);
       if (outcome.filter) {
-        filters.push(outcome.filter);
+        // Field existence, judged on the COMPILED tree so no negation spelling
+        // can route around it. A policy naming an undeclared column joins
+        // `deniedBy` exactly as an unresolved variable does — same collection,
+        // same fail-closed sentinel below, same WARN line — because it is the
+        // same class of fault: an applicable policy that cannot enforce.
+        const verdict = fieldGuard ? judgeCompiledFields(outcome.filter, fieldGuard) : null;
+        if (verdict && !verdict.ok) {
+          deniedBy.push({ policy, cause: { reason: 'unknown-field', detail: verdict.detail } });
+        } else {
+          filters.push(outcome.filter);
+        }
       } else if (!isSupportedRlsExpression(predicate)) {
         // ADR-0056 D4: an UNSUPPORTED-SHAPE predicate (e.g. arithmetic, functions,
         // subqueries) compiles to nothing and would silently vanish, leaving the

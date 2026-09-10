@@ -311,12 +311,22 @@ Sort field and direction pair
 | **objectName** | `string` | optional | Object this calendar binds to. Optional because the component-level `dataSource` binding can supply the object instead |
 | **calendar** | `any` | optional | Calendar field config: `{ startDateField, endDateField?, titleField?, colorField?, allDayField? }` |
 | **defaultView** | `Enum<'month' \| 'week' \| 'day'>` | optional | Initial view mode |
-| **filter** | `any` | optional | Base query filter |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `any` | optional | Sort for the fetched events |
 | **data** | `any[]` | optional | Pre-fetched records — skips the internal fetch |
 | **staticData** | `any[]` | optional | Static inline records |
 | **locale** | `string` | optional | Locale override for the calendar chrome |
 | **loading** | `boolean` | optional | External loading state (honoured only alongside `data`) |
+
+### Nested Shape: `ObjectCalendarProps.filter[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
 
 
 ---
@@ -381,7 +391,7 @@ Sort field and direction pair
 | **title** | `string \| Record<string, string>` | optional | Fallback for `label` (the renderer reads `label \|\| title`) |
 | **columns** | `any[]` | optional | Columns: field names or column definition objects |
 | **fields** | `any[]` | optional | Field list fallback used when `columns` is absent |
-| **filter** | `any` | optional | Base query filter (ObjectQL filter array/AST) — lowered to the wire `$filter`. THE key, singular — not the plural misspelling |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **defaultFilters** | `any` | optional | Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter` |
 | **sort** | `any` | optional | Initial sort (array of `{ field, order }`) |
 | **defaultSort** | `never` | optional | [REMOVED] `object-grid` property `defaultSort` was removed in @objectstack/spec 17 (ADR-0049) — it was the legacy second spelling of `sort`: a single `{ field, order }` pair read only when `sort` was absent, so one intent had two spellings and a grid authoring both silently ignored this one. Rename the key to `sort` and wrap the value in an array (`defaultSort: { field, order }` becomes `sort: [{ field, order }]`); the pair itself is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
@@ -413,6 +423,16 @@ Sort field and direction pair
 | **operations** | `any` | optional | Operation toggles (`{ export: false, … }`) |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| api \| value \| schema). Static inline rows live at `{ provider: 'value', items: [...] }`; the bare-array shortcut is refused — see migration `object-grid-data-view-data-converged` |
 | **staticData** | `any[]` | optional | Deprecated bare-array static-rows shortcut the renderer still reads. Prefer `data: { provider: 'value', items: [...] }` |
+
+### Nested Shape: `ObjectGridProps.filter[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
 
 ### Nested Shape: `ObjectGridProps.data[provider='object']`
 
@@ -456,7 +476,7 @@ Sort field and direction pair
 | **objectName** | `string` | optional | Object this board binds to. Optional because the component-level `dataSource` binding can supply the object instead |
 | **groupBy** | `string` | optional | Field whose values become the board columns |
 | **columns** | `any[]` | optional | Swimlane definitions (`{ id, title }` per `groupBy` value, or bare value strings) — NOT a field projection |
-| **filter** | `any` | optional | Base query filter, handed to the wire `$filter` |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter, handed to the wire `$filter` — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **limit** | `integer` | optional | Maximum number of records loaded onto the board (row cap); lowered to the query's top-level `$top` (renderer default 100). The component-level `dataSource.limit` wins when both are set; a bound view's `pagination.pageSize` fills it only when unset |
 | **data** | `any[]` | optional | Static inline cards — bypasses the object query |
 | **cardTitle** | `string` | optional | Field rendered as each card title |
@@ -467,6 +487,16 @@ Sort field and direction pair
 | **quickAdd** | `boolean` | optional | Show the per-column quick-add affordance |
 | **coverImageField** | `string` | optional | Image field rendered as the card cover |
 | **conditionalFormatting** | `any` | optional | Card conditional formatting rules |
+
+### Nested Shape: `ObjectKanbanProps.filter[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
 
 
 ---
@@ -508,7 +538,7 @@ Sort field and direction pair
 | **icon** | `string` | optional | Lucide icon name drawn in the metric tile header, inside the `colorVariant`-tinted square. Read on this component — `ObjectMetricWidget` forwards it to `MetricWidget`, which resolves it with `getLazyIcon` (the `LazyIcon` module: kebab-case or PascalCase, degrading to the `Database` glyph on an unknown name). |
 | **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Icon container color variant |
 | **aggregate** | `any` | optional | Aggregation config (`{ field, function, groupBy? }`) run against the object |
-| **filter** | `any` | optional | Filter the aggregation is scoped by |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter the aggregation is scoped by — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **format** | `string` | optional | Number format pattern (e.g. '0,0', '$0,0', '0%') |
 | **currency** | `string` | optional | ISO currency code (e.g. 'USD') — enables currency formatting |
 | **prefix** | `string` | optional | Static prefix before the formatted value |
@@ -519,6 +549,16 @@ Sort field and direction pair
 | **trend** | `any` | optional | Static trend info (`{ value, label, direction }`) |
 | **drillDown** | `any` | optional | Click-through drill config — opens the underlying records |
 | **compareTo** | `any` | optional | Period-over-period comparison (`{ kind: 'previousPeriod' \| 'previousYear' }`) |
+
+### Nested Shape: `ObjectMetricProps.filter[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
 
 
 ---

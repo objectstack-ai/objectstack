@@ -71,6 +71,7 @@ Get installed package response
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -133,6 +134,7 @@ List installed packages response
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -249,6 +251,7 @@ Install package response
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -362,6 +365,7 @@ Upgrade package response
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -447,6 +451,7 @@ Resolve dependencies response
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -497,6 +502,7 @@ Uninstall package response
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -566,6 +572,7 @@ Upload artifact response
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |

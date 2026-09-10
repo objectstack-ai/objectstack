@@ -4,7 +4,8 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import { AggregationFunction } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { IAnalyticsService, IDataDriver, IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { IAnalyticsService, IDataDriver, IDataEngine, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
+import { translateObject, type ObjectLike, type ObjectFieldLike, type TranslationBundle } from '@objectstack/spec/system';
 import { AnalyticsService } from './analytics-service.js';
 import type { AnalyticsServiceConfig } from './analytics-service.js';
 import type { AnalyticsDriverCapabilities } from './strategies/types.js';
@@ -482,17 +483,73 @@ export class AnalyticsServicePlugin implements Plugin {
         | undefined
         | Promise<FilterCondition | null | undefined>;
     }
+    /**
+     * The three resolutions of the `security` service, for the ROW-LEVEL half
+     * of the read — the same three the OBJECT-LEVEL bridge below tells apart,
+     * and for the same reason.
+     *
+     *   ABSENT   — `getService('security')` returns nothing. No row-scope
+     *              provider on this deployment, which is a legitimate
+     *              configuration (a single-tenant kernel that ships no
+     *              `plugin-security`), reported loudly at init below. Today's
+     *              behaviour is kept EXACTLY: no scope, query runs.
+     *   UNUSABLE — a security service exists but cannot answer: resolving it
+     *              THREW, or the object it returned carries no
+     *              `getReadFilter`. A wired-but-broken provider, and the
+     *              answer here is NOT "no row restriction" — that value means
+     *              one thing only (`ISecurityService.getReadFilter`: "this
+     *              caller has no row restriction on this object"), and
+     *              spending it on a provider that never answered is how a
+     *              query ends up running with no row-level policy at all.
+     *              It REFUSES, and says why.
+     *   USABLE   — ask it.
+     *
+     * ⛔ The refusal is a THROW, not a louder log over an `undefined`: a log is
+     * not a refusal. `AnalyticsService.resolveReadScopes` is the fail-closed
+     * seam that already denies the whole query when this provider throws (it
+     * has since ADR-0021 D-C), so serving nothing — the same outcome the
+     * object-level bridge produces — needs no new error code and no new
+     * envelope here.
+     */
+    type SecurityReadFilterResolution =
+      | { kind: 'usable'; svc: SecurityReadFilter }
+      | { kind: 'absent' }
+      | { kind: 'unusable'; why: string };
     let getReadScope = this.options.getReadScope;
     let autoBridgedReadScope = false;
     let securityPresentAtInit = false;
     if (!getReadScope) {
-      const trySecurity = (): SecurityReadFilter | undefined => {
+      const trySecurity = (): SecurityReadFilterResolution => {
+        let svc: SecurityReadFilter | undefined;
         try {
-          const svc = ctx.getService<SecurityReadFilter>('security');
-          return svc && typeof svc.getReadFilter === 'function' ? svc : undefined;
-        } catch {
-          return undefined;
+          svc = ctx.getService<SecurityReadFilter>('security');
+        } catch (e) {
+          // ⛔ Not `absent`. A throwing resolver is a service that exists and
+          // failed, and a failed security lookup is a refusal everywhere else
+          // in this stack — including the object-level bridge below, which
+          // used to be spelled exactly like this one and now denies.
+          return {
+            kind: 'unusable',
+            why:
+              `resolving the "security" service threw ` +
+              `(${String((e as Error)?.message ?? e)})`,
+          };
         }
+        if (!svc) return { kind: 'absent' };
+        if (typeof svc.getReadFilter !== 'function') {
+          // `getReadFilter` is a REQUIRED member of `ISecurityService`, so a
+          // conforming provider never lands here — reaching it means the
+          // registered object is not the contract it claims to be, and a
+          // provider that cannot answer "which rows" must not be read as
+          // "every row".
+          return {
+            kind: 'unusable',
+            why:
+              'the registered "security" service exposes no getReadFilter(), ' +
+              'so it cannot answer a row-level read scope',
+          };
+        }
+        return { kind: 'usable', svc };
       };
       // ALWAYS wire the bridge — resolution happens at call time, mirroring the
       // executeAggregate / executeRawSql auto-bridges above. Gating the
@@ -502,8 +559,26 @@ export class AnalyticsServicePlugin implements Plugin {
       // strategy ran unscoped and only a WARN marked it. The repo's own
       // `bootStack` harness registers in exactly that order, which is why no
       // dogfood test could ever observe analytics RLS.
-      securityPresentAtInit = !!trySecurity();
-      getReadScope = (object, context) => trySecurity()?.getReadFilter(object, context);
+      securityPresentAtInit = trySecurity().kind === 'usable';
+      getReadScope = (object, context) => {
+        const resolved = trySecurity();
+        // No security service resolved at call time → no row-scope provider on
+        // this deployment, the state reported at init. Unchanged.
+        if (resolved.kind === 'absent') return undefined;
+        if (resolved.kind === 'unusable') {
+          ctx.logger.error(
+            `[Analytics] row-level read scope could not be resolved for "${object}" — ` +
+            `refusing the query (fail-closed): ${resolved.why}. ` +
+            'A security service is wired on this deployment, so analytics must not fall ' +
+            'open and serve rows with no row-level policy applied.',
+          );
+          throw new Error(
+            `[Analytics] row-level read scope could not be resolved for "${object}"; ` +
+            'query refused (fail-closed).',
+          );
+        }
+        return resolved.svc.getReadFilter(object, context);
+      };
       autoBridgedReadScope = true;
     }
 
@@ -658,6 +733,38 @@ export class AnalyticsServicePlugin implements Plugin {
         return svc && typeof svc.getObject === 'function' ? svc : undefined;
       } catch { return undefined; }
     };
+
+    // #16773 — a select option's `label` (`SelectOptionSchema.label`) is a
+    // PLAIN authored string; its translation, if any, lives in an i18n
+    // TRANSLATION BUNDLE, not on the field metadata `getObjectFields` reads.
+    // Resolved lazily, same as `dataEngine` above, so plugin-init order is
+    // free and a kernel with no i18n service configured degrades to exactly
+    // today's (locale-blind, authored-label) behaviour.
+    const i18nService = (): II18nService | undefined => {
+      try {
+        const svc = ctx.getService<II18nService>('i18n');
+        return svc && typeof svc.getTranslations === 'function' && typeof svc.getLocales === 'function'
+          ? svc
+          : undefined;
+      } catch { return undefined; }
+    };
+    // Mirrors `RestServer.buildTranslationBundle` (`packages/rest`) — this
+    // package has no dependency on `packages/rest`, so the ~10-line glue that
+    // turns an `II18nService` into a `TranslationBundle` is rebuilt here
+    // against the SAME public `II18nService` surface. This is NOT a second
+    // "translate a select option label" implementation: the actual lookup
+    // stays exactly one function, `translateObject` below, imported rather
+    // than reimplemented.
+    const buildTranslationBundle = (i18n: II18nService): TranslationBundle | undefined => {
+      const locales = i18n.getLocales();
+      if (!locales.length) return undefined;
+      const bundle: TranslationBundle = {};
+      for (const locale of locales) {
+        const data = i18n.getTranslations(locale);
+        if (data && typeof data === 'object') (bundle as Record<string, unknown>)[locale] = data;
+      }
+      return Object.keys(bundle).length ? bundle : undefined;
+    };
     const labelResolver: DimensionLabelDeps = {
       getObjectFields: (objectName) => dataEngine()?.getObject?.(objectName)?.fields,
       fetchRecordLabels: async (targetObject, ids, scope, context) => {
@@ -720,6 +827,42 @@ export class AnalyticsServicePlugin implements Plugin {
         }
         return map;
       },
+      // #16773 — route a select option label through the SAME translator the
+      // object-metadata REST endpoint uses (`GET /meta/object/:name`, which
+      // is where the console's list/kanban/grid renderers get theirs), so a
+      // chart's category/series labels match what those surfaces render for
+      // the identical field. `undefined` (no i18n service, no locales
+      // declared, or nothing in the bundle for this locale) leaves the
+      // caller's authored-label fallback untouched.
+      translateSelectOptions: (objectName, fieldName, options, locale) => {
+        if (!locale) return undefined;
+        const i18n = i18nService();
+        if (!i18n) return undefined;
+        const bundle = buildTranslationBundle(i18n);
+        if (!bundle) return undefined;
+        const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
+        const defaultLocale = typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+        // `value` here is `unknown` (an option's stored value, of whatever
+        // shape the field declares); `ObjectFieldLike.options[].value` narrows
+        // to `string | number | boolean` (`SelectOptionSchema.value`'s real
+        // runtime type). The cast is a type-only widening back to what this
+        // capability's own signature promises — no value is coerced.
+        const fields: Record<string, ObjectFieldLike> = {
+          [fieldName]: { name: fieldName, options: options as ObjectFieldLike['options'] },
+        };
+        const doc: ObjectLike = { name: objectName, fields };
+        const translated = translateObject(doc, bundle, {
+          locale,
+          fallbackChain: typeof fallback === 'string' && fallback.length > 0 ? [fallback] : undefined,
+          defaultLocale: typeof defaultLocale === 'string' && defaultLocale.length > 0 ? defaultLocale : undefined,
+        });
+        const translatedField = Array.isArray(translated.fields)
+          ? translated.fields.find((f) => f && f.name === fieldName)
+          : translated.fields?.[fieldName];
+        return Array.isArray(translatedField?.options)
+          ? (translatedField.options as typeof options)
+          : undefined;
+      },
     };
 
     // ADR-0037 P3 — draft data preview: resolve the PENDING seed draft's rows
@@ -765,9 +908,16 @@ export class AnalyticsServicePlugin implements Plugin {
     // The raw-SQL strategy binds dashboard relative-date tokens (already expanded
     // to ISO strings) directly, bypassing the driver's CRUD coercion. Delegate to
     // the driver — the single source of truth for the on-disk storage convention —
-    // so a `Field.datetime` ISO comparand becomes epoch ms on SQLite, while
-    // `Field.date` text and native-timestamp (Postgres) columns pass through
-    // unchanged. Resolved at call time so plugin-init order does not matter.
+    // so a `Field.datetime` comparand is canonicalised to the SAME form the write
+    // path stores, while `Field.date` text and native-timestamp (Postgres)
+    // columns pass through unchanged. Resolved at call time so plugin-init order
+    // does not matter.
+    //
+    // ⛔ What that form IS is stated in exactly one place —
+    // `AnalyticsServiceConfig.coerceTemporalFilterValue`'s storage-reality block
+    // in `analytics-service.ts` (#16737). Do not restate it here; this comment
+    // used to say "becomes epoch ms on SQLite", which stopped being true when
+    // #3912 made canonical UTC text the one stored form.
     const coerceTemporalFilterValue = (
       objectName: string,
       fieldName: string,
@@ -786,11 +936,19 @@ export class AnalyticsServicePlugin implements Plugin {
       return value;
     };
 
-    // The column half of the same fix (#3912). A SQLite `Field.datetime` column
-    // holds BOTH storage forms — INTEGER epoch from a `Date` write, ISO TEXT from
-    // a REST/JSON write or a `NOW()` default — so coercing the comparand alone
-    // matched whichever half the writer produced and returned an empty window for
-    // the other. Ask the driver for the column expression that normalises both.
+    // The column half of the same fix (#3912), and the half that is CONDITIONAL.
+    // A SQLite `Field.datetime` column written before the canonical convention
+    // can still hold a mix — INTEGER epoch from a `Date` write next to text from
+    // a REST/JSON write — so coercing the comparand alone matched whichever half
+    // the writer produced and returned an empty window for the other. Ask the
+    // driver for the column expression that normalises both; on a converged
+    // column, and on every dialect with a real temporal type, it answers with the
+    // bare column and the comparison stays indexable.
+    //
+    // ⛔ Same rule as the hook above: the storage reality is stated once, on
+    // `AnalyticsServiceConfig.coerceTemporalFilterValue` (#16737). This comment
+    // used to assert the mixed form as the steady state; it is the transitional
+    // one.
     const coerceTemporalFilterColumn = (
       objectName: string,
       fieldName: string,

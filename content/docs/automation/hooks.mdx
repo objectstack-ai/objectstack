@@ -181,6 +181,12 @@ record's fields **directly on `ctx.input`** (a flat view over the internal
 `{ data, options }` wrapper — reads and writes of record fields route through
 `ctx.input.data`):
 
+On **update**, "the incoming record" means *the record the engine intends to
+persist* — a caller-supplied value for a `readonly` field is not on it, and the
+caller's submission is on `ctx.submitted` instead (diagnostics only). See
+[Static `readonly` fields on the write path](/docs/protocol/objectql/security#static-readonly-fields-on-the-write-path)
+for the five rules and the migration.
+
 <Callout type="warn" title="`id` / `options` / `ast` / `data` are RESERVED on the flat `ctx.input` face">
 These four names always resolve to the envelope, never to a record field —
 even if your object declares a field with one of those names. A field named

@@ -242,6 +242,152 @@ describe('identity write guard — update whitelist (ADR-0092 D2)', () => {
   });
 });
 
+// ───────────────────────────────────────────────────────────────────────────
+// #16344 — the guard's DIAGNOSTICS against an engine whose `input.data` is the
+// persist image.
+//
+// Since the maintainer ruling of decision batch #87 (2026-09-08) the engine
+// hides a caller-forged statically-`readonly` value from `beforeUpdate`: what
+// this guard is handed on `input.data` is what the engine intends to persist,
+// and the caller's submission travels separately on `ctx.submitted`.
+//
+// ⚠️ The cases below are the ones the #5591 docblock predicted would degrade,
+// and they are pinned AT THEIR PRE-#16344 TEXT — measured on the unfixed engine
+// and reproduced verbatim here. That is this block's whole contract: the strip
+// moved, and the caller still gets told which field was refused. A regression
+// shows up as `(—)` in place of a field name, which is exactly the wording a
+// reader of this file is meant to recognise.
+//
+// The fixture builds the contexts the POST-fix engine builds — `input.data`
+// already missing the read-only key, `submitted` carrying the submission as
+// sent — because this guard is unit-tested against a fake engine throughout.
+// The end-to-end leg (a real ObjectQL engine dispatching a real `beforeUpdate`)
+// lives in objectql's `engine-readonly-hook-input.test.ts`; this file pins the
+// half that is plugin-auth's.
+describe('identity write guard — caller submission channel (#16344)', () => {
+  let engine: ReturnType<typeof makeEngine>;
+  let warns: string[];
+
+  beforeEach(() => {
+    warns = [];
+    engine = makeEngine(SCHEMAS);
+    registerManagedUpdateWhitelist('sys_user', SYS_USER_PROFILE_EDIT_FIELDS);
+    registerIdentityWriteGuard(engine, {
+      packageId: 'test.identity-write-guard',
+      logger: { info() {}, warn: (m: string) => warns.push(String(m)) },
+    });
+  });
+
+  it('CASE B — a read-only-only payload still 403s NAMING the field, not `(—)`', async () => {
+    // Pre-#16344 reading, reproduced: `update sys_user { id, role: 'admin' }`
+    // answered `None of the submitted fields (role) are editable on
+    // 'sys_user'`. `role` is read-only, so the post-fix engine hides it before
+    // this hook runs and `input.data` arrives as `{ id }` alone.
+    await expect(
+      guardOn(engine, 'beforeUpdate')({
+        object: 'sys_user',
+        session: USER_SESSION,
+        input: { id: 'u1', data: { id: 'u1' } },
+        submitted: Object.freeze({ id: 'u1', role: 'admin' }),
+      }),
+    ).rejects.toThrow(/None of the submitted fields \(role\) are editable on 'sys_user'/);
+  });
+
+  it('CASE B, the regression shape — without the channel it degrades to `(—)`', async () => {
+    // The SAME request with no `submitted` member: this is what an engine that
+    // moved the strip and skipped the ruling's second half produces. Pinned as
+    // the failure it is, so the two readings sit side by side and neither can
+    // be mistaken for the other. It is also the honest statement of what this
+    // guard does on an older engine: refusal intact, field list empty.
+    await expect(
+      guardOn(engine, 'beforeUpdate')({
+        object: 'sys_user',
+        session: USER_SESSION,
+        input: { id: 'u1', data: { id: 'u1' } },
+      }),
+    ).rejects.toThrow(/None of the submitted fields \(—\) are editable/);
+  });
+
+  it('CASE A — a smuggled read-only field still WARNS by name while the legit half commits', async () => {
+    // Pre-#16344 reading, reproduced: `[IdentityWriteGuard] stripped
+    // non-whitelisted field(s) from user-context update to 'sys_user': role
+    // (ADR-0092)`. The write itself succeeds — `name` is whitelisted — so
+    // without the channel this warn simply disappears: a security diagnostic
+    // vanishing on a write that reports success.
+    const data: any = { id: 'u1', name: 'B' };
+    await guardOn(engine, 'beforeUpdate')({
+      object: 'sys_user',
+      session: USER_SESSION,
+      input: { id: 'u1', data },
+      submitted: Object.freeze({ id: 'u1', name: 'B', role: 'admin' }),
+    });
+
+    expect(data).toEqual({ id: 'u1', name: 'B' });
+    expect(warns).toEqual([
+      "[IdentityWriteGuard] stripped non-whitelisted field(s) from user-context update to 'sys_user': role (ADR-0092)",
+    ]);
+  });
+
+  it('the two sources UNION — a guard-stripped key and an engine-hidden key are both named', async () => {
+    // `email` is not read-only, so it reaches this hook and THIS guard strips
+    // it; `role` is read-only, so the engine hid it and only `submitted` knows.
+    // Either source alone under-reports, which is why the guard reads both.
+    const data: any = { id: 'u1', name: 'B', email: 'evil@x' };
+    await guardOn(engine, 'beforeUpdate')({
+      object: 'sys_user',
+      session: USER_SESSION,
+      input: { id: 'u1', data },
+      submitted: Object.freeze({ id: 'u1', name: 'B', email: 'evil@x', role: 'admin' }),
+    });
+
+    expect(data).toEqual({ id: 'u1', name: 'B' });
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain('email');
+    expect(warns[0]).toContain('role');
+  });
+
+  it('⛔ the channel is READ, never written back — a refused value never reaches the payload', async () => {
+    // The one way this migration could turn a diagnostic into a privilege
+    // escalation: re-applying what `submitted` names, under the hook's own
+    // provenance, past the strip that refused it (#14088). Asked directly.
+    const data: any = { id: 'u1', name: 'B' };
+    const submitted = Object.freeze({ id: 'u1', name: 'B', role: 'admin' });
+    await guardOn(engine, 'beforeUpdate')({
+      object: 'sys_user', session: USER_SESSION, input: { id: 'u1', data }, submitted,
+    });
+    expect(data).not.toHaveProperty('role');
+    expect(submitted).toEqual({ id: 'u1', name: 'B', role: 'admin' });
+  });
+
+  it('`id` and the lifecycle stamps are not "refused fields" on this channel either', async () => {
+    // The submission carries the REST ingress fold's `id` (#6479) and the data
+    // routes' `updated_at`. Neither is a field the caller lost, so neither may
+    // appear in a message about fields that are not editable — the same two
+    // exclusions the payload loop already makes, asked of the new source.
+    const data: any = { id: 'u1', name: 'B', updated_at: '2026-09-09T00:00:00Z' };
+    await guardOn(engine, 'beforeUpdate')({
+      object: 'sys_user',
+      session: USER_SESSION,
+      input: { id: 'u1', data },
+      submitted: Object.freeze({ id: 'u1', name: 'B', updated_at: '2026-09-09T00:00:00Z' }),
+    });
+    expect(warns).toEqual([]);
+    expect(data).toEqual({ id: 'u1', name: 'B', updated_at: '2026-09-09T00:00:00Z' });
+  });
+
+  it('an isSystem caller is untouched — the guard does not run, whatever the channel says', async () => {
+    const data: any = { id: 'u1', role: 'admin' };
+    await guardOn(engine, 'beforeUpdate')({
+      object: 'sys_user',
+      session: SYSTEM_SESSION,
+      input: { id: 'u1', data },
+      submitted: Object.freeze({ id: 'u1', role: 'admin' }),
+    });
+    expect(data).toEqual({ id: 'u1', role: 'admin' });
+    expect(warns).toEqual([]);
+  });
+});
+
 describe('identity write guard — session snapshot refresh (ADR-0092 D6)', () => {
   const NOW = Date.now();
   const EXPIRES = new Date(NOW + 3600_000).toISOString();

@@ -4,11 +4,11 @@
 // the CALLER SUBMITTED, never whatever value happens to sit on the key at the
 // moment the strip runs.
 //
-// The strip executes AFTER `beforeUpdate`, so those two are different facts the
-// instant a hook writes to a read-only column. The guard used to be a key SET
-// snapshotted at engine entry, which can answer only "did the caller name this
-// key?" — so `delete data[name]` took the hook's value with it whenever the
-// caller's payload happened to carry the same key.
+// The ENFORCEMENT pass executes AFTER `beforeUpdate`, so those two are different
+// facts the instant a hook writes to a read-only column. The guard used to be a
+// key SET snapshotted at engine entry, which can answer only "did the caller
+// name this key?" — so `delete data[name]` took the hook's value with it
+// whenever the caller's payload happened to carry the same key.
 //
 // The measured downstream shape (objectstack#5591, from hotcrm#788, reproduced
 // below verbatim): "read the whole record → change one field → write the whole
@@ -29,6 +29,40 @@
 // What this suite is NOT: a relaxation of #2948 / #3003 / #3015. A
 // caller-supplied read-only value that no hook overwrote is still stripped, and
 // the case is pinned here next to the fix so the two verdicts are read together.
+//
+// ───────────────────────────────────────────────────────────────────────────
+// SUPERSEDED IN WRITING (#16344, maintainer ruling, decision batch #87,
+// 2026-09-08) — this file's #5591 reasoning is NOT deleted, and the part of it
+// that still stands is the part this note names.
+//
+// #5591 argued for comparing VALUES instead of stripping before the hooks, and
+// gave a second reason for the ordering beyond its own: "a `beforeUpdate` guard
+// that rejects or reports on what the caller submitted (plugin-auth's ADR-0092
+// identity write guard is the in-repo instance — its error text NAMES the
+// non-whitelisted keys it found) reads `ctx.input.data`. Stripping ahead of the
+// hooks would empty that out and silently degrade every such diagnostic."
+//
+// ⭐ That cost was REAL and was measured again on #16344 — the guard's 403 did
+// degrade to `(—)` on a strip-before-hooks build with no other change. What the
+// ruling rejected is the CONCLUSION that the ordering was therefore the only
+// way to pay it, because the ordering has a cost of its own that #5591 never
+// weighed: a hook handed a value the engine has already refused can derive a
+// column that IS persisted. Measured on a real app (17.2.0): a KPI row
+// committed `target_value = 400` beside a hook-derived `calc_trace` reading
+// `目标 1`, with no error, no warning and a 200 — a record whose own audit
+// trail cites values it does not hold.
+//
+// So both are paid: the caller-forged read-only values are HIDDEN from the
+// hooks (they cannot reach a derivation), and the caller's submission as sent
+// travels on its own named channel, `ctx.submitted`, which the ADR-0092 guard
+// now reads — so its message is byte-identical to the one #5591 was protecting.
+// The suite below is unchanged except for the one case that pinned the
+// diagnostic's OLD channel, which is re-pinned on the new one.
+//
+// ⛔ What did NOT move is the ENFORCEMENT pass. It is still after the hooks,
+// because it is the only point that can tell a hook's stamp from a caller's
+// forgery (`hookWrittenKeys`, #14088) — which is this file's own subject, and
+// the reason a hook write to a read-only column still lands.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { EngineQueryOptionsParsed } from '@objectstack/spec/data';
@@ -290,23 +324,31 @@ describe('update strip acts on CALLER-submitted values (#5591)', () => {
     expect(ka().published_at).toBe(NOW);
   });
 
-  it('a hook that reads the caller-submitted read-only value can still SEE it', async () => {
-    // Why the fix compares values instead of stripping before the hooks: a
-    // `beforeUpdate` guard that rejects or reports on what the caller
-    // submitted (plugin-auth's ADR-0092 identity write guard is the in-repo
-    // instance — its error text NAMES the non-whitelisted keys it found) reads
-    // `ctx.input.data`. Stripping ahead of the hooks would empty that out and
-    // silently degrade every such diagnostic, so the caller's payload still
-    // reaches the hooks unchanged.
-    const seen: unknown[] = [];
+  it('a hook that reads the caller-submitted read-only value can still SEE it — on `ctx.submitted`', async () => {
+    // [#16344] The diagnostic this case has always defended, re-pinned on the
+    // channel the ruling gave it. A `beforeUpdate` guard that reports on what
+    // the caller submitted (plugin-auth's ADR-0092 identity write guard is the
+    // in-repo instance — its error text NAMES the non-whitelisted keys it
+    // found) must still be able to name a caller-forged read-only key.
+    //
+    // BOTH readings are asserted, and the pair IS the contract:
+    //  - `input.data` no longer carries it — that is #16344's whole fix, and
+    //    an assertion here is what stops the leak coming back;
+    //  - `submitted` does — that is what keeps the guard whole, and an
+    //    assertion here is what stops the channel being quietly dropped as
+    //    unused.
+    const seenInput: unknown[] = [];
+    const seenSubmitted: unknown[] = [];
     engine.registerHook('beforeUpdate', async (ctx: any) => {
-      seen.push(Object.keys(ctx.input.data));
+      seenInput.push(Object.keys(ctx.input.data));
+      seenSubmitted.push(Object.keys(ctx.submitted ?? {}));
     }, { object: 'crm_knowledge_article', priority: 1 });
 
     await engine.update('crm_knowledge_article', {
       id: 'ka_1', title: 'B', published_at: '1999-01-01T00:00:00.000Z',
     });
-    expect(seen).toEqual([['id', 'title', 'published_at']]);
+    expect(seenInput).toEqual([['id', 'title']]);
+    expect(seenSubmitted).toEqual([['id', 'title', 'published_at']]);
   });
 
   it('an isSystem caller is untouched by any of this', async () => {
@@ -716,7 +758,7 @@ describe('the strip reads hook-write PROVENANCE, not value equality (#14088)', (
 
   // ── The measured consequence of "an assignment ran", stated out loud ───────
 
-  it('MEASURED: a lone self-assigning hook leaves the CALLER value on the key', async () => {
+  it('MEASURED: a lone self-assigning hook is a NO-OP on a hidden key — the STORED value stands (#16344)', async () => {
     // ⚠️ RECORDING BEHAVIOUR, NOT BLESSING IT. The direct consequence of the
     // mechanism #14088 chose: the record says an ASSIGNMENT RAN and is
     // deliberately blind to the VALUE (that blindness is the whole repair — it
@@ -748,6 +790,37 @@ describe('the strip reads hook-write PROVENANCE, not value equality (#14088)', (
     //
     // A future ruling that reverses this INVERTS both pins together; it never
     // deletes either. `isCallerSuppliedValue`'s docblock carries the argument.
+    //
+    // ⭐ [#16344] THE VERDICT MOVED, and this is the record of it rather than a
+    // deletion. Everything above still describes the recording mechanism
+    // exactly; what changed is what a `beforeUpdate` hook is SHOWN. The
+    // caller's forged `completed_at` is hidden from the hook, so
+    // `ctx.input.data.completed_at` reads `undefined` and the self-assign
+    // re-creates the key holding THAT.
+    //
+    // ⛔ And a hook write of `undefined` is NOT persisted as one. The
+    // confluence treats set-to-undefined of a HIDDEN key as the no-op the line
+    // actually is: the key is deleted, its entry leaves the record, and the
+    // ordinary hand-back puts the caller's value back for the strip to judge.
+    // The write then reads EXACTLY as it would have with no hook at all —
+    // stripped, reported, warned, refused under `strictReadonlyWrites`.
+    //
+    // The direction matters, and it is why this is not `toBeUndefined()`:
+    //  - persisting the `undefined` ERASES the stored value on the memory
+    //    driver and hands knex an undefined binding on a SQL one (a bare
+    //    compile-time Error, outside the ADR-0112 envelope). Neither is "the
+    //    record the engine intends to persist", which is this card's whole
+    //    subject.
+    //  - the laundering route this case existed to make VISIBLE stays CLOSED.
+    //    A no-op-looking line still cannot confer hook provenance on a value
+    //    the caller minted — the FORGED negative below is what pins that, and
+    //    it must stay red-able: drop the record-narrowing at the confluence and
+    //    the caller's timestamp is handed back onto a key the record still
+    //    calls hook-owned, and it commits.
+    //
+    // ⚠ The blindness to VALUE stated above is unchanged for every key the
+    // hook can actually SEE. This narrowing reaches only keys hidden by this
+    // card, and only the one value — `undefined` — that no driver can store.
     const FORGED = '1999-01-01T00:00:00.000Z';
     engine.registerHook('beforeUpdate', async (ctx: any) => {
       ctx.input.data.completed_at = ctx.input.data.completed_at;
@@ -758,34 +831,75 @@ describe('the strip reads hook-write PROVENANCE, not value equality (#14088)', (
       id: 't_20', status: 'in_progress', completed_at: FORGED,
     });
 
-    expect(task('t_20').completed_at).toBe(FORGED);
-    expect(warns).toEqual([]);
+    // The FORGED negative, KEPT: the laundering route stays closed.
+    expect(task('t_20').completed_at).not.toBe(FORGED);
+    // ⭐ The re-pin. The stored value STANDS — not erased, not `undefined`.
+    expect(task('t_20').completed_at).toBe(STAMPED);
+    // ...and the write is reported exactly as an un-hooked one would be.
+    expect(warns.some((w) => w.includes("Field 'completed_at'"))).toBe(true);
   });
 
   it('the recording is transparent to a hook reading its own payload', async () => {
-    // Hooks read `ctx.input.data` for diagnostics (plugin-auth's identity write
-    // guard NAMES the keys it found). The recording view must be indistinguishable
-    // from the payload for every read shape a hook uses.
+    // The recording view must be indistinguishable from the payload for every
+    // read shape a hook uses.
+    //
+    // [#16344] Written on WRITABLE keys, and that is the repair rather than an
+    // accommodation. This case's subject is the recording PROXY; using a
+    // read-only key the engine now hides made it assert two mechanisms at once
+    // and fail on the one it does not test. The hidden key gets its own
+    // assertion below — where it says what it means.
     const seen: any[] = [];
     engine.registerHook('beforeUpdate', async (ctx: any) => {
       seen.push({
         keys: Object.keys(ctx.input.data),
         spread: { ...ctx.input.data },
         json: JSON.stringify(ctx.input.data),
-        has: 'completed_at' in ctx.input.data,
+        has: 'status' in ctx.input.data,
         own: Object.prototype.hasOwnProperty.call(ctx.input.data, 'title'),
       });
     }, { object: 'duly_task', priority: 1 });
     seedDone('t_19');
 
-    await engine.update('duly_task', { id: 't_19', title: 'T', completed_at: null });
+    await engine.update('duly_task', { id: 't_19', title: 'T', status: 'in_progress' });
 
     expect(seen).toHaveLength(1);
-    expect(seen[0].keys).toEqual(['id', 'title', 'completed_at']);
-    expect(seen[0].spread).toEqual({ id: 't_19', title: 'T', completed_at: null });
-    expect(seen[0].json).toBe(JSON.stringify({ id: 't_19', title: 'T', completed_at: null }));
+    expect(seen[0].keys).toEqual(['id', 'title', 'status']);
+    expect(seen[0].spread).toEqual({ id: 't_19', title: 'T', status: 'in_progress' });
+    expect(seen[0].json).toBe(JSON.stringify({ id: 't_19', title: 'T', status: 'in_progress' }));
     expect(seen[0].has).toBe(true);
     expect(seen[0].own).toBe(true);
+  });
+
+  it('[#16344] the hide is CONSISTENT across every read shape, not just Object.keys', async () => {
+    // A key hidden from enumeration but reachable by `in`, by a direct read or
+    // through `JSON.stringify` would be worse than no hide at all: the derived
+    // write this card exists to stop is written by hooks that read the key
+    // DIRECTLY, and a partial hide would leave exactly those working while the
+    // audit of them came back clean. Asked of all five shapes, in one dispatch,
+    // through the recording view — so this also pins that the hide and the
+    // #14088 Proxy compose rather than one masking the other.
+    const seen: any[] = [];
+    engine.registerHook('beforeUpdate', async (ctx: any) => {
+      seen.push({
+        keys: Object.keys(ctx.input.data),
+        ownNames: Object.getOwnPropertyNames(ctx.input.data),
+        spread: { ...ctx.input.data },
+        json: JSON.stringify(ctx.input.data),
+        inOperator: 'completed_at' in ctx.input.data,
+        direct: ctx.input.data.completed_at,
+      });
+    }, { object: 'duly_task', priority: 1 });
+    seedDone('t_21');
+
+    await engine.update('duly_task', { id: 't_21', title: 'T', completed_at: null });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].keys).toEqual(['id', 'title']);
+    expect(seen[0].ownNames).toEqual(['id', 'title']);
+    expect(seen[0].spread).toEqual({ id: 't_21', title: 'T' });
+    expect(seen[0].json).toBe(JSON.stringify({ id: 't_21', title: 'T' }));
+    expect(seen[0].inOperator).toBe(false);
+    expect(seen[0].direct).toBeUndefined();
   });
 
   it('no recording view reaches the driver — the seal puts the RAW payload back', async () => {
@@ -799,6 +913,13 @@ describe('the strip reads hook-write PROVENANCE, not value equality (#14088)', (
     // stripped, every pass returns the SAME reference, so `updateMany` receives
     // `hookContext.input.data` verbatim and the identity is decisive rather
     // than laundered through one of the copies the by-id path makes.
+    //
+    // [#16344] "Nothing stripped" is a PRECONDITION of the identity argument,
+    // and the caller payload is now written to satisfy it: it no longer echoes
+    // the read-only `completed_at`, because the pre-hook hide would copy the
+    // payload for exactly the reason every other strip does. The hook still
+    // stamps the column, so the write under test is unchanged; what the caller
+    // echoes is not this case's subject, and the echo is covered above.
     const seenByDriver: any[] = [];
     const d2 = makeDriver();
     const e2 = new ObjectQL({});
@@ -823,7 +944,7 @@ describe('the strip reads hook-write PROVENANCE, not value equality (#14088)', (
     }, { object: 'duly_task', priority: 50 });
     d2.storeFor('duly_task').set('t_20', { id: 't_20', title: 'T', status: 'open', completed_at: null });
 
-    const payload: Record<string, unknown> = { status: 'done', completed_at: null };
+    const payload: Record<string, unknown> = { status: 'done' };
     await e2.update('duly_task', payload as any, { where: { status: 'open' }, multi: true } as any);
 
     expect(seenByDriver).toHaveLength(1);

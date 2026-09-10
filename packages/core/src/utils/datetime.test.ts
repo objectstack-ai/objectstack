@@ -11,6 +11,9 @@ import {
   zonedWallClockToUtcMs,
   calendarPartsInTz,
   nextUtcCalendarDay,
+  bucketDateKey,
+  BUCKET_GRANULARITIES,
+  isBucketGranularity,
 } from './datetime.js';
 
 const iso = (s: string) => Date.parse(s);
@@ -221,5 +224,79 @@ describe('nextUtcCalendarDay — re-exported from @objectstack/spec (ADR-0053 D-
     // dropping it would break them loudly rather than at their call sites.
     expect(nextUtcCalendarDay('2026-07-28')).toBe('2026-07-29');
     expect(nextUtcCalendarDay('2026-07-28T12:00:00Z')).toBeNull();
+  });
+});
+
+// ── [#16178] `bucketDateKey` — the forward labeller ──────────────────────────
+//
+// Hoisted here so `driver-memory`'s analytics face and `@objectstack/objectql`'s
+// `bucketDateValue` label one instant identically without a driver depending on
+// objectql and without a third hand copy of the rule. These cells pin the OUTPUT
+// CONTRACT (`DriverCapabilitiesSchema.queryDateGranularity` calls it that), not
+// a display preference: a driver that pushes the bucket down into SQL has to
+// emit these exact strings.
+
+describe('bucketDateKey — canonical labels', () => {
+  it('labels each of the five granularities in its canonical vocabulary', () => {
+    expect(bucketDateKey('2024-05-15T00:00:00Z', 'year')).toBe('2024');
+    expect(bucketDateKey('2024-05-15T00:00:00Z', 'quarter')).toBe('2024-Q2');
+    expect(bucketDateKey('2024-05-15T00:00:00Z', 'month')).toBe('2024-05');
+    expect(bucketDateKey('2024-05-15T00:00:00Z', 'day')).toBe('2024-05-15');
+    expect(bucketDateKey('2024-05-15T00:00:00Z', 'week')).toBe('2024-W20');
+  });
+
+  it('numbers ISO weeks by the first-Thursday rule, across the year boundary', () => {
+    expect(bucketDateKey('2024-01-01T00:00:00Z', 'week')).toBe('2024-W01');
+    // 2024-12-30 is a Monday whose week's Thursday falls in 2025.
+    expect(bucketDateKey('2024-12-30T00:00:00Z', 'week')).toBe('2025-W01');
+  });
+
+  it('reads a finite number as epoch milliseconds (#3773)', () => {
+    const ms = Date.parse('2026-01-10T08:30:00Z');
+    expect(bucketDateKey(ms, 'day')).toBe('2026-01-10');
+    for (const g of BUCKET_GRANULARITIES) {
+      // The three input spellings a driver can hand back must agree.
+      expect(bucketDateKey(ms, g)).toBe(bucketDateKey(new Date(ms), g));
+      expect(bucketDateKey(ms, g)).toBe(bucketDateKey(new Date(ms).toISOString(), g));
+    }
+  });
+
+  it('answers null for an absent or unparseable instant (#3839)', () => {
+    expect(bucketDateKey(null, 'month')).toBeNull();
+    expect(bucketDateKey(undefined, 'month')).toBeNull();
+    expect(bucketDateKey('not-a-date', 'month')).toBeNull();
+  });
+
+  it('resolves the calendar day in the reference timezone (ADR-0053 Phase 2)', () => {
+    // 23:30 UTC on Feb 29 is still Feb 29 in UTC and already Mar 1 in Tokyo.
+    const nearMidnight = '2024-02-29T23:30:00Z';
+    expect(bucketDateKey(nearMidnight, 'day', 'UTC')).toBe('2024-02-29');
+    expect(bucketDateKey(nearMidnight, 'day', 'Asia/Tokyo')).toBe('2024-03-01');
+    expect(bucketDateKey(nearMidnight, 'month', 'Asia/Tokyo')).toBe('2024-03');
+    // The week math runs on the parts ALREADY shifted into the zone, so the
+    // week boundary moves with the day rather than re-applying the offset.
+    const mondayUtc = '2024-03-04T02:00:00Z'; // Monday 03-04 UTC, Sunday 03-03 in NY
+    expect(bucketDateKey(mondayUtc, 'week', 'UTC')).toBe('2024-W10');
+    expect(bucketDateKey(mondayUtc, 'week', 'America/New_York')).toBe('2024-W09');
+  });
+});
+
+describe('BUCKET_GRANULARITIES / isBucketGranularity', () => {
+  it('is exactly the set bucketDateKey can label', () => {
+    expect([...BUCKET_GRANULARITIES]).toEqual(['day', 'week', 'month', 'quarter', 'year']);
+    for (const g of BUCKET_GRANULARITIES) {
+      expect(isBucketGranularity(g)).toBe(true);
+      // Every accepted member really produces a label — the guard and the
+      // labeller cannot disagree about the set without this failing.
+      expect(bucketDateKey('2024-05-15T00:00:00Z', g)).toMatch(/^\d{4}/);
+    }
+  });
+
+  it('rejects the three sub-day intervals TimeUpdateInterval also declares', () => {
+    // These have no canonical key anywhere in the contract, which is why a face
+    // that receives one refuses rather than bucketing it (#16178).
+    for (const g of ['second', 'minute', 'hour']) expect(isBucketGranularity(g)).toBe(false);
+    expect(isBucketGranularity('decade')).toBe(false);
+    expect(isBucketGranularity(undefined)).toBe(false);
   });
 });

@@ -11,13 +11,28 @@ import {
   Logger,
   createLogger,
   nextUtcCalendarDay,
-  calendarPartsInTzOrUtc,
-  zonedDateStartToUtcMs,
+  // [#16322] The ONE lowering of the closed `dateRange` preset vocabulary and
+  // the ONE refusal for a string outside it, shared with the SQL analytics
+  // path so the two backends cannot answer one input differently again.
+  resolveAnalyticsDateRangeString,
+  // [#16178] The ONE forward bucket labeller, and the guard that says which
+  // granularities it can label. Hoisted into core precisely so this driver can
+  // bucket with the SAME rule the objectql aggregation path uses, without a
+  // driver depending on objectql and without a third hand copy of the labels.
+  bucketDateKey,
+  isBucketGranularity,
+  type BucketGranularity,
 } from '@objectstack/core';
+// [#16178] The pipeline below is split at its `$group` when a time dimension
+// buckets, so the bucket key can be folded in JS between the two halves — mingo
+// has no expression that produces the canonical labels, and writing one would
+// be the second dialect this repair exists to avoid.
+import { Aggregator } from 'mingo';
 import {
   assertFilterConditionShape,
   uncompilableCombinatorError,
   uncompilableFieldOperatorError,
+  unsupportedTimeGranularityError,
   type FilterFaceCapabilities,
 } from './filter-refusal.js';
 
@@ -623,6 +638,53 @@ export interface MemoryAnalyticsConfig {
 }
 
 /**
+ * [#16178] A `timeDimensions[]` entry that asks its dimension to be BUCKETED,
+ * resolved to everything the fold needs.
+ *
+ * `granularity` is already narrowed to the five the canonical vocabulary can
+ * label — the three sub-day names `TimeUpdateInterval` also declares are refused
+ * at compile, before this is built.
+ */
+interface TimeBucket {
+  /** The member as the CALLER spelled it, which is how a projected bucket is named back. */
+  readonly dimension: string;
+  /** The row field the instant is read from. */
+  readonly fieldPath: string;
+  /** The bucket size, narrowed to what `bucketDateKey` can label. */
+  readonly granularity: BucketGranularity;
+  /** The synthetic field the bucket key is written to. */
+  readonly bucketKey: string;
+}
+
+/**
+ * The synthetic field a dimension's bucket key travels under.
+ *
+ * Synthetic rather than an overwrite of the source field, because one member can
+ * be both a group key and a measure's aggregand: folding `created_at` in place
+ * would leave `max(created_at)` ranking `'2026-W23'` strings. The `$` prefix a
+ * mingo expression adds is applied by the caller, so the name itself carries
+ * none; the double underscore keeps it clear of any real column.
+ */
+function bucketFieldFor(dimName: string): string {
+  return `__bucket__${dimName}`;
+}
+
+/**
+ * Read a row value at a resolved field path, dotted paths included — the same
+ * traversal mingo performs for the `$<path>` the `$group` stage would have used,
+ * so a nested dimension buckets from the value it would have grouped on.
+ */
+function readFieldPath(row: Record<string, any>, fieldPath: string): unknown {
+  if (!fieldPath.includes('.')) return row[fieldPath];
+  let cursor: any = row;
+  for (const segment of fieldPath.split('.')) {
+    if (cursor == null || typeof cursor !== 'object') return undefined;
+    cursor = cursor[segment];
+  }
+  return cursor;
+}
+
+/**
  * [#16179] A `timeDimensions[].dateRange` resolved to its two bounds, together
  * with what the UPPER one means.
  *
@@ -773,9 +835,35 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     }
 
     // Stage 2: Time dimension filters
+    //
+    // [#16178] and their GRANULARITY, which this face used to accept and never
+    // read. The two keys are orthogonal and both live on the same entry:
+    // `dateRange` decides WHICH rows are selected (#16042/#16179), `granularity`
+    // decides how the selected rows are FOLDED. Collected here, applied between
+    // the `$match` half of the pipeline and its `$group` (see
+    // {@link aggregateWithTimeBuckets}).
+    const timeBuckets: TimeBucket[] = [];
     if (query.timeDimensions && query.timeDimensions.length > 0) {
       for (const timeDim of query.timeDimensions) {
         const fieldPath = this.resolveFieldPath(cube, timeDim.dimension);
+        if (timeDim.granularity !== undefined) {
+          // Refused, not dropped: `TimeUpdateInterval` declares three sub-day
+          // names the canonical bucket-key vocabulary has no label for, and
+          // passing one through is this card's own defect under a new name.
+          if (!isBucketGranularity(timeDim.granularity)) {
+            throw unsupportedTimeGranularityError(timeDim.dimension, timeDim.granularity);
+          }
+          // The bucket travels under its own synthetic key rather than
+          // overwriting the row's field: the SAME member can be both a group key
+          // and a measure's aggregand (`max(created_at)`), and folding the field
+          // in place would silently rank bucket LABELS instead of instants.
+          timeBuckets.push({
+            dimension: timeDim.dimension,
+            fieldPath,
+            granularity: timeDim.granularity,
+            bucketKey: bucketFieldFor(this.getShortName(timeDim.dimension)),
+          });
+        }
         if (timeDim.dateRange) {
           // [#16179] The union's two arms are discriminated HERE, and the
           // answer travels the two lines down to the bound construction rather
@@ -846,13 +934,48 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     const groupStage: Record<string, any> = { _id: {} };
     
     // Add dimensions to _id
+    const keyedBucketPaths = new Set<string>();
     if (query.dimensions && query.dimensions.length > 0) {
       for (const dim of query.dimensions) {
         const fieldPath = this.resolveFieldPath(cube, dim);
         const dimName = this.getShortName(dim);
-        groupStage._id[dimName] = `$${fieldPath}`;
+        // [#16178] A dimension that a time dimension buckets keys on the FOLDED
+        // value. Matched on the resolved field path, so `createdAt` in
+        // `dimensions` and `events.createdAt` in `timeDimensions` are one member.
+        const bucketed = timeBuckets.find(b => b.fieldPath === fieldPath);
+        if (bucketed) keyedBucketPaths.add(bucketed.fieldPath);
+        groupStage._id[dimName] = bucketed ? `$${bucketed.bucketKey}` : `$${fieldPath}`;
       }
-    } else {
+    }
+
+    // [#16178] A GRANULAR time dimension is a group column in its own right,
+    // whether or not `dimensions` also lists it. Keying `$group` on
+    // `query.dimensions` alone answered ONE TOTAL (`_id: null`) for the
+    // canonical trend shape — `{measures, timeDimensions:[{dimension,
+    // granularity}]}` with no `dimensions` — so the granularity was accepted,
+    // silent and inert: this card's own defect class under a different name.
+    //
+    // The rule and its exception are the SQL/ObjectQL face's, recorded there:
+    // every granular entry not already listed groups and projects
+    // (`objectql-strategy.ts` :163-167), and one set — `projectedDimensions`
+    // (:1889-1893) — feeds grouping, row mapping and field metadata alike,
+    // because rows carrying a bucket under a `fields` list that never mentions
+    // it is a trend chart with no x-axis (#4033). An entry carrying only a
+    // `dateRange` is a PREDICATE and is NOT projected (#5688) — which needs no
+    // test here, since `timeBuckets` only ever admits an entry that declared a
+    // granularity.
+    //
+    // Deduped on the resolved field path, the same way the loop above folds a
+    // bucketed member, so two spellings of one member cannot become two columns.
+    const projectedBuckets: TimeBucket[] = [];
+    for (const bucket of timeBuckets) {
+      if (keyedBucketPaths.has(bucket.fieldPath)) continue;
+      keyedBucketPaths.add(bucket.fieldPath);
+      projectedBuckets.push(bucket);
+      groupStage._id[this.getShortName(bucket.dimension)] = `$${bucket.bucketKey}`;
+    }
+
+    if (Object.keys(groupStage._id).length === 0) {
       groupStage._id = null; // No grouping, aggregate all
     }
 
@@ -878,6 +1001,10 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         const dimName = this.getShortName(dim);
         projectStage[dimName] = `$_id.${dimName}`;
       }
+    }
+    for (const bucket of projectedBuckets) {
+      const dimName = this.getShortName(bucket.dimension);
+      projectStage[dimName] = `$_id.${dimName}`;
     }
     if (query.measures && query.measures.length > 0) {
       for (const measure of query.measures) {
@@ -915,7 +1042,12 @@ export class MemoryAnalyticsService implements IAnalyticsService {
 
     // Execute the aggregation pipeline
     const tableName = this.extractTableName(cube.sql);
-    const rawRows = await this.driver.aggregate(tableName, pipeline);
+    // [#16178] Unbucketed queries keep the single-call path they always had,
+    // byte for byte; only a query that actually asks for a granularity pays the
+    // split.
+    const rawRows = timeBuckets.length === 0
+      ? await this.driver.aggregate(tableName, pipeline)
+      : await this.aggregateWithTimeBuckets(tableName, pipeline, timeBuckets, query.timezone);
 
     // [#6814] `$addToSet` COLLECTS; a `count_distinct` measure has to ANSWER a
     // number. Without this step the value reached the caller as the raw array
@@ -946,6 +1078,13 @@ export class MemoryAnalyticsService implements IAnalyticsService {
           }
         }
       }
+      // [#16178] and a granular time dimension `dimensions` never listed.
+      for (const bucket of projectedBuckets) {
+        const shortName = this.getShortName(bucket.dimension);
+        if (shortName in row) {
+          renamedRow[bucket.dimension] = row[shortName];
+        }
+      }
       
       // Rename measures
       if (query.measures) {
@@ -972,6 +1111,19 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         });
       }
     }
+
+    // [#16178] On the declared type, not on `string`: the value is a bucket
+    // LABEL either way, and the shape that DOES list the member has always
+    // answered the member's own type for exactly that folded value. Two
+    // spellings of one query answer one `fields` list — the same choice the
+    // ObjectQL face records at `buildFieldMeta`.
+    for (const bucket of projectedBuckets) {
+      const dimension = this.resolveDimension(cube, bucket.dimension);
+      fields.push({
+        name: bucket.dimension,
+        type: dimension?.type || 'string'
+      });
+    }
     
     if (query.measures) {
       for (const measure of query.measures) {
@@ -990,6 +1142,52 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       fields,
       sql: this.generateSqlFromPipeline(tableName, pipeline) // For debugging
     };
+  }
+
+  /**
+   * [#16178] Run a pipeline whose time dimensions BUCKET, folding the bucket key
+   * in between the pipeline's two halves.
+   *
+   * The fold has to happen in JavaScript. mingo has no expression that produces
+   * the canonical bucket keys (`2026-Q2`, `2026-W23`) and building one out of
+   * `$isoWeek`/`$concat` would be a SECOND implementation of the label rule —
+   * exactly the divergence `checkDateBucketParity` exists to catch, and exactly
+   * what hoisting `bucketDateKey` into `@objectstack/core` was ruled to avoid.
+   * So the pipeline is cut at its `$group`: the `$match` half still runs in the
+   * driver (which is where the rows live, and which is where the tenancy guard
+   * sits), the bucket keys are written onto the selected rows, and the grouping
+   * half runs over those rows with the same mingo the driver would have used.
+   *
+   * `timezone` is `AnalyticsQuery.timezone` — the SAME reference zone
+   * `parseDateRangeString` resolves a `dateRange` preset against, so the window
+   * that selects the rows and the bucket that folds them agree on where a
+   * calendar day starts. Unset means UTC, on both.
+   */
+  private async aggregateWithTimeBuckets(
+    tableName: string,
+    pipeline: Record<string, any>[],
+    timeBuckets: readonly TimeBucket[],
+    timezone?: string,
+  ): Promise<Record<string, any>[]> {
+    const groupIndex = pipeline.findIndex(stage => '$group' in stage);
+    // Stage 3 pushes `$group` unconditionally, so this cannot miss. Stated as a
+    // throw rather than left to a `-1` slicing the pipeline inside out.
+    if (groupIndex < 0) {
+      throw new Error(
+        'Analytics pipeline carries no $group stage to fold a time bucket into (driver-memory).',
+      );
+    }
+    const selected = await this.driver.aggregate(tableName, pipeline.slice(0, groupIndex));
+    for (const row of selected) {
+      for (const bucket of timeBuckets) {
+        row[bucket.bucketKey] = bucketDateKey(
+          readFieldPath(row, bucket.fieldPath),
+          bucket.granularity,
+          timezone,
+        );
+      }
+    }
+    return new Aggregator(pipeline.slice(groupIndex)).run(selected) as Record<string, any>[];
   }
 
   /**
@@ -1477,146 +1675,60 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     return sql.trim();
   }
 
+  /**
+   * The STRING arm of `timeDimensions[].dateRange`, resolved against the ONE
+   * closed vocabulary — or refused (#16322, the driver half of #16041).
+   *
+   * ## What this method stopped doing, and why each half had to go
+   *
+   * It used to be a hand-rolled parser with two branches and a fallback, and
+   * ALL THREE were defects by the time #16041 closed the contract:
+   *
+   *   - `range === 'today'` was the only preset it understood. Every other
+   *     member of the declared vocabulary fell past it — MEASURED on the built
+   *     dist over five probe rows (2020, 2026-08-31, 2026-09-05, now, 2099):
+   *     `today` selected 1/5, and the other twelve selected **5/5, 2099
+   *     included**. So a VALID preset like `last_30_days` was accepted by the
+   *     schema and then silently widened to all of history: the exact defect
+   *     class #16041 abolished at the contract, relocated onto the
+   *     newly-blessed vocabulary.
+   *   - `range.startsWith('last ')` matched a SPACE, a relative dialect
+   *     (`'last 7 days'`) the closed vocabulary does not contain and the
+   *     schema door now refuses. It could never fire for a preset name, which
+   *     spells them `last_7_days`.
+   *   - the `[range, range]` fallback is the silent widening itself, and it is
+   *     what the refusal below replaces. ⛔ It must not come back in any
+   *     spelling: an unresolvable window is a REFUSAL, not a window.
+   *
+   * ## ⛔ The calendar arithmetic did not move here — it left
+   *
+   * #15825's two defects (a LOCAL-midnight boundary rendered as UTC, and
+   * `last N …` arithmetic done on the local calendar) and #16042's dropped
+   * `timezone` were repaired in this method, and are now repaired ONCE for
+   * every analytics face in `@objectstack/core`'s
+   * {@link resolveAnalyticsDateRangeString} — the same package, one file over
+   * from the `{date-macro}` resolver whose tokens it lowers. ⛔ Re-deriving any
+   * of it here is the three-drifting-copies shape the vocabulary module's own
+   * header records; the SQL analytics path calls the same function, which is
+   * what makes "the drivers agree" checkable rather than asserted.
+   *
+   * ## ⭐ What survives unchanged
+   *
+   * `'today'` still resolves to `[that zone's midnight, tomorrow's midnight)`
+   * with `endExclusive: true` — #16179's repair, byte for byte, because the
+   * shared resolver states the same window in the same tokens. The three
+   * rolling `last_N_days` presets end at NOW and stay INCLUSIVE. And the
+   * explicit `[a, b]` array arm never arrives here at all: it is discriminated
+   * at the call site and keeps its published `$lte` reading.
+   *
+   * @throws the ADR-0112 `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` envelope for
+   *   a string outside `DATE_RANGE_PRESETS` — the same code, status and
+   *   wording the schema door and the SQL analytics path answer with, since
+   *   all three call one constructor.
+   */
   private parseDateRangeString(range: string, timezone?: string): ResolvedDateRange {
-    // Simple parser for common date range strings
-    // In production, this would use a proper date range parser
-    //
-    // [#16179] Returns a {@link ResolvedDateRange}, not a bare pair: a window
-    // this function BUILT knows whether its upper bound is inclusive, and that
-    // answer cannot be recovered downstream -- a resolved bound and a caller's
-    // bound are the same `toISOString()` text. Each `return` below states it.
-    //
-    // [#15825] ONE calendar, and it is UTC -- the same one `toISOString()`
-    // renders every bound below on. Two INDEPENDENT defects lived here:
-    //
-    //   1. The window BOUNDARY was `new Date(y, m, d)` -- LOCAL midnight --
-    //      rendered as UTC. Wrong on every day of the year in every non-UTC
-    //      process, with no DST transition needed: measured 2026-09-05, the
-    //      `'today'` bucket ran from the previous 16:00Z at `Asia/Shanghai`,
-    //      from 07:00Z at `America/Los_Angeles` (08:00Z outside its DST).
-    //   2. The `last N ...` legs did their arithmetic on the LOCAL calendar
-    //      (`setDate` / `setMonth` / `setFullYear`) and rendered on the UTC
-    //      one. `setDate` preserves WALL-CLOCK time, so the instant moves
-    //      n x 24h only while every local day in the window is 24 hours
-    //      long; across a DST transition it moves 23h or 25h and the window
-    //      start slips an hour.
-    //
-    // ⛔ They do not fix each other: `setUTCDate` alone leaves the
-    // local-midnight boundary in place, and `Date.UTC` alone leaves the
-    // arithmetic mixed. Each is pinned by its own file, and each was ablated
-    // separately to prove it -- `memory-analytics-date-range-utc-window.test.ts`
-    // (boundary; red in any non-UTC zone, no transition instant needed) and
-    // `memory-analytics-date-range-dst.test.ts` (arithmetic; CANNOT go red at
-    // TZ=UTC, where the two spellings are indistinguishable -- which is
-    // exactly why nothing in CI ever reddened on this).
-    //
-    // UTC is the target calendar, not merely "a consistent one". The rest of
-    // the platform resolves a bare date to the UTC day: `@objectstack/core`'s
-    // `{today}` filter-token macro builds its reference day as
-    // `new Date(Date.UTC(year, month - 1, day))` and falls back to UTC parts
-    // when the context carries no timezone, and `{TODAY()}` in flow templates
-    // resolves to the UTC day (#14852, same two-calendar shape). So the same
-    // analytics question asked through this path and through a flow token no
-    // longer selects different rows in one deployment -- that agreement, not
-    // the hour count, is what this repair restores. ⚠️ That paragraph scopes
-    // itself to a query carrying NO timezone; a query that carries one is
-    // answered on THAT zone's calendar -- see [#16042] below.
-    //
-    // [#16042] The reference TIMEZONE, which this path used to accept and drop.
-    //
-    // `AnalyticsQuery.timezone` is declared optional with no default precisely
-    // because an ABSENT value is a meaningful state that the engine resolves
-    // (`selection.timezone ?? context.timezone ?? 'UTC'`, ADR-0053 Phase 2 —
-    // `service-analytics`' `buildQuery` resolves that whole chain and writes the
-    // ANSWER into `query.timezone` before a driver ever sees it). So a driver
-    // owes the chain's last two links: the value it was handed, else UTC. The
-    // third state -- accepting the field and ignoring it -- is the one that
-    // misleads, and it is what a caller asking `'today'` with
-    // `timezone: 'Asia/Shanghai'` got: the UTC day, silently, with no warning.
-    //
-    // TWO halves, and each needs its own primitive:
-    //
-    //   1. WHICH calendar day "now" is -- `calendarPartsInTzOrUtc(now, tz)`,
-    //      read from the platform tz database. Arithmetic then runs on a UTC
-    //      "proxy" date built from those parts, the `proxyDay()` pattern in
-    //      `@objectstack/core`'s filter-token macros: working in UTC keeps
-    //      `last N months` free of DST jumps, and the zone only decides which
-    //      calendar day the window is anchored to.
-    //   2. WHERE that day BEGINS as an instant -- `zonedDateStartToUtcMs(ymd,
-    //      tz)`, that zone's local midnight. This half is required because the
-    //      bounds here are rendered with `toISOString()` and compared against
-    //      DATETIME values, which is exactly the case ADR-0053 settles in
-    //      `service-analytics`' drill ranges: "`datetime` -> the reference tz's
-    //      MIDNIGHT INSTANT (ISO), because the bucket is defined on that tz's
-    //      calendar"; only a `date`-typed, tz-naive column takes the bare
-    //      `YYYY-MM-DD` calendar bound.
-    //
-    // ⛔ Half 1 alone is NOT the fix, and the failure is silent: it would
-    // anchor to Shanghai's calendar day but cut it at UTC midnight, a window
-    // that is neither the UTC day nor the Shanghai day but an 8-hour-shifted
-    // hybrid -- worse for that caller than the UTC day they get today.
-    // ⛔ Nor is `+ 86_400_000` a next-day boundary once a zone is in play:
-    // measured on `America/New_York`, 2026-03-08 begins at 05:00Z and 2026-03-09
-    // at 04:00Z, so that spring-forward day is 23 hours long.
-    //
-    // NO-TIMEZONE CASE UNCHANGED, by construction: `zonedDateStartToUtcMs`
-    // returns plain UTC midnight for an unset, `'UTC'`, or unknown zone, so
-    // every bound below is byte-identical to #15825's for a query carrying no
-    // timezone -- the common case, and the one this must not disturb. An
-    // unknown zone degrades to UTC rather than throwing, the same call
-    // `calendarPartsInTzOrUtc` makes one line above.
-    const now = new Date();
-    const ref = calendarPartsInTzOrUtc(now, timezone);
-    const today = new Date(Date.UTC(ref.year, ref.month - 1, ref.day));
-    /** That proxy day's `YYYY-MM-DD`, then the instant it BEGINS in `timezone`. */
-    const boundary = (proxy: Date): string =>
-      new Date(zonedDateStartToUtcMs(proxy.toISOString().slice(0, 10), timezone)).toISOString();
-
-    if (range === 'today') {
-      // The next calendar day, via the proxy calendar -- never `+ 86_400_000`.
-      const tomorrow = new Date(today.getTime());
-      tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-      // [#16179] `endExclusive`, and the flag is the whole repair: the upper
-      // bound is where TOMORROW begins, which is the one instant `'today'` must
-      // NOT contain. Compared inclusively it made every day window one instant
-      // too long, so two adjacent days overlapped at midnight and a row stamped
-      // there was counted twice -- silently, with no error and no warning.
-      //
-      // ⛔ Emitting a bare `YYYY-MM-DD` end instead -- the other spelling of
-      // this repair -- is NOT available on this path and the failure would be
-      // silent: `boundary()` renders that zone's midnight INSTANT, and a bare
-      // day would be widened by `nextUtcCalendarDay` and cut at `T00:00:00Z`,
-      // i.e. at UTC midnight, undoing #16042 for every non-UTC caller. Measured
-      // on `Asia/Shanghai`: the window ends at 2026-09-06T16:00:00.000Z, and
-      // the bare-day route would end it eight hours late.
-      return { bounds: [boundary(today), boundary(tomorrow)], endExclusive: true };
-    } else if (range.startsWith('last ')) {
-      const parts = range.split(' ');
-      const num = parseInt(parts[1]);
-      const unit = parts[2];
-      const start = new Date(today);
-      
-      if (unit.startsWith('day')) {
-        start.setUTCDate(start.getUTCDate() - num);
-      } else if (unit.startsWith('week')) {
-        start.setUTCDate(start.getUTCDate() - num * 7);
-      } else if (unit.startsWith('month')) {
-        start.setUTCMonth(start.getUTCMonth() - num);
-      } else if (unit.startsWith('year')) {
-        start.setUTCFullYear(start.getUTCFullYear() - num);
-      }
-      
-      // The upper bound is the current INSTANT, which no zone moves -- and it
-      // is a moment the window REACHES, not one it stops before, so it stays
-      // INCLUSIVE ([#16179] leaves this leg alone). ⚠️ No preset in the declared
-      // vocabulary reaches this branch today: `DATE_RANGE_PRESETS` spells them
-      // `last_7_days`, and `startsWith('last ')` wants a space (#16322).
-      return { bounds: [boundary(start), now.toISOString()], endExclusive: false };
-    }
-
-    // Fallback -- an inclusive pair of the raw string, unchanged and NOT this
-    // card's question (#16041 / #16322 own what an unresolved range matches).
-    return { bounds: [range, range], endExclusive: false };
+    const window = resolveAnalyticsDateRangeString(range, { timezone });
+    return { bounds: [window.start, window.end], endExclusive: window.endExclusive };
   }
 
   private generateSqlFromPipeline(table: string, pipeline: Record<string, any>[]): string {

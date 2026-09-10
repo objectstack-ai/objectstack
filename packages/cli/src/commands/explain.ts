@@ -238,6 +238,12 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
     docsPath: 'ui/app',
   },
 
+  // `BaseQuerySchema` (`spec/src/data/query.zod.ts`) is a plain `z.object`, so an
+  // unknown top-level key here is DROPPED rather than refused — the one open top
+  // level among this catalog's bound entries (closing it is #4001's to schedule).
+  // The two keys are therefore spelled exactly as the schema declares them:
+  // `where` (not `filters`) and `orderBy` (not `sort`). Spelt wrong, a copied
+  // example parses clean and returns unfiltered, unordered rows with no signal.
   query: {
     name: 'Query',
     description: 'Declarative data retrieval definition used for fetching and filtering records from objects.',
@@ -246,16 +252,20 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
     ],
     optional: [
       { name: 'fields', type: 'string[]', description: 'Fields to select' },
-      { name: 'filters', type: 'Filter[]', description: 'Where conditions' },
-      { name: 'sort', type: 'SortConfig[]', description: 'Order by configuration' },
+      { name: 'where', type: 'FilterCondition', description: 'The condition TREE the query filters by — one object, never a `Filter[]`. A field-keyed entry is a condition on that field (a bare value is implicit equality, an object is a map of `$` operators such as `$in` / `$gte` / `$contains`), and `$and` / `$or` / `$not` combine conditions.' },
+      { name: 'orderBy', type: 'SortNode[]', description: 'Sort nodes, each `{ field, order }` with `order` one of `asc` / `desc`. The direction key is spelled `order` — `direction` is rejected by name, because when it was merely dropped the sort fell back to `asc` and, with `limit`, returned a different set of rows under an ordinary success.' },
       { name: 'limit', type: 'number', description: 'Maximum records to return' },
       { name: 'offset', type: 'number', description: 'Pagination offset' },
     ],
     example: `{
   object: 'project_task',
   fields: ['title', 'status', 'assigned_to'],
-  filters: [{ field: 'status', operator: 'eq', value: 'open' }],
-  sort: [{ field: 'created_at', order: 'desc' }],
+  // \`where\` is ONE condition tree, not a \`Filter[]\`: key it by field — a bare value
+  // is implicit equality, an object is a map of \`$\` operators — and combine with
+  // \`$and\` / \`$or\` / \`$not\`.
+  where: { status: 'open', priority: { $in: ['high', 'urgent'] } },
+  // A sort node spells its direction \`order\`, never \`direction\`.
+  orderBy: [{ field: 'created_at', order: 'desc' }],
   limit: 50,
 }`,
     related: ['object', 'field', 'view'],

@@ -21,7 +21,7 @@ counts are sums of the rows they head. Regenerate with
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 11 | 66 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
 | [API Protocol](/docs/references/api) | 31 | 437 | REST contracts, endpoints, routing, realtime, batch, discovery. |
-| [Automation Protocol](/docs/references/automation) | 14 | 74 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
+| [Automation Protocol](/docs/references/automation) | 13 | 73 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Cloud Protocol](/docs/references/cloud) | 11 | 94 | Environments, packages and versions, marketplace, developer portal, tenancy. |
 | [Data Protocol](/docs/references/data) | 29 | 173 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
@@ -29,11 +29,11 @@ counts are sums of the rows they head. Regenerate with
 | [Kernel Protocol](/docs/references/kernel) | 30 | 162 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
 | [QA Protocol](/docs/references/qa) | 1 | 8 | Declarative test suites — scenarios, steps, actions and assertions. |
 | [Security Protocol](/docs/references/security) | 5 | 30 | Permission sets, row-level security, sharing rules, tenancy posture. |
-| [Shared Protocol](/docs/references/shared) | 9 | 28 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
+| [Shared Protocol](/docs/references/shared) | 9 | 29 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 33 | 272 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 153 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **199** | **1583** | 14 protocol modules |
+| **Total** | **198** | **1583** | 14 protocol modules |
 
 ---
 
@@ -103,7 +103,7 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 
 ## Automation Protocol
 
-**Source:** `packages/spec/src/automation/` · **Import:** `@objectstack/spec/automation` · **14 pages, 74 schemas**
+**Source:** `packages/spec/src/automation/` · **Import:** `@objectstack/spec/automation` · **13 pages, 73 schemas**
 
 Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records.
 
@@ -118,7 +118,6 @@ Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execu
 | [`flow-function.zod.ts`](/docs/references/automation/flow-function) | `FlowFunctionEffect` |
 | [`io-node-config.zod.ts`](/docs/references/automation/io-node-config) | `HttpConfig`, `NotifyConfig` |
 | [`node-executor.zod.ts`](/docs/references/automation/node-executor) | `ActionCategory`, `ActionDescriptor`, `ActionParadigm`, `NodeExecutorDescriptor`, `WaitEventType`, `WaitExecutorConfig`, `WaitResumePayload`, `WaitTimeoutBehavior` |
-| [`schedule-organization.zod.ts`](/docs/references/automation/schedule-organization) | `ScheduleOrganization` |
 | [`schemaless-node-config.zod.ts`](/docs/references/automation/schemaless-node-config) | `DecisionCondition`, `DecisionConfig`, `ScriptConfig`, `SubflowConfig` |
 | [`state-machine.zod.ts`](/docs/references/automation/state-machine) | `ActionRef`, `GuardRef`, `StateMachine`, `StateNode`, `Transition` |
 | [`time-relative-trigger.zod.ts`](/docs/references/automation/time-relative-trigger) | `TimeRelativeTrigger` |
@@ -287,7 +286,7 @@ Permission sets, row-level security, sharing rules, tenancy posture.
 
 ## Shared Protocol
 
-**Source:** `packages/spec/src/shared/` · **Import:** `@objectstack/spec/shared` · **9 pages, 28 schemas**
+**Source:** `packages/spec/src/shared/` · **Import:** `@objectstack/spec/shared` · **9 pages, 29 schemas**
 
 Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums.
 
@@ -295,7 +294,7 @@ Primitives used across every protocol — identifiers, HTTP, expressions, error 
 | :--- | :--- |
 | [`enums.zod.ts`](/docs/references/shared/enums) | `IsolationLevelEnum`, `MutationEventEnum`, `SortDirectionEnum`, `SortItem` |
 | [`epoch.zod.ts`](/docs/references/shared/epoch) | `EpochMs` |
-| [`expression.zod.ts`](/docs/references/shared/expression) | `CronExpressionInput`, `EvaluatedExpression`, `Expression`, `ExpressionDialect`, `ExpressionInput`, `ExpressionMeta`, `Predicate`, `PredicateInput`, `TemplateExpressionInput` |
+| [`expression.zod.ts`](/docs/references/shared/expression) | `CronExpressionInput`, `EvaluatedExpression`, `EvaluatedExpressionInput`, `Expression`, `ExpressionDialect`, `ExpressionInput`, `ExpressionMeta`, `Predicate`, `PredicateInput`, `TemplateExpressionInput` |
 | [`http.zod.ts`](/docs/references/shared/http) | `CorsConfig`, `HttpMethod`, `HttpMethodSubset`, `HttpRequest`, `RateLimitConfig`, `StaticMount` |
 | [`identifiers.zod.ts`](/docs/references/shared/identifiers) | `MetadataItemName`, `SnakeCaseIdentifier`, `SystemIdentifier` |
 | [`mapping.zod.ts`](/docs/references/shared/mapping) | `FieldMapping` |

@@ -52,10 +52,19 @@
  * now total, answering `undefined` for the shape. This card's route is
  * unchanged: `isoFromValidDate` in `protocol.ts` converts the ONE measured
  * shape (a valid `Date`) and returns every other shape — including an Invalid
- * `Date` — UNCHANGED, which is what `listCommits` promises its callers. §D
- * below stays the pin on that promise: it goes red the moment anyone swaps
- * the other spelling into this site, now the separately-tracked consolidation
- * decision #16422.
+ * `Date` — UNCHANGED, which is what `listCommits` promises its callers.
+ *
+ * ⚠️ #16422 has now RULED the consolidation, and this site was held OUT of it
+ * on the strength of that promise. The card collapsed the family's other four
+ * call sites into `canonicalIsoInstant` and deleted both sibling definitions;
+ * `protocol.ts` keeps its copy, and §D below is no longer a placeholder for a
+ * pending decision but the standing pin on a decided one. Measured across the
+ * seven inputs that distinguish the two helpers, this site is byte-identical
+ * before and after that card — the swap here would have ERASED an Invalid
+ * `Date` from the response (`undefined`, the one answer [ADR-0053 D-F3]
+ * refuses) and handed a `number` or an opaque object to
+ * `compareAuditInstants` as `String(value)` instead of verbatim, reordering
+ * rows this seam deliberately leaves alone.
  *
  * ## Reverse verification, direction predicted BEFORE running
  *
@@ -180,7 +189,12 @@ describe('[#14038] listCommits emits the ISO-8601 string createdAt is declared a
          * invented rendering. This case is what makes that a PIN rather than
          * a claim: it goes red the moment `canonicalIsoInstant` (or any
          * spelling that reaches `.toISOString()` unconditionally) is swapped
-         * into `listCommits`. The consolidation is #16422.
+         * into `listCommits`.
+         *
+         * ⚠️ #16422 ruled the consolidation and held this site OUT of it, so
+         * this pin now guards a DECIDED contract rather than an open one. It
+         * stays exactly as written — the only pin of the three that did not
+         * need rewriting, because the behaviour it asserts did not move.
          */
         it('hands the value through unchanged instead of raising RangeError', async () => {
             const invalid = new Date(NaN);

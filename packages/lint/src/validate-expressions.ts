@@ -1194,11 +1194,14 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
      * ⚠️ Deliberately NOT `predicateSlotRefusal`, which the declared-slot arm
      * above uses. A ledger `predicate` slot is declared `z.string()`; neither
      * structural slot is — `FlowEdgeSchema.condition` is
-     * `ExpressionInputSchema`, so an envelope is the shape the parse itself
-     * produces, and a node's `config` is an open `z.record` that passes one
-     * through verbatim. Both are admitted here; a value that is neither text
-     * nor an expression is not, because the evaluator reads it as an EMPTY
-     * condition and answers a silent `false`.
+     * `EvaluatedExpressionInputSchema` (#15807), so an envelope is the shape
+     * the parse itself produces, and a node's `config` is an open `z.record`
+     * that passes one through verbatim. Both are admitted here; a value that
+     * is neither text nor an envelope carrying a string `source` is not,
+     * because the evaluator reads it as an EMPTY condition and answers a
+     * silent `false` — since #15807 that includes an `ast`-only envelope, which
+     * the edge schema refuses one tier earlier and which this pass is the only
+     * producer-side gate for on `config.condition`.
      *
      * @returns whether the slot was refused, so the caller can skip the
      *   value-reading passes that would otherwise re-report it as an empty one.

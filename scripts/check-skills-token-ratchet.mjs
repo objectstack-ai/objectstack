@@ -51,7 +51,7 @@
  *
  *   - DETERMINISM. A ratchet's numbers are pinned constants. A tokenizer's
  *     output is a function of its vocabulary version, so a dependency bump
- *     would silently re-price all eleven ceilings — a ratchet that moves when
+ *     would silently re-price every ceiling — a ratchet that moves when
  *     nobody edited a file is not a ratchet.
  *   - NO DEPENDENCY. The workspace carries no tokenizer today (checked at
  *     landing: no `tiktoken` / `gpt-tokenizer` / `gpt-3-encoder` in any
@@ -329,37 +329,12 @@ export const CEILINGS = new Map([
   // re-implementing a platform rule, and no landing of the half that fits.
   // Nothing in this file said any of it. +280 tokens, 1 absorbed, ceiling +279.
   ['skills/objectstack-platform/SKILL.md', 12984],
-  // 14239 -> 14391: the pull-directed split-resolution order joined the decision
-  // frame (maintainer ruling 2026-08-27, verbatim and untranslated: 「tong y 4」 —
-  // accepting the four-rule set), and this file carries one enforced frame copy
-  // (check:skill-frame-sync COPIES), so the rule ships to third-party installers
-  // with the frame it amends — the #5130 drift is exactly a frame-semantics change
-  // that skipped this mirror. +152 tokens across both copies, compressed to the
-  // minimal anchor form; the raising PR's body carries the arithmetic.
-  // 14391 -> 14549: the axis WEIGHTING joined the decision frame — long-term
-  // soundness carries the highest weight, at least 50%. Maintainer ruling
-  // 2026-09-01, verbatim and untranslated (kept on ONE line, #11106: a governed
-  // quotation that soft-breaks stops being findable by the things that grep it):
-  // 「四维分析中，长期合理应该权重最高，至少50%」
-  // Same shape and same reason as the +152 row above it: this file carries one
-  // enforced frame copy (check:skill-frame-sync COPIES), and a rule that
-  // changes WHICH RECOMMENDATION the frame yields is exactly the #5130 drift
-  // class if it ships to third-party installers with only the old tie-break —
-  // the customer's agent would weigh the axes co-equally while this repo weighs
-  // long-term ≥50%, and no report would reveal it. +158 tokens across both
-  // copies, against +152 for the comparable 2026-08-27 rule. Compressed twice
-  // before landing: the first cut measured +242, and the provenance was then
-  // removed on the #5451 route-B convention — the published copy carries the
-  // RULE without this repo's dates or quoted rulings (verified: the file holds
-  // zero of each), so the verbatim ruling lives in the internal copies and in
-  // the raising PR's body. No genuine deletion was available: the rule makes no
-  // existing sentence redundant, and a re-wrap moves no tokens and pays nothing.
-  // 14549 -> 9708: re-locked at the landed count after the #14296 item-4 split —
-  // the developer-agent operating template moved to `rules/dev-template.md`
-  // (its own row below); the one gate-pinned copy of the decision frame stays
-  // in this file (check:skill-frame-sync reads its copies by path). Lowered,
-  // not raised: shrink-only, no ruling needed for this direction.
-  ['skills/objectstack-pm-dispatch/SKILL.md', 9708],
+  // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
+  // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
+  // the maintainer deleted the published PM skill whole (verbatim:
+  // 「发布版 skills/objectstack-pm-dispatch 删」). A row for a file the walk cannot
+  // read is red, not a skip (#4690), so the rows go with the files; the bundle
+  // total drops by the two ceilings, which is the ratchet's ordinary direction.
   ['skills/objectstack-query/SKILL.md', 5552], //       -17 (was 5569)
   // 25125 -> 25143: the CRM UI Blueprint — the catalog's module-completeness
   // list, and the only place an agent is told what a finished module contains —
@@ -450,12 +425,6 @@ export const CEILINGS = new Map([
 
   // objectstack-automation
   ['skills/objectstack-automation/evals/approvals/test-revise-loop.md', 1329],
-
-  // objectstack-pm-dispatch — the #14296 item-1/item-4 split (2026-09-02, maintainer
-  // ruling 「其他同意」 adopting 1A/4A): the developer-agent operating template
-  // moved out of SKILL.md verbatim, minus the decision-frame block the frame
-  // gate pins to the entry. Pinned AT its landed count, zero headroom.
-  ['skills/objectstack-pm-dispatch/rules/dev-template.md', 1838],
 
   // objectstack-ui — the two authored eval files; its `references/react-blocks.md`
   // is generator-owned and carries no row here on purpose (see the boundary
@@ -799,8 +768,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the internal-id-strip basis sha is recorded': 1,
   'the re-measure lowered the SKILL.md subtotal': 1,
   'the #12392 extension basis sha is recorded': 1,
-  'the extension priced more than the eleven SKILL.md files': 1,
+  'the extension priced more than the SKILL.md files alone': 1,
   'every SKILL.md still carries its own ceiling': 1,
+  'the catalog has SKILL.md files to price, so the pin above is not vacuous': 1,
   'the report prints a whole-bundle total': 1,
   'the report prints a per-file net delta against the ceiling': 1,
   'the report names the counting convention': 1,
@@ -843,6 +813,12 @@ function selfTest() {
   }
 
   const skillMdCeilings = [...CEILINGS.entries()].filter(([p]) => p.endsWith('/SKILL.md'));
+  // The catalog's SKILL.md population, read off the REAL tree the way the gate
+  // reads it — never a typed count. A literal here (it was 11) turns a skill
+  // deleted by ruling into a self-test red that names no file, and a skill
+  // added without a row into a green: the walk is what says how many there are,
+  // and the case below asks only that every one of them is priced.
+  const skillMdOnDisk = discoverBundleFiles().filter((p) => /^skills\/[^/]+\/SKILL\.md$/.test(p)).length;
 
   const cases = [
     // ── ratchet semantics ────────────────────────────────────────────────
@@ -999,8 +975,9 @@ function selfTest() {
     // The extension's whole point, as a number: the priced population is no
     // longer one file per skill. If a future edit collapses it back, this is
     // the case that says so out loud.
-    ['the extension priced more than the eleven SKILL.md files', CEILINGS.size > 11, true],
-    ['every SKILL.md still carries its own ceiling', skillMdCeilings.length, 11],
+    ['the extension priced more than the SKILL.md files alone', CEILINGS.size > skillMdCeilings.length, true],
+    ['every SKILL.md still carries its own ceiling', skillMdCeilings.length, skillMdOnDisk],
+    ['the catalog has SKILL.md files to price, so the pin above is not vacuous', skillMdOnDisk > 0, true],
 
     // ── the report line ──────────────────────────────────────────────────
     ['the report prints a whole-bundle total',

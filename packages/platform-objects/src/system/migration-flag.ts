@@ -220,11 +220,12 @@ export async function recordDataMigrationRun(
  * answer for every id that has one is a DIFFERENT command. A two-way branch
  * answered both at once: it read the file id and gave every other id
  * `value-shapes` by default. That default was silently wrong the moment a third
- * id joined {@link CREATION_ATTESTED_MIGRATION_IDS} — `adr-0030-notification-event`
- * would have been told to run `os migrate value-shapes --apply`, a command that
- * does not attest it, does not clear it, and has nothing to do with it (there is
- * no `os migrate notification-event` at all; that cut-over is an operator call
- * with no self-check, ruled on `NOTIFICATION_EVENT_MIGRATION_ID`'s docblock).
+ * id joined {@link CREATION_ATTESTED_MIGRATION_IDS}: the ADR-0030 notification
+ * cut-over (`adr-0030-notification-event`, since RETIRED whole — no runner, no
+ * membership) would have been told to run `os migrate value-shapes --apply`, a
+ * command that does not attest it, does not clear it, and has nothing to do
+ * with it. The member is gone; the defect the branch encoded is not, and this
+ * map is what keeps it gone.
  *
  * ⛔ So a new member must NOT inherit a remedy. An id absent from this map is
  * never-contradictable *by this evidence* — a value-shape tally says nothing

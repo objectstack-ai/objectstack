@@ -78,6 +78,23 @@ export default defineConfig({
         find: /^@objectstack\/service-automation$/,
         replacement: path.resolve(__dirname, '../services/service-automation/src/index.ts'),
       },
+      // [#16534] `auth-rotated-session-token.test.ts` drives the SDK's
+      // credential bookkeeping against the REAL better-auth pipeline, so it
+      // takes VALUE imports on the server that rotates the session
+      // (`AuthManager`) and on the identity object definitions that pipeline
+      // stores its rows in. Same reason as every entry above — a unit pin is a
+      // verdict about the SOURCE in this checkout, and `check:test-source-alias`
+      // dictates exactly this remedy because its `KNOWN_UNALIASED_TEST_IMPORTS`
+      // registry is ⛔ SHRINK-ONLY. Anchored (`^…$`, array form) so neither
+      // entry can swallow a subpath specifier and resolve it THROUGH a file.
+      {
+        find: /^@objectstack\/plugin-auth$/,
+        replacement: path.resolve(__dirname, '../plugins/plugin-auth/src/index.ts'),
+      },
+      {
+        find: /^@objectstack\/platform-objects\/identity$/,
+        replacement: path.resolve(__dirname, '../platform-objects/src/identity/index.ts'),
+      },
     ],
   },
 });

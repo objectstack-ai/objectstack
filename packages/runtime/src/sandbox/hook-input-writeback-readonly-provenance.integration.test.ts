@@ -145,7 +145,15 @@ describe('#14760 — an untouched readonly key is not laundered by the sandbox w
     booted = null;
   });
 
-  async function boot(source: string): Promise<Boot> {
+  /**
+   * `opts.preHook` [#16344] registers a CODE hook ahead of the body, on the raw
+   * envelope (`ctx.input.data`). It exists so a case can put an object-valued
+   * readonly key on the payload the way the platform is allowed to — a hook's
+   * own write, which #5591/#14088 keep and this card did not touch — instead of
+   * the way a caller no longer can. See the write-THROUGH control for why that
+   * distinction became load-bearing.
+   */
+  async function boot(source: string, opts?: { preHook?: (ctx: any) => void }): Promise<Boot> {
     const dir = mkdtempSync(join(tmpdir(), 'os-14760-'));
     const driver = new SqlDriver({
       client: 'better-sqlite3',
@@ -174,6 +182,18 @@ describe('#14760 — an untouched readonly key is not laundered by the sandbox w
       events: ['beforeUpdate'],
       body: { language: 'js', source, capabilities: ['log'] },
     } as any], { packageId: 'guard' });
+
+    // ⛔ Registered AFTER `bindHooksToEngine` and under a DIFFERENT packageId:
+    // the binder is hot-reload friendly and opens by calling
+    // `unregisterHooksByPackage(opts.packageId)`, so a pre-hook registered
+    // before it under `'guard'` is silently dropped — measured, as the body
+    // faulting on an absent key. Ordering within the event is by PRIORITY
+    // (lower first, default 100), never by registration order, so priority 1
+    // still puts this ahead of the body.
+    if (opts?.preHook) {
+      engine.registerHook('beforeUpdate', async (ctx: any) => { opts.preHook!(ctx); },
+        { object: 'guard_task', priority: 1, packageId: 'guard-prehook' });
+    }
 
     booted = { engine, driver, seen, dir };
     return booted;
@@ -295,7 +315,29 @@ describe('#14760 — an untouched readonly key is not laundered by the sandbox w
   }, 60000);
 
   it('write-THROUGH control: leg 2 still carries an object the body mutated in place', async () => {
-    const { engine, driver, seen } = await boot(WRITES_THROUGH_SOURCE);
+    // [#16344] RE-ROUTED, and the subject is unchanged. This control asks one
+    // thing: can leg 2 carry a mutation made THROUGH an object-valued readonly
+    // key, which leg 1 (the `set` trap on `ctx.input`) structurally cannot see?
+    // It used to reach that question by having the CALLER put the object on the
+    // payload. Since #16344 a caller cannot: a caller-supplied static `readonly`
+    // value is hidden from `beforeUpdate`, so `ctx.input.locked_meta` would be
+    // `undefined` and the body would fault on the dereference — measuring the
+    // hide, not the write-back.
+    //
+    // So the object arrives the way the platform is still allowed to put it
+    // there: a code hook's own write, ahead of the body. That is #5591/#14088
+    // semantics, which this card deliberately did not move, and it leaves the
+    // control strictly sharper — the value under test is now unambiguously
+    // hook-authored, so a pass cannot be explained by a caller value leaking
+    // through. Leg 1 still cannot see the body's in-place mutation (the body
+    // assigns no readonly key), so leg 2 is still the only thing that can carry
+    // it, which is the whole assertion.
+    //
+    // The old path — a caller supplying it — is not lost: it is pinned as its
+    // own case below, with the verdict #16344 gives it.
+    const { engine, driver, seen } = await boot(WRITES_THROUGH_SOURCE, {
+      preHook: (ctx) => { ctx.input.data.locked_meta = { who: 'platform' }; },
+    });
     await seed(driver);
     const seeded = await row(engine);
     seen.splice(0);
@@ -303,7 +345,6 @@ describe('#14760 — an untouched readonly key is not laundered by the sandbox w
     await engine.update('guard_task', {
       id: seeded.id,
       status: 'done',
-      locked_meta: { who: 'caller' },
       locked_note: 'CALLER',
     } as any);
 
@@ -313,9 +354,84 @@ describe('#14760 — an untouched readonly key is not laundered by the sandbox w
     // `ctx.input.locked_meta.who = 'hook'` trips no trap on `ctx.input`, so leg
     // 1 cannot list it: only the normalised leg-2 comparison can carry it, and
     // only a carried key is recorded as hook-written and kept by the strip.
+    // `'hook'` rather than `'platform'` is what proves the body's in-place
+    // mutation survived — a write-back that had gone silent would leave the
+    // pre-hook value standing and is caught here.
     expect(asJson(after.locked_meta)).toEqual({ who: 'hook' });
     expect(after.locked_note).toBe('SEEDED');
     expect(after.touched_by).toBe('hook');
+  }, 60000);
+
+  it('[#16344/#17219] a body reaching THROUGH a caller-supplied readonly key is refused — and the refusal names the key, the reason and the remedy', async () => {
+    // The old path of the control above, kept and re-judged rather than
+    // deleted, because the behaviour change is the point of the card and this
+    // is the one place in the repo that measures it end to end through a REAL
+    // sandbox: QuickJS, the flat-input proxy, the #14088 recorder and the strip.
+    //
+    // The caller forges the readonly `locked_meta`. Before #16344 the body saw
+    // it, mutated it in place, and the mutation PERSISTED — a stored value the
+    // caller steered through a column it may not write, which is this card's
+    // defect wearing its sandbox costume. Now the key is simply not on the
+    // hook's record, so `ctx.input.locked_meta.who = 'hook'` faults.
+    //
+    // ⚠️ That fault is a REFUSAL, not a silent no-op: a `body` hook's default
+    // `onError` is `abort`, so the caller's whole write is rejected and the row
+    // is untouched. Loud beats silent — and #17219 supplied the second half the
+    // refusal was missing. Measured here before that card, through this very
+    // harness, at both doors:
+    //
+    //   direct  SandboxError: hook 'guard_task_body' threw:
+    //             TypeError: cannot set property 'who' of undefined
+    //   REST    500 {"error":"Internal server error","code":"INTERNAL_ERROR"}
+    //
+    // The REST reading is the worse one and it is the door an author authors
+    // against: a leading `TypeError:` is correctly classified as a crash
+    // (#7543) and sanitised, so the author was told nothing at all. The engine
+    // now names the withheld key at the dispatch site — it is the only actor
+    // that can tell "the platform took this away" from "nobody sent it".
+    //
+    // ⛔ Still no `ctx.submitted` on the sandbox face: that face is assembled
+    // key by key and the shape was measured and refused in PR #17195. The
+    // supported source for a derived column is `ctx.previous`, which is what
+    // the message now says.
+    const { engine, driver } = await boot(WRITES_THROUGH_SOURCE);
+    await seed(driver);
+    const seeded = await row(engine);
+
+    const err: any = await engine.update('guard_task', {
+      id: seeded.id,
+      status: 'done',
+      locked_meta: { who: 'caller' },
+      locked_note: 'CALLER',
+    } as any).then(() => null, (e) => e);
+
+    // ⛔ The ENVELOPE, not `toThrow`: a bare "it threw" passes for the raw
+    // `TypeError` this card exists to replace, which is how the old assertion
+    // here stayed green through the whole defect.
+    expect(err).toBeTruthy();
+    // ① the withheld key, ② withheld BY THE PLATFORM rather than absent by
+    // accident, ③ the documented remedy — the three the card requires.
+    expect(err.message).toContain('`locked_meta`');
+    expect(err.message).toContain('withheld by the platform, not missing by accident');
+    expect(err.message).toContain('`ctx.previous.locked_meta`');
+    // ④ and the status that carries all of the above past `mapDataError`'s
+    //    script-fault sanitiser instead of into a blank 500.
+    expect(err.status).toBe(400);
+    // ⛔ Deliberately NOT a `code`: this rides the existing "message verbatim,
+    // no code" 400 channel a body's own authored refusal already uses. A
+    // dedicated ledger entry is a new PUBLISHED member and a separate decision.
+    expect(err.code).toBeUndefined();
+    // The original fault survives inside the message — an author debugging the
+    // body still gets the line that actually threw.
+    expect(err.message).toContain("cannot set property 'who' of undefined");
+
+    const after = await row(engine);
+    // ⭐ The verdict that matters: NOTHING the caller sent reached the row —
+    // not the forged readonly value, and not the writable `status` either,
+    // because the write was refused whole.
+    expect(asJson(after.locked_meta)).toEqual({ seeded: true });
+    expect(after.locked_note).toBe('SEEDED');
+    expect(after.status).toBe('open');
   }, 60000);
 });
 

@@ -7,8 +7,13 @@
 //   - data fidelity   : runCrudVerification — author → write → read → assert
 //   - authorization   : runRlsProofs        — "you can't write what you can't read"
 
-export { bootStack } from './harness.js';
+export { bootStack, bootStackOnce } from './harness.js';
 export type { VerifyStack, BootOptions } from './harness.js';
+
+// The in-process handle on the booted stack (hotcrm#1579 step 5a): every
+// `VerifyStack` carries it; these are its types and its one predicate.
+export { isVerifyRefusal } from './handle.js';
+export type { VerifyHandle, VerifyRefusal, AsUser, FlowRun, FlowRunRef, EngineRow } from './handle.js';
 
 export { deriveCrudCases, fillRelationalRefs } from './derive.js';
 export type { CrudCase, DerivedAssert, AssertKind, RelationalRef } from './derive.js';
