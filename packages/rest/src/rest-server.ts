@@ -640,6 +640,57 @@ export const GLOBAL_SEARCH_PARAMS: readonly string[] = [
     'q', 'query', 'objects', 'limit', 'perObject',
 ];
 
+/**
+ * [#16674] Which `services.*` slot each `routes.*` key is the address OF.
+ *
+ * `/discovery` states the same fact twice -- `routes.X` (the flat convenience
+ * map) and `services.Y.route` (the per-slot entry) -- and the discovery handler
+ * below rewrites only the first half to the paths this server actually mounts.
+ * Measured on this file's own composition harness with
+ * `crud: { dataPrefix: '/objects' }`: `routes.data` answered `/api/v1/objects`
+ * while `services.data.route` still answered `/api/v1/data`, a path with
+ * nothing mounted on it -- one document, one deployment, two different data
+ * addresses (AGENTS.md "Route & surface ownership" #4: a machine-readable
+ * surface must not lie, and it must not lie to itself either).
+ *
+ * The mirror this table drives is deliberately a PROJECTION of the finished
+ * `routes` map, never a second computation of the same paths -- the producer
+ * learned that in #14646 ("two derivations of one fact is how `routes` and
+ * `services` drift"), and re-deriving `${realBase}${dataPrefix}` here would
+ * re-open the very gap this closes, one key over.
+ *
+ * Read each pair as *the address of one thing*, never as "these names look
+ * alike": `notifications` maps to the `notification` slot because that is the
+ * spelling difference the producer's own `serviceToRouteKey` carries, and
+ * `storage` names TWO slots because `file-storage` is the deprecated v17 alias
+ * the producer mirrors VERBATIM off the canonical row (#9683) -- updating only
+ * the canonical one would turn a byte-equal copy into a second opinion.
+ *
+ * Route keys with no slot behind them are absent on purpose, not by oversight:
+ * `packages` (the `package` service is deliberately NOT a `CoreServiceName`
+ * slot, so there is no `services.package` entry to mirror onto, #6633),
+ * `datasources`, `email`, `mcp` and `discovery` (surfaces this server mounts
+ * itself, which the protocol's service map never described), and `approvals`
+ * (declared in `ApiRoutesSchema`, emitted by neither producer). `services.search`
+ * is the mirror image: a slot that declares a route with no `ApiRoutesSchema`
+ * key to follow. `discovery-services-route-follows-mount.test.ts` holds this
+ * table complete against the producer, so a newly routed slot fails that pin
+ * instead of silently opting out of the mirror.
+ */
+export const DISCOVERY_ROUTE_KEY_TO_SERVICE_SLOTS: Readonly<Record<string, readonly string[]>> = {
+    data: ['data'],
+    metadata: ['metadata'],
+    ui: ['ui'],
+    auth: ['auth'],
+    analytics: ['analytics'],
+    automation: ['automation'],
+    ai: ['ai'],
+    i18n: ['i18n'],
+    notifications: ['notification'],
+    realtime: ['realtime'],
+    storage: ['storage', 'file-storage'],
+};
+
 /** Platform object backing async import jobs (see sys-import-job.object.ts). */
 const IMPORT_JOB_OBJECT = 'sys_import_job';
 /** Cap on per-row results persisted on the job (failures first). */
@@ -4594,6 +4645,55 @@ export class RestServer {
                         );
                         if (emailBase) discovery.routes.email = emailBase;
                         else delete discovery.routes.email;
+
+                        // [#16674] Bring the OTHER half of the document in line
+                        // with the same mounted paths. Everything above rewrites
+                        // `discovery.routes.*`; `discovery.services.*.route` is
+                        // the same address stated per slot, and it was never
+                        // brought along -- so a deployment that moved a prefix
+                        // got a document that contradicted itself, and the
+                        // `services` half pointed at a path with nothing on it.
+                        //
+                        // A PROJECTION of the finished `routes` map, key by key
+                        // (`DISCOVERY_ROUTE_KEY_TO_SERVICE_SLOTS` above), so the
+                        // two halves cannot state different answers whatever a
+                        // future substitution does to `routes`. The three guards
+                        // are what keep a DEFAULT deployment byte-identical --
+                        // the whole point of the fix is that it moves only the
+                        // values that are already wrong:
+                        //
+                        //   1. only a slot the producer actually emitted, and
+                        //   2. only one that already declares a `route` -- a
+                        //      route-less slot (`cache`/`queue`/`job`, an
+                        //      unmounted `realtime` channel) must not GAIN a
+                        //      route key here: "no HTTP surface" is a fact this
+                        //      handler does not get to overwrite (#4318, D12),
+                        //      and inventing the key would also reorder the
+                        //      entry for every reader diffing the document;
+                        //   3. only from a route key that survived the pass --
+                        //      a deleted or absent `routes.X` leaves the slot
+                        //      alone rather than blanking it. Withdrawing an
+                        //      advertisement is the ADR-0076 D12 question
+                        //      #4318 owns, not this card's.
+                        //
+                        // On a stock boot every write here assigns the string
+                        // that was already there, which is why the default
+                        // document does not move by a byte.
+                        const advertisedServices = discovery.services as
+                            | Record<string, { route?: string } | undefined>
+                            | undefined;
+                        if (advertisedServices) {
+                            const mountedRoutes = discovery.routes as unknown as Record<string, unknown>;
+                            for (const [routeKey, slots] of Object.entries(DISCOVERY_ROUTE_KEY_TO_SERVICE_SLOTS)) {
+                                const mounted = mountedRoutes[routeKey];
+                                if (typeof mounted !== 'string' || mounted.length === 0) continue;
+                                for (const slot of slots) {
+                                    const entry = advertisedServices[slot];
+                                    if (!entry || typeof entry.route !== 'string') continue;
+                                    entry.route = mounted;
+                                }
+                            }
+                        }
                     }
 
                     // Cross-object atomic batch capability (#3298). `declared ===
