@@ -686,6 +686,12 @@ export interface ServerReadyOptions {
    * Credentials of the dev admin seeded on an empty DB this boot (dev only).
    * When present, the banner surfaces them so backend debugging never has to
    * guess the login. Absent when nothing was seeded.
+   *
+   * [#17081] The banner also says what this account SEES, because it is the
+   * only credential a first-run operator is given and it holds no app-declared
+   * capability — in an app that gates navigation on `requiredPermissions` it is
+   * the account that renders an empty menu. See the render site in
+   * {@link printServerReady} for the wording and the restraints on it.
    */
   seededAdmin?: { email: string; password: string };
   /**
@@ -905,6 +911,46 @@ export function printServerReady(opts: ServerReadyOptions) {
       chalk.bold.green(`${opts.seededAdmin.email} / ${opts.seededAdmin.password}`),
     );
     console.error(chalk.dim('      seeded on empty DB · dev only — do not use in production'));
+    // [#17081] Say what this account SEES. It is the only credential a
+    // first-run operator is handed, and the banner used to stop at the line
+    // above — which asserts a login and says nothing about its audience. The
+    // account's standing is `admin_full_access`
+    // (`ADMIN_FULL_ACCESS_CAPABILITIES`, `@objectstack/spec/identity`): every
+    // PLATFORM capability (`setup.access`, `studio.access`, …) plus the `'*'`
+    // view-all/modify-all record bits — and NO app-declared capability, because
+    // a capability an app declares is the app's to grant. So in any app that
+    // gates its apps/tabs/nav on `requiredPermissions` (the `/me/apps` and
+    // `/meta/app` filters), this is by construction the account that resolves
+    // to an empty menu. Measured downstream on `objectstack-ai/ats`: of five
+    // personas, the four the app seeds each render their group and the one the
+    // banner prints renders none — and the operator read the empty shell as a
+    // broken product rather than as a scoped account.
+    //
+    // ⚠️ Three deliberate restraints, each ADR-0115's `:93` amendment applied
+    // here rather than routed around:
+    //   • DIM, not a warning. That paragraph excluded the dev-admin seed from
+    //     the `OS_ALLOW_DEV_PLUGIN` hazard set because "a warning about a
+    //     non-event spends the attention the real ones need". The exclusion is
+    //     KEPT, not overturned: these lines print only inside
+    //     `if (opts.seededAdmin)` — i.e. only when the seed actually fired and
+    //     the operator is holding the credential, so the subject is an event,
+    //     not a non-event — and they add no new line where there was none,
+    //     they finish a line already printed. A yellow `⚠` here would spend
+    //     precisely the attention that paragraph is protecting.
+    //   • It names a REACHABLE route. The same paragraph's rule is that a
+    //     degraded state must be branded "where an operator looks"; a route
+    //     that 404s would be that defect wearing the fix's clothes.
+    //     `Setup → Users` is `SETUP_APP` (`requiredPermissions:
+    //     ['setup.access']`, which this account holds) → the `nav_users`
+    //     contribution (`sys_user`, ungated), whose detail page carries the
+    //     "Grant permission set" related list. Pinned against those
+    //     declarations in `format.server-ready-dev-admin-audience.test.ts`, so
+    //     a rename there cannot leave this sentence pointing at nothing.
+    //   • It changes no seed. What the first run CREATES is a product-shape
+    //     decision and stays exactly as it was; only the banner's words move.
+    console.error(chalk.dim('      platform admin — Setup, Studio and every record, but NO app-declared capability, so'));
+    console.error(chalk.dim('      an app that gates navigation on requiredPermissions may show it an empty menu; grant'));
+    console.error(chalk.dim('      it a permission set under Setup → Users, or sign in as an account your app seeds'));
   }
   console.error('');
   // #8978 — name what actually booted, never a file that was not read.
