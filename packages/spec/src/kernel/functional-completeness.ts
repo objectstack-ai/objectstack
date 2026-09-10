@@ -19,7 +19,7 @@
  * duplicate rules onto it so the AI-build path cannot drift from the framework
  * (ADR-0078 §2 — the path-asymmetry the ADR exists to kill).
  *
- * ## Discipline: every rule here cites the runtime line that makes it true
+ * ## Discipline: every rule here cites the runtime site that makes it true
  *
  * The completeness audit's scariest candidate (a "fail-open sharing rule")
  * collapsed on a three-file read, and this campaign shipped four confidently
@@ -28,12 +28,16 @@
  * recorded with the evidence that exempts it. The codebase can be asked;
  * these were:
  *
- * - `summary` w/o `summaryOperations` → `objectql/engine.ts:3001`
+ * - `summary` w/o `summaryOperations` →
+ *   `packages/objectql/src/engine.ts#buildSummaryIndex`, verbatim
  *   `if (d?.type !== 'summary' || !d.summaryOperations) continue;`
- * - `formula` w/o `expression` → `objectql/engine.ts:346` builds the formula
- *   plan only from fields WITH an expression; a bare formula never computes.
- * - `lookup`/`master_detail` w/o `reference` → `objectql/engine.ts:3191`
- *   `$expand` `if (!referenceObject) continue;` — the relationship silently
+ * - `formula` w/o `expression` →
+ *   `packages/objectql/src/engine.ts#planFormulaProjection`, verbatim
+ *   `def?.type === 'formula' && def.expression`: it builds the formula plan
+ *   only from fields WITH an expression, so a bare formula never computes.
+ * - `lookup`/`master_detail` w/o `reference` →
+ *   `packages/objectql/src/engine.ts#expandRelatedRecords` (`$expand`),
+ *   verbatim `if (!referenceObject) continue;` — the relationship silently
  *   never resolves, and the record picker has no target to search.
  * - `select`/`radio` w/o `options` → `record-validator.ts`'s `validateOne`,
  *   verbatim `allowed.length > 0 && !allowed.includes(String(value))`: an
