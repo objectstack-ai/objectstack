@@ -98,10 +98,16 @@ const CUBE: Cube = {
   public: false,
 } as unknown as Cube;
 
-/** A second cube over the SAME table, so "one answer, many objects" is drivable. */
+/**
+ * A second cube over a DIFFERENT object, so "one answer, many objects" is
+ * drivable. ⚠️ The hook is asked about the OBJECT the cube reads (`sql`), not
+ * about the cube — which is why the line below names `rows`, and why this
+ * twin has to point somewhere else to be a second object at all.
+ */
 const OTHER_CUBE: Cube = {
   ...(CUBE as unknown as Record<string, unknown>),
   name: 'other_texts',
+  sql: 'other_rows',
 } as unknown as Cube;
 
 const query = (where: unknown, cube = 'texts'): AnalyticsQuery =>
@@ -132,6 +138,10 @@ const serviceAnswering = (
     logger: logger as unknown as AnalyticsServiceConfig['logger'],
     cubes: [CUBE, OTHER_CUBE],
     queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: true, inMemory: false }),
+    // `NativeSQLStrategy.canHandle` requires a raw-SQL door to exist. Nothing
+    // below EXECUTES through it — the SQL is minted by `generateSql` and run on
+    // sql.js directly — so it only has to be present and typed.
+    executeRawSql: async () => [] as Record<string, unknown>[],
     sqlDialect: hook as unknown as AnalyticsServiceConfig['sqlDialect'],
   } satisfies AnalyticsServiceConfig;
   return { service: new AnalyticsService(config), logger };
@@ -145,6 +155,7 @@ const serviceAnsweringNothing = (): { service: AnalyticsService; logger: TestLog
       logger: logger as unknown as AnalyticsServiceConfig['logger'],
       cubes: [CUBE, OTHER_CUBE],
       queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: true, inMemory: false }),
+      executeRawSql: async () => [] as Record<string, unknown>[],
     }),
     logger,
   };
@@ -205,7 +216,8 @@ describe('[#16206] the ruling\'s named pin — both halves', () => {
     const warnings = dialectWarnings(logger);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('"sqlite3"');
-    expect(warnings[0]).toContain('"texts"');
+    // The OBJECT the hook was asked about — `texts` reads the object `rows`.
+    expect(warnings[0]).toContain('"rows"');
     for (const accepted of ACCEPTED_SQL_DIALECTS) expect(warnings[0], accepted).toContain(accepted);
   });
 
@@ -246,8 +258,10 @@ describe('[#16206] "once" is keyed on the failure\'s identity, and is bounded', 
     const warnings = dialectWarnings(logger);
     expect(warnings).toHaveLength(1);
     // The FIRST object to elicit it is the one named — a concrete place to look,
-    // not a count that grows with the object registry.
-    expect(warnings[0]).toContain('"texts"');
+    // not a count that grows with the object registry. Two DIFFERENT objects
+    // were asked about (`rows` and `other_rows`); one line came out.
+    expect(warnings[0]).toContain('"rows"');
+    expect(warnings[0]).not.toContain('"other_rows"');
   });
 
   it('a SECOND, DIFFERENT wrong answer is a second failure and gets its own line', async () => {
@@ -369,20 +383,40 @@ describe('[#16206] the `unknown` arm\'s ROWS for a `sqlite3`-answering host, on 
         wrong.push({ case: c.name, expected: [...c.expected], measured });
       }
     }
-    // At least the two case-folding rows of the shared table come back wrong.
-    expect(wrong.length).toBeGreaterThan(0);
+    // FIVE of the shared table's SIX case-exact cases come back wrong — every
+    // one that discriminates on ASCII case. The sixth (`$contains 'a_b'`) is
+    // the LIKE-metacharacter row, which carries no cased letter to fold, and is
+    // the reason this is a count and not "all of them".
+    expect(wrong.map((w) => w.case)).toEqual([
+      '$contains is case-SENSITIVE — a lower-case comparand misses the upper-case row',
+      '$contains is case-SENSITIVE — an upper-case comparand misses the lower-case row',
+      '$startsWith is case-SENSITIVE',
+      '$endsWith is case-SENSITIVE',
+      '$notContains is case-SENSITIVE, and negation does not widen it',
+    ]);
 
-    // Named, so the report reads the rows rather than a count.
+    // Named, so the record reads the rows rather than a count.
     expect(await executedIds({ name: { $contains: 'acme' } }, sqlite3Host)).toEqual(['1', '2']);
     expect(await executedIds({ name: { $contains: 'acme' } }, sqliteHost)).toEqual(['2']);
+    expect(await executedIds({ name: { $contains: 'ACME' } }, sqlite3Host)).toEqual(['1', '2']);
+    expect(await executedIds({ name: { $contains: 'ACME' } }, sqliteHost)).toEqual(['1']);
     expect(await executedIds({ name: { $startsWith: 'ACME' } }, sqlite3Host)).toEqual(['1', '2']);
     expect(await executedIds({ name: { $startsWith: 'ACME' } }, sqliteHost)).toEqual(['1']);
     expect(await executedIds({ name: { $endsWith: 'corp' } }, sqlite3Host)).toEqual(['1', '2']);
     expect(await executedIds({ name: { $endsWith: 'corp' } }, sqliteHost)).toEqual(['2']);
-    // Negation does not widen it back: the over-match becomes an under-match.
+    // ⭐ Negation turns the over-match into an UNDER-match: row 1 is DROPPED
+    // from a result set that should contain it. On a read scope that direction
+    // hides rows; on the query's own `where` it is a wrong chart.
     expect(await executedIds({ name: { $notContains: 'acme' } }, sqlite3Host))
       .toEqual(['3', '4', '5', '6', '7', '8', '9']);
     expect(await executedIds({ name: { $notContains: 'acme' } }, sqliteHost))
       .toEqual(['1', '3', '4', '5', '6', '7', '8', '9']);
+
+    // The construct that causes it, so the finding names a mechanism: the
+    // residue arm's plain `LIKE`, which SQLite folds ASCII case on.
+    const viaSqlite3 = await sqlite3Host.generateSql(query({ name: { $contains: 'acme' } }));
+    const viaSqlite = await sqliteHost.generateSql(query({ name: { $contains: 'acme' } }));
+    expect(viaSqlite3.sql).toContain('LIKE');
+    expect(viaSqlite.sql).toContain('GLOB');
   });
 });

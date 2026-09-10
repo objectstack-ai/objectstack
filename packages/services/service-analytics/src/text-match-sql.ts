@@ -257,6 +257,24 @@ export function isUnrecognisedSqlDialectAnswer(name: string | undefined | null):
 }
 
 /**
+ * [#16206] `name` if it is one of {@link ACCEPTED_SQL_DIALECTS}, else
+ * `undefined` — the narrowing a caller needs when it must hand an answer on to
+ * something that declares the accept set.
+ *
+ * ⚠️ It exists for the bridge in `plugin.ts`, which answers from a `SqlDriver`'s
+ * `dialectName` — a FOUR-name vocabulary whose fourth name is `'unknown'`, that
+ * driver's own "I cannot say". Passed through verbatim, that residue would
+ * arrive at the config hook looking like a considered answer outside the accept
+ * set, and the host would be warned about a driver doing exactly the right
+ * thing (and about `driver-sql`'s deliberately unrecognised spellings, #11756).
+ * ⇒ Translate the residue to the hook's own spelling for "cannot answer" —
+ * `undefined` — rather than teaching the diagnostic a list of exceptions.
+ */
+export function asAcceptedSqlDialect(name: string | undefined | null): AcceptedSqlDialect | undefined {
+  return typeof name === 'string' && KNOWN_DIALECTS.has(name) ? (name as AcceptedSqlDialect) : undefined;
+}
+
+/**
  * The dialect of the datasource backing `objectName`, read off the context's
  * `sqlDialect` hook — `'unknown'` when the host wired none.
  *
