@@ -57,50 +57,72 @@ const bytes = (v: unknown): string => JSON.stringify(v);
 
 /**
  * One cell per reserved key: the predicate that reads it, the value a hostile
- * bag supplies, and the kernel facts that make the key resolve for real.
+ * bag supplies, the context in which the KERNEL resolved nothing for that key,
+ * and the kernel facts that make it resolve for real.
  *
- * `organization_id` reads `ExecutionContext.tenantId`, not a same-named field —
- * the compiler renames it at the seam, and a cell that set `organization_id`
- * directly would pin nothing.
+ * Two spellings here are load-bearing and both were found by a red test rather
+ * than by reading:
+ *
+ *  - `organization_id` reads `ExecutionContext.tenantId`, not a same-named
+ *    field — the compiler renames it at the seam, so a cell setting
+ *    `organization_id` directly would pin nothing.
+ *  - `id` reads `ExecutionContext.userId`, which means the absent-kernel
+ *    context for THAT key is the one with no `userId` at all. A shared
+ *    `{ userId: 'usr_a' }` base made the `id` cell a kernel-PRESENT cell
+ *    wearing an absent cell's name — it passed the byte-identity assertion for
+ *    the wrong reason and only the fail-closed assertion caught it. Hence one
+ *    explicit `absentCtx` per key rather than a shared base.
  */
 const CELLS: Record<
   string,
-  { using: string; bagValue: string[]; kernelCtx: Record<string, unknown>; kernelWins: unknown }
+  {
+    using: string;
+    bagValue: string[];
+    absentCtx: Record<string, unknown>;
+    kernelCtx: Record<string, unknown>;
+    kernelWins: unknown;
+  }
 > = {
   id: {
     using: 'owner_id == current_user.id',
     bagValue: ['usr_victim'],
+    absentCtx: {},
     kernelCtx: { userId: 'usr_real' },
     kernelWins: { owner_id: 'usr_real' },
   },
   organization_id: {
     using: 'org_col == current_user.organization_id',
     bagValue: ['org_victim'],
-    kernelCtx: { tenantId: 'org_real' },
+    absentCtx: { userId: 'usr_a' },
+    kernelCtx: { userId: 'usr_a', tenantId: 'org_real' },
     kernelWins: { org_col: 'org_real' },
   },
   positions: {
     using: 'role_col IN (current_user.positions)',
     bagValue: ['admin'],
-    kernelCtx: { positions: ['reader'] },
+    absentCtx: { userId: 'usr_a' },
+    kernelCtx: { userId: 'usr_a', positions: ['reader'] },
     kernelWins: { role_col: { $in: ['reader'] } },
   },
   org_user_ids: {
     using: 'assigned_to_id IN (current_user.org_user_ids)',
     bagValue: ['usr_evil'],
-    kernelCtx: { org_user_ids: ['usr_a', 'usr_b'] },
+    absentCtx: { userId: 'usr_a' },
+    kernelCtx: { userId: 'usr_a', org_user_ids: ['usr_a', 'usr_b'] },
     kernelWins: { assigned_to_id: { $in: ['usr_a', 'usr_b'] } },
   },
   accessible_org_ids: {
     using: 'employer_org IN (current_user.accessible_org_ids)',
     bagValue: ['org_victim'],
-    kernelCtx: { accessible_org_ids: ['org_real'] },
+    absentCtx: { userId: 'usr_a' },
+    kernelCtx: { userId: 'usr_a', accessible_org_ids: ['org_real'] },
     kernelWins: { employer_org: { $in: ['org_real'] } },
   },
   email: {
     using: 'owner_email == current_user.email',
     bagValue: ['victim@e.example'],
-    kernelCtx: { email: 'real@e.example' },
+    absentCtx: { userId: 'usr_a' },
+    kernelCtx: { userId: 'usr_a', email: 'real@e.example' },
     kernelWins: { owner_email: 'real@e.example' },
   },
 };
@@ -123,10 +145,10 @@ describe('RESERVED_RLS_MEMBERSHIP_KEYS — refused BY NAME at the compiler merge
 
     it(`⭐ ${key}: kernel value ABSENT — bag present compiles BYTE-IDENTICALLY to bag absent`, () => {
       const withBag = compiler.compileFilter([policy(cell.using)], {
-        userId: 'usr_a',
+        ...cell.absentCtx,
         rlsMembership: { [key]: cell.bagValue },
       } as never);
-      const withoutBag = compiler.compileFilter([policy(cell.using)], { userId: 'usr_a' } as never);
+      const withoutBag = compiler.compileFilter([policy(cell.using)], { ...cell.absentCtx } as never);
 
       // The acceptance criterion is byte equality, not "no longer wins".
       expect(bytes(withBag)).toBe(bytes(withoutBag));
@@ -143,7 +165,7 @@ describe('RESERVED_RLS_MEMBERSHIP_KEYS — refused BY NAME at the compiler merge
     it(`⛔ ${key}: the refusal is a DROPPED POLICY, never a throw`, () => {
       expect(() =>
         compiler.compileFilter([policy(cell.using)], {
-          userId: 'usr_a',
+          ...cell.absentCtx,
           rlsMembership: { [key]: cell.bagValue },
         } as never),
       ).not.toThrow();
@@ -151,7 +173,6 @@ describe('RESERVED_RLS_MEMBERSHIP_KEYS — refused BY NAME at the compiler merge
 
     it(`⛔ ${key}: NEGATIVE CONTROL (a) — with the kernel value present the KERNEL still wins`, () => {
       const filter = compiler.compileFilter([policy(cell.using)], {
-        userId: 'usr_a',
         ...cell.kernelCtx,
         rlsMembership: { [key]: cell.bagValue },
       } as never);
@@ -169,10 +190,10 @@ describe('RESERVED_RLS_MEMBERSHIP_KEYS — refused BY NAME at the compiler merge
         check: cell.using,
       } as never;
       const withBag = compiler.compileFilter([checkPolicy], {
-        userId: 'usr_a',
+        ...cell.absentCtx,
         rlsMembership: { [key]: cell.bagValue },
       } as never, 'check');
-      const withoutBag = compiler.compileFilter([checkPolicy], { userId: 'usr_a' } as never, 'check');
+      const withoutBag = compiler.compileFilter([checkPolicy], { ...cell.absentCtx } as never, 'check');
       expect(bytes(withBag)).toBe(bytes(withoutBag));
       expect(withBag).toEqual(RLS_DENY_FILTER);
     });
