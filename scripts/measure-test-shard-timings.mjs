@@ -140,7 +140,17 @@ export function sliceOfCliArguments(args) {
   return null;
 }
 
-// Pull every genuinely-executed `test` task out of one parsed run summary.
+// The task names whose windows this file counts as a package's test cost.
+// #16550: since #16466, six packages (core, objectql, rest, runtime, spec,
+// types) split their suite into `test` and `test:repo` (the repo-scanning
+// tests, hashed on the wide inputs) -- TWO task records per package in the
+// same run summary, both genuinely part of the suite's cost. `ci.yml` runs
+// them together (`turbo run test test:repo`), so a package that has a
+// `test:repo` task always has it in the SAME summary as its `test` task.
+const SAMPLED_TASKS = ['test', 'test:repo'];
+
+// Pull every genuinely-executed `test` (and, for split packages, `test:repo`)
+// task out of one parsed run summary, folded per package into ONE window.
 //
 // The shape assertions are loud for the same reason the partitioner's are:
 // `--summarize` is stable but not contractual, and the failure this script can
@@ -152,6 +162,16 @@ export function sliceOfCliArguments(args) {
 // not need it (a shard runs exactly one slice, so its prediction follows from
 // the slice map, not from the summary), while buildDataset below cannot record
 // a correct weight without it.
+//
+// #16550: a package's `test` and `test:repo` legs are folded by SUMMING their
+// execution windows -- the whole-package cost is both halves together, not
+// either alone. The rejection rule composes across the fold rather than being
+// re-derived per leg: EVERY leg present for a package must be a cache MISS
+// with exit 0, or the WHOLE package is skipped -- one cached or failed leg is
+// exactly as disqualifying as a cached or failed `test` used to be on its own.
+// Recording one leg's seconds alone (because the other was cached or failed)
+// would write a partial suite's cost as the package's whole cost, a reading
+// worse than today's undercount by #16466's own defect this card fixes.
 export function samplesFromSummary(parsed, label) {
   const tasks = parsed?.tasks;
   if (!Array.isArray(tasks)) {
@@ -160,29 +180,63 @@ export function samplesFromSummary(parsed, label) {
         'is this a run summary at all?'
     );
   }
-  const samples = new Map();
-  const skippedCached = [];
-  const slices = new Map();
+  // One entry per package, holding whichever of its sampled tasks this
+  // summary carries (almost always just `test`; `test` + `test:repo` for a
+  // split package). Each leg is recorded as EITHER a seconds+cliArguments
+  // reading, OR a `cached`/`failed` flag -- never both -- so the fold below
+  // can tell "this leg disqualifies the package" from "this leg is a real
+  // measurement" without re-reading the raw task.
+  const legsByPackage = new Map();
   for (const task of tasks) {
-    if (task?.task !== 'test') continue;
+    const taskName = task?.task;
+    if (!SAMPLED_TASKS.includes(taskName)) continue;
     const name = task.package;
     if (typeof name !== 'string' || name.length === 0) {
-      throw new Error(`${label}: a test task carries no package name: ${JSON.stringify(task.taskId)}`);
+      throw new Error(`${label}: a ${taskName} task carries no package name: ${JSON.stringify(task.taskId)}`);
     }
+    if (!legsByPackage.has(name)) legsByPackage.set(name, new Map());
+    const legs = legsByPackage.get(name);
     if (task?.cache?.status !== 'MISS') {
-      skippedCached.push(name);
+      legs.set(taskName, { cached: true });
       continue;
     }
     const { startTime, endTime, exitCode } = task.execution ?? {};
     if (typeof startTime !== 'number' || typeof endTime !== 'number') {
-      throw new Error(`${label}: ${name}#test has no execution window to measure`);
+      throw new Error(`${label}: ${name}#${taskName} has no execution window to measure`);
     }
     // A failed suite stops early, so its duration is not this package's cost.
-    if (exitCode !== 0) continue;
+    if (exitCode !== 0) {
+      legs.set(taskName, { failed: true });
+      continue;
+    }
     const seconds = (endTime - startTime) / 1000;
-    if (!(seconds >= 0)) throw new Error(`${label}: ${name}#test measured ${seconds}s`);
+    if (!(seconds >= 0)) throw new Error(`${label}: ${name}#${taskName} measured ${seconds}s`);
+    legs.set(taskName, { seconds, cliArguments: task.cliArguments });
+  }
+
+  const samples = new Map();
+  const skippedCached = [];
+  const slices = new Map();
+  for (const [name, legs] of legsByPackage) {
+    const readings = [...legs.values()];
+    // Cache wins over failure when both are present: either alone already
+    // disqualifies the whole package, and `skippedCached` is what the merge
+    // rule in buildDataset() reads as the witness for carrying a prior weight
+    // forward -- a package skipped here for ANY reason including a failed
+    // sibling leg still needs that witness if one of its legs was a HIT.
+    if (readings.some((leg) => leg.cached)) {
+      skippedCached.push(name);
+      continue;
+    }
+    if (readings.some((leg) => leg.failed)) continue;
+    let seconds = 0;
+    let cliArguments;
+    for (const leg of readings) {
+      seconds += leg.seconds;
+      cliArguments ??= leg.cliArguments;
+    }
     samples.set(name, seconds);
-    const slice = sliceOfCliArguments(task.cliArguments);
+    const slice = sliceOfCliArguments(cliArguments);
     if (slice) slices.set(name, slice);
   }
   return { samples, skippedCached, slices };
@@ -425,7 +479,7 @@ export function buildDataset({ perSummary, fileCounts, provenance, carryFrom = n
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering, never to lower the number.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'measure-test-shard-timings self-test': 50,
+  'measure-test-shard-timings self-test': 56,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -470,6 +524,13 @@ function selfTest() {
   const testTask = (pkg, start, end, status = 'MISS', exitCode = 0) => ({
     taskId: `${pkg}#test`,
     task: 'test',
+    package: pkg,
+    cache: { status },
+    execution: { startTime: start, endTime: end, exitCode },
+  });
+  const testRepoTask = (pkg, start, end, status = 'MISS', exitCode = 0) => ({
+    taskId: `${pkg}#test:repo`,
+    task: 'test:repo',
     package: pkg,
     cache: { status },
     execution: { startTime: start, endTime: end, exitCode },
@@ -523,6 +584,65 @@ function selfTest() {
   const failed = samplesFromSummary(summary([testTask('a', 0, 500, 'MISS', 1)]), 'f');
   check(() => {
     if (failed.samples.has('a')) throw new Error('exit: a failed suite was recorded as a duration');
+  });
+
+  // #16550: a two-task summary -- a split package's `test` and `test:repo`
+  // legs are SUMMED into one whole-package reading, not either leg alone. The
+  // un-split control (`ctl`, a plain `test`-only package in the SAME summary)
+  // rides alongside it and must read exactly as it always has -- the
+  // discriminating half of this case, since a probe that reads the same
+  // before and after the fold would not catch a fold that leaked onto
+  // packages it was never meant to touch.
+  const twoTask = samplesFromSummary(
+    summary([testTask('spec', 0, 400_000), testRepoTask('spec', 0, 53_900), testTask('ctl', 0, 12_000)]),
+    'f'
+  );
+  check(() => {
+    if (twoTask.samples.get('spec') !== 453.9) {
+      throw new Error(`test:repo fold: expected the sum 453.9, got ${twoTask.samples.get('spec')}`);
+    }
+  });
+  check(() => {
+    if (twoTask.samples.get('ctl') !== 12) {
+      throw new Error(`test:repo fold: the un-split control was disturbed (got ${twoTask.samples.get('ctl')})`);
+    }
+  });
+
+  // Either leg cached skips the WHOLE package -- recording the other leg's
+  // seconds alone would be a reading worse than the pre-#16550 undercount.
+  const repoCached = samplesFromSummary(
+    summary([testTask('spec', 0, 400_000), testRepoTask('spec', 0, 53_900, 'HIT')]),
+    'f'
+  );
+  check(() => {
+    if (repoCached.samples.has('spec')) {
+      throw new Error(`test:repo fold: a cached test:repo leg did not skip the whole package (got ${repoCached.samples.get('spec')})`);
+    }
+  });
+  check(() => {
+    if (!repoCached.skippedCached.includes('spec')) {
+      throw new Error('test:repo fold: a package with a cached test:repo leg was not reported as skipped');
+    }
+  });
+  const testCached = samplesFromSummary(
+    summary([testTask('spec', 0, 400_000, 'HIT'), testRepoTask('spec', 0, 53_900)]),
+    'f'
+  );
+  check(() => {
+    if (testCached.samples.has('spec')) {
+      throw new Error(`test:repo fold: a cached test leg did not skip the whole package (got ${testCached.samples.get('spec')})`);
+    }
+  });
+
+  // Either leg failed skips the WHOLE package, same as a lone `test` failure.
+  const repoFailed = samplesFromSummary(
+    summary([testTask('spec', 0, 400_000), testRepoTask('spec', 0, 53_900, 'MISS', 1)]),
+    'f'
+  );
+  check(() => {
+    if (repoFailed.samples.has('spec')) {
+      throw new Error('test:repo fold: a failed test:repo leg did not skip the whole package');
+    }
   });
 
   const threw = (fn) => {
