@@ -719,10 +719,10 @@ export const PageTabsProps = strictObject({
      *     binds it to the data-source ADAPTER. Same key, two meanings.
      *   * **The row's bare fields are spread flat**, so `status` resolves as
      *     well as `record.status`. The ambient scope is spread AFTER the row,
-     *     so an ambient root (`app`, `features`, `user`, …) wins over a record
+     *     so an ambient root (`features`, `user`, …) wins over a record
      *     field of the same name.
      *
-     * Like the component-node surface it also mounts the ambient `app` /
+     * Like the component-node surface it also mounts the ambient
      * `features` / `os.user` roots, which no ADR rules for a UI predicate
      * (ADR-0068's Non-goals: "only the user object is in scope here").
      *
