@@ -90,7 +90,8 @@ import {
  * | `MULTI_OPTION_TYPES` | multiselect, checkboxes, tags | no correction — an array in a JSON column (see below). |
  * | `FILE_REFERENCE_TYPES` | image, file, avatar, video, audio | no correction — the stored form is mid-migration (see below). |
  * | `STRUCTURED_JSON_TYPES` | json, composite, repeater, record, location, address, vector | no correction — an object in a JSON column (see below). |
- * | `formula` | formula | no correction — the answer exists but is not on this rule's input (see below). |
+ * | `formula` | formula | {@link FORMULA_RETURN_TYPE_RESULT} — TRANSLATED from the field's own declared `returnType`. |
+ * | `formula`, `returnType` ABSENT | formula | no correction — do not answer, keep the word the producer minted (see below). |
  *
  * ### `autonumber` is a STRING, measured on three independent readings
  *
@@ -152,18 +153,56 @@ import {
  * inline metadata object. Two shipped statements, two different stored forms;
  * correcting to either would describe half the deployments.
  *
- * ### `formula`: answerable, but not from this rule's input
+ * ### `formula`: answered from the field's own DECLARED result type
  *
  * A formula field's result type IS declared — `FieldSchema.returnType`
  * (`number` / `text` / `boolean` / `date`), whose own JSDoc names "dataset
- * measures" as its intended consumer. This rule cannot read it: its input is
- * the declared `FieldType` alone, because that is all
- * `AnalyticsServiceConfig.sourceFieldMeta` returns (`{ type?,
- * defaultCurrency?, max? }`). `returnType` is also OPTIONAL — "absent when the
- * type can't be proven (an ambiguous/`dyn` expression)" — so even with the
- * plumbing the rule would answer for some formula fields and not others.
- * Carrying it is a change to the host callback contract and its call site, not
- * a row in this table; filed separately rather than guessed at here.
+ * measures" as its FIRST intended consumer. This rule could not read it: its
+ * input was the declared `FieldType` alone, because that was all
+ * `AnalyticsServiceConfig.sourceFieldMeta` returned (`{ type?,
+ * defaultCurrency?, max? }`), so `'formula'` arrived as a bare word with the
+ * answer sitting one key away in the metadata. [#16236] That hook now carries
+ * `returnType` and this rule takes it as a third input.
+ *
+ * ⚠️ **The mapping is a TRANSLATION, never a relay.** `returnType` speaks the
+ * AUTHORING vocabulary; `fields[].type` speaks `DimensionType`. Two of the four
+ * members are not wire words at all — `text` is `'string'` there and `date` is
+ * `'time'` — so passing the literal through would put a word into the response
+ * that no consumer branches on, which is the same mistake the section below
+ * ("Why `'string'` and `'time'`") already records for the `FieldType` axis. The
+ * table is {@link FORMULA_RETURN_TYPE_RESULT}; the pin that holds it a
+ * translation is in `__tests__/formula-return-type-measure.test.ts` and is one
+ * invariant over the whole enum rather than four expectations: NO member of
+ * `returnType` is answered by its own spelling.
+ *
+ * The two members whose spelling the wire vocabulary happens to share are not
+ * relayed either, and each for the reason its `FieldType` row already carries:
+ *
+ * - `returnType: 'number'` → **no correction**, identical to the
+ *   `NUMERIC_VALUE_TYPES` row. The producer's `'number'` is already the correct
+ *   word, so this rule has nothing to add.
+ * - `returnType: 'boolean'` → **no correction**, identical to the
+ *   `BOOLEAN_VALUE_TYPES` row. Three readings disagree about what a `min`/`max`
+ *   over a boolean returns, or whether it returns at all; minting `'boolean'`
+ *   would ship one of them as a published declaration.
+ *
+ * ### `formula` with NO `returnType` — a ROW, not an implied code path
+ *
+ * `returnType` is OPTIONAL: "absent when the type can't be proven (an
+ * ambiguous/`dyn` expression)". So a formula field whose type could not be
+ * proven at authoring reaches this rule as `'formula'` with nothing behind it,
+ * and the verdict is: **do not answer — keep the word the producer minted.**
+ * An unproven formula's measure column stays `number`, and the ABSENCE is not
+ * itself read as an answer.
+ *
+ * That is the same "cannot answer, do not block" tier every other reader of
+ * `sourceFieldMeta` already uses (an unknown field type, a host with no data
+ * engine wired, a relationship-path measure), which is why it needed no new
+ * design — and it is written down HERE, as a row in this table, precisely so it
+ * does not become a behaviour that exists only inside a `?.` in the code path.
+ * A word outside the declared four is the same tier: a host answers at runtime
+ * and can answer anything, and an unrecognised one is left alone, never guessed
+ * at — the same treatment the `FieldType` axis gives an unrecognised `type`.
  *
  * ### `summary` is NUMERIC — the correction is not needed, not merely skipped
  *
@@ -220,6 +259,43 @@ export const MEASURE_RESULT_TYPE_TEMPORAL = 'time';
 export const MEASURE_RESULT_TYPE_STRING = 'string';
 
 /**
+ * The four members of `FieldSchema.returnType` (`packages/spec/src/data/
+ * field.zod.ts`). Spelled here rather than imported because the spec exports
+ * the schema, not a named type for this key; `__tests__/formula-return-type-
+ * measure.test.ts` reads the enum off `FieldSchema` itself and reds if the two
+ * ever disagree, so the drift guard is mechanical rather than a promise.
+ */
+export type FormulaReturnType = 'number' | 'text' | 'boolean' | 'date';
+
+/**
+ * [#16236] `FieldSchema.returnType` → the `DimensionType` word a `min`/`max`
+ * over that formula field's value should carry, or `undefined` for "no
+ * correction — keep the word the producer minted".
+ *
+ * ⚠️ **A TRANSLATION between two closed vocabularies, ⛔ never a relay.** The
+ * left column is the AUTHORING vocabulary a formula's result type is declared
+ * in; the right is the five-word wire vocabulary `AnalyticsResult.fields[].type`
+ * speaks. `text` and `date` do not exist on the right at all.
+ *
+ * | `returnType` | verdict | why |
+ * |:---|:---|:---|
+ * | `text` | `'string'` | the wire spelling for a string column, already carried by `lookup`/`string` dimension columns in the same response |
+ * | `date` | `'time'` | the wire spelling for a temporal column, already carried by a `date` dimension column in the same response |
+ * | `number` | no correction | identical to the `NUMERIC_VALUE_TYPES` row — the producer's `'number'` is already right |
+ * | `boolean` | no correction | identical to the `BOOLEAN_VALUE_TYPES` row — three readings disagree on what the aggregate even returns |
+ *
+ * ⭐ No member is answered by its own spelling, on ANY row — which is what makes
+ * a reintroduced pass-through detectable by one invariant instead of four
+ * hand-written expectations. See the module header for the long form.
+ */
+export const FORMULA_RETURN_TYPE_RESULT: Readonly<Record<FormulaReturnType, string | undefined>> = {
+  text: MEASURE_RESULT_TYPE_STRING,
+  date: MEASURE_RESULT_TYPE_TEMPORAL,
+  number: undefined,
+  boolean: undefined,
+};
+
+/**
  * Source-field types whose stored value is temporal (`FieldType`, `spec/data/
  * field.zod.ts` → "Date & Time"). `min`/`max` over one of these returns that
  * same kind of value.
@@ -265,18 +341,28 @@ export const STRING_SOURCE_FIELD_TYPES: ReadonlySet<string> = new Set<string>([
  *
  * `undefined` is also the answer for every field type whose `min`/`max` has no
  * single backend-independent value — booleans, the JSON-column classes, the
- * mid-migration file types — and for `formula`, whose declared result type is
- * not on this function's input. Those are VERDICTS, not gaps; the module
- * header records the measurement behind each one.
+ * mid-migration file types — and for a `formula` field whose declared
+ * `returnType` is absent or unrecognised. Those are VERDICTS, not gaps; the
+ * module header records the measurement behind each one.
  *
  * @param aggregate - the measure's declared `aggregate`; absent on a `derived`
  *   measure.
  * @param sourceFieldType - the DECLARED `FieldType` of the aggregated field,
  *   from `AnalyticsServiceConfig.sourceFieldMeta`.
+ * @param formulaReturnType - [#16236] the aggregated field's declared
+ *   `FieldSchema.returnType`, from the same hook. Read for `sourceFieldType ===
+ *   'formula'` and for nothing else: it is that member's own declared key, not
+ *   a general override of the table above.
+ *
+ *   ⚠️ Typed `string`, not {@link FormulaReturnType}, for the reason its sibling
+ *   `sourceFieldType` is: this is what a HOST answered at runtime, and a host
+ *   can answer a word this contract does not accept. An unrecognised one lands
+ *   in the "cannot answer" tier rather than being coerced into the table.
  */
 export function measureResultType(
   aggregate: AggregationFunction | undefined,
   sourceFieldType: string | undefined,
+  formulaReturnType?: string,
 ): string | undefined {
   // `count` / `count_distinct` / `sum` / `avg` — and a derived measure's absent
   // aggregate — all keep the `number` their producer minted. See the table above.
@@ -284,5 +370,16 @@ export function measureResultType(
   if (sourceFieldType === undefined) return undefined;
   if (TEMPORAL_SOURCE_FIELD_TYPES.has(sourceFieldType)) return MEASURE_RESULT_TYPE_TEMPORAL;
   if (STRING_SOURCE_FIELD_TYPES.has(sourceFieldType)) return MEASURE_RESULT_TYPE_STRING;
+  // [#16236] The one member whose answer is declared on a SECOND key. ⛔ The
+  // literal is never relayed — {@link FORMULA_RETURN_TYPE_RESULT} translates it
+  // into the wire vocabulary, and answers `undefined` for the two members whose
+  // own `FieldType` rows already answer "no correction".
+  if (sourceFieldType === 'formula') {
+    if (formulaReturnType === undefined) return undefined;
+    // Widened on the RECORD, not the key: an out-of-contract word from a host
+    // reads back as `undefined`, which is this rule's "cannot answer" tier.
+    const table = FORMULA_RETURN_TYPE_RESULT as Readonly<Record<string, string | undefined>>;
+    return table[formulaReturnType];
+  }
   return undefined;
 }
