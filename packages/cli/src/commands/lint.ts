@@ -511,11 +511,15 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   //     the family stays silent on it and `checkHookBodyLowering` is what
   //     reports it, so no verdict is ever given about a body that was not
   //     produced. Nothing here touches what `os build` accepts (#13838).
-  const { lowered } = lowerCallables(config as Record<string, unknown>);
+  const { lowered, loweredHookRefs } = lowerCallables(config as Record<string, unknown>);
   for (const f of runAuthoringRules('lint', {
     normalized: config,
     parsed: lowered,
     sduiManifest: opts.sduiManifest,
+    // [#16546] Same ref set `os build` computes from the same normalized
+    // input — what lets `validateReadonlyHookWrites` / `validateHookBodyWrites`
+    // report `hooks[i].handler` here byte-identically to `os build`.
+    loweredHookRefs,
   })) {
     issues.push({
       severity: f.severity === 'info' ? 'suggestion' : f.severity,

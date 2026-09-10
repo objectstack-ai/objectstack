@@ -163,6 +163,7 @@
 
 import {
   extractHookBodyWriteSet,
+  hookBodyFindingLocation,
   type BodyWritePatternExclusion,
 } from './validate-hook-body-writes.js';
 import { buildReadonlyIndex, buildInsertStripExemptObjects } from './validate-readonly-flow-writes.js';
@@ -346,7 +347,10 @@ function isRec(v: unknown): v is AnyRec {
  * on it; the refusal itself is reported by `os lint`'s `hook-body/*` rules and
  * by `os build`'s warn-and-bundle line, never guessed at here.
  */
-export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFinding[] {
+export function validateReadonlyHookWrites(
+  stack: AnyRec,
+  ctx?: { loweredHookRefs?: ReadonlySet<string> },
+): ReadonlyHookWriteFinding[] {
   const findings: ReadonlyHookWriteFinding[] = [];
   const hooks = recordsOf(stack.hooks);
   if (hooks.length === 0) return findings;
@@ -394,7 +398,8 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
 
     const hookName = typeof hook.name === 'string' && hook.name ? hook.name : `#${hookIndex}`;
     const where = `hook "${hookName}" > body`;
-    const path = `hooks[${hookIndex}].body.source`;
+    const loc = hookBodyFindingLocation(hook, hookIndex, ctx);
+    const path = loc.path;
     const reported = new Set<string>();
 
     for (const w of writes) {
@@ -436,7 +441,7 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
           // The static-`readonly` write-path strip is #2948 on UPDATE and, since
           // the 2026-09-03 ruling, #14147 on INSERT; the ids stay here, out of
           // the message an author reads and cannot resolve.
-          message: isCreate
+          message: (isCreate
             ? `body writes field '${w.field}' through ${call}, and object '${objectName}' declares it ` +
               `readonly:true. A hook's ctx.api is a ScopedContext over the TRIGGERING operation's context, so ` +
               `on every non-system trigger the engine strips readonly keys from that INSERT payload exactly ` +
@@ -445,7 +450,7 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
             : `body writes field '${w.field}' through ${call}, and object '${objectName}' declares it ` +
               `readonly:true. A hook's ctx.api is a ScopedContext over the TRIGGERING operation's context, so ` +
               `on every non-system trigger the engine strips readonly keys from that UPDATE payload - ` +
-              `the write never lands, while the call still returns success.`,
+              `the write never lands, while the call still returns success.`) + loc.messageSuffix,
           hint: isCreate
             ? `Seeding a readonly column at create time is a SYSTEM act. To keep writing it from here, ` +
               `declare runAs: 'system' on this hook: the strip skips a system context, so the write lands, ` +
@@ -475,7 +480,7 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
           message:
             `body writes field '${w.field}' through ${call}, and object '${objectName}' declares it ` +
             `readonlyWhen. On records whose predicate is TRUE that UPDATE strips the field, so this ` +
-            `write may silently not land depending on the record's state.`,
+            `write may silently not land depending on the record's state.` + loc.messageSuffix,
           hint:
             `Either confirm this call only targets records whose readonlyWhen predicate is FALSE, or ` +
             `derive '${w.field}' in a beforeUpdate hook on '${objectName}' - a hook-derived value is not ` +
