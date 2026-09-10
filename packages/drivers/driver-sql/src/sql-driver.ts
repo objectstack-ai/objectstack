@@ -13573,35 +13573,51 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#14079] Is `localField` a column on `table` whose STORED value is never
-   * text — a declared numeric or boolean scalar?
+   * [#14079/#15683] Is `localField` a column on `table` a text operator must
+   * not be aimed at — a column DECLARED numeric, boolean or temporal?
    *
-   * Reads the two registries `formatOutput`'s read-coercion already reads —
-   * `numericFields` (`NUMERIC_SCALAR_TYPES`, non-`multiple`) and
-   * `booleanFields` (`boolean` / `toggle`) — which `initObjects` and
-   * `registerExternalObject` both fill from the declared field type. Asking
-   * THOSE rather than growing a third list is the same discipline
-   * {@link isJsonColumn} states for `jsonFields`: one registry per column
-   * class, filled at the one place the declaration is read. Spec-side the
-   * same two classes are `NON_TEXT_STORED_VALUE_TYPES`; this driver's registries
-   * add its SQL aliases (`integer` / `int` / `float`) on top, as that
-   * constant's docblock says drivers do.
+   * Reads the registries `formatOutput`'s read-coercion and the temporal seam
+   * already read — `numericFields` (`NUMERIC_SCALAR_TYPES`, non-`multiple`),
+   * `booleanFields` (`boolean` / `toggle`) and, through
+   * {@link SqlDriver.temporalFieldKind}, `datetimeFields` / `dateFields` /
+   * `timeFields` — which `initObjects` and `registerExternalObject` both fill
+   * from the declared field type. Asking THOSE rather than growing another
+   * list is the same discipline {@link isJsonColumn} states for `jsonFields`:
+   * one registry per column class, filled at the one place the declaration is
+   * read. Spec-side the same four classes are `NON_TEXT_STORED_VALUE_TYPES`;
+   * this driver's registries add its SQL aliases (`integer` / `int` / `float`)
+   * on top, as that constant's docblock says drivers do.
    *
    * A table with no entry answers `false`, exactly like {@link isJsonColumn}:
    * a table this driver was never told about has no declared types, and the
    * gate fires only where the column class is KNOWN — never from a guess.
    *
-   * Temporal columns are deliberately NOT here. On SQLite a `Field.datetime` /
-   * `Field.date` / `Field.time` column's stored value IS text (canonical ISO,
-   * ADR-0053), so "the stored value is not a string" is a dialect question for
-   * them and the contract row this predicate serves declares nothing about
-   * them — `NON_TEXT_STORED_VALUE_TYPES`' docblock records the same boundary.
+   * [#15683] Temporal columns joined this predicate by RULING, not by storage.
+   * On SQLite a `Field.date` / `Field.datetime` / `Field.time` column's stored
+   * value IS text (canonical ISO, ADR-0053), so `GLOB '*2026*'` matched a date
+   * by ISO substring here while live Postgres refused the same filter at query
+   * time (SQLSTATE 42883 `operator does not exist: date ~~ unknown`, a
+   * `DATABASE_ERROR` 500) — one filter, three answers across the family, with
+   * MySQL never measured. The maintainer ruled it on 2026-09-05 (recorded on
+   * #15683): 「a text operator over a column whose DECLARED type is temporal is
+   * type-gated exactly like the numeric and boolean classes; the SQLite
+   * ISO-text match is not a contract」. That match is RETIRED, deliberately: a
+   * caller who wants "records in 2026" uses the range operators
+   * (`$gte` / `$lt`, or `$between`), which every dialect answers the same way.
+   *
+   * ⚠️ The gate keys on the DECLARATION, never on the storage class — which is
+   * why {@link temporalFieldKind} rather than a "does this column hold text"
+   * test is the right question. `canonicalDatetimeFields` (whether a column has
+   * been certified canonical) is a REPAIR concern and deliberately not read
+   * here: an uncertified column is still a declared datetime, and gating on
+   * certification would make the answer depend on repair state.
    */
   protected isNonTextColumn(table: string | null | undefined, localField: string): boolean {
     if (!table) return false;
     return (
       this.numericFields[table]?.includes(localField) === true ||
-      this.booleanFields[table]?.includes(localField) === true
+      this.booleanFields[table]?.includes(localField) === true ||
+      this.temporalFieldKind(table, localField) !== null
     );
   }
 

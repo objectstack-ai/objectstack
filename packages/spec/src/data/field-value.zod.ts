@@ -69,33 +69,6 @@ export const BOOLEAN_VALUE_TYPES: ReadonlySet<string> = new Set([
   'boolean', 'toggle',
 ] as const satisfies readonly FieldType[]);
 
-/**
- * [#14079] Field types whose STORED value is never text on any backend — the
- * numeric and boolean value classes, i.e. the columns a text operator can only
- * ever be aimed at by mistake.
- *
- * `FILTER_TEXT_CASES` (`filter-text-conformance.ts`) declares what that mistake
- * answers (maintainer ruling 2026-09-05, recorded on #14079): a stored value
- * that is not a string never satisfies a positive text operator and always
- * satisfies `$notContains`. The JS faces read that off the value itself
- * (`typeof value !== 'string'`). A SQL compiler cannot read the value at
- * compile time and reads the DECLARED type instead — this set is what it
- * consults, so `driver-sql`, `driver-turso`'s remote transport and
- * `service-analytics`' SQL lowerings classify a column by one list rather
- * than three.
- *
- * Deliberately NOT here: the temporal classes (`date`, `datetime`, `time`).
- * Their stored form is a dialect question (ADR-0053: ISO TEXT on SQLite, a
- * native type on Postgres), so "is the stored value a string" has no
- * backend-independent answer for them and the contract does not declare one.
- * Driver-internal aliases (`integer`, `int`, `float`) stay layered in their
- * drivers, as this section's header says.
- */
-export const NON_TEXT_STORED_VALUE_TYPES: ReadonlySet<string> = new Set([
-  ...NUMERIC_VALUE_TYPES,
-  ...BOOLEAN_VALUE_TYPES,
-]);
-
 /** Naive calendar day, stored `YYYY-MM-DD` — NOT an instant (ADR-0053). */
 export const CALENDAR_DATE_TYPES: ReadonlySet<string> = new Set([
   'date',
@@ -110,6 +83,50 @@ export const INSTANT_TYPES: ReadonlySet<string> = new Set([
 export const CLOCK_TIME_TYPES: ReadonlySet<string> = new Set([
   'time',
 ] as const satisfies readonly FieldType[]);
+
+/**
+ * [#14079/#15683] Field types a SQL compiler must NOT aim a text operator at,
+ * decided by the DECLARATION — the numeric, boolean and temporal value
+ * classes, i.e. the columns a text operator can only ever be aimed at by
+ * mistake.
+ *
+ * `FILTER_TEXT_CASES` (`filter-text-conformance.ts`) declares what that mistake
+ * answers (maintainer ruling 2026-09-05, recorded on #14079): a stored value
+ * that is not a string never satisfies a positive text operator and always
+ * satisfies `$notContains`. The JS faces read that off the value itself
+ * (`typeof value !== 'string'`). A SQL compiler cannot read the value at
+ * compile time and reads the DECLARED type instead — this set is what it
+ * consults, so `driver-sql`, `driver-turso`'s remote transport and
+ * `service-analytics`' SQL lowerings classify a column by one list rather
+ * than four.
+ *
+ * The temporal classes are members by RULING, not by storage. #14079 left them
+ * out because their stored form is a dialect question (ADR-0053: canonical ISO
+ * TEXT on SQLite, a native type on Postgres), so one filter answered three ways
+ * across the SQL family — SQLite matched the ISO text, live Postgres refused at
+ * query time with SQLSTATE 42883 (`operator does not exist: date ~~ unknown`, a
+ * `DATABASE_ERROR` 500), MySQL was never measured. The maintainer ruled that
+ * cell on 2026-09-05 (recorded on #15683): 「a text operator over a column whose
+ * DECLARED type is temporal is type-gated exactly like the numeric and boolean
+ * classes; the SQLite ISO-text match is not a contract」. So a temporal column
+ * answers the same declared no-match on every dialect, Postgres's 500 becomes
+ * that declared answer, and a caller who wants "records in 2026" uses the range
+ * operators. Driver-internal aliases (`integer`, `int`, `float`) stay layered
+ * in their drivers, as this section's header says.
+ *
+ * ⚠️ This set is keyed on the DECLARED type, which is why it can hold a class
+ * whose stored value IS a string on one backend. The JS evaluators that read
+ * the VALUE (`driver-memory`'s matcher, `formula`, `having`) answer a temporal
+ * column by what was stored, and none of them is handed a schema — measured on
+ * #15683 and recorded there; they are not consumers of this set.
+ */
+export const NON_TEXT_STORED_VALUE_TYPES: ReadonlySet<string> = new Set([
+  ...NUMERIC_VALUE_TYPES,
+  ...BOOLEAN_VALUE_TYPES,
+  ...CALENDAR_DATE_TYPES,
+  ...INSTANT_TYPES,
+  ...CLOCK_TIME_TYPES,
+]);
 
 /** Single-choice option types: value is one declared option code. */
 export const SINGLE_OPTION_TYPES: ReadonlySet<string> = new Set([
