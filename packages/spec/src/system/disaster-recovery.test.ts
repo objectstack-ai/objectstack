@@ -58,7 +58,8 @@ describe('BackupConfigSchema', () => {
   it('should accept full backup config with encryption', () => {
     const config = BackupConfigSchema.parse({
       strategy: 'full',
-      schedule: '0 2 * * 0',
+      // `schedule` was deleted outright (#16320) — the strip is pinned in
+      // `cron-typed-positions-retirement.test.ts`.
       retention: { days: 365, minCopies: 12 },
       destination: { type: 'gcs', bucket: 'backups', region: 'us-central1' },
       encryption: { enabled: true, algorithm: 'AES-256-GCM', keyId: 'kms-key-123' },
@@ -165,7 +166,6 @@ describe('DisasterRecoveryPlanSchema', () => {
       rto: { value: 30, unit: 'minutes' },
       backup: {
         strategy: 'incremental',
-        schedule: '0 */6 * * *',
         retention: { days: 90, minCopies: 5 },
         destination: { type: 's3', bucket: 'dr-backups', region: 'us-east-1' },
         encryption: { enabled: true },
@@ -190,7 +190,6 @@ describe('DisasterRecoveryPlanSchema', () => {
       },
       testing: {
         enabled: true,
-        schedule: '0 3 1 * *',
         notificationChannel: '#dr-alerts',
       },
       runbookUrl: 'https://docs.example.com/dr-runbook',

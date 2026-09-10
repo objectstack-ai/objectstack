@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #5262 — DevPlugin decides whether to load the enterprise multi-org runtime
+// #5262 — DevPlugin decides whether to load the multi-org runtime
 // from the AUTHORITATIVE tenancy posture, never the demoted
 // `OS_MULTI_ORG_ENABLED` boolean.
 //

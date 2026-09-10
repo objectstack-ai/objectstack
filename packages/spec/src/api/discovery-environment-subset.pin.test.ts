@@ -37,9 +37,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { EnvironmentTypeSchema } from '../cloud/environment.zod';
-
-import { DiscoveryEnvironmentSchema } from './discovery.zod';
+import { DiscoveryEnvironmentSchema, EnvironmentTypeSchema } from './discovery.zod';
 
 /** `.options` through the `lazySchema` Proxy — read once, asserted below. */
 const discoveryMembers = DiscoveryEnvironmentSchema.options as readonly string[];

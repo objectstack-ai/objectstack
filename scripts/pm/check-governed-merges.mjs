@@ -208,8 +208,8 @@
  *      the repo-relative paths of everything a real run emits, from the same
  *      map the write disposition uses. The register consults THAT list; it
  *      never restates it. An `_index.md` under a skill the generator does not
- *      write (`objectstack-upgrade` and `objectstack-pm-dispatch` have no
- *      SKILL_MAP entry today) is absent from the manifest and stays governed,
+ *      write (`objectstack-upgrade` has no SKILL_MAP entry today) is absent
+ *      from the manifest and stays governed,
  *      which is the ruling's own limit in code.
  *   2. THE BYTES MATCH. The generator's own `--check` — "the real run minus the
  *      writes", by the sink's construction — must report no drift. One
@@ -3658,9 +3658,8 @@ async function selfTest() {
   const genIndex = REGISTER_SAMPLES['spec-skill-refs'];
   const handAuthored = 'skills/objectstack-ui/SKILL.md';
   // Real, and the reason this case is not hypothetical: `objectstack-upgrade`
-  // and `objectstack-pm-dispatch` are shipped skills with NO SKILL_MAP entry,
-  // so an `_index.md` under either would be hand-written prose at a path the
-  // candidate matches.
+  // is a shipped skill with NO SKILL_MAP entry, so an `_index.md` under it
+  // would be hand-written prose at a path the candidate matches.
   const unownedIndex = 'skills/objectstack-upgrade/references/_index.md';
   const declaredOutputs = [genIndex, 'skills/objectstack-data/references/_index.md'];
   const cleanRun = { ok: true, outputs: declaredOutputs, reason: 'the generator reported no drift' };

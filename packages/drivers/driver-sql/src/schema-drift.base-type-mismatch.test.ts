@@ -57,6 +57,7 @@ import {
   type SqlDialectName,
 } from './schema-drift.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
+import { FILE_REFERENCE_TYPES } from '@objectstack/spec/data';
 
 const MATRIX = 'multi-value base-type drift';
 
@@ -358,10 +359,25 @@ describe('diffManagedTable — a SINGLE-VALUE JSON-class field over a stale text
 
   it('closes the blind spot for EVERY JSON-class type the spec declares, not just the file family', () => {
     // The card's scope, asserted rather than described: the fork applies to
-    // every single-value member of the writer's set, whichever way the
-    // `VARCHAR(2048)`-vs-json generator divergence (#15041) is ruled.
-    const jsonClassTypes = [...JSON_COLUMN_FIELD_TYPES].filter((t) => t !== 'object' && t !== 'array');
+    // every single-value member of the writer's set.
+    //
+    // ⚠️ [#15989] #15041 has since been ruled — option A, the file family's
+    // column holds the bare `sys_file` id — so the family is no longer a member
+    // of {@link JSON_COLUMN_FIELD_TYPES}: it is asked per deployment, and
+    // `diffTags` omits `fileColumnsMoved`, i.e. every call here is about a
+    // deployment that has NOT moved its media columns. On that deployment the
+    // family is still written as JSON into whatever column exists, so it is
+    // still part of this blind spot and is swept here by name. The moved arm is
+    // the other half of the same question and is pinned in
+    // `schema-drift.json-column-parity.test.ts`.
+    const jsonClassTypes = [...JSON_COLUMN_FIELD_TYPES, ...FILE_REFERENCE_TYPES]
+      .filter((t) => t !== 'object' && t !== 'array');
     expect(jsonClassTypes.length).toBeGreaterThan(10);
+    // The family really is being swept from the second source rather than
+    // silently missing: without this a set that stopped spreading it would
+    // shrink the sweep and stay green.
+    expect(jsonClassTypes).toContain('file');
+    expect(jsonClassTypes).toContain('avatar');
 
     const blind = jsonClassTypes.filter(
       (type) => diffTags({ type }, staleColumn('character varying', 2048), 'postgres').length === 0,

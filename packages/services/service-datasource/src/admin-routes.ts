@@ -16,7 +16,7 @@ import {
   // classification owns #13906 decision 1 option A (branded "never registered"
   // stays quiet, every other rejection is the ADR-0112 outage) and reads the
   // posture IN FORCE off the `tenancy` service (ADR-0093 D4/D5: a deployment
-  // REQUESTING `isolated` without the enterprise organizations runtime is
+  // REQUESTING `isolated` without the `@objectstack/organizations` runtime is
   // `single` in force). The WIRING fact stays here -- see
   // `resolveAdmissionTenancyPosture` below.
   classifyAdmissionTenancyPosture,

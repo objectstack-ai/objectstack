@@ -751,14 +751,13 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **fields** | `string[]` | optional | Fields to include |
 | **filter** | `Record<string, any>` | optional | Record filter criteria |
 | **templateId** | `string` | optional | Export template ID for field mappings |
-| **schedule** | `{ cronExpression: string \| object; timezone?: string }` | ✅ | Schedule timing configuration |
+| **schedule** | `{ timezone: string }` | ✅ | Schedule timing configuration |
 | **delivery** | `{ method: Enum<'email' \| 'storage' \| 'webhook'>; recipients?: string[]; storagePath?: string; webhookUrl?: string }` | ✅ | Export delivery configuration |
 
 ### Nested Shape: `ScheduleExportRequest.schedule`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **cronExpression** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression for schedule |
 | **timezone** | `string` | optional (default: `"UTC"`) | IANA timezone |
 
 ### Nested Shape: `ScheduleExportRequest.delivery`
@@ -825,7 +824,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 | **fields** | `string[]` | optional | Fields to include |
 | **filter** | `Record<string, any>` | optional | Record filter criteria |
 | **templateId** | `string` | optional | Export template ID for field mappings |
-| **schedule** | `{ cronExpression: string \| object; timezone?: string }` | ✅ | Schedule timing configuration |
+| **schedule** | `{ timezone: string }` | ✅ | Schedule timing configuration |
 | **delivery** | `{ method: Enum<'email' \| 'storage' \| 'webhook'>; recipients?: string[]; storagePath?: string; webhookUrl?: string }` | ✅ | Export delivery configuration |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the scheduled export is active |
 | **lastRunAt** | `string` | optional | Last execution timestamp |
@@ -837,7 +836,6 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **cronExpression** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression for schedule |
 | **timezone** | `string` | optional (default: `"UTC"`) | IANA timezone |
 
 ### Nested Shape: `ScheduledExport.delivery`

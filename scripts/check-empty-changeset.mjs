@@ -628,8 +628,8 @@ function selfTest() {
     battery('GREEN 3: a skills/**-only PR carrying NO changeset (route 2)');
     {
       const { dir, base } = makeRepo(
-        { 'skills/objectstack-pm-dispatch/SKILL.md': 'two axes\n', '.changeset/stock-empty.md': EMPTY },
-        { 'skills/objectstack-pm-dispatch/SKILL.md': 'three axes\n' },
+        { 'skills/objectstack-upgrade/SKILL.md': 'two axes\n', '.changeset/stock-empty.md': EMPTY },
+        { 'skills/objectstack-upgrade/SKILL.md': 'three axes\n' },
       );
       const r = scan({ cwd: dir, base });
       assert(r.violations.length === 0, 'GREEN 3: a skills-only PR with no changeset at all must be green here');

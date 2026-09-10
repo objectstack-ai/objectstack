@@ -131,9 +131,14 @@ export interface ScheduleExportInput {
   filter?: Record<string, unknown>;
   /** Export template ID */
   templateId?: string;
-  /** Schedule timing configuration */
+  /**
+   * Schedule timing configuration. `cronExpression` left this block with the spec
+   * positions it mirrored (`ScheduleExportRequest.schedule.cronExpression` /
+   * `ScheduledExport.schedule.cronExpression`, both DELETED under ADR-0049, #16320):
+   * the return type below no longer carries the key, so an input that still demanded
+   * it would ask the provider for a cadence it cannot store.
+   */
   schedule: {
-    cronExpression: string;
     timezone?: string;
   };
   /** Export delivery configuration */

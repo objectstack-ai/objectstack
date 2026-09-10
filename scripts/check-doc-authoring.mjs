@@ -295,6 +295,8 @@ const PUBLISHED_SKILLS_ROOT = 'skills';
 // the same placeholder spelling the sibling `filed as #<n>:` site in that file
 // already used. The `#` still teaches the argument grammar, the numbers stop
 // impersonating a citation, and the exemption it needed disappears with it.
+// (That published skill was itself deleted on 2026-09-10; the placeholder rule
+// is about the spelling and outlives the file it was first applied to.)
 //
 // That is the general shape, not a one-off: a passage that seems to need an
 // example id needs a PLACEHOLDER instead. `#<n>` teaches the same syntax, is
@@ -1803,10 +1805,13 @@ function selfTest() {
 
       // The placeholder that replaced the one passage which used to need an
       // exemption (maintainer ruling 2026-08-25). It must PASS — otherwise the
-      // remedy the failure text prescribes is itself a violation.
-      mkdirSync(join(idDir, 'skills', 'objectstack-pm-dispatch'), { recursive: true });
+      // remedy the failure text prescribes is itself a violation. Planted under
+      // a surviving catalog skill: the published PM skill that carried the
+      // passage was deleted on 2026-09-10, and the rule is about the spelling,
+      // not the file.
+      mkdirSync(join(idDir, 'skills', 'objectstack-upgrade'), { recursive: true });
       writeFileSync(
-        join(idDir, 'skills', 'objectstack-pm-dispatch', 'SKILL.md'),
+        join(idDir, 'skills', 'objectstack-upgrade', 'SKILL.md'),
         ['```', '/pm-dispatch #<n> #<n>       # two named issues, nothing else', '```'].join('\n'),
       );
       writeFileSync(planted, 'The `cursor` key was removed in protocol 17.');

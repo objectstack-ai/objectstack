@@ -725,7 +725,8 @@ describe('ScheduleStateSchema', () => {
     const state = ScheduleStateSchema.parse({
       id: 'sched_001',
       flowName: 'daily_report',
-      cronExpression: '0 9 * * MON-FRI',
+      // `cronExpression` was deleted outright (#16320) — the strip is pinned in
+      // `cron-typed-positions-retirement.test.ts`.
       timezone: 'America/New_York',
       status: 'active',
       nextRunAt: '2026-02-03T14:00:00Z',
@@ -742,7 +743,7 @@ describe('ScheduleStateSchema', () => {
       createdBy: 'user_admin',
     });
     expect(state.id).toBe('sched_001');
-    expect(state.cronExpression).toEqual({ dialect: 'cron', source: '0 9 * * MON-FRI' });
+    expect(state).not.toHaveProperty('cronExpression');
     expect(state.totalRuns).toBe(42);
     expect(state.timezone).toBe('America/New_York');
   });
@@ -751,7 +752,6 @@ describe('ScheduleStateSchema', () => {
     const state = ScheduleStateSchema.parse({
       id: 'sched_002',
       flowName: 'weekly_sync',
-      cronExpression: '0 6 * * MON',
       createdAt: '2026-01-01T00:00:00Z',
     });
     expect(state.timezone).toBe('UTC');
@@ -766,7 +766,6 @@ describe('ScheduleStateSchema', () => {
       const state = ScheduleStateSchema.parse({
         id: 'sched_test',
         flowName: 'test',
-        cronExpression: '* * * * *',
         createdAt: '2026-01-01T00:00:00Z',
         status: v,
       });
@@ -777,20 +776,23 @@ describe('ScheduleStateSchema', () => {
   it('should reject missing required fields', () => {
     expect(() => ScheduleStateSchema.parse({
       flowName: 'test',
-      cronExpression: '* * * * *',
       createdAt: '2026-01-01T00:00:00Z',
     })).toThrow(); // missing id
 
     expect(() => ScheduleStateSchema.parse({
       id: 'sched_003',
-      cronExpression: '* * * * *',
       createdAt: '2026-01-01T00:00:00Z',
     })).toThrow(); // missing flowName
 
+    // `cronExpression` was the third required key until #16320 deleted it, so
+    // the requiredness left with the key: a state without it now PARSES. The
+    // positive half lives here so the former "missing cronExpression" refusal
+    // cannot quietly come back; the authored-value strip is pinned in
+    // `cron-typed-positions-retirement.test.ts`.
     expect(() => ScheduleStateSchema.parse({
       id: 'sched_004',
       flowName: 'test',
       createdAt: '2026-01-01T00:00:00Z',
-    })).toThrow(); // missing cronExpression
+    })).not.toThrow();
   });
 });

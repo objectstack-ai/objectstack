@@ -11,6 +11,7 @@ import type { AnalyticsServiceConfig } from './analytics-service.js';
 import type { AnalyticsDriverCapabilities } from './strategies/types.js';
 import { pickDisplayField, type DimensionLabelDeps } from './dimension-labels.js';
 import { assertReadScopeCannotVacate } from './read-scope-sql.js';
+import { readScopeUnresolvedError } from './read-scope-refusal.js';
 
 /**
  * The slice of the DECLARED engine contracts this plugin's auto-bridges
@@ -507,9 +508,19 @@ export class AnalyticsServicePlugin implements Plugin {
      * ⛔ The refusal is a THROW, not a louder log over an `undefined`: a log is
      * not a refusal. `AnalyticsService.resolveReadScopes` is the fail-closed
      * seam that already denies the whole query when this provider throws (it
-     * has since ADR-0021 D-C), so serving nothing — the same outcome the
-     * object-level bridge produces — needs no new error code and no new
-     * envelope here.
+     * has since ADR-0021 D-C), so serving nothing is the same outcome the
+     * object-level bridge produces.
+     *
+     * [#17130] It needs no NEW error code — and the clause that used to follow,
+     * "and no new envelope here", was the finding. An envelope is not a second
+     * outcome, it is what stops the outcome being decided by wording:
+     * `queryDataset`'s catch re-throws whatever declares `code` + `status` and
+     * sends everything else to a six-substring sniff over driver phrasing,
+     * three limbs of which (`not registered`, `unknown object`,
+     * `is not a registered object`) are what a security refusal says. This
+     * refusal propagated only because its text happened to miss all six.
+     * {@link readScopeUnresolvedError} carries the code the sibling lowering
+     * stage already owns, so the coincidence is gone without a ledger row.
      */
     type SecurityReadFilterResolution =
       | { kind: 'usable'; svc: SecurityReadFilter }
@@ -572,7 +583,15 @@ export class AnalyticsServicePlugin implements Plugin {
             'A security service is wired on this deployment, so analytics must not fall ' +
             'open and serve rows with no row-level policy applied.',
           );
-          throw new Error(
+          // [#17130] Declared, not bare. `resolveReadScopes` replaces this
+          // error with its own on the dataset path, but this provider is read
+          // by four consumers and a bare refusal is the one kind
+          // `queryDataset`'s catch classifies by WORDING — three of the six
+          // substrings it matches on (`not registered`, `unknown object`,
+          // `is not a registered object`) are exactly what a security refusal
+          // reaches for. ⛔ The message is unchanged: the fix is the
+          // declaration, never a luckier string.
+          throw readScopeUnresolvedError(
             `[Analytics] row-level read scope could not be resolved for "${object}"; ` +
             'query refused (fail-closed).',
           );

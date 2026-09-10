@@ -238,13 +238,16 @@ describe('CacheWarmupSchema', () => {
     expect(result.concurrency).toBe(20);
   });
 
-  it('should accept scheduled warmup', () => {
+  it('still accepts the `scheduled` strategy value — the `schedule` cron key beside it is retired', () => {
+    // `schedule` was deleted outright (#16320); the strip is pinned in
+    // `cron-typed-positions-retirement.test.ts`. The enum member is a value the
+    // ruling did not name and stays exactly as inert as it was.
     const result = CacheWarmupSchema.parse({
       enabled: true,
       strategy: 'scheduled',
-      schedule: '0 0 * * *',
     });
-    expect(result.schedule).toEqual({ dialect: 'cron', source: '0 0 * * *' });
+    expect(result.strategy).toBe('scheduled');
+    expect(result).not.toHaveProperty('schedule');
   });
 });
 

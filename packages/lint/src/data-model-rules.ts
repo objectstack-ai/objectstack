@@ -148,12 +148,14 @@ const OPTION_FIELD_TYPES = new Set(['select', 'multiselect', 'radio', 'enum']);
  *     by `driver-sql`'s `int` cast on Postgres (#11635). The answer is a
  *     number, so it fits.
  *
- * ⛔ Deliberately NOT read: `NON_TEXT_STORED_VALUE_TYPES`, whose membership is
- * these same two classes TODAY. It is defined by a third question — "is the
- * stored value never text" (#14079) — and excludes the temporal class for a
- * DIALECT reason, not for this one. Composing the union here states why each
- * half is in, so a future member of that set cannot widen this door as a side
- * effect.
+ * ⛔ Deliberately NOT read: `NON_TEXT_STORED_VALUE_TYPES`. It is defined by a
+ * third question — "may a text operator be aimed at this column" (#14079) —
+ * and it is no longer even coextensive with these two classes: #15683's ruling
+ * added `date` / `datetime` / `time` to it on 2026-09-05, and a temporal child
+ * field is the very declaration this rule exists to refuse, so reading it here
+ * would now widen this door by exactly the class the rule guards. Composing the
+ * union states why each half is in, so a future member of that set cannot widen
+ * this door as a side effect either.
  */
 function summaryRollupAnswerFitsColumn(childFieldType: string): boolean {
   return NUMERIC_VALUE_TYPES.has(childFieldType) || BOOLEAN_VALUE_TYPES.has(childFieldType);

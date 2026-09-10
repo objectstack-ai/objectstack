@@ -18,15 +18,15 @@
 - 前瞻的条款②事实住卡上裁决与分诊评论、`Clause-②` 申报和 `--tier` 输出。
 - 开着的载体恒 = 真实待审;载体不迁移:⛔ 不迁 PR review 或 Request Changes,⛔ 不为迁移留门。
 - FAIL 同 PASS 剥双载体:同笔留卡上交接评论(引复审、独立性对、欠改);卡态与 assignee 不动。
-- 重挂前先查裁决:闸门标签缺失 ⇒ 先 grep 卡评论找复审结论。
-- PASS + 无标 + head 未动 = 已清标不是被剥;head 后移或无结论才重挂。
-- `get_reviews` 读空 ≠ 未复审。
+- 重挂前先查裁决:闸门标签缺失 ⇒ 先 grep 卡评论找复审结论;`get_reviews` 读空 ≠ 未复审。
+- PASS + 无标 + head 未动 = 已清标不是被剥;head 后移或无结论才重挂;清标缺引记录即半态。
 
 ## 复核归属与资格(席内)
 
 - 归属该卡派发席,交付后收集复核当轮席内完成。
 - spec 席审低档实现者的契约增量,非自身产物;余席条款②复核 = 默认判断档自审加门禁。
-- 契约判断清单逐项落卡或 PR 评论,⛔ 不是散文自述。
+- 复核记录 = 一条评论落 PR 或卡,达档与默认档同形;散文、dev 自评、`os-dev-report` 恒不算。
+- 同形 = `## Contract review` 题头、所审 head sha 码段、①②③ 逐项、独立性对、PASS/FAIL 判词。
 - ① derived judgments 逐项:diff 引出的接受集与公开面变化逐条点名判对错。
 - ② semver 定级:变更级别与 changeset 声明一致。
 - ③ 边界旗处置:dev 挂旗与 `open_questions` 逐旗答复或升级。
@@ -35,12 +35,12 @@
 - 裁决载独立性对(机读):产出 diff 的身份写 `Implemented-by:`,出裁决的席位写 `Reviewed-by:`。
 - `mode:subagent` dev 记其分支 `claude/issue-…`(子代理无自有 session);`mode:remote` dev 记 session id。
 - 两者同 session ⇒ 报 SELF-REVIEW,⛔ 不作独立复核;两行皆无的历史裁决恒静默。
-- 放行 = 清标即落地:PASS ⇒ 同席同笔剥双载体,清标同笔留 provenance 评论引该 PASS。
+- 清标即落地:PASS ⇒ 同席同笔剥双载体;凡清标同笔留 provenance 评论,引记录 id 与所判 head。
 - 随后按 `landing-operations.md` 走落地前检 → 转 ready → 挂 auto-merge 或入队。
 - 轮次报告设复审清单专节,形状与代裁清单同为强制审计。
-- 落地前检三条:① 席内条款②复核 PASS 在案,即卡上的复核裁决评论(spec 席达档)。
+- 落地前检三条:① 席内条款②复核 PASS 在案,即 PR 或卡上同形的复核记录(spec 席达档)。
 - ② 双载体已清,逐对机读 `node scripts/pm/check-clause2-carriers.mjs --pair PR-NUMBER`。
-- 该命令 0 = 双肢一致且无放宽 tell,4 = 任一不成立,3 = 环境答不了;⛔ 3 不作干净。
+- 0 = 双肢一致、无放宽 tell、head 上有记录;4 = 任一不成立;3 = 环境答不了,⛔ 不作干净。
 - 放宽 tell 由 `scripts/pm/check-widening-tells.mjs` 判,`no` 撞新键/成员/导出/登记即拒,附 file:line。
 - ③ PR 全部 check 全绿,⛔ 非 required 子集;受管面不适用,draft-only 终局不变。
 

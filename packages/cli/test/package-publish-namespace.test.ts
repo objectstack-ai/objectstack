@@ -17,7 +17,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CreatePackageRequestSchema } from '@objectstack/spec/cloud';
+import { CreatePackageRequestSchema } from '@objectstack/spec/marketplace';
 import PackagePublish, { NAMESPACE_RE } from '../src/commands/package/publish.js';
 
 type Call = { url: string; body: any };

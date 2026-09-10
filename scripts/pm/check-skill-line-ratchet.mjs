@@ -892,7 +892,7 @@ export const CEILINGS = new Map([
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 38],
+  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 36],
   // Lowered 35 → 33 by the rules-only rewrite (maintainer 2026-09-04:
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
@@ -1052,7 +1052,21 @@ export const CEILINGS = new Map([
   // bullet is already typeset at the surrounding block's 90-byte prose width, and
   // AGENTS.md is not a CROSS_FILE_MOVES destination, so no `ruledRaises` record
   // applies. Landed count, headroom 0, same convention.
-  ['AGENTS.md', 1068],
+  //
+  // 1068 → 1074 (card #16851): Multi-agent discipline §3 narrowed from an
+  // unconditional force-push ban to "never force-push a SHARED branch", plus the
+  // five criteria that make a branch provably unshared before `--force-with-lease`
+  // is allowed — the ban's own rationale (a parallel agent's work) was already
+  // scoped that way, and check-partof-closing-keyword RULE 2 can only be satisfied
+  // by rewriting a commit message, so the unconditional wording had already been
+  // broken once in practice. +6 lines, exactly the ruled budget: two lines cannot
+  // carry five criteria, and the item measures 0 lossless rewrap headroom at the
+  // list's ~90-byte prose width. Maintainer ruling, verbatim and untranslated:
+  // 「其他同意」 (decision batch #111 item 4, 2026-09-10, on analysis 5615846806
+  // option A; recorded by the director on #16851 comment 5617189215, which also
+  // rules the net budget of 6). AGENTS.md is not a CROSS_FILE_MOVES destination,
+  // so no `ruledRaises` record applies. Landed count, headroom 0, same convention.
+  ['AGENTS.md', 1074],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to

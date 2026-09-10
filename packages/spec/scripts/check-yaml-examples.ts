@@ -129,12 +129,12 @@ import {
 import * as AI from '../src/ai';
 import * as API from '../src/api';
 import * as Automation from '../src/automation';
-import * as Cloud from '../src/cloud';
 import * as Contracts from '../src/contracts';
 import * as Data from '../src/data';
 import * as Identity from '../src/identity';
 import * as Integration from '../src/integration';
 import * as Kernel from '../src/kernel';
+import * as Marketplace from '../src/marketplace';
 import * as QA from '../src/qa';
 import * as Security from '../src/security';
 import * as Shared from '../src/shared';
@@ -413,8 +413,8 @@ function parseDecl(raw: string): { decl?: ParsedDecl; error?: string } {
  * access), so only the names markers actually declare are ever probed.
  */
 const NAMESPACES: Record<string, Record<string, unknown>> = {
-  AI, API, Automation, Cloud, Contracts, Data, Identity, Integration,
-  Kernel, QA, Security, Shared, Studio, System, UI,
+  AI, API, Automation, Contracts, Data, Identity, Integration,
+  Kernel, Marketplace, QA, Security, Shared, Studio, System, UI,
 };
 
 type NameIndex = Record<string, Record<string, unknown>>;

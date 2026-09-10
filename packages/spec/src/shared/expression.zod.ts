@@ -333,15 +333,18 @@ function typedExpressionUnionParams(dialect: TypedExpressionDialect): { error: (
  * `{ dialect: 'cron', source }`, and an envelope must declare `dialect: 'cron'`
  * — a `cel` or `template` envelope is refused at the slot, naming the fix
  * (`TYPED_EXPRESSION_DIALECT_ONLY.cron`), as is a blank string
- * (`TYPED_EXPRESSION_SOURCE_REQUIRED.cron`). Use this for `schedule` /
- * `cronExpression` fields so authors can write `'0 9 * * 1-5'` without
- * manually wrapping.
+ * (`TYPED_EXPRESSION_SOURCE_REQUIRED.cron`). Two slots carry it:
+ * `CronSchedule.expression` (`system/job.zod.ts`) and
+ * `KnowledgeRefreshPolicy.cron` (`ai/knowledge-source.zod.ts`); authors write
+ * `'0 9 * * 1-5'` without manually wrapping. The seven other cron-typed
+ * positions nothing evaluated were retired by #16320 (ADR-0049 — a slot with
+ * no engine is declared, not enforced), so a new one needs a reader first.
  *
  * No cron syntax is judged at parse time — `'not a cron'` normalizes like any
  * other string. `croner` judges the pattern where a schedule is wired
  * (`CronSchedule.expression` → `toBoundaryJobSchedule` → `CronJobAdapter`);
- * every other cron-typed slot reaches no engine, and no grammar is restated
- * here.
+ * the knowledge-refresh slot is `[EXPERIMENTAL — not enforced]` by design and
+ * reaches no engine, and no grammar is restated here.
  */
 export const CronExpressionInputSchema = z.union([
   typedExpressionStringArm('cron'),

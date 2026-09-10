@@ -338,10 +338,10 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       // the L1 "Simple Sync" DataSyncConfig) left with the whole file in
       // #4738 — the L1 layer was narrative-only, so no engine ever evaluated
       // that predicate. Connector-attached sync (`ConnectorSchema.syncConfig`)
-      // declares no CEL surface to re-point this cover at. It does declare a
-      // cron one — `syncConfig.schedule` — which was invisible to discovery
-      // when that was written and is classified by `cron-declared-unwired`
-      // since #15027; nothing evaluates it either.
+      // declares no CEL surface to re-point this cover at. It did declare a
+      // cron one — `syncConfig.schedule` — invisible to discovery when that
+      // was written, classified by `cron-declared-unwired` from #15027, and
+      // retired under ADR-0049 at #16320 (nothing ever evaluated it).
       // `kernel/metadata-loader.zod.ts:filter` (on MetadataLoadOptions and
       // MetadataExportOptions) was removed with the rest of that file's
       // zero-consumer duplicate envelope family in #4411. The surviving
@@ -367,7 +367,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       'runtime/job-schedule.ts `toBoundaryJobSchedule` — the authoring→boundary seam: it lowers the parsed `{dialect:"cron",source}` envelope to the bare cron string the adapter takes, and THROWS naming the job on a non-cron dialect, an AST-only envelope, or a missing/blank source. Called from runtime/app-plugin.ts `start`; the boundary value reaches service-job/cron-job-adapter.ts `CronJobAdapter.schedule` → **croner** `Cron` (db-job-adapter.ts routes the cron variant there and persists the shape onto sys_job). The throw is CONTAINED at the call site, deliberately and visibly: AppPlugin catches per job, logs `Background job FAILED TO SCHEDULE — it will never run` at ERROR with the `jobScheduleFailuresTotal` counter, then reports the failed count — boot continues and the job does not run. Cron SYNTAX is not judged on this path at all: `toBoundaryJobSchedule` only checks dialect/source shape, and a syntactically invalid pattern throws later inside croner, into the same catch',
     covers: ['system/job.zod.ts:CronScheduleSchema.expression'],
     proof: 'packages/runtime/src/job-schedule.test.ts',
-    note: 'The ONE cron slot in the spec with a measured evaluator. `@objectstack/formula` cronEngine is NOT on this path — see `cron-declared-unwired` for what that means for the rest.',
+    note: 'The ONE cron slot in the spec with a measured evaluator. `@objectstack/formula` cronEngine is NOT on this path — it has zero consumers outside packages/formula, and the five other cron slots once declared beside this one (the former `cron-declared-unwired` row: export schedules, flow schedule state, connector sync, cache warmup, DR backup/test) never reached it either; they were retired under ADR-0049 as declared-but-never-evaluated.',
   },
   {
     // The key and its documented hand-off arrived with #14825.
@@ -377,25 +377,27 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     enforcement:
       'PARSE ONLY — `CronExpressionInputSchema` refuses a blank/non-string, non-envelope value and normalizes to `{dialect:"cron",source}`; nothing evaluates the result. service-knowledge/knowledge-service.ts reads `refresh.onRecordChange` and NEVER `refresh.cron` (measured: the only `refresh` reads in that package are the two `onRecordChange` sites)',
     covers: ['ai/knowledge-source.zod.ts:KnowledgeRefreshPolicySchema.cron'],
-    note: 'EXPERIMENTAL by DESIGN, and separated from `cron-declared-unwired` for that reason: the key documents its own hand-off — service-knowledge surfaces the value so an automation flow / external scheduler can call `reindexSource`, and the field docblock says so. Nothing in this repo schedules it, which is the intended state rather than an undelivered one. It still has no evaluator, so it is not `enforced`.',
+    note: 'EXPERIMENTAL by DESIGN — and that is why it survived the ADR-0049 retirement of the other declared-but-unwired cron slots (the former `cron-declared-unwired` row): the key documents its own hand-off — service-knowledge surfaces the value so an automation flow / external scheduler can call `reindexSource`, and the field docblock says so. Nothing in this repo schedules it, which is the intended state rather than an undelivered one. It still has no evaluator, so it is not `enforced`.',
   },
-  {
-    // Sibling cards named in this row's note: #15500 (ratchet-key granularity)
-    // and #15028 (the envelope arm now pins the dialect — the note's last sentence).
-    id: 'cron-declared-unwired',
-    summary: 'cron slots on subsystems that were declared but never built — export schedules, flow schedule state, connector sync, cache warmup, DR backup/test',
-    dialect: 'cron', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
-    enforcement:
-      'PARSE ONLY — `CronExpressionInputSchema` refuses a blank/non-string, non-envelope value and normalizes to the envelope; NO EVALUATOR FOUND for any of these five keys. Reader hunt, per key, walking out from each declaration (2026-09-04, `61821e54cf5`): `api/export.zod.ts:cronExpression` — the whole `ExportJobApiContracts` family has zero consumers and rest-server serves no `/api/v1/data/export` route, so `POST /api/v1/data/export/schedules` is a declared contract nothing implements; `IExportService` has no provider binding, which its own source already records. `automation/execution.zod.ts:cronExpression` — `ScheduleStateSchema` has no consumer outside packages/spec; the schedule TRIGGER that does work reads a flow start node `config.schedule` through trigger-schedule/schedule-trigger.ts `normalizeSchedule`, a different shape this key never reaches. `integration/connector.zod.ts:schedule` — `syncConfig` has no reader outside packages/spec. `system/cache.zod.ts:schedule` (CacheWarmup) and `system/disaster-recovery.zod.ts:schedule` (BackupConfig + the DR `testing` block) — neither schema has any consumer outside packages/spec',
-    covers: [
-      'api/export.zod.ts:ScheduledExportSchema.cronExpression', 'api/export.zod.ts:ScheduleExportRequestSchema.cronExpression',
-      'automation/execution.zod.ts:ScheduleStateSchema.cronExpression',
-      'integration/connector.zod.ts:DataSyncConfigSchema.schedule',
-      'system/cache.zod.ts:CacheWarmupSchema.schedule',
-      'system/disaster-recovery.zod.ts:BackupConfigSchema.schedule', 'system/disaster-recovery.zod.ts:DisasterRecoveryPlanSchema.schedule',
-    ],
-    note: 'EXPERIMENTAL — five declared cron slots with no runtime evaluator (ADR-0049 enforce-or-remove candidates; each wants its own look, and the card that surfaced them says so rather than proposing a sweep). ⚠️ TWO of these surfaces are declared TWICE: `api/export.zod.ts` `cronExpression` on `ScheduledExportSchema` and on `ScheduleExportRequestSchema`, and `system/disaster-recovery.zod.ts` `schedule` on `BackupConfigSchema` and on `DisasterRecoveryPlanSchema` (the DR `testing` block). Both pairs are genuinely the same surface twice, so one row is honest here — and now that each declaring position carries its OWN key, that judgement is written out as two `covers` entries instead of being assumed by a collapse. ⚠️ The `failPolicy` on this row is `unevaluated`. It read `compile-error` until the vocabulary gained a member for "nothing evaluates this slot", and that value was the closest available rather than a true one: the PARSE is the only thing that ever refuses one of these values, which is a property every row in this ledger shares and says nothing about this one. It was never a claim that cron SYNTAX is checked. It is not: `@objectstack/formula` cronEngine validates 5/6-field patterns and `@` aliases, and has ZERO consumers outside packages/formula — nothing routes these slots through it. The parse now DOES pin these slots to the cron dialect (the sibling finding on the dialect union is closed): the envelope arm of `CronExpressionInputSchema` accepts a `cron` envelope only and its bare-string arm refuses a blank string, each with one issue at the slot naming the fix — and it still judges no cron syntax, by position: no grammar is restated in spec; `croner` judges the pattern where a schedule is wired (`cron-job-schedule`).',
-  },
+  // `cron-declared-unwired` sat here until #16320 retired every position it
+  // covered under ADR-0049 (the #15954 ruling, decision batch #56, option A —
+  // retire — per family): `api/export.zod.ts` `ScheduledExportSchema.cronExpression`
+  // / `ScheduleExportRequestSchema.cronExpression`, `automation/execution.zod.ts`
+  // `ScheduleStateSchema.cronExpression`, `integration/connector.zod.ts`
+  // `DataSyncConfigSchema.schedule`, `system/cache.zod.ts` `CacheWarmupSchema.schedule`,
+  // and `system/disaster-recovery.zod.ts` `BackupConfigSchema.schedule` /
+  // `DisasterRecoveryPlanSchema.schedule` (the DR `testing` block). Each key was
+  // DELETED OUTRIGHT — no `retiredKey()` tombstone, no D2 conversion and no D3
+  // semantic entry (maintainer ruling 2026-09-10 on the retirement PR) — so there is
+  // no `CronExpressionInputSchema` member left at any of the seven, discovery (by
+  // roster name) no longer sees them and every cover would read STALE; the row is
+  // deleted rather than re-pointed, the `mapping.zod.ts:expression` (#5552) /
+  // `element:form.onSubmit` (#9249) way. What the row recorded — PARSE ONLY, no
+  // evaluator found for any of the five keys, `failPolicy: 'unevaluated'` — became
+  // the retirement's reason, stated at each deletion site in the schema source; it
+  // reaches no ADR-0087 entry, because the ruling registered none. The two cron rows
+  // above are the whole cron dialect now: one evaluated slot, one
+  // experimental-by-design.
 
   // ── TEMPLATE dialect (#15027) ─────────────────────────────────────────────
   {

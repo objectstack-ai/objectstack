@@ -892,7 +892,7 @@ export class MetadataPlugin implements Plugin {
      * landing.
      */
     private async _parseAndRegisterArtifact(ctx: PluginContext, raw: unknown, label: string): Promise<number> {
-        const { EnvironmentArtifactSchema } = await import('@objectstack/spec/cloud');
+        const { EnvironmentArtifactSchema } = await import('@objectstack/spec/system');
         const { ObjectStackDefinitionSchema } = await import('@objectstack/spec');
 
         let metadata: Record<string, unknown[]>;

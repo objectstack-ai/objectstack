@@ -1,7 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { CronExpressionInputSchema } from '../shared/expression.zod';
 
 /**
  * @module system/cache
@@ -179,8 +178,17 @@ export const CacheWarmupSchema = lazySchema(() => z.object({
   /** Warmup strategy */
   strategy: z.enum(['eager', 'lazy', 'scheduled']).default('lazy')
     .describe('Warmup strategy: eager (at startup), lazy (on first access), scheduled (cron)'),
-  /** Cron schedule for scheduled warmup */
-  schedule: CronExpressionInputSchema.optional().describe('Cron expression for scheduled warmup'),
+  /*
+   * `CacheWarmup.schedule` was DELETED here in @objectstack/spec 18 (ADR-0049
+   * enforce-or-remove, #16320): declared, parsed into the cron envelope and read by
+   * nothing — `CacheWarmupSchema` has no consumer outside `packages/spec`, so no
+   * warmup ever ran on a schedule. Deleted outright — no `retiredKey()` tombstone, no
+   * D2 conversion, no D3 semantic entry (maintainer ruling 2026-09-10 on the
+   * retirement PR). The `strategy` enum keeps its `scheduled` member: it is a value,
+   * not a position this ruling names, and it was exactly as inert before. The one cron
+   * slot the platform evaluates is `Job.schedule.expression` (`system/job.zod.ts`): a
+   * warmup on a cadence is a job whose handler you write.
+   */
   /** Keys/patterns to warm up */
   patterns: z.array(z.string()).optional().describe('Key patterns to warm up (e.g., "user:*", "config:*")'),
   /** Maximum concurrent warmup operations */

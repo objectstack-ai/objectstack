@@ -362,7 +362,7 @@ describe('#14760 — an untouched readonly key is not laundered by the sandbox w
     expect(after.touched_by).toBe('hook');
   }, 60000);
 
-  it('[#16344] a body that reads a CALLER-supplied readonly key no longer sees it — and says so instead of deriving from it', async () => {
+  it('[#16344/#17219] a body reaching THROUGH a caller-supplied readonly key is refused — and the refusal names the key, the reason and the remedy', async () => {
     // The old path of the control above, kept and re-judged rather than
     // deleted, because the behaviour change is the point of the card and this
     // is the one place in the repo that measures it end to end through a REAL
@@ -376,22 +376,54 @@ describe('#14760 — an untouched readonly key is not laundered by the sandbox w
     //
     // ⚠️ That fault is a REFUSAL, not a silent no-op: a `body` hook's default
     // `onError` is `abort`, so the caller's whole write is rejected and the row
-    // is untouched. Loud beats silent — but the message is a raw `TypeError`
-    // from the app's own dereference, which names nothing an author can act on.
-    // Recorded here rather than smoothed over: a body that needs the caller's
-    // submission has no `ctx.submitted` (it is deliberately not marshalled onto
-    // the sandbox face), and its supported source for a derived column is
-    // `ctx.previous`.
+    // is untouched. Loud beats silent — and #17219 supplied the second half the
+    // refusal was missing. Measured here before that card, through this very
+    // harness, at both doors:
+    //
+    //   direct  SandboxError: hook 'guard_task_body' threw:
+    //             TypeError: cannot set property 'who' of undefined
+    //   REST    500 {"error":"Internal server error","code":"INTERNAL_ERROR"}
+    //
+    // The REST reading is the worse one and it is the door an author authors
+    // against: a leading `TypeError:` is correctly classified as a crash
+    // (#7543) and sanitised, so the author was told nothing at all. The engine
+    // now names the withheld key at the dispatch site — it is the only actor
+    // that can tell "the platform took this away" from "nobody sent it".
+    //
+    // ⛔ Still no `ctx.submitted` on the sandbox face: that face is assembled
+    // key by key and the shape was measured and refused in PR #17195. The
+    // supported source for a derived column is `ctx.previous`, which is what
+    // the message now says.
     const { engine, driver } = await boot(WRITES_THROUGH_SOURCE);
     await seed(driver);
     const seeded = await row(engine);
 
-    await expect(engine.update('guard_task', {
+    const err: any = await engine.update('guard_task', {
       id: seeded.id,
       status: 'done',
       locked_meta: { who: 'caller' },
       locked_note: 'CALLER',
-    } as any)).rejects.toThrow(/locked_meta|cannot set property 'who' of undefined/);
+    } as any).then(() => null, (e) => e);
+
+    // ⛔ The ENVELOPE, not `toThrow`: a bare "it threw" passes for the raw
+    // `TypeError` this card exists to replace, which is how the old assertion
+    // here stayed green through the whole defect.
+    expect(err).toBeTruthy();
+    // ① the withheld key, ② withheld BY THE PLATFORM rather than absent by
+    // accident, ③ the documented remedy — the three the card requires.
+    expect(err.message).toContain('`locked_meta`');
+    expect(err.message).toContain('withheld by the platform, not missing by accident');
+    expect(err.message).toContain('`ctx.previous.locked_meta`');
+    // ④ and the status that carries all of the above past `mapDataError`'s
+    //    script-fault sanitiser instead of into a blank 500.
+    expect(err.status).toBe(400);
+    // ⛔ Deliberately NOT a `code`: this rides the existing "message verbatim,
+    // no code" 400 channel a body's own authored refusal already uses. A
+    // dedicated ledger entry is a new PUBLISHED member and a separate decision.
+    expect(err.code).toBeUndefined();
+    // The original fault survives inside the message — an author debugging the
+    // body still gets the line that actually threw.
+    expect(err.message).toContain("cannot set property 'who' of undefined");
 
     const after = await row(engine);
     // ⭐ The verdict that matters: NOTHING the caller sent reached the row —

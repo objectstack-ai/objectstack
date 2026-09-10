@@ -4172,18 +4172,21 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  *
  * ## The census, re-derived on this tree
  *
- * 209 code-position matches over the tracked JS/TS corpus. 187 are the bare
- * `selfTest`; the remaining 22 carry compound names over 21 distinct spellings,
- * and they are the rows below. Fifteen are genuine self-test batteries — the
- * anchor firing on them is the anchor working. SEVEN are production code:
+ * 252 code-position matches over the tracked JS/TS corpus. 223 are the bare
+ * `selfTest`; the remaining 29 carry compound names over 26 distinct spellings,
+ * and they are the rows below. Nineteen are genuine self-test batteries — the
+ * anchor firing on them is the anchor working. TEN are production code:
  *
- *   scripts/check-self-test-wired.mjs            carriesSelfTest
+ *   scripts/check-self-test-wired.mjs             carriesSelfTest
  *   scripts/check-self-test-workflow-commands.mjs runSelfTest
- *   scripts/check-step-collectors.mjs            selfTestTargets
- *   scripts/check-step-collectors.mjs            selfTestDiscoveries
- *   scripts/measure-self-test-floor.mjs          selfTestDefs
- *   scripts/pm/dispatch-gates.mjs                selfTestOnlyCallables
- *   scripts/pm/dispatch-gates.mjs                maskSelfTests
+ *   scripts/check-step-collectors.mjs             selfTestTargets
+ *   scripts/check-step-collectors.mjs             selfTestDiscoveries
+ *   scripts/measure-durability-swallow-family.mjs selfTestMode
+ *   scripts/measure-self-test-floor.mjs           selfTestDefs
+ *   scripts/pm/dispatch-gates.mjs                 selfTestOnlyCallables
+ *   scripts/pm/dispatch-gates.mjs                 maskSelfTests
+ *   scripts/pm/dispatch-gates.mjs                 selfTestCaseLines
+ *   scripts/pm/dispatch-gates.mjs                 selfTestOnlyInvocation
  *
  * Every one of them is a gate that REASONS ABOUT self-tests, which is why they
  * cluster: a tool that finds, spawns, counts or masks other scripts' self-tests
@@ -4192,16 +4195,17 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  *
  * ## What it costs today: nothing, MEASURED, and that is the whole point
  *
- * Neutralising each of the seven one at a time and re-extracting moves no hint
- * in any of the four files. The claim is therefore live rather than recalled —
+ * Neutralising each of the ten one at a time and re-extracting moves no hint
+ * in any of the six files. The claim is therefore live rather than recalled —
  * and it is exactly the kind of claim that stops being true without anything
  * going red, which is what the pin in this module's self-test exists to catch.
  *
- * The same measurement over the fifteen genuine rows is NOT zero, and that
- * asymmetry is what makes the classification load-bearing rather than
- * decorative: `fixtureSelfTest` drops `packages/spec/spec-changes.json` and
- * `prePushIsArmedSelfTest` drops `.githooks/pre-push`, both fixture paths in
- * `scripts/check-regen-pending.mjs`, both correctly refused. So "no
+ * The same measurement, redone over the table's current nineteen genuine rows,
+ * is still NOT zero, and that asymmetry is what makes the classification
+ * load-bearing rather than decorative: `fixtureSelfTest` drops
+ * `packages/spec/spec-changes.json` and `prePushIsArmedSelfTest` drops
+ * `.githooks/pre-push`, both fixture paths in `scripts/check-regen-pending.mjs`,
+ * both correctly refused. So "no
  * compound-name match may contribute a hint" is FALSE as a blanket invariant;
  * the invariant holds only over the accidental half, and only a classification
  * can name that half.
@@ -4219,14 +4223,14 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  *     that excludes the accidental one also unmasks a real self-test battery and
  *     readmits its fixture paths as hints — the fabricated-lead family this
  *     whole masker exists to refuse, traded for a silence that costs nothing.
- *   - **Special-casing this module's own path fixes two rows of seven.** The
- *     other five live in three other files, so the objection that a rename
+ *   - **Special-casing this module's own path fixes four rows of ten.** The
+ *     other six live in five other files, so the objection that a rename
  *     "fixes one instance and leaves the class" applies to it too, one file
  *     wider — and it would make the tool's self-scan differ from every other
  *     scan, which is a hazard of its own.
  *
- * ⇒ What ships is neither. The anchor keeps firing on all 22, the mask keeps
- * blanking all 22, and the cost of the seven accidental ones is MEASURED on
+ * ⇒ What ships is neither. The anchor keeps firing on all 29, the mask keeps
+ * blanking all 29, and the cost of the ten accidental ones is MEASURED on
  * every run instead of asserted in prose. Silence was the defect; the remedy is
  * noise on the day it starts costing something.
  *
@@ -4239,6 +4243,13 @@ const BARE_ENTRY_POINT_NAME = 'selfTest';
  * measures, and keeps measuring, that masking it costs no hint. ⛔ Do not
  * "repair" a red by renaming the function to dodge the anchor: the row is the
  * record, and the next accidental name is the one nobody will notice.
+ *
+ * The TOTAL / GENUINE / ACCIDENTAL counts stated above are pinned the same
+ * way (#15310): `--self-test` computes them fresh from this table and checks
+ * the docblock's own prose against that computation, never against a second
+ * hand-typed constant. Prose that drifts from the table reds there, instead
+ * of drifting further unnoticed the way it had — twice — by the time #15310
+ * measured it.
  */
 const COMPOUND_ANCHOR_LEDGER = [
   ['packages/lint/scripts/check-doc-formula-expressions.mjs', 'specSelfTest', false],
@@ -10606,7 +10617,11 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
  * (1023 of that is the suspect glob's contract surface). The `skills/**`
  * entry (2026-09-10) adds one hint and the 47 tracked files under `skills/`
  * (`git ls-files skills` on ebf9a489), one of which — the published PM
- * skill — the table already covered.
+ * skill — the table already covered. That skill was deleted on 2026-09-10
+ * (maintainer, verbatim: 「发布版 skills/objectstack-pm-dispatch 删」) and its
+ * own entry left with it — a dead glob is refused by the self-test — so the
+ * catalog is covered by `skills/**` alone and a catalog file hits exactly ONE
+ * entry; the frame-copy half of clause ① now names the internal copy only.
  *
  * They stay inert against a gate that RESOLVES to this file, because no check
  * family does — `check:pm-dispatch-gates` resolves to `check-dispatch-gates.mjs`
@@ -10645,11 +10660,6 @@ export const MANDATORY_TIER_GLOBS = [
     glob: '.claude/agents/os-dev.md',
     tier: CONTRACT_REVIEW_TIER,
     why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and receives the decision frame the PM pastes into its prompt at dispatch time rather than carrying a copy of its own',
-  },
-  {
-    glob: 'skills/objectstack-pm-dispatch/SKILL.md',
-    tier: CONTRACT_REVIEW_TIER,
-    why: 'clause ① (2026-08-20 narrowing): the published PM skill carries one enforced copy of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
   },
   {
     glob: 'skills/**',
@@ -15509,6 +15519,86 @@ function selfTest() {
     t('…and so is the reachability helper beside it', names.includes('selfTestOnlyCallables'));
   }
 
+  // #15310 — the docblock above states this table's TOTAL / GENUINE /
+  // ACCIDENTAL composition in prose, and prose does not move when a row is
+  // added: three integers that agree with EACH OTHER while jointly
+  // disagreeing with the table is exactly the shape that let this drift twice
+  // without ever looking wrong. The declared numbers are read out of this
+  // module's own docblock text, never re-typed as a second constant here, and
+  // checked against a count taken fresh from COMPOUND_ANCHOR_LEDGER itself —
+  // so a row added without touching the docblock reds here, and an edit to
+  // any unrelated line changes neither side and stays green.
+  {
+    const ownSource = readFileSync(nodePath.join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8');
+    const ledgerAt = ownSource.indexOf('const COMPOUND_ANCHOR_LEDGER = [');
+    const before = ledgerAt < 0 ? '' : ownSource.slice(0, ledgerAt);
+    const blockStart = before.lastIndexOf('/**');
+    const blockEnd = before.lastIndexOf('*/');
+    // Line-wrapped JSDoc prose carries a `\n * ` between words that happen to
+    // fall on a line break — flattened to single spaces so a future rewrap of
+    // this paragraph cannot itself make a true reading look false.
+    const prose =
+      blockStart < 0 || blockEnd < 0
+        ? ''
+        : ownSource
+            .slice(blockStart, blockEnd)
+            .replace(/\n[ \t]*\*[ \t]?/g, ' ')
+            .replace(/[ \t]+/g, ' ');
+
+    const total = COMPOUND_ANCHOR_LEDGER.length;
+    const genuine = COMPOUND_ANCHOR_LEDGER.filter(([, , accidental]) => !accidental).length;
+    const accidental = COMPOUND_ANCHOR_LEDGER.length - genuine;
+    const distinctSpellings = new Set(COMPOUND_ANCHOR_LEDGER.map(([, name]) => name)).size;
+
+    // Only as wide as the words this docblock actually spells; extending it is
+    // a deliberate edit, not silent tolerance for a new spelling.
+    const NUMBER_WORDS = {
+      zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+      ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+      seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+    };
+    const asCount = (word) => (/^\d+$/.test(word) ? Number(word) : NUMBER_WORDS[String(word).toLowerCase()]);
+
+    const remaining = prose.match(/the remaining (\d+) carry compound names/);
+    const allFiring = prose.match(/keeps firing on all (\d+), the mask keeps blanking all (\d+)/);
+    const genuineLine = prose.match(/([A-Za-z]+) are genuine self-test batteries/);
+    const accidentalLine = prose.match(/([A-Za-z]+) are production code:/);
+    const spellingsLine = prose.match(/over (\d+) distinct spellings/);
+
+    t(
+      'the docblock\'s TOTAL row count — "the remaining N carry compound names" and both "all N" claims — ' +
+        `agrees with the table (table: ${total}; declared: ` +
+        `${remaining ? remaining[1] : '<not found>'}/${allFiring ? allFiring[1] : '<not found>'}/` +
+        `${allFiring ? allFiring[2] : '<not found>'})`,
+      remaining !== null
+        && allFiring !== null
+        && Number(remaining[1]) === total
+        && Number(allFiring[1]) === total
+        && Number(allFiring[2]) === total,
+    );
+    t(
+      "the docblock's GENUINE count (\"N are genuine self-test batteries\") agrees with the table " +
+        `(table: ${genuine}; declared: ${genuineLine ? genuineLine[1] : '<not found>'})`,
+      genuineLine !== null && asCount(genuineLine[1]) === genuine,
+    );
+    t(
+      "the docblock's ACCIDENTAL count (\"N are production code:\") agrees with the table " +
+        `(table: ${accidental}; declared: ${accidentalLine ? accidentalLine[1] : '<not found>'})`,
+      accidentalLine !== null && asCount(accidentalLine[1]) === accidental,
+    );
+    // Distinct NAMES, not rows: `runSelfTest` is a genuine entry point in one
+    // file and an accidental one in another, so it is one spelling occupying
+    // two rows — the same reason COMPOUND_ANCHOR_KEYS has to carry the file in
+    // its key. This is derivable from the table exactly like the three above,
+    // so it is pinned the same way rather than left as the one clause in this
+    // paragraph a future row could still drift without going red.
+    t(
+      "the docblock's distinct-spellings count (\"over N distinct spellings\") agrees with the table " +
+        `(table: ${distinctSpellings}; declared: ${spellingsLine ? spellingsLine[1] : '<not found>'})`,
+      spellingsLine !== null && Number(spellingsLine[1]) === distinctSpellings,
+    );
+  }
+
   // A population DECLARED for this very scanner is referenced by no executing
   // code — being unreferenced is what such a declaration IS. Extending the mask
   // to value declarations was implemented and REFUSED on this evidence: over
@@ -19449,7 +19539,7 @@ function selfTest() {
     'and the tier-table file globs are not inheritable either',
     ownPopulation.length > 0
       && !ownPopulation.includes('.claude/agents/os-dev.md')
-      && !ownPopulation.includes('skills/objectstack-pm-dispatch/SKILL.md'),
+      && !ownPopulation.includes('skills/**'),
   );
   // Cost of the mechanism on this tree, pinned so it cannot grow unnoticed: the
   // marker is an opt-out, and an opt-out that spreads is how a real population
@@ -21269,7 +21359,6 @@ function selfTest() {
   const fableOf = (paths) => deriveTier(paths);
   t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === CONTRACT_REVIEW_TIER);
-  t('the published PM skill (one enforced frame copy) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).mandatory === false);
   const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/agents/os-dev.md']);
   t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === CONTRACT_REVIEW_TIER);
@@ -21289,8 +21378,13 @@ function selfTest() {
   t('a published catalog SKILL.md is mandated, by the skills/** entry', catalogHit.tier === CONTRACT_REVIEW_TIER && catalogHit.hits.some((h) => h.glob === 'skills/**'));
   t('a second published catalog file is mandated the same way', fableOf(['skills/objectstack-ai/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('a generated references file under a published skill is mandated too — the mandate is the ROOT, not the SKILL.md files', fableOf(['skills/objectstack-data/references/_index.md']).mandatory === true);
-  const pmCopyHit = fableOf(['skills/objectstack-pm-dispatch/SKILL.md']);
-  t('the published PM skill is covered by its own entry AND skills/**, at ONE tier — no ambiguity refusal', pmCopyHit.hits.length === 2 && pmCopyHit.tier === CONTRACT_REVIEW_TIER);
+  // The published PM skill's own entry left with the file (2026-09-10 ruling,
+  // 「发布版 skills/objectstack-pm-dispatch 删」): the "own entry AND skills/**"
+  // shape has no subject any more, and what is pinned instead is that a
+  // catalog file is covered by exactly ONE entry — the root — so no second
+  // per-file entry under `skills/` has quietly returned.
+  t('a catalog file is covered by exactly ONE entry — skills/** — now that the published PM skill and its own entry are gone', catalogHit.hits.length === 1 && catalogHit.hits[0].glob === 'skills/**');
+  t('no per-file entry for the deleted published PM skill survives it, and its old path carries the root mandate only', !MANDATORY_TIER_GLOBS.some((g) => g.glob.includes('objectstack-pm-dispatch')) && fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).hits.every((h) => h.glob === 'skills/**'));
   t('skills/** does NOT reach the internal .claude/skills tree — a pm-dispatch references file still carries no mandate', fableOf(['.claude/skills/pm-dispatch/references/core-rules.md']).mandatory === false);
   t('the skills/** entry is declared with its one-line exit switched off, as data', MANDATORY_TIER_GLOBS.some((g) => g.glob === 'skills/**' && g.oneLineExit === false && g.tier === CONTRACT_REVIEW_TIER));
   t('every other mandatory entry keeps the one-line exit open (the flag is an opt-out, absent by default)', MANDATORY_TIER_GLOBS.filter((g) => g.glob !== 'skills/**').every((g) => g.oneLineExit === undefined) && catalogHit.hits.every((h) => h.glob !== 'skills/**' || h.oneLineExit === false));

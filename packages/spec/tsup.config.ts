@@ -83,7 +83,7 @@ const entries = [
   'src/contracts/index.ts',
   'src/integration/index.ts',
   'src/studio/index.ts',
-  'src/cloud/index.ts',
+  'src/marketplace/index.ts',
   'src/qa/index.ts',
   'src/identity/index.ts',
   'src/shared/index.ts',
@@ -117,7 +117,6 @@ const browserConditionedEntries = [
   'src/data/index.ts',
   'src/system/index.ts',
   'src/kernel/index.ts',
-  'src/cloud/index.ts',
 ];
 
 /**
