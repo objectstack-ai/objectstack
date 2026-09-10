@@ -256,9 +256,15 @@ function deriveCarriers(): Carrier[] {
       for (const [key, raw] of Object.entries(props)) {
         const prop = deref(raw, root);
         // A retired key is a parse-time refusal, not an authorable column.
-        if (typeof prop?.description === 'string' && prop.description.startsWith(RETIRED_PREFIX)) continue;
+        const description = raw?.description ?? prop?.description;
+        if (typeof description === 'string' && description.startsWith(RETIRED_PREFIX)) continue;
         carrier.authorable.push(key);
-        const title = prop?.title;
+        // ⚠️ The property node FIRST, and only then the `$ref` target. A
+        // `.meta({ title })` on a schema zod hoists into `$defs` is emitted as
+        // a sibling of the `$ref` (`{ title, $ref }`), which is precisely
+        // where the console reads `items.properties[k].title` from — deref
+        // first and a titled property reads as untitled.
+        const title = raw?.title ?? prop?.title;
         if (typeof title !== 'string' || title.length === 0) carrier.untitled.push(key);
       }
       carriers.push(carrier);

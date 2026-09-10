@@ -81,9 +81,9 @@ export const ReportSortSchema = lazySchema(() => strictObject({
   },
 }, {
   /** A dimension (`rows`/`columns`) or measure (`values`) name this report selects. */
-  by: z.string().describe('Dimension or measure name to order by (must be selected by this report)'),
+  by: z.string().describe('Dimension or measure name to order by (must be selected by this report)').meta({ title: 'Order By' }),
   /** Sort direction. Null/empty cells sort LAST in both directions. */
-  direction: z.enum(['asc', 'desc']).default('asc').describe('Sort direction (default ascending)'),
+  direction: z.enum(['asc', 'desc']).default('asc').describe('Sort direction (default ascending)').meta({ title: 'Direction' }),
 }));
 
 /**
@@ -213,32 +213,32 @@ export const JoinedReportBlockSchema: z.ZodTypeAny = lazySchema(() => strictObje
   },
 }, {
   /** Stable id for the block (used as react key, telemetry, deeplinks). */
-  name: SnakeCaseIdentifierSchema,
+  name: SnakeCaseIdentifierSchema.meta({ title: 'Name' }),
   /** Human label shown above the block. Falls back to `name`. */
-  label: I18nLabelSchema.optional(),
+  label: I18nLabelSchema.optional().meta({ title: 'Label' }),
   /** Optional description rendered below the label. */
-  description: I18nLabelSchema.optional(),
+  description: I18nLabelSchema.optional().meta({ title: 'Description' }),
   /** Block report type — `joined` is intentionally excluded (no recursion). */
-  type: z.enum(['tabular', 'summary', 'matrix']).default('tabular'),
+  type: z.enum(['tabular', 'summary', 'matrix']).default('tabular').meta({ title: 'Block Type' }),
   /** Optional inline chart configuration. */
-  chart: ReportChartSchema.optional(),
+  chart: ReportChartSchema.optional().meta({ title: 'Chart' }),
 
   /**
    * ADR-0021 — the dataset this block binds to (single-form). The block selects
    * the dataset's measures by name; the legacy inline `objectName` + `columns` +
    * `groupings` query was removed in the cutover.
    */
-  dataset: SnakeCaseIdentifierSchema.optional().describe('Dataset name to bind (ADR-0021)'),
+  dataset: SnakeCaseIdentifierSchema.optional().describe('Dataset name to bind (ADR-0021)').meta({ title: 'Dataset' }),
   /** Dimension names (from the dataset) to group rows by. Dataset-bound only. */
-  rows: z.array(z.string()).optional().describe('Dimension names down (dataset-bound)'),
+  rows: z.array(z.string()).optional().describe('Dimension names down (dataset-bound)').meta({ title: 'Rows' }),
   /** Dimension names across — matrix blocks pivot rows × columns (ADR-0021 D2). */
-  columns: z.array(z.string()).optional().describe('Dimension names across (matrix, dataset-bound)'),
+  columns: z.array(z.string()).optional().describe('Dimension names across (matrix, dataset-bound)').meta({ title: 'Columns' }),
   /** Measure names (from the dataset) to display. Dataset-bound only. */
-  values: z.array(z.string()).optional().describe('Measure names to show (dataset-bound)'),
+  values: z.array(z.string()).optional().describe('Measure names to show (dataset-bound)').meta({ title: 'Values' }),
   /** Render-time scope filter, ANDed at query time. Dataset-bound only. */
-  runtimeFilter: FilterConditionSchema.optional().describe('Render-time scope filter (dataset-bound)'),
+  runtimeFilter: FilterConditionSchema.optional().describe('Render-time scope filter (dataset-bound)').meta({ title: 'Runtime Filter' }),
   /** Result ordering for this block, most significant key first (framework#3916). */
-  order: z.array(ReportSortSchema).optional().describe('Result ordering, most significant key first'),
+  order: z.array(ReportSortSchema).optional().describe('Result ordering, most significant key first').meta({ title: 'Order' }),
 }).superRefine(checkReportOrder));
 
 /**
