@@ -44,6 +44,7 @@ import { MAX_BULK_PER_ROW_HOOK_ROWS, resolveBulkPerRowHookBudget } from '@object
 import { ActionActivationProjection, type ActionActivationRow, type ActionActivationStore } from './action-activation.js';
 import { assertListComparandShapes, assertFilterIsMaterializable } from './filter-comparand-shape.js';
 import { assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
+import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
 // scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
 // the cursor merge is the part that is easy to get subtly wrong.
@@ -778,10 +779,22 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // run it against" — and because this seam is the one place EVERY
     // caller-supplied `where` passes through, whichever verb it arrived by.
     assertFilterIsMaterializable(object, operation, schema, where);
-    // [#8690] The TEMPORAL-comparand door, third on the same seam and third
-    // question about the same predicate: the shape gate asks "can this
-    // comparand run", the materializable gate asks "is there a column to run it
-    // against", and this asks "can that column's storage rule READ this value".
+    // [#15661] The DECLARED-TYPE door for the text operators, third on this
+    // seam and third question about the same predicate: the shape gate asks
+    // "can this comparand run", the materializable gate asks "is there a column
+    // to run it against", and this asks "can that column's declared type ever
+    // hold a string". It runs BEFORE the temporal gate below deliberately — a
+    // `$startsWith` over a `date` field is refused by that gate today, with the
+    // same `INVALID_FILTER` / 400 envelope but a message about the COMPARAND,
+    // which sends the author to fix a value that could never have made the
+    // filter runnable. Same wire envelope, the ruling's message.
+    assertTextOperatorTargetsAreStringCapable(object, operation, schema, where);
+    // [#8690] The TEMPORAL-comparand door, fourth on the same seam (#15661's
+    // declared-type door was inserted above it) and fourth question about the
+    // same predicate: the shape gate asks "can this comparand run", the
+    // materializable gate asks "is there a column to run it against", the
+    // declared-type gate asks "can that column ever hold a string", and this
+    // asks "can that column's storage rule READ this value".
     // It must run BEFORE `resolveWhereTokens` (which is downstream of every
     // caller of this function) because the refusal has to precede the driver —
     // hence the door steps around `{placeholder}` strings rather than judging
@@ -856,6 +869,11 @@ function lowerWhereFilterArray<T extends object | undefined>(
   // the array sugar (`[['is_open','=',true]]`) names fields too, and a gate on
   // one branch would answer one mistake two ways depending on the spelling.
   assertFilterIsMaterializable(object, operation, schema, condition);
+  // [#15661] Same door as the object branch, on the LOWERED condition — the
+  // array sugar (`[['amount','contains','5']]`) names non-text fields too, and
+  // a gate on one branch would answer one mistake two ways depending on the
+  // spelling.
+  assertTextOperatorTargetsAreStringCapable(object, operation, schema, condition);
   // [#8690] Same door as the object branch, on the LOWERED condition — the
   // array sugar (`[['at','>=','last_30_days']]`) names temporal fields too, and
   // a gate on one branch would answer one mistake two ways depending on the
@@ -14198,6 +14216,12 @@ export class ObjectQL implements IObjectQLEngine {
           if (aggFilter == null) continue;
           assertListComparandShapes(object, 'aggregate', aggFilter, `aggregations[${i}].filter`);
           assertFilterIsMaterializable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+          // [#15661] …and the declared-type door for the text operators: a
+          // `$contains` over a numeric column in ONE aggregation's filter is
+          // the same silent zero at a second filter position, and a door that
+          // spoke on `where` alone would answer one mistake two ways within a
+          // single verb.
+          assertTextOperatorTargetsAreStringCapable(object, 'aggregate', this._registry.getObject(object), aggFilter);
       }
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);
