@@ -24,3 +24,18 @@ payloads that were refused for their manifest stage now parse. `ManifestSchema`
 is unchanged. A row belonging to neither stage — an `objects` array mixing globs
 with definitions — is still refused. Consumers holding a value typed as one of
 these two responses now see a union at `manifest` and narrow at the point of use.
+
+`@objectstack/spec/api` also gains a `browser` export condition. Declaring the
+assembled stage makes this entry's module graph reach the datasource
+declaration and with it the driver-config validators, whose postgres URL
+refinement links `pg-connection-string` — a package whose `parse` statically
+resolves `require('fs')`, so a browser bundler that reaches it fails on
+`Can't resolve 'fs'`. The entry now resolves, for browser consumers only, to a
+build with the pg-grammar arm swapped for its dependency-free twin: exactly the
+boundary the four entries that already carry the condition use. Node resolution
+and the Node bundles are unchanged, byte for byte. For browser consumers the
+postgres `url` refinement degrades to the shape-only checks it already performs
+before `parse` — the unix-socket short-circuit and the refusal of the
+filesystem-reading `?sslcert=` / `?sslkey=` / `?sslrootcert=` query parameters
+are kept; the "is this a URL `pg` can open" arm answers "no findings". Datasource
+publish is a server-side act, so that arm never legitimately ran in a browser.
