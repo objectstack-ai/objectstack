@@ -194,8 +194,11 @@
     "RetryPolicy": "src/shared/retry-policy.zod.ts#RetryPolicy (type)",
     "RetryPolicyParsed": "src/shared/retry-policy.zod.ts#RetryPolicyParsed (type)",
     "RetryPolicySchema": "src/shared/retry-policy.zod.ts#RetryPolicySchema (const)",
+    "SCHEDULE_ORGANIZATION_KEY": "src/automation/schedule-organization.zod.ts#SCHEDULE_ORGANIZATION_KEY (const)",
     "SCHEMALESS_NODE_CONFIG_SCHEMAS": "src/automation/schemaless-node-config.zod.ts#SCHEMALESS_NODE_CONFIG_SCHEMAS (const)",
     "STRUCTURAL_CONDITION_SHAPE_REFUSAL": "src/automation/flow-node-expression-paths.ts#STRUCTURAL_CONDITION_SHAPE_REFUSAL (const)",
+    "ScheduleOrganization": "src/automation/schedule-organization.zod.ts#ScheduleOrganization (type)",
+    "ScheduleOrganizationSchema": "src/automation/schedule-organization.zod.ts#ScheduleOrganizationSchema (const)",
     "ScheduleState": "src/automation/execution.zod.ts#ScheduleState (type)",
     "ScheduleStateParsed": "src/automation/execution.zod.ts#ScheduleStateParsed (type)",
     "ScheduleStateSchema": "src/automation/execution.zod.ts#ScheduleStateSchema (const)",
@@ -253,6 +256,7 @@
     "defineActionDescriptor": "src/automation/node-executor.zod.ts#defineActionDescriptor (function)",
     "defineFlow": "src/automation/flow.zod.ts#defineFlow (function)",
     "defineWebhook": "src/automation/webhook.zod.ts#defineWebhook (function)",
+    "describeMissingScheduleOrganization": "src/automation/schedule-organization.zod.ts#describeMissingScheduleOrganization (function)",
     "exportConstructsToBpmn": "src/automation/bpmn-mapping.ts#exportConstructsToBpmn (function)",
     "findRegionEntry": "src/automation/control-flow.zod.ts#findRegionEntry (function)",
     "flowForm": "src/automation/flow.form.ts#flowForm (const)",
@@ -267,6 +271,7 @@
     "predicateSlotRefusal": "src/automation/flow-node-expression-paths.ts#predicateSlotRefusal (function)",
     "resolveFlowNodeExpressions": "src/automation/flow-node-expression-paths.ts#resolveFlowNodeExpressions (function)",
     "resolveFlowTriggerKind": "src/automation/flow-trigger-kind.ts#resolveFlowTriggerKind (function)",
+    "resolveScheduleOrganization": "src/automation/schedule-organization.zod.ts#resolveScheduleOrganization (function)",
     "structuralConditionRefusal": "src/automation/flow-node-expression-paths.ts#structuralConditionRefusal (function)",
     "validateControlFlow": "src/automation/control-flow.zod.ts#validateControlFlow (function)"
   }

@@ -777,7 +777,8 @@ function selfTest() {
   // state what it reads. If that refusal ever changes, this line moves with it.
   const unseeable = (r) => !r.includes('/') && !r.startsWith('.');
   const declFailures = [];
-  const decl = (label, ok) => { if (!ok) declFailures.push(label); };
+  let declCases = 0;
+  const decl = (label, ok) => { declCases += 1; if (!ok) declFailures.push(label); };
   decl('SKILLS_DIR is invisible to the derivation, which is why it needs a declaration at all',
     unseeable(SKILLS_DIR));
   decl('and it declares exactly that root, in the subtree spelling',
@@ -864,7 +865,7 @@ function selfTest() {
     console.error(`\n✗ check-skill-compatibility-version self-test: ${failed} failure(s) (cases and floor).`);
     process.exit(1);
   }
-  console.log(`\n✓ check-skill-compatibility-version self-test: ${cases.length} cases pass, plus 7 dispatch-gates declaration cases.`);
+  console.log(`\n✓ check-skill-compatibility-version self-test: ${cases.length} cases pass, plus ${declCases} dispatch-gates declaration cases.`);
   selfTestReachedVerdict = true;
 }
 

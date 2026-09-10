@@ -1196,6 +1196,217 @@ describe('audit writers — a lost audit row is reported at error (#5226)', () =
 });
 
 /**
+ * [#15166] The dedupe key is the failure's CAUSE, not the process.
+ *
+ * The block above pins that a lost audit row is reported at `error`, and that
+ * it is reported ONCE rather than once per failed write. Both still hold. What
+ * this block pins is the COUNTING UNIT of that "once", and the two defects the
+ * process-wide version had:
+ *
+ *  1. after the first failure of ANY cause, every later failure of every OTHER
+ *     cause degraded to `debug` for the life of the process — a server could
+ *     keep losing rows for hours to a second fault with one `error` line at the
+ *     top of the log describing the first;
+ *  2. that one line named the telemetry-datasource remedy unconditionally. The
+ *     cause measured on #14927 was `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` and
+ *     the text said "datasource" — the operator was sent to check something
+ *     that was not broken.
+ *
+ * ⚠️ The anti-noise choice these must not undo is AGENTS.md's, and #4420 is
+ * what it was invented against: an unbounded per-write line nobody could read.
+ * `keys on the error CODE, never its message` below is the pin that keeps
+ * "once per cause" from decaying into it — ⛔ do not relax it to a message.
+ */
+describe('audit writers — reported once per CAUSE, not once per process (#15166)', () => {
+  interface LogLine { level: string; message: string; meta?: any }
+
+  /** Engine whose `sys_audit_log` insert fails with a caller-chosen error each time. */
+  function makeCauseEngine(nextError: (object: string, n: number) => unknown) {
+    const hooks = new Map<string, Array<(ctx: any) => any>>();
+    const logs: LogLine[] = [];
+    let n = 0;
+    const sudoApi = {
+      object(name: string) {
+        return {
+          async create(row: Record<string, any>) {
+            if (name === 'sys_audit_log') throw nextError(String(row.object_name), n++);
+            return { id: 'generated-id' };
+          },
+        };
+      },
+    };
+    const api = { sudo: () => sudoApi };
+    const engine = {
+      getSchema(name: string) {
+        const fields = (SINGLE_TENANT as Record<string, string[]>)[name];
+        if (fields) return { name, fields: Object.fromEntries(fields.map((f) => [f, { type: 'text' }])) };
+        return { name, fields: { id: { type: 'text' }, name: { type: 'text' } } };
+      },
+      registerHook(event: string, fn: (ctx: any) => any) {
+        const list = hooks.get(event) ?? [];
+        list.push(fn);
+        hooks.set(event, list);
+      },
+      unregisterHooksByPackage() { /* no-op */ },
+      logger: {
+        error(message: string, _err?: unknown, meta?: any) { logs.push({ level: 'error', message, meta }); },
+        warn(message: string, meta?: any) { logs.push({ level: 'warn', message, meta }); },
+        debug(message: string, meta?: any) { logs.push({ level: 'debug', message, meta }); },
+        info() { /* unused */ },
+      },
+    };
+    installAuditWriters(engine as any, 'test.audit');
+    const fire = async (object: string, id: string) => {
+      for (const fn of hooks.get('afterInsert') ?? []) {
+        await fn({
+          event: 'afterInsert',
+          api,
+          object,
+          input: { id },
+          result: { id, name: 'Acme' },
+          session: { organizationId: 'org-1', userId: 'user-1' },
+        });
+      }
+    };
+    const at = (level: string) => logs.filter((l) => l.level === level);
+    return { fire, at, logs };
+  }
+
+  const driverError = (message: string, code?: string): Error => {
+    const e = new Error(message) as Error & { code?: string };
+    if (code !== undefined) e.code = code;
+    return e;
+  };
+
+  const NO_SUCH_TABLE = () => driverError('no such table: sys_audit_log', 'SQLITE_ERROR');
+  const ORG_REQUIRED = () =>
+    driverError('system write requires an organization', 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED');
+
+  it('reports a SECOND, DIFFERENT cause at error — a new cause is a new degradation', async () => {
+    // THE DEFECT. On the process-wide key this was one `error` (the first
+    // cause) and one `debug`; the organization refusal — a completely
+    // different fault, with a different remedy — was never reported at all.
+    let phase = 0;
+    const { fire, at } = makeCauseEngine(() => (phase === 0 ? NO_SUCH_TABLE() : ORG_REQUIRED()));
+
+    await fire('crm_lead', 'l-1');
+    phase = 1;
+    await fire('crm_lead', 'l-2');
+
+    const errors = at('error');
+    expect(errors).toHaveLength(2);
+    expect(errors[0].message).toMatch(/no such table: sys_audit_log/);
+    expect(errors[1].message).toMatch(/ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED/);
+    expect(at('debug')).toHaveLength(0);
+    expect(at('warn')).toEqual([]);
+  });
+
+  it('still degrades a REPEAT of an already-reported cause to debug', async () => {
+    // Unchanged from the process-wide version, and the half that must not
+    // regress: the same cause on the same object says it once.
+    const { fire, at } = makeCauseEngine(() => NO_SUCH_TABLE());
+
+    for (const id of ['l-1', 'l-2', 'l-3', 'l-4', 'l-5']) await fire('crm_lead', id);
+
+    expect(at('error')).toHaveLength(1);
+    expect(at('debug')).toHaveLength(4);
+    // The repeats name the cause they were folded into, so a `debug` sweep can
+    // tell "the same fault, 4 more times" from "four different faults".
+    expect(at('debug')[0].meta?.cause).toBe(at('debug')[3].meta?.cause);
+  });
+
+  it('keys on the error CODE, never its message, so a per-row fault cannot flood `error`', async () => {
+    // ⚠️ THE ANTI-NOISE PIN (AGENTS.md; #4420). A driver names the offending
+    // ROW in its message, so a message-keyed dedupe would grow one `error`
+    // line per failed write — #4420 again, wearing the word "cause". 200
+    // writes, 200 distinct messages, ONE code ⇒ one line.
+    const WRITES = 200;
+    const { fire, at } = makeCauseEngine((_object, i) =>
+      driverError(`UNIQUE constraint failed: sys_audit_log.id (row aud_${i})`, 'SQLITE_CONSTRAINT_UNIQUE'));
+
+    for (let i = 0; i < WRITES; i += 1) await fire('crm_lead', `l-${i}`);
+
+    expect(at('error')).toHaveLength(1);
+    expect(at('debug')).toHaveLength(WRITES - 1);
+  });
+
+  it('folds a fault carrying NO code into ONE bucket rather than growing one', async () => {
+    // The other half of the bound: "the code, or its ABSENCE" is a single key
+    // value, so an uncoded driver — the shape with nothing bounded to key on —
+    // still says it once instead of once per write.
+    const WRITES = 200;
+    const { fire, at } = makeCauseEngine((_object, i) => driverError(`insert failed for record aud_${i}`));
+
+    for (let i = 0; i < WRITES; i += 1) await fire('crm_lead', `l-${i}`);
+
+    expect(at('error')).toHaveLength(1);
+    expect(at('debug')).toHaveLength(WRITES - 1);
+  });
+
+  it('carries the underlying code and message in the first line it prints', async () => {
+    // The information was computed one line above the branch and dropped on the
+    // floor: the `error` path built a fixed string and never read `err`.
+    const { fire, at } = makeCauseEngine(() => ORG_REQUIRED());
+
+    await fire('crm_lead', 'l-1');
+
+    const msg = at('error')[0].message;
+    expect(msg).toMatch(/ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED/);
+    expect(msg).toMatch(/system write requires an organization/);
+    // The consequence half is unchanged — it is still owed, and still first.
+    expect(msg).toMatch(/compliance trail is now INCOMPLETE/);
+  });
+
+  it('prints the datasource remedy for the cause it is the remedy FOR, and not for others', async () => {
+    // ⛔ Not a deletion: the ADR-0057 §3.6 routing text is genuinely correct for
+    // the "no such table" cause it was written for, so it must still print
+    // there. What is fixed is that it used to print for EVERY cause.
+    const missing = makeCauseEngine(() => NO_SUCH_TABLE());
+    await missing.fire('crm_lead', 'l-1');
+    const forMissingTable = missing.at('error')[0].message;
+    expect(forMissingTable).toMatch(/telemetry/);
+    expect(forMissingTable).toMatch(/OS_TELEMETRY_DB=0/);
+
+    // The measured #14927 misdirection: the cause was an organization refusal
+    // and the text said "datasource".
+    const refused = makeCauseEngine(() => ORG_REQUIRED());
+    await refused.fire('crm_lead', 'l-1');
+    const forRefusal = refused.at('error')[0].message;
+    expect(forRefusal).not.toMatch(/OS_TELEMETRY_DB/);
+    expect(forRefusal).not.toMatch(/telemetry/i);
+    // It still owes a fix — it just owes the RIGHT one.
+    expect(forRefusal).toMatch(/Fix:/);
+  });
+
+  it('asks the missing-table question about `sys_activity` too — the same writer writes both', async () => {
+    // `persistAuditTrailRow` writes the ledger row AND its activity mirror, and
+    // ADR-0057 §3.6 routes both, so the datasource remedy is the remedy for
+    // either table going missing.
+    const { fire, at } = makeCauseEngine(() =>
+      driverError('no such table: sys_activity', 'SQLITE_ERROR'));
+
+    await fire('crm_lead', 'l-1');
+
+    expect(at('error')[0].message).toMatch(/OS_TELEMETRY_DB=0/);
+  });
+
+  it('separates causes per OBJECT as well as per code, and stays bounded by both', async () => {
+    // The key is (object, code). Two objects failing the same way are two
+    // lines — that is the ruling's granularity — and the count is bounded by
+    // the DECLARED object set, never by traffic: 3 objects x 40 writes each,
+    // all with distinct per-row messages, is still 3 lines.
+    const objects = ['crm_lead', 'crm_account', 'crm_contact'];
+    const { fire, at } = makeCauseEngine((object, i) =>
+      driverError(`insert failed for ${object} record aud_${i}`, 'SQLITE_CONSTRAINT_UNIQUE'));
+
+    for (const object of objects) for (let i = 0; i < 40; i += 1) await fire(object, `r-${i}`);
+
+    expect(at('error')).toHaveLength(objects.length);
+    expect(at('debug')).toHaveLength(objects.length * 40 - objects.length);
+  });
+});
+
+/**
  * [#8707] Which organization an audit row is stamped with — the RECORD'S own,
  * honouring the maintainer's ruling on #8287.
  *

@@ -11,6 +11,17 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { runImport, type ImportProtocolLike } from './import-runner';
+
+/**
+ * [#16952] The doubles below are annotated FROM the exported declaration
+ * (`ImportProtocolLike`), never from a hand-written restatement of the shape
+ * the runner happens to send. A local parameter annotation was one of the
+ * three non-authoritative places this card converged: it froze a dialect no
+ * compiler held anyone to, so it kept compiling — and kept passing — after the
+ * runner moved to another one. ⛔ Never widen these back to an inline object
+ * type; that re-opens the seam.
+ */
+type FindArgs = Parameters<ImportProtocolLike['findData']>[0];
 import type { ExportFieldMeta } from './export-format.js';
 
 // `parent` is a lookup back to this same object (a category tree).
@@ -44,8 +55,8 @@ function makeProtocol(seed: Array<Record<string, any>> = []) {
   }));
   // [#16638] Reads the CANONICAL `where` the runner sends. ⛔ No `?? {}`: an
   // absent filter must throw here, never degrade into a match-everything probe.
-  const findData = vi.fn(async (args: { query: { where: Record<string, any> } }) => {
-    const filter = args.query.where;
+  const findData = vi.fn(async (args: FindArgs) => {
+    const filter = args.query!.where!;
     return store.filter((row) => Object.entries(filter).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return row[k] === v; }));
   });
   const p: ImportProtocolLike = { findData, createData: vi.fn(), updateData: vi.fn(), createManyData };

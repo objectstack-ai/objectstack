@@ -199,8 +199,11 @@
     "RetryPolicy (type)",
     "RetryPolicyParsed (type)",
     "RetryPolicySchema (const)",
+    "SCHEDULE_ORGANIZATION_KEY (const)",
     "SCHEMALESS_NODE_CONFIG_SCHEMAS (const)",
     "STRUCTURAL_CONDITION_SHAPE_REFUSAL (const)",
+    "ScheduleOrganization (type)",
+    "ScheduleOrganizationSchema (const)",
     "ScheduleState (type)",
     "ScheduleStateParsed (type)",
     "ScheduleStateSchema (const)",
@@ -259,6 +262,7 @@
     "defineActionDescriptor (function)",
     "defineFlow (function)",
     "defineWebhook (function)",
+    "describeMissingScheduleOrganization (function)",
     "exportConstructsToBpmn (function)",
     "findRegionEntry (function)",
     "flowForm (const)",
@@ -273,6 +277,7 @@
     "predicateSlotRefusal (function)",
     "resolveFlowNodeExpressions (function)",
     "resolveFlowTriggerKind (function)",
+    "resolveScheduleOrganization (function)",
     "structuralConditionRefusal (function)",
     "validateControlFlow (function)"
   ]

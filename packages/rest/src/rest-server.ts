@@ -640,6 +640,57 @@ export const GLOBAL_SEARCH_PARAMS: readonly string[] = [
     'q', 'query', 'objects', 'limit', 'perObject',
 ];
 
+/**
+ * [#16674] Which `services.*` slot each `routes.*` key is the address OF.
+ *
+ * `/discovery` states the same fact twice -- `routes.X` (the flat convenience
+ * map) and `services.Y.route` (the per-slot entry) -- and the discovery handler
+ * below rewrites only the first half to the paths this server actually mounts.
+ * Measured on this file's own composition harness with
+ * `crud: { dataPrefix: '/objects' }`: `routes.data` answered `/api/v1/objects`
+ * while `services.data.route` still answered `/api/v1/data`, a path with
+ * nothing mounted on it -- one document, one deployment, two different data
+ * addresses (AGENTS.md "Route & surface ownership" #4: a machine-readable
+ * surface must not lie, and it must not lie to itself either).
+ *
+ * The mirror this table drives is deliberately a PROJECTION of the finished
+ * `routes` map, never a second computation of the same paths -- the producer
+ * learned that in #14646 ("two derivations of one fact is how `routes` and
+ * `services` drift"), and re-deriving `${realBase}${dataPrefix}` here would
+ * re-open the very gap this closes, one key over.
+ *
+ * Read each pair as *the address of one thing*, never as "these names look
+ * alike": `notifications` maps to the `notification` slot because that is the
+ * spelling difference the producer's own `serviceToRouteKey` carries, and
+ * `storage` names TWO slots because `file-storage` is the deprecated v17 alias
+ * the producer mirrors VERBATIM off the canonical row (#9683) -- updating only
+ * the canonical one would turn a byte-equal copy into a second opinion.
+ *
+ * Route keys with no slot behind them are absent on purpose, not by oversight:
+ * `packages` (the `package` service is deliberately NOT a `CoreServiceName`
+ * slot, so there is no `services.package` entry to mirror onto, #6633),
+ * `datasources`, `email`, `mcp` and `discovery` (surfaces this server mounts
+ * itself, which the protocol's service map never described), and `approvals`
+ * (declared in `ApiRoutesSchema`, emitted by neither producer). `services.search`
+ * is the mirror image: a slot that declares a route with no `ApiRoutesSchema`
+ * key to follow. `discovery-services-route-follows-mount.test.ts` holds this
+ * table complete against the producer, so a newly routed slot fails that pin
+ * instead of silently opting out of the mirror.
+ */
+export const DISCOVERY_ROUTE_KEY_TO_SERVICE_SLOTS: Readonly<Record<string, readonly string[]>> = {
+    data: ['data'],
+    metadata: ['metadata'],
+    ui: ['ui'],
+    auth: ['auth'],
+    analytics: ['analytics'],
+    automation: ['automation'],
+    ai: ['ai'],
+    i18n: ['i18n'],
+    notifications: ['notification'],
+    realtime: ['realtime'],
+    storage: ['storage', 'file-storage'],
+};
+
 /** Platform object backing async import jobs (see sys-import-job.object.ts). */
 const IMPORT_JOB_OBJECT = 'sys_import_job';
 /** Cap on per-row results persisted on the job (failures first). */
@@ -4594,6 +4645,55 @@ export class RestServer {
                         );
                         if (emailBase) discovery.routes.email = emailBase;
                         else delete discovery.routes.email;
+
+                        // [#16674] Bring the OTHER half of the document in line
+                        // with the same mounted paths. Everything above rewrites
+                        // `discovery.routes.*`; `discovery.services.*.route` is
+                        // the same address stated per slot, and it was never
+                        // brought along -- so a deployment that moved a prefix
+                        // got a document that contradicted itself, and the
+                        // `services` half pointed at a path with nothing on it.
+                        //
+                        // A PROJECTION of the finished `routes` map, key by key
+                        // (`DISCOVERY_ROUTE_KEY_TO_SERVICE_SLOTS` above), so the
+                        // two halves cannot state different answers whatever a
+                        // future substitution does to `routes`. The three guards
+                        // are what keep a DEFAULT deployment byte-identical --
+                        // the whole point of the fix is that it moves only the
+                        // values that are already wrong:
+                        //
+                        //   1. only a slot the producer actually emitted, and
+                        //   2. only one that already declares a `route` -- a
+                        //      route-less slot (`cache`/`queue`/`job`, an
+                        //      unmounted `realtime` channel) must not GAIN a
+                        //      route key here: "no HTTP surface" is a fact this
+                        //      handler does not get to overwrite (#4318, D12),
+                        //      and inventing the key would also reorder the
+                        //      entry for every reader diffing the document;
+                        //   3. only from a route key that survived the pass --
+                        //      a deleted or absent `routes.X` leaves the slot
+                        //      alone rather than blanking it. Withdrawing an
+                        //      advertisement is the ADR-0076 D12 question
+                        //      #4318 owns, not this card's.
+                        //
+                        // On a stock boot every write here assigns the string
+                        // that was already there, which is why the default
+                        // document does not move by a byte.
+                        const advertisedServices = discovery.services as
+                            | Record<string, { route?: string } | undefined>
+                            | undefined;
+                        if (advertisedServices) {
+                            const mountedRoutes = discovery.routes as unknown as Record<string, unknown>;
+                            for (const [routeKey, slots] of Object.entries(DISCOVERY_ROUTE_KEY_TO_SERVICE_SLOTS)) {
+                                const mounted = mountedRoutes[routeKey];
+                                if (typeof mounted !== 'string' || mounted.length === 0) continue;
+                                for (const slot of slots) {
+                                    const entry = advertisedServices[slot];
+                                    if (!entry || typeof entry.route !== 'string') continue;
+                                    entry.route = mounted;
+                                }
+                            }
+                        }
                     }
 
                     // Cross-object atomic batch capability (#3298). `declared ===
@@ -10558,8 +10658,8 @@ export class RestServer {
                     // `publicPicker.object` override, fall back to the
                     // field def on the parent object.
                     const p = await this.resolveProtocol(environmentId, req);
-                    let referenceTo: string | undefined = picker.object;
-                    if (!referenceTo && typeof (p as any).getMetaItems === 'function') {
+                    let referenceObject: string | undefined = picker.object;
+                    if (!referenceObject && typeof (p as any).getMetaItems === 'function') {
                         try {
                             const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                                 type: 'object',
@@ -10569,58 +10669,45 @@ export class RestServer {
                             const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
                             const obj = items.find((o: any) => o?.name === match.object);
                             const def = obj?.fields?.[fieldName];
-                            // [#7486] `reference` FIRST — it is the canonical
-                            // key on `FieldSchema`, and the ONLY spelling that
-                            // schema accepts. Reading only the legacy spellings
-                            // meant a well-formed object schema carried NONE of
-                            // them, the chain resolved `undefined`, and the
-                            // route answered 500 — making `publicPicker.object`
-                            // de-facto required while the schema and docs
-                            // present it as an optional override.
+                            // [#7486] Resolve the target from the canonical key — and, since
+                            // [#12920], from it ALONE. `reference` is the spelling `FieldSchema`
+                            // accepts, so it is the only spelling a field def can legitimately
+                            // carry.
                             //
-                            // ⛔ [#13137] `data/field.zod.ts` does NOT fold the
-                            // legacy spellings onto `reference`. An earlier
-                            // version of this comment said it did, and that
-                            // sentence is precisely what invited consumers to
-                            // be lenient. Its `aliases` table is a RENAME HINT
-                            // ON A REJECTED KEY, not a normaliser:
-                            // `strictObject` consults `aliases` only from the
-                            // `unrecognized_keys` path (the semantics are
-                            // stated in `spec/src/shared/strict-object.ts`), so
-                            // `relatedTo` / `referenceTo` / `target` /
-                            // `targetObject` / `lookupObject` are REFUSED by
-                            // `FieldSchema` — answered with *"Did you mean
-                            // `referenceTo` → `reference`?"* and never
-                            // rewritten. Pinned three ways (accept /
-                            // alias-refusal-with-hint / unknown-key-refusal
-                            // -without-hint) in
-                            // `public-form-lookup-picker.test.ts`.
-                            // ⇒ ⛔ this chain is NOT licence to be lenient
-                            // anywhere else: nothing upstream folds for you,
-                            // and a producer emitting a legacy spelling emits a
-                            // document the spec refuses by name.
+                            // ⛔ [#12920] This read used to be a four-spelling tolerant chain
+                            // (`reference ?? referenceTo ?? target ?? options.objectName`). It was
+                            // RETIRED by ruling — director seat summon #20, decision batch #107
+                            // item 5, 2026-09-09, maintainer verbatim 「其他同意」 = option A —
+                            // executing the stance recorded 2026-08-30, verbatim 「折叠即契约」:
+                            // the spec spelling IS the contract, and a stored row spelling the
+                            // target the old way is a PRODUCER defect, not a shape this route
+                            // accommodates. The prerequisite that had held execution — whether any
+                            // live deployment holds alias-spelled rows — was answered by the
+                            // maintainer: none to preserve.
                             //
-                            // The tail below reads exactly three spellings —
-                            // `referenceTo`, `target`, `options.objectName` —
-                            // which is NOT the spec's five-entry hint list:
-                            // only the first two appear on it, and
-                            // `options.objectName` appears on no list at all.
-                            // They can reach here only on a STORED row that
-                            // never went through `FieldSchema`, which is
-                            // possible because the serving read path replays
-                            // ADR-0087 conversions
-                            // (`applyConversionsToStoredItem`) and performs no
-                            // schema validation. ⚠️ Whether such a row is still
-                            // reachable in production is #12920's OPEN census —
-                            // ⛔ do not widen this chain here, and do not narrow
-                            // it here either; #12920 decides its fate.
-                            referenceTo = def?.reference
-                                ?? def?.referenceTo
-                                ?? def?.target
-                                ?? def?.options?.objectName;
+                            // Wire-visible consequence, deliberate: a stored def spelling the
+                            // target `referenceTo` / `target` / `options.objectName` now resolves
+                            // NOTHING here, and the route answers `500 LOOKUP_TARGET_MISSING`
+                            // instead of searching the aliased object. Pinned, in both directions,
+                            // in `public-form-lookup-picker.test.ts`.
+                            //
+                            // ⛔ Do not re-widen this read, here or in any sibling consumer —
+                            // widening it back is how the platform came to answer the same
+                            // question differently per consumer. Nothing upstream folds for you:
+                            // [#13137] `data/field.zod.ts`'s `aliases` table is a RENAME HINT ON A
+                            // REJECTED KEY, not a normaliser (`strictObject` consults it solely
+                            // from the `unrecognized_keys` path — the semantics are stated in
+                            // `spec/src/shared/strict-object.ts`), so `relatedTo` / `referenceTo` /
+                            // `target` / `targetObject` / `lookupObject` are REFUSED by
+                            // `FieldSchema`, answered with *"Did you mean `referenceTo` →
+                            // `reference`?"*, and never rewritten. The one place an alias IS
+                            // tolerated is the ADR-0087 conversion layer (`fieldReferenceToAlias`),
+                            // replayed on stored-row rehydration — declared, tested and removable
+                            // on a schedule, which a `??` arm here never was.
+                            referenceObject = def?.reference;
                         } catch {/* ignore */}
                     }
-                    if (!referenceTo) {
+                    if (!referenceObject) {
                         res.status(500).json({
                             code: 'LOOKUP_TARGET_MISSING',
                             error: `Could not resolve referenced object for "${fieldName}"`,
@@ -10668,7 +10755,7 @@ export class RestServer {
                     };
 
                     const pickerRequest: ServerScopedDataRequest<FindDataRequest> = {
-                        object: referenceTo,
+                        object: referenceObject,
                         // [#16337] Canonical QueryAST: `filters` → `where`,
                         // `select` → `fields`, `sort` → `orderBy`. The normalizer
                         // folds each of those aliases onto exactly these keys and
@@ -10686,7 +10773,7 @@ export class RestServer {
                         // all; that the value is now a filter the ingress ACCEPTS
                         // is measured end-to-end, not asserted by the type.
                         query: {
-                            object: referenceTo,
+                            object: referenceObject,
                             limit: maxResults,
                             offset: 0,
                             where: filters,

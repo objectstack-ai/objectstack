@@ -17,6 +17,7 @@
  *  - token with no MCP scope → 403 insufficient_scope
  *  - presented-but-invalid JWT bearer → 401 even when a cookie session
  *    exists (no ambient-session fallback for a dead credential)
+ *  - a refused JWT bearer assembles NO execution context at all (#16418)
  *  - the API-key track is byte-for-byte unchanged (regression)
  */
 
@@ -26,6 +27,10 @@ import { hashApiKey } from '@objectstack/core';
 import { HttpDispatcher } from './http-dispatcher.js';
 
 const VALID_JWT = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1NDIifQ.sig'; // shape only — verifier is faked
+// Shape only, and deliberately NOT VALID_JWT: the harness's fake verifier
+// answers `null` for anything else, which is exactly the verdict the real
+// verifier now returns for a client_credentials token (#16418).
+const M2M_JWT = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJtMm0tY2xpZW50In0.sig';
 const RAW_API_KEY = 'osk_test_regression_key';
 
 interface HarnessOptions {
@@ -181,6 +186,25 @@ describe('HttpDispatcher — OAuth bearer on /mcp (#2698)', () => {
     // Session provenance is NOT scope-limited.
     expect(mcpService.lastOpts.toolOptions).toBeUndefined();
     expect(recorded[0]?.oauthScopes).toBeUndefined();
+  });
+
+  it('[#16418] a JWT bearer the verifier refuses (client_credentials / M2M) → 401 and NO context assembled', async () => {
+    // The verifier's own half — that a minted `client_credentials` token
+    // verifies to `null` — is pinned in @objectstack/plugin-auth against a
+    // real authorization server. What this door owes is the other half: a
+    // `null` verdict must stop the request BEFORE any execution context
+    // reaches the MCP runtime or the data bridge. A bare status assertion is
+    // not enough here — "still 401" was never the doubt; "did anything run"
+    // is.
+    const { dispatcher, mcpService, recorded } = makeHarness({
+      oauthScopes: null, // the verifier refuses this credential
+    });
+    const res = await dispatchMcp(dispatcher, {
+      authorization: `Bearer ${M2M_JWT}`,
+    });
+    expect(res.response!.status).toBe(401);
+    expect(mcpService.lastOpts, 'the MCP runtime must never be reached').toBeUndefined();
+    expect(recorded, 'no execution context may be assembled for a refused credential').toEqual([]);
   });
 
   it('REGRESSION: the API-key track is unchanged — x-api-key resolves the key principal, unscoped', async () => {

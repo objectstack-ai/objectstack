@@ -1298,52 +1298,78 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // directly, which skipped that pipeline entirely and dropped
             // req.query on several routes (so the documented `?overwrite=true`
             // install flag never reached the handler).
-            const mountPackagesRoute = (
-                verb: 'get' | 'post' | 'patch' | 'delete',
-                routePath: string,
-                toSubPath: (req: any) => string,
-            ) => {
-                (server as any)[verb](`${prefix}/packages${routePath}`, async (req: any, res: any) => {
-                    try {
-                        const result = await dispatcher.dispatch(
-                            verb.toUpperCase(),
-                            `/packages${toSubPath(req)}`,
-                            req.body,
-                            req.query ?? {},
-                            { request: req },
-                        );
-                        sendResult(result, res);
-                    } catch (err: any) {
-                        errorResponse(err, res);
-                    }
-                });
+            //
+            // [#16781] A `base`-taking registrar, exactly like
+            // `registerAutomationRoutes` / `registerActionRoutes` /
+            // `registerAIRoutes` below, so the SAME handler can be mounted at
+            // the environment-scoped prefix as well. It used to close over
+            // `prefix` directly, and that is the whole reason
+            // `/api/v1/environments/:id/packages` had no door on a host
+            // composed as `plugin-hono-server` + this plugin WITHOUT
+            // `@objectstack/hono`'s catch-all: the domain has resolved scoped
+            // package paths since #15859, but nothing mounted one here. The
+            // scoped registration is at the `enableProjectScoping` block below,
+            // beside its three siblings; `dispatch()` is still handed the
+            // UNSCOPED subpath, and the `:environmentId` rides on `req.params`
+            // for `prepareResolverHints` to read — the same convention the
+            // action routes document.
+            const registerPackageRoutes = (base: string) => {
+                const mountPackagesRoute = (
+                    verb: 'get' | 'post' | 'patch' | 'delete',
+                    routePath: string,
+                    toSubPath: (req: any) => string,
+                ) => {
+                    (server as any)[verb](`${base}/packages${routePath}`, async (req: any, res: any) => {
+                        try {
+                            const result = await dispatcher.dispatch(
+                                verb.toUpperCase(),
+                                `/packages${toSubPath(req)}`,
+                                req.body,
+                                req.query ?? {},
+                                { request: req },
+                            );
+                            sendResult(result, res);
+                        } catch (err: any) {
+                            errorResponse(err, res);
+                        }
+                    });
+                };
+
+                mountPackagesRoute('get', '', () => '');
+                mountPackagesRoute('post', '', () => '');
+                mountPackagesRoute('get', '/:id/export', (req) => `/${req.params.id}/export`);
+                mountPackagesRoute('get', '/:id', (req) => `/${req.params.id}`);
+                mountPackagesRoute('delete', '/:id', (req) => `/${req.params.id}`);
+                // Edit a package's manifest (name / description / version). `/:id`
+                // is a single segment, so this does not shadow the
+                // `/:id/enable|disable` routes below.
+                mountPackagesRoute('patch', '/:id', (req) => `/${req.params.id}`);
+                mountPackagesRoute('patch', '/:id/enable', (req) => `/${req.params.id}/enable`);
+                mountPackagesRoute('patch', '/:id/disable', (req) => `/${req.params.id}/disable`);
+                mountPackagesRoute('post', '/:id/publish', (req) => `/${req.params.id}/publish`);
+                // ADR-0033 — publish every pending draft bound to a package ("publish
+                // whole app"). Distinct from /publish (which needs the metadata
+                // service): this promotes sys_metadata draft rows via the protocol.
+                mountPackagesRoute('post', '/:id/publish-drafts', (req) => `/${req.params.id}/publish-drafts`);
+                mountPackagesRoute('post', '/:id/revert', (req) => `/${req.params.id}/revert`);
+                // duplicate (ADR-0070 D4), adopt-orphans (D5), discard-drafts, and
+                // the ADR-0067 commit-history / rollback family.
+                mountPackagesRoute('post', '/:id/duplicate', (req) => `/${req.params.id}/duplicate`);
+                mountPackagesRoute('post', '/:id/adopt-orphans', (req) => `/${req.params.id}/adopt-orphans`);
+                mountPackagesRoute('post', '/:id/discard-drafts', (req) => `/${req.params.id}/discard-drafts`);
+                mountPackagesRoute('get', '/:id/commits', (req) => `/${req.params.id}/commits`);
+                mountPackagesRoute('post', '/:id/commits/:commitId/revert', (req) => `/${req.params.id}/commits/${req.params.commitId}/revert`);
+                mountPackagesRoute('post', '/:id/rollback', (req) => `/${req.params.id}/rollback`);
             };
 
-            mountPackagesRoute('get', '', () => '');
-            mountPackagesRoute('post', '', () => '');
-            mountPackagesRoute('get', '/:id/export', (req) => `/${req.params.id}/export`);
-            mountPackagesRoute('get', '/:id', (req) => `/${req.params.id}`);
-            mountPackagesRoute('delete', '/:id', (req) => `/${req.params.id}`);
-            // Edit a package's manifest (name / description / version). `/:id`
-            // is a single segment, so this does not shadow the
-            // `/:id/enable|disable` routes below.
-            mountPackagesRoute('patch', '/:id', (req) => `/${req.params.id}`);
-            mountPackagesRoute('patch', '/:id/enable', (req) => `/${req.params.id}/enable`);
-            mountPackagesRoute('patch', '/:id/disable', (req) => `/${req.params.id}/disable`);
-            mountPackagesRoute('post', '/:id/publish', (req) => `/${req.params.id}/publish`);
-            // ADR-0033 — publish every pending draft bound to a package ("publish
-            // whole app"). Distinct from /publish (which needs the metadata
-            // service): this promotes sys_metadata draft rows via the protocol.
-            mountPackagesRoute('post', '/:id/publish-drafts', (req) => `/${req.params.id}/publish-drafts`);
-            mountPackagesRoute('post', '/:id/revert', (req) => `/${req.params.id}/revert`);
-            // duplicate (ADR-0070 D4), adopt-orphans (D5), discard-drafts, and
-            // the ADR-0067 commit-history / rollback family.
-            mountPackagesRoute('post', '/:id/duplicate', (req) => `/${req.params.id}/duplicate`);
-            mountPackagesRoute('post', '/:id/adopt-orphans', (req) => `/${req.params.id}/adopt-orphans`);
-            mountPackagesRoute('post', '/:id/discard-drafts', (req) => `/${req.params.id}/discard-drafts`);
-            mountPackagesRoute('get', '/:id/commits', (req) => `/${req.params.id}/commits`);
-            mountPackagesRoute('post', '/:id/commits/:commitId/revert', (req) => `/${req.params.id}/commits/${req.params.commitId}/revert`);
-            mountPackagesRoute('post', '/:id/rollback', (req) => `/${req.params.id}/rollback`);
+            // Mounted at the UNSCOPED prefix right here, keeping the exact
+            // registration ORDER these routes have always had — Hono resolves
+            // competing patterns first-registration-wins (the ADR-0076 D11
+            // hazard this file's fallback note explains), so moving this call
+            // down beside the scoped one would be a behaviour change wearing a
+            // refactor's clothes. The scoped mount is purely ADDITIVE and
+            // cannot shadow anything: it lives under a different path prefix.
+            registerPackageRoutes(prefix);
 
             // ── Storage ─────────────────────────────────────────────────
             // Nothing mounted here on purpose (#4087). The dispatcher used to
@@ -1699,6 +1725,23 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     registerActionRoutes(`${prefix}/environments/:environmentId`);
                     registerAIRoutes(`${prefix}/environments/:environmentId`);
                 }
+            }
+
+            // [#16781] The scoped `/packages` door, the residue PR #16628 was
+            // authorised to leave behind (ruling C′ on #14503 step 2). Same
+            // handler as the unscoped mount above — `registerPackageRoutes` is
+            // called a second time with the scoped base, never re-implemented.
+            //
+            // ONE condition rather than the three-way branch its siblings take,
+            // and the difference is deliberate: `registerAutomationRoutes` /
+            // `registerActionRoutes` / `registerAIRoutes` DROP their unscoped
+            // mounts under `projectResolution: 'required'`, while the package
+            // routes above are mounted unconditionally and stay that way. This
+            // card adds a missing door; taking one away is a different change
+            // with a different blast radius, so the asymmetry is left standing
+            // and recorded here rather than silently "tidied" into a removal.
+            if (enableProjectScoping) {
+                registerPackageRoutes(`${prefix}/environments/:environmentId`);
             }
 
             ctx.logger.info('Dispatcher bridge routes registered', { prefix, enableProjectScoping, projectResolution });

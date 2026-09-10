@@ -104,6 +104,8 @@
     "ParallelBranchSchema": "automation/ParallelBranch",
     "ParallelConfig": "automation/ParallelConfig",
     "ParallelConfigSchema": "automation/ParallelConfig",
+    "ScheduleOrganization": "automation/ScheduleOrganization",
+    "ScheduleOrganizationSchema": "automation/ScheduleOrganization",
     "ScheduleState": "automation/ScheduleState",
     "ScheduleStateSchema": "automation/ScheduleState",
     "ScreenConfig": "automation/ScreenConfig",

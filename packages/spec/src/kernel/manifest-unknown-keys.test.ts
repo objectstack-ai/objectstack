@@ -387,6 +387,24 @@ describe('#16328 — the `permissions` union door names the surface and the rena
   // the `devPlugins[]` guard above.
   const near = () => ({ ...legal(), permissions: { services: ['object'], hoooks: ['x'] } });
 
+  /**
+   * The object arm's own `unrecognized_keys` issue, carried inside the union
+   * issue at `['permissions']` — the shape the first pin below measures raw.
+   */
+  const permissionsRefusal = (result: ReturnType<typeof ManifestSchema.safeParse>) => {
+    if (result.success) throw new Error('expected the manifest to be refused');
+    const union = result.error.issues.find((i) => i.code === 'invalid_union') as
+      | { path: (string | number)[]; errors: Array<Array<{ code: string; keys?: string[] }>> }
+      | undefined;
+    expect(union, 'the refusal is a union issue at `permissions`').toBeDefined();
+    expect(union!.path).toEqual(['permissions']);
+    const nested = union!.errors.flat().find((i) => i.code === 'unrecognized_keys') as
+      | { code: string; keys: string[] }
+      | undefined;
+    expect(nested, 'the named refusal is carried inside the union issue').toBeDefined();
+    return nested!;
+  };
+
   it('the author reads the key, the surface and the rename — through `formatZodError`', () => {
     const result = ManifestSchema.safeParse(near());
     expect(result.success).toBe(false);
@@ -443,6 +461,38 @@ describe('#16328 — the `permissions` union door names the surface and the rena
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(formatZodError(result.error)).toContain('Did you mean `filesystem` → `fs`?');
+  });
+
+  it('`paths` reaches `fs` too — the second half of the same unreachable pair', () => {
+    // `paths` is 5 characters, so the fallback budget is
+    // `Math.max(2, Math.floor(5 / 3))` = 2, and its nearest declared key is 4
+    // edits away (`hooks` and `fs` tie). Nothing to overrule; the entry buys a
+    // suggestion where the fallback offers none.
+    const result = ManifestSchema.safeParse({ ...legal(), permissions: { paths: ['/tmp'] } });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const nested = permissionsRefusal(result);
+    expect(nested.keys).toEqual(['paths']);
+    expect(formatZodError(result.error)).toContain('Did you mean `paths` → `fs`?');
+  });
+
+  it('`hosts` overrules a LIVE wrong suggestion — without the alias the fallback answers `hooks`', () => {
+    // The one alias of the three whose absence would be invisible: it does not
+    // fill a silent gap, it overrides a confident wrong answer. `hosts` is 5
+    // characters, so the budget is `Math.max(2, Math.floor(5 / 3))` = 2, and
+    // `hosts` differs from the declared `hooks` by exactly 2 — so the bare
+    // fallback reaches `hooks` and sends the author to lifecycle hooks on the
+    // one block that also grants network access. Dropping the alias line makes
+    // the assertion below read ``Did you mean `hosts` → `hooks`?``, which is
+    // why the negative half is asserted and not only the positive one.
+    const result = ManifestSchema.safeParse({ ...legal(), permissions: { hosts: ['api.acme.com'] } });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const nested = permissionsRefusal(result);
+    expect(nested.keys).toEqual(['hosts']);
+    const rendered = formatZodError(result.error);
+    expect(rendered, 'the curated target is offered').toContain('Did you mean `hosts` → `network`?');
+    expect(rendered, 'the reachable wrong answer is not').not.toContain('`hosts` → `hooks`');
   });
 
   it('the five doors that already named their key are untouched by this change', () => {

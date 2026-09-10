@@ -51,11 +51,40 @@
  * two runs over an unchanged board produce byte-identical files and the branch's
  * history is a diff of what actually changed on the board.
  *
+ * ## Open first — the walk order, and why it is not a preference
+ *
+ * The first walk is the one that matters and it used to be the wrong way round.
+ * Measured on the first scheduled run of this tool: the listing ascends by
+ * update time from the beginning of the board, so 800 requests bought 137 closed
+ * issues and 268 closed pull requests from February — and ZERO open cards, with
+ * days of runs still to go. The records a suspension destroys are the OPEN
+ * board: that is the whole reason this file exists (#17374 F3), and it was the
+ * half being archived last.
+ *
+ * So a first walk runs in two phases, and `walk_phase` in the manifest names
+ * which one a reader is looking at:
+ *
+ *   open         `state=open`, issues AND pull requests (the `/issues` listing
+ *                carries both), walked to a short page. Nothing else starts
+ *                until this finishes — a run that runs out of budget inside the
+ *                open set resumes INSIDE it.
+ *   history      `state=all` from the stored history cursor: the closed record,
+ *                which has no other reader anywhere. Only reachable once the
+ *                open set is complete.
+ *   incremental  the steady state, once the whole board has been walked once:
+ *                one `since` walk, unchanged by any of the above.
+ *
+ * An archive written before this order existed carries no `walk` block; its
+ * cursor is a HISTORY cursor, so it is kept rather than discarded and the open
+ * set is walked first from there. ⛔ The two phases are never interleaved: the
+ * point is that after one run of the open phase the open board is on disk.
+ *
  * ## Incremental, and the two things that makes exact
  *
- * A run reads `since` from the previous manifest (`next_since`, or `resume.since`
- * when the previous run stopped early) and asks the listing endpoint for
- * everything updated at or after it. The first run has no manifest and is full.
+ * A run reads `since` from the previous manifest (`next_since`, or the phase
+ * cursor when the previous run stopped early) and asks the listing endpoint for
+ * everything updated at or after it. The first run has no manifest, so it walks
+ * the open set and then the whole history.
  *
  * **The page walk never trusts `Link: rel="next"`.** The REST channel table
  * records the measurement: cursor-following stopped at 102 rows where the page
@@ -108,10 +137,16 @@
  *                                        to another repo) goes in `gone.json`,
  *                                        which is the ONLY way to quiet it.
  *
- * Both are non-zero exits. A partial archive (a first snapshot still resuming)
- * makes the check `pending` instead — the census is not yet a reading, and
- * reporting `pending` is what keeps "could not check" apart from "checked and
- * clean" (#4690).
+ * Both are non-zero exits. `pending` is the third answer and not a pass — what
+ * keeps "could not check" apart from "checked and clean" (#4690) — and the
+ * predicate for it is the OPEN SET, because the arithmetic above needs nothing
+ * else: the check is a reading exactly when THIS run enumerated the open board
+ * (the run that finishes the open phase, or any run whose walk completed), and
+ * `pending` with a stated reason otherwise. A run in the history phase reports
+ * `pending` even though the open set is complete, and the reason says why: that
+ * enumeration is from an earlier run, so every card closed or opened since then
+ * is still archived in its old state and a verdict would be an alarm about the
+ * clock rather than about the board.
  *
  * ## Heartbeat
  *
@@ -296,13 +331,15 @@ export function reviewsPath(outDir, number) {
 /**
  * One page of the board, oldest update first.
  *
- * `state=all` is the point — a closed card is exactly what a suspension
- * destroys, and every census, patrol and mutex query on the live board forces
- * `state:open`, so the closed half has no other reader at all.
+ * `state` is the phase, and one endpoint serves both: the `/issues` listing
+ * carries pull requests too, so `state=open` is the whole open board in one
+ * walk. `state=all` is what the history phase needs — a closed card is exactly
+ * what a suspension destroys, and every census, patrol and mutex query on the
+ * live board forces `state:open`, so the closed half has no other reader at all.
  */
-export function listingPath(repo, { since = null, page = 1, perPage = PER_PAGE } = {}) {
+export function listingPath(repo, { since = null, page = 1, perPage = PER_PAGE, state = 'all' } = {}) {
   const query = [
-    'state=all',
+    `state=${state}`,
     'sort=updated',
     'direction=asc',
     ...(since ? [`since=${encodeURIComponent(since)}`] : []),
@@ -337,48 +374,139 @@ export function nextWalkStep({ batchLength, lastUpdatedAt, since, page, perPage 
   return { done: false, since, page: page + 1, reanchored: false };
 }
 
+export const WALK_PHASES = Object.freeze(['open', 'history', 'incremental']);
+
 /**
- * The `since` this run reads from, and the reason — printed, so a run that
- * silently became full (or silently stayed incremental) cannot be mistaken for
- * the other one.
+ * The walk this run performs: which phase, from which cursor, and the reason —
+ * printed, so a run that silently became full (or silently stayed incremental,
+ * or silently skipped the open set) cannot be mistaken for another one.
+ *
+ * The plan also carries forward what earlier runs finished, because those two
+ * cursors are independent: an open-phase stop resumes the OPEN cursor and the
+ * history cursor waits untouched; a history-phase stop resumes the history
+ * cursor and the open set stays complete.
+ *
+ * ⚠️ A manifest with no `walk` block was written before the open phase existed.
+ * Its cursor is a HISTORY cursor by construction — the only walk that version
+ * had was `state=all` — so it is preserved and the open set is walked first.
+ * `next_since` is the legacy "a walk finished here" marker: that version wrote
+ * it only when a walk completed, and a completed `state=all` walk did archive
+ * the open records, so such an archive is already past both phases.
  */
-export function selectSince(manifest, { full = false, override = null } = {}) {
-  if (override) return { since: override, reason: `--since=${override} given on the command line` };
-  if (full) return { since: null, reason: '--full: the whole board, ignoring the previous manifest' };
-  if (!manifest) return { since: null, reason: 'no previous manifest — the first run is full' };
-  if (manifest.resume?.since) return { since: manifest.resume.since, reason: `resuming the previous run at ${manifest.resume.since}` };
-  if (manifest.next_since) return { since: manifest.next_since, reason: `incremental from the previous run's next_since (${manifest.next_since})` };
-  return { since: null, reason: 'the previous manifest carries no cursor — falling back to a full read' };
+export function selectWalkPlan(manifest, { full = false, override = null } = {}) {
+  const walk = manifest?.walk ?? null;
+  const legacyDone = Boolean(manifest) && !walk && Boolean(manifest.next_since || manifest.run?.walk_complete);
+  const state = {
+    openSetComplete: walk ? Boolean(walk.open_set?.complete) : legacyDone,
+    openCursor: walk?.open_set?.cursor ?? null,
+    openCompletedAt: walk?.open_set?.completed_at ?? null,
+    historyComplete: walk ? Boolean(walk.history?.complete) : legacyDone,
+    historyCursor: walk ? (walk.history?.cursor ?? null) : (manifest && !walk && !legacyDone ? (manifest.resume?.since ?? null) : null),
+  };
+
+  if (override) return { ...state, phase: 'incremental', since: override, reason: `--since=${override} given on the command line` };
+  if (full) {
+    return {
+      openSetComplete: false,
+      openCursor: null,
+      openCompletedAt: null,
+      historyComplete: false,
+      historyCursor: null,
+      phase: 'open',
+      since: null,
+      reason: '--full: the whole board again, open records first, ignoring the previous manifest',
+    };
+  }
+  if (!manifest) return { ...state, phase: 'open', since: null, reason: 'no previous manifest — the first run is full, and it starts with the open board' };
+  if (!state.openSetComplete) {
+    return {
+      ...state,
+      phase: 'open',
+      since: state.openCursor,
+      reason: state.openCursor
+        ? `resuming the open set at ${state.openCursor} — the closed history does not start until it is complete`
+        : state.historyCursor
+          ? `the previous archive walked the closed history only — the open board is read first, and its cursor (${state.historyCursor}) is kept`
+          : 'the open set is not complete — it is walked before the closed history',
+    };
+  }
+  if (!state.historyComplete) {
+    return {
+      ...state,
+      phase: 'history',
+      since: state.historyCursor,
+      reason: state.historyCursor
+        ? `the open set is complete — the closed history resumes at ${state.historyCursor}`
+        : 'the open set is complete — the closed history starts at the beginning of the board',
+    };
+  }
+  if (manifest.resume?.since) return { ...state, phase: 'incremental', since: manifest.resume.since, reason: `resuming the previous run at ${manifest.resume.since}` };
+  if (manifest.next_since) return { ...state, phase: 'incremental', since: manifest.next_since, reason: `incremental from the previous run's next_since (${manifest.next_since})` };
+  return { ...state, phase: 'incremental', since: null, reason: 'the previous manifest carries no cursor — falling back to a full read' };
+}
+
+/**
+ * Why this run's census is not a reading about the board, or `null` when it is.
+ *
+ * The arithmetic needs the OPEN set and nothing else, so the predicate is about
+ * the open set and nothing else: a run that enumerated the open board just now
+ * has a reading even though the closed history is still resuming, and a run that
+ * inherited a complete open set from an EARLIER run does not — cards close and
+ * open while a multi-day history walk runs, and the archive still holds their
+ * old state, so a verdict there would report the clock as a board defect.
+ */
+export function countCheckPendingReason({
+  phase,
+  openSetComplete = false,
+  openSetCompletedHere = false,
+  walkCompletedHere = false,
+  boardCountRead = false,
+}) {
+  if (!boardCountRead) return "the board's own count was not read this run, so there is nothing to compare the census with";
+  if (walkCompletedHere || openSetCompletedHere) return null;
+  if (!openSetComplete) return 'the open set is still being walked — a census of a partial open set says nothing about the board in either direction';
+  if (phase === 'history') {
+    return 'the open set is complete but was enumerated in an earlier run, and the closed history is still walking — cards closed or opened since then are archived in their old state';
+  }
+  return 'the walk stopped before it finished, so the archive is behind the board by an unknown amount';
 }
 
 /**
  * The count check. `expected` is the board's own arithmetic; `archived` is a
- * census of files on disk. `pending` is a third answer and not a pass: a
- * snapshot still resuming has not enumerated the board yet, so its census says
- * nothing about completeness in either direction.
+ * census of files on disk. `pending` is a third answer and not a pass: pass the
+ * reason from `countCheckPendingReason` and the manifest carries it, so a reader
+ * gets "why not" rather than a bare verdict.
  */
-export function countCheck({ openIssuesCount, openPullRequests, archivedOpenIssues, gone = [], resuming = false }) {
+export function countCheck({ openIssuesCount, openPullRequests, archivedOpenIssues, gone = [], pending = null }) {
   const expected = Number(openIssuesCount ?? 0) - Number(openPullRequests ?? 0);
   const goneOpen = new Set(gone ?? []);
   const archived = Number(archivedOpenIssues ?? 0);
   const shortfall = Math.max(0, expected - archived);
   const surplus = Math.max(0, archived - expected - goneOpen.size);
-  if (resuming) {
-    return { verdict: 'pending', expected, archived, shortfall: null, surplus: null, gone_ledger: goneOpen.size, ok: null };
+  if (pending) {
+    return { verdict: 'pending', reason: pending, expected, archived, shortfall: null, surplus: null, gone_ledger: goneOpen.size, ok: null };
   }
   const ok = shortfall === 0 && surplus === 0;
-  return { verdict: ok ? 'ok' : shortfall > 0 ? 'shortfall' : 'surplus', expected, archived, shortfall, surplus, gone_ledger: goneOpen.size, ok };
+  return { verdict: ok ? 'ok' : shortfall > 0 ? 'shortfall' : 'surplus', reason: null, expected, archived, shortfall, surplus, gone_ledger: goneOpen.size, ok };
 }
 
 /**
- * The manifest, minus the three fields that move on every run whether or not
+ * The manifest, minus every field that moves on every run whether or not
  * anything changed. Comparing THIS is what makes "no change ⇒ no write" real:
  * a run stamp is a fact about the run, not about the board.
+ *
+ * ⚠️ `board.read_at` is one of those stamps and is stripped for the same reason
+ * the top-level ones are. It is nested, so it survived the first spelling of
+ * this function — and a steady-state run, whose whole job is to write nothing,
+ * would move it and commit a manifest-only diff on every scheduled run, burying
+ * the real ones exactly the way the header promises this tool never will.
  */
 export function materialManifest(manifest) {
   if (!manifest) return null;
-  const { generated_at: _stamp, requests: _requests, run: _run, ...rest } = manifest;
-  return rest;
+  const { generated_at: _stamp, requests: _requests, run: _run, board, ...rest } = manifest;
+  if (board === undefined) return rest;
+  const { read_at: _readAt, ...boardWithoutStamp } = board ?? {};
+  return { ...rest, board: boardWithoutStamp };
 }
 
 /** Did anything about the BOARD change between these two manifests? */
@@ -391,6 +519,8 @@ export function manifestChanged(previous, next) {
 export function buildManifest({
   repo,
   generatedAt,
+  walkPhase,
+  walk,
   since,
   sinceReason,
   nextSince,
@@ -405,6 +535,8 @@ export function buildManifest({
     schema: ARCHIVE_SCHEMA,
     repo,
     generated_at: generatedAt,
+    walk_phase: walkPhase,
+    walk,
     since: since ?? null,
     since_reason: sinceReason,
     next_since: nextSince ?? null,
@@ -685,51 +817,101 @@ async function collectNumber(repo, raw, outDir, { budget }) {
 }
 
 /**
+ * The board's own arithmetic — the right-hand side of the count check, read as
+ * one act so the two sides of the comparison name one instant.
+ */
+async function readBoardArithmetic(repo, budget) {
+  budget.spend();
+  const meta = await rest(`/repos/${repo}`);
+  const openPulls = await readAllPages((page) => openPullsPath(repo, { page }), { budget });
+  return { open_issues_count: meta?.open_issues_count ?? null, open_pull_requests: openPulls.length, read_at: new Date().toISOString() };
+}
+
+/**
  * The snapshot run.
  *
  * Every early exit — budget, rate limit — leaves the same two things behind: the
- * files already collected, and a `resume` cursor the next run continues from.
+ * files already collected, and the phase cursor the next run continues from.
  * ⛔ There is no path here that retries a refused request.
+ *
+ * The phases run in one order and never interleave: the open board first, then
+ * the closed history, then (once the whole board has been walked once) a single
+ * incremental `since` walk. A run that stops inside a phase resumes inside it.
  */
 async function snapshot(repo, options) {
   const outDir = options.out;
   const previous = readJsonFile(join(outDir, MANIFEST_NAME));
-  const picked = selectSince(previous, { full: options.full, override: options.since });
+  const plan = selectWalkPlan(previous, { full: options.full, override: options.since });
   const budget = makeBudget(options.maxRequests);
 
   const files = new Map();
   const seen = new Set();
-  let since = picked.since;
-  let page = 1;
-  let cursor = picked.since;
+  // One cursor per phase, kept apart on purpose: a stop inside the open set must
+  // not move the history cursor, and finishing the open set must not lose it.
+  const cursors = { open: plan.openCursor, history: plan.historyCursor, incremental: plan.phase === 'incremental' ? plan.since : null };
+  let phase = plan.phase;
+  let openSetComplete = plan.openSetComplete;
+  let openSetCompletedHere = false;
+  let openCompletedAt = plan.openCompletedAt;
+  let historyComplete = plan.historyComplete;
   let stopped = null;
   let walkComplete = false;
+  let board = { open_issues_count: null, open_pull_requests: null, read_at: null };
 
-  try {
+  /**
+   * One phase's page walk. Returns whether the phase FINISHED (a short page, and
+   * nothing else); the planned stops leave through the same throws the single
+   * walk used, and the cursor they resume from is already in `cursors`.
+   */
+  async function walk(key, state) {
+    let since = cursors[key];
+    let page = 1;
     for (;;) {
       budget.spend();
-      const batch = await rest(listingPath(repo, { since, page }));
+      const batch = await rest(listingPath(repo, { since, page, state }));
       const rows = Array.isArray(batch) ? batch : [];
       for (const raw of rows) {
         if (seen.has(raw.number)) continue;
         if (options.limit && seen.size >= options.limit) {
           stopped = { kind: 'limit', reason: `--limit=${options.limit} reached` };
-          break;
+          return false;
         }
         const collected = await collectNumber(repo, raw, outDir, { budget });
         for (const [path, text] of collected.files) files.set(path, text);
         seen.add(raw.number);
-        cursor = collected.record.updated_at ?? cursor;
+        cursors[key] = collected.record.updated_at ?? cursors[key];
       }
-      if (stopped) break;
       const step = nextWalkStep({ batchLength: rows.length, lastUpdatedAt: rows.at(-1)?.updated_at ?? null, since, page });
       if (step.done) {
-        walkComplete = true;
-        cursor = step.since ?? cursor;
-        break;
+        cursors[key] = step.since ?? cursors[key];
+        return true;
       }
       since = step.since;
       page = step.page;
+    }
+  }
+
+  try {
+    if (phase === 'open') {
+      if (await walk('open', 'open')) {
+        openSetComplete = true;
+        openSetCompletedHere = true;
+        openCompletedAt = new Date().toISOString();
+        cursors.open = null;
+        // Read the board's arithmetic HERE, while the open set it describes has
+        // just been enumerated. This is the tightest instant the count check can
+        // name, and it is bought before the history walk spends what is left.
+        board = await readBoardArithmetic(repo, budget);
+        phase = 'history';
+      }
+    }
+    if (phase === 'history' && !stopped) {
+      if (await walk('history', 'all')) {
+        historyComplete = true;
+        walkComplete = true;
+      }
+    } else if (phase === 'incremental' && !stopped) {
+      if (await walk('incremental', 'all')) walkComplete = true;
     }
   } catch (err) {
     if (err instanceof BudgetExhausted) stopped = { kind: 'budget', reason: err.message };
@@ -738,16 +920,12 @@ async function snapshot(repo, options) {
   }
 
   // The board's own arithmetic, read in THIS run so the two sides of the count
-  // check describe one instant. Skipped when the run already stopped: spending
-  // the last requests on a census of an archive that is knowingly partial buys
-  // a reading nobody can use.
-  let board = { open_issues_count: null, open_pull_requests: null, read_at: null };
-  if (!stopped) {
+  // check describe one instant. Skipped when the run stopped without having
+  // enumerated the open set: spending the last requests on a census of an
+  // archive that is knowingly partial buys a reading nobody can use.
+  if (!stopped && board.read_at === null) {
     try {
-      budget.spend();
-      const meta = await rest(`/repos/${repo}`);
-      const openPulls = await readAllPages((p) => openPullsPath(repo, { page: p }), { budget });
-      board = { open_issues_count: meta?.open_issues_count ?? null, open_pull_requests: openPulls.length, read_at: new Date().toISOString() };
+      board = await readBoardArithmetic(repo, budget);
     } catch (err) {
       if (err instanceof BudgetExhausted) stopped = { kind: 'budget', reason: err.message };
       else if (err instanceof RateLimited) stopped = { kind: 'rate-limit', reason: err.message, resetAt: err.resetAt };
@@ -760,7 +938,6 @@ async function snapshot(repo, options) {
   // repairs. The other order loses records and reports success.
   const written = applyWrites(files, { dryRun: options.dryRun });
 
-  const resuming = Boolean(stopped);
   const counts = censusArchive(outDir);
   const gone = readGoneLedger(outDir);
   const check = countCheck({
@@ -768,36 +945,60 @@ async function snapshot(repo, options) {
     openPullRequests: board.open_pull_requests,
     archivedOpenIssues: counts.issues_open,
     gone,
-    resuming: resuming || board.open_issues_count === null,
+    pending: countCheckPendingReason({
+      phase,
+      openSetComplete,
+      openSetCompletedHere,
+      walkCompletedHere: walkComplete,
+      boardCountRead: board.open_issues_count !== null,
+    }),
   });
 
   const manifest = buildManifest({
     repo,
     generatedAt: new Date().toISOString(),
-    since: picked.since,
-    sinceReason: picked.reason,
-    nextSince: resuming ? (previous?.next_since ?? null) : cursor,
-    resume: resuming ? { since: cursor, stopped_by: stopped.kind, reason: stopped.reason, ...(stopped.resetAt ? { resets_at: stopped.resetAt } : {}) } : null,
+    walkPhase: phase,
+    walk: {
+      open_set: { complete: openSetComplete, completed_at: openCompletedAt, cursor: cursors.open },
+      history: { complete: historyComplete, cursor: cursors.history },
+    },
+    since: plan.since,
+    sinceReason: plan.reason,
+    nextSince: walkComplete ? (phase === 'incremental' ? cursors.incremental : cursors.history) : (previous?.next_since ?? null),
+    resume: stopped ? { since: cursors[phase], phase, stopped_by: stopped.kind, reason: stopped.reason, ...(stopped.resetAt ? { resets_at: stopped.resetAt } : {}) } : null,
     counts,
     board,
     check,
     requests: requestCount.value,
-    run: { numbers_read: seen.size, files_written: written.length, walk_complete: walkComplete },
+    run: { numbers_read: seen.size, files_written: written.length, walk_complete: walkComplete, open_set_completed_here: openSetCompletedHere },
   });
 
   const manifestPath = join(outDir, MANIFEST_NAME);
   const manifestMoved = manifestChanged(previous, manifest) || written.length > 0;
   if (manifestMoved) writeIfChanged(manifestPath, stableJson(manifest), { dryRun: options.dryRun });
 
-  return { manifest, written, manifestMoved, stopped, picked, walkComplete };
+  return { manifest, written, manifestMoved, stopped, plan, walkComplete };
 }
+
+/** What each phase is doing, in the words a reader of the run summary needs. */
+const PHASE_LEGEND = Object.freeze({
+  open: 'the open board first: the records a suspension destroys',
+  history: 'the closed history, which has no other reader anywhere',
+  incremental: 'the steady state: one `since` walk over everything that moved',
+});
 
 /** What the run tells a reader, and the exit code that goes with it. */
 export function renderRun(result, options) {
   const m = result.manifest;
+  const openSet = m.walk?.open_set ?? { complete: false, completed_at: null, cursor: null };
+  const openLine = openSet.complete
+    ? `complete${openSet.completed_at ? ` (enumerated ${openSet.completed_at})` : ''}${m.run.open_set_completed_here ? ' — BY THIS RUN' : ''}`
+    : `INCOMPLETE — the open board is still being walked${openSet.cursor ? `, resuming at ${openSet.cursor}` : ''}`;
   const lines = [
     `board-snapshot — ${m.repo} into ${options.out}${options.dryRun ? ' (DRY RUN — nothing was written)' : ''}`,
-    `  since        ${m.since ?? '(full)'} — ${m.since_reason}`,
+    `  phase        ${m.walk_phase} — ${PHASE_LEGEND[m.walk_phase] ?? 'an unknown phase'}`,
+    `  open set     ${openLine}`,
+    `  since        ${m.since ?? '(from the beginning)'} — ${m.since_reason}`,
     `  read         ${m.run.numbers_read} number(s) in ${m.requests} request(s); walk ${m.run.walk_complete ? 'complete' : 'INCOMPLETE'}`,
     `  written      ${result.written.length} file(s)${result.manifestMoved ? ' + manifest' : ''}`,
     `  archive      ${m.counts.records} record(s): ${m.counts.issues_open} open / ${m.counts.issues_closed} closed issue(s), ${m.counts.pulls_open} open / ${m.counts.pulls_closed} closed pull request(s)`,
@@ -809,10 +1010,11 @@ export function renderRun(result, options) {
 
   const check = m.count_check;
   if (check.verdict === 'pending') {
-    const board = m.board.open_issues_count === null
-      ? 'the board\'s own count was not read this run'
-      : `the board reports ${check.expected}`;
-    lines.push(`  count check  PENDING — the snapshot is incomplete, so its census is no reading about the board (archived ${check.archived}; ${board}).`);
+    const board = m.board.open_issues_count === null ? 'the board\'s own count was not read this run' : `the board reports ${check.expected}`;
+    lines.push(
+      `  count check  PENDING — archived ${check.archived} open issue(s); ${board}.`,
+      `               Why not a verdict: ${check.reason ?? 'the snapshot is incomplete.'}`,
+    );
   } else if (check.ok) {
     lines.push(`  count check  ok — ${check.archived} open issue(s) archived, board says ${check.expected} (open_issues_count ${m.board.open_issues_count} minus ${m.board.open_pull_requests} open pull request(s)).`);
   } else if (check.verdict === 'shortfall') {
@@ -865,7 +1067,7 @@ async function verifyCounts(repo, options) {
   let page = 1;
   for (;;) {
     budget.spend();
-    const batch = await rest(`/repos/${repo}/issues?state=open&sort=updated&direction=asc${since ? `&since=${encodeURIComponent(since)}` : ''}&per_page=${PER_PAGE}&page=${page}`);
+    const batch = await rest(listingPath(repo, { since, page, state: 'open' }));
     const rows = Array.isArray(batch) ? batch : [];
     for (const raw of rows) if (!raw.pull_request) numbers.add(raw.number);
     const step = nextWalkStep({ batchLength: rows.length, lastUpdatedAt: rows.at(-1)?.updated_at ?? null, since, page });
@@ -984,6 +1186,8 @@ const USAGE = [
   '  node scripts/pm/board-snapshot.mjs --self-test               # offline, no network, no token',
   '',
   `  Default --out is ${DEFAULT_OUT_DIR}/ and the default budget is ${DEFAULT_MAX_REQUESTS} requests per run.`,
+  '  The first walk archives the OPEN board before the closed history; `walk_phase` in the',
+  '  manifest says which phase a run is in, and a run that stops inside a phase resumes in it.',
   '  The board is PM_SWEEP_REPO or GITHUB_REPOSITORY; this tool refuses to guess one.',
   '  It reads GitHub and writes files. It has no write path to GitHub in any mode.',
 ].join('\n');
@@ -1078,10 +1282,12 @@ function rearmThroughProxy(args) {
 
 // ---------------------------------------------------------------------------
 // Self-test — offline, no network, no token, and the only instrument watching
-// the rules a clean tree cannot exercise: the walk's re-anchor, the resume
-// cursor, the count check's three verdicts, the restore header, and the two
-// structural properties (no write path to GitHub, no retry loop) that this
-// tool's whole standing rests on.
+// the rules a clean tree cannot exercise: the walk ORDER (open board first, and
+// a run that stops inside the open set resumes inside it), the walk's re-anchor,
+// the resume cursors, the count check's three verdicts and the predicate that
+// decides between them, the restore header, and the two structural properties
+// (no write path to GitHub, no retry loop) that this tool's whole standing rests
+// on.
 //
 // Every section opens with `battery(...)`; the floor below requires the OPENED
 // set to equal the DECLARED set with each battery at or above its own count, so
@@ -1091,10 +1297,10 @@ function rearmThroughProxy(args) {
 
 const SELF_TEST_BATTERIES = Object.freeze({
   'the record shapes: fixed key order, declared absence': 9,
-  'the page walk: only a short page ends it': 8,
-  'the `since` selection: full, then incremental, then resume': 7,
-  'idempotence: no change means no write': 8,
-  'the census and the count check': 10,
+  'the page walk: only a short page ends it': 10,
+  'the walk plan: the open board first, then the closed history, then incremental': 15,
+  'idempotence: no change means no write': 9,
+  'the census and the count check': 15,
   'the restore payload: a rebuilt record says it is one': 9,
   'the refusals: a typo must never make this decision': 11,
   'the rate-limit stop, and the two properties that are structural': 8,
@@ -1175,18 +1381,57 @@ export function selfTest() {
   t('the listing asks for state=all — the closed half is exactly what a suspension destroys', path.includes('state=all'));
   t('…ordered by updated ascending, 100 a page, by page number', path.includes('sort=updated') && path.includes('direction=asc') && path.includes('per_page=100') && path.includes('page=3'));
   t('a full read carries no `since` at all', !listingPath('o/r', {}).includes('since='));
+  const openPath = listingPath('o/r', { state: 'open' });
+  t('THE open phase asks for state=open — one listing, and it carries pull requests as well as issues',
+    openPath.includes('state=open') && !openPath.includes('state=all') && openPath.includes('/issues?'));
+  t('…and the history phase asks the same endpoint for state=all, so one walk implementation serves both',
+    listingPath('o/r', { state: 'all' }) === listingPath('o/r', {}));
 
-  // -- the since selection ---------------------------------------------------
-  battery('the `since` selection: full, then incremental, then resume');
-  t('no manifest: the first run is full', selectSince(null).since === null);
-  t('…and says so, so a full run and an incremental one are never confused', /first run is full/.test(selectSince(null).reason));
-  t('a previous manifest hands over its next_since', selectSince({ next_since: '2026-09-05T00:00:00Z' }).since === '2026-09-05T00:00:00Z');
+  // -- the walk plan ---------------------------------------------------------
+  battery('the walk plan: the open board first, then the closed history, then incremental');
+  t('no manifest: the first run is full', selectWalkPlan(null).since === null);
+  t('…and says so, so a full run and an incremental one are never confused', /first run is full/.test(selectWalkPlan(null).reason));
+  t('a previous manifest hands over its next_since', selectWalkPlan({ next_since: '2026-09-05T00:00:00Z' }).since === '2026-09-05T00:00:00Z');
   t('a resume cursor WINS over next_since — an interrupted run is continued, not skipped past',
-    selectSince({ next_since: '2026-09-09T00:00:00Z', resume: { since: '2026-09-05T00:00:00Z' } }).since === '2026-09-05T00:00:00Z');
-  t('--full ignores the manifest', selectSince({ next_since: '2026-09-05T00:00:00Z' }, { full: true }).since === null);
+    selectWalkPlan({ next_since: '2026-09-09T00:00:00Z', resume: { since: '2026-09-05T00:00:00Z' } }).since === '2026-09-05T00:00:00Z');
+  t('--full ignores the manifest', selectWalkPlan({ next_since: '2026-09-05T00:00:00Z' }, { full: true }).since === null);
   t('--since overrides everything, including a resume cursor',
-    selectSince({ resume: { since: '2026-09-05T00:00:00Z' } }, { override: '2026-01-01T00:00:00Z' }).since === '2026-01-01T00:00:00Z');
-  t('every selection carries a printable reason', ['reason'].every((k) => typeof selectSince(null)[k] === 'string' && selectSince(null)[k].length > 0));
+    selectWalkPlan({ resume: { since: '2026-09-05T00:00:00Z' } }, { override: '2026-01-01T00:00:00Z' }).since === '2026-01-01T00:00:00Z');
+  t('every selection carries a printable reason', ['reason'].every((k) => typeof selectWalkPlan(null)[k] === 'string' && selectWalkPlan(null)[k].length > 0));
+  t('THE ORDER: a fresh archive plans the OPEN phase — the records a suspension destroys are read before the closed history',
+    selectWalkPlan(null).phase === 'open' && selectWalkPlan(null).openSetComplete === false);
+  const midOpen = { walk: { open_set: { complete: false, completed_at: null, cursor: '2026-09-07T00:00:00Z' }, history: { complete: false, cursor: '2026-02-01T14:43:39Z' } } };
+  t('THE CASE: a run that ran out of budget inside the open set resumes INSIDE it — the history does not start early',
+    selectWalkPlan(midOpen).phase === 'open' && selectWalkPlan(midOpen).since === '2026-09-07T00:00:00Z');
+  t('…and the history cursor waits untouched while that happens, so finishing the open set costs the history nothing',
+    selectWalkPlan(midOpen).historyCursor === '2026-02-01T14:43:39Z');
+  const openDone = { walk: { open_set: { complete: true, completed_at: '2026-09-10T15:00:00Z', cursor: null }, history: { complete: false, cursor: '2026-02-01T14:43:39Z' } } };
+  t('an open set that is complete hands over to the history phase, from the history cursor',
+    selectWalkPlan(openDone).phase === 'history' && selectWalkPlan(openDone).since === '2026-02-01T14:43:39Z');
+  const legacy = { next_since: null, resume: { since: '2026-02-01T14:43:39Z' }, run: { walk_complete: false } };
+  t('THE MIGRATION: an archive written before this order existed walks the open board first, and its cursor is KEPT rather than thrown away',
+    selectWalkPlan(legacy).phase === 'open' && selectWalkPlan(legacy).historyCursor === '2026-02-01T14:43:39Z');
+  t('…while one whose old walk had COMPLETED is already past both phases and stays incremental',
+    selectWalkPlan({ next_since: '2026-09-09T00:00:00Z', run: { walk_complete: true } }).phase === 'incremental');
+  t('--full restarts at the open set, not at the history', selectWalkPlan(openDone, { full: true }).phase === 'open');
+  t('every plan names one of the three declared phases', WALK_PHASES.includes(selectWalkPlan(openDone).phase) && WALK_PHASES.length === 3);
+  const phased = buildManifest({
+    repo: 'o/r',
+    generatedAt: 's',
+    walkPhase: 'history',
+    walk: { open_set: { complete: true, completed_at: '2026-09-10T15:00:00Z', cursor: null }, history: { complete: false, cursor: '2026-02-01T14:43:39Z' } },
+    since: null,
+    sinceReason: 'r',
+    nextSince: null,
+    resume: { since: '2026-02-01T14:43:39Z', phase: 'history', stopped_by: 'budget', reason: 'spent' },
+    counts: {},
+    board: {},
+    check: {},
+    requests: 800,
+    run: { numbers_read: 1, files_written: 1, walk_complete: false, open_set_completed_here: false },
+  });
+  t('the manifest says WHICH phase and whether the open set is complete, so "open set complete, history resuming" is not "still in the open set"',
+    phased.walk_phase === 'history' && phased.walk.open_set.complete === true && phased.resume.phase === 'history' && phased.resume.stopped_by === 'budget');
 
   // -- idempotence -----------------------------------------------------------
   battery('idempotence: no change means no write');
@@ -1211,6 +1456,10 @@ export function selfTest() {
       manifestChanged(base, { ...base, generated_at: 'B', requests: 9, run: { numbers_read: 4 } }) === false);
     t('a manifest whose counts moved IS a change', manifestChanged(base, { ...base, counts: { issues_open: 4 } }) === true);
     t('no previous manifest is always a change', manifestChanged(null, base) === true);
+    const withBoard = { ...base, board: { open_issues_count: 598, open_pull_requests: 20, read_at: '2026-09-10T02:07:00Z' } };
+    t('THE steady state: a manifest differing only in WHEN the board count was read is NOT a change — a nested stamp would commit a no-op every run',
+      manifestChanged(withBoard, { ...withBoard, board: { ...withBoard.board, read_at: '2026-09-10T08:07:00Z' } }) === false
+      && manifestChanged(withBoard, { ...withBoard, board: { ...withBoard.board, open_issues_count: 599 } }) === true);
 
     // -- the census and the count check --------------------------------------
     battery('the census and the count check');
@@ -1237,9 +1486,25 @@ export function selfTest() {
     t('a SURPLUS is the destruction signature this tool exists for, and it is not ok', surplus.verdict === 'surplus' && surplus.surplus === 6 && surplus.ok === false);
     t('…and the gone ledger is the only thing that quiets it',
       countCheck({ openIssuesCount: 620, openPullRequests: 20, archivedOpenIssues: 606, gone: [1, 2, 3, 4, 5, 6] }).ok === true);
-    const pending = countCheck({ openIssuesCount: 620, openPullRequests: 20, archivedOpenIssues: 12, resuming: true });
+    const stillOpen = countCheckPendingReason({ phase: 'open', openSetComplete: false, boardCountRead: true });
+    const pending = countCheck({ openIssuesCount: 620, openPullRequests: 20, archivedOpenIssues: 12, pending: stillOpen });
     t('a resuming snapshot reads PENDING — a census of a partial archive is no reading about the board', pending.verdict === 'pending');
     t('…and pending is not a pass: `ok` is null, so "could not check" never renders as "checked and clean"', pending.ok === null);
+    t('…and it carries the reason, so the manifest answers "why not" instead of leaving a reader to infer it',
+      typeof pending.reason === 'string' && /open set is still being walked/.test(pending.reason));
+    t('THE CASE the open phase buys: the run that FINISHES the open set has a reading, even though the closed history is still resuming',
+      countCheckPendingReason({ phase: 'history', openSetComplete: true, openSetCompletedHere: true, walkCompletedHere: false, boardCountRead: true }) === null);
+    t('…but a LATER history run does not: that enumeration is from an earlier run, and the reason says exactly that',
+      /enumerated in an earlier run/.test(countCheckPendingReason({ phase: 'history', openSetComplete: true, openSetCompletedHere: false, boardCountRead: true })));
+    t('a completed walk is a reading in any phase — the steady state, unchanged by the open phase existing',
+      countCheckPendingReason({ phase: 'incremental', openSetComplete: true, walkCompletedHere: true, boardCountRead: true }) === null);
+    t('an incremental walk that stopped early is pending, and says the archive is behind the board',
+      /behind the board/.test(countCheckPendingReason({ phase: 'incremental', openSetComplete: true, walkCompletedHere: false, boardCountRead: true })));
+    t('no board count this run: pending, and the reason names the side that is missing',
+      /own count was not read this run/.test(countCheckPendingReason({ phase: 'incremental', openSetComplete: true, walkCompletedHere: true, boardCountRead: false })));
+    t('a verdict carries `reason: null`, so the key set is the same in every branch and the manifest diff stays stable',
+      'reason' in countCheck({ openIssuesCount: 620, openPullRequests: 20, archivedOpenIssues: 600 })
+      && countCheck({ openIssuesCount: 620, openPullRequests: 20, archivedOpenIssues: 600 }).reason === null);
 
     // -- the restore payload -------------------------------------------------
     battery('the restore payload: a rebuilt record says it is one');
@@ -1321,7 +1586,7 @@ export function selfTest() {
     console.error(`x board-snapshot self-test: ${failed.length} of ${cases.length} case(s) failed.`);
     return 1;
   }
-  console.log(`OK board-snapshot self-test: ${cases.length} cases pass across ${declared.length} batteries (walk re-anchor, resume cursor, idempotence, the three count-check verdicts, the restore header, and the two structural properties).`);
+  console.log(`OK board-snapshot self-test: ${cases.length} cases pass across ${declared.length} batteries (open-first walk order, walk re-anchor, the two phase cursors, idempotence, the three count-check verdicts and their predicate, the restore header, and the two structural properties).`);
   selfTestReachedVerdict = true;
   return 0;
 }

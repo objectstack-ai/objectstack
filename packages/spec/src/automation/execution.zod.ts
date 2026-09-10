@@ -1,7 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { CronExpressionInputSchema } from '../shared/expression.zod';
 
 /**
  * Automation Execution Protocol
@@ -522,8 +521,19 @@ export const ScheduleStateSchema = lazySchema(() => z.object({
   /** Flow reference */
   flowName: z.string().describe('Flow machine name'),
 
-  /** Schedule configuration */
-  cronExpression: CronExpressionInputSchema.describe('Cron expression — cron`0 9 * * MON-FRI`'),
+  /*
+   * `cronExpression` was DELETED here in @objectstack/spec 18 (ADR-0049
+   * enforce-or-remove, #16320). It was this schema's REQUIRED cron and was read by
+   * nothing: `ScheduleStateSchema` has no consumer outside `packages/spec`, and the
+   * schedule trigger that does run reads a flow start node's `config.schedule`
+   * through `trigger-schedule/schedule-trigger.ts` `normalizeSchedule` — a different
+   * shape this key never reached. Deleted outright — no `retiredKey()` tombstone, no
+   * D2 conversion, no D3 semantic entry (maintainer ruling 2026-09-10 on the
+   * retirement PR). `timezone` / `status` / `nextRunAt` stay: the ruling retires the
+   * cron position, not the def. A scheduled flow declares its cadence on the flow's
+   * start node (`config.schedule`); the one cron slot the platform evaluates is
+   * `Job.schedule.expression` (`system/job.zod.ts`).
+   */
   timezone: z.string().default('UTC').describe('IANA timezone for cron evaluation'),
 
   /** Runtime state */

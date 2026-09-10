@@ -655,8 +655,25 @@ export const PageSchema = lazySchema(() => strictObject({
     route: '`route` is not a page key — a page is routed by its `name` (lowercase snake_case). Rename the page rather than declaring a path.',
     path: '`path` is not a page key — a page is routed by its `name` (lowercase snake_case).',
     url: '`url` is not a page key — a page is routed by its `name`. To link OUT to an address, use a navigation node on the app.',
-    visibleWhen: 'page-level conditional rendering does not exist — put `visibleWhen` on the COMPONENT inside a region, or gate the page with `assignedProfiles`',
-    permissions: 'a page is not permission-gated by a field — reach it through `assignedProfiles`, and gate the DATA it shows with the object\'s permission sets (which is what actually protects the records)',
+    // ⛔ Neither prescription below may name `assignedProfiles` as the way to gate
+    // a page. The key is still authorable on this schema — nothing here changes what
+    // the schema accepts — but it gates NOTHING, so prescribing it handed the author
+    // a capability the runtime does not deliver, at parse time, which is Prime
+    // Directive #10's exact prohibition. Measured 2026-09-10: zero readers in this
+    // repo (every hit is a declaration, a generated artifact, prose, or this
+    // schema's own round-trip test) and zero readers in objectui at `3fbdd4a2d`
+    // (three hits — a docs table row, `packages/types/src/layout.ts` and
+    // `packages/types/src/zod/layout.zod.ts` — every one a declaration; lit controls
+    // `visibleWhen` 308 files and `PageSchema` 94 files prove the instrument fired).
+    // `liveness/page.json` still grades it `live` on the strength of an objectui
+    // bridge at `react/src/spec-bridge/bridges/page.ts` — a path that does not exist
+    // in that repo, while two sibling citations in the same ledger file resolve.
+    // It is also named for the concept ADR-0090 D2 removed, which
+    // `security/permission.zod.ts` states to authors three times over.
+    // ⛔ The key's own disposition (keep / rename / remove) needs a ruling and is
+    // tracked in #16929; this correction deliberately does not pre-empt it.
+    visibleWhen: 'page-level conditional rendering does not exist — put `visibleWhen` on the COMPONENT inside a region',
+    permissions: 'a page is not permission-gated by a field — gate the DATA it shows with the object\'s permission sets (which is what actually protects the records)',
   },
 }, {
   name: SnakeCaseIdentifierSchema.describe('Page unique name (lowercase snake_case)'),
