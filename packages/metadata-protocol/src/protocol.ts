@@ -56,6 +56,13 @@ import {
     // (#9454's read-side rule). One predicate on both doors means the swept
     // page set and the served page set cannot drift.
     organizationIdForMetaRead,
+    // [#16319] The field-`type` admission vocabulary. `loadMetaFromDb` asks the
+    // registration door's OWN question — never a second opinion about which
+    // declarations the registry will take, which is the defect class the
+    // 2026-09-10 ruling closes — to choose the sentence it prints and the level
+    // it prints it at.
+    findUndeclarableFieldType,
+    isObjectFieldTypeRefused,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
@@ -21411,14 +21418,36 @@ export class ObjectStackProtocolImplementation implements
                     const verdict = computeMetadataDiagnostics(normalizedType, data);
                     if (verdict && !verdict.valid) {
                         invalid++;
-                        const first = verdict.errors?.[0];
-                        console.warn(
-                            `[Protocol] [metadata_spec_invalid] stored ${normalizedType}/${record.name} fails the ` +
-                            `current spec schema even after conversion` +
-                            (first ? ` (${first.path || '<root>'}: ${first.message})` : '') +
-                            `. Registered anyway so it stays serveable and fixable — correct it in Studio ` +
-                            `(the read carries the full _diagnostics), or delete the sys_metadata row.`,
-                        );
+                        // [#16319] ⭐ THE ONE CLASS THIS POLICY NO LONGER COVERS.
+                        //
+                        // MAINTAINER RULING 2026-09-10 (director seat batch #111
+                        // item 2): a field whose `type` is absent or is not a
+                        // `FieldType` member 「应该禁止加载」, so the row does NOT
+                        // register and 「Registered anyway so it stays serveable and
+                        // fixable」 would be a false receipt for it. `registerObject`
+                        // below throws for exactly this class and the per-record
+                        // catch prints the `error`-level line naming the object, the
+                        // field, the reason and the remedy — one loud statement, not
+                        // this reassuring one followed by a contradiction.
+                        //
+                        // ⛔ The question is asked through the DOOR's own predicate,
+                        // never re-derived here: a boot log with its own opinion
+                        // about what the registry admits is the same two-answers
+                        // defect one layer up. And ⛔ the row is not skipped here
+                        // either — the refusal stays the registry's single act, so
+                        // ablating the door's check makes this row register again.
+                        const willRefuseFieldType =
+                            normalizedType === 'object' && findUndeclarableFieldType(data) !== null;
+                        if (!willRefuseFieldType) {
+                            const first = verdict.errors?.[0];
+                            console.warn(
+                                `[Protocol] [metadata_spec_invalid] stored ${normalizedType}/${record.name} fails the ` +
+                                `current spec schema even after conversion` +
+                                (first ? ` (${first.path || '<root>'}: ${first.message})` : '') +
+                                `. Registered anyway so it stays serveable and fixable — correct it in Studio ` +
+                                `(the read carries the full _diagnostics), or delete the sys_metadata row.`,
+                            );
+                        }
                     }
                     if (normalizedType === 'object') {
                         // Every row here came from `sys_metadata` — a TENANT-authored
@@ -21503,7 +21532,35 @@ export class ObjectStackProtocolImplementation implements
                     loaded++;
                 } catch (e) {
                     errors++;
-                    console.warn(`[Protocol] Failed to hydrate ${record.type}/${record.name}: ${e instanceof Error ? e.message : String(e)}`);
+                    if (isObjectFieldTypeRefused(e)) {
+                        // [#16319] `error`, not `warn` — the AGENTS.md
+                        // "Degradation log levels" question answers YES here:
+                        // after this line the system looks entirely normal
+                        // (boot completes, every other object is served) while a
+                        // row the operator can see in `sys_metadata` is simply
+                        // not part of the runtime. It owes the two things an
+                        // `error` owes, in this first line: the CONSEQUENCE —
+                        // the object is absent, so its table is never created or
+                        // updated and every API for it answers as unknown — and
+                        // the FIX, which is the ruling's own precondition that
+                        // the row stay reachable: it is still readable, still
+                        // writable and still deletable through the metadata
+                        // API's raw-row path (`GET`/`PUT`/`DELETE
+                        // /api/v1/metadata/object/<name>`), because that path
+                        // reads `sys_metadata` directly and never asks the
+                        // registry whether the row registered.
+                        console.error(
+                            `[Protocol] [metadata_field_type_refused] stored ${record.type}/${record.name} is NOT ` +
+                            `registered. ${e.message} Until the row is corrected this object is absent from the ` +
+                            `runtime — its table is never created or updated, and every API for it answers as ` +
+                            `unknown — while the boot completes and everything else looks healthy. The row itself ` +
+                            `is untouched and still reachable: correct it in Studio or with ` +
+                            `PUT /api/v1/metadata/object/${record.name}, or remove it with ` +
+                            `DELETE /api/v1/metadata/object/${record.name}.`,
+                        );
+                    } else {
+                        console.warn(`[Protocol] Failed to hydrate ${record.type}/${record.name}: ${e instanceof Error ? e.message : String(e)}`);
+                    }
                 }
             }
             // #6190 — say out loud which org-scoped rows this filter just

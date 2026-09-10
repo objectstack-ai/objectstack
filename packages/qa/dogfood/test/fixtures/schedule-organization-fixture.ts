@@ -18,13 +18,22 @@
  * driver truncates to `YYYY-MM-DD` puts a per-driver truncation rule between
  * the fixture and the property under test, which is WHICH ORGANIZATION's rows
  * came back.
+ *
+ * `touched` is `boolean` — a SCALAR flag. The `update_record` node below writes
+ * `touched: true` and both pins read it back as one (`r.touched === true || r.touched === 1`,
+ * `Boolean(r.touched)`). ⛔ Not `checkboxes`, which is the multi-value checkbox
+ * GROUP (a JSON array of option values, sibling of `multiselect`/`radio`): an
+ * empty set is truthy, so the sweep pin would report rows nothing touched as
+ * touched and the differential would go green on the defect. `checkbox` is not
+ * a `FieldType` member at all — `SchemaRegistry.registerObject` refuses the
+ * whole object for it.
  */
 const SweepTargetObject = {
   name: 'sched_org_target',
   label: 'Sweep Target',
   fields: {
     name: { type: 'text', label: 'Name', required: true },
-    touched: { type: 'checkbox', label: 'Touched' },
+    touched: { type: 'boolean', label: 'Touched' },
     due_date: { type: 'datetime', label: 'Due' },
   },
 };

@@ -1743,6 +1743,74 @@ function refuseRejectedReferenceAlias(column: string): never {
   throw err;
 }
 
+/**
+ * [#16319] Has this field declared a `type` at all?
+ *
+ * The whole predicate the DDL emitter needs, and deliberately no more: it asks
+ * PRESENCE, not membership. Membership is decided one layer up and for the whole
+ * object — see {@link refuseUndeclaredFieldType}.
+ */
+function isDeclaredFieldType(field: { type?: unknown }): boolean {
+  return typeof field.type === 'string' && field.type !== '';
+}
+
+/**
+ * [#16319] DDL-time defence: a field declaration with NO `type` gets no column
+ * — it gets a refusal.
+ *
+ * MAINTAINER RULING, 2026-09-10 (director seat batch #111 item 2): 「一个没写
+ * type(或拼错)的字段 应该禁止加载」, and 「下游默认值全部改拒绝:`createColumn`
+ * 的 `|| 'string'` … 一律改为响亮拒绝 … ⛔ 不再猜族;按构造它们应当不可达,拒绝是
+ * 防御」.
+ *
+ * What it replaces is `createColumn`'s `const type = field.type || 'string'`,
+ * which sized the column from `declaredVarcharLength(field)` — the declared
+ * `maxLength` verbatim, knex's 255 without one — while BOTH `os generate
+ * migration` formats defaulted the SAME declaration to `TEXT`. Two families from
+ * one declaration: measured on live PostgreSQL 16.13, `{ maxLength: 100 }` with
+ * no `type` produced `character varying(100)` here and `TEXT` there, so the
+ * platform refused a 101-character value both generated tables accepted (#16319).
+ *
+ * ⭐ By construction this is now unreachable: `SchemaRegistry.registerObject`
+ * refuses the whole object declaration, and every route into `syncSchema` —
+ * boot rehydration, package and plugin manifests, programmatic registration —
+ * is fronted by it. It stays as defence, and it stays LOUD, because the
+ * alternative is a silent guess and reaching this line means the object was
+ * handed to the driver by a path the registry does not front.
+ *
+ * ⚠️ PRESENCE only, and that boundary is deliberate — ⛔ do not widen it to
+ * `FieldType` membership here without ruling on the cost. A NON-MEMBER `type`
+ * still falls to this switch's own catch-all arm, unchanged: membership is
+ * refused at the registration door for the whole object, which is where the
+ * ruling put the single point of closure and what its acceptance list means by
+ * 「驱动永远到不了」. Measured on this tree: 388 sites across ~100 of this
+ * package's own test files declare a non-member spelling (`'string'` 361,
+ * `'integer'` 17, `'auto_number'` 5, `'varchar'` 4, `'object'` 1) and drive
+ * `initObjects` directly, never through the registry — and `'string'` is a
+ * declared `case` arm of this very switch whose column shape differs from every
+ * member's, so re-typing them is a corpus migration with column consequences,
+ * not a spelling fix.
+ *
+ * `VALIDATION_ERROR` + 400, exactly as {@link refuseRejectedReferenceAlias} one
+ * function up: a standard-catalog member, so no new code is minted and this
+ * package's ledger entry is unchanged.
+ */
+function refuseUndeclaredFieldType(column: string): never {
+  const err = new Error(
+    `[sql-driver] field '${column}' declares no \`type\`, so no column is created for it. ` +
+      `⛔ The driver no longer guesses a family here: it used to build \`varchar(255)\` (or the ` +
+      `declared \`maxLength\`) while both \`os generate migration\` formats built \`TEXT\` from ` +
+      `the same declaration, so the platform refused values the generated tables accepted, in ` +
+      `both directions and silently. \`FieldSchema\` requires \`type\`, and ` +
+      `\`SchemaRegistry.registerObject\` refuses the whole object declaration before any DDL runs ` +
+      `— so reaching this line means the object was handed to \`syncSchema\` by a path that does ` +
+      `not go through the registry. Give the field a \`FieldType\` member, or remove the field.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  throw err;
+}
+
 /*
  * [#8445 → #8567] `isUnbackedConflictTargetError` — "is this the conflict
  * target is not a key failure?" — is imported from `@objectstack/types`
@@ -16552,7 +16620,14 @@ export class SqlDriver implements IDataDriver {
       return;
     }
 
-    const type = field.type || 'string';
+    // [#16319] ⛔ Was `const type = field.type || 'string'`. See
+    // {@link refuseUndeclaredFieldType} for what that default cost and why the
+    // answer here is a refusal rather than a different guess. Asked AFTER
+    // `multiple`, exactly where the default stood, so a flagged field is still a
+    // JSON column whatever its element type would have been — the rule the two
+    // generators and `fieldHasColumn` state as well.
+    if (!isDeclaredFieldType(field)) refuseUndeclaredFieldType(name);
+    const type: string = field.type;
     let col: any;
     switch (type) {
       case 'string':

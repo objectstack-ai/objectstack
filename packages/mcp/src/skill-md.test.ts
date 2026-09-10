@@ -72,7 +72,12 @@ describe('renderSkillMarkdown', () => {
   it('teaches action preference — run a matching business action instead of hand-editing records', () => {
     const md = renderSkillMarkdown();
     expect(md).toContain('Prefer actions over hand-edits');
-    expect(md).toContain('run_action({ actionName, objectName?, recordId?, params? })');
+    expect(md).toContain('run_action({ actionName, objectName?, recordId?, params?, confirm? })');
+    // [#15942] The signature owes `confirm`, and the skill owes the sentence
+    // that makes it usable: an agent that learns the member exists but not that
+    // the server REFUSES without it has learned nothing it can act on.
+    expect(md).toContain('ACTION_CONFIRMATION_REQUIRED');
+    expect(md).toContain('requiresConfirmation');
   });
 
   it('is generic — it does not enumerate any concrete schema', () => {

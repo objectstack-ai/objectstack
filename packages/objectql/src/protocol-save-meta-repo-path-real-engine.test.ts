@@ -29,7 +29,7 @@ const sysMetadataObject = {
         // the driver; the declared-field door judges the payload against this
         // map, so the omission now shows up as the fixture defect it always was.
         package_id: { name: 'package_id', label: 'Package', type: 'text' as const },
-        metadata: { name: 'metadata', label: 'Body', type: 'longtext' as const },
+        metadata: { name: 'metadata', label: 'Body', type: 'textarea' as const },
         checksum: { name: 'checksum', label: 'Checksum', type: 'text' as const, maxLength: 71 },
         state: { name: 'state', label: 'State', type: 'text' as const },
         version: { name: 'version', label: 'Version', type: 'number' as const },
@@ -231,10 +231,10 @@ describe('deleteMetaItem — repository write path against real ObjectQL (PR-10d
             name: { name: 'name', label: 'Name', type: 'text' as const, required: true },
             version: { name: 'version', label: 'Version', type: 'number' as const, required: true },
             operation_type: { name: 'operation_type', label: 'Op', type: 'text' as const, required: true },
-            metadata: { name: 'metadata', label: 'Body', type: 'longtext' as const },
+            metadata: { name: 'metadata', label: 'Body', type: 'textarea' as const },
             checksum: { name: 'checksum', label: 'Checksum', type: 'text' as const, maxLength: 71 },
             previous_checksum: { name: 'previous_checksum', label: 'Prev Checksum', type: 'text' as const, maxLength: 71 },
-            change_note: { name: 'change_note', label: 'Note', type: 'longtext' as const },
+            change_note: { name: 'change_note', label: 'Note', type: 'textarea' as const },
             source: { name: 'source', label: 'Source', type: 'text' as const },
             organization_id: { name: 'organization_id', label: 'Org', type: 'text' as const },
             recorded_by: { name: 'recorded_by', label: 'By', type: 'text' as const },
