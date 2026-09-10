@@ -1060,6 +1060,7 @@ instead:
 | `connector_action` | `unmeasured` |
 | `script`, function declared pure (the default) | nothing — a registered function is **contractually pure**: data I/O stays on the flow graph, so every write it causes is a downstream node that counts itself |
 | `script`, function declared `effect: 'writes'` | `unmeasured` — the function said it writes where the platform cannot see, so the run says the count is incomplete |
+| `notify` | `selected`: the recipient entries the node addressed, always. Then `acted: <delivered>` when the messaging stack delivered inline and knows the outcome, or `unmeasured` when it handed the deliveries to the outbox and the dispatcher decides later. A notify that reached **nobody** — an audience that resolved to no recipient, a preference filter that suppressed every pair, a dedup hit, no messaging service installed — reports `selected: N, acted: 0` and no `unmeasured`, which is what puts it inside the broken-sweep filter instead of leaving it silent |
 
 The `script` row is a contract, not a measurement: nothing stops a registered
 function from writing, so an **undeclared** writer still makes its run report
@@ -1070,6 +1071,17 @@ every flow that calls any function, to cover the few that break the rule.
 
 `unmeasured` propagates through `subflow` and `map` roll-ups, so a parent whose
 child dispatched an uncountable effect knows its own `acted` is incomplete.
+
+<Callout type="warn">
+A `notify` node reports `selected` for the recipients it addressed **whether or
+not any of them were reached**, and that is deliberate: it is the only thing
+that separates a run which notified nobody from a run that had nobody to
+notify. Both used to fold to `selected: 0, acted: 0, unmeasured: 0` — the same
+triple a run with no `notify` node at all reports — so a flow that quietly
+stopped delivering read exactly like a healthy quiet day, and the broken-sweep
+filter could not match it because its first clause is `selected > 0`. The zero
+is reported as a **measured** zero, never as `unmeasured`: the count is known.
+</Callout>
 
 The same counts land on `sys_automation_run` as **queryable columns**
 (`selected_count`, `acted_count`, `skipped_count`, `unmeasured_count`, plus a

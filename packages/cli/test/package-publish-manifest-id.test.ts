@@ -41,7 +41,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PackageSchema } from '@objectstack/spec/cloud';
+import { PackageSchema } from '@objectstack/spec/marketplace';
 import PackagePublish, { deriveManifestId, isManifestId } from '../src/commands/package/publish.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));

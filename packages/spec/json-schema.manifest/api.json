@@ -134,6 +134,7 @@
     "api/EnablePackageResponse",
     "api/EndpointRegistry",
     "api/EnhancedApiError",
+    "api/EnvironmentType",
     "api/ErrorCategory",
     "api/ErrorCode",
     "api/ErrorHandlingConfig",

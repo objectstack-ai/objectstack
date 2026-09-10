@@ -403,11 +403,9 @@ export const NON_READ_ANCHORS = [
     symbol: 'isSystem',
     why: 'EmailTemplate.isSystem -- unrelated metadata field',
   },
-  {
-    file: 'packages/spec/src/cloud/environment.zod.ts',
-    symbol: 'isSystem',
-    why: 'Environment.isSystem -- unrelated metadata field',
-  },
+  // `Environment.isSystem` (`packages/spec/src/cloud/environment.zod.ts`) was the
+  // fourth row until #16325 removed the `@objectstack/spec/cloud` subpath; the
+  // declaration lives in the cloud repo now and is outside this census.
   // ── The `sys_` name-prefix family, cited to keep it apart from the flag ──────
   {
     file: 'packages/runtime/src/action-execution.ts',

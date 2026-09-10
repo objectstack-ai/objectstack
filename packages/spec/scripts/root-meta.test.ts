@@ -67,8 +67,8 @@ describe('rootCategoryDirs — which categories reach the root sidebar (#11482)'
     // filters agree on all 14 — the byte-identical root `meta.json` the issue
     // itself measured, and the acceptance bar this fix must not move.
     const categories = [
-      'ai', 'api', 'automation', 'cloud', 'data', 'identity', 'integration',
-      'kernel', 'qa', 'security', 'shared', 'studio', 'system', 'ui',
+      'ai', 'api', 'automation', 'data', 'identity', 'integration',
+      'kernel', 'marketplace', 'qa', 'security', 'shared', 'studio', 'system', 'ui',
     ];
     const metaPages = new Map(categories.map(c => [c, ['some-page']]));
 

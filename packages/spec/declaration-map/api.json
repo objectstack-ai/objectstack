@@ -243,6 +243,8 @@
     "EndpointRegistrySchema": "api/EndpointRegistry",
     "EnhancedApiError": "api/EnhancedApiError",
     "EnhancedApiErrorSchema": "api/EnhancedApiError",
+    "EnvironmentType": "api/EnvironmentType",
+    "EnvironmentTypeSchema": "api/EnvironmentType",
     "ErrorCategory": "api/ErrorCategory",
     "ErrorCode": "api/ErrorCode",
     "ErrorHandlingConfig": "api/ErrorHandlingConfig",

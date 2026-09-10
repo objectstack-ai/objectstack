@@ -142,9 +142,11 @@ export * from './registry-config.zod';
 // TenantProvisioningResult) was declared-only — zero implementations and zero
 // importers across objectstack / cloud / objectui — and its
 // `TenantPlan(Schema)` collided with the live declaration in `./cloud`. The
-// living provisioning surface is the `Provision*` family in
-// `@objectstack/spec/cloud` (cloud/tenant.zod.ts, cloud/environment.zod.ts),
-// which the cloud services actually consume.
+// living provisioning surface is the `Provision*` family — declared in
+// `@objectstack/spec/cloud` until #16325, and since then in the cloud repo
+// itself, beside the services that consume it (the `./cloud` subpath is gone;
+// `./tenant-provisioning-family-retired.test.ts` keeps this side's half of
+// the #4739 ruling pinned).
 export * from './deploy-bundle.zod';
 export * from './app-install.zod';
 export * from './environment-artifact.zod';

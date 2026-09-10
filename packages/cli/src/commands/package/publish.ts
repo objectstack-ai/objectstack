@@ -29,7 +29,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath, basename, dirname, isAbsolute } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
-import { PackageSchema } from '@objectstack/spec/cloud';
+import { PackageSchema } from '@objectstack/spec/marketplace';
 import { printHeader, printKV, printSuccess, printError, printStep } from '../../utils/format.js';
 import { DEFAULT_CLOUD_URL, tryReadCloudConfig } from '../../utils/cloud-config.js';
 import { readErrorMessage } from '../../utils/response-envelope.js';
@@ -543,7 +543,7 @@ export default class PackagePublish extends Command {
       }
 
       // Marketplace per-locale translations. Schema is
-      // `PackageTranslationsSchema` from @objectstack/spec/cloud. Per-entry
+      // `PackageTranslationsSchema` from @objectstack/spec/marketplace. Per-entry
       // `readme` may be inlined markdown OR a path (e.g. `README.zh-CN.md`)
       // — we resolve paths against the manifest directory.
       if (m.translations && typeof m.translations === 'object') {

@@ -45,7 +45,7 @@ The marketplace protocol consists of three primary schema files:
 
 1. **`packages/spec/src/kernel/manifest.zod.ts`** — Package manifest schema defining the structure of all packages
 2. **`packages/spec/src/kernel/package-registry.zod.ts`** — Runtime lifecycle management for installed packages
-3. **`packages/spec/src/cloud/marketplace.zod.ts`** — Marketplace ecosystem schemas for publishing and discovery
+3. **`packages/spec/src/marketplace/marketplace.zod.ts`** — Marketplace ecosystem schemas for publishing and discovery
 
 ### Reference Implementation
 
@@ -108,7 +108,7 @@ Supports semantic versioning ranges:
 
 ## 3. Developer Publishing Flow
 
-From `packages/spec/src/cloud/marketplace.zod.ts`:
+From `packages/spec/src/marketplace/marketplace.zod.ts`:
 
 ```
 1. Develop   → Build plugin locally using ObjectStack CLI
@@ -526,7 +526,7 @@ Validates:
 **Deliverables:**
 - ✅ `packages/spec/src/kernel/manifest.zod.ts`
 - ✅ `packages/spec/src/kernel/package-registry.zod.ts`
-- ✅ `packages/spec/src/cloud/marketplace.zod.ts`
+- ✅ `packages/spec/src/marketplace/marketplace.zod.ts`
 - 🚧 `packages/kernel/src/registry/schema-registry.ts`
 
 ### Phase 2: CLI Tooling (Q2 2026)
@@ -619,7 +619,7 @@ This comprehensive design document establishes the **Marketplace Protocol** for 
 **Key Protocol Files:**
 - ✅ `packages/spec/src/kernel/manifest.zod.ts`
 - ✅ `packages/spec/src/kernel/package-registry.zod.ts`
-- ✅ `packages/spec/src/cloud/marketplace.zod.ts`
+- ✅ `packages/spec/src/marketplace/marketplace.zod.ts`
 
 **Next Steps:**
 1. Implement Phase 1: SchemaRegistry.installPackage() with 30+ metadata registration
