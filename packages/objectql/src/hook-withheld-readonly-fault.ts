@@ -136,10 +136,22 @@ export class HookWithheldReadonlyFaultError extends Error {
   readonly status = 400;
   /** The read-only keys the engine withheld from this hook, in payload order. */
   readonly withheldKeys: readonly string[];
+  /**
+   * The hook's original throw, whole.
+   *
+   * DECLARED on the class and assigned by hand rather than passed through the
+   * constructor, for the reason `duplicate-record-error.ts` already writes down
+   * one file over: this repo compiles against `lib: ES2020`, where `Error` has
+   * neither a `cause` member nor an `ErrorOptions` overload to carry one — so
+   * the two-argument `super()` does not compile, and an undeclared assignment
+   * would be invisible to every TypeScript consumer of the field.
+   */
+  readonly cause: unknown;
   constructor(message: string, withheldKeys: readonly string[], options?: { cause?: unknown }) {
-    super(message, options as ErrorOptions);
+    super(message);
     this.name = 'HookWithheldReadonlyFaultError';
     this.withheldKeys = withheldKeys;
+    this.cause = options?.cause;
   }
 }
 
