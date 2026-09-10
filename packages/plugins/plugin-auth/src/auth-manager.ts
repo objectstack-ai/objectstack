@@ -3996,10 +3996,19 @@ export class AuthManager {
   /**
    * ADR-0093 D1 — the deployment's membership policy **as it stands right now**.
    *
-   * The ONE source both membership paths read (#5152):
+   * The ONE source EVERY membership-writing path reads (#5152):
    *   - sign-up: the reconciler composed into `user.create.after` (below);
    *   - backfill: `AuthPlugin`'s ADR-0093 D6 pass over pre-existing member-less
-   *     users, which used to read the plugin's CONSTRUCTOR options instead.
+   *     users, which used to read the plugin's CONSTRUCTOR options instead;
+   *   - `POST /admin/create-user`: the endpoint-side belt-and-suspenders bind
+   *     in `admin-user-endpoints.ts`, reached through
+   *     `AdminUserEndpointDeps.getMembershipPolicy`.
+   *
+   * That list was written as "both membership paths" while the admin endpoint
+   * handed the reconciler a literal `'auto'` — a third writer, outside the
+   * accounting, binding under `invite-only` where the other two correctly did
+   * not. Enumerate every writer here: a path that is not in this list is a
+   * path that can disagree with the deployment's policy.
    *
    * That split mattered because `this.config` is what {@link applyConfigPatch}
    * targets: once `auth.membership_policy` became a platform setting, the

@@ -641,10 +641,17 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       // `sys_api_key`'s divergent `active_organization_id` included), falling
       // back to the acting context's tenant (`record.organizationId`) when the
       // trigger carries no record or the object has no organization of its
-      // own. A plain scheduled sweep has neither and keeps NULL — fabricating
-      // an acting organization stays vetoed (Option C). Same inputs and same
-      // precedence as `serialize()` below, so a run's paused row and its
-      // terminal row agree by construction.
+      // own. Fabricating an acting organization stays vetoed (Option C). Same
+      // inputs and same precedence as `serialize()` below, so a run's paused
+      // row and its terminal row agree by construction.
+      //
+      // [#16659] This used to end "a plain scheduled sweep has neither and
+      // keeps NULL", and that stopped being true when a time-triggered flow
+      // began declaring the organization it runs as: such a sweep now arrives
+      // with `record.organizationId` set, so the second limb answers and the
+      // row is stamped. What has NOT changed is the precedence — the SUBJECT's
+      // organization still wins over the acting one where both exist, which is
+      // deliberate (a history row belongs with the record it is about).
       organization_id:
         this.recordOrgResolver.organizationOf(record.triggerObject ?? '', record.triggerRecord) ??
         record.organizationId ??
