@@ -50,4 +50,4 @@ async findData(args) {
 
 ⚠️ The `?? {}` shape in the "before" is the mechanism that made a dialect mismatch silent rather than loud: an unrecognised query does not throw, it degrades into a filter that constrains nothing, so a duplicate probe stops discriminating and an upsert updates the wrong record. Prefer a read that throws.
 
-<!-- adr-0087: not-required (type-surface-only packages/rest/src/import-runner.ts#ImportProtocolLike) a TypeScript-only parameter narrowing off `any`; the compiler at the implementor's own call site is the whole delivery channel, and `objectstack migrate meta` has no stored metadata to rewrite -->
+<!-- adr-0087: not-required (no-migration-prescription) probe -->
