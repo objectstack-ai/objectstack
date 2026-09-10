@@ -407,3 +407,180 @@ describe('#16344 — caller-forged readonly values are hidden from beforeUpdate'
     expect(afterSubmitted).toEqual([{ id: 'kpi_1', actual_value: 380, target_value: 1 }]);
   });
 });
+
+/**
+ * [#17219] The OTHER half of the same hide pass: what an author is told when a
+ * hook reaches THROUGH a key #16344 withheld.
+ *
+ * ⛔ The refusal itself is not under test here and is not moved: a body's
+ * default `onError: abort` refuses the caller's whole write, and what that
+ * replaced is a write that succeeded while persisting a value derived from the
+ * caller's forgery. Every case below re-asserts that the row is untouched, so a
+ * future repair of the DIAGNOSTIC cannot quietly restore the old write.
+ *
+ * Measured on `origin/main` `501959b72a` before this fix, both doors:
+ *
+ *   direct   SandboxError: hook '…' threw: TypeError: cannot set property 'who' of undefined
+ *   REST     500 {"error":"Internal server error","code":"INTERNAL_ERROR"}
+ *
+ * The REST reading is the one that decides the shape of the fix: a leading
+ * `TypeError:` is correctly classified as a crash (#7543) and sanitised, so at
+ * the door an author actually authors against, the old behaviour said nothing
+ * at all — not the key, not the reason, not the remedy.
+ *
+ * A code hook is the subject rather than a sandboxed body deliberately: the
+ * dispatch sites and the hide pass are what this card wraps, and they are
+ * common to both. The sandbox spelling is measured end to end, through a real
+ * QuickJS, in `runtime`'s `hook-input-writeback-readonly-provenance` suite.
+ */
+describe('#17219 — a hook that faults reaching THROUGH a withheld readonly key names it', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+
+  const OBJECT = 'guard_task';
+
+  /** Reaches through the read-only `locked_meta`, which the hide pass removed. */
+  const reachThrough = async (ctx: any) => {
+    ctx.input.data.locked_meta.who = 'hook';
+  };
+
+  async function boot(
+    hook: (ctx: any) => Promise<void>,
+    opts?: { unscopedMulti?: boolean },
+  ) {
+    engine = new ObjectQL({ logger: {
+      warn() {}, debug() {}, info() {}, error() {}, trace() {}, fatal() {},
+      child() { return this as any; },
+    } as any });
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: OBJECT,
+      fields: {
+        status: { type: 'text' },
+        bucket: { type: 'text' },
+        locked_meta: { type: 'json', readonly: true },
+      },
+    } as any);
+    storeFor(OBJECT).set('t1', {
+      id: 't1', status: 'open', bucket: 'b1', locked_meta: { seeded: true },
+    });
+    engine.registerHook('beforeUpdate', hook, {
+      object: OBJECT,
+      priority: 50,
+      ...(opts?.unscopedMulti ? { dispatchUnscopedMultiWrite: true } : {}),
+    } as any);
+  }
+
+  const row = () => storeFor(OBJECT).get('t1');
+
+  /** Every requirement the card places on the message, asserted as one set. */
+  const expectActionable = (err: any) => {
+    // ① the withheld KEY is named — the old message named nothing.
+    expect(err.message).toContain('`locked_meta`');
+    // ② WITHHELD BY THE PLATFORM, not absent by accident.
+    expect(err.message).toContain('withheld by the platform, not missing by accident');
+    // ③ the documented remedy, reachable from the message itself.
+    expect(err.message).toContain('`ctx.previous.locked_meta`');
+    // ④ and it reaches the author at the REST door: `declaredHttpStatus` reads
+    //    this, and without it the body is the sanitised 500.
+    expect(err.status).toBe(400);
+    // The original fault is carried through, never swallowed.
+    expect(err.message).toMatch(/cannot set propert|Cannot set propert/);
+  };
+
+  it('BY-ID: the refusal stands and now names the key, the reason and the remedy', async () => {
+    await boot(reachThrough);
+
+    const err = await engine.update(OBJECT, {
+      id: 't1', status: 'done', locked_meta: { who: 'caller' },
+    } as any).then(() => null, (e) => e);
+
+    expect(err).toBeTruthy();
+    expectActionable(err);
+    // ⛔ RULING 1, re-pinned: the write is still refused WHOLE. Neither the
+    // forged read-only value nor the writable `status` reached the row.
+    expect(row().locked_meta).toEqual({ seeded: true });
+    expect(row().status).toBe('open');
+  });
+
+  it('PREDICATE: the per-row dispatch site answers on the same terms', async () => {
+    await boot(reachThrough);
+
+    const err = await engine.update(
+      OBJECT,
+      { status: 'done', locked_meta: { who: 'caller' } } as any,
+      { multi: true, where: { bucket: 'b1' } } as any,
+    ).then(() => null, (e) => e);
+
+    expect(err).toBeTruthy();
+    expectActionable(err);
+    expect(row().locked_meta).toEqual({ seeded: true });
+    expect(row().status).toBe('open');
+  });
+
+  it('UNSCOPED-MULTI: the third dispatch site inside the hide window answers too', async () => {
+    await boot(reachThrough, { unscopedMulti: true });
+
+    const err = await engine.update(
+      OBJECT,
+      { status: 'done', locked_meta: { who: 'caller' } } as any,
+      { multi: true } as any,
+    ).then(() => null, (e) => e);
+
+    expect(err).toBeTruthy();
+    expectActionable(err);
+    expect(row().locked_meta).toEqual({ seeded: true });
+  });
+
+  it('CONTROL — nothing withheld: an ordinary crash keeps its own raw words', async () => {
+    // The caller sends NO read-only key, so the hide pass never runs and
+    // `readonlyHiddenFromHooks` stays unset. The hook still faults (the column
+    // is simply absent from this payload), and that fault must pass through
+    // untouched: the diagnostic is tied to the WITHHOLDING, not to any crash
+    // that happens to occur on an object with a read-only field. Without this
+    // leg the case above would pass just as well for a wrapper that rewrote
+    // every hook error it saw.
+    await boot(reachThrough);
+
+    const err = await engine.update(OBJECT, { id: 't1', status: 'done' } as any)
+      .then(() => null, (e) => e);
+
+    expect(err).toBeTruthy();
+    expect(err.message).not.toContain('withheld by the platform');
+    expect(err.status).toBeUndefined();
+    expect(row().status).toBe('open');
+  });
+
+  it('CONTROL — an AUTHORED refusal is never rewritten, even while a key is withheld', async () => {
+    // The regression this guards is the card's own defect aimed the other way:
+    // `mapDataError` serves an authored message to the caller verbatim, so
+    // overwriting it would destroy the author's words to explain a key they
+    // never asked about.
+    await boot(async () => { throw new Error('仍有未结清的发票'); });
+
+    const err = await engine.update(OBJECT, {
+      id: 't1', status: 'done', locked_meta: { who: 'caller' },
+    } as any).then(() => null, (e) => e);
+
+    expect(err.message).toBe('仍有未结清的发票');
+    expect(err.status).toBeUndefined();
+    expect(row().status).toBe('open');
+  });
+
+  it('CONTROL — a hook that does NOT fault still runs, and the strip still refuses the forgery', async () => {
+    // The over-narrowing guard: if the wrapper had broken the dispatch, every
+    // case above would pass for the wrong reason. Here the same withheld key is
+    // in play, the hook completes, and the write lands MINUS the forgery.
+    await boot(async (ctx: any) => { ctx.input.data.status = 'hooked'; });
+
+    await engine.update(OBJECT, {
+      id: 't1', status: 'done', locked_meta: { who: 'caller' },
+    } as any);
+
+    expect(row().status).toBe('hooked');
+    expect(row().locked_meta).toEqual({ seeded: true });
+  });
+});
