@@ -76,10 +76,57 @@ export type PackagePathParams = z.input<typeof PackagePathParamsSchema>;
  * The body half is deliberately typed `Record<string, unknown>`; the reason is
  * recorded at `AssembledPackageBodySchema` and is not repeated here. The RUNTIME
  * schema still carries the manifest's every field plus every collection's full
- * declaration, so a wrong-shaped body is refused exactly as it is there.
+ * declaration, so a wrong-shaped body is refused exactly as it is there — with
+ * the one measured exception {@link AssembledPackageRecordBodySchema} states
+ * and pins.
  */
+/**
+ * The assembled package body AS THE REGISTRY RECORDS IT — the same declaration,
+ * with the two collections that have no JSON form left unchecked.
+ *
+ * ## Why this exists at all, measured rather than assumed
+ *
+ * `SchemaRegistry.installPackage` does not store the caller's object; it stores
+ * `toRecordManifest(manifest)`, a structural JSON projection that DROPS
+ * functions, class instances, `Map`, `Set` and every other exotic value. So the
+ * row this API serves is JSON by construction, and two of the assembled body's
+ * 55 collections cannot survive that projection in the shape they declare:
+ *
+ * - `functions` — a `z.function()` branch (a named callable);
+ * - `hooks` — a `z.custom()` branch (a lifecycle handler).
+ *
+ * Those same two are the reason `AssembledPackageBodySchema` has NO JSON Schema
+ * at all: `z.toJSONSchema` refuses a function and a custom type, which is also
+ * why `ArtifactPackageSchema` and `ObjectStackDefinitionSchema` publish none.
+ * Embedding the body verbatim in the two published response schemas below made
+ * BOTH of them disappear from `json-schema/api/`, which the build's own
+ * disappearance ratchet refuses and whose only other remedy is retiring two
+ * published defs. `build-schemas.ts` names the remedy taken here instead:
+ * «make it emit — narrow the unrepresentable member».
+ *
+ * ⛔ The override set is NOT hand-picked, and must never become so. It is the
+ * measured set of shape members with no JSON form, pinned key-by-key in
+ * `./package-api.test.ts`: a new collection with no JSON form reddens there,
+ * naming itself, instead of silently unpublishing these responses again.
+ *
+ * ⚠️ What `unknown` costs, stated plainly: on THIS surface those two keys are
+ * accepted without being checked. It is a widening from today, where both are
+ * refused outright by `ManifestSchema`'s strict close while the door really can
+ * serve them — so the declaration moves from wrong to incomplete, never from
+ * checked to tolerant. Every other key, `objects` included, is checked at the
+ * assembled stage exactly as `AssembledPackageBodySchema` declares it. The
+ * ARTIFACT surface is untouched and keeps both collections fully declared.
+ */
+const AssembledPackageRecordBodySchema = lazySchema(() =>
+  (AssembledPackageBodySchema as unknown as z.ZodObject<z.ZodRawShape>).extend({
+    functions: z.unknown().optional()
+      .describe('Named handler functions, as they survived the record JSON projection'),
+    hooks: z.unknown().optional()
+      .describe('Object lifecycle hooks, as they survived the record JSON projection'),
+  }).describe('One package as assembled, as the registry RECORDS it (JSON only)'));
+
 export const AssembledInstalledPackageSchema = lazySchema(() => InstalledPackageSchema.extend({
-  manifest: AssembledPackageBodySchema.describe('The ASSEMBLED package body this row carries'),
+  manifest: AssembledPackageRecordBodySchema.describe('The ASSEMBLED package body this row carries'),
 }).describe('Installed package row whose manifest is the assembled package body'));
 export type AssembledInstalledPackage = z.input<typeof AssembledInstalledPackageSchema>;
 /** Post-parse shape of {@link AssembledInstalledPackage} — defaults applied, transforms run (ADR-0122). */

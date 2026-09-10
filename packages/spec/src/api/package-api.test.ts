@@ -22,6 +22,8 @@ import {
   InstalledPackageAtEitherStageSchema,
 } from './package-api.zod';
 import { InstalledPackageSchema } from '../kernel/package-registry.zod';
+import { AssembledPackageBodySchema } from '../stack.zod';
+import { z } from 'zod';
 
 // ==========================================
 // Path Parameters
@@ -561,6 +563,37 @@ describe('`InstalledPackageAtEitherStageSchema` admits both stages and NOTHING e
       const typo = { ...row, manifest: { ...row.manifest, namesapce: 'stage' } };
       expect(InstalledPackageAtEitherStageSchema.safeParse(typo).success).toBe(false);
     }
+  });
+});
+
+describe('the record-body override set is MEASURED, never hand-picked', () => {
+  /** Does this schema have a JSON Schema form at all? */
+  const emits = (schema: unknown): boolean => {
+    try {
+      z.toJSONSchema(schema as never, { io: 'input' } as never);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it('exactly `functions` and `hooks` have no JSON form on the assembled body', () => {
+    // The two published response schemas below embed the assembled body. Any
+    // collection with no JSON form makes them BOTH vanish from
+    // `json-schema/api/`, which the build's disappearance ratchet refuses — so
+    // the read-API record body overrides exactly this set, and this pin is what
+    // keeps the two in step. A new non-serialisable collection reddens HERE,
+    // naming itself, rather than unpublishing two response schemas.
+    const shape = (AssembledPackageBodySchema as unknown as { shape: Record<string, unknown> }).shape;
+    const noJsonForm = Object.keys(shape).filter((k) => !emits(shape[k]));
+    expect(noJsonForm.sort()).toEqual(['functions', 'hooks']);
+  });
+
+  it('lit control: the body itself does not emit, the narrowed row does', () => {
+    // Without both halves this pin could pass while measuring nothing.
+    expect(emits(AssembledPackageBodySchema)).toBe(false);
+    expect(emits(ListInstalledPackagesResponseSchema)).toBe(true);
+    expect(emits(GetInstalledPackageResponseSchema)).toBe(true);
   });
 });
 
