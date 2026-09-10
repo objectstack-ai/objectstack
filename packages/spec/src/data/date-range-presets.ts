@@ -66,24 +66,59 @@ export function isDateRangePresetName(value: unknown): value is DateRangePreset 
 
 /**
  * The `{date-macro}` window each preset resolves to — `[start, end]`, in the
- * WRAPPED spelling a filter author writes; `end: null` means "now" (the
- * rolling `last_N_days` windows have no upper macro — the resolver's clock is
- * the bound).
+ * WRAPPED spelling a filter author writes.
  *
- * This exists for one purpose: PRESCRIPTION. When a preset name is refused as
- * a bare filter comparand (#8793), the refusal must name the spelling that
- * works — that is the difference between a dead end and a one-edit fix,
- * especially for an AI author whose correction loop only sees the error text.
+ * ## The convention, binding on every entry (#17014)
+ *
+ * **`start` names the FIRST calendar day the window contains; `end` names its
+ * LAST. Inclusive — never the day the window stops before.**
+ *
+ * That is the reading that makes the pair correct as the `$between` this table
+ * is written for. `$between` is `$gte min` ∧ `$lte max`, and a bare-day upper
+ * bound means "through that whole day", compiled half-open to
+ * `< nextUtcCalendarDay(max)` — the platform-wide rule stated in
+ * `./calendar-day.ts` (ADR-0053 D-D, #3777). So an inclusive last-day end
+ * covers its day to the final instant and stops there:
+ * `['{yesterday}', '{yesterday}']` is exactly yesterday, one day — and the
+ * degenerate single-day range is a shape `./temporal-conformance.ts` already
+ * pins across every driver.
+ *
+ * ⛔ The OTHER convention — an end naming the day the window STOPS BEFORE —
+ * is equally real and is used deliberately one package over
+ * (`@objectstack/core`'s `analytics-date-range.ts` states its ends that way
+ * and says so). It must never appear here. Both spellings parse, resolve, run
+ * and return rows; only the EXTENT differs, so nothing downstream can catch an
+ * entry that picked the wrong one, and a reader of a mixed table cannot tell
+ * which reading any single row intends.
+ *
+ * `end: null` is the open arm, and it is exactly the three ROLLING
+ * `last_N_days` windows: those have no calendar upper bound at all, so the
+ * resolver's clock is the bound and the prescription takes the `$gte`-only
+ * form. ⛔ A CALENDAR preset — one that names a period, `today` included —
+ * always closes on its own last day, because `$gte` alone also selects every
+ * day AFTER the window on a column that carries future dates.
+ *
+ * ## Why the table exists: PRESCRIPTION
+ *
+ * When a preset name is refused as a bare filter comparand (#8793), the
+ * refusal must name the spelling that works — that is the difference between
+ * a dead end and a one-edit fix, especially for an AI author whose correction
+ * loop only sees the error text. An author handed a prescription whose EXTENT
+ * is wrong gets a filter that parses, runs and returns rows over the wrong
+ * window, with no second error to correct against — which is why the
+ * convention above is a rule here and not a preference.
+ *
  * It is deliberately NOT a resolver: the console's own preset-to-bounds
  * lowering (objectui `dashboard-filters`) stays the executable mapping, and
- * `date-range-presets.test.ts` pins every token here as a member of the macro
- * vocabulary so the two cannot drift silently.
+ * `date-range-presets.test.ts` pins both the macro-vocabulary membership of
+ * every token here AND the resolved EXTENT of every window, so neither the
+ * spelling nor the convention can drift silently.
  */
 export const DATE_RANGE_PRESET_MACRO_WINDOWS: Readonly<
   Record<DateRangePreset, readonly [start: string, end: string | null]>
 > = {
-  today:        ['{today}', null],
-  yesterday:    ['{yesterday}', '{today}'],
+  today:        ['{today}', '{today}'],
+  yesterday:    ['{yesterday}', '{yesterday}'],
   this_week:    ['{week_start}', '{week_end}'],
   last_week:    ['{last_week_start}', '{last_week_end}'],
   this_month:   ['{month_start}', '{month_end}'],
