@@ -237,8 +237,17 @@ function isMissingColumnOfRelation(message: string): boolean {
  * wording, so no tightening of "does this say a relation is missing" can ever
  * exclude it — only asking the more specific question FIRST can. That makes the
  * ORDER the fix, not the pattern.
+ *
+ * [#17130] EXPORTED — module-internal still (it is absent from `index.ts`, and
+ * this package's `exports` map publishes only that entry, so no consumer can
+ * reach it), but reachable from `refusal-wording-collision.test.ts`. That guard
+ * asserts no BARE refusal this package raises can be mistaken for a driver
+ * saying "the table is gone", and it has to ask THIS predicate: a guard
+ * carrying its own copy of the six limbs answers a question about the copy, and
+ * would stay green the moment a limb is added here — precisely the drift it
+ * exists to catch.
  */
-function isMissingSourceError(err: unknown): boolean {
+export function isMissingSourceError(err: unknown): boolean {
   const raw = String((err as { message?: unknown })?.message ?? err ?? '');
   // [#6035] Missing COLUMN is not missing SOURCE — the paragraph above promises
   // column errors stay hard failures, and this is where that promise is kept.
