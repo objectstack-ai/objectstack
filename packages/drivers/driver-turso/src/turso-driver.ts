@@ -658,15 +658,19 @@ export class TursoDriver extends SqlDriver {
         this.temporalFilterColumnSql(object, field, columnSql),
       );
 
-      // [#14079] The declared-type half of the text-operator contract, handed
-      // down for the same reason the temporal rule is: the transport keeps no
-      // schema, and `registerRemoteFieldMetadata` → `registerExternalObject`
-      // fills the SAME `numericFields` / `booleanFields` registries the local
-      // compiler reads, keyed by object name. So `isNonTextColumn` answers in
-      // remote mode exactly what it answers in local mode, and a text operator
-      // over a `Field.number` compiles to the contract's constant on both
-      // transports (`turso-local-remote-text-parity` holds them to one row set)
-      // instead of a `GLOB` over the number's storage-class spelling.
+      // [#14079/#15683] The declared-type half of the text-operator contract,
+      // handed down for the same reason the temporal rule is: the transport
+      // keeps no schema, and `registerRemoteFieldMetadata` →
+      // `registerExternalObject` fills the SAME `numericFields` /
+      // `booleanFields` / `dateFields` / `datetimeFields` / `timeFields`
+      // registries the local compiler reads, keyed by object name. So
+      // `isNonTextColumn` answers in remote mode exactly what it answers in
+      // local mode, and a text operator over a `Field.number` — or, since
+      // #15683's ruling, over a `Field.date` / `Field.datetime` / `Field.time`
+      // — compiles to the contract's constant on both transports
+      // (`turso-local-remote-text-parity` holds them to one row set) instead of
+      // a `GLOB` over the number's storage-class spelling or over the temporal
+      // column's canonical ISO text.
       this.remoteTransport.setNonTextColumnResolver((object, field) =>
         this.isNonTextColumn(object, field),
       );
