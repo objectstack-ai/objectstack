@@ -146,7 +146,7 @@ describe('runImport — idempotent retry with natural keys (framework#3149)', ()
     // ⭐ [#16638] …and every probe that produced those numbers actually
     // constrained something. The natural-key probes carry the match field.
     expectEveryProbeNarrowed(findData.mock.calls, appliedFilters);
-    expect(findData.mock.calls.map(([a]) => Object.keys(a.query.where))).toContainEqual(['name']);
+    expect(findData.mock.calls.map(([a]) => Object.keys(a.query!.where!))).toContainEqual(['name']);
   });
 
   it('upsert+matchFields: a short createManyData return degrades and still does not duplicate', async () => {
