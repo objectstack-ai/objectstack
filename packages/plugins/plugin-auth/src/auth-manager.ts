@@ -6130,9 +6130,33 @@ export class AuthManager {
    * signature against our own JWKS, `iss` must be this deployment's issuer,
    * `aud` must be the MCP resource URL (tokens minted for other audiences —
    * userinfo, plain OIDC SSO — do NOT unlock MCP), `exp`/`nbf` enforced by
-   * jose. Client-credentials (M2M) tokens carry no `sub` and are rejected:
-   * the MCP surface is principal-bound by design; headless callers use API
-   * keys. Revocation note: JWT access tokens are not server-tracked, so
+   * jose.
+   *
+   * A `client_credentials` (M2M) token is REFUSED here — the MCP surface is
+   * principal-bound by design; headless callers use API keys. The
+   * discriminator is the `sub`/`client_id` PAIR, read as RFC 9068 defines it
+   * for a JWT access token: §2.2 makes `client_id` REQUIRED, and §2.2.3.1
+   * fixes what `sub` means beside it — the resource OWNER for a grant that
+   * had one, and "an identifier the authorization server uses to indicate the
+   * client application" for a grant that did not. So a token whose `sub`
+   * equals its own `client_id` (or its `azp` spelling) states, in the
+   * authorization server's own words, that NO human delegated it, and a token
+   * carrying neither client claim is refused as well: the check cannot run on
+   * it, and a check that cannot run must not silently pass (Route & surface
+   * ownership §3).
+   *
+   * ⛔ Not `sid`, and ⛔ not a `sys_user` lookup. `sid` does separate today's
+   * two token shapes, but it is an OIDC session-management convenience the
+   * installed provider ALREADY gates per-client on ID tokens
+   * (`enableEndSession || backchannelLogoutUri`) — a bump that gates it on
+   * access tokens too would 401 every human on this surface, which is the
+   * failure this method must not have. A `sys_user` read would make a
+   * deliberately LOCAL, I/O-free verifier depend on the data engine and turn
+   * a transient store error into a 401 for a legitimate human, and a row's
+   * existence is not humanity anyway (`isHumanUserRow` exists because
+   * `usr_system` is a row and not a person).
+   *
+   * Revocation note: JWT access tokens are not server-tracked, so
    * revocation takes effect at expiry (≤1h default); refresh tokens ARE
    * revocable immediately via `/oauth2/revoke`.
    *
@@ -6163,14 +6187,34 @@ export class AuthManager {
         audience: this.getMcpResourceUrl(),
       });
 
-      const userId = typeof payload.sub === 'string' && payload.sub ? payload.sub : undefined;
-      if (!userId) return null;
+      const subject = typeof payload.sub === 'string' && payload.sub ? payload.sub : undefined;
+      if (!subject) return null;
+
+      // The two spellings of "which client is presenting this", read
+      // independently rather than through a `??` chain: a token that carries
+      // both and disagrees with itself must be refused on EITHER match, and
+      // collapsing them first would let the losing spelling smuggle the
+      // client id past the comparison below.
+      const clientIdClaim =
+        typeof (payload as any).client_id === 'string' && (payload as any).client_id
+          ? ((payload as any).client_id as string)
+          : undefined;
+      const azp =
+        typeof (payload as any).azp === 'string' && (payload as any).azp
+          ? ((payload as any).azp as string)
+          : undefined;
+      // No client identity at all → the human/machine discriminator has no
+      // input. Fail closed rather than admit an unclassifiable token.
+      if (!clientIdClaim && !azp) return null;
+      // `sub` IS the client → RFC 9068 §2.2.3.1's "no resource owner was
+      // involved" shape, i.e. a client_credentials grant. No principal.
+      if (subject === clientIdClaim || subject === azp) return null;
+
       const scopes =
         typeof payload.scope === 'string'
           ? payload.scope.split(' ').filter(Boolean)
           : [];
-      const clientId = typeof (payload as any).azp === 'string' ? (payload as any).azp : undefined;
-      return { userId, scopes, ...(clientId ? { clientId } : {}) };
+      return { userId: subject, scopes, ...(azp ? { clientId: azp } : {}) };
     } catch {
       return null; // unknown/expired/wrong-audience/garbage → no principal
     }
