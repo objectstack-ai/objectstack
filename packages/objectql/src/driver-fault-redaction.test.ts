@@ -751,7 +751,9 @@ describe('#8682 half B — the write-path loggers', () => {
       lines,
       trace() {}, fatal() {},
       debug() {}, info() {},
-      warn(msg: string) { lines.push({ level: 'warn', msg: String(msg) }); },
+      // [#17052] `warn` grew a meta capture: the write doors report there now,
+      // and the redaction this suite pins travels in `meta.error`.
+      warn(msg: string, meta?: any) { lines.push({ level: 'warn', msg: String(msg), meta }); },
       error(msg: string, err?: any, meta?: any) { lines.push({ level: 'error', msg: String(msg), err, meta }); },
       child() { return logger; },
     };
@@ -814,28 +816,37 @@ describe('#8682 half B — the write-path loggers', () => {
       } as any);
     } catch (e) { thrown = e; }
     const line = logger.lines.find((l: any) => l.msg === 'Insert operation failed');
-    return { line, thrown };
+    return { line, thrown, logger };
   }
 
-  it('the entry survives — same level, same message, same object', async () => {
-    const { line } = await insertAgainstADriftedColumn();
+  it('the entry survives — one line, `warn` since #17052, same message, same object', async () => {
+    const { line, logger } = await insertAgainstADriftedColumn();
 
     expect(line).toBeDefined();
-    expect(line!.level).toBe('error');
-    expect(line!.meta).toEqual({ object: 'crm_account' });
+    // [#17052] Was `error` until the door was read against AGENTS.md's third
+    // legal answer: this catch rethrows, so the caller was told. What this
+    // suite pins is the REDACTION, and it is unchanged by the level — the
+    // assertions below read the same two fields they always did.
+    expect(line!.level).toBe('warn');
+    expect(line!.meta).toEqual({
+      object: 'crm_account',
+      error: { message: expect.any(String), stack: expect.any(String) },
+    });
+    // …and the entry did not merely move: nothing is emitted at `error` now.
+    expect(logger.lines.filter((l: any) => l.level === 'error')).toHaveLength(0);
   });
 
   it('the failing column is still named — the fault stays debuggable', async () => {
     const { line } = await insertAgainstADriftedColumn();
 
-    expect(String(line!.err?.message)).toContain('has no column named secret_note');
-    expect(String(line!.err?.stack)).toContain('at Database.prepare');
+    expect(String(line!.meta?.error?.message)).toContain('has no column named secret_note');
+    expect(String(line!.meta?.error?.stack)).toContain('at Database.prepare');
   });
 
   it('neither `message` nor `stack` carries a caller value', async () => {
     const { line } = await insertAgainstADriftedColumn();
 
-    for (const field of [String(line!.err?.message), String(line!.err?.stack)]) {
+    for (const field of [String(line!.meta?.error?.message), String(line!.meta?.error?.stack)]) {
       expect(field).not.toContain(SECRET);
       expect(field).not.toContain(DESCRIPTION);
       expect(field).not.toContain('insert into');
@@ -872,17 +883,22 @@ describe('#8682 half B — the write-path loggers', () => {
     const { line } = await insertAgainstADriftedColumn(MYSQL_DUPLICATE_ENTRY);
 
     expect(line).toBeDefined();
-    expect(line!.level).toBe('error');
-    expect(line!.meta).toEqual({ object: 'crm_account' });
+    // [#17052] The level moved to `warn`; #14095's property is what this case
+    // exists for, and it is asserted below on the same two fields. They travel
+    // in `meta.error` now because `warn` has no `Error` slot — the engine
+    // rebuilds the very `{ message, stack }` bag the slot used to build, so
+    // the index name still arrives.
+    expect(line!.level).toBe('warn');
+    expect(line!.meta?.object).toBe('crm_account');
     // The operator's answer to "which constraint?" is kept whole.
-    expect(String(line!.err?.message)).toContain("for key 'crm_account.secret_note'");
-    expect(String(line!.err?.stack)).toContain('at Database.prepare');
+    expect(String(line!.meta?.error?.message)).toContain("for key 'crm_account.secret_note'");
+    expect(String(line!.meta?.error?.stack)).toContain('at Database.prepare');
   });
 
   it('MySQL duplicate entry — neither `message` nor `stack` carries the value', async () => {
     const { line } = await insertAgainstADriftedColumn(MYSQL_DUPLICATE_ENTRY);
 
-    for (const field of [String(line!.err?.message), String(line!.err?.stack)]) {
+    for (const field of [String(line!.meta?.error?.message), String(line!.meta?.error?.stack)]) {
       expect(field).not.toContain(SECRET);
       expect(field).not.toContain(DESCRIPTION);
       expect(field).not.toContain('insert into');
