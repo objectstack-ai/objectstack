@@ -279,15 +279,28 @@ tool call runs under **your** permissions and row-level security.
 claude mcp add --transport http objectstack https://your-deployment.example.com/api/v1/mcp
 # then approve the browser login on first use
 
-# claude.ai — Settings → Connectors → Add custom connector → paste the MCP URL
-# (requires the deployment to be reachable from the public internet over HTTPS)
-
-# Claude Desktop — Settings → Connectors → Add custom connector
+# claude.ai (web) AND Claude Desktop — Settings → Connectors →
+# Add custom connector → paste the MCP URL. Both drive the same claude.ai
+# connector system, which dials the endpoint FROM Anthropic's servers, so the
+# deployment has to be reachable over public HTTPS.
 ```
 
-TLS is required for OAuth (localhost is exempt, per OAuth 2.1). Local clients
-(Claude Code / Desktop) can reach intranet deployments; claude.ai web
-connectors additionally need the endpoint publicly reachable. Coarse scopes
+TLS is required for OAuth (localhost is exempt, per OAuth 2.1). What decides
+whether a client can reach a deployment is **where the connection is made
+from**, not whether the client application runs on your machine:
+
+- **Claude Code** (`claude mcp add`, or the plugin) dials the endpoint from
+  your own machine, so it reaches `localhost` and intranet-only deployments.
+- **claude.ai (web) and Claude Desktop** both go through the same claude.ai
+  custom-connector system, which connects **from Anthropic's servers**.
+  Anthropic's custom-connector documentation requires the MCP server to be
+  reachable over the public internet from Anthropic's IP ranges, and states
+  that a server on a private corporate network, behind a VPN, or blocked by a
+  firewall will not connect — a locally trusted certificate does not change
+  that.
+
+So a local or intranet deployment is connected through the **Claude Code**
+track; *Add custom connector* is not a second door to it. Coarse scopes
 (`data:read`, `data:write`, `actions:execute`) narrow the exposed tool
 families at consent time; permissions/RLS bind every *object CRUD* call to the
 logged-in user. Business actions are the exception: `actions:execute` gates

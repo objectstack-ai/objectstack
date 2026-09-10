@@ -35,6 +35,13 @@ import { predicateSlotRefusal, resolveFlowNodeExpressions, structuralConditionRe
 // ({@link AutomationEngine.valueEnvelopeRefusals}), so a flow that registers can
 // never be refused at run time and vice versa.
 import { AssignmentValueSchema, ASSIGNMENT_VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/automation';
+// [#17322] The EVALUATED-slot rule, IMPORTED rather than re-derived. It is the
+// rule `FlowEdgeSchema.condition` already composes since #15807, so a node's
+// `config.condition` — which no schema stands in front of — is held to the same
+// notion of "blank" and answers the same published sentence. A second,
+// hand-written `trim()` here is exactly the drift the #15662 campaign built the
+// shared refusal to prevent. See `checkStructuralCondition` in `registerFlow`.
+import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
 import { applyConversionsToFlow, type ConversionNotice, type ConversionConflictNotice } from '@objectstack/spec';
 // [ADR-0126 §7.3] "Does a code package ship this flow?" for the subflow guard.
 // Routed through the local precedence module rather than importing
@@ -8060,12 +8067,45 @@ export class AutomationEngine implements IAutomationService {
          * node's trigger gate is read from. Same severity as a malformed
          * predicate (this throws): the reject set of registration and the reject
          * set of evaluation must be one set.
+         *
+         * [#17322] SECOND gate, after the shape one and before the CEL one: the
+         * source must be non-blank. `structuralConditionRefusal` admits every
+         * string by design, so a whitespace-only `config.condition` passed here
+         * and landed on `evaluateCondition`'s empty-source arm — a SILENT
+         * `false`, i.e. a branch that never runs, forever, under a comment that
+         * names that arm as being for an UNAUTHORED condition. `'   '` was
+         * authored, and on a `start` node that key is the trigger gate. Since
+         * #15807 the EDGE door refuses exactly this value at
+         * `FlowSchema.parse`, and 带治理的一侧胜出,另一侧改绑: the node door,
+         * which has no schema in front of it, aligns to the governed side HERE,
+         * at the producer.
          */
+        const evaluatedSourceRefusal = (raw: unknown): { message: string; source: string } | undefined => {
+            // Reached only after `structuralConditionRefusal` cleared the value,
+            // so `raw` is bare text or an envelope carrying a string `source`.
+            const source = typeof raw === 'string' ? raw : (raw as { source?: unknown }).source;
+            if (typeof source !== 'string') return undefined;
+            // The rule and its sentence both come from the edge door's own
+            // schema. Applied to the SOURCE rather than to the whole value on
+            // purpose: the union would also refuse an envelope with no
+            // `dialect` or a dialect outside its enum, both of which this slot
+            // admits (`structuralConditionRefusal`'s docblock, and #4336) — and
+            // refusing them would widen this narrowing past what was ruled.
+            const verdict = EvaluatedExpressionInputSchema.safeParse(source);
+            if (verdict.success) return undefined;
+            return { message: verdict.error.issues[0]?.message ?? EVALUATED_EXPRESSION_SOURCE_REQUIRED, source };
+        };
+
         const checkStructuralCondition = (where: string, raw: unknown): void => {
             if (raw == null) return;
             const shapeRefusal = structuralConditionRefusal(raw);
             if (shapeRefusal) {
                 failures.push(`  • ${where}: ${shapeRefusal.message}\n      source: \`${shapeRefusal.source}\``);
+                return;
+            }
+            const blankRefusal = evaluatedSourceRefusal(raw);
+            if (blankRefusal) {
+                failures.push(`  • ${where}: ${blankRefusal.message}\n      source: \`${blankRefusal.source}\``);
                 return;
             }
             check(where, raw);
