@@ -758,7 +758,7 @@ describe('the strip reads hook-write PROVENANCE, not value equality (#14088)', (
 
   // ── The measured consequence of "an assignment ran", stated out loud ───────
 
-  it('MEASURED: a lone self-assigning hook can no longer leave the CALLER value on the key (#16344)', async () => {
+  it('MEASURED: a lone self-assigning hook is a NO-OP on a hidden key — the STORED value stands (#16344)', async () => {
     // ⚠️ RECORDING BEHAVIOUR, NOT BLESSING IT. The direct consequence of the
     // mechanism #14088 chose: the record says an ASSIGNMENT RAN and is
     // deliberately blind to the VALUE (that blindness is the whole repair — it
@@ -794,19 +794,33 @@ describe('the strip reads hook-write PROVENANCE, not value equality (#14088)', (
     // ⭐ [#16344] THE VERDICT MOVED, and this is the record of it rather than a
     // deletion. Everything above still describes the recording mechanism
     // exactly; what changed is what a `beforeUpdate` hook is SHOWN. The
-    // caller's forged `completed_at` is now hidden from the hook, so
+    // caller's forged `completed_at` is hidden from the hook, so
     // `ctx.input.data.completed_at` reads `undefined` and the self-assign
-    // writes THAT — a hook write of `undefined`, faithfully persisted, rather
-    // than the caller's timestamp promoted to hook-owned.
+    // re-creates the key holding THAT.
     //
-    // Two things follow, and both are the point:
-    //  - the laundering route this case existed to make VISIBLE is now CLOSED.
-    //    A no-op-looking line can no longer confer hook provenance on a value
-    //    the caller minted, because the line can no longer reach that value.
-    //  - the line is still not a no-op. It is an assignment, so the hook owns
-    //    the key and the column is written — with what the hook assigned. That
-    //    is #14088 working as designed, and it is why this case stays pinned
-    //    with the new reading instead of being dropped as fixed.
+    // ⛔ And a hook write of `undefined` is NOT persisted as one. The
+    // confluence treats set-to-undefined of a HIDDEN key as the no-op the line
+    // actually is: the key is deleted, its entry leaves the record, and the
+    // ordinary hand-back puts the caller's value back for the strip to judge.
+    // The write then reads EXACTLY as it would have with no hook at all —
+    // stripped, reported, warned, refused under `strictReadonlyWrites`.
+    //
+    // The direction matters, and it is why this is not `toBeUndefined()`:
+    //  - persisting the `undefined` ERASES the stored value on the memory
+    //    driver and hands knex an undefined binding on a SQL one (a bare
+    //    compile-time Error, outside the ADR-0112 envelope). Neither is "the
+    //    record the engine intends to persist", which is this card's whole
+    //    subject.
+    //  - the laundering route this case existed to make VISIBLE stays CLOSED.
+    //    A no-op-looking line still cannot confer hook provenance on a value
+    //    the caller minted — the FORGED negative below is what pins that, and
+    //    it must stay red-able: drop the record-narrowing at the confluence and
+    //    the caller's timestamp is handed back onto a key the record still
+    //    calls hook-owned, and it commits.
+    //
+    // ⚠ The blindness to VALUE stated above is unchanged for every key the
+    // hook can actually SEE. This narrowing reaches only keys hidden by this
+    // card, and only the one value — `undefined` — that no driver can store.
     const FORGED = '1999-01-01T00:00:00.000Z';
     engine.registerHook('beforeUpdate', async (ctx: any) => {
       ctx.input.data.completed_at = ctx.input.data.completed_at;
@@ -817,9 +831,12 @@ describe('the strip reads hook-write PROVENANCE, not value equality (#14088)', (
       id: 't_20', status: 'in_progress', completed_at: FORGED,
     });
 
+    // The FORGED negative, KEPT: the laundering route stays closed.
     expect(task('t_20').completed_at).not.toBe(FORGED);
-    expect(task('t_20').completed_at).toBeUndefined();
-    expect(warns).toEqual([]);
+    // ⭐ The re-pin. The stored value STANDS — not erased, not `undefined`.
+    expect(task('t_20').completed_at).toBe(STAMPED);
+    // ...and the write is reported exactly as an un-hooked one would be.
+    expect(warns.some((w) => w.includes("Field 'completed_at'"))).toBe(true);
   });
 
   it('the recording is transparent to a hook reading its own payload', async () => {

@@ -11762,7 +11762,7 @@ export class ObjectQL implements IObjectQLEngine {
        // deliberately keeps the pre-#14088 over-strip instead.
        const sealedHookWrites = hookWrites?.seal(hookContext.input.data);
        if (sealedHookWrites) hookContext.input.data = sealedHookWrites.data as any;
-       const hookWrittenKeys = sealedHookWrites?.hookWrittenKeys;
+       let hookWrittenKeys = sealedHookWrites?.hookWrittenKeys;
 
        // ── [#16344] HAND BACK what was hidden from the hooks ────────────────
        //
@@ -11782,16 +11782,56 @@ export class ObjectQL implements IObjectQLEngine {
        // below reads that record for provenance — so the caller's own forgery
        // would be handed the one credential (`hookWrittenKeys`) that stops it
        // being stripped. The exact laundering #14088 exists to prevent.
+       //
+       // ⛔ ...and SET-TO-UNDEFINED of a hidden key is a NO-OP, not a hook
+       // write. A hook that assigns a hidden key from the payload it was shown
+       // (`data.x = data.x`, the shape #14088's own pin names) reads
+       // `undefined` and RE-CREATES the key holding it. Left alone, three
+       // mechanisms agree the wrong way: the recorder's `set` trap counts it as
+       // a hook write, the hand-back below skips the key because `k in target`,
+       // and the strip keeps it on that record — so a driver is handed
+       // `{ x: undefined }`. On the memory driver that ERASES the stored
+       // read-only value; on a knex-backed one `formatInput` does not drop
+       // `undefined` and `builder.update(payload)` hands knex an undefined
+       // binding, a bare compile-time `Error` OUTSIDE the ADR-0112 envelope.
+       // Neither is "the record the engine intends to persist", which is the
+       // whole subject of this card.
+       //
+       // Undoing it here — delete the key, drop it from the record, let the
+       // ordinary hand-back put the caller's value back for the strip to judge
+       // — makes the write read EXACTLY as it would have with no hook at all:
+       // stripped, `onFieldsDropped` reporting it, the WARN said, and
+       // `strictReadonlyWrites` refusing. That identity IS the invariant this
+       // hide/hand-back pair exists to hold.
+       //
+       // ⛔ Dropping the key from `hookWrittenKeys` is NOT optional and is not
+       // tidiness: leaving it there while handing the caller's value back over
+       // it would credit the caller's forgery with hook provenance — the exact
+       // laundering the note above refuses, arrived at from the other side. The
+       // narrowing reaches only keys THIS pass hid, and only the one value no
+       // driver can store; a hook write of any real value is untouched, so the
+       // recorder's deliberate blindness to VALUE (#14088) is unchanged for
+       // every key a hook can actually see.
        if (readonlyHiddenFromHooks) {
          const restoreTargets = new Set<Record<string, unknown> | null | undefined>([
            hookContext.input.data as Record<string, unknown> | null | undefined,
            opCtx.data as Record<string, unknown> | null | undefined,
          ]);
+         const undoneSelfAssigns = new Set<string>();
          for (const target of restoreTargets) {
            if (!target || typeof target !== 'object') continue;
            for (const [k, v] of Object.entries(readonlyHiddenFromHooks)) {
+             if (k in target && target[k] === undefined) {
+               delete target[k];
+               undoneSelfAssigns.add(k);
+             }
              if (!(k in target)) target[k] = v;
            }
+         }
+         if (undoneSelfAssigns.size > 0 && hookWrittenKeys !== undefined) {
+           const narrowed = new Set(hookWrittenKeys);
+           for (const k of undoneSelfAssigns) narrowed.delete(k);
+           hookWrittenKeys = narrowed;
          }
        }
 
