@@ -15,6 +15,7 @@ import {
   type ElementDataSource,
   type InterfacePageConfig,
 } from './page.zod';
+import { ComponentPropsMap } from './component.zod';
 
 describe('PageComponentSchema', () => {
   it('should accept valid minimal component', () => {
@@ -666,6 +667,9 @@ describe('ElementDataSourceSchema `filter` — one filter orthography platform-w
   /** The issues a parse raised under `key` (top-level), whatever else it raised. */
   const issuesUnder = (r: ParseResult, key: string) =>
     r.success ? [] : r.error!.issues.filter((i) => i.path[0] === key);
+  /** The issues located EXACTLY at `path` (dotted) — `filter` is not `filter.0`. */
+  const issuesAt = (r: ParseResult, path: string) =>
+    r.success ? [] : r.error!.issues.filter((i) => i.path.join('.') === path);
 
   it('accepts a ViewFilterRule[] filter — the acceptance criterion', () => {
     // Before #15442 this exact value was REFUSED here (`invalid_type`, expected
@@ -727,34 +731,36 @@ describe('ElementDataSourceSchema `filter` — one filter orthography platform-w
     // seventeen off-spec authors at the pin are the seat's objectui follow-up.
     const r = ElementDataSourceSchema.safeParse({ object: 'account', filter: TUPLE_ARRAY });
     expect(r.success).toBe(false);
-    expect(issuesUnder(r, 'filter')).toEqual([]);
-    const atElement = r.error!.issues.filter((i) => i.path.join('.') === 'filter.0');
-    expect(atElement.map((i) => i.code)).toEqual(['invalid_type']);
+    expect(issuesAt(r, 'filter')).toEqual([]);
+    expect(issuesAt(r, 'filter.0').map((i) => i.code)).toEqual(['invalid_type']);
+    expect(issuesAt(r, 'filter.0')[0]).toMatchObject({ expected: 'object' });
   });
 
   it('shares the array orthography with the props-map `filter` doors — one value, two keys, the same verdicts', () => {
     // `element:record_picker` was the node that carried two orthographies at
     // two keys (`properties.filter` the array, `dataSource.filter` the record)
-    // resolved through one `??` in the renderer. The same rule array now raises
-    // no issue at either key, and the same record is refused at both with the
-    // same code — measured through the real `PageComponentSchema`, the door an
-    // authored page actually passes.
-    const both = PageComponentSchema.safeParse({
+    // resolved through one `??` in the renderer. Each key is asked at ITS
+    // door: the binding through the real `PageComponentSchema` (which parses
+    // `dataSource` and leaves `properties` a bag — the props-map dispatch is
+    // the lint's, warning tier), and the props key through the picker's own
+    // `ComponentPropsMap` entry. The same rule array raises no issue at either;
+    // the same record is refused at both with the same code.
+    const binding = PageComponentSchema.safeParse({
       type: 'element:record_picker',
       properties: { object: 'account', filter: RULES },
       dataSource: { object: 'account', filter: RULES },
     });
-    expect(both.success).toBe(true);
-    const bothRecords = PageComponentSchema.safeParse({
+    expect(binding.success).toBe(true);
+    const bindingRecord = PageComponentSchema.safeParse({
       type: 'element:record_picker',
-      properties: { object: 'account', filter: RECORD_FORM },
+      properties: { object: 'account', filter: RULES },
       dataSource: { object: 'account', filter: RECORD_FORM },
     });
-    expect(bothRecords.success).toBe(false);
-    const codesAt = (path: string) =>
-      bothRecords.error!.issues.filter((i) => i.path.join('.') === path).map((i) => i.code);
-    expect(codesAt('dataSource.filter')).toEqual(['invalid_type']);
-    expect(codesAt('properties.filter')).toEqual(codesAt('dataSource.filter'));
+    expect(issuesAt(bindingRecord, 'dataSource.filter').map((i) => i.code)).toEqual(['invalid_type']);
+    const picker = ComponentPropsMap['element:record_picker'];
+    expect(issuesAt(picker.safeParse({ object: 'account', filter: RULES }), 'filter')).toEqual([]);
+    expect(issuesAt(picker.safeParse({ object: 'account', filter: RECORD_FORM }), 'filter').map((i) => i.code))
+      .toEqual(issuesAt(bindingRecord, 'dataSource.filter').map((i) => i.code));
   });
 });
 

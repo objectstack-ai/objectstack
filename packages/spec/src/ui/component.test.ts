@@ -2653,12 +2653,16 @@ describe('#7751 — object-* block props schemas', () => {
   });
 
   it('the corrected #7750 node (my-work.page.ts, post-fix) parses GREEN and retains its filter', () => {
+    // The node as the showcase authors it since #15442 / #15449: the
+    // `ViewFilterRule` array (ui#6206-B). The AST tuple this pin carried
+    // before is refused at `filter.0` now — pinned in the object-* filter
+    // describe below.
     const parsed = ComponentPropsMap['object-grid'].parse({
       objectName: 'showcase_task',
       columns: ['title', 'project', 'status', 'priority', 'due_date'],
-      filter: [['owner_id', '=', '{current_user_id}']],
+      filter: [{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }],
     });
-    expect(parsed.filter).toEqual([['owner_id', '=', '{current_user_id}']]);
+    expect(parsed.filter).toEqual([{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }]);
   });
 
   it("object-grid `data` takes the ViewDataSchema provider object — the ui#6207 convergence (Option A)", () => {
@@ -2733,10 +2737,13 @@ describe('#7751 — object-* block props schemas', () => {
   it('every object-metric node of the showcase corpus parses GREEN (the clean-corpus control)', () => {
     // Copies of all three my-work.page.ts metrics + the command-center shape
     // (variant/format) — the exact nodes the lint must NOT start warning on.
+    // The three filters are the `ViewFilterRule` arrays the showcase authors
+    // since #15442 / #15449 (ui#6206-B); the records they replaced are refused
+    // at `filter` now (pinned in the object-* filter describe above).
     const nodes = [
-      { objectName: 'showcase_task', label: 'Open Tasks', icon: 'list-checks', colorVariant: 'blue', description: 'not done', aggregate: { field: 'id', function: 'count' }, filter: { status: { $ne: 'done' } } },
-      { objectName: 'showcase_task', label: 'In Review', icon: 'eye', colorVariant: 'warning', description: 'awaiting review', aggregate: { field: 'id', function: 'count' }, filter: { status: 'in_review' } },
-      { objectName: 'showcase_project', label: 'At-Risk Projects', icon: 'alert-triangle', colorVariant: 'danger', description: 'health red', aggregate: { field: 'id', function: 'count' }, filter: { health: 'red' } },
+      { objectName: 'showcase_task', label: 'Open Tasks', icon: 'list-checks', colorVariant: 'blue', description: 'not done', aggregate: { field: 'id', function: 'count' }, filter: [{ field: 'status', operator: 'not_equals', value: 'done' }] },
+      { objectName: 'showcase_task', label: 'In Review', icon: 'eye', colorVariant: 'warning', description: 'awaiting review', aggregate: { field: 'id', function: 'count' }, filter: [{ field: 'status', operator: 'equals', value: 'in_review' }] },
+      { objectName: 'showcase_project', label: 'At-Risk Projects', icon: 'alert-triangle', colorVariant: 'danger', description: 'health red', aggregate: { field: 'id', function: 'count' }, filter: [{ field: 'health', operator: 'equals', value: 'red' }] },
       { objectName: 'showcase_task', label: 'Tasks', colorVariant: 'purple', variant: 'bare', aggregate: { field: 'id', function: 'count' }, format: '0,0' },
     ];
     for (const node of nodes) {
