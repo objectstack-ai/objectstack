@@ -214,6 +214,11 @@ import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, str
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
 // why neither end may move.
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
+// [#17219] The hide pass's other half: when a hook faults reaching THROUGH a
+// key that pass withheld, this names the key, says the platform withheld it,
+// and points at `ctx.previous` — the module owns the measurement and the
+// reason the explanation cannot be composed any further downstream.
+import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
 import {
   divergingHookPayloadKeys,
   MultiUpdateHookKeyDivergenceError,
@@ -11701,7 +11706,13 @@ export class ObjectQL implements IObjectQLEngine {
            // permanently true here: it states the invariant, and the invariant
            // outlives this call site.
            if (priorRecord) hookContext.previous = coerceBooleanFields(updateSchema as any, priorRecord as any) as any;
-           await this.triggerHooks('beforeUpdate', hookContext);
+           // [#17219] All three `beforeUpdate` dispatch sites inside the hide
+           // window share one wrapper, so a hook that faults reaching THROUGH a
+           // key this pass withheld names that key instead of surfacing the
+           // platform's own contract enforcement as the author's crash. It
+           // rethrows the original error untouched on every other path.
+           await dispatchHooksExplainingWithheldReadonly(readonlyHiddenFromHooks, 'beforeUpdate',
+             () => this.triggerHooks('beforeUpdate', hookContext));
            // The retired lever, refused. Everything above — `previous`, and
            // below it the `readonlyWhen` strip and every validation rule — was
            // computed against the row the ladder chose.
@@ -11772,7 +11783,8 @@ export class ObjectQL implements IObjectQLEngine {
            // predicate is unscoped.
            const rawWhere = (hookContext.input.options as { where?: unknown } | undefined)?.where;
            if (rawWhere === undefined || rawWhere === null) {
-               await this.dispatchUnscopedMultiWriteHooks('beforeUpdate', object, hookContext);
+               await dispatchHooksExplainingWithheldReadonly(readonlyHiddenFromHooks, 'beforeUpdate',
+                 () => this.dispatchUnscopedMultiWriteHooks('beforeUpdate', object, hookContext));
            }
            const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
            readPriorRows = async () => {
@@ -11804,7 +11816,8 @@ export class ObjectQL implements IObjectQLEngine {
                // [D1] Zero matched rows is zero dispatches — a batch that
                // changed nothing is not a record change.
                if (perRowBeforeHooks && rows.length > 0) {
-                   await this.dispatchPerRowBeforeHooks(object, 'beforeUpdate', rows, hookContext);
+                   await dispatchHooksExplainingWithheldReadonly(readonlyHiddenFromHooks, 'beforeUpdate',
+                     () => this.dispatchPerRowBeforeHooks(object, 'beforeUpdate', rows, hookContext));
                }
            }
        }
