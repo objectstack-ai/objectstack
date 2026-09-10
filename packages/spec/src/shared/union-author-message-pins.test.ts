@@ -112,8 +112,16 @@ interface UnionMessageSite {
    * fixture cannot silently decay into a single-issue one.
    */
   readonly reject: unknown;
-  /** The undeclared key the fixture writes, as it must appear in the message. */
+  /** The undeclared key the fixture writes. */
   readonly key: string;
+  /**
+   * The key exactly as the message spells it. Curated `strictObject()` refusals
+   * backtick it (`` `foo` ``); zod's own bare-`.strict()` message double-quotes
+   * it (`Unrecognized key: "foo"`). Pinning the SPELLING and not just the
+   * substring is what keeps this from passing on a message that merely happens
+   * to contain the letters.
+   */
+  readonly keyInMessage: string;
   /** The curated surface phrase, or `null` for the one class-B site. */
   readonly surface: string | null;
   /** The `Did you mean` target, or `null` where the site declares no rename. */
@@ -138,6 +146,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     door: GuardRefSchema,
     reject: { parms: { a: 1 } },
     key: 'parms',
+    keyInMessage: '`parms`',
     surface: 'this guard reference',
     rename: 'params',
     acceptString: 'isManager',
@@ -148,6 +157,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     door: StateNodeSchema,
     reject: { on: { GO: { guard: 'isX', actions: 'not-an-array' } } },
     key: 'guard',
+    keyInMessage: '`guard`',
     surface: 'this state transition',
     rename: 'cond',
     acceptString: { on: { GO: 'next' } },
@@ -159,6 +169,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     reject: { id: 'machine', initial: 'idle', states: { idle: { initial: 'a', states: {} } },
       on: { GO: { guard: 'isX', actions: 'not-an-array' } } },
     key: 'guard',
+    keyInMessage: '`guard`',
     surface: 'this state transition',
     rename: 'cond',
     acceptString: { id: 'machine', initial: 'idle', states: { idle: { initial: 'a', states: {} } },
@@ -169,12 +180,13 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
   ['Approval.decisionOutputs — a declared decision output', {
     site: 'automation/approval.zod.ts:791',
     door: ApprovalNodeConfigSchema,
-    reject: { approvers: [{ type: 'user', users: ['u1'] }], decisionOutputs: [{ widget: 'user' }] },
+    reject: { approvers: [{ type: 'user', value: 'u1' }], decisionOutputs: [{ widget: 'user' }] },
     key: 'widget',
+    keyInMessage: '`widget`',
     surface: 'this decision-output declaration',
     rename: 'type',
-    acceptString: { approvers: [{ type: 'user', users: ['u1'] }], decisionOutputs: ['comment'] },
-    acceptObject: { approvers: [{ type: 'user', users: ['u1'] }],
+    acceptString: { approvers: [{ type: 'user', value: 'u1' }], decisionOutputs: ['comment'] },
+    acceptObject: { approvers: [{ type: 'user', value: 'u1' }],
       decisionOutputs: [{ key: 'comment', type: 'text' }] },
   }],
   ['FlowFunctionEntry — a `functions` map entry', {
@@ -182,6 +194,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     door: FlowFunctionEntrySchema,
     reject: { efect: 'pure' },
     key: 'efect',
+    keyInMessage: '`efect`',
     surface: 'this `functions` entry',
     rename: 'effect',
     acceptString: 'scoreLead',
@@ -190,28 +203,31 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
   ['Field.lookupColumns — an explicit record-picker column', {
     site: 'data/field.zod.ts:1438',
     door: FieldSchema,
-    reject: { name: 'owner', type: 'lookup', lookupColumns: [{ name: 'amount' }] },
+    reject: { name: 'owner', type: 'lookup', reference: 'account', lookupColumns: [{ name: 'amount' }] },
     key: 'name',
+    keyInMessage: '`name`',
     surface: 'this lookup column',
     rename: 'field',
-    acceptString: { name: 'owner', type: 'lookup', lookupColumns: ['amount'] },
-    acceptObject: { name: 'owner', type: 'lookup', lookupColumns: [{ field: 'amount' }] },
+    acceptString: { name: 'owner', type: 'lookup', reference: 'account', lookupColumns: ['amount'] },
+    acceptObject: { name: 'owner', type: 'lookup', reference: 'account', lookupColumns: [{ field: 'amount' }] },
   }],
   ['Field.dependsOn — a dependent-picker binding', {
     site: 'data/field.zod.ts:1464',
     door: FieldSchema,
-    reject: { name: 'owner', type: 'lookup', dependsOn: [{ local: 'account' }] },
+    reject: { name: 'owner', type: 'lookup', reference: 'account', dependsOn: [{ local: 'account' }] },
     key: 'local',
+    keyInMessage: '`local`',
     surface: 'this dependsOn entry',
     rename: 'field',
-    acceptString: { name: 'owner', type: 'lookup', dependsOn: ['account'] },
-    acceptObject: { name: 'owner', type: 'lookup', dependsOn: [{ field: 'account' }] },
+    acceptString: { name: 'owner', type: 'lookup', reference: 'account', dependsOn: ['account'] },
+    acceptObject: { name: 'owner', type: 'lookup', reference: 'account', dependsOn: [{ field: 'account' }] },
   }],
   ['ChartGroupBy — the structured category axis', {
     site: 'ui/chart.zod.ts:767',
     door: ChartGroupBySchema,
     reject: { granularity: 'day' },
     key: 'granularity',
+    keyInMessage: '`granularity`',
     surface: 'this chart groupBy',
     rename: 'dateGranularity',
     acceptString: 'created_at',
@@ -222,6 +238,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     door: RecordHighlightsProps,
     reject: { fields: [{ field: 'status' }] },
     key: 'field',
+    keyInMessage: '`field`',
     surface: 'this `record:highlights` field',
     rename: 'name',
     acceptString: { fields: ['status'] },
@@ -232,6 +249,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     door: GanttQuickFilterSchema,
     reject: { field: 'stage', options: [{ title: 'Won' }] },
     key: 'title',
+    keyInMessage: '`title`',
     surface: 'this gantt quick-filter option',
     rename: 'label',
     acceptString: { field: 'stage', options: ['won'] },
@@ -243,6 +261,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
     reject: { startDateField: 's', endDateField: 'e', titleField: 't',
       tooltipFields: [{ name: 'amount' }] },
     key: 'name',
+    keyInMessage: '`name`',
     surface: 'this gantt tooltip field',
     rename: 'field',
     acceptString: { startDateField: 's', endDateField: 'e', titleField: 't',
@@ -259,6 +278,7 @@ const SITES: ReadonlyArray<readonly [name: string, site: UnionMessageSite]> = [
       lifecycle: { class: 'audit', retention: { maxAge: '30d',
         onlyWhen: { status: { $in: ['closed'], bogusKey: 1 } } } } },
     key: 'bogusKey',
+    keyInMessage: 'Unrecognized key: "bogusKey"',
     surface: null,
     rename: null,
     acceptString: { name: 'lead', label: 'Lead', fields: { a: { type: 'text', label: 'A' } },
@@ -286,7 +306,7 @@ describe('[#15423] the AUTHOR-VISIBLE message at a string-or-object union site',
       // The key the author actually mistyped. This is the assertion #14722
       // believed would fail — the "keyless `Invalid input`" claim.
       expect(rendered, `${site.site}: the undeclared key must reach the author`)
-        .toContain(`\`${site.key}\``);
+        .toContain(site.keyInMessage);
 
       // The named authoring surface, so the author knows WHICH shape refused.
       if (site.surface !== null) {
@@ -333,7 +353,7 @@ describe('[#15423] the AUTHOR-VISIBLE message at a string-or-object union site',
       const rendered = formatZodError(
         (result as unknown as { error: Parameters<typeof formatZodError>[0] }).error,
       );
-      expect(rendered).toContain(`\`${site.key}\``);
+      expect(rendered).toContain(site.keyInMessage);
 
       // ⛔ The string arm's complaint is a KIND mismatch, never a prescription,
       // and `selectUnionBranches` drops it. Rendering it is the "N branches, N
