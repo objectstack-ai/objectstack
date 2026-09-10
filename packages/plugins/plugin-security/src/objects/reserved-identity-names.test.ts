@@ -306,6 +306,11 @@ describe('#15972 the service write door funnels into the same single refusal', (
     };
     const matches = (row: any, where: any): boolean =>
       Object.entries(where ?? {}).every(([k, v]) => {
+        // ⛔ REFUSE what this double does not implement. A `$and` / `$or` read
+        // as a field name is the silently-wrong shape: every row fails the
+        // lookup, the gate sees an empty result, and the assertion passes for
+        // a reason that has nothing to do with what it claims to measure.
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported combinator ${k}`);
         if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row[k]);
         return row[k] === v;
       });

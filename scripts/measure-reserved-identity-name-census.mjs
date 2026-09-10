@@ -71,6 +71,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { isEntrypoint } from './invoked-as.mjs';
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.turbo', 'coverage', '.cache', '.next']);
@@ -395,4 +397,4 @@ function main(argv) {
   console.log(`\n${ZERO_CAVEAT}`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main(process.argv.slice(2));
+if (isEntrypoint(import.meta.url)) main(process.argv.slice(2));
