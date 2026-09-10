@@ -4688,12 +4688,14 @@ export class ObjectStackClient {
         return { accounts: accounts as Array<{
           id: string;
           providerId: string;
-          /** Authority that vouched for `accountId` — an OIDC issuer, or `local:…`. */
-          issuer: string;
           /**
-           * The user's id at the provider. `1.7.0-rc.2` briefly published this
-           * as `providerAccountId`; stable 1.7 answers with `accountId` again
-           * (#3002), which is what this route returns today.
+           * The user's id at the provider. With `providerId` it is the WHOLE
+           * account identity: better-auth 1.7.3 rolled the issuer-scoped key
+           * back, so the `issuer` this route used to return is gone (#17440).
+           *
+           * `1.7.0-rc.2` briefly published this field as `providerAccountId`;
+           * stable 1.7 answers with `accountId` again (#3002), which is what
+           * this route returns today.
            */
           accountId: string;
           createdAt?: string;

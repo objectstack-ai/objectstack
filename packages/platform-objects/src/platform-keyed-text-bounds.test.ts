@@ -36,9 +36,15 @@ import * as PlatformObjects from './index';
  * EXPRESSIBLE after #11627 (it moves onto a SHA-256 hash-shadow column) while a
  * non-unique one is not: hashing destroys the ordering and prefix structure an
  * access path is for, so there is no fallback and the column itself must be
- * keyable. `sys_account.issuer` (bounded at 2048) is the live illustration that
- * the two rules are independent — it passes the gate and is out of this
- * describe's scope because its index is unique.
+ * keyable. `sys_oauth_access_token.token` (bounded at 1024) is the live
+ * illustration that the two rules are independent — it passes the gate and is
+ * out of this describe's scope because its index is unique.
+ *
+ * ⚠️ [#17440] That illustration used to be `sys_account.issuer` (bounded at
+ * 2048), which retired with better-auth's account-issuer rollback. The
+ * replacement is a MEASURED live member of the same class, not a plausible
+ * name: an example this header cites has to keep passing the gate and keep
+ * being out of scope, or the paragraph quietly stops describing anything.
  *
  * The gate deliberately does not fold this in; its header says so.
  */
