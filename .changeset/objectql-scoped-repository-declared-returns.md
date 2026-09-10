@@ -1,39 +1,21 @@
 ---
-"@objectstack/objectql": patch
+"@objectstack/objectql": minor
 ---
 
-fix(engine): `ObjectRepository` declares the `findOne` / `update` shapes it already published (#16786)
+feat(engine): `ObjectRepository.findOne` / `.update` publish their honest types — the contract's shapes, not `any` (#16786)
 
-`ObjectRepository.findOne` and `.update` declared `Promise<any>` and now declare
-what `IScopedObjectRepository` — the contract this class carries an `implements`
-clause for — has declared since #16231's ruling A landed (PR #16783):
+**BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, shipped as `minor` under the launch-window convention (the one PR #15280 used for `SqlDriver.update()` and the `TursoDriver.update()` override, and PR #14434 before it on `@objectstack/driver-memory`).
+
+`ObjectRepository.findOne()` and `.update()` were written out with an explicit `Promise<any>` while they have always answered what the contract declares — each one forwards, one line down, to an `IDataEngine` door that already declares the shape:
 
 - `findOne` → `Promise<Record<string, any> | null>`
 - `update` → `Promise<Record<string, any> | number | null>`
 
-**Why this is a `patch` and not a `minor`.** Nothing is widened and no symbol is
-added. `packages/spec/src/contracts/scoped-context.ts` already publishes the
-narrower type, and `IDataEngine` — the call each of these two methods forwards to,
-one line down — already publishes it too. This class sat between two narrow
-declarations and re-widened the result back to `any` on the way out. `implements`
-does not catch that, because a WIDER declared return always satisfies a narrower
-one: `class ObjectRepository implements IScopedObjectRepository` compiled green
-the whole time while the members it published were `any`. So this is an
-implementation coming back to the declaration it had already published — the
-repo's `patch` rung — and not a contract that moved. The recorded **WHICH LEVEL**
-maintainer ruling of 2026-09-04 (decision batch #35, on #15294, recorded at
-`.github/workflows/pr-automation.yml`) puts *additive widening* of a published
-surface — a new exported symbol, a new accepted key or value — at `minor`; this
-PR does none of those, and adds no exported symbol.
+`IScopedObjectRepository` — the contract this class carries an `implements` clause for — declares both, and has since ruling A on #16231 landed (PR #16783). An explicit `any` satisfies that structurally, because a **wider** declared return always satisfies a narrower one: `class ObjectRepository implements IScopedObjectRepository` compiled green the whole time while the emitted `.d.ts` read `Promise<any>`, so no caller holding an `ObjectRepository` — or reaching one through `ScopedContext` or `ObjectQL.createContext()`, both exported from this package's index — was ever asked to narrow. They are now declared as the contract declares them. No runtime behaviour changes.
 
-**Who has to change something, on the TYPE axis.** A TypeScript consumer that
-typed against the concrete `ObjectRepository` / `ScopedContext` class — rather
-than the `IScopedObjectRepository` contract, which already said this — and reads
-a field off `findOne`'s result without a null check, or off `update`'s result
-without separating the by-id record from the predicate-form count. Those call
-sites were reading `any`; they now read the declared shape and the compiler asks
-for the null check. Consumers already written against the contract, including
-every hook whose `ctx` is typed `HookContext` (`HookContext.api` has been
-`IScopedContext` since #5945), see no change: they were already narrow.
+A caller that read fields off `findOne()`'s result through the `any` now narrows the `null` arm first; a caller that read `update()`'s result now separates the by-id record from the predicate-form count. The in-repo census for this change was one file, repaired alongside.
 
-The in-repo census for this change was one file, repaired here.
+`updateById` is deliberately untouched: `IScopedObjectRepository.updateById` itself declares `Promise<any>`, so the class already matches its contract and there is no drift to repair on this side. That half stays open on #16786.
+
+<!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves. No metadata key, no spec key, no authored property, no config field, no accepted request shape and no stored artifact changes spelling or shape; `packages/spec` is untouched, so `objectstack migrate meta` has nothing to rewrite, `spec-changes.json` has nothing to project and the upgrade guide has no row to gain. What moves is the declared RETURN TYPE of two TypeScript methods, and the rewrite this ships -- narrow the `null` arm -- is addressed to a TYPESCRIPT CONSUMER and delivered by the compiler at their own call site, which is the audience the ADR-0087 ledger explicitly does not serve.
+     `type-surface-only` is the category built for exactly this class and it is NOT claimed here, because its predicate 4 cannot be made to name this change's symbols -- measured, not assumed. The bare form `engine.ts#findOne` resolves to the FIRST same-named member in the file, `ObjectQL.findOne` (line 9761), which #16783 already narrowed, so predicate 4 reads `narrowed-from-erased is FALSE: at the merge base ... was already CONCRETE` -- a true statement about a member this diff never touched. The documented fallback, a dotted member path, is walked only through OBJECT-LITERAL nesting and refuses a class member: `ObjectRepository.findOne does not resolve: no ObjectRepository object literal is declared`. Both narrowed members are class members whose names repeat in the file, so neither spelling can address them. The gap is reported on the card rather than worked around, and the **BREAKING** banner above is carried rather than dropped -- which is the erosion #13080 was filed about. -->
