@@ -467,8 +467,14 @@ Even inside your own worktree, operate defensively:
    pays a rebuild lap per landing; and a breaking changeset's ADR-0087 disposition is base-relative, so a stacked card's
    two bases demand contradictory markers. A multi-card change uses a **trunk branch**: correct the trunk's disposition
    to `registered` before it merges, and pay the rebase laps. ⛔ No gate or merge-policy change is made for it.
-3. **Never `git push --force` / `--force-with-lease`, and never push `main`.** A
-   force-push can clobber a parallel agent's work; `main` is shared — land all via PR.
+3. **Never force-push a *shared* branch, and never push `main`.** A force-push can
+   clobber a parallel agent's work; `main` is shared — land all via PR. A branch is
+   unshared, and `--force-with-lease` allowed, only while ALL FIVE hold: ① it is named
+   `claude/issue-*`; ② this worktree created it; ③ nobody else has ever pushed it (the
+   author and committer sets of `git log origin/<branch>` are you alone); ④ no open PR
+   on it carries a reviewer or an approval (one does ⇒ a new branch and a fresh PR
+   instead); ⑤ the push spells `--force-with-lease=<branch>:<sha you last pushed>` —
+   ⛔ never bare `--force`. One criterion failing ⇒ the branch is shared.
 4. **Verify the current branch before every commit/push**
    (`git rev-parse --abbrev-ref HEAD`). HEAD may have been switched by another agent —
    if it isn't your feature branch, stop and re-checkout before pushing.
