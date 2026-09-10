@@ -61,8 +61,11 @@ import { bootSchemaStack } from '../../utils/schema-migrate.js';
  * and a row that says "clean on Tuesday" authorises nothing on Thursday.
  */
 export default class MigrateAccountIssuer extends Command {
+  // The tracker id stays in this comment and out of the string below: a
+  // command description reaches operators, who have no tracker to resolve
+  // `#NNNN` against (`check:doc-authoring`). This command is #17440's.
   static override description =
-    'Pre-flight the retirement of sys_account.issuer (#17440): report every (provider_id, account_id) ' +
+    'Pre-flight the retirement of sys_account.issuer: report every (provider_id, account_id) ' +
     'key held by more than one row — the class that is legal under the retired (issuer, account_id) key ' +
     'and is ONE account under the key better-auth 1.7.3 restored. Read-only; exits non-zero when the ' +
     'drop must not proceed.';
