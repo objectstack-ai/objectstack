@@ -103,7 +103,12 @@
  *
  *      ⚠️ "A generated migration emits no index, so no generated column is
  *      ever keyed" is FALSE and was this pin's own first answer. It describes
- *      the generator's OUTPUT; the driver keys on the object's INPUT. Driven on
+ *      the generator's OUTPUT; the driver keys on the object's INPUT. Its
+ *      premise is now false as well — since #16317 the generators DO emit the
+ *      field-level unique index (`generate-declared-unique-index.pin.test.ts`)
+ *      — and the argument is unchanged by that: the declaration sets read here
+ *      stay strictly wider than what that emitter emits, so deriving one from
+ *      the other in either direction re-creates this defect. Driven on
  *      live PostgreSQL 16.13, `{ type: 'text', unique: true, maxLength: 100 }`
  *      built `varchar(100)` on the platform and TEXT in both generated tables,
  *      and a 300-character write was REFUSED by the driver's table (`22001

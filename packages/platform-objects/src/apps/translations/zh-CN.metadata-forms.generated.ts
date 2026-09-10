@@ -950,6 +950,30 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "页眉",
         helpText: "仪表板页眉配置（title、subtitle、actions）"
       },
+      "header.showTitle": {
+        label: "显示标题",
+        helpText: "在页眉中显示仪表板标题"
+      },
+      "header.showDescription": {
+        label: "显示描述",
+        helpText: "在页眉中显示仪表板描述"
+      },
+      "header.actions": {
+        label: "操作按钮",
+        helpText: "页眉中的操作按钮"
+      },
+      "header.actions.label": {
+        label: "标签"
+      },
+      "header.actions.actionUrl": {
+        label: "操作地址"
+      },
+      "header.actions.actionType": {
+        label: "操作类型"
+      },
+      "header.actions.icon": {
+        label: "图标"
+      },
       widgets: {
         label: "组件",
         helpText: "包含位置和尺寸的仪表板组件"

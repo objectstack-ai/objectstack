@@ -652,3 +652,148 @@ export function isSchemaAlreadyExistsError(error: unknown, depth = 0): boolean {
 export function isMissingTableError(error: unknown, readObject?: string, depth = 0): boolean {
     return matchesDriverError(error, MISSING_TABLE, depth, readObject);
 }
+
+// ---------------------------------------------------------------------------
+// Operator-facing text for a DECLARED driver fault (#16657)
+// ---------------------------------------------------------------------------
+
+/**
+ * [#16657] The ADR-0112 code a driver declares when the backend, not the
+ * caller, refused the work. Spelled as a literal for the same reason
+ * {@link declaresServerFault} spells `status`/`code` by hand: this package is
+ * the common dependency every consumer of the question already has, and reading
+ * one string field must not drag a schema module into it.
+ */
+const DECLARED_DATABASE_FAULT_CODE = 'DATABASE_ERROR';
+
+/**
+ * [#16657] The fragment that identifies `SqlDriver`'s RAW-path envelope, and
+ * only it.
+ *
+ * The raw terminal (`rawStatementFaultError`, `driver-sql/src/sql-driver.ts`;
+ * `TursoDriver` remote mode reaches the same composition through
+ * `SqlDriver.rawStatementFault`) COMPOSES its message on purpose — there is no
+ * cut of a dialect's text that keeps its words and reliably drops a caller's
+ * inlined literals, so the envelope discloses nothing and carries the dialect
+ * error whole under a non-enumerable `cause`. That is the disclosure clause of
+ * the raw path and ⛔ is not reverted here: the fix for an operator record is
+ * to read the `cause` the driver already attached, never to widen what the
+ * envelope discloses.
+ *
+ * ⚠️ Matching the sentence — rather than the declaration alone — is what keeps
+ * the READ-exit envelope (`backendStatementFaultError`, the #8931 / PR #9273
+ * half) untouched: it declares the very same code and status, composes a
+ * DIFFERENT sentence, and whether its prose should be unwrapped is a separate
+ * decision this helper deliberately does not take. An envelope that declares
+ * the code and composes a NON-EMPTY sentence this fragment does not match is
+ * returned exactly as it arrived — it speaks at depth 0, so the walk stops on
+ * it. ⚠️ Not so for a declared envelope whose own message is EMPTY: an empty
+ * node says nothing, so the walk steps past it and that envelope IS unwrapped
+ * (measured:
+ * `{code:'DATABASE_ERROR', message:'', cause:{message:'walked'}}` answers
+ * `'walked'`). ⛔ No claim is made about whether any producer composes an
+ * empty-message `DATABASE_ERROR`; that was not measured.
+ *
+ * The producer is pinned in the driver, where a real refusal can be raised:
+ * `packages/drivers/driver-sql/src/sql-driver-16657-operator-facing-cause-text.test.ts`
+ * fails if `sql-driver.ts` stops composing a sentence this recognises.
+ */
+const RAW_STATEMENT_FAULT_SENTENCE = /refused to run a raw statement/;
+
+/**
+ * The message channel of one node of a `cause` chain, as text.
+ *
+ * Empty means "this node says nothing" — a caller distinguishes that from a
+ * node that speaks, and never records it. The channel is the node's own string
+ * `message` for an object or function, the string itself for a string, and
+ * `String()` for any other primitive; anything else reads `''`. So a non-Error
+ * node reads whatever text it carries rather than the `undefined` that
+ * `(e as Error).message` produced at the FIVE sites spelled that way (for
+ * `null` and `undefined` that expression produced nothing at all — it threw a
+ * `TypeError` out of the catch) — of the fourteen this helper replaces; the
+ * other nine spell `instanceof Error ? … : String()` (five) or
+ * `?.message ?? …` (four) and already carried a fallback — and a node whose own
+ * text is empty, a thrown empty string among them, reads `''`.
+ */
+function messageChannelOf(node: unknown): string {
+    if (typeof node === 'string') return node;
+    if (node === null || node === undefined) return '';
+    if (typeof node === 'object' || typeof node === 'function') {
+        const message = (node as { message?: unknown }).message;
+        return typeof message === 'string' ? message : '';
+    }
+    return String(node);
+}
+
+/**
+ * The text an OPERATOR should read for `error` — the dialect's own words when a
+ * driver composed over them, the error's own message otherwise (#16657).
+ *
+ * # The defect this closes
+ *
+ * Since #16019 the raw-SQL seam every migration probe, backfill and
+ * `os db clean` runs through no longer lets the dialect's error out: it
+ * declares `DATABASE_ERROR` / 500 with a composed sentence and keeps the
+ * dialect error under `cause`. Every consumer that embedded `error.message`
+ * into an operator-facing record therefore began storing *"the database refused
+ * to run a raw statement"* where it used to store *"no such column: foo"*.
+ *
+ * For a LIVE console that is cosmetic — the driver writes the statement and the
+ * dialect text to its warn sink one line earlier, so the operator has already
+ * read it. For a STORED record it is not: whoever reads a backfill's `detail`
+ * field a week later never had that console line, and for them the dialect's
+ * words are unrecoverable. This helper is for the second class.
+ *
+ * # What it does, and the two things that bound it
+ *
+ * It walks the `cause` chain to the first node that says something which is not
+ * the raw-path composed sentence, and returns that. Both narrowings matter:
+ *
+ *  - **only a DECLARED fault is reinterpreted.** An undeclared throw — anything
+ *    without `code: DATABASE_ERROR` — comes back as `messageChannelOf(error) ||
+ *    String(error)`: the value's own string `message`, the string itself when a
+ *    string was thrown, and `String(error)` when neither yields text. Its `cause`
+ *    is never walked. That channel is deliberately NOT byte-identical to what
+ *    the call sites used to compute, and how it differs follows from that rule
+ *    rather than from a list of shapes: an empty-message `Error` reads its
+ *    `name`; a thrown non-`Error` reads its own text or `String(error)` where
+ *    `(e as Error).message` read `undefined`, and where `null` / `undefined`
+ *    threw out of the catch instead of recording anything; an object carrying a
+ *    NON-EMPTY string `message` reads it where `String(err)` recorded
+ *    `[object Object]` — one carrying an EMPTY `message` still reads
+ *    `[object Object]`, because an empty channel is no channel. A
+ *    thrown EMPTY string reads `''`, so this channel is neither always prose nor
+ *    never empty. Reading a `cause` chain nobody declared would be sniffing,
+ *    which is the mechanism #16019 removed;
+ *  - **only the raw-path sentence is walked through.** See
+ *    {@link RAW_STATEMENT_FAULT_SENTENCE}.
+ *
+ * The walk is bounded by the same {@link MAX_CAUSE_DEPTH} every predicate in
+ * this module uses, so a cyclic or absurdly deep chain terminates. Exhausting
+ * the bound — like finding no `cause` at all — falls back to the SAME surface
+ * channel an undeclared throw reads, `messageChannelOf(error) || String(error)`.
+ * ⛔ That fallback is not a promise of prose: it is `''` exactly when that
+ * channel is, which inside this branch means a declared envelope whose own
+ * `message` and `name` are both empty (measured: it answers `''`). The
+ * "neither always prose nor never empty" reading above holds here too — what
+ * the fallback rules out is `undefined`, never emptiness.
+ *
+ * @param error - the thrown value, of any shape.
+ * @returns text for an operator; never `undefined`, never empty for a thrown
+ *          value that has any textual channel at all.
+ */
+export function operatorFacingErrorText(error: unknown): string {
+    const surface = messageChannelOf(error) || String(error);
+    if (typeof error !== 'object' || error === null) return surface;
+    const { code } = error as { code?: unknown };
+    if (code !== DECLARED_DATABASE_FAULT_CODE) return surface;
+
+    let node: unknown = error;
+    for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth += 1) {
+        const text = messageChannelOf(node);
+        if (text !== '' && !RAW_STATEMENT_FAULT_SENTENCE.test(text)) return text;
+        if (node === null || (typeof node !== 'object' && typeof node !== 'function')) break;
+        node = (node as { cause?: unknown }).cause;
+    }
+    return surface;
+}

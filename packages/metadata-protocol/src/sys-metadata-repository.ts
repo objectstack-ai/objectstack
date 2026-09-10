@@ -143,8 +143,9 @@ import { isWritablePackage } from './package-writability.js';
  *
  * The terminal value is chosen **per call site**, and this one's is
  * `undefined`: every caller already carries such a chain — `getByHash` and
- * `rowToItem` end in `?? new Date(...).toISOString()`, `listDrafts` (#14938)
- * in `?? null` — the branch an absent column takes at each of them today.
+ * `rowToItem` end in `?? new Date(...).toISOString()`, `rowToEvent` (#16422)
+ * in `?? new Date(0).toISOString()`, `listDrafts` (#14938) in `?? null` —
+ * the branch an absent column takes at each of them today.
  * The ruling assigns `undefined` exactly where "the field is optional and the
  * caller already carries a `?? default` chain". ⛔ NOT the visible text
  * `"Invalid Date"` — the fields fed from here are read by machines
@@ -152,6 +153,20 @@ import { isWritablePackage } from './package-writability.js';
  * `z.string().datetime()` field), so that text would move the failure to a zod
  * refusal at the consumer instead of removing it. ⛔ And NOT a blanket `''`: a silent blank is the shape that
  * hides the producer's bug.
+ *
+ * ## [#16422] This file now has ONE spelling
+ *
+ * #14037's per-site `isoFromValidDate` stood beside this one until #16422 and
+ * is gone: it rewrote a single shape (valid `Date` -> ISO) and handed every
+ * other input back untouched, so `rowToEvent` fed a `Date`, a `number` and an
+ * opaque column straight into `MetadataEvent.ts`, declared `z.string()`.
+ * Measured across seven inputs, `MetadataEventSchema` refused four of them.
+ * The two helpers were never interchangeable — #14078 aligned them on the
+ * Invalid-`Date` shape ALONE — so the collapse was a per-call-site decision
+ * with a terminal value each, not the mechanical swap the retired docblocks
+ * implied. `listCommits` in `protocol.ts` keeps its own copy on purpose: it
+ * promises its callers the RAW value back, a contract this domain rewrite
+ * would reverse.
  */
 function canonicalIsoInstant(value: unknown): string | undefined {
   if (value === null || value === undefined) return undefined;
@@ -162,62 +177,6 @@ function canonicalIsoInstant(value: unknown): string | undefined {
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
   if (typeof value === 'string') return value;
   return String(value);
-}
-
-/**
- * Canonicalise the ONE driver materialisation {@link
- * SysMetadataRepository.rowToEvent} was measured to produce — a valid JS
- * `Date` — into the ISO-8601 string `MetadataEvent.ts` is declared as. Every
- * other shape is returned UNTOUCHED.
- *
- * [#14037] `rowToEvent` reaches `ts` through `(row.recorded_at as string) ??
- * …`, and `row` is `any`, so tsc sees a `string` assignment that never
- * happened. `recorded_at` is a declared `Field.datetime` on
- * `sys_metadata_history`, and the dialect asymmetry described above did not
- * protect it: the `datetimeFields` fold sat inside `formatOutput`'s
- * `if (this.isSqlite)` arm, so Postgres and MySQL handed the column out as a JS
- * `Date`. #13973 ([ADR-0053 D-F1]) has since closed that asymmetry — the fold
- * runs on every dialect — but the cast is still an assertion rather than a
- * measurement, and the `Date` domain is not empty: an INVALID `Date` still
- * leaves `driver-sql` unchanged ([ADR-0053 D-F3]) and non-SQL drivers
- * materialise their own. `MetadataEventSchema.ts` is `z.string()`
- * (`packages/metadata-core/src/types.ts`), and the value's one in-repo reader
- * — `MetadataManager.applyRepoEvent`, which forwards it to
- * `MetadataWatchEvent.timestamp` — is declared `z.string().datetime()`.
- *
- * ⚠️ Deliberately NOT {@link canonicalIsoInstant} above. That difference used
- * to be exactly one input shape — the Invalid `Date` on which that spelling
- * raised `RangeError: Invalid time value`, measured reachable on BOTH live
- * dialects (a MySQL zero datetime; any Postgres year in 275760..294276).
- * #14078 has since RULED it (option B, 2026-09-02): that arm is now total and
- * answers `undefined` for the shape, so the two agree on it.
- *
- * ⛔ They are still not ONE spelling, which is why #14078 did not collapse
- * this helper into it. `canonicalIsoInstant` returns `string | undefined` and
- * rewrites the whole domain (nullish -> `undefined`; anything neither `Date`
- * nor string -> `String(value)`), while this one returns `unknown` and hands
- * every non-valid-`Date` shape back UNTOUCHED. The consolidation is its own
- * decision — **#16422** — because it moves six call sites for `null`, for a
- * `number` and for an opaque column, one of which (`MetadataHistoryRecord
- * .recordedAt`, a REQUIRED `z.string().datetime()`) has no terminal value
- * either half of the #14078 ruling supplies. §C of
- * `sys-metadata-repository-14037-event-ts-canonicalisation.test.ts` pins the
- * behaviour this paragraph describes.
- *
- * ⛔ NOT a tolerant fallback (#13973's standing prohibition): it teaches no
- * consumer to accept an off-spec shape; it converts one measured producer
- * materialisation at the producer. The `Number.isNaN(value.getTime())` guard
- * is the spelling already in use at `packages/rest/src/export-format.ts` and
- * `packages/rest/src/import-prepare.ts`, not a new one.
- *
- * A sibling copy serves the four sites in
- * `packages/metadata/src/loaders/database-loader.ts`. ⛔ Neither is exported:
- * widening `@objectstack/metadata-core`'s public surface for it is a separate
- * decision, and #14078 consolidates this family anyway.
- */
-function isoFromValidDate(value: unknown): unknown {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
-  return value;
 }
 
 /**
@@ -1278,7 +1237,16 @@ export class SysMetadataRepository implements MetadataRepository {
       // the answer is "the platform", not a user literally named 'unknown'.
       actor: (row.recorded_by as string | null | undefined) ?? null,
       message: (row.change_note as string | undefined) ?? undefined,
-      ts: (isoFromValidDate(row.recorded_at) as string) ?? new Date(0).toISOString(),
+      // [#16422] The shared spelling, not the per-site `isoFromValidDate` this
+      // card retired. Two things change at this site and both were measured:
+      // the `as string` cast is gone (`canonicalIsoInstant` RETURNS
+      // `string | undefined`, so the declared type is now a measurement), and
+      // an Invalid `Date` folds to `undefined` and takes the epoch below —
+      // the branch an absent column already took, and the same answer
+      // `history()` gives for `authoredAt` off this very column. Before the
+      // collapse that shape reached `MetadataEvent.ts` — declared `z.string()`
+      // — as a `Date` object, and `MetadataEventSchema` refused the event.
+      ts: canonicalIsoInstant(row.recorded_at) ?? new Date(0).toISOString(),
       source: (row.source as string | undefined) ?? 'sys-metadata-repo',
     };
   }

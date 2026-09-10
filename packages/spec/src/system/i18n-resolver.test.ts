@@ -682,6 +682,7 @@ import {
   resolveMetadataTypeLabel,
   resolveMetadataTypeDescription,
   resolveMetadataFormLabels,
+  resolveMetadataFormSchemaTitles,
 } from './i18n-resolver';
 
 describe('TranslationDataSchema metadataForms', () => {
@@ -4119,5 +4120,139 @@ describe('#14882 — a declared fallback chain, at the resolver', () => {
     expect(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'en' }).label).toBe('Entry Sheet');
     expect(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'fr', fallbackChain: ['en'] }).label)
       .toBe('Entry Sheet');
+  });
+});
+
+describe('resolveMetadataFormSchemaTitles (#16458)', () => {
+  const bundle: TranslationBundle = {
+    'zh-CN': {
+      metadataForms: {
+        dashboard: {
+          fields: {
+            columns: { label: '列数' },
+            'header.showTitle': { label: '显示标题', helpText: '在页眉中显示仪表板标题' },
+            'header.actions': { label: '操作按钮' },
+            'header.actions.label': { label: '标签' },
+            'header.actions.actionUrl': { label: '操作地址' },
+            'ghost.child': { label: '幽灵' },
+          },
+        },
+      },
+    },
+    'zh-TW': {
+      metadataForms: {
+        dashboard: {
+          fields: {
+            'header.actions.icon': { label: '圖示' },
+          },
+        },
+      },
+    },
+  };
+
+  // The shape `z.toJSONSchema(DashboardSchema)` derives for the header,
+  // trimmed: a composite, a repeater whose row properties carry the authored
+  // English title, and an `I18nLabel` union on one of them.
+  const schema = () => ({
+    type: 'object',
+    properties: {
+      columns: { type: 'integer', description: 'Number of grid columns (default 12)' },
+      header: {
+        type: 'object',
+        properties: {
+          showTitle: { type: 'boolean', description: 'Show dashboard title in header' },
+          actions: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                label: { anyOf: [{ type: 'string' }, { type: 'object' }], title: 'Label' },
+                actionUrl: { type: 'string', title: 'Action URL' },
+                actionType: { type: 'string', title: 'Action Type', enum: ['url', 'modal'] },
+                icon: { type: 'string', title: 'Icon' },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  it('names a repeater ROW property through the array\'s `items`, with no `items` segment in the path', () => {
+    const out: any = resolveMetadataFormSchemaTitles(schema(), 'dashboard', bundle, { locale: 'zh-CN' });
+    const row = out.properties.header.properties.actions.items.properties;
+    expect(row.label.title).toBe('标签');
+    expect(row.actionUrl.title).toBe('操作地址');
+    // A union node takes the title at the node, where the renderer reads it.
+    expect(row.label.anyOf).toHaveLength(2);
+    // The authored English title stays where no locale names the property.
+    expect(row.actionType.title).toBe('Action Type');
+  });
+
+  it('names a composite child and a top-level field by the same rule; only `label` crosses over', () => {
+    const out: any = resolveMetadataFormSchemaTitles(schema(), 'dashboard', bundle, { locale: 'zh-CN' });
+    expect(out.properties.header.properties.showTitle.title).toBe('显示标题');
+    expect(out.properties.header.properties.actions.title).toBe('操作按钮');
+    expect(out.properties.columns.title).toBe('列数');
+    // `helpText` is a FormView attribute — the schema `description` is untouched.
+    expect(out.properties.header.properties.showTitle.description).toBe('Show dashboard title in header');
+    expect(out.properties.columns.description).toBe('Number of grid columns (default 12)');
+  });
+
+  it('walks the fallback chain per key', () => {
+    const out: any = resolveMetadataFormSchemaTitles(schema(), 'dashboard', bundle, {
+      locale: 'zh-TW', fallbackChain: ['zh-CN'],
+    });
+    const row = out.properties.header.properties.actions.items.properties;
+    expect(row.icon.title).toBe('圖示');   // the requested locale's own entry
+    expect(row.label.title).toBe('标签');  // reached through the chain
+  });
+
+  it('leaves a path the schema cannot place alone — an overlay, not a fork', () => {
+    const out: any = resolveMetadataFormSchemaTitles(schema(), 'dashboard', bundle, { locale: 'zh-CN' });
+    expect(out.properties.ghost).toBeUndefined();
+    expect(Object.keys(out.properties).sort()).toEqual(['columns', 'header']);
+  });
+
+  it('is pure: the input is not mutated, and the untouched spine is shared by identity', () => {
+    const input: any = schema();
+    const before = JSON.stringify(input);
+    const out: any = resolveMetadataFormSchemaTitles(input, 'dashboard', bundle, { locale: 'zh-CN' });
+    expect(JSON.stringify(input)).toBe(before);
+    expect(out).not.toBe(input);
+    // `actionType` is renamed by no locale: its node is the input's own object.
+    expect(out.properties.header.properties.actions.items.properties.actionType)
+      .toBe(input.properties.header.properties.actions.items.properties.actionType);
+  });
+
+  it('returns the input object itself when no bundle entry for the type exists at any locale of the chain', () => {
+    const input: any = schema();
+    expect(resolveMetadataFormSchemaTitles(input, 'dashboard', bundle, { locale: 'en' })).toBe(input);
+    expect(resolveMetadataFormSchemaTitles(input, 'report', bundle, { locale: 'zh-CN' })).toBe(input);
+    expect(resolveMetadataFormSchemaTitles(input, 'dashboard', undefined, { locale: 'zh-CN' })).toBe(input);
+  });
+
+  it('a literal `items` segment addresses a declared property of that name, never the row', () => {
+    const declaredItems = {
+      type: 'object',
+      properties: {
+        fields: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              items: { type: 'object', properties: { label: { type: 'string' } } },
+              label: { type: 'string' },
+            },
+          },
+        },
+      },
+    };
+    const b: TranslationBundle = {
+      'zh-CN': { metadataForms: { object: { fields: { 'fields.items.label': { label: '字段标签' }, 'fields.label': { label: '行标签' } } } } },
+    };
+    const out: any = resolveMetadataFormSchemaTitles(declaredItems, 'object', b, { locale: 'zh-CN' });
+    expect(out.properties.fields.items.properties.items.properties.label.title).toBe('字段标签');
+    expect(out.properties.fields.items.properties.label.title).toBe('行标签');
   });
 });

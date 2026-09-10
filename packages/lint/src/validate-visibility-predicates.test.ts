@@ -674,6 +674,86 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
     expect(bareFindings(formStack("record.type == 'grid'"))).toEqual([]);
   });
 
+  /**
+   * ── #16412: the CEL-type blind spot is NAME-local, and now really is ──
+   *
+   * The pin above describes a missed catch on the name it pins. It used to
+   * cost far more than that, and the same was true of every `SCOPE_ROOTS`
+   * name: those roots were declared `map` in the strict env while the
+   * permissive compile env leaves them `dyn`, so an ordinary comparison on one
+   * faulted `no such overload` HERE and compiled clean THERE. cel-js returns
+   * exactly ONE error, so that fault took the slot and every bare identifier
+   * behind it in the same predicate went unjudged — the rule published the
+   * predicate clean, and per its own message the console then falls OPEN.
+   *
+   * The roots are `dyn` in both environments now, which closes the
+   * `SCOPE_ROOTS` half. ⛔ The CEL-type half above is NOT closed and cannot be
+   * from here: `type` is not a `SCOPE_ROOTS` member, so no declaration
+   * `@objectstack/formula` makes reaches it (measured: the strict env's message
+   * for `type == 'grid'` is byte-identical under a `map` and a `dyn` root
+   * declaration). The row below pins that remaining cost so it stays visible.
+   */
+  describe('a bare identifier behind a namespace-root name is reported (#16412)', () => {
+    it.each([
+      ['data', "data == 'x' && status == 'active'"],
+      ['record', "record == 'x' && status == 'active'"],
+      ['config', "config != null && status == 'active'"],
+      ['result', "result > 1 && status == 'active'"],
+    ])('%s as the first operand no longer masks `status`', (_root, predicate) => {
+      const findings = bareFindings(formStack(predicate));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].message).toContain('`status`');
+      expect(findings[0].hint).toContain('`record.status`');
+    });
+
+    it('names the BARE identifier, never the root that used to mask it', () => {
+      const findings = bareFindings(formStack("config != null && status == 'active'"));
+      expect(findings[0].message).not.toContain('`config`');
+    });
+
+    it('emits exactly ONE finding — no double report on a predicate that compiles', () => {
+      // The predicate type-checks in the permissive env, so no sibling rule
+      // fires beside this one; the author gets a single verdict, not two.
+      expect(validateVisibilityPredicates(formStack("data == 'x' && status == 'active'")).map((f) => f.rule))
+        .toEqual([VISIBILITY_BARE_IDENTIFIER]);
+    });
+
+    it('⛔ the CEL-type half of the masking stays open — pinned, not fixed', () => {
+      // `type` is CEL's own declaration, out of reach of `SCOPE_ROOTS`. This is
+      // the one row of #16412's twelve that its fix does not flip, and it is
+      // recorded here rather than left to be rediscovered.
+      expect(bareFindings(formStack("type == 'grid' && status == 'active'"))).toEqual([]);
+      // The control that proves the sentence above is about `type` and not
+      // about the shape: same shape, a namespace root in the first operand.
+      expect(bareFindings(formStack("data == 'grid' && status == 'active'"))).toHaveLength(1);
+    });
+
+    it('⛔ the `has()` half stays closed by #16118 s call-site mask, not by this', () => {
+      // The mask is what makes these report; the oracle alone still answers
+      // `null` for a `has()` first error. If the mask is ever removed these go
+      // silent again, which is the whole reason it is load-bearing.
+      expect(bareFindings(formStack("has(status) && other == 'x'"))).toHaveLength(1);
+      expect(bareFindings(formStack('has(record.status)'))).toEqual([]);
+    });
+
+    /**
+     * ⛔ The narrowing is not relaxed anywhere: every predicate here has each
+     * reference rooted, or is legitimate CEL, and none may start reporting.
+     */
+    it.each([
+      ['record.status == "active"', 'the canonical dotted spelling'],
+      ['data.status == "x"', 'a root used as a NAMESPACE, which is what roots are for'],
+      ['type(record.x) == string', 'the legitimate CEL the blind-spot pin protects'],
+      ['previous.status != record.status', 'two roots in one predicate'],
+      ['parent.type == "grid" && record.status == "x"', 'a declared root, then a rooted term'],
+      ["record.tags.all(t, t != '')", 'a comprehension macro'],
+      ['size(record.tags) > 0', 'a cel-js built-in'],
+      ['record.?name.orValue("x") == "x"', 'optional chaining'],
+    ])('%s produces no bare-identifier finding (%s)', (predicate) => {
+      expect(bareFindings(formStack(predicate))).toEqual([]);
+    });
+  });
+
   // ── The #4953 boundary, pinned rather than described ────────────────
   //
   // #4953 measured the SAME evaluator giving opposite verdicts on a total vs a

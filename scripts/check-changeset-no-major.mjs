@@ -918,6 +918,63 @@ export function render(result) {
 // merged PR, the thing it exists to find. ⛔ That count is a reading for the
 // maintainer, never an argument for a tolerance: there is no allowlist and no
 // grandfathering here, and the six are cleared by declaring, not by softening.
+//
+// ## THE LEVEL: `src/**` as a proxy for a public face — measured, left alone (#16985)
+//
+// Everything above decides WHICH packages this axis can see. This section is
+// about what it then asserts about one: that a moved `packages/**/src/**` byte
+// means the package's published surface grew. Those two facts do come apart —
+// a module under `src/**` that no entry point reaches ships nothing at all —
+// and #16985 filed the gap, correctly refusing to prescribe a repair before
+// somebody produced a RATE. Its one instance (PR #16694, whose only `rest`
+// change was `packages/rest/src/rest-route-ledger.ts`, a review record nothing
+// imports) had an exit, and one instance is not a rate.
+//
+// MEASURED over the axis's WHOLE life, so the population is the thing itself
+// rather than a sample of it: the axis was born at `c3b63f7add` (#16264,
+// 2026-09-06) and 449 commits landed to `3c5f3c5991`, 233 of them introducing
+// a changeset entry AND moving a package this axis calls «grown». Method as in
+// the DEPTH note above — drive this file's own `scan`, `packagesTouched` and
+// `judgeLevel` at each merge commit against its parent — with one reading added
+// per package: does this diff ship anything? That question is answered from the
+// build each package actually runs, never from the path (see
+// `PUBLISHED_SOURCE_ROOT` for why the distinction is the whole ballgame).
+//
+//   * THE OVER-READ IS COMMON. 50 of 358 (package, PR) pairs — 14.0%, spread
+//     across 37 of the 233 PRs — name a package the diff ships NOTHING for. 35
+//     of the 50 moved only `src/**/*.test.ts`, which a bundled package never
+//     emits; 12 moved only modules no entry point reaches; 3 moved both.
+//   * ITS COST IS ZERO, and that is the number that sizes the repair. 47 of the
+//     50 never reach the offender list at all — the package is graded `minor`+,
+//     or is not graded. THREE do. Two of those sit beside a co-offender that
+//     genuinely ships (PR #17020, PR #17095), so the refusal is earned and the
+//     over-read costs a line in the message, not a verdict. The third is #16694
+//     itself, which on TODAY's rule reads `discharged` at exit 0: the
+//     `@objectstack/client: minor` in its own changeset discharges the PR under
+//     #16361, which landed after it. ⇒ Not one false refusal exists in the
+//     axis's entire history, including the instance the card was filed on.
+//   * THE ZERO IS DECLARATION-INDEPENDENT, which is what makes it a bound and
+//     not a coincidence of who declared what. It is measured with the
+//     declaration forced to `yes` on EVERY PR — the maximally exposed
+//     assumption, stronger than anything that actually happened — and
+//     `refusable` is computed before the declaration is consulted, so the same
+//     zero covers the `not-measured-material` lane too.
+//
+// ⇒ Triage sized the repair in advance: an exemption list if the false red is
+// rare, an exported-surface reading if it is common. It is neither — it is
+// ABSENT — so neither instrument is bought, and the proxy stands. #16361
+// already took the half of this that was real by deleting the per-line claim
+// from the rendering, which is why the residual is two noisy lines rather than
+// a reader mistaking the pair for the finding.
+//
+// ⛔ This is a reading for the maintainer, never a verdict that the proxy is
+// SOUND. It says the repair is unbought AT TODAY'S RATE. The shape that would
+// buy it is named and still unobserved: a PR genuinely `Clause-②: yes` for
+// package A that also moves a package-internal line under package B's `src/**`
+// — there the author has no exit at all, because a carrier alone forces `yes`
+// (see `declarationFromPullRequest`) and only the review seat can clear it. Two
+// of the 128 refusable PRs already have the mixed offender shape; none has the
+// declaration to go with it. ⇒ Re-measure before repairing, not instead of it.
 
 /**
  * The compiled-source root whose movement makes a package's PUBLISHED surface
@@ -931,6 +988,26 @@ export function render(result) {
  * this axis outright, and print a tick while doing it: the exact shape #16692
  * and #16713 both document. ⇒ The packed set is the reason for a SECOND leg
  * below, never a replacement for this one.
+ *
+ * ⛔ Nor is the repair "exempt a file no entry point transitively re-exports",
+ * the cheaper alternative #16985 left open — MEASURED UNSOUND, and unsound by
+ * the same asymmetry that condemns the packed-set predicate. It holds only for
+ * a BUNDLED package: `tsup` builds from `src/index.ts`, so a module nothing
+ * reaches contributes no emitted byte. `packages/cli` does not bundle. It runs
+ * `tsc -p tsconfig.build.json`, which emits the whole `include` program, so a
+ * `src/**` file nothing imports STILL ships as its own `dist/*.js` — which is
+ * why that tsconfig carries an explicit `exclude` line for a review-record
+ * module, and says in prose that its bundled siblings needed none. It is the
+ * only whole-program public package here, 1 of 69, and one is enough: an
+ * entry-graph exemption applied uniformly would turn this axis OFF for exactly
+ * the package where it must not be, printing a GREEN — the expensive
+ * direction, and the same failure #16692 and #16713 each landed to undo.
+ *
+ * ⚠️ That is measured rather than reasoned. While sizing #16985 an instrument
+ * that skipped the build mode reported TWELVE false refusals for
+ * `@objectstack/cli`; reading the build mode collapsed them to zero. An
+ * exemption written from the same blind spot would have shipped that error as
+ * a rule.
  */
 const PUBLISHED_SOURCE_ROOT = 'src';
 
@@ -3196,6 +3273,34 @@ function selfTest() {
       assert(
         JSON.stringify(publishedSourceOwners('packages/drivers/driver-sql/README.md', everywhere)) === '[]',
         'nonsense control on the superset run: a manifest under every ancestor must NOT make an ordinary file owned — otherwise the four rows above would hold for any input at all',
+      );
+
+      // ── #16985: `src/**` is owned WITHOUT asking what re-exports it ────────
+      //
+      // These two rows are a DECISION, not an oversight, and they are here so
+      // that undoing it costs a deliberate deletion. The over-read they pin is
+      // real and was measured rather than denied — 14.0% of (package, PR) pairs
+      // over the axis's whole life name a package the diff ships nothing for —
+      // and it is KEPT because that over-read has never once changed a verdict
+      // (zero false refusals, declaration-independent) and because the cheaper
+      // repair is unsound for a whole-program build. Both readings, with their
+      // method and their controls, are in the header; the unsoundness is at
+      // `PUBLISHED_SOURCE_ROOT`. ⇒ An edit that exempts unreachable files must
+      // delete these rows and bring a rate that buys the change.
+      const noManifest = () => null;
+      assert(
+        JSON.stringify(publishedSourceOwners('packages/rest/src/rest-route-ledger.ts', noManifest)) === '["packages/rest"]',
+        '#16985: a module no entry point re-exports is owned all the same — the proxy is deliberate, and an entry-graph exemption is a false GREEN for a whole-program `tsc` package',
+      );
+      assert(
+        JSON.stringify(publishedSourceOwners('packages/rest/src/rest-route-ledger.test.ts', noManifest)) === '["packages/rest"]',
+        '#16985: a test file under `src/**` is owned too — 35 of the 50 measured over-reads are this shape, kept for the same reason and refused an exemption on the same evidence',
+      );
+      // Nonsense control on THIS pair, so the two rows above cannot be read as
+      // "any path at all is owned": one segment over, nothing is.
+      assert(
+        JSON.stringify(publishedSourceOwners('packages/rest/rest-route-ledger.ts', noManifest)) === '[]',
+        '#16985 control: the same file name outside `src/**` is owned by nobody — the two rows above are about `src/**`, not about the name',
       );
 
       // ── End to end, on real temp git repositories ─────────────────────────

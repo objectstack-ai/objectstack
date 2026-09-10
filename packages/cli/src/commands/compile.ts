@@ -908,9 +908,11 @@ export default class Compile extends Command {
           // Same key `os validate --json` uses, so a CI consumer reads one shape
           // from either command rather than learning two.
           conversions: conversionNotices,
-          // Published key name kept; the axis behind it moved to
-          // `manifest.engines.protocol` (#13860). See validate.ts.
-          specVersionGap: protocolGap,
+          // [#14261] Renamed from the retired `specVersion*` spelling: one
+          // axis, one name. The axis itself moved to
+          // `manifest.engines.protocol` in #13860; the published key name
+          // follows it here. Value shape unchanged. See validate.ts.
+          protocolVersionGap: protocolGap,
           stats,
           duration: timer.elapsed(),
         }, 0, { compact: true });

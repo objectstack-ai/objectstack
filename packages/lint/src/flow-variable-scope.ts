@@ -275,17 +275,30 @@ const MAX_BARE_ROOTS = 64;
  * consulting the AST, which is what re-opens the macro-variable false positive.
  *
  * ⛔ That blind spot is NOT confined to the colliding name, and reading it as
- * name-local understates it (#16412). Those roots are declared `map`, so using
- * one as the operand of an operator with no `map` overload makes the checker's
- * FIRST error a `no such overload` rather than an `Unknown variable` — the
- * oracle returns `null` on iteration 0 and this loop terminates before it has
- * judged anything. Every shadow in that source is then lost, whatever it is
- * named, and the source still compiles (the permissive env leaves those roots
- * `dyn`, so no sibling diagnostic fires either). Measured, `status` and
- * `config` both declared variables and both fields:
+ * name-local understates it — but the WIDEST way it escaped the name is closed
+ * (#16412). Those roots used to be declared `map` in the oracle's strict env
+ * while the permissive env left them `dyn`, so using one as the operand of an
+ * operator with no `map` overload made the checker's FIRST error a `no such
+ * overload` rather than an `Unknown variable`: the oracle returned `null` on
+ * iteration 0 and this loop terminated before it had judged anything, losing
+ * every shadow in that source whatever it was named. The strict env now
+ * declares those roots `dyn` as well, so the two envs agree and that class
+ * cannot arise. Measured, `status` and `config` both declared variables and
+ * both fields:
  *
- *     config == 'x' && status == 'y'   -> []           `status` LOST
- *     status == 'y' && config == 'x'   -> ['status']   same names, other order
+ *     config == 'x' && status == 'y'   -> ['status']   the class, closed
+ *     status == 'y' && config == 'x'   -> ['status']   unchanged, the control
+ *
+ * ⚠️ The MECHANISM is untouched for every OTHER first-error class, so a `null`
+ * from the oracle is still "nothing was reported" and never "the source is
+ * clean", and this loop still terminates on it. Two such classes are reachable
+ * from authored input, and each still loses every shadow in the source whatever
+ * it is named — a CEL TYPE name in that same operand position, which CEL
+ * declares itself so no declaration this package makes can move it, and `has()`
+ * handed a non-select argument:
+ *
+ *     type == 'grid' && status == 'y'  -> []           `status` still LOST
+ *     has(status) && other == 'x'      -> []           `other` still LOST
  *
  * The masking is positional, so the loop's own upper bound is not what limits
  * it. See {@link firstUndeclaredReference}'s false-negative section for the

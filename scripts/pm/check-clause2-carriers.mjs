@@ -126,7 +126,11 @@
  * way H4 tolerates it (a leading blockquote, a list bullet, backticks, bold),
  * because that is markdown a seat writes without meaning anything by it; the
  * KEY and the VALUE are literal. A near-miss spelling is reported IN the row so
- * the residue is actionable, and it still does not count as a declaration.
+ * the residue is actionable, and it still does not count as a declaration. So
+ * is the other near miss, the one where the key is spelled exactly right and
+ * sits mid-line after another field: that line is quoted back with a remedy
+ * naming PLACEMENT rather than spelling, and it is not read as a declaration
+ * either — what moved is the sentence, never the accept set.
  *
  * **It writes nothing.** No label, ever — hanging or clearing a review gate
  * from a checker would be issuing the review verdict, which is 自查放行 and is
@@ -529,6 +533,62 @@ const CLAUSE2_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?Clause-�
 const CLAUSE2_NEAR_MISS_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*#][ \t]*)*(?:\*\*)?`?\s*Clause[ \t-]*(?:②|2|two)(?![\w]).*$/i;
 
 /**
+ * The SECOND near-miss shape, and the one both patterns above are blind to: the
+ * key in the FIXED spelling, on a line that starts with something else.
+ *
+ * `Domain: \`domain:cli\` · Clause-②: no` is a natural way to write a compact
+ * claim header, and it reaches neither pattern above — both anchor at `^` and
+ * tolerate only line-start decoration before the key. So the line was invisible
+ * TWICE: not read as a declaration (correct), and not quoted back as a near miss
+ * either (the whole job of the mechanism above). What the seat was told instead
+ * was that the SPELLING was wrong, on a line spelled exactly right.
+ *
+ * ⛔ This is a REPORTER, never a reader. It changes what this file SAYS about a
+ * line it does not read; it changes nothing about what it ACCEPTS.
+ * `CLAUSE2_KEY_LINE` is untouched, and must stay untouched: 「a predicate that
+ * reads prose is a heuristic, and the measured terminus of that direction is a
+ * check that can barely fail」.
+ *
+ * ⭐ And the reason that red line is structural rather than stylistic: this
+ * reader decides "is this line a declaration?" by POSITION ALONE. Loosening the
+ * position rule to catch the shape above would, by the same stroke, promote more
+ * merely-DESCRIBING prose into candidate declarations — the opposite direction,
+ * measured on the same regex. So the detector below deliberately fires only
+ * where the key is NOT at the start of a line, and a key-initial line reaches it
+ * never: whatever a key-initial line reads as, this file does not move it.
+ *
+ * The prefix set is the decoration the two patterns above already tolerate
+ * (whitespace, a blockquote `>`, a list bullet, `#`, backtick/bold wrapping). A
+ * line whose key is preceded by only that is a DECORATION near miss and keeps
+ * the spelling remedy; a line whose key is preceded by anything else is a
+ * PLACEMENT near miss and gets a remedy that names placement.
+ */
+const CLAUSE2_KEY_TEXT = 'Clause-②';
+const CLAUSE2_KEY_COLON = /^`?(?:\*\*)?[ \t]*:/;
+const CLAUSE2_LINE_START_DECORATION = /^[ \t>\-*#`]*$/;
+
+/**
+ * Does this line carry the fixed key, followed by its colon, at a position no
+ * line-start decoration can explain?
+ *
+ * @param {string} line
+ * @returns {boolean}
+ */
+function hasInlineClause2Key(line) {
+  const s = String(line ?? '');
+  let from = 0;
+  for (;;) {
+    const at = s.indexOf(CLAUSE2_KEY_TEXT, from);
+    if (at < 0) return false;
+    from = at + CLAUSE2_KEY_TEXT.length;
+    // The key alone is not the shape; it is the key AND its colon, so a bare
+    // mention of `Clause-②` in a sentence is left to the pattern above.
+    if (!CLAUSE2_KEY_COLON.test(s.slice(from))) continue;
+    if (!CLAUSE2_LINE_START_DECORATION.test(s.slice(0, at))) return true;
+  }
+}
+
+/**
  * The value token, read immediately after the colon.
  *
  * ⚠️ Trailing text after the token is ACCEPTED, and the calibration is not
@@ -567,16 +627,23 @@ function quoteLine(line, cap = 160) {
  * @param {string} text
  * @returns {{ kind: 'declared', value: 'yes'|'no', line: string }
  *          | { kind: 'malformed', value: string, line: string }
- *          | { kind: 'near-miss', line: string }
+ *          | { kind: 'near-miss', reason: 'inline-key'|'spelling', line: string }
  *          | null}
  *
  * Four-valued on purpose. `declared` and `malformed` are different facts about
  * a line that IS the key; `near-miss` is a fact about a line that is not. Any
  * collapse of these into "no" is the defect #13914 filed.
+ *
+ * The near miss carries a REASON because the two shapes owe opposite remedies:
+ * `spelling` is a line that does not carry the fixed key at all, and `inline-key`
+ * is a line that carries it exactly right but not at the start of a line. ⛔ The
+ * reason changes the sentence, never the state — both are near misses, and a
+ * near miss is not a declaration in either case.
  */
 export function readClause2Line(text) {
   const lines = String(text ?? '').split(/\r?\n/);
   let nearMiss = null;
+  let inlineKey = null;
   for (const line of lines) {
     const m = CLAUSE2_KEY_LINE.exec(line);
     if (m) {
@@ -584,9 +651,14 @@ export function readClause2Line(text) {
       if (value !== null) return { kind: 'declared', value, line: quoteLine(line) };
       return { kind: 'malformed', value: quoteLine(m[1], 60), line: quoteLine(line) };
     }
+    if (inlineKey === null && hasInlineClause2Key(line)) inlineKey = quoteLine(line);
     if (nearMiss === null && CLAUSE2_NEAR_MISS_LINE.test(line)) nearMiss = quoteLine(line);
   }
-  return nearMiss === null ? null : { kind: 'near-miss', line: nearMiss };
+  // The correctly-spelled key wins over a vocabulary near miss wherever the two
+  // land in the body: it is the more actionable of the two residues, and reading
+  // order is not a fact about which one the seat should be sent to.
+  if (inlineKey !== null) return { kind: 'near-miss', reason: 'inline-key', line: inlineKey };
+  return nearMiss === null ? null : { kind: 'near-miss', reason: 'spelling', line: nearMiss };
 }
 
 /**
@@ -619,7 +691,7 @@ export function readClause2Line(text) {
  * @param {{ body?: string, created_at?: string }[]|null} commentRows — the REST
  *   comment rows, or `null` when the thread could NOT be read.
  * @returns {{ state: 'declared'|'malformed'|'misplaced'|'missing'|'absent'|'unreadable',
- *   value?: 'yes'|'no', detail?: string }}
+ *   value?: 'yes'|'no', detail?: string, nearMissReason?: 'inline-key'|'spelling' }}
  */
 export function cardDeclaration(commentRows) {
   if (!Array.isArray(commentRows)) return { state: 'unreadable' };
@@ -657,7 +729,16 @@ export function cardDeclaration(commentRows) {
   // exists at all. `claimRows` is non-empty exactly when some comment matched
   // the imported claim predicate, and `pool` is derived from it — so this asks
   // the same question the reading above asked and cannot answer it differently.
-  return { state: claimRows.length > 0 ? 'missing' : 'absent', detail: nearMiss?.line };
+  // `nearMissReason` rides alongside the quoted line for exactly one purpose:
+  // the row below picks its REMEDY sentence from it. ⛔ It is not part of the
+  // state union and no verdict, count or exit reads it — a near miss with a
+  // correctly-spelled key is the same `missing` this function has always
+  // returned, and #12409's boundary moves by not one character.
+  return {
+    state: claimRows.length > 0 ? 'missing' : 'absent',
+    detail: nearMiss?.line,
+    nearMissReason: nearMiss?.reason,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -810,6 +891,24 @@ export function c2DeclarationUnreadable(pair) {
         `${NEVER_WRITES}`
       );
     case 'missing':
+      // The key is on the thread, spelled exactly right, and simply not at the
+      // start of a line. The state is unchanged — it was not read, so it is
+      // still `missing` and still exits 4 — but the remedy that ships with the
+      // sentence below sends the seat to inspect SPELLING, which for this shape
+      // is a search for a typo that is not there. Naming the placement is the
+      // whole of the change; ⛔ nothing here accepts the line.
+      if (d.nearMissReason === 'inline-key') {
+        return (
+          `${head} — NO READING on the declaration limb, and the PLACEMENT of the key is what is ` +
+          `wrong, NOT its spelling: the thread carries the key in the fixed spelling, on ` +
+          `${JSON.stringify(d.detail)}, but not at the START of a line. This limb is read ` +
+          'line-anchored — only whitespace, a blockquote `>`, a list bullet and backtick/bold ' +
+          'wrapping may precede the key — so a key that follows another field on a shared line is ' +
+          'not read, however correctly it is spelled. ⛔ There is no typo to find on that line. ' +
+          'Remedy: put the `Clause-②: yes|no` line on a line of its OWN in the card\'s claim ' +
+          `comment, unchanged otherwise — ${fixed}. ${notADecision} ${NEVER_WRITES}`
+        );
+      }
       return (
         `${head} — NO READING on the declaration limb, and the DECLARATION LINE is what is ` +
         `missing: the card's claim comment is there and carries no \`Clause-②:\` line in the ` +
@@ -2254,6 +2353,21 @@ export function selfTest() {
   t('a very long claim line is quoted back CAPPED, so one row cannot swamp the report', (readClause2Line(`Clause-②: maybe ${'x'.repeat(400)}`)?.line ?? '').length < 200);
   t('a card that never mentions the clause reads null', readClause2Line('Claim: whatever\nBranch: x') === null);
   t('⛔ the reader never invents a value from an adjacent word', readClause2Line('this card is clause 2 yes in substance')?.kind !== 'declared');
+  // The inline-key near miss. Each case below pins ONE line and says only what
+  // that line shows: the measured shape is `Domain: … · Clause-②: no`, which is
+  // how a compact claim header is written and which reached NEITHER pattern.
+  t('this exact shared-line header — `Domain: `domain:cli` · Clause-②: no` — is reported as a near miss', readClause2Line('Domain: `domain:cli` · Clause-②: no')?.kind === 'near-miss');
+  t('…reasoned INLINE-KEY, so the row that quotes it can name placement instead of spelling', readClause2Line('Domain: `domain:cli` · Clause-②: no')?.reason === 'inline-key');
+  t('…and ⛔ NOT read as a declaration: this line is exactly as unread as it was before', readClause2Line('Domain: `domain:cli` · Clause-②: no')?.kind !== 'declared');
+  t('…and the row quotes THAT line, not the key alone', says(readClause2Line('Domain: `domain:cli` · Clause-②: no')?.line, 'Domain:'));
+  // ⛔ The reporter fires only where the key is NOT at the start of a line. The
+  // key-INITIAL direction is a different card's (#17098) and is not moved here;
+  // this pins the property of THIS change — a key-initial line never reaches the
+  // inline-key reason — rather than pinning what that direction currently reads.
+  t('⛔ a key-INITIAL line is never reasoned inline-key — decoration before the key is not placement', readClause2Line('## Clause-②: yes')?.reason === 'spelling');
+  t('…nor is a bulleted, blockquoted or backticked key: `> - `Clause-②` : yes` still reads DECLARED, untouched', readClause2Line('> - `Clause-②` : yes')?.kind === 'declared');
+  t('⛔ a mid-line mention with NO colon is not the inline shape — the reporter looks for the key AND its colon', readClause2Line('Domain: x · Clause-② is not touched here') === null);
+  t('the inline-key residue wins over a vocabulary near miss written ABOVE it — reading order is not a fact about the remedy', readClause2Line('## Clause ②: **yes**\nDomain: x · Clause-②: no')?.reason === 'inline-key');
 
   // -- the card-level declaration: every state, none collapsed into another --
   battery('the card-level declaration: every state, none collapsed into another');
@@ -2342,6 +2456,25 @@ export function selfTest() {
   const nearMiss = c2DeclarationUnreadable(pair({ cardComments: [CLAIM('## Clause ②: **yes**')] }));
   t('a prose declaration still produces the C2 row — prose is not a reading', typeof nearMiss === 'string');
   t('…and the row quotes what WAS there, so the residue is actionable', says(nearMiss, 'Clause ②'));
+  // The inline-key row. The measured claim comment is a compact header — the
+  // key correctly spelled, after another field, on a shared line.
+  const INLINE = 'Domain: `domain:cli` · Clause-②: no';
+  const inlineRow = c2DeclarationUnreadable(pair({ cardComments: [CLAIM(INLINE)] }));
+  t('a claim comment whose only Clause-② key sits mid-line produces a C2 row', typeof inlineRow === 'string');
+  t('…and that row names PLACEMENT as what is wrong', says(inlineRow, 'PLACEMENT of the key is what is wrong'));
+  t('…and says in as many words that the spelling is NOT it', says(inlineRow, 'NOT its spelling') && says(inlineRow, 'no typo to find'));
+  t('…and quotes the offending line, which is what makes the residue actionable', says(inlineRow, 'Domain: `domain:cli`'));
+  t('…and its remedy is to put the line on one of its OWN, not to hunt a misspelling', says(inlineRow, 'line of its OWN'));
+  t('⛔ it is a DIFFERENT sentence from the row a claim comment with no key at all gets', inlineRow !== missingLine);
+  t('⛔ and the state behind it is still MISSING — the sentence moved, the accept set did not', cardDeclaration([CLAIM(INLINE)]).state === 'missing');
+  t('⛔ …with no value read off that line', cardDeclaration([CLAIM(INLINE)]).value === undefined);
+  t('⛔ and the sweep still counts it as one NOT-READ card, exactly as before', declarationLimbTally([pair({ cardComments: [CLAIM(INLINE)] })]).missing === 1);
+  t('…and the row still carries the standing refusal to relax the spelling', says(inlineRow, 'do not relax the') && says(inlineRow, 'Do not fill the line in'));
+  // A thread with no claim comment owes the COMMENT, so that remedy does not
+  // change; what it gains is the quotation it never had.
+  const inlineNoClaim = c2DeclarationUnreadable(pair({ cardComments: [{ body: INLINE, created_at: '2026-08-31T10:00:00Z' }] }));
+  t('a NON-claim comment carrying the inline key still owes the CLAIM COMMENT', says(inlineNoClaim, 'CLAIM COMMENT is what is missing'));
+  t('…and now quotes that line as the nearest thing on the thread', says(inlineNoClaim, 'Domain: `domain:cli`'));
   const misplaced = c2DeclarationUnreadable(pair({ cardComments: [CLAIM('Domain: x'), { body: 'Clause-②: yes', created_at: '2026-08-31T11:00:00Z' }] }));
   t('a declaration outside the claim comment reads MISPLACED, with its own sentence', says(misplaced, 'MISPLACED'));
   t('…and says the thinking was done, only in the wrong carrier', says(misplaced, 'not in a place') || says(misplaced, 'place the predicate does not look'));

@@ -277,6 +277,11 @@ const NON_HTTP: Record<string, string> = {
   'getRoute': 'pure route-table lookup',
   'unwrapResponse': 'pure envelope unwrap',
   'isFilterAST': 'pure type predicate',
+  // [#16534] Local credential state: it writes `this.token` from a value the
+  // three rotating auth routes have ALREADY received, and issues nothing of its
+  // own. Those three routes are swept on their own rows, so parking this helper
+  // here drops no call out of coverage.
+  'adoptRotatedSessionToken': 'local state',
   'environment': 'constructs a ScopedEnvironmentClient; its methods are swept separately',
   'setProjectId': 'local state',
   'getProjectId': 'local state',
