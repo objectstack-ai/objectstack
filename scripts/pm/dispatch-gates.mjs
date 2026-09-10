@@ -10486,10 +10486,12 @@ export function residueLines(
 
 /**
  * The single source of truth for the model tier the PM lane's governance
- * reads — clause ②'s CONTRACT-REVIEW tier: the tier a card that changes
- * contract accept/reject behaviour or widens the public surface must be
- * dispatched at, and the tier the `needs:contract-review` re-review sub-round
- * must itself be running at (its opening self-check reads this). Declared HERE
+ * reads — clause ②'s CONTRACT-REVIEW tier: the tier the clause-② REVIEW runs
+ * at, both halves of it — the spec seat's review of a card that changes
+ * contract accept/reject behaviour or widens the public surface, and the
+ * `needs:contract-review` re-review sub-round (its opening self-check reads
+ * this). The BUILD of such a card is at the default judgment tier, so this
+ * constant is a review tier and never a dispatch mandate. Declared HERE
  * and only here, as a constant, so a model upgrade is a one-line change in one
  * file — the clause-① mandate rows below read it, the self-test compares
  * against it, and the PM skill's prose names it, so the model id is spelled as
