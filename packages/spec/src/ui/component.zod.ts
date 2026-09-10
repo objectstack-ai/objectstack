@@ -2580,7 +2580,8 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   reorderableColumns: z.boolean().optional().describe('Allow column drag-reorder'),
   frozenColumns: z.number().optional().describe('How many leading columns stay frozen (default 1)'),
   showColumnTypeIcons: z.boolean().optional().describe('Show field-type icons in column headers'),
-  exportOptions: z.unknown().optional().describe('Export config ({ formats, streaming })'),
+  exportOptions: z.unknown().optional()
+    .describe('Export config ({ formats, maxRecords, includeHeaders, fileNamePrefix, streaming }). Unvalidated here (`z.unknown()`), so this list is the whole account of the shape; `ListViewSchema.exportOptions` declares the same five members with their per-member contract'),
   operations: z.unknown().optional().describe('Operation toggles ({ export: false, … })'),
   /**
    * Data source binding — `ViewDataSchema`, the #5090-pinned authority the
