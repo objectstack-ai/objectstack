@@ -3527,6 +3527,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-automation/src/builtin/notify-zero-delivery-visibility.integration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-automation/src/builtin/wait-node-degraded-run.test.ts",
       "verb": "update",
       "pinned": 1

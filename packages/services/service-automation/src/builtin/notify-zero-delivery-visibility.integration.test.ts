@@ -99,6 +99,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SqlDriver } from '@objectstack/driver-sql';
 import {
     MessagingService,
@@ -243,6 +244,11 @@ function inProcessEngine(): IDataEngine {
             return query?.limit ? hits.slice(0, query.limit) : hits;
         },
         async findOne(object: string, query?: { where?: Record<string, unknown> }) {
+            // The #4419 dispatch, imported rather than approximated: a `findOne`
+            // that selects no particular record is REFUSED by `ObjectQL.findOne`,
+            // so this arm has to refuse it too or it is looser than the engine it
+            // stands in for — the exact shape `check:engine-double-contract` pins.
+            assertEngineFindOnePredicate(object, query);
             return rowsOf(object).find((r) => matches(r, query?.where));
         },
     } as unknown as IDataEngine;
