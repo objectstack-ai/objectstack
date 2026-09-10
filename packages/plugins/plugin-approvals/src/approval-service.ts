@@ -5100,9 +5100,13 @@ export class ApprovalService implements IApprovalService {
    *
    * Deliberately shaped like the engine verb it completes: an in-process
    * operator repair, reachable from a host or a console script, with no REST
-   * route and no entry in the spec `ApprovalService` contract — exactly as
-   * `restoreConsumedSuspension` is a class method on `AutomationEngine` and
-   * appears in no contract. It authorizes nothing new: the decision it replays
+   * route — exactly as `restoreConsumedSuspension` is reached. Both verbs are
+   * DECLARED on their spec contracts as OPTIONAL members —
+   * `IAutomationService.restoreConsumedSuspension` by #16495, and this one on
+   * `IApprovalService` by the #15389 ruling of 2026-09-09 — which declares the
+   * capability without opening a door: a caller reaching this verb through the
+   * contract must probe for presence and refuse fail-closed when it is absent.
+   * It authorizes nothing new: the decision it replays
    * was authorized and recorded when it was made, and re-authorizing it here
    * against a present-day actor would be a different and wrong question (the
    * original approver may be long gone). `requestedBy` / `reason` ride the log
