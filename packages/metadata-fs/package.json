@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/metadata-fs",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "FileSystemRepository: Node-only Repository implementation backed by JSON files and a JSONL change log (ADR-0008).",
   "type": "module",
@@ -45,7 +45,7 @@
     "@types/node": "^26.2.0",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "author": "ObjectStack",
   "repository": {

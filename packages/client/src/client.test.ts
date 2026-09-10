@@ -832,17 +832,56 @@ describe('Auth enhancements', () => {
         expect((client as any).token).toBe('new-token');
     });
 
-    it('should refresh token', async () => {
+    // [#16760] REPLACED, not adjusted. The previous fixture served
+    // `{ data: { token } }` — a body `/get-session` has never produced — and so
+    // pinned the very read that made this method a silent no-op in the field.
+    // A fixture modelling the misdeclaration cannot witness the fix, so the
+    // shape below is the measured one: better-auth answers bare, and the only
+    // credential in it is `session.token`. The end-to-end proof against a real
+    // `AuthManager` is `auth-get-session-envelope.test.ts`; this is its unit
+    // half, kept because it pins the REQUEST too.
+    it('should refresh token from session.token, the only token /get-session serves', async () => {
         const { client, fetchMock } = createMockClient({
-            data: { token: 'refreshed-token' }
+            user: { id: 'usr_1', email: 'test@example.com', name: 'Test User' },
+            session: { id: 'ses_1', userId: 'usr_1', token: 'refreshed-token', expiresAt: '2026-09-16T19:33:50.074Z' },
         });
         const result = await client.auth.refreshToken('old-refresh-token');
-        expect(result.data.token).toBe('refreshed-token');
+        expect(result.data.session?.token).toBe('refreshed-token');
+        // The bare answer is lifted into the envelope the method declares.
+        expect(result.success).toBe(true);
+        expect(result.data.user?.id).toBe('usr_1');
+        // ⛔ and NOT synthesized onto `data.token` — the key the broken read named.
+        expect((result.data as { token?: unknown }).token).toBeUndefined();
         const [url, opts] = fetchMock.mock.calls[0];
         expect(url).toContain('/api/v1/auth/get-session'); // Updated: better-auth uses get-session for refresh
         expect(opts.method).toBe('GET'); // Updated: GET instead of POST
         // Token should be auto-set
         expect((client as any).token).toBe('refreshed-token');
+    });
+
+    // [#16760] `me()` lifts the same bare body into the declared envelope.
+    it('me() lifts the bare /get-session answer into the declared envelope', async () => {
+        const { client, fetchMock } = createMockClient({
+            user: { id: 'usr_1', email: 'test@example.com', name: 'Test User' },
+            session: { id: 'ses_1', userId: 'usr_1', token: 'tok_1', expiresAt: '2026-09-16T19:33:50.074Z' },
+        });
+        const result = await client.auth.me();
+        expect(result.success).toBe(true);
+        expect(result.data.user?.id).toBe('usr_1');
+        expect(result.data.session?.id).toBe('ses_1');
+        // The raw keys stay reachable for callers written against the wire.
+        expect((result as unknown as { user?: { id?: string } }).user?.id).toBe('usr_1');
+        const [url] = fetchMock.mock.calls[0];
+        expect(url).toContain('/api/v1/auth/get-session');
+        // ⛔ me() must never capture a credential — only refreshToken does.
+        expect((client as any).token).toBeUndefined();
+    });
+
+    // [#16760] The anonymous answer is the literal `null` at 200. The lift must
+    // pass it through rather than manufacture a signed-in-looking envelope.
+    it('me() passes the anonymous null through untouched', async () => {
+        const { client } = createMockClient(null);
+        expect(await client.auth.me()).toBeNull();
     });
 
     it('signInWithProvider defaults callbackURL to the current page (base-path-correct)', async () => {

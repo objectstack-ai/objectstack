@@ -1,0 +1,21 @@
+---
+"@objectstack/driver-memory": minor
+---
+
+fix(driver-memory): refuse a call the engine tenant-scoped, instead of silently answering with every organization's rows (#16589)
+
+**BREAKING** for a `driver-memory` deployment that holds more than one organization's rows: an operation the engine tenant-scoped now refuses loudly instead of answering. Shipped as `minor` under the launch-window convention, the same grading the driver's `update()`/`upsert()` type-surface narrowing used.
+
+Two predicates decided "is this object tenant-scoped", and they disagreed on the default case. The engine scopes an object **unless** it opts out (`buildDriverOptions`: `execCtx?.tenantId !== undefined && !isTenancyDisabled(objectSchema) && !isFederated`), while this driver's boot guard refused only an explicit opt-**in** (`declaresTenantScope`: `tenancy.enabled === true`). An object that **omits the `tenancy` block entirely** — the common case — therefore fell between them: the engine scoped it, the guard never saw it, the deployment posture really was `single` so the posture check passed, and the driver then discarded the scope and returned every organization's rows. A SQL driver refuses the same read.
+
+This driver still implements **no row-level tenant isolation**, and deliberately does not gain any: it declines to answer rather than answering correctly. `assertCallNotTenantScoped` is a third seam beside the two boot seams, and it judges the scope the engine actually handed over (`DriverOptions.tenantId` / `tenantIds`) rather than re-deriving the engine's predicate from object metadata — a driver that re-derived it would drift from the engine the first time that reasoning changed, and drift here is silent exposure. It runs first in every driver door that accepts a `DriverOptions`, so a refusal leaves the store exactly as it found it.
+
+**⚠️ Every isolation measurement previously taken on the memory driver is void and must be re-taken.** A suite asserting "tenant A cannot see tenant B's rows" passed here trivially — not because isolation worked, but because both tenants' rows came back to every caller and the assertion was written against a single tenant's fixture. An app that proved out its isolation model on this driver measured nothing.
+
+What is unaffected, and why: an object declaring `tenancy: { enabled: false }` is never scoped by the engine (ADR-0066), so the driver never sees a scope for it and serves it unchanged; a caller with no organization context is never scoped either, which is the ordinary dev, example-app and single-organization path. Only a call that actually arrives carrying a tenant scope is refused. A deployment that needs organization-scoped reads in development uses `@objectstack/driver-sql`, whose `:memory:` connection is the closest in-process replacement; a deployment whose data genuinely is platform-global can say so with the ADR-0066 posture, which stops the engine scoping it at all.
+
+The refusal reuses the existing `MemoryMultiTenantUnsupportedError` and its `MEMORY_MULTI_TENANT_UNSUPPORTED` code rather than introducing a second error family: the cause is identical, so a host that already recognises the boot refusal recognises this one with no new code and no second code to learn.
+
+Also corrects `declaresTenantScope`'s docstring, which closed on a false sentence — "every object in a single-tenant deployment omits the block". A `single` posture constrains the **wall**, not the number of organizations: a `single`-posture run was measured holding 13 `sys_organization` rows, with each row carrying whichever `organization_id` it was written with. The sentence is recorded as superseded rather than deleted, because it is what justified the predicate being an opt-in test.
+
+<!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed, renamed or re-shaped: no Zod schema, no spec declaration, no stored representation and no published export changes shape, so `objectstack migrate meta` has nothing to rewrite. The change is a runtime refusal inside one driver, reached through a deployment's choice of driver rather than through authored metadata, and it is delivered to the operator by the refusal itself — which names the isolating driver and the ADR-0066 posture in its own message, at the moment the unsupported call is made. -->

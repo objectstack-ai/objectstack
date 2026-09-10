@@ -261,6 +261,8 @@ export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_migration.fields.applied_at.label": "e95c287d92cd1215",
   "objects.sys_migration.fields.blocking.help": "e807388f81f23dda",
   "objects.sys_migration.fields.blocking.label": "fde63021cfe650a1",
+  "objects.sys_migration.fields.columns_moved_at.help": "eaa31d8860c680ec",
+  "objects.sys_migration.fields.columns_moved_at.label": "9f0cfcef656a7ec8",
   "objects.sys_migration.fields.created_at.label": "1f02d416befb595b",
   "objects.sys_migration.fields.details.help": "315f8003d77cf2b9",
   "objects.sys_migration.fields.details.label": "974694e5c164374e",

@@ -56,16 +56,20 @@
  *      the time of the audit; that workflow has since been deleted outright —
  *      see the ⛔ exclusion note below, which outlives it);
  *   7. its workflow's `pull_request:` trigger exists and carries no `paths:` /
- *      `paths-ignore:`, and, if it names `types:` at all, that list is a
- *      superset of GitHub's default `[opened, synchronize, reopened]`. A
- *      path-filtered trigger produces NO check run on a PR that misses the
- *      glob, and naming `types:` REPLACES (never extends) the default set,
- *      so dropping one of the three from a hand-written list produces NO
- *      check run on that activity — neither is a skip, both are an absence,
- *      which is permanent pending (the audit's `Spec property liveness`
- *      exclusion for the `paths:` half; #8304 for the `types:` half — no
- *      enrolled workflow names `types:` today, and this guard is what makes
- *      growing such a list safe).
+ *      `paths-ignore:`, no `branches:` / `branches-ignore:`, and, if it names
+ *      `types:` at all, that list is a superset of GitHub's default
+ *      `[opened, synchronize, reopened]`. A path-filtered trigger produces NO
+ *      check run on a PR that misses the glob; a BASE-filtered trigger
+ *      produces none on a PR based on a branch outside the filter; and naming
+ *      `types:` REPLACES (never extends) the default set, so dropping one of
+ *      the three from a hand-written list produces NO check run on that
+ *      activity — none of the three is a skip, all are an absence, which is
+ *      permanent pending (the audit's `Spec property liveness` exclusion for
+ *      the `paths:` half; #8304 for the `types:` half — no enrolled workflow
+ *      names `types:` today, and this guard is what makes growing such a list
+ *      safe; #16482 for the `branches:` half, where `branches: [main]` on both
+ *      enrolled workflows meant all six required contexts reported NOTHING on
+ *      every PR based on a feature branch).
  *
  * Plus two whole-registry properties:
  *
@@ -216,6 +220,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(6) the merge_group trigger': 3,
   '(7) a path-filtered pull_request trigger': 4,
   '(7b) a `types:` list that drops a GitHub default': 6,
+  '(7c) a `branches:` filter on the pull_request trigger': 5,
   '(9) the shadowing collision, on the live specimen': 3,
   '(8) a registry that lists one context twice': 1,
   '(10) a `carries` string that embeds a step count': 3,
@@ -234,7 +239,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 22;
+const SELF_TEST_BATTERY_FLOOR = 23;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -969,6 +974,28 @@ export function judge({ registry, workflows }) {
             `.github/workflows/${file}'s \`pull_request:\` trigger carries \`${key}:\`. A path-filtered trigger publishes NO check run ` +
               `on a PR that misses the glob — not a skip, an absence — so every required context in this file sits permanently pending ` +
               `on those PRs (#5617 audit; the \`Spec property liveness\` shape).`,
+          );
+        }
+      }
+      // (7c) a `branches:` / `branches-ignore:` filter on the pull_request
+      // trigger. Same permanent-pending wedge as assertion 7's `paths:` guard,
+      // reached through the OTHER axis of the same trigger: `paths:` decides
+      // which CHANGES run the workflow, `branches:` decides which BASE
+      // branches do. A `pull_request: branches: [main]` filter means a PR
+      // whose base is a feature branch does not start this workflow at all, so
+      // every required context in this file publishes no check run — an
+      // ABSENCE, not a skip, which branch protection holds as permanently
+      // pending. Measured on the #14478 stack (#16482): six card PRs each
+      // showed 8-11 light checks and ZERO of the six required contexts, and
+      // the first real signal arrived only at the trunk PR, after every card
+      // had been written, reviewed and merged.
+      for (const key of ['branches', 'branches-ignore']) {
+        if (pr && typeof pr === 'object' && Object.prototype.hasOwnProperty.call(pr, key)) {
+          problems.push(
+            `.github/workflows/${file}'s \`pull_request:\` trigger carries \`${key}:\`. A base-filtered trigger does not run at all on a PR ` +
+              `whose base branch is outside the filter, so it publishes NO check run there — not a skip, an absence — and every required ` +
+              `context in this file sits permanently pending on every PR based on a feature branch (#16482; the base-branch counterpart to ` +
+              `assertion 7's \`paths:\` guard above). A required context must report for ANY base.`,
           );
         }
       }
@@ -1799,13 +1826,13 @@ async function selfTest() {
   // ── (7) a path-filtered pull_request trigger ─────────────────────────────
   battery('(7) a path-filtered pull_request trigger');
   const pathFiltered = fixture('paths: on ci.yml', 'ci.yml', (s) =>
-    s.replace('  pull_request:\n    branches:\n      - main\n', "  pull_request:\n    branches:\n      - main\n    paths:\n      - 'packages/**'\n"),
+    s.replace('  pull_request:\n', "  pull_request:\n    paths:\n      - 'packages/**'\n"),
   );
   assert(
     pathFiltered.problems.some((p) => p.includes('`paths:`') && p.includes('permanently pending')),
     'a paths-filtered pull_request trigger ⇒ red (it publishes no check run at all, which is not a skip)',
   );
-  const noPr = fixture('drop pull_request from ci.yml', 'ci.yml', (s) => s.replace('  pull_request:\n    branches:\n      - main\n', ''));
+  const noPr = fixture('drop pull_request from ci.yml', 'ci.yml', (s) => s.replace('  pull_request:\n', ''));
   assert(noPr.problems.some((p) => p.includes('no `pull_request:` trigger')), 'a required-context workflow with no pull_request trigger ⇒ red');
 
   // ── (7b) a `types:` list that drops a GitHub default ──────────────────────
@@ -1819,25 +1846,57 @@ async function selfTest() {
   // asserted green at the top of this self-test.
   battery('(7b) a `types:` list that drops a GitHub default');
   const droppedReopened = fixture('grow a types: list that omits reopened onto ci.yml', 'ci.yml', (s) =>
-    s.replace('  pull_request:\n    branches:\n      - main\n', '  pull_request:\n    types: [opened, synchronize]\n    branches:\n      - main\n'),
+    s.replace('  pull_request:\n', '  pull_request:\n    types: [opened, synchronize]\n'),
   );
   assert(
     droppedReopened.problems.some((p) => p.includes('ci.yml') && p.includes("omits GitHub's default activity type(s) 'reopened'")),
     "a hand-restated types: list missing 'reopened' ⇒ red, naming the dropped default (#8304)",
   );
   const droppedTwo = fixture('grow a types: list that omits opened and synchronize onto ci.yml', 'ci.yml', (s) =>
-    s.replace('  pull_request:\n    branches:\n      - main\n', '  pull_request:\n    types: [reopened]\n    branches:\n      - main\n'),
+    s.replace('  pull_request:\n', '  pull_request:\n    types: [reopened]\n'),
   );
   assert(
     droppedTwo.problems.some((p) => p.includes("'opened', 'synchronize'")),
     'dropping two defaults at once ⇒ red naming both, in default order',
   );
   const supersetTypes = fixture('grow a strict-superset types: list onto ci.yml', 'ci.yml', (s) =>
-    s.replace('  pull_request:\n    branches:\n      - main\n', '  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n    branches:\n      - main\n'),
+    s.replace('  pull_request:\n', '  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n'),
   );
   assert(
     supersetTypes.problems.length === 0,
     `a types: list that is a strict superset of the three defaults ⇒ green (got ${JSON.stringify(supersetTypes.problems)})`,
+  );
+
+  // ── (7c) a `branches:` filter on the pull_request trigger ────────────────
+  // The defect #16482 closed, pinned in BOTH directions. Until 2026-09-08 both
+  // enrolled workflows carried `pull_request: branches: [main]`, so a PR based
+  // on a feature branch started NEITHER — and all six required contexts
+  // published no check run at all on every such PR. The green half is the
+  // checked-in baseline (asserted explicitly below rather than left implicit,
+  // because "no key" is exactly the state a one-line edit restores); the red
+  // half re-introduces the filter on each file in turn.
+  battery('(7c) a `branches:` filter on the pull_request trigger');
+  const baseFiltered = fixture('restore branches: [main] on ci.yml', 'ci.yml', (s) =>
+    s.replace('  pull_request:\n', '  pull_request:\n    branches:\n      - main\n'),
+  );
+  assert(
+    baseFiltered.problems.some((p) => p.includes('`branches:`') && p.includes('permanently pending')),
+    'a base-filtered pull_request trigger ⇒ red (it publishes no check run on a feature-branch-based PR, which is not a skip)',
+  );
+  const baseIgnored = fixture('add branches-ignore: to lint.yml', 'lint.yml', (s) =>
+    s.replace('  pull_request:\n', "  pull_request:\n    branches-ignore:\n      - 'claude/**'\n"),
+  );
+  assert(
+    baseIgnored.problems.some((p) => p.includes('`branches-ignore:`') && p.includes('permanently pending')),
+    'branches-ignore: is the same wedge through the negated key ⇒ red',
+  );
+  assert(
+    baseline.problems.length === 0 &&
+      !REQUIRED_CONTEXTS.some((e) => {
+        const pr = triggersOf(parse(sources[e.workflow]))?.pull_request;
+        return pr && typeof pr === 'object' && ('branches' in pr || 'branches-ignore' in pr);
+      }),
+    'the checked-in workflows carry NO base filter on pull_request — the required contexts report for any base (#16482)',
   );
 
   // ── (9) the shadowing collision, on the live specimen ────────────────────

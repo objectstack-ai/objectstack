@@ -174,6 +174,95 @@ describe('applyArtifactForwardConversions — the versioned window (#12772)', ()
   });
 });
 
+/**
+ * ⛔ The artifact door must NOT invent a column constraint (#16693, maintainer
+ * ruling 2026-09-08, option A).
+ *
+ * This is the seam the card measured. `retiredFromLoadPath` does NOT hold a
+ * conversion back here — this module replays the chain with `includeRetired:
+ * true` on purpose — so a conversion that stamped `storage: { notNull: true }`
+ * onto every `required: true` field reached every artifact whose declared
+ * `engines.protocol` FLOOR sat below the running spec. `^17.0.0` is the range
+ * `create-objectstack` stamps, so that was every scaffolded app, from its first
+ * boot: NOT NULL columns nobody asked for, plus a warning instructing the
+ * author to write the same tightening into the source — a `destructive`
+ * `tighten_not_null` migration on any populated database, prescribed as the
+ * remedy for a deprecation notice.
+ *
+ * ADR-0113 is the protocol: `required` is the write-time contract and NOT a
+ * column constraint; `storage.notNull` alone binds the column, and only an
+ * author writes it.
+ */
+describe('the artifact door never stamps a column constraint (ADR-0113, #16693)', () => {
+  const requiredFieldDefinition = (protocolRange: string) => ({
+    manifest: {
+      id: 'app.example.clm', name: 'clm', version: '1.0.0', type: 'app',
+      engines: { protocol: protocolRange },
+    },
+    objects: [{
+      name: 'clm_party',
+      label: 'Party',
+      fields: {
+        name: { type: 'text', label: 'Name', required: true },
+        notes: { type: 'textarea', label: 'Notes' },
+      },
+    }],
+  });
+
+  it('leaves `required: true` alone on an artifact the retired window IS open for', () => {
+    const def = requiredFieldDefinition('^17.0.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.3.0' });
+
+    // ⭐ ANTI-VACUITY, and the whole point of the pin: the window really is
+    // open on this input. A green line below because the door skipped this
+    // artifact entirely would prove nothing.
+    expect(result.verdict).toBe('converted-forward');
+    expect(result.authoredFloor).toBe('17.0.0');
+
+    const fields = (result.definition as { objects: { fields: Record<string, { storage?: unknown; required?: boolean }> }[] })
+      .objects[0]!.fields;
+    expect(fields.name!.required, 'the write contract is untouched').toBe(true);
+    expect(fields.name!.storage, 'no NOT NULL is invented for the author').toBeUndefined();
+    expect(fields.notes!.storage).toBeUndefined();
+    expect(result.notices.map((n) => n.conversionId)).not.toContain('field-required-notnull-explicit');
+    // Copy-on-write: nothing was recognized, so the door hands back the same
+    // reference it was given.
+    expect(result.definition).toBe(def);
+  });
+
+  it('keeps an explicitly declared `storage.notNull` — the author\'s own act still binds the column', () => {
+    const def = requiredFieldDefinition('^17.0.0') as unknown as {
+      objects: { fields: Record<string, Record<string, unknown>> }[];
+    };
+    def.objects[0]!.fields.name!.storage = { notNull: true };
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.3.0' });
+    expect(result.verdict).toBe('converted-forward');
+    expect((result.definition as typeof def).objects[0]!.fields.name!.storage).toEqual({ notNull: true });
+  });
+
+  /**
+   * ⭐ FIRING CONTROL for the two assertions above. They are negatives, so they
+   * are worthless unless this instrument can still be made to say YES in the
+   * same window — a door that had stopped converting anything at all would make
+   * them green for the wrong reason.
+   */
+  it('still replays other retired conversions in that same window (the instrument fires)', () => {
+    const def = legacyPermissionDefinition('^17.0.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.3.0' });
+    expect(result.verdict).toBe('converted-forward');
+    expect(result.notices.length).toBeGreaterThan(0);
+    // A rewrite actually landed on the same floor the assertions above use:
+    // the retired permission bits are gone, and copy-on-write proves it by
+    // handing back a DIFFERENT object than it was given.
+    const objects = (result.definition as { permissions: { objects: Record<string, Record<string, unknown>> }[] })
+      .permissions[0]!.objects;
+    expect(objects.crm_ticket!.allowRestore).toBeUndefined();
+    expect(objects.crm_ticket!.allowPurge).toBeUndefined();
+    expect(objects.crm_ticket!.allowRead, 'only the retired bits move').toBe(true);
+    expect(result.definition).not.toBe(def);
+  });
+});
+
 describe('parseRangeFloor — the range spellings artifacts actually carry', () => {
   it.each([
     ['^17.1.0', [17, 1, 0]],

@@ -77,14 +77,22 @@
 // (scripts/gen-sdui-manifest.sh) is the wrapper that builds objectui at
 // `.objectui-sha`, dumps the manifest, and then runs THIS gate against it.
 //
-// This repository carries no manifest to fall back on. Measured, so the next reader
-// does not have to re-derive it: `packages/console/dist/` is gitignored (the package
-// tracks 4 files, none of them a dist), `scripts/build-console.sh` deliberately does
-// not produce one — it must not drag a browser into the console build, and says so —
-// and the published `@objectstack/console` tarball has none either (16.1.0: 513
-// files, zero `sdui` matches; its `dist/manifest.json` is the PWA manifest), so even
-// the CLI's `@objectstack/console/dist/sdui.manifest.json` fallback resolves to
-// nothing.
+// NOTHING HERE PRODUCES one — but since #13446 one is CHECKED IN. The production
+// half is unchanged and still measured: `packages/console/dist/` is gitignored (the
+// package tracks 4 files, none of them a dist), `scripts/build-console.sh`
+// deliberately does not produce one — it must not drag a browser into the console
+// build, and says so — and the published `@objectstack/console` tarball has none
+// either (16.1.0: 513 files, zero `sdui` matches; its `dist/manifest.json` is the PWA
+// manifest), so even the CLI's `@objectstack/console/dist/sdui.manifest.json`
+// fallback resolves to nothing.
+//
+// What DID change is the fallback: `sdui.manifest.json` is committed at the
+// repository root, `scripts/sdui-manifest.record.json` pins it to the `.objectui-sha`
+// it was dumped from, and `lint.yml` runs this gate against it on every PR
+// (`MANIFEST="$PWD/sdui.manifest.json"`). ⛔ So do not read a non-zero exit here as
+// "no input available": the input is in the tree, and the refusal text now probes for
+// it rather than asserting its absence (#16715 — `./manifest-prescription.ts`, which
+// carries what that stale assertion cost).
 //
 // Therefore "no manifest" never means "nothing to check" here. It means THIS GATE
 // DID NOT RUN — reported as exit 1, not as a `⚠` and exit 0. Until #4690 the two
@@ -113,7 +121,10 @@
 process.env.OS_EAGER_SCHEMAS = '1';
 
 import fs from 'fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import { manifestPrescription, repoManifestIsCheckedIn } from './manifest-prescription';
 import { REACT_BLOCKS } from '../src/ui/react-blocks';
 import { ComponentPropsMap } from '../src/ui/component.zod';
 import { PageComponentSchema } from '../src/ui/page.zod';
@@ -294,35 +305,25 @@ function manifestInputs(manifest: any, schemaType: string): string[] | null {
 }
 
 /**
- * The prescription every "could not run" exit carries.
+ * The repository root, resolved from THIS FILE's own location.
  *
- * A refusal is only better than a skip if the reader can act on it. The manifest's
- * provenance is two repos away from whoever hits this — it is dumped from objectui's
- * registry in a browser — so the exit that replaced the skip has to hand over the
- * whole path, not just the missing variable's name.
+ * Not from `process.cwd()` and not from an env var: the prescription's whole job is
+ * to tell a reader where the manifest is, and a cwd-derived answer would be wrong for
+ * exactly the reader who is lost. `packages/spec/scripts/` → three levels up.
  */
-const MANIFEST_PRESCRIPTION = [
-  '',
-  '  The registry side of this comparison is objectui\'s sdui.manifest.json, and this',
-  '  repository contains no copy of it: packages/console/dist/ is gitignored, the console',
-  '  build deliberately does not produce one (it must not pull in a browser), and the',
-  '  published @objectstack/console ships none either. Produce one, then re-run:',
-  '',
-  '    pnpm objectui:build     # build + vendor the console at the pinned .objectui-sha',
-  '    pnpm sdui:manifest      # dump the manifest in a browser AND run this ratchet',
-  '',
-  '  Against a sibling objectui checkout, point the build at it first:',
-  '',
-  '    OBJECTUI_ROOT=../objectui pnpm objectui:build && pnpm sdui:manifest',
-  '',
-  '  Or, with a manifest already in hand:',
-  '',
-  '    MANIFEST=/path/to/sdui.manifest.json \\',
-  '      pnpm --filter @objectstack/spec check:react-declaration-parity \\',
-  '      --baseline react-declaration-parity.baseline.json --strict',
-  '',
-  '  (the dump needs a browser: pnpm exec playwright install chromium-headless-shell)',
-].join('\n');
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+
+/**
+ * The prescription every "could not run" exit carries — probed, not asserted.
+ *
+ * Text and probe live in `./manifest-prescription.ts` so both branches (a manifest
+ * checked in at the root, and none) are unit-testable without a repository that has
+ * to be in two states at once. #16715 is what a single unprobed branch cost.
+ */
+const MANIFEST_PRESCRIPTION = manifestPrescription({
+  repoRoot: REPO_ROOT,
+  checkedIn: repoManifestIsCheckedIn(REPO_ROOT),
+});
 
 /**
  * Exit loudly because the gate could not run — never because it ran and disagreed.

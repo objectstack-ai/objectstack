@@ -134,7 +134,7 @@ Each node performs a specific action in the flow.
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| `id` | `string` | ✅ | Unique node identifier |
+| `id` | `string` | ✅ | Unique node identifier — unique across the **whole flow**: the top-level `nodes[]` and every region body (`loop.body`, `parallel.branches[]`, `try_catch.try` / `.catch`, at any depth) share one id space, and `FlowSchema` refuses a reused id at parse (`Duplicate node id …`, naming both locations) |
 | `type` | `string` | ✅ | Node type — a built-in id from the table above **or** a plugin-registered one. Per ADR-0018 the spec does not gate this with a closed enum; it is checked against the live action registry once that registry is complete — plugins contribute node types while they start, so flows registered during boot are checked in one pass when the vocabulary closes (all plugins started), and anything registered after that (Studio publish, dev reload) is checked immediately. Unknown types warn, never reject; executing one fails with `NO_EXECUTOR` |
 | `label` | `string` | ✅ | Display label |
 | `config` | `object` | optional | Type-specific configuration — the registered executor's `configSchema` owns its shape. Keys that schema does not declare are rejected at `registerFlow()`, and the built-in executors `parse()` the value against their Zod contract before running (#4277) |
@@ -496,7 +496,11 @@ a malformed construct is rejected before the flow can run.
 A region runs in the **enclosing variable scope** (the iterator value and any
 body mutations are visible to the surrounding flow) — it is *not* a separate
 `subflow` invocation. The container node's ordinary out-edges are the
-"after-loop / after-block" continuation.
+"after-loop / after-block" continuation. "Self-contained" describes control
+flow and variable scope, not ids: node ids are **one space across the whole
+flow**, so a region node may not reuse an id declared at the top level or in
+any other region — the collision is refused at parse (see `id` under
+[Node Structure](#node-structure)).
 
 ### Loop container
 
@@ -1730,6 +1734,8 @@ curl -b cookies.txt -X POST \
 | `GET /api/v1/automation/:name/runs/:runId` | One run's detail (404 `Execution not found`). Requires read on `sys_automation_run` — see [Observing runs](#observing-runs) |
 | `POST /api/v1/automation/:name/runs/:runId/resume` | Resume a paused run — body `{ inputs, output, branchLabel }` |
 | `GET /api/v1/automation/:name/runs/:runId/screen` | The pending screen of a screen-flow run |
+| `POST /api/v1/automation/:name/runs/:runId/cancel` | Cancel a suspended run (ADR-0044) — `PLATFORM_ADMIN` posture only (`isSystem` bypass); body `{ reason? }`. `501 NOT_IMPLEMENTED` when the service does not declare the verb |
+| `POST /api/v1/automation/:name/runs/:runId/restore-suspension` | Re-arm a run stranded by a failed resume — same gate as `cancel`; body `{ reason? }`. `501 NOT_IMPLEMENTED` when the service does not declare the verb |
 
 **Failures answer real HTTP status codes.** A flow that does not run is not a
 `200`. The route classifies five outcomes, and it reads the engine's own verdict

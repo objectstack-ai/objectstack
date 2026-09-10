@@ -1,6 +1,6 @@
 # ADR-0053: `date` is a timezone-naive calendar day; `datetime` is an instant rendered in a reference timezone
 
-**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 resolved 2026-07-30: `temporalFilterValue` + `temporalFilterColumnSql` are optional `IDataDriver` contract members with identity semantics, and analytics types its driver seam from the contract. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942). **Extended (2026-07-30, addendum D-C1..D-C3):** `Field.time` takes the same construction — canonical `HH:MM:SS[.fff]` wall-clock text, one function on write/filter/read, `TIME(3)` on MySQL, UTC `NOW()` defaults on every dialect (#3994). **Extended (2026-09-07, addendum D-F1..D-F3):** the READ side takes the same canon — every `@objectstack/driver-sql` record read door but `findWithWindowFunctions` (#16609) presents `Field.datetime` values and the builtin `created_at` / `updated_at` audit stamps as the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text on every dialect, folded at the driver's read boundary with the client parsers untouched; those doors never hand out a JS `Date` for those columns, save an Invalid `Date`, which has no canonical text and passes through unchanged (#13973, maintainer ruling B1 narrow, 2026-09-02).
+**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 resolved 2026-07-30: `temporalFilterValue` + `temporalFilterColumnSql` are optional `IDataDriver` contract members with identity semantics, and analytics types its driver seam from the contract. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942). **Extended (2026-07-30, addendum D-C1..D-C3):** `Field.time` takes the same construction — canonical `HH:MM:SS[.fff]` wall-clock text, one function on write/filter/read, `TIME(3)` on MySQL, UTC `NOW()` defaults on every dialect (#3994). **Extended (2026-09-07, addendum D-F1..D-F3):** the READ side takes the same canon — every `@objectstack/driver-sql` record read door ~~but `findWithWindowFunctions` (#16609)~~ presents `Field.datetime` values and the builtin `created_at` / `updated_at` audit stamps as the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text on every dialect, folded at the driver's read boundary with the client parsers untouched; those doors never hand out a JS `Date` for those columns, save an Invalid `Date`, which has no canonical text and passes through unchanged (#13973, maintainer ruling B1 narrow, 2026-09-02). **Corrected 2026-09-08 (#16609 / PR #16716):** that exception is gone — `findWithWindowFunctions` now routes each row through the same `formatOutput` pass, so those two column classes present as the same canonical text there, with the window ALIAS columns carved out (a computed alias wins the key and its value stays raw). D-F1 rules those two classes and no more: the other presentations that pass applies at that door are #16609's contract, not this ADR's.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0032](./0032-unified-expression-layer.md) (unified expression layer — CEL dialect, `today()`/`daysFromNow()`), [ADR-0014](./0014-record-form-field-type.md) (field types)
 **Consumers**: `@objectstack/spec` (`Field.date`/`Field.datetime`), `@objectstack/driver-sql` (`coerceFilterValue`, `formatInput`/`formatOutput`, `dateFields`/`datetimeFields`), `@objectstack/formula` (`stdlib` time functions, `cel-engine` hydration), `@objectstack/objectql` (`applyFormulaPlan`), schedule/cron executors, report/analytics date bucketing, `sys-user-preference.timezone`.
@@ -1078,8 +1078,21 @@ Postgres and MySQL alike, exactly as SQLite always did:
 
 None of these doors hands out a JS `Date` for these columns, save the one
 shape D-F3 names: an Invalid `Date`, which has no canonical text and passes
-through unchanged. `findWithWindowFunctions` is not one of these doors (see
-Consequences; #16609). Declared = enforced:
+through unchanged. ~~`findWithWindowFunctions` is not one of these doors (see
+Consequences; #16609).~~ — **corrected 2026-09-08 (#16609 / PR #16716): it is
+one of them now, for these two column classes.** It routes each row through the
+same `formatOutput` pass `find()` runs, minus the window ALIAS columns: a
+computed alias wins the key and its value stays raw (`select *` plus an
+`... as ok` window projection yields two `ok` columns and the row object keeps
+the LAST), so no declared field's presentation rule is ever applied to a
+computed value. That pass moves more than this addendum rules — the
+`external.columnMap` row-KEY rename, `Field.object`/JSON, numeric strings,
+`Field.boolean`, `Field.date` and `Field.time` — and D-F1 governs, at that door
+exactly as at the doors listed above, ONLY the two instant classes named here;
+the rest of that pass is #16609's contract, pinned by
+`sql-driver-window-function-output.test.ts` (door-to-door agreement with
+`find()` on SQLite; the Postgres and MySQL cells under `Temporal Conformance
+(live PG + MySQL)`). Declared = enforced:
 `sql-driver-13973-canonical-iso-read-door.test.ts` asserts it per cell of the
 D-A3 driver axis for every door listed — `bulkCreate()` over the rows a
 dialect's bulk insert returns (MySQL, with no `RETURNING`, returns none, and
@@ -1154,9 +1167,17 @@ itself.
   `Date` arm sits beside it.
 - D-A3's matrix gains the read-shape cell. `Temporal Conformance (live PG +
   MySQL)` is the job that proves it; its package set is not widened.
-- Not covered: `findWithWindowFunctions`, which applies no read presentation of
+- ~~Not covered: `findWithWindowFunctions`, which applies no read presentation of
   any kind today (booleans, dates and JSON included) — a pre-existing gap of its
-  own, recorded rather than folded in.
+  own, recorded rather than folded in.~~ — **corrected 2026-09-08 (#16609 / PR
+  #16716): that gap was a card of its own and it landed.** The door now runs
+  each row through the same `formatOutput` pass `find()` runs, so it presents
+  the two instant classes D-F1 rules exactly as the doors listed above do — and
+  also the classes D-F1 does NOT rule (the `external.columnMap` row-KEY rename,
+  `Field.object`/JSON, numeric strings, `Field.boolean`, `Field.date`,
+  `Field.time`), which are #16609's contract rather than this ADR's. Carved out
+  at that door: the window ALIAS columns — a computed alias wins the key and its
+  value stays raw.
 
 ### Options not taken
 

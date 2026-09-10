@@ -58,15 +58,22 @@
  * in for them. A bare `typeof` check would pass for reasons unrelated to the
  * `.datetime()` refinement that is the sharp edge here.
  *
- * §D is the #14078 NEUTRALITY pin and is load-bearing for this card's scope:
- * an Invalid `Date` must reach the consumer UNCHANGED, exactly as these casts
- * pass it through today. #14078 has since ruled (option B, 2026-09-02) and the
- * shared `canonicalIsoInstant` spelling is now TOTAL — it answers `undefined`
- * for that shape rather than raising `RangeError: Invalid time value`. The two
- * helpers still differ across the REST of the input domain, so §D keeps its
- * job unchanged: it goes red the moment someone swaps the other spelling in,
- * which is now the separately-tracked consolidation decision #16422 rather
- * than an open ruling.
+ * §D WAS the #14078 neutrality pin — "an Invalid `Date` must reach the
+ * consumer UNCHANGED, exactly as these casts pass it through" — written to go
+ * red the moment anyone swapped the shared spelling in. #16422 made that swap
+ * DELIBERATELY, so §D is rewritten as the RULED pin rather than kept or
+ * deleted, and it now asserts the terminal value chosen at each boundary.
+ * They are NOT one value: `MetadataRecord.createdAt` / `.updatedAt` are
+ * `.optional()` and take `undefined`, while `MetadataHistoryRecord.recordedAt`
+ * is REQUIRED and takes the epoch from `recordedAtFallback()` — the site this
+ * card was filed for, and the one with no legal terminal value at all before
+ * the change.
+ *
+ * ⚠️ The casts those lines carried (`as string | undefined`, `as string`) are
+ * gone, not restated: `canonicalIsoInstant` RETURNS `string | undefined`, so
+ * the declared type is a measurement now. §A/§B/§C are unchanged — a valid
+ * `Date` and a canonical string were never shapes the two helpers disagreed
+ * on.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -283,32 +290,81 @@ describe('#14037 — DatabaseLoader adapter boundaries emit the declared ISO str
     });
   });
 
-  describe('§D #14078 neutrality — an Invalid Date is NOT converted here', () => {
+  describe('§D [#16422] RULED — the terminal value per site, and the schemas now accept it', () => {
     /**
-     * ⛔ This card does not decide #14078. An Invalid `Date` is measured
-     * reachable on both live dialects (a MySQL zero datetime; any Postgres
-     * year in 275760..294276), and whether the shared canonical-ISO spelling
-     * should throw on it (option A) or fall back to a rendering (option B) is
-     * a maintainer call across four packages. Until it is ruled, these sites
-     * hand that one shape through exactly as they do today — no new throw, no
-     * invented rendering. This case is what makes that a pin rather than a
-     * claim.
+     * This section was the #14078 NEUTRALITY pin, asserting these boundaries
+     * hand an Invalid `Date` through UNCHANGED. It was written to go red on
+     * exactly the swap #16422 then performed, and is rewritten rather than
+     * deleted because that swap was deliberate and carries its own evidence.
+     *
+     * The card exists because `MetadataHistoryRecord.recordedAt` is a REQUIRED
+     * `z.string().datetime()` for which NONE of the three candidate answers
+     * was legal: the visible text `"Invalid Date"` fails the refinement,
+     * `undefined` fails the required field, and the pass-through fed it a
+     * `Date` object, which fails both. The third answer is a caller-side
+     * default — `recordedAtFallback()`, the epoch — and this is its pin.
+     *
+     * `MetadataRecord.createdAt` / `.updatedAt` are `.optional()`, so their
+     * terminal value is `undefined` and no default is invented there. Two
+     * different answers on purpose; a single one would have been the tell that
+     * nobody followed each site to its declared schema.
      */
     const INVALID = new Date(NaN);
 
-    it('hands the value through unchanged instead of raising RangeError', async () => {
+    it('recordedAt: the epoch, and MetadataHistoryRecordSchema now accepts the record', async () => {
       expect(INVALID).toBeInstanceOf(Date);
       expect(Number.isNaN(INVALID.getTime())).toBe(true);
-      // The contested spelling's `Date` arm, on this input, for contrast.
+      // Non-vacuity: the shape really is the one with no canonical text.
       expect(() => INVALID.toISOString()).toThrow(RangeError);
 
       tables.sys_metadata_history.push(historyRow({ recorded_at: INVALID }));
 
       const record = await loader.getHistoryRecord('view', 'case_grid', 3);
-      expect(record!.recordedAt).toBe(INVALID);
 
-      const viaRecord = rowToRecordVia(loader, metadataRow({ updated_at: INVALID }));
-      expect(viaRecord.updatedAt).toBe(INVALID);
+      expect(record!.recordedAt).toBe(new Date(0).toISOString());
+      // ⛔ NOT the retired pass-through, which is what this section used to
+      // assert and what the declared schema refused.
+      expect(record!.recordedAt).not.toBe(INVALID as unknown as string);
+
+      const parsed = MetadataHistoryRecordSchema.safeParse(record);
+      expect(parsed.success, JSON.stringify((parsed as { error?: { issues: unknown } }).error?.issues)).toBe(true);
+    });
+
+    it('queryHistory takes the same terminal value — the two doors do not drift', async () => {
+      tables.sys_metadata_history.push(historyRow({ recorded_at: INVALID }));
+
+      const { records } = await loader.queryHistory('view', 'case_grid');
+
+      expect(records[0].recordedAt).toBe(new Date(0).toISOString());
+      expect(MetadataHistoryRecordSchema.safeParse(records[0]).success).toBe(true);
+    });
+
+    it('createdAt / updatedAt: `undefined`, because the declared field is optional', () => {
+      const viaRecord = rowToRecordVia(loader, metadataRow({ created_at: INVALID, updated_at: INVALID }));
+
+      expect(viaRecord.updatedAt).toBeUndefined();
+      expect(viaRecord.createdAt).toBeUndefined();
+      // ⛔ Specifically NOT the epoch: inventing a creation instant for a
+      // field the schema lets be absent would be a fabricated fact.
+      expect(viaRecord.updatedAt).not.toBe(new Date(0).toISOString());
+
+      expect(MetadataRecordSchema.safeParse(viaRecord).success).toBe(true);
+    });
+
+    it('a `null` column reaches the same terminal values — not just the Invalid `Date`', async () => {
+      // The neutrality version measured ONE shape. The collapse moved four,
+      // and `null` is the one a reader is most likely to assume was already
+      // handled: it used to arrive as a literal `null` in fields declared
+      // `string | undefined`, which both schemas refused.
+      tables.sys_metadata_history.push(historyRow({ recorded_at: null }));
+      const record = await loader.getHistoryRecord('view', 'case_grid', 3);
+      expect(record!.recordedAt).toBe(new Date(0).toISOString());
+      expect(MetadataHistoryRecordSchema.safeParse(record).success).toBe(true);
+
+      const viaRecord = rowToRecordVia(loader, metadataRow({ created_at: null, updated_at: null }));
+      expect(viaRecord.createdAt).toBeUndefined();
+      expect(viaRecord.updatedAt).toBeUndefined();
+      expect(MetadataRecordSchema.safeParse(viaRecord).success).toBe(true);
     });
   });
 });

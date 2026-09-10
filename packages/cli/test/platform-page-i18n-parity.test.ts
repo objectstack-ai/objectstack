@@ -29,7 +29,7 @@ import {
 import { CONNECT_AGENT_UI_BUNDLE } from '@objectstack/mcp';
 import { SetupAppTranslations } from '@objectstack/platform-objects';
 import * as PlatformPages from '@objectstack/platform-objects/pages';
-import { PAGE_COMPONENT_COPY_KEYS, translatePage } from '@objectstack/spec/system';
+import { PAGE_COMPONENT_COPY_KEYS, translatePage, walkAddressedPageComponents } from '@objectstack/spec/system';
 import { collectExpectedEntries } from '../src/utils/i18n-extract.js';
 
 /** The pages exactly as the plugins register them with the kernel. */
@@ -289,18 +289,24 @@ const walkParityPage = (): Record<string, any> => ({
               null,
             ],
             // NOT descended by `translatePage`: `body`/`footer` are a
-            // renderer-side back-compat fallback, and `items[].children` sits
-            // one level deeper than the slot the ruling names.
+            // renderer-side back-compat fallback, not an authorable
+            // composition spelling.
             body: [{ id: 'card_body_child', type: 'object-metric', properties: { title: 'Body child' } }],
             footer: [{ id: 'card_footer_child', type: 'object-metric', properties: { title: 'Footer child' } }],
-            items: [{ children: [{ id: 'tab_child', type: 'object-metric', properties: { title: 'Tab child' } }] }],
+            // DESCENDED since #16772 — a `page:tabs` / `page:accordion`
+            // panel's `items[].children`, one level below the container.
+            items: [{ label: 'Panel', children: [{ id: 'tab_child', type: 'object-metric', properties: { title: 'Tab child' } }] }],
           },
         },
       ],
     },
   ],
-  // NOT walked by `translatePage` at all — it maps `regions` only.
-  slots: { aside: { id: 'slot_child', type: 'object-metric', properties: { title: 'Slot child' } } },
+  // A ROOT since #16772 — a `kind: 'slotted'` page authors its components
+  // here (one component or an array per slot); walked after the regions.
+  slots: {
+    aside: { id: 'slot_child', type: 'object-metric', properties: { title: 'Slot child' } },
+    details: [{ id: 'slot_list_child', type: 'record:details', properties: { title: 'Slot list child' } }],
+  },
 });
 
 /** A container chain deeper than the resolver's descent cap. */
@@ -370,15 +376,44 @@ describe('i18n-extract ↔ translatePage walk parity (#13109)', () => {
     const page = walkParityPage();
     expect([...idsExtractorOffers(page)].sort()).toEqual([
       'card', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header', 'region_metric',
+      'slot_child', 'slot_list_child', 'tab_child',
     ]);
-    // `card_body_child`, `card_footer_child`, `tab_child` and `slot_child` are
-    // absent from BOTH sides — the shapes `translatePage` does not descend.
+    // `card_body_child` and `card_footer_child` are absent from BOTH sides —
+    // the shapes `translatePage` does not descend. `tab_child`, `slot_child`
+    // and `slot_list_child` are present on BOTH sides since #16772 widened
+    // the shared walk to `items[].children` and to the `slots.<slot>` roots.
     // `hdr` — the region-level `page:header` — is absent from BOTH sides since
     // the ruling. `nested_header` stays: a `page:header` inside a container is
     // reached by the id route only, so the id key is the only key it has.
     expect([...idsResolverApplies(page)].sort()).toEqual([
       'card', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header', 'region_metric',
+      'slot_child', 'slot_list_child', 'tab_child',
     ]);
+  });
+
+  it('offers and reads the page-name header route for a `slots.header` page:header — a slotted page has a header too (#16772)', () => {
+    const page = {
+      name: 'slotted_header_page',
+      label: 'Contract',
+      kind: 'slotted',
+      regions: [],
+      slots: {
+        header: { id: 'hdr', type: 'page:header', properties: { title: 'Contract detail', subtitle: 'Lifecycle' } },
+      },
+    };
+    const offered = collectExpectedEntries({ pages: [page] } as any)
+      .filter((e) => e.path[0] === 'pages' && e.path[1] === page.name)
+      .map((e) => e.path.slice(2).join('.'))
+      .sort();
+    // Page-name route offered; the id route NOT offered for a root-level
+    // header, exactly as for a region-level one.
+    expect(offered).toEqual(['label', 'subtitle', 'title']);
+
+    const bundle = {
+      en: { pages: { slotted_header_page: { title: 'T::title', subtitle: 'T::subtitle', components: { hdr: { title: 'ID-ROUTE' } } } } },
+    } as any;
+    const out = translatePage(page as any, bundle, { locale: 'en' });
+    expect(out.slots.header.properties).toEqual({ title: 'T::title', subtitle: 'T::subtitle' });
   });
 
   // ── The ruled invariant, pinned directly (decision batch #58, 2026-09-06) ──
@@ -756,22 +791,35 @@ describe('shipped platform record pages -- i18n ownership (#14817)', () => {
     expect(SHIPPED_LOCALES.length).toBeGreaterThan(1);
   });
 
-  it('records that the extractor reaches the page label and nothing under `slots`', () => {
-    // A BOUNDARY PIN, not an endorsement. It states the measured fact that the
-    // shared walk roots at `regions[].components[]` and these pages author
-    // `regions: []`, so the 45 inline sites under `slots.*` have no bundle
-    // face. If the walk is ever widened -- a maintainer decision open on
-    // #14749 -- this reds, and the person widening it is told, at the exact
-    // moment they can act on it, that these three pages gain a bundle surface
-    // that needs entries and a coverage home. That notice is the whole value:
-    // today the same change would land green over an unmeasured population.
+  it('records that the walk now reaches under `slots`, that these pages author no component id there, and so the extractor still offers the label alone', () => {
+    // A BOUNDARY PIN, not an endorsement — re-measured, and the reason moved.
+    // Until #16772 `offered: ['label']` held because the shared walk rooted at
+    // `regions[].components[]` and these pages author `regions: []`: the 45
+    // inline sites under `slots.*` were UNREACHABLE. #16772 widened the walk
+    // to the `slots.<slot>` roots and to `items[].children`, and the notice the
+    // old pin promised fired — so this is the answer to it, measured off the
+    // documents: the walk now VISITS every component under `slots` (`reached`
+    // below), and not one of them carries an `id`, so nothing is addressable
+    // by `pages.<name>.components.<id>` and the extractor still offers the
+    // page label alone. These pages gained no bundle surface, need no entries,
+    // and their coverage home stays this file (the inline-map case below).
+    // Both halves are held so the next change is told precisely: `reached`
+    // reds if the roots narrow again; `offered` grows the day one of these
+    // components takes an id, and that component then needs a bundle entry.
     for (const page of RECORD_PAGES) {
+      let visited = 0;
+      let addressed = 0;
+      walkAddressedPageComponents(page as any, (component, ctx) => {
+        visited += 1;
+        if (ctx.addressed) addressed += 1;
+        return component;
+      });
       const offered = collectExpectedEntries({ pages: [page] } as any)
         .filter((e) => e.path[0] === 'pages' && e.path[1] === page.name)
         .map((e) => e.path.slice(2).join('.'))
         .sort();
-      expect({ page: page.name, regions: page.regions, offered })
-        .toEqual({ page: page.name, regions: [], offered: ['label'] });
+      expect({ page: page.name, regions: page.regions, reached: visited > 0, addressed, offered })
+        .toEqual({ page: page.name, regions: [], reached: true, addressed: 0, offered: ['label'] });
     }
   });
 

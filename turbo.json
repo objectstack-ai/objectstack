@@ -96,6 +96,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/**/package.json"
       ]
     },
@@ -108,6 +109,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/scripts/nightly-tiers.mjs",
         "$TURBO_ROOT$/scripts/nightly-tiers.d.mts",
         "$TURBO_ROOT$/packages/verify/src/**",
@@ -137,6 +139,7 @@
         "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml",
         "$TURBO_ROOT$/packages/create-objectstack/bin/create-objectstack.js",
         "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/package.json",
+        "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/.github/workflows/ci.yml",
         "$TURBO_ROOT$/scripts/sync-scaffold-emission-policy.mjs",
         "$TURBO_ROOT$/packages/drivers/driver-sql/src/sql-driver.ts",
         "$TURBO_ROOT$/packages/drivers/driver-sql/src/schema-drift.ts",
@@ -152,6 +155,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/runtime/src/route-ledger.ts",
         "$TURBO_ROOT$/packages/rest/src/rest-route-ledger.ts",
         "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.ts",
@@ -179,6 +183,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/cli/src/commands/**",
         "$TURBO_ROOT$/packages/metadata-protocol/src/**",
         "$TURBO_ROOT$/packages/objectql/src/validation/**",
@@ -234,6 +239,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/**/*.object.ts",
       "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
       "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
@@ -311,6 +317,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/**/*.object.ts",
         "$TURBO_ROOT$/packages/core/src/security/**",
         "$TURBO_ROOT$/packages/runtime/src/**",
@@ -378,6 +385,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/spec/src/security/**",
         "$TURBO_ROOT$/packages/spec/src/identity/**"
       ]
@@ -391,6 +399,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/client/src/**",
         "$TURBO_ROOT$/packages/mcp/src/**",
         "$TURBO_ROOT$/packages/plugins/plugin-hono-server/src/**",
@@ -428,6 +437,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/spec/src/security/rls.zod.ts",
         "$TURBO_ROOT$/skills/objectstack-formula/**"
       ]
@@ -453,6 +463,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/spec/src/**",
         "$TURBO_ROOT$/packages/spec/package.json"
       ]
@@ -466,6 +477,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/content/**",
         "$TURBO_ROOT$/scripts/sync-template-versions.mjs",
         "$TURBO_ROOT$/scripts/invoked-as.mjs",
@@ -503,6 +515,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/**/*.object.ts",
         "$TURBO_ROOT$/packages/lint/src/**",
         "$TURBO_ROOT$/content/docs/references/**",
@@ -543,6 +556,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/**/*.ts"
       ]
     },
@@ -554,6 +568,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/**/*.ts"
       ]
     },
@@ -565,6 +580,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
         "$TURBO_ROOT$/packages/**/*.ts",
@@ -579,6 +595,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/packages/**/*.ts",
         "$TURBO_ROOT$/scripts/cross-package-test-inputs.mjs"
       ]
@@ -591,6 +608,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "!**/node_modules/**",
         "$TURBO_ROOT$/content/docs/protocol/objectql/state-machine.mdx",
         "$TURBO_ROOT$/skills/objectstack-automation/SKILL.md",
         "$TURBO_ROOT$/content/**",

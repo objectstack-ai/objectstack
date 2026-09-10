@@ -1,5 +1,507 @@
 # Changelog
 
+## 17.4.0
+
+### Minor Changes
+
+- cfb64a6: `createHonoApp` mounts the auth surface where the auth service actually serves, and refuses a prefix it cannot serve it under.
+  
+  The documented embed did not reach better-auth at all. `createHonoApp` mounted `/auth/*` under its own `prefix` (default `/api`) while `AuthPlugin` configures better-auth with `basePath: '/api/v1/auth'`, so the two never intersected. The forwarded request could only 404, that 404 fell through to the terminal dispatcher catch-all, and the caller got a `200` with an empty body. Measured on a real kernel with `AuthPlugin`, driving `createHonoApp({ kernel })` with both defaults untouched:
+  
+  ```
+  POST /api/auth/sign-in/email   (valid shape, wrong password)  ->  200  {}
+  GET  /api/auth/get-session                                    ->  200  {}
+  POST /api/auth/sign-up/email                                  ->  200  {}
+  ```
+  
+  A failed sign-in answering `200 {}` is the silent-success shape: a client that reads `res.ok` sends the user into an authenticated view with no session. The same boot now answers, through the same embed:
+  
+  ```
+  POST /api/v1/auth/sign-in/email  (wrong password)  ->  401  {"message":"Invalid email or password","code":"INVALID_EMAIL_OR_PASSWORD"}
+  GET  /api/v1/auth/get-session                      ->  200  null
+  POST /api/v1/auth/delete-user                      ->  401  {"message":"Unauthorized","code":"UNAUTHORIZED"}
+  ```
+  
+  **Neither default moves.** `prefix` still defaults to `/api` and the auth `basePath` still defaults to `/api/v1/auth`. What changed is which of the two decides the mount:
+  
+  - **`@objectstack/hono`** — the `/auth/*` mount is derived from the auth service's configured `basePath`, read at app-construction time, rather than from `prefix`. An auth service that does not expose its base path keeps the previous `${prefix}/auth` mount, so a custom or older auth service is unaffected.
+  - **`@objectstack/hono`** — a `prefix` the auth base path is not inside now **refuses at construction**, naming both values and every one-line fix that actually constructs: move the app up to the base path's own parent namespace, or configure better-auth down under the prefix (carrying the leading slash the prefix may itself be missing). ⛔ A direction with no working answer is not offered rather than offered wrongly — a single-segment base has no usable parent prefix, because `''` falls back to `/api` and `'/'` mounts every other route of the app under `//`. Previously that composition served auth outside the namespace the host asked for while `${prefix}/auth/*` answered `200 {}`. This is the one behaviour that can stop an app booting: a deployment passing, say, `prefix: '/custom'` alongside the default auth base path was already not serving auth, and now says so instead of failing silently.
+  - **`@objectstack/plugin-auth`** — `AuthManager.getBasePath()` is new and public: the configured base path in its one normalised spelling (a leading slash added when absent, trailing slashes stripped), which is the spelling an HTTP adapter can mount on. ⛔ **Purely additive — no configured `basePath` changes anything this package does.** better-auth is still handed the configured string verbatim, and the route-ownership walk still normalises its own copy; that copy now reads this accessor instead of repeating the expression. ⛔ It is **not** the string better-auth receives, and it is **not** the single definition of the value. `getAuthIssuer()` and `getMcpResourceUrl()` still derive their own copies and are deliberately unchanged: they are the OAuth `iss` this AS advertises and the RFC 8707 resource identifier a token's `aud` is matched against, both compared by exact string by relying parties, so retiring their copies moves published identifiers and is not a tidy-up that belongs on this card (filed as #16399). Normalising the string handed to better-auth is that same move seen from the other side — it shifts the access-token `iss` off `getAuthIssuer()`, and this manager's own `verifyMcpAccessToken` then rejects every MCP token the deployment mints. Measured on a real `client_credentials` token, and not done.
+- 142c01c: MCP OAuth can complete again: the MCP resource is registered as an RFC 8707 resource and DCR-registered clients are linked to it, so `authorize?resource=<mcp url>` no longer answers `invalid_target`.
+  
+  On 17.3.0 no MCP client could ever obtain a token. `plugin-auth` configured `@better-auth/oauth-provider` with `validAudiences: [authIssuer, mcpResourceUrl]`, an option the pinned 1.7.2 does not read — the string does not occur once in its dist. In 1.7.2 a requested `resource` is resolved from the `oauthResource` table (`sys_oauth_resource`) and `enforcePerClientResources` defaults to `true`, so the client must also be linked in `oauthClientResource` (`sys_oauth_client_resource`). Neither row was ever written, so every client that sends `resource=` — Claude Code does — was refused at `/oauth2/authorize` with `invalid_target: requested resource <mcp url> is not configured`. Discovery, dynamic client registration and the login page all worked; the flow died one step before consent.
+  
+  - **`resources: [mcpResourceUrl]`** seeds the `sys_oauth_resource` row from the provider's own `init`. Seeding is idempotent and defaults to `insertOnly`, so an administrator's later edits to the row's token policy are never reverted by a restart.
+  - **`clientRegistrationDefaultResources: [mcpResourceUrl]`** links each newly registered client to that resource inside the DCR transaction. This is the only place the link can be made: a client registers anonymously about one second before the browser login, leaving no window for an administrator to insert the row by hand.
+  - **`enforcePerClientResources` is left at its `true` default.** The per-client linkage check stays on — the fix makes the link exist rather than switching the check off. A client with no link row is still refused with `invalid_target`, and a test asserts that.
+  - **`validAudiences` is removed.** It was passed and read by nobody, which is precisely how the defect survived a version bump: it looked like configuration and enforced nothing.
+  
+  Two boot-path defects the resource seed uncovered are fixed in the same change, because seeding is the first thing this package ever wrote from a plugin `init`:
+  
+  - **`getAuthInstance()` now settles better-auth's plugin `init` hooks before it resolves.** `betterAuth()` returns synchronously and runs those hooks behind `auth.$context`, so a failure inside one had no catcher and escaped as an unhandled rejection — which Node terminates the process for by default. A boot failure now rejects the call that asked for the instance.
+  - **The no-`dataEngine` development fallback builds its own in-memory adapter instead of letting better-auth build one.** better-auth 1.7.2 keys that store by the schema *key* while every read resolves by `modelName`, so on that path every model this package renames was unreachable — `user`/`sys_user` as much as `oauthResource`/`sys_oauth_resource` — answering `Model <name> not found`. Production never took this branch (it uses the ObjectQL adapter); development and tests did.
+  
+  No configuration change is required. Deployments that already ran 17.3.0 get the resource row on the next boot; MCP clients that failed to connect need to reconnect so a fresh registration picks up the link.
+- 4ca358d: `sys_session.revoke_reason` accepts `organization_membership_ended` — "Remove member" now actually signs the person out
+  
+  Removing a member deleted the `sys_member` row and left the session alive, for up to seven
+  days. #15409 closed the security half per request (a session whose `activeOrganizationId`
+  is not backed by a membership resolves with no active organization). This is the courtesy
+  half an admin was promised, and it is **never the enforcement**: a trigger can be missed,
+  an evaluation cannot.
+  
+  - **New `revoke_reason` value, `organization_membership_ended`** — an accept-set widening
+    on a published system object, hence `minor` on `@objectstack/platform-objects`. Every
+    reason before it is a timer (`idle_timeout`, `absolute_max`, `concurrent_cap`) or an
+    interactive revoke (`user_revoked`, `admin`); this is the first authorization-event
+    cause. There is no Zod enum behind the column — it is free `text` — so the field's own
+    description is the published vocabulary, and that is where the value is declared. The
+    string deliberately matches the one the API-key arm of the same ruling family already
+    mints for this event (`ApiKeyRefusalReason` in `resolve-authz-context.ts`), so one grep
+    finds every place the platform acts on a membership ending.
+  - **The trigger acts on the ORGANIZATION'S CLAIM, never on the user** (maintainer ruling,
+    decision batch #49 item 4, option B). A user who still holds another membership is
+    **re-pointed** to it — never signed out of organizations they legitimately belong to. A
+    user with no remaining membership has their session revoked through the existing
+    `revoked_at` / `revoke_reason` mechanism, which expires it in place: better-auth returns
+    nothing on the next request and the Console's existing 401 → login redirect handles it,
+    with **no client change**.
+  - **The seam is an engine hook on `sys_member`**, not a hook on better-auth's
+    `/organization/remove-member`. A census measured that the endpoint, a direct delete, a
+    bulk delete, the cascade from a `sys_user` delete and an organization re-point all reach
+    the hook, while an endpoint hook would have reached one of them. Same precedent as
+    `last-admin-guard.ts`.
+  - **New public surface on `@objectstack/plugin-auth`** — `MEMBERSHIP_ENDED_REVOKE_REASON`,
+    `endSessionClaimsForEndedMembership` and `registerMembershipEndedSessionTrigger`, hence
+    `minor` rather than `patch`.
+  
+  Known open by measurement, not by omission: a raw driver delete bypasses the trigger
+  entirely, and cloud's package-uninstall sample-data purge is one (filed as cloud#2003). The
+  per-request check covers it; the courtesy does not.
+- 6acb37e: feat(platform-objects,plugin-auth): `sys_business_unit.timezone` and `sys_organization.timezone` — the organization hierarchy carries the IANA zone a date boundary is computed in (#14238)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A NON-BREAKING ADDITION, registered here in writing because ADR-0087's registries have no additive entry kind (their three tables are semantic TODOs, retired keys and retired defs, and `spec-changes.json`'s `added[]` is the release-time export diff of `@objectstack/spec`, which platform-object columns are not on). Two nullable `text` columns are added to two `isSystem` platform objects; no metadata key, export, config field or stored shape is renamed, retired, re-typed or tombstoned, so `objectstack migrate meta` has nothing to rewrite and no consumer has to change anything. The physical columns are provisioned by boot schema-sync, which is additive-only (`initObjects` creates missing columns and never alters existing ones). MIGRATION NOTE, as the ruling requires it stated: existing deployments resolve to UTC until the root default is set — every pre-existing row reads null in both columns, null on `sys_organization.timezone` means UTC, and null on `sys_business_unit.timezone` means inherit (parent chain, then the organization, then UTC), so a deployment computes every date boundary in UTC after upgrading exactly as it did before, until an administrator sets `sys_organization.timezone`. -->
+  
+  Maintainer ruling 2026-09-02 (director summon #8), quoted verbatim and untranslated: 「同意」 — adopting option A on #14238.
+  
+  **The gap.** No platform object carried a timezone, so every application that has to answer "when does this day / week / period end?" invented a column of its own — on its tenant object, its team object or its user — and two apps in one deployment would disagree about when Tuesday ended, with nothing to report. A date boundary decides *which record exists*, not how one is shown: a monthly duty "due on the 5th" expires at midnight, and in UTC+8 that midnight is 08:00 UTC.
+  
+  **What lands.**
+  
+  - `sys_business_unit.timezone` — `text`, optional, `maxLength: 64`, `valueDomain: 'iana_time_zone'`, no default, in the Hierarchy group. Null means **inherit**: the nearest ancestor up the `parent_business_unit_id` chain that carries a value, then `sys_organization.timezone`, then `UTC`.
+  - `sys_organization.timezone` — the same shape, in the Configuration group: the **root default** of that chain. Null means `UTC`.
+  - plugin-auth registers `sys_organization.timezone` as an ADR-0105 D7 extension field (the collision guard proves better-auth's organization schema owns no `timezone` at the pinned version) and as generically editable under the ADR-0092 D2 identity write guard — the same tier as `require_mfa` and the group-structure fields. A root default the guard stripped on every administrator write would be a column nobody can set. `sys_business_unit` is `managedBy: 'platform'` and needs no entry.
+  
+  **The inheritance is a documented contract, not a mechanism.** Measured on the tree: nothing on the platform walks `parent_business_unit_id` *upward* to resolve an attribute. The three existing walkers (plugin-sharing's business-unit graph, plugin-approvals' recursive department approver, plugin-security's delegated-admin frontier) all descend to a unit's *descendants* and read no column beyond the parent link, `active` and `organization_id`. **No resolver API ships with this change** — the ruling holds option B ("the effective zone for this record") for a second consumer — so an application resolving a boundary reads the columns and walks the chain itself, in the order above. Nothing on the platform reads either column yet; both docblocks say so, so the next author does not read inheritance onto a field that stores what was written.
+  
+  **Validated on write.** Both columns declare `valueDomain: 'iana_time_zone'` — the ruling's own precondition (「rather than shipping an unvalidated text column」), met now that the record validator reads the key (#14168 / #15161). A non-member written to either column (`Mars/Olympus`, `Europe/Munich`, `UTC+8`) is refused with the ADR-0114 field code `value_domain` and `constraint.valueDomain`; membership is the shared `Intl.DateTimeFormat` probe, never the `Intl.supportedValuesOf('timeZone')` enumeration, which omits `UTC` — the very fallback this contract names. `UTC` is admitted, and pinned.
+  
+  **One shape, on purpose.** The platform's own two earlier IANA columns disagree with each other — `sys_job.timezone` (`maxLength: 100`, no default) and `sys_report_schedule.timezone` (`maxLength: 64`, default `UTC`), neither validated. The ruled pair takes 64 (the smaller precedent, and twice the domain's real ceiling: the enumeration's longest name on the repo's Node baseline is 30 characters, the longest tzdb link 32) and no schema default on either column (a default on the unit would mean "stop inheriting"; one on the organization would give UTC two spellings). Those two precedent columns are not retrofitted here — outside the ruling's scope, carded separately.
+  
+  **Not the home.** `sys_user` (option C): two people in different zones owning work in the same period would compute different boundaries for what the business considers one period. A per-user zone is a display preference on top of an org-resolved boundary, not a substitute for it. This change is distinct from the settings door's `localization.timezone` (the deployment-wide default analytics buckets dates in today); how the two relate is the future resolver's question.
+- 8e0b297: fix(plugin-auth)!: `positions[]` on the session payload is the SECURITY axis, not the better-auth role scalar (#15136)
+  
+  <!-- adr-0087: registered session-payload-positions-security-axis -->
+  
+  **BREAKING** meaning change on a published payload — `user.positions` in
+  `GET /api/v1/auth/get-session`. Shipped as `minor` under the repo's
+  launch-window convention for breaking changes. Maintainer ruling 2026-09-05 on
+  #15136 (director decision batch #39, item 2, verbatim 「同意」): option A, one
+  name, one meaning.
+  
+  `customSession` built the array from the better-auth `sys_user.role` scalar
+  split on commas, plus the active membership mapped to `org_*`, plus
+  `platform_admin` — and read **nothing** from `sys_user_position`, the ADR-0057
+  D4 table that is the source of truth for custom positions. The Console binds
+  that array straight through as the CEL root `current_user`, so an
+  `action.visible` (or any `visibleWhen`, nav `visible`, page-tab gate) narrowed
+  by a business position answered FALSE for **everyone**, including the user who
+  genuinely held it.
+  
+  ⭐ It failed **silently and in the invisible direction**: the root was bound and
+  the key was present, so `has(current_user.positions)` was true, CEL raised
+  nothing, and the predicate simply returned FALSE. A predicate that *faults*
+  fails OPEN in the shell and would have shown the button; a successful FALSE
+  shows nothing and reports nothing. The documented example
+  (`'org_admin' in current_user.positions`) kept working throughout, because
+  `org_admin` is the one name that sits on **both** axes.
+  
+  This was a **declared** contract being violated, not an ambiguous name:
+  `EvalUserSchema` already specified `positions` as "built-in identity names +
+  position names", exposed to "every predicate surface (server formula, server
+  RLS, client UI gates) ... with an identical shape" so that a predicate
+  "evaluates identically wherever it is written". `/auth/me/permissions` and
+  every server-side evaluator (`ExecutionContext.positions`) already resolved the
+  security axis; only the session payload did not.
+  
+  **What changes**
+  
+  - `packages/plugins/plugin-auth` — the hand-rolled derivation is **deleted**,
+    not repaired. `customSession` now asks `resolveUserAuthzGrants`, the ONE
+    authority (`core/security/resolve-authz-context.ts`, whose header forbids
+    every entry point from re-reading the `sys_*` grant tables itself), scoped to
+    the session's active organization. The payload therefore carries the
+    `sys_user_position` assignments and the ADR-0090 D5 `everyone` anchor, and
+    agrees with `/auth/me/permissions` set for set. Same move
+    `isPlatformAdminUserId` made at #10348.
+  - `isPlatformAdmin` is now derived from that array (ADR-0068 D2 defines it as
+    an alias of `'platform_admin' in positions`), so one authority answers both.
+  - `packages/spec` — `EvalUserSchema` states which axis `positions` is, and
+    states that the better-auth role scalar is not it.
+  
+  **No key is renamed, and none is added.** The ruling anticipated a renamed
+  auth-role array; measured against the tree, it has no content to carry and no
+  consumer. Everything the old union contributed beyond the security axis was the
+  `sys_user.role` scalar's own tokens — and that scalar is **already published,
+  unchanged, as `user.role`** (the single exception ADR-0090 D3's "role" word ban
+  carves out, for third-party schema this platform does not own). Minting a
+  `roles` array would revive that banned word to publish information the payload
+  already carries. (Precisely: `check:role-word` ratchets the reserved word in
+  `content/docs` and `skills/` PROSE, while the identifier ban over authored
+  metadata lives in `packages/lint`; a TypeScript payload key trips neither
+  mechanically until it is documented. The ADR-level prohibition is what rules
+  here, not a gate that would have caught it.) A consumer that wants the
+  better-auth role reads `user.role`.
+  
+  **What does NOT change:** `user.role` is still never overwritten (ADR-0068 D2);
+  `platform_admin` still derives from the unscoped `admin_full_access` grant with
+  its ADR-0091 validity window and ADR-0049 active flag intact —
+  `platform-admin-standing.consolidation.test.ts` PIN 6 passes unchanged over
+  those shapes.
+  
+  ⚠️ **`isPlatformAdmin` is derived from the posture RUNG, never from the array.**
+  `positions.includes('platform_admin')` is the form
+  `resolve-authz-context.ts` forbids, because an ADR-0057 D4 `sys_user_position`
+  row may spell that very name — and this card is what made that reachable, by
+  moving `positions` onto an axis a tenant admin can write. Reading the name would
+  have let a tenant mint platform standing and pass the `/admin/*` mount gate.
+  `platform-admin-gate.ts` drops its positions leg for the same reason.
+  `session-platform-admin-rung-agreement.test.ts` requires the payload alias, that
+  gate and `hasPlatformAdminStanding` to agree, driven with such a row present and
+  a genuine grant as the control.
+  
+  **Upgrade.** If you gate on the better-auth role scalar, read `user.role`
+  instead of looking for its tokens in `user.positions`. Predicates written
+  against real position names, built-in identity names, or `everyone` need no
+  change — they start working. Deployments that stored business role names in
+  `sys_user.role` rather than assigning positions should assign them through
+  `sys_user_position` (the governed ADR-0090 D12 channel).
+  
+  A name in `sys_member.role` is still projected, **with one carve-out**: for a
+  session carrying NO active organization, membership names are now *added*, from
+  **every** membership the user holds — the resolver projects them all when no
+  tenant scopes it, where the old derivation contributed none. Measured on the
+  real pipeline (`autoActiveOrganization: false`, one `sys_member.role = 'admin'`):
+  `[]` before, `[org_admin, everyone]` after, pinned by
+  `session-positions-security-axis.test.ts`. With an active organization the
+  projection is tenant-scoped exactly as `/auth/me/permissions` scopes it, so
+  membership-derived names there are unchanged.
+- aedbaef: `POST /sign-up/email` for an address that already has a `sys_user` row is refused explicitly, instead of answering 200 for a row that is never written (#15587)
+  
+  **This is a wire-behaviour change on one lane**: a call that answers `200 {"token":null,"user":{…}}` today answers `422 USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL` after this change. Nothing is newly admitted — the response that changes is one that reported a creation that never happened.
+  
+  ### What was measured
+  
+  Under audience posture `email_domain` (domain allowlisted, `selfRegistrationPermissionSet` resolvable), a sign-up for an address that already carried a `sys_user` row answered **200 with a freshly minted user id** and persisted nothing: no new `sys_user`, no `sys_account`, and the next sign-in a `401` with nothing anywhere explaining it. The same call on the same population under the `invite_only` default was refused honestly with `422 USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`. An operator, a provisioning script or the console reading the status code concludes the account exists — and this sits directly on the recovery path a locked-out deployment walks, where widening the posture to let a seeded person register is exactly the remedy an operator is pointed at.
+  
+  ### The mechanism
+  
+  better-auth's sign-up route computes `shouldReturnGenericDuplicateResponse = requireEmailVerification || autoSignIn === false` and, when it is on, answers a duplicate with a synthetic in-memory user instead of throwing. **No insert is attempted and nothing is swallowed**: the vendor's `findUserByEmail` short-circuits ahead of `createUser`, which is why no row and no credential appear.
+  
+  The posture is not itself the cause — it is only what arms the shield: a posture that permits self-registration **forces** `requireEmailVerification` on. Holding the posture constant at the `invite_only` default and moving only that flag reproduces the divergence exactly, which also means the defect was never confined to the widened postures: `emailAndPassword.autoSignIn: false` arms the same shield under any posture.
+  
+  ### The fix
+  
+  The uniqueness refusal is raised on the `/sign-up/email` before-hook, the same seam and the same reason the audience-posture refusal is already raised there, and built from better-auth's own `BASE_ERROR_CODES` entry so both lanes answer byte-identically.
+  
+  **Order is load-bearing: it runs only for a caller the posture already admitted.** Asking uniqueness first would hand an uninvited stranger an account-existence oracle under the `invite_only` default (422 for a real address versus 403 for an unknown one). After the gate, `invite_only` is untouched — a stranger still gets `SELF_REGISTRATION_CLOSED` and learns nothing.
+  
+  **Operators of `open` / `email_domain` should know what the honest refusal costs:** on those postures a caller the audience gate admits can now distinguish an address that has an account from one that does not, where the synthetic 200 previously hid it. That is the disclosure the `invite_only` lane has always made to an invitation holder, and the platform's answer for a widened posture is now the same fact rather than a false receipt.
+  
+  `USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL` is registered in the ADR-0112 error-code ledger under `@objectstack/plugin-auth`: the platform now **emits** it rather than only passing it through, and an emitted-but-unregistered code is the silent fourth state that ledger exists to prevent.
+
+### Patch Changes
+
+- d4c2cb1: The auth catch-all yields only a 404 that disclaims ownership — better-auth's own 404 answers can no longer be replaced by another route's
+  
+  `registerAuthRoutes` mounts one catch-all over the whole auth namespace (`rawApp.all(`${basePath}/*`)`), and since #4088 that catch-all is deliberately not terminal: when better-auth answers 404 it calls `next()` and lets whatever else matched answer instead. That yield is load-bearing — `plugin-hono-server` mounts `/auth/me/permissions` and `/auth/me/localization` from its own `kernel:ready` hook, and without it those two are reachable only when HonoServerPlugin happens to register first.
+  
+  What the yield could not express is **which** 404 may be handed on, because it had only the status to go on. So every 404 was yielded, including the ones that are better-auth's own answer on a path its router serves. Measured with the shipped handler on a real Hono app: add one broad downstream mount — `app.all('/api/v1/*', c => c.json({}))`, the shape a composition adds — and
+  
+  ```
+  POST /api/v1/auth/delete-user   ->  200  {}
+  ```
+  
+  where better-auth answered 404 because `user.deleteUser` is deliberately unconfigured. That route is not hypothetical: `auth-route-ledger.ts` carries it under the `disabled` disposition precisely because it is published and refused — and the same holds for every 404 a routed endpoint produces for a bad token, an unknown id, or an admin family the deployment does mount. Those answers were all up for grabs.
+  
+  The catch-all now asks better-auth's live instance whether it owns the path before it yields. The seam is `auth.api` — the same one `auth-route-ledger.conformance.test.ts` reads and the same one the `/admin/` dogfood sweep derives from, because there is no route table to enumerate by hand; matching mirrors better-call's own `createRouter` walk, including its `SERVER_ONLY` skip and its `:param` syntax. That skip is load-bearing rather than cosmetic: measured on the stock boot, the nine `/admin/oauth2/*` endpoints are in `auth.api` and every one carries `SERVER_ONLY: true`, so better-call never routes them — their 404 is an unrouted one and stays yieldable, because ownership is "does better-call route this", not "is it in `auth.api`". An ownership table that cannot be built answers "not owned", so an enumeration failure degrades to the previous behaviour rather than taking the #4088 surface down with it.
+  
+  **The mount is untouched.** It still claims exactly `${basePath}/*` and still forwards every request under it to better-auth. What narrowed is only which 404 may be handed on.
+  
+  **Upgrade note — a composition that mounts a route matching paths under the auth base path may see a 404 where it previously saw its own answer.** Affected: deployments that register a route which also matches `/api/v1/auth/...` — most often a broad wildcard over the API prefix — mounted *after* AuthPlugin. Before this release, any request to a path better-auth serves but answers 404 on (a switched-off capability, not an unknown path) was passed to that route and the caller received *its* response, commonly `200` with an empty object. From this release the caller receives better-auth's 404. Callers that treated such a response as success — `res.ok`, `status === 200`, "no error thrown" — will start seeing the refusal that was always the real answer; that is the point of the change, and the wire shape they now get is the one a deployment without the extra mount has always returned. Nothing to do if you mount no such route: paths better-auth does **not** own are yielded as before, so `/auth/me/permissions`, `/auth/me/localization` and any other sibling route under the auth prefix are unaffected in either registration order.
+  
+  **One carve-out to that sentence, measured and bounded.** A **trailing-slash or doubled-slash spelling of a path better-auth DOES own** — `/api/v1/auth/delete-user/`, `/api/v1/auth//sign-in/social` — is now claimed rather than yielded. better-call treats those spellings as unrouted (it refuses on a `//` and on trailing-slash parity before it looks the route up), while this ownership table strips the trailing slash and drops empty segments and so counts them as owned. On a composition with a broad downstream mount, such a spelling therefore answers better-auth's 404 instead of that mount's response. Only those two spellings, only of a path better-auth already owns, and only where such a mount exists: no route in this repo registers a spelling of that shape, and every genuinely unowned path — every `/auth/me/*` route included — is yielded exactly as it was. Aligning the table with better-call's own pre-checks is tracked as a follow-up rather than carried here.
+- 2e6a2ea: `@objectstack/plugin-auth` pins the `better-auth` family to an exact `1.7.2`, so a fresh install of a published `@objectstack/*` release loads the auth plugin again — and with it creates the system tables and seeds the admin.
+  
+  Published 17.1.0, 17.2.0 and 17.3.0 declared `"@better-auth/core": "^1.7.2"` and imported `createLocalAccountIssuer` / `createOAuthAccountIssuer` from `@better-auth/core/db`. `@better-auth/core@1.7.3` — a **patch** — deleted both names, and the `account.issuer` column behind them, because upstream rolled the issuer-scoped account identity back to opt-in (better-auth/better-auth#10909). A static ESM named import of a missing export is a link-time `SyntaxError`, so the plugin could not load at all. Every symptom followed from that one failure and every one of them was quiet: the scaffolded project's CLI printed the `SyntaxError` as a scrollable oclif warning and carried on, the server printed `✓ Server is ready` on the broken boot, `sys_user` / `sys_organization` / `sys_permission_set` / `sys_position` were never created, the seeded admin sign-in never answered, and the Console's sign-in form answered `Auth request failed with status 404`.
+  
+  **This is a stopgap, deliberately, and it is labelled as one.** Upstream removed the export on purpose; adopting 1.7.3 means dropping `sys_account.issuer` — a required column with a unique `(issuer, accountId)` index — from the platform object, retiring the boot-time backfill that stamps it, and migrating every existing deployment. That is its own change with its own decision to make; this one restores a working install today.
+  
+  All five members `plugin-auth` declares move together (`better-auth`, `@better-auth/core`, `@better-auth/oauth-provider`, `@better-auth/scim`, `@better-auth/sso`), because they are only correct as one line: `@better-auth/core@1.7.2` and `@better-auth/kysely-adapter@1.7.3` are mutually incompatible in both directions. `better-auth@1.7.2` declares its own siblings exactly, so pinning those five resolves all twelve family members to 1.7.2 — measured on a fresh `npm install` with no lockfile.
+  
+  The workspace `overrides` move to the same exact target in step, so the version this repository tests is the version a consumer resolves. In-repo resolutions are unchanged: the lockfile already held 1.7.2 for all eleven overridden members.
+- 8e500f2: The `no_sign_in_account_at_boot` report now names a remedy that works — and warns off the one that silences the report itself.
+  
+  That boot line fires on the deployment nobody can sign in to: human `sys_user` rows, zero `sys_account` rows. It ended with two remedies, and measured on the exact population it fires on, neither did what its sentence said:
+  
+  - **"Open the audience posture so an existing person can register their own login"** produced no login, and for an existing person it never can: self-registration is a user-creation path, so it cannot attach a login to an address that already carries a `sys_user` row, whatever the posture. Widening only ever admits a *new* address — and then every posture other than `invite_only` forces `requireEmailVerification` on, so that login is refused `EMAIL_NOT_VERIFIED` at its first sign-in, and a locked-out self-hosted install is usually the shape with no mail transport wired.
+  - **"Write a `sys_account` credential row directly against the store"** was worse than useless. The `password` column carries a secret in the platform's own hash format, so a plaintext one authenticates nothing — and the probe behind this report asks only whether *any* `sys_account` row exists, so writing one turns the report off. The operator's first attempt at the named remedy turned the loud dead end back into the silent one the report was written to end.
+  
+  The line now names the path that was measured to work: write one pending `sys_invitation` row directly against the store — a lowercase address the directory does not already hold, `status` `pending`, a future `expires_at`, `inviter_id` of any existing `sys_user` — then register through the ordinary sign-up endpoint. The invitation carve-out admits that one creation under every posture, so no door needs widening. It is an admission verdict and not a verification bypass, though, so the line scopes what follows from that: only under the default `invite_only` posture is the recovery mail-transport-free, and it tells the operator to close a widened posture back to `invite_only` before the invited person registers — otherwise the invited login is created, refused `EMAIL_NOT_VERIFIED` at first sign-in, and has silenced this report on the way past. On the `single` tenancy posture that account holder is then promoted to platform admin. The other two are still named, as the two things that look like remedies and are not, because an operator who is going to hand-write a credential row anyway needs to know it blinds the probe.
+  
+  **Message text only — no admission semantics move.** Nothing widens, nothing narrows, no accept set changes, and the probe is untouched: this changes what an operator *reads*, not what the platform *admits*. The long form of the same three facts is on the self-hosting deployment page.
+- 41cbc54: `GET /organization/list-user-invitations` now honours the declared `requireEmailVerificationOnInvitation` — the per-user invitation inbox works for the unverified sessions it was declared open to
+  
+  `AuthManager` constructs better-auth's organization plugin with `requireEmailVerificationOnInvitation: false` on purpose: without a mailer wired in, nothing can ever verify an invitee, so requiring verification would dead-end every invite flow. The pinned better-auth 1.7.2 reads that option on `accept-invitation`, `reject-invitation` and `get-invitation`, but its `listUserInvitations` handler refuses every unverified session unconditionally. Measured on the real pipeline: the same unverified invitee got `200` from all three id-addressed routes and `403 EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION` from the listing, so on exactly the deployment shape the declaration exists for, an invitee could accept an invitation they were handed but never list it, and the SDK's `organizations.invitations.listMine()` inbox page was empty-by-403 for every user.
+  
+  The endpoint is now rebuilt in place on the organization plugin's own `endpoints` record, from the vendor endpoint's own options object (same path, method, query schema and OpenAPI entry), with one predicate changed: the verification refusal is asked against the declared option instead of assumed. The listing itself is still the vendor's own `getOrgAdapter(...).listUserInvitations(sessionEmail)` — invitations addressed to the session's email, pending only — so nothing widens beyond what the same session can already accept one by one. A client-side `?email=` is still refused with the vendor's `400`, and a request with no session keeps the vendor's `400`.
+  
+  Declared `true` keeps today's refusal byte-for-byte; an undeclared option keeps the vendor's list-route posture (refuse) rather than re-deriving the vendor-internal default the sibling routes use. No new public error code, no new export from the package entry.
+- 9f39897: fix(plugin-auth): the magic-link mail reads the recipient's own `sys_user.locale` (#15106)
+  
+  `sendMagicLink` was the last of the five auth mail sends still on the two-rung
+  #14319 ladder — the request's `Accept-Language`, then the deployment default.
+  #14762 put the recipient's stored `sys_user.locale` above both at the three
+  sends that hold a user row, and #14641 reached the invitation; the magic link
+  was fenced out because it is handed `{ email, url, token }` and no row, so the
+  column has to be read on the address rather than on an id. The visible cost was
+  one deployment answering the same person in two languages: a Chinese
+  password-reset mail and an English magic link, decided by whichever browser
+  happened to send the request.
+  
+  It now reads the column behind the existing placeholder-address refusal, in the
+  same shape #14641 gave the invitation send — one projected `findOne` on
+  `sys_user` under a system context, best-effort, and never a reason a send fails.
+  This completes the #14788 option-D ladder (`sys_user.locale` when set → the
+  request's `Accept-Language` → the deployment default) across the whole auth mail
+  surface: all five `sendTemplate` sites now answer per recipient.
+  
+  The request rung is kept rather than replaced. A magic link is requested BY its
+  recipient, so its `Accept-Language` is the recipient's own and remains a
+  legitimate second rung for an account that has stated no language; ruling D
+  inserts the column above the header, it does not remove the header.
+  
+  Two branches, because a magic link is also a sign-up: an address that carries a
+  row is written in that account's language, and an address with no row keeps
+  exactly the previous behaviour. The address is lowercased for the lookup —
+  better-auth applies no case transform to the magic-link request body, while
+  `findUserByEmail`, which `/magic-link/verify` resolves the very same link with,
+  matches on `email.toLowerCase()`, so the column is read for the row the link
+  will sign into. An address that resolves nothing lands on the rungs below, which
+  is the documented floor.
+- 9e9f03a: A self-registration grant is refused, not silently redirected, when a permission-set row is malformed — and the fourteen dead `{ records }` / `{ data }` normalizer limbs behind that code are gone.
+  
+  `plugin-auth` carried fourteen array-or-envelope normalizer blocks of the shape `Array.isArray(x) ? x : x.records ?? []` (thirteen on a `records` limb, one on a `data` limb, four of them written as a guard clause rather than a ternary). All fourteen read the same concrete engine — the `ObjectQL` instance the kernel registers as the `objectql` / `data` service — which answers a bare array on every path, populated or empty. The envelope limb was unreachable code that read as a contract, so the next author writing a defensive normalizer here believed an envelope was possible. The limbs are removed, and the three local engine ports that declared `Promise<unknown>` (`BootProbeEngine`, `DevAdminSeedProbeEngine`, `PhoneSmsTemplateEngine`) now declare the array they always returned.
+  
+  The user-visible change is in `settleSelfRegistrationGrant`, which carried the opposite defect. Its candidate filter dropped any permission-set row whose `id` was missing or blank, silently, before choosing which row to grant:
+  
+  - When the malformed row was the only one, the operator was told `no active sys_permission_set row named 'X' resolves` — false, since an active row named exactly that was present. That report is the only signal this path emits, and nothing retries it.
+  - When the malformed row was the **organization-scoped** one and a global row also carried the declared name, dropping it let the `organization_id == null` arm match instead, and the self-registrant was granted the **global** permission set their organization never declared — with a success log and no other trace.
+  
+  `active !== false` remains a selection predicate: a deactivated set still reports the ordinary "does not resolve". A malformed row is no longer a selection at all — the grant is refused and the report names the malformed row, so the ambiguity is surfaced instead of resolved by accident. A well-formed family grants exactly as before.
+  
+  **Upgrade note — one family now gets a refusal where it previously got a grant.** If a deployment's `sys_permission_set` already contains a row that is active and carries the declared name but whose `id` is missing or blank, self-registration grants against that name now stop and report, including the case where the malformed row is one nobody was relying on: a malformed **global** row sitting alongside a well-formed **organization-scoped** row used to be dropped silently, letting the org row be granted, and is now refused. This is deliberate — the old behaviour could not tell that family apart from the one where the silent drop granted the *wrong* set — and it is fully reversible without a code change: repair or delete the malformed row and the grant proceeds exactly as before. The refusal is loud and names the row, so it is visible rather than something to discover later; nothing is written while it stands.
+- c5d6803: Published `.js.map` files no longer embed the complete original source text (`sourcesContent`) — comments included. `sourcemap: true` was esbuild shorthand, and esbuild's own default for `sourcesContent` is `true`; nobody had decided to publish every package's full source (including `@internal`/test-only comments) to npm inside its source maps, it fell out of a default nobody had looked at. Measured before this change: 55 of 57 publishable packages shipped embedded source text, and maps were roughly half of `@objectstack/spec`'s published bytes.
+  
+  `sourcesContent: false` is now set at one shared place (`scripts/tsup-drop-sources-content.mjs`, wired into every `tsup.config.ts` via tsup's `esbuildOptions` hook — most packages build through the repo-root config directly and pick this up with no config change of their own). `mappings` are untouched, so stack-trace positions still resolve correctly to the original file/line/column; only the embedded source text is gone.
+  
+  `@objectstack/cli` (built with `tsc`, not `tsup`) never embedded source text to begin with — its maps' `sources` entries point at `src/**` paths that are not part of the published tarball either way. That is not a defect unique to `cli`: every `tsup`-built package's `sources` entries are `../src/**`-relative paths that are equally outside `files: ["dist", …]`, and were merely masked by the embedded content that just stopped shipping. Shipping `src/**` in `files[]` to make `sources` resolve was rejected — it would put most of the removed bytes straight back. So `cli`'s maps are left exactly as `tsc` emits them: this is now the fleet-consistent shape (accurate `mappings`, non-resolving-but-honest `sources` labels, no embedded text), not an outlier.
+  
+  A new gate, `pnpm check:sourcemap-no-sources-content`, sweeps every built, non-private package's `dist/**/*.map` and fails if any of them carries a non-empty `sourcesContent` array — so a future `tsup.config.ts` that skips the shared hook, or a toolchain upgrade that changes esbuild's default back, is caught rather than silently re-publishing source text.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [159dbad]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [4bc9821]
+- Updated dependencies [bc1c1ce]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [cbca47d]
+- Updated dependencies [acf4d38]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [61b4eb3]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [65846bc]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [3e7ef9c]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [51ae731]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [4ca358d]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [6acb37e]
+- Updated dependencies [7797102]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [0a038cc]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [97adce2]
+- Updated dependencies [a83482c]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [d5c4022]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [4771bd9]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [c930f85]
+- Updated dependencies [0db2947]
+- Updated dependencies [e13ede8]
+- Updated dependencies [7d7ca6c]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [53cbad9]
+- Updated dependencies [ec5db7b]
+- Updated dependencies [9b459b7]
+- Updated dependencies [f5cc78b]
+- Updated dependencies [1e43386]
+- Updated dependencies [7370989]
+- Updated dependencies [289bb43]
+- Updated dependencies [094b8fd]
+- Updated dependencies [46803fa]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b3820c3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [4df2a98]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [ce478db]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f89812e]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+- Updated dependencies [021a735]
+- Updated dependencies [7bdb163]
+  - @objectstack/spec@17.4.0
+  - @objectstack/core@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/rest@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/service-messaging@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

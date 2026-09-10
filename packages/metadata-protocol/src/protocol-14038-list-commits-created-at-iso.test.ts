@@ -10,15 +10,27 @@
  * ## The defect
  *
  * `created_at` is an engine-injected audit column: it is not in
- * `datetimeFields`, and `SqlDriver#formatOutput` repairs it (both the
- * builtin-audit-column repair and the `datetimeFields` fold) only inside its
- * `if (this.isSqlite)` arm (`sql-driver.ts`, `formatOutput`). Postgres and
- * MySQL therefore hand this column out of the record read door as a JS
- * `Date`, while the SQLite family hands out canonical ISO-Z text — pinned
- * live in
- * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`.
- * So on the production default driver, `listCommits` handed every
- * in-process consumer a `Date` in a field the type says is a `string`.
+ * `datetimeFields`, and when this landed `SqlDriver#formatOutput` repaired it
+ * (both the builtin-audit-column repair and the `datetimeFields` fold) only
+ * inside its `if (this.isSqlite)` arm (`sql-driver.ts`, `formatOutput`).
+ * Postgres and MySQL therefore handed this column out of the record read door
+ * as a JS `Date`, while the SQLite family handed out canonical ISO-Z text. So
+ * on the production default driver, `listCommits` handed every in-process
+ * consumer a `Date` in a field the type says is a `string`.
+ *
+ * #13973 ([ADR-0053 D-F1]) has since lifted BOTH passes out of that gate — they
+ * run on EVERY dialect now, so the record read door presents the canonical
+ * text — and the pin that recorded the asymmetry records that contract instead
+ * (`packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`
+ * §B1, inverted on purpose).
+ *
+ * ⚠️ That does not make the cases below historical. `withPostgresCalendarDayAsText`
+ * is untouched by that ruling ([ADR-0053 D-F2]) — the CLIENT still materialises
+ * `timestamptz` / `DATETIME(3)` as a `Date`, and what moved is where the driver
+ * folds it — and the `Date` domain at this mapper did not close: `driver-sql`
+ * hands an INVALID `Date` through unchanged ([ADR-0053 D-F3]) and non-SQL
+ * drivers materialise their own. What these cases own is the mapper's behaviour
+ * per INPUT SHAPE, which outlives the dialect fact.
  *
  * ## Why the fixture drives a hand-made `Date`
  *
@@ -40,10 +52,19 @@
  * now total, answering `undefined` for the shape. This card's route is
  * unchanged: `isoFromValidDate` in `protocol.ts` converts the ONE measured
  * shape (a valid `Date`) and returns every other shape — including an Invalid
- * `Date` — UNCHANGED, which is what `listCommits` promises its callers. §D
- * below stays the pin on that promise: it goes red the moment anyone swaps
- * the other spelling into this site, now the separately-tracked consolidation
- * decision #16422.
+ * `Date` — UNCHANGED, which is what `listCommits` promises its callers.
+ *
+ * ⚠️ #16422 has now RULED the consolidation, and this site was held OUT of it
+ * on the strength of that promise. The card collapsed the family's other four
+ * call sites into `canonicalIsoInstant` and deleted both sibling definitions;
+ * `protocol.ts` keeps its copy, and §D below is no longer a placeholder for a
+ * pending decision but the standing pin on a decided one. Measured across the
+ * seven inputs that distinguish the two helpers, this site is byte-identical
+ * before and after that card — the swap here would have ERASED an Invalid
+ * `Date` from the response (`undefined`, the one answer [ADR-0053 D-F3]
+ * refuses) and handed a `number` or an opaque object to
+ * `compareAuditInstants` as `String(value)` instead of verbatim, reordering
+ * rows this seam deliberately leaves alone.
  *
  * ## Reverse verification, direction predicted BEFORE running
  *
@@ -168,7 +189,12 @@ describe('[#14038] listCommits emits the ISO-8601 string createdAt is declared a
          * invented rendering. This case is what makes that a PIN rather than
          * a claim: it goes red the moment `canonicalIsoInstant` (or any
          * spelling that reaches `.toISOString()` unconditionally) is swapped
-         * into `listCommits`. The consolidation is #16422.
+         * into `listCommits`.
+         *
+         * ⚠️ #16422 ruled the consolidation and held this site OUT of it, so
+         * this pin now guards a DECIDED contract rather than an open one. It
+         * stays exactly as written — the only pin of the three that did not
+         * need rewriting, because the behaviour it asserts did not move.
          */
         it('hands the value through unchanged instead of raising RangeError', async () => {
             const invalid = new Date(NaN);

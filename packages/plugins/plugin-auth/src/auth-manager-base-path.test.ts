@@ -4,11 +4,12 @@
 // learn where better-auth serves.
 //
 // ⛔ NOT "the one definition" of that value, which an earlier spelling of this
-// header claimed. Two more readers of `this.config.basePath` are live in
-// `auth-manager.ts` — `getAuthIssuer()` and `getMcpResourceUrl()`, each with its
-// own normaliser — and they are deliberately untouched: they are published OAuth
-// identifiers, compared by exact string. The accessor's docblock carries the
-// measurement and the reason.
+// header claimed. #16399 gave the file one, a layer down: `configuredBasePath()`
+// is now the ONLY read of `this.config.basePath`, `rootedBasePath()` the only
+// place a leading slash is added, and `getBasePath()` the only place a trailing
+// one is stripped. `getAuthIssuer()` and `getMcpResourceUrl()` read that chain
+// instead of each re-deriving. Their two values still DIFFER on purpose — see
+// the #16399 block at the bottom of this file, which pins why.
 //
 // ## Why this member is public, and why a rename is a breaking change
 //
@@ -175,5 +176,159 @@ describe('#16025 the ownership walk follows getBasePath(), not the configured sp
 
   it('control — the already-normalised spelling, which the mirror mutation cannot move', async () => {
     await expect(ownsGetSession('/api/v1/auth')).resolves.toBe(true);
+  });
+});
+
+/**
+ * #16399 — the three derivations are ONE chain, and the MCP resource identifier
+ * is a URL for every spelling of `basePath`.
+ *
+ * ## What was wrong, measured on `origin/main` before this card
+ *
+ *     basePath 'api/v1/auth'   getMcpResourceUrl() -> http://localhost:3000api/v1/mcp
+ *     basePath 'api/v1/auth/'  getMcpResourceUrl() -> http://localhost:3000api/v1/mcp
+ *
+ * That is not an alternative spelling of the identifier, it is not a URL:
+ * `new URL()` throws on it (`3000api` is not a port), so `auth-plugin.ts`'s
+ * `new URL(manager.getMcpResourceUrl()).pathname` — which mounts the RFC 9728
+ * §3.1 path-inserted well-known route — throws too, and
+ * `@better-auth/oauth-provider` 1.7.2 refuses to seed the `sys_oauth_resource`
+ * row from it at plugin init:
+ *
+ *     oauth-provider: skipping resource seed for http://localhost:3000api/v1/mcp
+ *     — resource identifier ... must be an absolute URI (RFC 8707 §2)
+ *
+ * ⇒ under that configuration no token could ever have been minted OR matched,
+ * so the repair re-selects nothing.
+ *
+ * ## ⛔ Why the ASSERTION is `new URL(...)` and not a string literal
+ *
+ * A literal is only as right as whoever typed it: writing
+ * `toBe('http://localhost:3000api/v1/mcp')` would have pinned the defect. These
+ * cases assert the PROPERTY that failed — that the value parses as an absolute
+ * URL, and that its path is the one the mount actually serves — and only then
+ * compare it with the canonical answer.
+ */
+describe('#16399 one normalisation chain, and an MCP resource URL that is always a URL', () => {
+  const withOrigin = (basePath?: string) =>
+    new AuthManager({
+      ...(basePath === undefined ? {} : { basePath }),
+      baseUrl: 'http://localhost:3000',
+    } as unknown as AuthManagerOptions);
+
+  /** Every spelling of "mount better-auth under /api/v1/auth" a host might write. */
+  const EQUIVALENT_SPELLINGS = [
+    undefined,          // unset -> the shipped default
+    '',                 // empty -> treated as unset
+    '/api/v1/auth',     // canonical
+    'api/v1/auth',      // ⭐ no leading slash  — defect 1
+    '/api/v1/auth/',    // trailing slash
+    'api/v1/auth/',     // ⭐ both              — defect 1
+    '/api/v1/auth///',  // repeated trailing slashes
+  ] as const;
+
+  it('⭐ builds a parseable absolute URL for EVERY spelling — the property that failed', () => {
+    for (const spelling of EQUIVALENT_SPELLINGS) {
+      const manager = withOrigin(spelling);
+      // `new URL` throws on a malformed value; letting it throw IS the assertion.
+      const resource = new URL(manager.getMcpResourceUrl());
+      const issuer = new URL(manager.getAuthIssuer());
+      expect(resource.protocol).toBe('http:');
+      expect(resource.host).toBe('localhost:3000');
+      expect(issuer.host).toBe('localhost:3000');
+    }
+  });
+
+  it('⭐ answers the SAME resource identifier for every spelling of the same mount', () => {
+    for (const spelling of EQUIVALENT_SPELLINGS) {
+      expect(withOrigin(spelling).getMcpResourceUrl()).toBe('http://localhost:3000/api/v1/mcp');
+    }
+  });
+
+  it("the resource path is where the mount actually serves — auth-plugin's `new URL(...).pathname`", () => {
+    // auth-plugin.ts registers `/.well-known/oauth-protected-resource${mcpPath}`
+    // off exactly this expression. Under the defect it threw instead.
+    for (const spelling of EQUIVALENT_SPELLINGS) {
+      const manager = withOrigin(spelling);
+      expect(new URL(manager.getMcpResourceUrl()).pathname).toBe('/api/v1/mcp');
+      expect(manager.getBasePath()).toBe('/api/v1/auth');
+    }
+  });
+
+  it('a base path that is not an auth path keeps its whole prefix', () => {
+    expect(withOrigin('/api/v9/identity').getMcpResourceUrl()).toBe(
+      'http://localhost:3000/api/v9/identity/mcp',
+    );
+    expect(withOrigin('api/v9/identity/').getMcpResourceUrl()).toBe(
+      'http://localhost:3000/api/v9/identity/mcp',
+    );
+  });
+
+  it('a configured root yields the bare /mcp resource, not a doubled slash', () => {
+    // `'/'` normalises to `''` (pinned above), so the resource is `/mcp`.
+    // Before this card it was `http://localhost:3000//mcp` — parseable, but a
+    // `//mcp` path that no mount serves.
+    expect(withOrigin('/').getMcpResourceUrl()).toBe('http://localhost:3000/mcp');
+    expect(new URL(withOrigin('/').getMcpResourceUrl()).pathname).toBe('/mcp');
+  });
+
+  /**
+   * ⭐ NEGATIVE CONTROL — an already-canonical `basePath` must answer byte for
+   * byte what it answered before this card, on ALL THREE getters. These are the
+   * values in the card's own "measured, on the real manager" table, row 1.
+   * If a canonical deployment's `iss` or `aud` moved, this card changed which
+   * tokens are accepted and the claim's `Clause-②: no` no longer holds.
+   */
+  it('⭐ negative control — a canonical basePath moves NOTHING on all three getters', () => {
+    const manager = withOrigin('/api/v1/auth');
+    expect(manager.getBasePath()).toBe('/api/v1/auth');
+    expect(manager.getAuthIssuer()).toBe('http://localhost:3000/api/v1/auth');
+    expect(manager.getMcpResourceUrl()).toBe('http://localhost:3000/api/v1/mcp');
+
+    const dflt = withOrigin();
+    expect(dflt.getBasePath()).toBe('/api/v1/auth');
+    expect(dflt.getAuthIssuer()).toBe('http://localhost:3000/api/v1/auth');
+    expect(dflt.getMcpResourceUrl()).toBe('http://localhost:3000/api/v1/mcp');
+  });
+
+  /**
+   * ⭐ The pin that stops defect 2 from being "fixed" into existence.
+   *
+   * The card and its triage both read PR #16380 as having created a divergence
+   * — better-auth handed the STRIPPED form while `getAuthIssuer()` broadcast
+   * the RETAINED one. That is not what landed: #16380's last commit ("hand
+   * better-auth the configured basePath verbatim again") reverted exactly that,
+   * because it rejects every token minted under a trailing-slash `basePath`.
+   *
+   * So there is nothing to align, and this case says so by measurement rather
+   * than by prose: it reads better-auth's OWN `ctx.context.baseURL` — the value
+   * `@better-auth/oauth-provider` 1.7.2 stamps as the access-token `iss` — off
+   * a real instance built by `createAuthInstance`, and requires
+   * `getAuthIssuer()` to equal it. Canonicalising `getAuthIssuer()` turns this
+   * RED, which is the point.
+   */
+  it('⭐ getAuthIssuer() equals the issuer the AS is ACTUALLY configured with', async () => {
+    const withSecret = (basePath: string) =>
+      new AuthManager({
+        basePath,
+        secret: 'x'.repeat(40),
+        baseUrl: 'http://localhost:3000',
+      } as unknown as AuthManagerOptions);
+
+    for (const configured of [
+      '/api/v1/auth',
+      'api/v1/auth',
+      '/api/v1/auth/',
+      'api/v1/auth/',
+      '/api/v1/auth///',
+      '/api/v9/identity/',
+    ]) {
+      const manager = withSecret(configured);
+      const auth = (await manager.getAuthInstance()) as unknown as {
+        $context: Promise<{ baseURL: string }>;
+      };
+      const stamped = (await auth.$context).baseURL;
+      expect(manager.getAuthIssuer()).toBe(stamped);
+    }
   });
 });

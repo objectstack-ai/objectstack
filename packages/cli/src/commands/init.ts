@@ -98,16 +98,44 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  * the first thing a newcomer sees, on the one screen where they are deciding
  * whether this project is solid, and there is nothing they did to cause it.
  *
- *  - `better-auth>better-sqlite3` — better-auth 1.7.1 peers `^12.0.0` while the
- *    tree resolves 13.x (`@objectstack/driver-sql`'s optional dependency). The
- *    peer is OPTIONAL and governs one configuration only: a raw better-sqlite3
- *    `Database` handed to better-auth's `database` option. ObjectStack never
- *    does that — `AuthManager.createDatabaseConfig()` passes an ObjectQL
- *    adapter factory. Measured on the configuration the range *does* govern
- *    (better-auth's own Kysely dialect: migrations, sign-up, sign-in, adapter
- *    find/update/delete), 1.7.1 behaves identically on better-sqlite3 13.0.3
- *    and on 12.11.1. So the upstream range is stale and 13 is right — widening
- *    is the correct remedy, not pinning our own declaration back to 12.
+ *  - `better-auth>better-sqlite3` — better-auth peers `^12.0.0` while the tree
+ *    resolves 13.x. The peer is OPTIONAL and governs one configuration only: a
+ *    raw better-sqlite3 `Database` handed to better-auth's `database` option.
+ *    ObjectStack never does that — `AuthManager.createDatabaseConfig()` passes
+ *    an ObjectQL adapter factory (or `undefined`, better-auth's own in-memory
+ *    adapter). So the upstream range is stale and 13 is right — widening is
+ *    the correct remedy, not pinning our own declaration back to 12.
+ *
+ *    RE-MEASURED on the pinned 1.7.2 (#16813). The original reading was taken
+ *    on 1.7.1 (#10326) and was behavioural: better-auth's own Kysely dialect —
+ *    migrations, sign-up, sign-in, adapter find/update/delete — behaves
+ *    identically on better-sqlite3 13.0.3 and on 12.11.1. 1.7.2 makes that
+ *    structural instead of empirical: of the 464 files in the published
+ *    `better-auth@1.7.2` tarball, exactly ONE names better-sqlite3 —
+ *    `package.json`, i.e. the peer declaration itself. Zero code files
+ *    reference it (positive control: `kysely` names 9). better-auth never
+ *    imports the package; it accepts a `Database` the CALLER constructs and
+ *    hands it to Kysely, and its own sqlite test path uses node's built-in
+ *    `node:sqlite` `DatabaseSync`. There is therefore no better-auth call site
+ *    that could touch an API moved between better-sqlite3 12 and 13 — the
+ *    range is a statement about an instance we never supply.
+ *
+ *    ⚠️ TWO CORRECTIONS to what this entry used to say, both measured:
+ *      • the 13.x copy better-auth binds to is `@objectstack/cli`'s OWN
+ *        `optionalDependencies` entry, NOT `@objectstack/driver-sql`'s. On the
+ *        chain that actually reports (`cli` → `runtime` → `plugin-auth` →
+ *        `better-auth`) the CLI is the ancestor, so its copy is the one pnpm
+ *        resolves the peer against — pnpm names it in the warning itself
+ *        ("found 13.0.3 in @objectstack/cli"). Editing driver-sql alone would
+ *        not move this line.
+ *      • pinning the CLI back to `^12` is not a neutral alternative. Measured
+ *        on a bare project depending on `@objectstack/cli@17.3.0`, it clears
+ *        the report only by installing a SECOND native better-sqlite3
+ *        (12.11.1 alongside 13.0.3), and the 12 copy is dead weight — the CLI
+ *        loads better-sqlite3 itself (`src/utils/sqlite-occupancy.ts`) and
+ *        knex resolves 13.x through driver-sql regardless. This
+ *        `allowedVersions` entry clears the same report with the resolution
+ *        byte-identical (0 lines of lockfile diff).
  *
  *  - RETIRED (#3653): `@better-auth/scim>better-call` — the rc.1-era scim pin
  *    peered an exact `better-call@1.3.7` against the host's 1.4.0, and this
@@ -317,9 +345,6 @@ export const SCAFFOLD_VITEST_RANGE = '^4.0.0';
 /** The `@types/node` range a scaffolded project declares. */
 export const SCAFFOLD_TYPES_NODE_RANGE = '^22.0.0';
 
-/** The `tsx` range a scaffolded project declares when its scripts need it. */
-export const SCAFFOLD_TSX_RANGE = '^4.21.0';
-
 /** The zod range a scaffolded project declares when it authors schemas. */
 export const SCAFFOLD_ZOD_RANGE = '^4.3.6';
 
@@ -477,11 +502,16 @@ export function renderPnpmWorkspaceYaml(
       '# package states, and that pnpm reports on a first install. None is a',
       '# real incompatibility:',
       '#',
-      '#   better-auth peers better-sqlite3 ^12.0.0 while the tree resolves 13.x.',
-      '#   That peer is optional and covers handing better-auth a raw',
-      '#   better-sqlite3 `Database`; ObjectStack hands it an ObjectQL adapter',
-      '#   instead. Measured on the configuration the range does cover,',
-      '#   better-auth 1.7.1 behaves identically on 13.0.3 and on 12.11.1.',
+      '#   better-auth peers better-sqlite3 ^12.0.0 while the tree resolves 13.x',
+      '#   (the copy @objectstack/cli declares for its own sqlite tooling). That',
+      '#   peer is optional and covers handing better-auth a raw better-sqlite3',
+      '#   `Database`; ObjectStack hands it an ObjectQL adapter instead, so',
+      '#   nothing here goes down that path. Re-measured on better-auth 1.7.2:',
+      '#   no file in the published package references better-sqlite3 at all —',
+      '#   it only accepts a Database you construct — so there is no call site',
+      '#   that could depend on what changed between 12 and 13. The upstream',
+      '#   range is stale; pinning back to 12 would just install a second,',
+      '#   unused native copy.',
       '#',
       '#   @better-auth/scim (held at a release candidate deliberately) peers an',
       '#   exact better-call 1.3.7, while better-auth itself depends on 1.4.0. A',
@@ -547,6 +577,7 @@ export const TEMPLATES: Record<string, {
       start: 'objectstack compile && objectstack serve',
       build: 'objectstack compile',
       validate: 'objectstack validate',
+      lint: 'objectstack lint',
       typecheck: 'tsc --noEmit',
     },
     configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';
@@ -633,6 +664,7 @@ export default ${toCamelCase(namespace)}Item;
     scripts: {
       build: 'objectstack compile',
       validate: 'objectstack validate',
+      lint: 'objectstack lint',
       test: 'vitest run',
       typecheck: 'tsc --noEmit',
     },
@@ -706,6 +738,7 @@ export default ${toCamelCase(namespace)}Item;
     scripts: {
       build: 'objectstack compile',
       validate: 'objectstack validate',
+      lint: 'objectstack lint',
       typecheck: 'tsc --noEmit',
     },
     configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';

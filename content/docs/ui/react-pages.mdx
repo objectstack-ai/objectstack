@@ -120,14 +120,14 @@ An injected block folds its JSX props into the block's schema, so you write flat
 rather than a nested `schema` object:
 
 ```jsx
-<ListView objectName="showcase_account" columns={['name', 'status']} navigation={{ mode: 'none' }} />
+<ListView data={{ provider: 'object', object: 'showcase_account' }} columns={['name', 'status']} navigation={{ mode: 'none' }} />
 ```
 
 Function props are passed through as real callbacks — that is how one block drives
 another:
 
 ```jsx
-<ListView objectName="showcase_account" onRowClick={(record) => setSelected(record.id)} />
+<ListView data={{ provider: 'object', object: 'showcase_account' }} onRowClick={(record) => setSelected(record.id)} />
 ```
 
 One collision is worth knowing. `type` is the SDUI envelope's component discriminator
@@ -155,7 +155,7 @@ Any registered component, including ones outside the curated contract:
 ```
 
 A kanban, calendar, gantt, timeline or map of an object is also reachable without the
-escape hatch — `<ListView viewType="kanban" …>` selects the visualization directly.
+escape hatch — `<ListView type="kanban" …>` selects the visualization directly.
 
 `Block` is **not** a way back to the `record:*` family; see
 [below](#record-blocks-not-in-react).
@@ -358,8 +358,9 @@ by tag and through `<Block type="record:…">` alike:
 The error names the replacement for the block you reached for, so read the hint rather
 than a table here. In general: on a react page the parent record is React state, so bind
 it with a block that reads its **own** props — `<ObjectForm mode="view" recordId={…}>`
-for a field panel, `<ListView objectName="<child>" filters={['<lookup>', '=', parentId]}>`
-for a related list — or read the record with `useAdapter().findOne` and lay it out in JSX.
+for a field panel, `<ListView data={{ provider: 'object', object: '<child>' }}
+filters={['<lookup>', '=', parentId]}>` for a related list — or read the record with
+`useAdapter().findOne` and lay it out in JSX.
 To use the family itself, author the page as `type:'record'` instead.
 
 ## How you check your work
@@ -434,7 +435,7 @@ function Page() {
     <div style={{ display: 'flex', height: '100%', gap: 16, padding: 16 }}>
       <div style={{ width: '50%' }}>
         <ListView
-          objectName="showcase_account"
+          data={{ provider: 'object', object: 'showcase_account' }}
           columns={['name', 'status']}
           navigation={{ mode: 'none' }}
           onRowClick={(record) => { setSel(record.id); setEditing(false); }}
@@ -457,7 +458,7 @@ function Page() {
               yAxis={[{ field: 'total' }]}
               title="Invoice value by status"
             />
-            <ListView objectName="showcase_invoice" filters={['account', '=', sel]} columns={['name', 'status', 'total']} navigation={{ mode: 'none' }} />
+            <ListView data={{ provider: 'object', object: 'showcase_invoice' }} filters={['account', '=', sel]} columns={['name', 'status', 'total']} navigation={{ mode: 'none' }} />
             <button onClick={() => setEditing(true)} style={{ borderRadius: 'var(--radius)', border: '1px solid hsl(var(--border))', background: 'transparent', color: 'hsl(var(--foreground))', padding: '6px 12px', cursor: 'pointer' }}>
               Edit account
             </button>

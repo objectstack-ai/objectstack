@@ -103,7 +103,12 @@
  *
  *      ⚠️ "A generated migration emits no index, so no generated column is
  *      ever keyed" is FALSE and was this pin's own first answer. It describes
- *      the generator's OUTPUT; the driver keys on the object's INPUT. Driven on
+ *      the generator's OUTPUT; the driver keys on the object's INPUT. Its
+ *      premise is now false as well — since #16317 the generators DO emit the
+ *      field-level unique index (`generate-declared-unique-index.pin.test.ts`)
+ *      — and the argument is unchanged by that: the declaration sets read here
+ *      stay strictly wider than what that emitter emits, so deriving one from
+ *      the other in either direction re-creates this defect. Driven on
  *      live PostgreSQL 16.13, `{ type: 'text', unique: true, maxLength: 100 }`
  *      built `varchar(100)` on the platform and TEXT in both generated tables,
  *      and a 300-character write was REFUSED by the driver's table (`22001
@@ -173,6 +178,44 @@
  * ⚠️ Scope, as `generateMigrationSql`'s docblock and the `--format` help text
  * already say (#15521): this is a POSTGRESQL claim and nothing else. Neither
  * generator reproduces the driver's dialect branching.
+ *
+ * ## ⭐ ...and the oracle runs on SQLite, so the PostgreSQL claim rests on a
+ * PREMISE — now measured rather than assumed (#16394)
+ *
+ * `PRAGMA table_info` is the tell: the real chain below runs against an
+ * in-memory better-sqlite3 database while every width it asserts is a
+ * PostgreSQL claim. That is sound exactly while ONE premise holds — *the width
+ * the chain produces does not depend on the dialect* — and nothing was holding
+ * it. Measured as a mutation battery against this very oracle:
+ *
+ * ```
+ *   leg   driver-side mutation                             this file
+ *   L7    a Postgres gate on `createColumn`'s quoted line   2 failed / 79
+ *   L7b   the same gate as the FIRST LINE of                all green
+ *         `keyableTextLength`
+ * ```
+ *
+ * L7b changes the column a real PostgreSQL deployment gets and this file
+ * reported everything fine; L7 reddened only because a source-text assertion
+ * here happens to quote the line the mutation landed on — luck about placement,
+ * not coverage. The premise is now carried in two halves:
+ *
+ *   - HERE, in §F2's dialect-parity block: the two width bodies and the
+ *     dispatch mirror are asked on a driver configured for EACH dialect the
+ *     emitter branches on, and must answer identically. No server is needed —
+ *     `isPostgres` reads the CONFIG — so it runs wherever this file runs, and
+ *     it reddens on L7b.
+ *   - In `driver-sql`, by
+ *     `sql-driver-16394-character-width-dialect-parity.test.ts`: the same
+ *     object through the same real chain on a LIVE Postgres and MySQL, columns
+ *     read back from the server's own catalog and compared against the SQLite
+ *     ones. That half also covers `createColumn`'s DISPATCH, which asking the
+ *     bodies cannot see move. ⚠️ It lives there and not here because the
+ *     `Temporal Conformance (live PG + MySQL)` job — the only job in this
+ *     repository that provisions a live server — runs `pnpm --filter
+ *     @objectstack/driver-sql test` and nothing else, so a live cell written
+ *     into this file would be provisioned by no job and would report itself
+ *     un-run forever.
  */
 
 import fs from 'node:fs';
@@ -967,6 +1010,20 @@ class DriverOracle extends SqlDriver {
   }
 
   /**
+   * `SqlDriver.varcharColumnChars`, unmodified — the emitter's own read-only
+   * mirror of which arm `createColumn` sends a field to, and at what width.
+   *
+   * ⚠️ A MIRROR, not the dispatch. It is the driver's own second copy of that
+   * switch, so it reaches one layer past the two width bodies and still stops
+   * short of `createColumn` itself; the real chain is {@link createdColumns},
+   * and its live-dialect half is `driver-sql`'s
+   * `sql-driver-16394-character-width-dialect-parity.test.ts`.
+   */
+  public varcharCharsFor(field: unknown, keyed?: { unique: boolean }): number | null {
+    return this.varcharColumnChars(field, keyed);
+  }
+
+  /**
    * ⭐ THE REAL CHAIN. The columns `initObjects` actually creates for one
    * object, read back out of the database it created them in.
    *
@@ -1006,8 +1063,34 @@ const ORACLE = new DriverOracle({
   useNullAsDefault: true,
 });
 
+/**
+ * [#16394] The SAME oracle, configured for each dialect the emitter branches on.
+ *
+ * ⭐ These are never dialled. `isPostgres` / `isMysql` are derived from
+ * `SqlDriver.clientSpelling(this.config)` — a read of the CONFIG, with no
+ * connection anywhere in it — so a dialect-configured driver answers every
+ * declaration-only question this file asks without a server existing. That is
+ * what makes the dialect axis affordable HERE, in Test Core, rather than only
+ * in the one job that provisions live servers.
+ *
+ * The connection strings are deliberately unreachable (port 1) and deliberately
+ * present: knex wants one, and a value nothing can dial is the loudest possible
+ * statement that nothing is meant to.
+ */
+const DIALECT_ORACLES: ReadonlyArray<{ dialect: string; oracle: DriverOracle }> = [
+  { dialect: 'sqlite', oracle: ORACLE },
+  {
+    dialect: 'postgres',
+    oracle: new DriverOracle({ client: 'pg', connection: 'postgres://never:dialled@127.0.0.1:1/none' }),
+  },
+  {
+    dialect: 'mysql',
+    oracle: new DriverOracle({ client: 'mysql2', connection: 'mysql://never:dialled@127.0.0.1:1/none' }),
+  },
+];
+
 afterAll(async () => {
-  await ORACLE.disconnect();
+  for (const { oracle } of DIALECT_ORACLES) await oracle.disconnect();
 });
 
 /**
@@ -1624,6 +1707,97 @@ describe('#16091 — the driver is the ORACLE, not just the source text', () => 
     expect(ORACLE.declaredCharsFor({})).toBe(DEFAULT_CHARS);
     expect(sqlWidth(columnsFor({ type: 'text', unique: true, maxLength: 1000 }).sql)).toBeNull();
     expect(sqlWidth(columnsFor({ type: 'email', maxLength: 1000 }).sql)).toBe(1000);
+  });
+
+  // ── F2b: the DIALECT axis (#16394) ────────────────────────────────────────
+  //
+  // Everything above — source readers, leaf differentials and the real chain
+  // alike — asks ONE driver, configured for SQLite, and then asserts the answer
+  // as a POSTGRESQL claim. The step between the two is a premise nothing was
+  // holding: that the width does not depend on the dialect. It is false as soon
+  // as anyone writes a dialect gate into one of these bodies, and a gate inside
+  // `keyableTextLength` left every assertion in this file green while changing
+  // the column a real PostgreSQL deployment gets.
+  //
+  // ⛔ NOT a source-text guard over the width arm. "No Postgres token appears
+  // in these lines" reddens because a TOKEN appeared, which a rename evades and
+  // which is the layer this file spent four rounds leaving. What follows CALLS
+  // the driver's own bodies on a driver configured for each dialect and
+  // compares the VALUES they return, so it reddens because the width moved.
+  //
+  // ⚠️ What it does not reach: `createColumn`'s dispatch, and everything
+  // `initObjects` does around it, on a real Postgres. That needs a server, and
+  // it is measured — over this same corpus of arms — by `driver-sql`'s
+  // `sql-driver-16394-character-width-dialect-parity.test.ts`, which runs in
+  // the one job that provisions one.
+
+  it('control — the dialect oracles really are DIFFERENT dialects, unconnected', () => {
+    // ⛔ Non-vacuity, and the whole load-bearing half of it: if all three
+    // instances reported the same dialect, the parity sweep below would compare
+    // one driver against itself 38 times and pass while measuring nothing.
+    expect(DIALECT_ORACLES.map((d) => d.oracle.dialectName)).toEqual(['sqlite', 'postgres', 'mysql']);
+    expect(DIALECT_ORACLES.map((d) => d.dialect)).toEqual(['sqlite', 'postgres', 'mysql']);
+    // `dialectName` is derived from the config, so it answers with no server —
+    // which is what makes this block affordable outside the live job.
+    expect(new Set(DIALECT_ORACLES.map((d) => d.oracle.dialectName)).size).toBe(3);
+    // ...and every one of them really is a driver that still answers.
+    for (const { dialect, oracle } of DIALECT_ORACLES) {
+      expect(oracle, dialect).toBeInstanceOf(SqlDriver);
+      expect(oracle.keyableCharsFor({ maxLength: PROBE_CHARS }), dialect).toBe(PROBE_CHARS);
+    }
+  });
+
+  it('both width bodies and the emitter mirror answer the SAME on every dialect', () => {
+    const disagreements: string[] = [];
+    const answers = new Set<string>();
+    let compared = 0;
+
+    const record = (what: string, shown: string, per: (number | null)[]): void => {
+      const distinct = new Set(per.map((v) => String(v)));
+      answers.add([...distinct].sort().join('|'));
+      compared += 1;
+      if (distinct.size !== 1) {
+        disagreements.push(
+          `${what} @ ${shown}: ` +
+            DIALECT_ORACLES.map((d, i) => `${d.dialect}=${String(per[i])}`).join(' '),
+        );
+      }
+    };
+
+    for (const maxLength of WIDTH_DECLARATIONS) {
+      const shown = JSON.stringify(maxLength) ?? String(maxLength);
+      record('keyableTextLength', shown, DIALECT_ORACLES.map((d) => d.oracle.keyableCharsFor({ maxLength })));
+      record('declaredVarcharLength', shown, DIALECT_ORACLES.map((d) => d.oracle.declaredCharsFor({ maxLength })));
+      // The mirror, over every character TYPE and both keyednesses — so a gate
+      // written into the SWITCH rather than into a width body is seen too, at
+      // the one layer that can be reached without a server. MEMBERSHIP is the
+      // driver's own, read off its case labels, exactly as the sweeps above.
+      for (const type of [...armMembers('text'), ...armMembers('email'), ...characterCatchAllMembers()]) {
+        const field: Record<string, unknown> = { type };
+        if (maxLength !== undefined) field.maxLength = maxLength;
+        for (const keyed of [undefined, { unique: true }]) {
+          record(
+            `varcharColumnChars(${type}${keyed ? ' keyed' : ''})`,
+            shown,
+            DIALECT_ORACLES.map((d) => d.oracle.varcharCharsFor(field, keyed)),
+          );
+        }
+      }
+    }
+
+    // Non-vacuity: the sweep really ran over every declaration, and the driver
+    // really gave more than one answer across it — a body that returned one
+    // constant everywhere would agree with itself on every dialect.
+    expect(compared).toBeGreaterThan(WIDTH_DECLARATIONS.length * 2);
+    expect(answers.size).toBeGreaterThan(3);
+
+    expect(
+      disagreements.slice(0, 20),
+      `${disagreements.length} of ${compared} width questions are answered differently by ` +
+        'dialect. The generators emit ONE dialect\'s DDL, and this file reads its oracle off ' +
+        'another — that is only sound while the driver\'s character width is dialect-invariant. ' +
+        'Fix driver-sql, never this expectation.',
+    ).toEqual([]);
   });
 
   it('every character TYPE, at every declaration, takes the width initObjects CREATES', async () => {

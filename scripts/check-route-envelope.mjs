@@ -204,6 +204,8 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
+// dispatch-gates: wide-population -- discover() and discoverResponseWriters() (the two walks behind MODULES and the Hono/Express surfaces) both root at join(ROOT, 'packages') and admit every non-test .ts file there before an AST pass decides which of them write a response -- a file-KIND filter, not a filename one, so no glob spells the population short of the whole subtree. Measured fresh on this tree: 2403 of 6491 tracked packages/ files are non-test .ts source (37.0%), corroborating the independent fs-trace in scripts/pm/bare-root-worklist.mjs's CENSUS_REFUSE_WIDE ("check:route-envelope packages", 2181/5837 = 37.4% at 2aa8456cf, verdict REFUSE-WIDE) -- the same width trade that table already recorded for this gate, now acted on here (#16828). The MODULES table's own keys stay as exact-file hints below, so a card touching an ALREADY-declared module still MATCHES precisely; this marker only stops a file the walk discovers but MODULES does not yet list -- the #16730 case -- from reading as Silent. packages/runtime/src/domains (DISPATCHER_DOMAIN_DIR) is a second, separately audited surface: discoverDomains() enumerates it exhaustively against DISPATCHER_DOMAINS below, independent of the response-writer population this marker is about.
+
 /**
  * Every route module in the repo, with the envelope structure it is DECLARED to
  * have. A module the scan finds that is not listed here fails — see the header.

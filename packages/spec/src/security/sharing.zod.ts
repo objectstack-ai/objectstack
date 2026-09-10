@@ -88,9 +88,10 @@ export const SharingLevel = z.enum([
  *   principal). Unlike every member above, which resolves ONCE PER RULE, a
  *   `field` recipient expands ONCE PER MATCHED RECORD, and its grants
  *   re-materialise when the record's own write changes that column. That
- *   executor half is #15072 (`plugin-sharing`); until it lands, the
- *   declared-rule bootstrap skips a `field` rule with a logged warning
- *   (`mapRecipientType` → null) — it never seeds one as anything wider.
+ *   executor half landed as #15072 (`plugin-sharing`): the declared-rule
+ *   bootstrap's `mapRecipientType` maps `field` through, and
+ *   `SharingRuleService.expandRecipientForRecord` reads the named column on
+ *   each matched record — never rule-wide, and never wider than the column.
  *
  * ⛔ No `manager` member (same ruling). "Share with the owner's manager" is
  * authored as a user field the application stores on the record — a snapshot
@@ -258,8 +259,9 @@ export const CriteriaSharingRuleSchema = lazySchema(() => BaseSharingRuleSchema.
  * `unit_and_subordinates` / `business_unit` (ADR-0057 D5; ADR-0090 D3) — every
  * authorable recipient expands at runtime (`plugin-sharing` `expandRecipient`)
  * — plus `field`, the record-relative recipient (#14103): resolved per matched
- * record from a user-typed column on it; its executor is the services half,
- * #15072, and until that lands a `field` rule is skipped LOUDLY at seed.
+ * record from a user-typed column on it. Its services half, #15072, landed:
+ * `expandRecipientForRecord` resolves it per record, so a `field` rule seeds
+ * at bootstrap like any other instead of being skipped there.
  *
  * The whole authorable surface is enforced — nothing here validates and then
  * silently does nothing (ADR-0078). Removed to keep it that way: `owner`-type

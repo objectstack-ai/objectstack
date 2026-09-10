@@ -18,6 +18,49 @@ import { registerPluginByName } from './plugin-registration.js';
 import { raceWithTimeout } from './timeout-guard.js';
 
 /**
+ * The kernel service a DEGRADED boot's conclusion is published on (#16630).
+ *
+ * ## Why this exists at all
+ *
+ * `validateSystemRequirements()` below decides which `core` services are
+ * missing and says so with `logger.warn`. That sentence was, until this
+ * constant, the ONLY form the conclusion took — and a log line is not a datum:
+ * the CLI's ready banner (`printServerReady`, `@objectstack/cli`) is emitted
+ * from a different package with no data path back to here, so it printed a
+ * green `✓ Server is ready` over a boot this method had just declared
+ * degraded. Two statements about one boot, produced independently, and the
+ * louder one was the wrong one. Measured twice within a day: objectui CI run
+ * `34056438855` (auth plugin failed, no `sys_*` table, ready printed anyway)
+ * and this repo's own published-artifact canary, run `34084559243`, where
+ * `✓ Server is ready` printed ABOVE four boot warnings including this one.
+ *
+ * ## Why a service entry and not a new export
+ *
+ * The kernel's service registry is ALREADY the seam every boot fact crosses on
+ * its way to that banner: `serve` reads `auth` (for the seeded dev admin) and
+ * `seed-summary` (the per-source seed outcomes `@objectstack/runtime` stashes
+ * the same way) off exactly this map, through the `getService` accessor this
+ * class already publishes. Publishing here therefore adds no member and no
+ * type to `@objectstack/core`'s public surface — the fact rides a boundary
+ * that is already crossed.
+ *
+ * ## Reading it
+ *
+ * Present ⇔ this boot was degraded. `getService` THROWS when it is absent, and
+ * absent is the healthy case, so every reader catches and treats the throw as
+ * "nothing to report" — the same shape `serve` already uses for the two reads
+ * above. The value is `{ missingCoreServices: string[] }`, frozen, holding the
+ * very array the warning above rendered: a reader must ⛔ never re-derive which
+ * services count as `core`, because that judgement is `ServiceRequirementDef`'s
+ * and a second implementation of it is free to disagree with this one.
+ *
+ * Dotted, kernel-owned name on purpose: every capability service is a bare noun
+ * (`auth`, `metadata`, `job`), and the two prefixes anything scans for are
+ * `driver.` and `app.`, so this collides with neither.
+ */
+const DEGRADED_CAPABILITIES_SERVICE = 'kernel.degraded-capabilities';
+
+/**
  * Enhanced Kernel Configuration
  */
 export interface ObjectKernelConfig {
@@ -325,9 +368,48 @@ export class ObjectKernel {
 
         if (missingCoreServices.length > 0) {
             this.logger.warn(`System started with degraded capabilities. Missing core services: ${missingCoreServices.join(', ')}`);
+            // [#16630] Say it as DATA as well as prose, so a reader outside this
+            // package can report the same conclusion instead of contradicting
+            // it. Same array, same moment — see DEGRADED_CAPABILITIES_SERVICE.
+            this.publishDegradedCapabilities(missingCoreServices);
         }
         
         this.logger.info('System requirement check passed');
+    }
+
+    /**
+     * Publish this boot's degraded-capabilities conclusion on
+     * {@link DEGRADED_CAPABILITIES_SERVICE} — the data half of the warning
+     * `validateSystemRequirements()` just logged (#16630).
+     *
+     * ⛔ Best-effort, and silent on failure BY DESIGN: this is a diagnostic
+     * readout, and a readout must never be able to fail a boot that the kernel
+     * has just decided is good enough to run. The one way `registerService`
+     * can throw here is a name collision, which the guard above already
+     * forecloses; the `catch` is there so that stays true if either ever
+     * changes. (`recordSeedOutcome` in `@objectstack/runtime` states the same
+     * rule for the same reason.)
+     *
+     * The value is FROZEN and holds a COPY. `getService` hands out the stored
+     * reference, so an unfrozen live array would let any reader edit the
+     * kernel's own record of what was missing — and this record exists
+     * precisely so that two packages cannot disagree about it.
+     */
+    private publishDegradedCapabilities(missingCoreServices: string[]): void {
+        try {
+            if (
+                this.services.has(DEGRADED_CAPABILITIES_SERVICE)
+                || this.pluginLoader.hasService(DEGRADED_CAPABILITIES_SERVICE)
+            ) {
+                return;
+            }
+            this.registerService(
+                DEGRADED_CAPABILITIES_SERVICE,
+                Object.freeze({ missingCoreServices: Object.freeze([...missingCoreServices]) }),
+            );
+        } catch {
+            /* diagnostic only — never let the readout break a boot */
+        }
     }
 
     /**

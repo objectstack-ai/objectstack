@@ -20,7 +20,7 @@
  *
  * The control for that reading sits in the same file as the defect:
  * `SCAFFOLD_PNPM_RANGE` and `renderPnpmWorkspaceYaml()` are IMPORTED by the
- * other scaffolder rather than restated, and across the same five emissions,
+ * other scaffolder rather than restated, and across the same emissions,
  * the same window and the same authors they did not drift at all.
  *
  * ## What is asserted, and why no expected value is written down here
@@ -204,10 +204,14 @@ describe('scaffold emission policy — one definition, four emissions', () => {
   it('emits the exported constant rather than a literal, for every policy range', () => {
     const ranges = declaredRanges();
     // ⚠️ `tsx` left this table with #16483: the retired `os create example`
-    // template was the only emission that declared it, so `SCAFFOLD_TSX_RANGE`
-    // now reaches no scaffold at all. Asserting it here anyway would compare an
-    // empty harvest against the constant and go red on a correct tree; a row is
-    // owed by a range some emission really declares, and by nothing else.
+    // template was the only emission that declared it. `SCAFFOLD_TSX_RANGE`
+    // has now been retired with it — every surviving emission runs its scripts
+    // through `objectstack`, `tsc` or `vitest`, none of which is invoked as
+    // `tsx`, so no emission declares that range. Asserting it here anyway
+    // would compare an empty harvest against a constant and go red on a
+    // correct tree; a row is owed by a range some emission really declares,
+    // and by nothing else — so this table grows a `tsx` row only after some
+    // emission declares one, never to keep a constant company.
     const expected: Array<[string, string]> = [
       ['typescript', SCAFFOLD_TYPESCRIPT_RANGE],
       ['vitest', SCAFFOLD_VITEST_RANGE],
@@ -352,8 +356,8 @@ describe('the on-ramp emits the same policy — measured by DRIVING it', () => {
     if (sandbox) rmSync(sandbox, { recursive: true, force: true });
   });
 
-  /** The on-ramp's emission, beside the five the two CLI commands render. */
-  function allSixManifests(): Array<{ id: string; manifest: Record<string, unknown> }> {
+  /** Every emission the two CLI commands render, plus the on-ramp's. */
+  function allScaffolderManifests(): Array<{ id: string; manifest: Record<string, unknown> }> {
     return [...emittedManifests(), { id: 'npx create-objectstack', manifest: emitted! }];
   }
 
@@ -372,7 +376,7 @@ describe('the on-ramp emits the same policy — measured by DRIVING it', () => {
 
   it('declares exactly one range per third-party dependency, across ALL THREE scaffolders', () => {
     const byName = new Map<string, Map<string, string[]>>();
-    for (const { id, manifest } of allSixManifests()) {
+    for (const { id, manifest } of allScaffolderManifests()) {
       for (const [name, range] of [
         ...thirdPartyOnly(manifest.dependencies as Record<string, unknown>),
         ...thirdPartyOnly(manifest.devDependencies as Record<string, unknown>),
@@ -399,7 +403,7 @@ describe('the on-ramp emits the same policy — measured by DRIVING it', () => {
 
   it('emits the exported TypeScript and pnpm constants, not a restatement of them', () => {
     const typescriptRanges = new Set(
-      allSixManifests().map(
+      allScaffolderManifests().map(
         ({ manifest }) =>
           (manifest.devDependencies as Record<string, string> | undefined)?.typescript
           ?? (manifest.dependencies as Record<string, string> | undefined)?.typescript,
@@ -410,7 +414,7 @@ describe('the on-ramp emits the same policy — measured by DRIVING it', () => {
     ]);
 
     const pnpmRanges = new Set(
-      allSixManifests().map(({ manifest }) => (manifest.engines as Record<string, string> | undefined)?.pnpm),
+      allScaffolderManifests().map(({ manifest }) => (manifest.engines as Record<string, string> | undefined)?.pnpm),
     );
     expect([...pnpmRanges], 'every emission declares engines.pnpm, at one range').toEqual([
       SCAFFOLD_PNPM_RANGE,

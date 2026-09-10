@@ -4,13 +4,45 @@ on:
   push:
     branches:
       - main
+  # ⭐ NO `branches:` filter here, deliberately (#16482) — see ci.yml's `on:`
+  # block for the full rationale and the measured runner cost; both files carry
+  # required contexts and are widened together, because six contexts split
+  # across two files are only as reachable as the less reachable file.
+  #
+  # ⚠️ The MEASURED 2026-08-25 (#12211) block immediately below does NOT bind
+  # on this widening, and it is not touched by it. Read what it measured: it is
+  # a `merge_group` COVERAGE result — "is there a queue-build gap to close" —
+  # answered NO, plus a ⛔ against adding `merge_group` to the ADVISORY
+  # workflows. It says nothing about the `pull_request:` trigger's `branches:`
+  # filter, and its residual is explicitly named as two repository SETTINGS
+  # (a commit reaching main with no queue build; `strict_required_status_checks
+  # _policy: false`), "neither reachable from this file". Removing a base-branch
+  # filter from `pull_request:` changes no merge_group behaviour whatsoever:
+  # `merge_group:` is a separate trigger key, still present below, and
+  # `check:required-contexts` assertion 6 fails the build if it ever is not.
   pull_request:
-    branches:
-      - main
   # Merge queue (see ci.yml for the full note): required checks must report on
   # queue builds or the queue stalls. This workflow has no PR-only steps, so
   # the trigger alone is enough.
   merge_group:
+  # ── THE HOURLY FULL RUN (#16467), the half this file owns ────────────────
+  # The card's ruling is that the hourly run covers BOTH required-context
+  # files, not just ci.yml, and the reason is measured rather than symmetric:
+  # the push-on-`main` run of THIS workflow is the only post-merge full-battery
+  # run of the families `scripts/ci/select-gate-families.sh` scopes away on
+  # merge groups (the PM dispatch-gates self-test, both ratchets, the
+  # verify-lock self-test, the comment-mask corpus). A scoped family that goes
+  # red on `main` after a queue build skipped it had, until this trigger, no
+  # run that would notice and no filer that would say so.
+  #
+  # The selector already treats every event that is neither `merge_group` nor
+  # `pull_request` as "run every family", so this trigger alone restores the
+  # full battery here — no step in this file changes.
+  #
+  # ⛔ A NEW TRIGGER KEY, not a widening of `push:`; see ci.yml's `on:` block.
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 # ── MEASURED 2026-08-25 (#12211) — a NEGATIVE result, recorded so it is not
 # re-measured. After the stale-ledger outage the queue's check set was measured
@@ -54,8 +86,14 @@ on:
 # Same policy as ci.yml: superseded runs on the same PR/branch waste runners
 # and delay feedback; cancel them. Push runs to main group by commit ref, so an
 # in-flight main run is cancelled only by a newer main push.
+#
+# ⭐ `github.event_name` is in the key for the reason ci.yml's concurrency block
+# states in full (#16467): on a `schedule` event the remaining two segments are
+# byte-identical to a push to `main`, so without it the next merge cancels the
+# hourly full run. `scripts/ci/scheduled-full-run.mjs --check-concurrency`
+# evaluates THIS expression too and reds if the two groups ever collapse again.
 concurrency:
-  group: lint-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: lint-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1064,6 +1102,28 @@ jobs:
       # exactly the family `check:self-test-wired` requires this step for.
       - name: Widening-tell gate self-test
         run: pnpm check:pm-widening-tells
+
+      # Changeset-deadline census self-test (#16850) — same family and the same
+      # split as every step around it. The LIVE census reads the shared board
+      # over the API and is REPORT-ONLY by ruling: #16850 takes option 1 (detect
+      # the consumption) under this lane's standing rule that a NEW scan
+      # population — here, issue BODIES — is censused before anything is
+      # enforced. So a card whose changeset window closed is a fact about the
+      # board, not about the PR that happens to run CI next, and failing that
+      # PR would punish the wrong actor.
+      #
+      # ⛔ Do not "promote" the live census into this step, and ⛔ do not give it
+      # a failing exit on findings. Whether the number justifies an exit
+      # contract at all is the question the census exists to answer, and the
+      # answer it produced on 2026-09-09 is in the PR that landed this file.
+      #
+      # What the self-test instruments is the MATCHING RULE and the CONTROLS —
+      # the two things a clean tree cannot exercise. Weakening either (counting
+      # the glob spelling as a target; accepting a zero without its positive
+      # control) leaves a production run just as green, which is the shape
+      # `check:self-test-wired` requires this step for.
+      - name: Changeset-deadline census self-test
+        run: pnpm check:pm-changeset-deadline-census
 
       # Governed-merges audit self-test (#9495) — same family, same split as
       # the half-state sweeper above: the live sweep enumerates the governed
@@ -2465,6 +2525,7 @@ jobs:
           run_self_test node scripts/symbol-anchors.mjs --self-test
           run_self_test node scripts/check-adr-symbol-anchors.mjs --self-test
           run_self_test node scripts/check-scripts-symbol-anchors.mjs --self-test
+          run_self_test node scripts/check-spec-docblock-symbol-anchors.mjs --self-test
           if [ -n "$failed" ]; then
             echo ""
             echo "Symbol-anchor self-tests — the following FAILED:"
@@ -2482,6 +2543,20 @@ jobs:
       # harness plants and the count comes out 4/3.
       - name: scripts/** symbol anchors resolve (no line citations on tracked targets survive)
         run: node scripts/check-scripts-symbol-anchors.mjs
+
+      # The THIRD corpus (#17065) — `packages/spec/src/**` doc blocks, again a
+      # `defineCorpus` registration and ⛔ not a second resolver. Separate sweep
+      # step for the same `check-step-collectors` reason stated above.
+      #
+      # ⭐ Its exit contract is a PINNED DAY-ONE RESIDUAL, not a clean tree: the
+      # census (7 findings across 6 of 1,317 files, taken in reporting mode
+      # BEFORE any exit code was chosen) is enumerated in the gate's
+      # `CENSUS_RESIDUAL`, every finding outside it is a hard red, and a row
+      # whose citation gets repaired goes STALE and reds until it is deleted.
+      # Repairing those 7 edits `packages/spec/**` text, which is `domain:spec`
+      # work with its own cards — the registration does not do it.
+      - name: packages/spec/src/** doc-block symbol anchors resolve (no NEW line citations on tracked targets)
+        run: node scripts/check-spec-docblock-symbol-anchors.mjs
 
       # NOTE: the standing platform test checklist (docs/qa/platform-checklist/)
       # is validated by `pnpm check:platform-checklist`, but by MAINTAINER
@@ -2991,6 +3066,34 @@ jobs:
       - name: Changeset-family gate self-tests
         run: pnpm check:changeset-gate-self-tests
 
+      # Lockstep package-count guard (#17039). `.changeset/config.json`'s
+      # `fixed` array is the one true count of packages one stray `major`
+      # promotes; check-changeset-fixed.mjs (release/RC workflows) already
+      # gates that array against the real workspace. Nothing gated the THREE
+      # prose restatements of the array's length — two sentences in
+      # content/docs/protocol/backward-compatibility.mdx and one header
+      # comment in scripts/publish-smoke-pack.mjs — so all three drifted
+      # silently (69 written, 70 true) the day a package joined the group.
+      # Full-repo state, not diff-shaped, so — unlike the self-tests above —
+      # this runs its real check every time, unconditionally.
+      - name: Lockstep package-count guard
+        run: pnpm check:lockstep-package-count
+
+      # Route-ledger census guard (#16758). `packages/runtime/src/route-ledger.ts`
+      # is census-shaped: its value is the completeness of a list, and nothing in
+      # this tree read its row COUNT. An index-slice edit meant to add two rows
+      # removed 105 lines — route rows plus the whole `/actions` section — and
+      # exited 0; it was caught only because an unrelated gate happened to redden.
+      # The file's own package suite is domain-level ("every registered dispatcher
+      # domain has at least one ledger entry"), which a shorter list satisfies, and
+      # the cross-ledger guards compare against a UNION that still holds 26 of the
+      # 82 rows' wire patterns from other ledgers. This gate holds the GENERATED
+      # census sentence above the array to the array's real length, so a deletion
+      # reds and a deliberate change shows its digits moving in the same diff.
+      # Full-repo state, not diff-shaped, so it runs its real check unconditionally.
+      - name: Route-ledger census guard
+        run: pnpm check:route-ledger-census
+
       # Release-notes drift guard: the platform is one version-locked train, so
       # every released @objectstack/spec major must have a curated, navigable
       # release page at content/docs/releases/v<major>.mdx. Catches the gap that
@@ -3387,6 +3490,35 @@ jobs:
       # group selects nothing WITHOUT the #10057 complaint). Offline; ~2s.
       - name: Test Core package selection self-test
         run: pnpm check:select-shard-packages
+
+      # The hourly full run's own contract (#16467). Two halves, one script:
+      #
+      #   --self-test        the card's IDENTITY, DE-DUP and BODY, driven
+      #                      offline. The filer is a `workflow_run` workflow, so
+      #                      it can only ever run from the default branch and
+      #                      NOTHING on a pull request can exercise it — the
+      #                      same position merge-queue-triage.yml is in. A
+      #                      de-dup rule tested only by the live workflow gets
+      #                      its first real test on the night it files its
+      #                      second duplicate, and this one fires hourly.
+      #   --check-concurrency
+      #                      evaluates ci.yml's and THIS file's
+      #                      `concurrency.group` expressions against a
+      #                      push-shaped and a schedule-shaped context and reds
+      #                      when the two collapse onto one group. They did
+      #                      until #16467: on a `schedule` event the other two
+      #                      segments are byte-identical to a push to `main`, so
+      #                      `cancel-in-progress` let the next merge kill the
+      #                      hourly run. It also refuses the two degenerate ways
+      #                      to make them differ — a run-unique key, and a
+      #                      constant one — since both switch cancellation off
+      #                      or on for every event in the file.
+      #
+      # Offline, no network, ~0.1 s.
+      - name: Hourly full run self-test and concurrency gate
+        run: |
+          node scripts/ci/scheduled-full-run.mjs --self-test
+          node scripts/ci/scheduled-full-run.mjs --check-concurrency
 
       # Gate-family selection self-test (#16496). The "Select the gate families
       # this run pays for" step at the top of this job is a thin call into

@@ -28,14 +28,45 @@
       // verdict about that package's `dist/` build state
       // (`pnpm check:type-source-resolution`). Anchored on the SUBPATH: the
       // bare key would match by prefix and resolve `/apps` through a file.
-      "@objectstack/platform-objects/apps": ["../../platform-objects/src/apps/index.ts"]
+      "@objectstack/platform-objects/apps": ["../../platform-objects/src/apps/index.ts"],
+      // [#16829] Resolve the real driver the record-view integration test boots
+      // to SOURCE. Without it that file's `SqliteWasmDriver` type comes from
+      // `driver-sqlite-wasm/dist`, making this package's typecheck a verdict
+      // about another package's build state (`pnpm check:type-source-resolution`).
+      // The `paths` precondition holds here: `rootDir` above is `../..` — the
+      // `packages/` directory — and the redirected source sits under it at
+      // `packages/drivers/driver-sqlite-wasm/src`, so no TS6059 is owed.
+      "@objectstack/driver-sqlite-wasm": ["../../drivers/driver-sqlite-wasm/src/index.ts"]
     }
   },
   "include": [
     "src/**/*"
   ],
+  // [#16829] Tests leave the BUILD program, exactly as `plugin-approvals`
+  // spells it. They are NOT losing coverage: `tsconfig.test.json` beside this
+  // file includes them and the `typecheck` script NAMES it (via
+  // `check:test-typecheck --project`), which is the pair
+  // `pnpm check:type-check-coverage` reads.
+  //
+  // The reason is the `@objectstack/driver-sqlite-wasm` `paths` rule above.
+  // That rule puts the driver's SOURCE into whichever program resolves the
+  // specifier, and the only importer is the record-view integration test. In
+  // THIS program that source is compiled under the root config's CommonJS-bound
+  // module setting, where `knex-wasm-dialect.ts` and `wasm-connection.ts` are 4
+  // × TS1470 ("`import.meta` is not allowed in files which will build into
+  // CommonJS output") — a verdict about the driver's module semantics billed to
+  // this package. `tsconfig.test.json` compiles the same files as ESM
+  // (`module: esnext`, `moduleResolution: bundler`), which is what vitest really
+  // runs them as, and there `import.meta` is legal.
+  //
+  // ⛔ The `paths` rule stays in THIS file rather than moving to the test
+  // config: a child that declared its own `paths` would REPLACE this map, not
+  // merge into it, silently sending `@objectstack/metadata-core` and
+  // `@objectstack/platform-objects/apps` back to `dist/`. That refusal is
+  // written into `tsconfig.test.json`'s own header.
   "exclude": [
     "dist",
-    "node_modules"
+    "node_modules",
+    "**/*.test.ts"
   ]
 }

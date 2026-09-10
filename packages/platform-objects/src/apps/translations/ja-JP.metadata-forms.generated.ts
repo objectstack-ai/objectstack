@@ -950,6 +950,30 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ヘッダー",
         helpText: "ダッシュボードヘッダー設定（title, subtitle, actions）"
       },
+      "header.showTitle": {
+        label: "タイトルを表示",
+        helpText: "ヘッダーにダッシュボードのタイトルを表示"
+      },
+      "header.showDescription": {
+        label: "説明を表示",
+        helpText: "ヘッダーにダッシュボードの説明を表示"
+      },
+      "header.actions": {
+        label: "操作ボタン",
+        helpText: "ヘッダーに表示する操作ボタン"
+      },
+      "header.actions.label": {
+        label: "ラベル"
+      },
+      "header.actions.actionUrl": {
+        label: "操作 URL"
+      },
+      "header.actions.actionType": {
+        label: "操作タイプ"
+      },
+      "header.actions.icon": {
+        label: "アイコン"
+      },
       widgets: {
         label: "ウィジェット",
         helpText: "位置とサイズを持つダッシュボードウィジェット"
@@ -1460,7 +1484,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "ID",
-        description: "権限セットはプロファイルに追加アクセス権を重ねる。プロファイルは各ユーザーに 1:1 で割り当てる基本セット。"
+        description: "権限セットは唯一の能力コンテナです。ユーザーは保持するすべてのセットの和集合を得るため、セットはアクセス権を追加することしかできません。ポジションがセットを人に配分します。"
       },
       system_permissions: {
         label: "システム権限",

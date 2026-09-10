@@ -950,6 +950,30 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "页眉",
         helpText: "仪表板页眉配置（title、subtitle、actions）"
       },
+      "header.showTitle": {
+        label: "显示标题",
+        helpText: "在页眉中显示仪表板标题"
+      },
+      "header.showDescription": {
+        label: "显示描述",
+        helpText: "在页眉中显示仪表板描述"
+      },
+      "header.actions": {
+        label: "操作按钮",
+        helpText: "页眉中的操作按钮"
+      },
+      "header.actions.label": {
+        label: "标签"
+      },
+      "header.actions.actionUrl": {
+        label: "操作地址"
+      },
+      "header.actions.actionType": {
+        label: "操作类型"
+      },
+      "header.actions.icon": {
+        label: "图标"
+      },
       widgets: {
         label: "组件",
         helpText: "包含位置和尺寸的仪表板组件"
@@ -1456,11 +1480,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     description: "Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)"
   },
   permission: {
-    label: "权限集 / 配置文件",
+    label: "权限集",
     sections: {
       identity: {
         label: "身份",
-        description: "权限集叠加在配置文件之上，用于授予额外访问权限。配置文件是按 1:1 分配给每个用户的基础权限集。"
+        description: "权限集是唯一的能力容器：用户获得其持有的所有权限集的并集，因此权限集只会增加访问权限。岗位负责把权限集分配给人。"
       },
       system_permissions: {
         label: "系统权限",

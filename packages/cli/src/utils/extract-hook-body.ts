@@ -14,8 +14,14 @@
  * For v1 we apply a deliberately simple **regex allow-list** over the
  * extracted body — full TypeScript AST analysis is deferred to v2. Anything
  * the regex rejects (top-level `import`, `require(` / esbuild's `__require(`,
- * `fetch(`, `process.*`, `globalThis.*`, `eval`, `new Function`, `.sudo(`) makes
- * extraction **throw**.
+ * `fetch(`, `process.*`, `globalThis.*`, `eval`, `new Function`, `.sudo(`,
+ * `.create(`) makes extraction **throw**.
+ *
+ * The last two are one family: a member that is REAL on the host
+ * `ScopedContext`/`ObjectRepository` and absent from the VM's `ctx.api`, so the
+ * same handler source passes an in-process test and TypeErrors the moment the
+ * build lowers it into a body. `.create(` carries one wrinkle `.sudo(` does not
+ * — see its entry in `FORBIDDEN_PATTERNS`.
  *
  * ⚠️ What that throw costs the BUILD depends on the flag, and the two outcomes
  * are not the same one. This header used to claim only the second (#10678):
@@ -212,6 +218,49 @@ const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string }> = [
       + '`onError: \'abort\'` that aborts the triggering write). Stamp the value from the record\'s own '
       + 'before-hook (`ctx.input.<field> = ...`), or leave this handler bundled so it runs in-process '
       + 'where `sudo()` exists',
+  },
+  // [#16249] Same family as `.sudo(` above, one layer over: the host
+  // `ObjectRepository` aliases `create(data)` to `insert(data)`, the spec
+  // contract `IScopedObjectRepository` declares `insert` and NOT `create`
+  // (packages/spec/src/contracts/scoped-context.ts — `create` is listed there
+  // as measured and deliberately excluded), and the VM installs exactly
+  // `insert / update / delete / updateMany / deleteMany / upsert` as the
+  // `ctx.api.object()` write leaves (`installCtx`,
+  // runtime/src/sandbox/quickjs-runner.ts). So a lowered body's `.create()` is
+  // `TypeError: not a function` on its FIRST run, and under a hook's default
+  // `onError: 'abort'` that aborts the triggering write with a message naming
+  // no member — the blind message #14010 measured for `sudo()`.
+  //
+  // What made this worse than an omission: the extractor ledger
+  // (`HOOK_BODY_WRITE_PATTERNS`, packages/lint) ADVERTISED `.create({…})` as
+  // legal `api-crud-literal` syntax and graded its payload as a live write, so
+  // the one layer that actively told an author how to write it named a spelling
+  // that cannot run. That entry is withdrawn in the same change; refusing here
+  // is what makes build time say what the contract already said.
+  //
+  // ⛔ The alternative — installing a `create` leaf in `installCtx` — is
+  // rejected on purpose: it would have the SANDBOX ratify a verb the CONTRACT
+  // never declared, which is the wrong direction under contract-first.
+  //
+  // Receiver-loose like `.sudo(` (a local alias `const repo =
+  // ctx.api.object('x'); repo.create(…)` must not slip through), with ONE
+  // carve-out that `.sudo(` needs no equivalent of: `Object` is a real sandbox
+  // global (pinned in `SANDBOX_GLOBALS`), so `Object.create(null)` is working,
+  // lowerable code. Refusing it would turn a correct body into a bundled
+  // closure — and a hard failure under `--strict-body` — which is a false
+  // refusal, not the safe direction. The lookbehind excludes that ONE receiver
+  // and nothing else: `myObject.create(` still matches, because `\b` requires a
+  // word boundary before `Object`.
+  {
+    rx: /(?<!\bObject\s*)\.\s*create\s*\(/,
+    reason:
+      '`create()` is not reachable from a sandboxed body — the VM\'s `ctx.api.object()` installs '
+      + '`insert` / `update` / `delete` / `updateMany` / `deleteMany` / `upsert` and no `create` leaf, so '
+      + 'the call is a TypeError at run time (and under a hook\'s default `onError: \'abort\'` that aborts '
+      + 'the triggering write). Spell the same payload `.insert({ ... })`, which is the member the sandbox '
+      + 'actually has and the only insert verb the spec contract declares; `Object.create()` is unaffected. '
+      + 'Alternatively leave this handler bundled so it runs in-process, where the host repository\'s '
+      + '`create()` alias exists',
   },
 ];
 

@@ -237,7 +237,7 @@ await client.data.batch('contact', batchRequest);
 
 // Authentication
 await client.auth.login({ email: 'user@example.com', password: 'pass' });
-await client.auth.register({ email: 'new@example.com', password: 'pass' });
+await client.auth.register({ email: 'new@example.com', password: 'pass', name: 'New User' });
 await client.auth.me();
 await client.auth.logout();
 await client.auth.refreshToken('refresh-token-string');
@@ -252,8 +252,8 @@ await client.packages.install({
 await client.packages.enable('plugin-id');
 
 // Approvals (approval is a flow node — decisions are keyed by request id)
-await client.approvals.approve(requestId, 'LGTM');
-await client.approvals.reject(requestId, 'Incomplete');
+await client.approvals.approve(requestId, { comment: 'LGTM' });
+await client.approvals.reject(requestId, { comment: 'Incomplete' });
 
 // Notifications
 await client.notifications.list({ read: false }); // unread only

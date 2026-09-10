@@ -950,6 +950,30 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Header",
         helpText: "Dashboard header config (title, subtitle, actions)"
       },
+      "header.showTitle": {
+        label: "Show Title",
+        helpText: "Show dashboard title in header"
+      },
+      "header.showDescription": {
+        label: "Show Description",
+        helpText: "Show dashboard description in header"
+      },
+      "header.actions": {
+        label: "Actions",
+        helpText: "Header action buttons"
+      },
+      "header.actions.label": {
+        label: "Label"
+      },
+      "header.actions.actionUrl": {
+        label: "Action URL"
+      },
+      "header.actions.actionType": {
+        label: "Action Type"
+      },
+      "header.actions.icon": {
+        label: "Icon"
+      },
       widgets: {
         label: "Widgets",
         helpText: "Dashboard widgets with position and sizing"
@@ -1460,7 +1484,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     sections: {
       identity: {
         label: "Identity",
-        description: "Permission Sets stack on top of a Profile to grant additional access. Profiles are the base set assigned 1:1 to each user."
+        description: "Permission sets are the only capability container: a user gets the union of every set they hold, so sets only ever add access. Positions distribute sets to people."
       },
       system_permissions: {
         label: "System Permissions",

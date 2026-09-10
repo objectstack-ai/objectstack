@@ -7,7 +7,7 @@
  *
  *   node scripts/check-system-context-census.mjs
  *   node scripts/check-system-context-census.mjs --self-test
- *   node scripts/check-system-context-census.mjs --fix   # nothing to repair -- see below
+ *   node scripts/check-system-context-census.mjs --fix   # regenerates declared COUNTS; anchors still need a human -- see below
  *
  * That page declares itself "the authority" for every platform behaviour keyed off
  * `ExecutionContext.isSystem`, and says it is "built by census over the whole repo,
@@ -252,7 +252,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the same criterion, behaviourally, on one page': 3,
   '⛔ and the half that must NOT have moved: the contract still reds': 2,
   'absence is loud': 1,
-  '⛔ --fix rewrites NOTHING, and says so': 2,
+  '⛔ --fix regenerates declared COUNTS only, never anchors, and says so': 8,
   '⭐ THE RULED RED-FIRST PAIR: a symbol rename REDS, a pure line move does NOT': 5,
   '⭐ the precision this trades away, pinned so nobody rediscovers it as a bug': 2,
   'the refusal has to SHOW its work (both counts, the symbol, the file)': 2,
@@ -431,39 +431,39 @@ export const NON_READ_ANCHORS = [
     file: 'packages/objectql/src/engine.ts',
     symbol: 'buildDriverOptions',
     collapsesOntoRead: true,
-    why: 'row 23 -- the early return the tenant-audit read feeds, and where `bypassTenantAudit` is threaded to the driver',
+    why: 'row 24 -- the early return the tenant-audit read feeds, and where `bypassTenantAudit` is threaded to the driver',
     rowSeams: ['Tenant-audit warning silenced'],
   },
   {
     file: 'packages/objectql/src/engine.ts',
     symbol: 'insert',
     collapsesOntoRead: true,
-    why: 'row 21 -- the strict-drop refusal that never fires under elevation, and the strip-before-validation block the validation row cites',
+    why: 'row 22 -- the strict-drop refusal that never fires under elevation, and the strip-before-validation block the validation row cites',
     rowSeams: ['Strict-drop refusal never fires'],
   },
   {
     file: 'packages/objectql/src/readonly-strict-errors.ts',
     symbol: 'READONLY_CLASS_REASONS',
-    why: 'row 21 -- the reason set the silent refusal would have used',
+    why: 'row 22 -- the reason set the silent refusal would have used',
     rowSeams: ['Strict-drop refusal never fires'],
   },
   {
     file: 'packages/plugins/plugin-security/src/system-write-guard.ts',
     symbol: 'assertEngineOwnedWriteAllowed',
-    why: 'row 24 -- the bypass expressed through a helper rather than a direct read',
+    why: 'row 25 -- the bypass expressed through a helper rather than a direct read',
     rowSeams: ['append-only write guard bypassed'],
   },
   {
     file: 'packages/plugins/plugin-sharing/src/sharing-service.ts',
     symbol: 'revoke',
     collapsesOntoRead: true,
-    why: 'row 34 -- the CONFLICT guard `revoke()` deletes in front of, in the same function',
+    why: 'row 35 -- the CONFLICT guard `revoke()` deletes in front of, in the same function',
     rowSeams: ['`revoke()` deletes directly'],
   },
   {
     file: 'packages/services/service-automation/src/builtin/crud-nodes.ts',
     symbol: 'registerCrudNodes',
-    why: 'row 60 -- the call site of the compensating owner stamp',
+    why: 'row 61 -- the call site of the compensating owner stamp',
     rowSeams: ['Automation flow data nodes re-add the `owner_id` stamp'],
   },
   {
@@ -1076,6 +1076,73 @@ export const DECLARED_COUNTS = [
 ];
 
 /**
+ * The WRITE half of `DECLARED_COUNTS` (#16919 direction 1).
+ *
+ * `evaluate()`'s COUNTS check (below) already computes, for every declared
+ * sentence, exactly the value it should hold — `declared.value(census, page)`
+ * — and only ever uses it to compare. Two branches independently hand-typing
+ * the same freshly-computed number into the same sentence text-merge clean and
+ * silently wrong on the SUM: main and a sibling PR each bumped the same seven
+ * sentences 106 → 107 for two different new reads, and the merged tree held
+ * 108. The fix in that shape is never "type the right number" — it is "stop
+ * typing it": this function performs the identical `pattern`/`value` lookup
+ * COUNTS already runs, and writes the result back instead of only comparing.
+ *
+ * Pure — a text in, a text out, plus what changed and what could not be
+ * derived. The caller decides whether to persist `text` or to refuse on a
+ * non-empty `errors`; nothing here touches the filesystem, so `--self-test`
+ * can drive it on a fixture exactly as it drives `evaluate()`.
+ *
+ * ⛔ Deliberately narrow, same rule as `check:generated --fix` elsewhere in
+ * this repo (see AGENTS.md, "Touched `packages/spec`?"): only a MISMATCHED
+ * count is rewritten, so a page where every count already agrees with the
+ * census comes back byte-identical — idempotent by construction, not merely
+ * in practice (`--self-test`'s IDEMPOTENCE case proves it on the real page).
+ * `UNENFORCED_TEXT_COUNTS` is deliberately NOT in scope: those six rows count
+ * whole-corpus TEXT, not the elevation contract, and are unenforced by design
+ * (see that export) — regenerating them would silently start enforcing a
+ * population this gate has already measured and rejected as noise.
+ *
+ * @param {{ pageText: string, census: object, declaredCounts?: typeof DECLARED_COUNTS }} args
+ * @returns {{ text: string, rewrites: {id: string, from: string, to: string}[], errors: string[] }}
+ */
+export function regenerateDeclaredCounts({ pageText, census, declaredCounts = DECLARED_COUNTS }) {
+  let text = pageText;
+  const rewrites = [];
+  const errors = [];
+  for (const declared of declaredCounts) {
+    // `d` adds match INDICES (Node >=16) so only the captured digits are
+    // spliced out -- never the surrounding sentence, which stays hand-written
+    // prose and must survive byte-for-byte on every run that changes nothing.
+    const flags = declared.pattern.flags.includes('d') ? declared.pattern.flags : `${declared.pattern.flags}d`;
+    const re = new RegExp(declared.pattern.source, flags);
+    const match = re.exec(text);
+    if (!match) {
+      errors.push(
+        `[count-pattern-unmatched] the page no longer carries the \`${declared.id}\` sentence ` +
+          `(${declared.why}) -- nothing was rewritten for it. Update the pattern together with the wording.`
+      );
+      continue;
+    }
+    const actual = declared.value(census, text);
+    if (!Number.isInteger(actual) || actual < 0) {
+      errors.push(
+        `[count-underivable] \`${declared.id}\` could not be derived (${declared.why}) -- the page ` +
+          'structure it reads is gone; nothing was rewritten for it.'
+      );
+      continue;
+    }
+    const stated = match[1];
+    const replacement = String(actual);
+    if (stated === replacement) continue;
+    const [start, end] = match.indices[1];
+    text = text.slice(0, start) + replacement + text.slice(end);
+    rewrites.push({ id: declared.id, from: stated, to: replacement });
+  }
+  return { text, rewrites, errors };
+}
+
+/**
  * ⛔ The six numbers this gate deliberately does NOT hold to the census, listed
  * here so that stays a decision instead of an omission.
  *
@@ -1518,25 +1585,28 @@ function readFileAt(root) {
 }
 
 /**
- * ⛔ `--fix` has nothing to repair, and says so instead of exiting 0 in silence.
+ * ⛔ ANCHORS have nothing to repair, and `--fix` says so instead of exiting 0 in
+ * silence about that half.
  *
  * Before #15921 this rewrote line numbers after a pure shift, which was the
  * common repair and a real one. Symbol anchors encode no position, so the shift
  * that repair existed for cannot happen: an edit above a site moves nothing this
- * page writes. Every red is now a human edit -- a rename, an arrived read, a
- * vanished one -- and none of them is mechanically derivable from the tree.
+ * page writes. A remaining anchor red is a human edit -- a rename, an arrived
+ * read, a vanished one -- and none of them is mechanically derivable from the
+ * tree. COUNTS are the other half, and `run()` handles those separately below
+ * (#16919) -- this function is deliberately scoped to what stays a human edit.
  *
  * ⭐ The flag stays RECOGNISED on purpose. `gen:system-context-census` and
  * `scripts/regen-artifacts.mjs` both name it, and a flag that silently became a
  * no-op would leave both reading as a working regeneration path. This prints what
  * it did not do, then returns the ordinary verdict.
  */
-function reportNoFix() {
+function reportNoAnchorFix() {
   process.stdout.write(
-    'check-system-context-census --fix: nothing to rewrite — this page carries no line numbers.\n' +
-      '  Anchors are `path#symbol` (scripts/symbol-anchors.mjs), so an unrelated edit above a site\n' +
-      '  cannot rot one and there is no mechanical repair to apply. A red below is a human edit:\n' +
-      '  a renamed symbol, a read that arrived, or a read that vanished.\n'
+    'check-system-context-census --fix: anchors have nothing to rewrite — this page carries no line\n' +
+      '  numbers. Anchors are `path#symbol` (scripts/symbol-anchors.mjs), so an unrelated edit above a\n' +
+      '  site cannot rot one and there is no mechanical repair to apply there. A remaining anchor red is\n' +
+      '  a human edit: a renamed symbol, a read that arrived, or a read that vanished (add its row).\n'
   );
 }
 
@@ -1549,7 +1619,6 @@ function run({ fix = false } = {}) {
     process.stderr.write(`::error::[unreadable-page] ${PAGE} could not be read -- ${error.message}\n`);
     return 1;
   }
-  if (fix) reportNoFix();
 
   const census = runCensus({ root: ROOT });
   /* RESOLUTION is the shared resolver's, run once, over this gate's corpus
@@ -1563,14 +1632,49 @@ function run({ fix = false } = {}) {
     return 1;
   }
 
+  if (fix) {
+    // ── COUNTS: the one half of `--fix` that IS mechanical (#16919 direction 1) ──
+    //
+    // Reuses the exact `DECLARED_COUNTS` computation the COUNTS check below
+    // runs, as a write instead of a comparison -- see `regenerateDeclaredCounts`.
+    // A count that cannot be derived or located refuses loudly (`errors`) rather
+    // than writing a partial page: a generator that writes six of seven numbers
+    // and silently skips the seventh is worse than one that writes none.
+    const { text, rewrites, errors } = regenerateDeclaredCounts({ pageText, census });
+    if (errors.length > 0) {
+      for (const error of errors) process.stderr.write(`::error::${error}\n`);
+      process.stderr.write(
+        `\ncheck-system-context-census --fix: ${errors.length} declared count(s) could not be ` +
+          'regenerated -- the page wording changed out from under the pattern that reads it. Fix the ' +
+          'wording and the pattern together (by hand), then re-run --fix.\n'
+      );
+      return 1;
+    }
+    if (rewrites.length > 0) {
+      writeFileSync(join(ROOT, PAGE), text, 'utf8');
+      pageText = text;
+      process.stdout.write(
+        `check-system-context-census --fix: regenerated ${rewrites.length} declared count(s) from the ` +
+          `census: ${rewrites.map((r) => `${r.id} ${r.from}->${r.to}`).join(', ')}.\n`
+      );
+    } else {
+      process.stdout.write(
+        'check-system-context-census --fix: every declared count already matches the census -- nothing ' +
+          'to rewrite there.\n'
+      );
+    }
+    reportNoAnchorFix();
+  }
+
   const { problems, stats } = evaluate({ pageText, census, readFile, sweep });
   for (const problem of problems) process.stderr.write(`::error::${problem}\n`);
   if (problems.length > 0) {
     process.stderr.write(
       `\ncheck-system-context-census: ${problems.length} problem(s) over ${stats.anchors} anchors ` +
         `and ${stats.sites} census sites.\n` +
-        'Re-run the census with `node scripts/isystem-census.mjs --json`. ⛔ There is no mechanical ' +
-        'repair: every red here is a human edit.\n' +
+        'Re-run the census with `node scripts/isystem-census.mjs --json`. A `[declared-count]` mismatch ' +
+        'is mechanical -- `pnpm gen:system-context-census` (`--fix`) rewrites it from the census. ' +
+        '⛔ Everything else here is a human edit.\n' +
         `\nThe anchor grammar:\n  ${ANCHOR_GRAMMAR}\n`
     );
     return 1;
@@ -2192,14 +2296,17 @@ function selfTest() {
   const noAnchors = run('---\ntitle: x\n---\n\nnothing here.\n');
   t('ABSENCE: a page with no anchors refuses', noAnchors.problems.some((p) => p.startsWith('[no-anchors]')));
 
-  // ── ⛔ --fix rewrites NOTHING, and says so ──────────────────────────────────
+  // ── ⛔ --fix regenerates declared COUNTS only, never anchors, and says so ───
   //
-  // ⭐ The failure this pins is the QUIET one. `gen:system-context-census` and
-  // `scripts/regen-artifacts.mjs` both invoke `--fix`; a flag that silently became
-  // a no-op leaves both of them reading as a working regeneration path, and the
-  // first person to hit a red would run it, see exit 0, and conclude the red was
-  // spurious.
-  battery('⛔ --fix rewrites NOTHING, and says so');
+  // ⭐ Two failures this pins, in opposite directions. `gen:system-context-census`
+  // and `scripts/regen-artifacts.mjs` both invoke `--fix`; a flag that silently
+  // went back to being a no-op (the pre-#16919 shape) leaves both reading as a
+  // working regeneration path while every count red still needs a human. And a
+  // `--fix` that goes the OTHER way -- resurrecting the retired line-shift
+  // repair, or writing the page on a count it could not actually derive -- is
+  // exactly the "mechanical repair" this gate explicitly does not offer for
+  // anchors. Both directions are pinned on the SAME source read.
+  battery('⛔ --fix regenerates declared COUNTS only, never anchors, and says so');
   let ownSourceForFix = null;
   try {
     ownSourceForFix = readFileSync(join(ROOT, 'scripts/check-system-context-census.mjs'), 'utf8');
@@ -2208,15 +2315,82 @@ function selfTest() {
   }
   if (ownSourceForFix !== null) {
     t(
-      '--fix: no anchor-rewriting code survives -- nothing in this gate writes the page',
-      !/writeFileSync\(\s*join\(ROOT, PAGE\)/.test(ownSourceForFix) && !/\bfixAnchors\b/.test(ownSourceForFix),
-      'a rewriter is back in this file'
+      '--fix: no anchor line-shift repair survives -- symbol anchors still encode no position to fix',
+      !/\bfixAnchors\b/.test(ownSourceForFix),
+      'the retired line-shift repair is back in this file'
     );
     t(
-      '--fix: the flag is still RECOGNISED and still explains itself, so the wiring cannot go quiet',
-      /argv\.includes\('--fix'\)/.test(ownSourceForFix) && /nothing to rewrite/.test(ownSourceForFix)
+      '--fix: the count-regenerating function is exported, not inlined where nothing else can reach it',
+      /export function regenerateDeclaredCounts\(/.test(ownSourceForFix)
+    );
+    t(
+      '--fix: the write is gated on there being something to write -- a no-op run must not touch the page',
+      /if \(rewrites\.length > 0\) \{/.test(ownSourceForFix) &&
+        /writeFileSync\(\s*join\(ROOT, PAGE\)/.test(ownSourceForFix)
+    );
+    t(
+      '--fix: the flag is still RECOGNISED and explains BOTH halves, so the wiring cannot go quiet',
+      /argv\.includes\('--fix'\)/.test(ownSourceForFix) &&
+        /anchors have nothing to rewrite/.test(ownSourceForFix) &&
+        /regenerated \$\{rewrites\.length\} declared count/.test(ownSourceForFix)
     );
   }
+
+  // ⭐ Behavioural, not textual: drive `regenerateDeclaredCounts` itself on the
+  // same fixtures the 'counts' battery already uses to pin the CHECK, so the
+  // WRITE can never define "correct" any differently than the comparison does.
+  const mismatched = fixturePage() + '\nit is a single boolean read at **7\ndistinct sites across 1 packages**.\n';
+  const regenerated = regenerateDeclaredCounts({ pageText: mismatched, census: FIXTURE_CENSUS, declaredCounts: FIXTURE_COUNTS });
+  t(
+    '--fix REGENERATES: a mismatched declared count is rewritten to the census value, and reported',
+    regenerated.errors.length === 0 &&
+      regenerated.rewrites.length === 1 &&
+      regenerated.rewrites[0].id === 'headline-sites' &&
+      regenerated.rewrites[0].from === '7' &&
+      regenerated.rewrites[0].to === '1',
+    JSON.stringify(regenerated.rewrites)
+  );
+  t(
+    '--fix REGENERATES: the rewritten text carries the new digit and NOT the old one, surrounding prose untouched',
+    regenerated.text.includes('read at **1\ndistinct sites') && !regenerated.text.includes('**7\ndistinct sites'),
+    regenerated.text
+  );
+  t(
+    '⭐ IDEMPOTENCE: a page that already agrees with the census comes back BYTE-IDENTICAL, zero rewrites',
+    (() => {
+      const already = fixturePage() + '\nit is a single boolean read at **1\ndistinct sites across 1 packages**.\n';
+      const first = regenerateDeclaredCounts({ pageText: already, census: FIXTURE_CENSUS, declaredCounts: FIXTURE_COUNTS });
+      const second = regenerateDeclaredCounts({ pageText: first.text, census: FIXTURE_CENSUS, declaredCounts: FIXTURE_COUNTS });
+      return (
+        first.rewrites.length === 0 &&
+        first.text === already &&
+        second.rewrites.length === 0 &&
+        second.text === first.text
+      );
+    })()
+  );
+  t(
+    '--fix REFUSES rather than writes a partial page: an unmatched or underivable count surfaces as an error',
+    (() => {
+      const unmatched = regenerateDeclaredCounts({
+        pageText: fixturePage(),
+        census: FIXTURE_CENSUS,
+        declaredCounts: FIXTURE_COUNTS,
+      });
+      const underivable = regenerateDeclaredCounts({
+        pageText: fixturePage() + '\nhelper at `pkg/a.ts#isSystemObjectName`\n',
+        census: FIXTURE_CENSUS,
+        declaredCounts: [
+          { id: 'x', pattern: /helper at `pkg\/a\.ts#(\w+)`/, value: () => carryOnwardRowCount('gone'), why: 'fixture' },
+        ],
+      });
+      return (
+        unmatched.errors.some((e) => e.startsWith('[count-pattern-unmatched]')) &&
+        unmatched.text === fixturePage() &&
+        underivable.errors.some((e) => e.startsWith('[count-underivable]'))
+      );
+    })()
+  );
 
   // ── ⭐ THE RULED RED-FIRST PAIR, on a real tree ─────────────────────────────
   //
@@ -2573,14 +2747,15 @@ function selfTest() {
       t(
         '⭐ ABLATION: one row inserted above row 34 turns the gate RED, naming the falsified page ' +
           'references -- this is the exact edit #15687 made under a green gate',
-        falsifiedRefs.some((p) => p.includes('`Row 34`') && p.includes('is row 35')) &&
-          falsifiedRefs.some((p) => p.includes('`rows 1–62`')),
+        falsifiedRefs.some((p) => p.includes('`Row 35`') && p.includes('is row 36')) &&
+          falsifiedRefs.some((p) => p.includes('`rows 1–63`')),
         ablated.problems.join(' | ')
       );
       t(
-        '⭐ ABLATION: and the `why:` strings for rows 34 and 60 -- the other two references #15687 falsified',
-        falsifiedWhy.some((p) => p.includes('`row 34`') && p.includes('is row 35')) &&
-          falsifiedWhy.some((p) => p.includes('`row 60`') && p.includes('is row 61')),
+        '⭐ ABLATION: and the `why:` strings for the two `why:` references #15687 falsified ' +
+          '(the seams #15687 knew as rows 34 and 60; the page has since grown a row above them)',
+        falsifiedWhy.some((p) => p.includes('`row 35`') && p.includes('is row 36')) &&
+          falsifiedWhy.some((p) => p.includes('`row 61`') && p.includes('is row 62')),
         falsifiedWhy.join(' | ')
       );
       t(

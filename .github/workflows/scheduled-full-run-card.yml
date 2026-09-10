@@ -1,0 +1,252 @@
+name: Scheduled Full Run Card
+
+# The reader for the hourly full run (#16467).
+#
+# ══════════════════════════════════════════════════════════════════════════════
+# WHY THIS EXISTS: A RED SCHEDULED RUN HAD NOBODY LOOKING AT IT.
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Since #16467 a `push` to `main` computes the Test Core package set with
+# `--affected`, and `scripts/ci/select-gate-families.sh` already scopes several
+# `Lint & Repo Gates` families away on merge groups. The hourly `schedule` run
+# of `CI` and `Lint & Type Check` is therefore the ONLY run that exercises the
+# whole battery on `main`.
+#
+# A scheduled run is on no pull request. It publishes no check that branch
+# protection reads, it blocks nothing, and nobody is notified when it goes red.
+# Narrowing `push` without this file would have left `main` less tested than
+# before AND unwatched — strictly worse than not doing the card at all.
+#
+# ⚠️ IT WATCHES BOTH WORKFLOWS, and that is the part the card did not say.
+# `merge-queue-triage.yml` is `workflows: [CI]`, so a red `Lint & Type Check` on
+# `main` has had no filer at all — not since #16467, but ever. The families
+# #16496/#16754 scope on merge groups (the PM dispatch-gates self-test, both
+# ratchets, the verify-lock self-test, the comment-mask corpus) are exactly the
+# ones that would go red here and nowhere else.
+#
+# ## ONE CARD PER WORKFLOW, deduplicated — the shape, and why not one card
+#
+# The identity, the de-dup rule and the body all live in
+# `scripts/ci/scheduled-full-run.mjs`, driven offline by its `--self-test`. That
+# is deliberate: a de-dup rule exercised only by the live workflow gets its
+# first real test on the night it files its second duplicate, and this one fires
+# hourly.
+#
+#   IDENTITY   a fixed title prefix per workflow —
+#              `hourly full run: red on main (CI)` — plus a PLAIN-TEXT body
+#              marker. ⛔ Never an HTML comment: this platform's body sanitizer
+#              is measured to eat short angle-bracket fragments, and a de-dup
+#              key that can be swallowed files a duplicate an hour.
+#   DE-DUP     scan OPEN issues for that prefix or that marker, bounded pages;
+#              a scan that hits its page bound has NOT established absence and
+#              REFUSES rather than filing. The oldest match wins — it is the one
+#              any duplicates were closed against, and the one the devx seat
+#              already graded.
+#   REFRESH    the body is rewritten in place, never a comment per run. ⛔ Labels
+#              are applied on CREATE only: grading is the seat's and a refresh
+#              must not undo it.
+#   BODY       the run link, and the commits between the previous GREEN
+#              scheduled run of THIS workflow and this one. That range is the
+#              hour in which `main` broke, and an EMPTY range is a reading of
+#              its own: same tree, green then red, so it is a flake or an
+#              infrastructure fault and nobody should go hunting a commit.
+#
+# ⛔ Two cards, not one, because `CI` and `Lint & Type Check` are two batteries
+# that go red for unrelated reasons. Under a single identity whichever filer ran
+# second would OVERWRITE the other's diagnosis — the body is rewritten on a
+# refresh. "One red scheduled run files exactly one card" holds per run, which
+# is the unit that is red.
+#
+# ⛔ A CLOSED card is never reopened. Red again after it was answered is a
+# regression, filed fresh.
+#
+# ## What this file cannot prove about itself, and what covers that
+#
+# A `workflow_run` workflow only ever runs from the default branch, so nothing
+# on a pull request can trigger it — the same position `merge-queue-triage.yml`
+# is in. Everything decidable offline is therefore pushed into the module and
+# gated by `Lint & Repo Gates`; what is left here is the API paging and the
+# event guard.
+
+on:
+  workflow_run:
+    # Byte-exact workflow NAMES (the `name:` at the top of each file), not
+    # paths. Quoted because `Lint & Type Check` starts a YAML alias unquoted.
+    workflows: ['CI', 'Lint & Type Check']
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  # Per watched workflow: two reds in one hour are two different cards and must
+  # not race, while two reds of the SAME workflow are the same card and the
+  # later one carries the newer facts. ⛔ `cancel-in-progress: false` — a filer
+  # cancelled between its de-dup scan and its create is how a duplicate is born.
+  group: scheduled-full-run-card-${{ github.event.workflow_run.name }}
+  cancel-in-progress: false
+
+jobs:
+  file:
+    name: File or refresh the hourly full run card
+    # ⭐ THREE guards, and each one is load-bearing.
+    #
+    #   event == 'schedule'  — a push, PR or merge_group run of these workflows
+    #     is read by branch protection and by merge-queue-triage.yml. Filing on
+    #     those would mint a card for every red PR in the repo.
+    #   conclusion in (failure, timed_out) — NOT `!= 'success'`. `cancelled`
+    #     and `skipped` are not reds: a cancelled hourly run measured nothing,
+    #     and a card saying "main is red" on the strength of a run that did not
+    #     finish is a false statement that costs somebody an investigation.
+    #   head_branch == 'main' — belt and braces. A scheduled run can only be on
+    #     the default branch today; if that ever changes, this must not file.
+    if: >-
+      github.event.workflow_run.event == 'schedule' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      (github.event.workflow_run.conclusion == 'failure' ||
+       github.event.workflow_run.conclusion == 'timed_out')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read # list the previous green scheduled run
+      contents: read # checkout, and the compare API
+      issues: write # the card, and nothing else
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: File or refresh the card
+        id: card
+        uses: actions/github-script@v9
+        with:
+          # Same transient-retry posture as merge-queue-triage.yml, and for the
+          # same reason: 403 is REMOVED from the exempt list because GitHub
+          # answers a secondary rate limit with 403 as well as 429, and this job
+          # pages issues. 400/401/404/422 stay exempt — a malformed request or a
+          # body past the 65536-character limit is this repo's own bug and is
+          # not improved by asking again.
+          retries: 3
+          retry-exempt-status-codes: 400,401,404,422
+          script: |
+            const mod = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci/scheduled-full-run.mjs`);
+            const { owner, repo } = context.repo;
+            const run = context.payload.workflow_run;
+
+            const identity = mod.cardIdentity(run.name);
+            const runUrl = run.html_url;
+
+            // The previous GREEN scheduled run of THIS workflow. `status:
+            // 'success'` is the filter that matters: a cancelled or a red
+            // earlier run is not a point the tree was known good at, so a range
+            // measured from one would name commits that were already suspect.
+            let previousGreen = null;
+            let commits = [];
+            let compareUrl = null;
+            let commitsTruncated = false;
+            let rangeNote = null;
+            try {
+              const previous = await github.rest.actions.listWorkflowRuns({
+                owner, repo,
+                workflow_id: run.workflow_id,
+                event: 'schedule',
+                branch: 'main',
+                status: 'success',
+                per_page: 1,
+              });
+              const hit = previous.data.workflow_runs?.[0];
+              if (hit) previousGreen = { run_id: hit.id, head_sha: hit.head_sha };
+              else rangeNote = 'No previous GREEN `schedule` run of this workflow is in the API window — either this is the first one, or every hourly run in the window was red.';
+            } catch (error) {
+              rangeNote = `The previous-green lookup failed (${error.message}).`;
+            }
+
+            if (previousGreen) {
+              try {
+                const cmp = await github.rest.repos.compareCommitsWithBasehead({
+                  owner, repo,
+                  basehead: `${previousGreen.head_sha}...${run.head_sha}`,
+                });
+                commits = (cmp.data.commits ?? []).map((c) => ({
+                  sha: c.sha,
+                  title: String(c.commit?.message ?? '').split('\n')[0],
+                }));
+                compareUrl = cmp.data.html_url ?? null;
+                // The compare endpoint caps at 250 commits. Saying so beats
+                // presenting a truncated list as the whole hour.
+                commitsTruncated = (cmp.data.total_commits ?? commits.length) > commits.length;
+              } catch (error) {
+                // ⛔ Do NOT fall through to "nothing landed": that string is the
+                // FLAKE reading, and a failed lookup is not evidence of an
+                // empty range. Drop the range entirely and say why.
+                previousGreen = null;
+                rangeNote = `The commit range could not be read (${error.message}).`;
+              }
+            }
+
+            const body = mod.renderBody({
+              identity,
+              runUrl,
+              headSha: run.head_sha,
+              conclusion: run.conclusion,
+              sweptAt: new Date().toISOString(),
+              previousGreen,
+              commits,
+              compareUrl,
+              commitsTruncated,
+              rangeNote,
+            });
+
+            // The DECISION is the module's, driven offline by its self-test
+            // against a mutable board (one red run files one card; the next
+            // refreshes it and files no second). What is left here is three
+            // callbacks over the API.
+            const outcome = await mod.fileOrRefreshCard({
+              identity,
+              body,
+              perPage: 100,
+              maxPages: 10,
+              listPage: async (page) => {
+                const res = await github.rest.issues.listForRepo({
+                  owner, repo, state: 'open', sort: 'created', direction: 'asc', per_page: 100, page,
+                });
+                return res.data;
+              },
+              updateIssue: async ({ number, body: b }) => {
+                await github.rest.issues.update({ owner, repo, issue_number: number, body: b });
+              },
+              createIssue: async ({ title, body: b, labels }) => {
+                // Additive on create; ⛔ nothing here ever replaces a whole
+                // label set (`check:whole-set-label-write` refuses that verb).
+                const res = await github.rest.issues.create({ owner, repo, title, body: b, labels });
+                return { number: res.data.number };
+              },
+            });
+
+            core.info(`${outcome.action} ${identity.marker} card #${outcome.number} (${body.length} chars)`);
+            core.notice(`${run.name} is red on the hourly full run — card #${outcome.number} ${outcome.action}.`);
+            core.setOutput('action', outcome.action);
+            core.setOutput('number', String(outcome.number));
+
+      - name: Publish the verdict to the run summary
+        # always(): when the step above threw — a refused scan, a rate limit —
+        # the run must still say what it was reacting to, or the red hourly run
+        # is invisible in both places at once.
+        if: always()
+        env:
+          CARD_ACTION: ${{ steps.card.outputs.action }}
+          CARD_NUMBER: ${{ steps.card.outputs.number }}
+          WATCHED: ${{ github.event.workflow_run.name }}
+          WATCHED_URL: ${{ github.event.workflow_run.html_url }}
+          WATCHED_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          {
+            echo "### Hourly full run: \`$WATCHED\` concluded \`$WATCHED_CONCLUSION\` on \`main\`"
+            echo
+            echo "- Run: $WATCHED_URL"
+            if [ -n "${CARD_ACTION:-}" ]; then
+              echo "- Card: ${CARD_ACTION} #${CARD_NUMBER}"
+            else
+              echo "- Card: NOT WRITTEN — the filing step did not report an outcome. Read this run's log:"
+              echo "  a bounded issue scan that could not complete REFUSES to file rather than risk a"
+              echo "  duplicate, and that refusal looks exactly like this."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

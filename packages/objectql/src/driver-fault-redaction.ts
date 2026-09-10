@@ -14,7 +14,7 @@
  * to disk at ERROR level, twice:
  *
  * ```
- * ERROR Insert operation failed {"object":"crm_account","error":{"message":
+ * WARN Insert operation failed {"object":"crm_account","error":{"message":
  *   "insert into `crm_account` (`account_number`, …, `zzz_nonexistent_field`)
  *    values ('ACC-000011', …, 'SENSITIVE-CANARY-9f3a2b') returning *
  *    - table crm_account has no column named zzz_nonexistent_field", "stack":
@@ -32,10 +32,17 @@
  * column and the condition (`table crm_account has no column named
  * zzz_nonexistent_field`, `NOT NULL constraint failed: sys_team.name`). It is
  * kept, and the log site keeps the `object` it already carried. ⛔ The
- * remedy for this exposure is NOT to lower the level or drop the entry: a
- * driver-level fault that logs nothing is a fault nobody can debug, which is
- * strictly worse than one logged too loudly. This narrows WHAT is written; the
- * level, the message and the entry are untouched.
+ * remedy for this exposure is NOT to drop the entry: a driver-level fault that
+ * logs nothing is a fault nobody can debug, which is strictly worse than one
+ * logged too loudly. This narrows WHAT is written; the message and the entry
+ * are untouched.
+ *
+ * [#17052] The LEVEL has since moved to `warn` on the three write doors — not
+ * as a remedy for THIS exposure, which it would not have fixed, but because
+ * those catches rethrow and AGENTS.md rules a failure handed to the caller is
+ * not a degradation report. The specimen above therefore reads `WARN` today.
+ * Nothing else about it moved: the same redacted `message`/`stack` reach the
+ * same `error` key of the same meta bag (`ObjectQL.writeFailureLogMeta`).
  *
  * ## [#8823] …but "the tail names identifiers" is not true of every dialect
  *

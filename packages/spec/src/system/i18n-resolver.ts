@@ -1145,13 +1145,120 @@ export interface WidgetLike {
   [key: string]: any;
 }
 
+/**
+ * Minimal global-filter shape consumed by `translateDashboard`
+ * (`GlobalFilterSchema`, #16772).
+ */
+export interface GlobalFilterLike {
+  /**
+   * `GlobalFilterSchema.name` — the stable filter key, declared as defaulting
+   * to `field`. The bundle addresses the filter by whichever of the two the
+   * document carries first: see {@link globalFilterKey}.
+   */
+  name?: string;
+  field?: string;
+  /** `I18nLabelSchema` — a plain string OR an inline locale map. */
+  label?: unknown;
+  /** Static options — `value` is `string | number | boolean`, `label` an `I18nLabelSchema`. */
+  options?: Array<{ value?: unknown; label?: unknown; [key: string]: any }>;
+  [key: string]: any;
+}
+
 /** Minimal dashboard metadata shape consumed by `translateDashboard`. */
 export interface DashboardLike {
   name: string;
   label?: string;
   description?: string;
   widgets?: WidgetLike[];
+  globalFilters?: GlobalFilterLike[];
   [key: string]: any;
+}
+
+/**
+ * The key `dashboards.<name>.globalFilters.<key>` addresses a filter by —
+ * its `name`, else its `field`. Not a lenient fallback: `GlobalFilterSchema`
+ * declares `name` as *"Stable filter name (variable key); defaults to
+ * field"*, so a filter that authors no `name` IS keyed by its `field`
+ * everywhere the platform reads it (widget `filterBindings`, the published
+ * `page.<name>` variable), and the bundle follows the same declaration.
+ * `undefined` for a filter carrying neither, which is off-spec (`field` is
+ * required) and passes through untranslated.
+ */
+export function globalFilterKey(filter: Pick<GlobalFilterLike, 'name' | 'field'>): string | undefined {
+  if (typeof filter.name === 'string' && filter.name.length > 0) return filter.name;
+  if (typeof filter.field === 'string' && filter.field.length > 0) return filter.field;
+  return undefined;
+}
+
+function lookupGlobalFilterLabel(
+  bundle: TranslationBundle | undefined,
+  dashboardName: string,
+  filterKey: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate =
+      pickData(bundle, code)?.dashboards?.[dashboardName]?.globalFilters?.[filterKey]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+function lookupGlobalFilterOption(
+  bundle: TranslationBundle | undefined,
+  dashboardName: string,
+  filterKey: string,
+  optionValue: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate =
+      pickData(bundle, code)?.dashboards?.[dashboardName]?.globalFilters?.[filterKey]?.options?.[optionValue];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Overlay `dashboards.<name>.globalFilters.<key>.{label,options.<value>}`
+ * onto one authored filter (#16772). Returns the input object itself when
+ * nothing resolved, so `translateDashboard` can tell "untouched" from
+ * "rebuilt" by identity and leave `globalFilters` off the copy when no filter
+ * moved.
+ */
+function translateGlobalFilter(
+  filter: GlobalFilterLike,
+  bundle: TranslationBundle,
+  dashboardName: string,
+  opts?: ResolveOptions,
+): GlobalFilterLike {
+  const key = globalFilterKey(filter);
+  if (key === undefined) return filter;
+
+  let next = filter;
+  const label = lookupGlobalFilterLabel(bundle, dashboardName, key, opts);
+  if (label !== undefined) next = { ...next, label };
+
+  if (Array.isArray(filter.options)) {
+    let changed = false;
+    const options = filter.options.map((option) => {
+      if (!option || typeof option !== 'object') return option;
+      const { value } = option;
+      // The record key is the option value spelled as a string — the schema
+      // declares `value` as `string | number | boolean`, so `String(value)`
+      // is the one spelling every value has; `null`/`undefined`/objects have
+      // no such spelling and are left alone.
+      if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') return option;
+      const translated = lookupGlobalFilterOption(bundle, dashboardName, key, String(value), opts);
+      if (translated === undefined) return option;
+      changed = true;
+      return { ...option, label: translated };
+    });
+    if (changed) next = { ...next, options };
+  }
+  return next;
 }
 
 function lookupDashboardAttr(
@@ -1196,6 +1303,16 @@ function lookupWidgetAttr(
  * key never reaches `options.description`, and `subCaption` never reaches
  * `widget.description`; the other `options` keys are carried through
  * untouched.
+ *
+ * Global filters are translated too (#16772), against
+ * `dashboards.<name>.globalFilters.<key>.label` and
+ * `.options.<value>` — the filter bar draws directly above the widget titles,
+ * and before this it was the one strip of the dashboard no bundle could
+ * reach. The key is the filter's `name`, else its `field`
+ * ({@link globalFilterKey}); an option is matched by its `value` spelled as
+ * a string. Only filters the bundle actually addresses are rebuilt, and
+ * `globalFilters` is left off the copy entirely when none moved, so a
+ * dashboard without filters gains no invented key.
  */
 export function translateDashboard<T extends DashboardLike>(
   doc: T,
@@ -1208,6 +1325,18 @@ export function translateDashboard<T extends DashboardLike>(
 
   const label = lookupDashboardAttr(bundle, name, 'label', opts) ?? doc.label;
   const description = lookupDashboardAttr(bundle, name, 'description', opts) ?? doc.description;
+
+  let globalFilters: GlobalFilterLike[] | undefined;
+  if (Array.isArray(doc.globalFilters)) {
+    let changed = false;
+    const rebuilt = doc.globalFilters.map((filter) => {
+      if (!filter || typeof filter !== 'object') return filter;
+      const next = translateGlobalFilter(filter, bundle, name, opts);
+      if (next !== filter) changed = true;
+      return next;
+    });
+    if (changed) globalFilters = rebuilt;
+  }
 
   const widgets = Array.isArray(doc.widgets)
     ? doc.widgets.map((w) => {
@@ -1228,6 +1357,7 @@ export function translateDashboard<T extends DashboardLike>(
     ...(label !== undefined ? { label } : {}),
     ...(description !== undefined ? { description } : {}),
     ...(widgets !== undefined ? { widgets } : {}),
+    ...(globalFilters !== undefined ? { globalFilters } : {}),
   };
 }
 
@@ -1390,6 +1520,14 @@ export interface PageLike {
   label?: string;
   description?: string;
   regions?: PageRegionLike[];
+  /**
+   * `PageSchema.slots` — where a `kind: 'slotted'` record page authors its
+   * components (#16772). Each slot holds one component or an array of them
+   * (`PageSchema` declares the union per slot); the walk tolerates either and
+   * passes any other value through untouched. Walked as a ROOT alongside
+   * `regions[].components[]` — see {@link walkAddressedPageComponents}.
+   */
+  slots?: Record<string, unknown>;
   /** Bound object for a record page — the `_tabs` fallback binding (#5377). */
   object?: string;
   /**
@@ -1472,8 +1610,9 @@ function lookupPageComponentCopy(
 }
 
 /**
- * How many levels of `properties.children` nesting
- * {@link walkAddressedPageComponents} descends below region level (#12961).
+ * How many levels of composition nesting — `properties.children` (#12961) and
+ * `properties.items[].children` (#16772), each panel costing one level —
+ * {@link walkAddressedPageComponents} descends below root level.
  * Authored page trees run three or four deep in practice, so the cap is not a
  * limit any real document meets — it exists because `children` is authored
  * data, and a walk that never throws must still be finite on a pathological
@@ -1511,15 +1650,20 @@ export interface AddressedPageComponentContext {
    */
   id: string | undefined;
   /**
-   * `true` below region level — the component was reached through a
-   * container's declared `properties.children`.
+   * `true` below root level — the component was reached through a container's
+   * declared `properties.children`, or through a `properties.items[].children`
+   * panel of a `page:tabs` / `page:accordion` (#16772).
    */
   nested: boolean;
-  /** Levels below region level; region-level components sit at `0`. */
+  /**
+   * Levels below root level; root-level components — an entry of
+   * `regions[].components[]` or of `slots.<slot>` — sit at `0`. An `items[]`
+   * panel costs one level exactly as a `children` slot does.
+   */
   depth: number;
   /**
    * `true` when this component OWNS its id's `pages.<name>.components.<id>`
-   * entry under the ruled collision arbitration (#12961): a region-level
+   * entry under the ruled collision arbitration (#12961): a root-level
    * component carrying the id wins outright — even over a nested match seen
    * earlier in document order — and among nested components the depth-first
    * document-order FIRST sighting takes it. At most one visited component is
@@ -1527,6 +1671,15 @@ export interface AddressedPageComponentContext {
    */
   addressed: boolean;
 }
+
+/**
+ * The two root collections {@link walkAddressedPageComponents} walks and
+ * rebuilds — `regions` (every page kind) and `slots` (`kind: 'slotted'`,
+ * #16772). Each key is present on the result exactly when it was present on
+ * the input, so a consumer can spread the pair back onto the document without
+ * inventing a `slots` key on a page that never authored one.
+ */
+export type AddressedPageRoots = Pick<PageLike, 'regions' | 'slots'>;
 
 /**
  * Depth-first, pre-order walk of the components `pages.<name>.components.<id>`
@@ -1541,11 +1694,21 @@ export interface AddressedPageComponentContext {
  * ignores, or omitting one it reads (#13109 was the second half going live).
  * Five invariants live here and ONLY here:
  *
- *   - roots: `regions[].components[]` only — `slots` is not walked, on any
- *     page;
- *   - descent: a container's declared `properties.children` only, recursively
- *     — the one composition key (#5775); `body` / `footer` /
- *     `items[].children` are deliberately not descended;
+ *   - roots: `regions[].components[]` AND `slots.<slot>` — a `kind: 'slotted'`
+ *     record page authors its components under `slots`, where each slot is one
+ *     component or an array of them (`PageSchema.slots`), and before #16772
+ *     such a page had exactly two addressable keys (`label`, `description`)
+ *     however many components it authored. Regions first, then the slots in
+ *     authored key order; both are ROOT level (depth `0`, `nested: false`);
+ *   - descent: a container's declared `properties.children` (#5775, the one
+ *     composition key) AND a `page:tabs` / `page:accordion` panel's
+ *     `properties.items[].children` (#16772 — the panel object itself is not
+ *     a component and is not visited; its `children` sit one level below the
+ *     tabs node, exactly as a `children` entry would). Both are matched by
+ *     SHAPE, not by component type, because `properties` is an open bag and
+ *     custom component types are legal. `body` / `footer` are deliberately
+ *     still not descended — a renderer-side back-compat fallback for stored
+ *     documents, not an authorable spelling;
  *   - the descent is depth-capped ({@link MAX_NESTED_COMPONENT_DEPTH},
  *     module-private — the walk is the contract, the number is its safety
  *     property);
@@ -1556,32 +1719,50 @@ export interface AddressedPageComponentContext {
  *
  * The visitor is called for EVERY component the walk reaches (addressed or
  * not), parent before children, siblings in document order. Its return value
- * REPLACES the node in the rebuilt region tree the walk returns; after the
- * visitor runs, the walk re-attaches the node's rebuilt `children` array in
- * place of the existing key, so the visitor never needs to recurse itself.
- * Enumeration-only consumers return the component unchanged and ignore the
- * walk's return value. The input document is never mutated. Entries of
- * `children` that are not component objects (bare id strings, `null` — the
- * slot is `z.array(z.unknown())`) pass through unvisited, and a region whose
- * shape is off-spec is returned as-is.
+ * REPLACES the node in the rebuilt root trees the walk returns; after the
+ * visitor runs, the walk re-attaches the node's rebuilt `children` array (and
+ * rebuilt `items[].children` arrays) in place of the existing keys, so the
+ * visitor never needs to recurse itself. Enumeration-only consumers return
+ * the component unchanged and ignore the walk's return value. The input
+ * document is never mutated. Entries of `children` that are not component
+ * objects (bare id strings, `null` — the slot is `z.array(z.unknown())`) pass
+ * through unvisited; a region or slot whose shape is off-spec is returned
+ * as-is.
+ *
+ * Returns the rebuilt {@link AddressedPageRoots} — `regions` and `slots`, each
+ * present exactly when present on the input.
  */
 export function walkAddressedPageComponents(
-  doc: Pick<PageLike, 'regions'>,
+  doc: AddressedPageRoots,
   visit: (component: PageComponentLike, context: AddressedPageComponentContext) => PageComponentLike,
-): PageLike['regions'] {
-  // Collision arbitration, pass 1 (#12961): every id carried by a REGION-LEVEL
-  // component. The ruling makes region level the outright winner when an id
-  // repeats across levels, so the whole set has to be known before the descent
-  // visits its first nested component — a region-level namesake in a LATER
-  // region still beats a nested match seen earlier.
-  const regionLevelIds = new Set<string>();
+): AddressedPageRoots {
+  const slots = doc.slots && typeof doc.slots === 'object' && !Array.isArray(doc.slots)
+    ? doc.slots
+    : undefined;
+
+  // Collision arbitration, pass 1 (#12961): every id carried by a ROOT-LEVEL
+  // component — a region's entry or a slot's. The ruling makes root level the
+  // outright winner when an id repeats across levels, so the whole set has to
+  // be known before the descent visits its first nested component — a
+  // root-level namesake in a LATER region or slot still beats a nested match
+  // seen earlier.
+  const rootLevelIds = new Set<string>();
+  const claimRootIds = (components: unknown[]): void => {
+    for (const component of components) {
+      const id = pageComponentId(component as PageComponentLike);
+      if (id !== undefined) rootLevelIds.add(id);
+    }
+  };
   if (Array.isArray(doc.regions)) {
     for (const region of doc.regions) {
       if (!region || typeof region !== 'object' || !Array.isArray(region.components)) continue;
-      for (const component of region.components) {
-        const id = pageComponentId(component);
-        if (id !== undefined) regionLevelIds.add(id);
-      }
+      claimRootIds(region.components);
+    }
+  }
+  if (slots) {
+    for (const slot of Object.values(slots)) {
+      if (Array.isArray(slot)) claimRootIds(slot);
+      else if (slot && typeof slot === 'object') claimRootIds([slot]);
     }
   }
 
@@ -1598,19 +1779,49 @@ export function walkAddressedPageComponents(
   const ancestors = new Set<PageComponentLike>();
 
   /**
-   * The component's rebuilt `properties.children`, or `undefined` when there
-   * is nothing to descend into — so a component without the slot is returned
-   * untouched rather than gaining an invented `properties` bag.
+   * The component's rebuilt composition slots — `properties.children` and
+   * `properties.items` (each panel's `children` rebuilt) — or `undefined` for
+   * a slot there is nothing to descend into, so a component without either is
+   * returned untouched rather than gaining an invented `properties` bag.
    */
-  const walkChildren = (component: PageComponentLike, depth: number): unknown[] | undefined => {
+  const walkComposition = (
+    component: PageComponentLike,
+    depth: number,
+  ): { children?: unknown[]; items?: unknown[] } | undefined => {
     if (depth >= MAX_NESTED_COMPONENT_DEPTH) return undefined;
     const props = component.properties;
     if (!props || typeof props !== 'object' || Array.isArray(props)) return undefined;
-    const children = (props as Record<string, unknown>).children;
-    if (!Array.isArray(children)) return undefined;
+    const { children, items } = props as Record<string, unknown>;
+    const hasChildren = Array.isArray(children);
+    // A panel is descended when it is an object carrying a `children` array;
+    // anything else in `items` (an option row of some other component, a bare
+    // string) passes through untouched, and `items` is only rebuilt when at
+    // least one panel was descended.
+    const panels = Array.isArray(items)
+      ? items.map((item) =>
+          item && typeof item === 'object' && !Array.isArray(item)
+            && Array.isArray((item as Record<string, unknown>).children))
+      : undefined;
+    const hasPanels = panels !== undefined && panels.some(Boolean);
+    if (!hasChildren && !hasPanels) return undefined;
     ancestors.add(component);
     try {
-      return children.map((child) => visitComponent(child as PageComponentLike, depth + 1));
+      const rebuilt: { children?: unknown[]; items?: unknown[] } = {};
+      if (hasChildren) {
+        rebuilt.children = children.map((child) => visitComponent(child as PageComponentLike, depth + 1));
+      }
+      if (hasPanels) {
+        rebuilt.items = (items as unknown[]).map((item, index) => {
+          if (!panels![index]) return item;
+          const panel = item as Record<string, unknown>;
+          return {
+            ...panel,
+            children: (panel.children as unknown[]).map((child) =>
+              visitComponent(child as PageComponentLike, depth + 1)),
+          };
+        });
+      }
+      return rebuilt;
     } finally {
       ancestors.delete(component);
     }
@@ -1627,28 +1838,52 @@ export function walkAddressedPageComponents(
     const nested = depth > 0;
     const id = pageComponentId(component);
     const addressed = id !== undefined
-      && (!nested || (!regionLevelIds.has(id) && !claimedNestedIds.has(id)));
+      && (!nested || (!rootLevelIds.has(id) && !claimedNestedIds.has(id)));
     if (addressed && nested) claimedNestedIds.add(id as string);
 
     // Pre-order: the visitor sees the parent before its children, so a
     // consumer that emits in visit order emits in document order. The rebuilt
-    // children land on the RETURNED node afterwards — `children` is the slot
-    // the walk owns; everything else on the node is the visitor's.
+    // composition slots land on the RETURNED node afterwards, and they are
+    // rebuilt from the ORIGINAL component, never from `next`. The walk owns
+    // two `properties` keys, each only when the ORIGINAL node carries it:
+    // `children` (rebuilt entry by entry), and — on a node carrying at least
+    // one panel (an `items` entry with a `children` array) — the WHOLE `items`
+    // array, panels rebuilt and every other entry carried across exactly as it
+    // was authored. So a visitor's edit to any other `items[*]` key (a panel's
+    // own `label`, say) is overwritten; on a node with no panel `items` is not
+    // rebuilt at all and such an edit stands. Everything else the visitor
+    // returns — every other `properties` key, every top-level key — is kept.
     let next = visit(component, { id, nested, depth, addressed });
 
-    const children = walkChildren(component, depth);
-    if (children !== undefined) {
-      next = { ...next, properties: { ...next.properties, children } };
+    const rebuilt = walkComposition(component, depth);
+    if (rebuilt !== undefined) {
+      next = { ...next, properties: { ...next.properties, ...rebuilt } };
     }
     return next;
   };
 
-  return Array.isArray(doc.regions)
+  const walkRoots = (components: unknown[]): PageComponentLike[] =>
+    components.map((c) => visitComponent(c as PageComponentLike, 0));
+
+  const regions = Array.isArray(doc.regions)
     ? doc.regions.map((region) => {
         if (!region || typeof region !== 'object' || !Array.isArray(region.components)) return region;
-        return { ...region, components: region.components.map((c) => visitComponent(c, 0)) };
+        return { ...region, components: walkRoots(region.components) };
       })
     : doc.regions;
+
+  const rebuiltSlots = slots
+    ? Object.fromEntries(Object.entries(slots).map(([slotName, slot]) => {
+        if (Array.isArray(slot)) return [slotName, walkRoots(slot)];
+        if (slot && typeof slot === 'object') return [slotName, visitComponent(slot as PageComponentLike, 0)];
+        return [slotName, slot];
+      }))
+    : doc.slots;
+
+  return {
+    ...('regions' in doc ? { regions } : {}),
+    ...('slots' in doc ? { slots: rebuiltSlots } : {}),
+  };
 }
 
 /**
@@ -1663,8 +1898,10 @@ export function walkAddressedPageComponents(
  * `pages.<name>.label` so translators need not repeat a string that is normally
  * identical to the page's nav label.
  *
- * **One component, one address.** A REGION-LEVEL `page:header` is addressed by
- * page name and by nothing else: the id route
+ * **One component, one address.** A ROOT-LEVEL `page:header` — an entry of a
+ * region's `components[]`, or of a `slots.<slot>` on a `kind: 'slotted'` page
+ * (its `slots.header` IS the page's header) — is addressed by page name and
+ * by nothing else: the id route
  * (`pages.<name>.components.<id>.*`) is NOT read for it, even when it carries
  * an id (ruled 2026-09-06, decision batch #58 — the page-name route is
  * canonical). It used to be read there and to WIN, which put the header's
@@ -1694,19 +1931,29 @@ export function walkAddressedPageComponents(
  * ruling widens the resolver to the published face rather than narrowing a
  * released face.
  *
- * `children` is the ONLY slot descended — it is the one composition key
- * (#5775). `body` is a renderer-side back-compat fallback for stored
- * documents, not an authorable spelling, so descending it would resurrect a
- * second spelling; `properties.items[].children` (`page:tabs`,
- * `page:accordion`) sits one level deeper than the slot the ruling names and
- * is left for its own contract call.
+ * Two composition slots are descended: `children` — the one composition key
+ * (#5775) — and, since #16772, a `page:tabs` / `page:accordion` panel's
+ * `items[].children`, which sits one level deeper than the slot the #12961
+ * ruling named and was left for its own contract call; that call is #16772,
+ * measured on a slotted contract page whose seven tab panels held every
+ * related list and the resolver reached none of them. `body` / `footer` stay
+ * undescended: a renderer-side back-compat fallback for stored documents, not
+ * an authorable spelling, so descending them would resurrect a second
+ * composition spelling.
+ *
+ * The roots widened in the same change: a `kind: 'slotted'` record page
+ * authors its components under `slots.<slot>` and `regions: []`, so before
+ * #16772 the walk visited NOTHING on such a page and `pages.<name>` carried
+ * exactly two addressable keys however many components the page authored.
+ * `slots` entries are ROOT level — the same standing as a region's entry, in
+ * the collision arbitration and for the page-name header route below.
  *
  * Nested components are reached by the **id route only**. The page-name header
  * route addresses THE page's header, and a `page:header` nested inside a
- * container is not it.
+ * container (or inside a tab panel) is not it.
  *
  * When one id appears more than once, the ruling fixes the winner: a
- * region-level component carrying it WINS outright, and among nested
+ * root-level component carrying it WINS outright, and among nested
  * components the document-order (depth-first) FIRST match takes it — one
  * bundle entry, one component. The descent is depth-capped
  * ({@link MAX_NESTED_COMPONENT_DEPTH}) and cycle-safe, because `children` is
@@ -1744,7 +1991,7 @@ export function translatePage<T extends PageLike>(
   // per-component overlay; the walk re-attaches each node's translated
   // `children` after the visitor returns, so the overlay never contends with
   // the descent for a key (`children` is not a copy key).
-  const regions = walkAddressedPageComponents(doc, (component, { nested, id, addressed }) => {
+  const { regions, slots } = walkAddressedPageComponents(doc, (component, { nested, id, addressed }) => {
     // Per-component copy (#6080) — addressed by the component's own id, and
     // applied before the page-name route below. `addressed` carries the ruled
     // collision arbitration (#12961), so a looked-up entry is this component's
@@ -1753,9 +2000,10 @@ export function translatePage<T extends PageLike>(
     // claim-on-first-sighting selects the same component a
     // claim-on-resolved-lookup would.
     //
-    // The one component this route does NOT serve is a REGION-LEVEL
-    // `page:header`: its copy is addressed by page name below, and reading
-    // `components.<id>` for it too would give one string two addresses. The
+    // The one component this route does NOT serve is a ROOT-LEVEL
+    // `page:header` (a region's entry or a `slots.<slot>` entry): its copy is
+    // addressed by page name below, and reading `components.<id>` for it too
+    // would give one string two addresses. The
     // condition is written to MIRROR the extractor's emission exception in
     // `collectExpectedEntries` (`packages/cli`) — same shape, opposite verb —
     // so the pair the shared walk exists to prevent cannot reopen from this
@@ -1763,7 +2011,7 @@ export function translatePage<T extends PageLike>(
     // which is the only route that reaches it.
     //
     // The walk's `addressed` arbitration is deliberately NOT touched: a
-    // region-level `page:header`'s id still CLAIMS its bundle entry and still
+    // root-level `page:header`'s id still CLAIMS its bundle entry and still
     // blocks a nested namesake. Which component owns an id is a property of
     // the document, decided identically for every consumer of the walk; only
     // whether this consumer READS the entry changes here, and the extractor
@@ -1794,7 +2042,7 @@ export function translatePage<T extends PageLike>(
     }
 
     // The page-name header route addresses THE page's header, so it stops at
-    // region level — nested components are reached by the id route only.
+    // root level — nested components are reached by the id route only.
     if (nested) return next;
     if (next.type !== PAGE_HEADER_COMPONENT) return next;
     if (headerTitle === undefined && headerSubtitle === undefined) return next;
@@ -1819,6 +2067,7 @@ export function translatePage<T extends PageLike>(
     ...(label !== undefined ? { label } : {}),
     ...(description !== undefined ? { description } : {}),
     ...(regions !== undefined ? { regions } : {}),
+    ...(slots !== undefined ? { slots } : {}),
     ...(interfaceConfig !== undefined ? { interfaceConfig } : {}),
   };
 }
@@ -2623,10 +2872,30 @@ export function resolveSettingsSourceLabel(
 //
 // `field_path` is dot-notation for nested fields. Top-level form fields use
 // just the field name (e.g. `"name"`, `"description"`). Composite and
-// repeater children are addressed via parent path:
+// repeater children are addressed via parent path — the SAME path the
+// extractor (`os i18n extract`, `walkFormField`) emits from a form's declared
+// `fields`, so a repeater ROW property is `<repeater>.<property>` with no
+// literal `items` segment in between:
 //
 //   "capabilities.trackHistory"  // composite "capabilities" → "trackHistory"
-//   "fields.items.label"         // repeater "fields" → row → "label"
+//   "header.actions.label"       // repeater "header.actions" → row → "label"
+//   "fields.items.label"         // repeater "fields" → a DECLARED child
+//                                // named `items` → "label" (not a reserved word)
+//
+// TWO objects consume these keys, and a localised name reaches the panel only
+// through the one the renderer reads for that node (#16458):
+//
+//   - the FormView (`FormFieldSpec.label` / `helpText` / `placeholder`) —
+//     `resolveMetadataFormLabels`, which also SYNTHESIZES a composite /
+//     repeater's `fields[]` from the bundle when the form enumerates none;
+//   - the JSON Schema derived from the metadata type's zod schema
+//     (`properties.<a>.properties.<b>.title`, and through an array's `items`)
+//     — `resolveMetadataFormSchemaTitles`. The console renders a repeater's
+//     rows as a table whose column headers read `items.properties[k].title`,
+//     never a `FormFieldSpec`, so an ITEM-level property name is authored as
+//     a `.meta({ title })` on the zod item schema (the English name) and
+//     localised by this overlay. Only `label` → `title` crosses over;
+//     `helpText` / `placeholder` stay on the FormView route.
 //
 // All helpers are pure (immutable) — they return a new form object with
 // the translated branches when matches exist, or the input unchanged when
@@ -2870,6 +3139,126 @@ export function resolveMetadataFormLabels<T extends Record<string, any>>(
   // mistake #6926 was filed for. It retires when the stored shape folds too.
   if (Array.isArray(form.groups)) {
     next.groups = form.groups.map(translateSection);
+  }
+  return next as T;
+}
+
+/**
+ * Every `metadataForms.<type>.fields.<path>` key recorded at any locale of the
+ * chain — the union, so a key one locale names and another does not is still
+ * visited (the per-key lookup then walks the chain in order).
+ */
+function listMetadataFormFieldPaths(
+  bundle: TranslationBundle | undefined,
+  type: string,
+  opts?: ResolveOptions,
+): string[] {
+  if (!bundle) return [];
+  const seen = new Set<string>();
+  for (const code of localeChain(opts)) {
+    const fields = pickData(bundle, code)?.metadataForms?.[type]?.fields;
+    if (!fields || typeof fields !== 'object') continue;
+    for (const key of Object.keys(fields)) if (key.length > 0) seen.add(key);
+  }
+  return Array.from(seen);
+}
+
+/**
+ * Write `title` onto the JSON Schema node a dot path addresses, copying only
+ * the spine of the tree that changes. Returns the SAME node when the path
+ * addresses nothing — an overlay, not a fork: a key the schema cannot place is
+ * left alone rather than invented.
+ *
+ * Addressing rules, shared with the extractor's `walkFormField` and with
+ * `translateFormField` above:
+ *
+ *   - a segment names an entry of `properties`;
+ *   - an ARRAY node is stepped through into its row schema (`items`) without
+ *     consuming a segment — a repeater row property is `<repeater>.<property>`;
+ *     a literal `items` segment is only ever a declared property of that name;
+ *   - a union (`anyOf` / `oneOf`) applies the path to every branch that can
+ *     take it (an `I18nLabel` is a `string | locale-map` union; an optional
+ *     array authored beside a scalar is a union of shapes);
+ *   - a `$ref` is not followed: a shared definition cannot carry a per-path
+ *     name, and the metadata-type schemas are emitted inlined.
+ */
+function setSchemaTitleAtPath(node: any, segments: readonly string[], title: string): any {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return node;
+  if (segments.length === 0) {
+    return node.title === title ? node : { ...node, title };
+  }
+  const [head, ...rest] = segments;
+  const props = node.properties;
+  if (props && typeof props === 'object' && props[head] && typeof props[head] === 'object') {
+    const child = setSchemaTitleAtPath(props[head], rest, title);
+    return child === props[head] ? node : { ...node, properties: { ...props, [head]: child } };
+  }
+  const items = node.items;
+  if (items && typeof items === 'object' && !Array.isArray(items)) {
+    const row = setSchemaTitleAtPath(items, segments, title);
+    return row === items ? node : { ...node, items: row };
+  }
+  for (const key of ['anyOf', 'oneOf'] as const) {
+    const branches = node[key];
+    if (!Array.isArray(branches)) continue;
+    let changed = false;
+    const next = branches.map((branch: any) => {
+      const out = setSchemaTitleAtPath(branch, segments, title);
+      if (out !== branch) changed = true;
+      return out;
+    });
+    if (changed) return { ...node, [key]: next };
+  }
+  return node;
+}
+
+/**
+ * Overlay a locale bundle's `metadataForms.<type>.fields.<path>.label` entries
+ * onto a JSON Schema derived from the metadata type's zod schema, as `title`
+ * on the node each path addresses (#16458).
+ *
+ * This is the SECOND half of the metadata-form localisation channel.
+ * {@link resolveMetadataFormLabels} decorates the FormView the panel lays
+ * out with; this function decorates the JSON Schema the panel reads field
+ * shapes from — and for one class of node the schema is the ONLY object the
+ * renderer consults: a repeater's rows render as a table whose column headers
+ * are `items.properties[k].title`, with no `FormFieldSpec` in reach. An
+ * item-level property is therefore named in English by a `.meta({ title })`
+ * on the zod item schema, and named in every other locale by a bundle entry at
+ * the row-property path (`header.actions.label`), which lands here.
+ *
+ * Every `fields.<path>` key of the bundle is applied — top-level and composite
+ * paths too — so a consumer reading `properties.<k>.title` sees the same name
+ * the FormView carries. Only `label` crosses over; `helpText` and
+ * `placeholder` are FormView attributes and stay on that route.
+ *
+ * Pure: returns a new schema with the changed spine copied, or the INPUT
+ * OBJECT ITSELF when no bundle entry for `type` exists at any locale of the
+ * chain or no entry addresses a node — a caller may memoise on identity.
+ * Lookup order per key is the resolver's usual chain (requested locale →
+ * `fallbackChain` → nothing; the authored `title` is left in place when no
+ * locale names the node).
+ *
+ * @example
+ * ```ts
+ * const schema = z.toJSONSchema(DashboardSchema, { io: 'input' });
+ * const localized = resolveMetadataFormSchemaTitles(schema, 'dashboard', bundle, { locale: 'zh-CN' });
+ * localized.properties.header.properties.actions.items.properties.label.title; // '标签'
+ * ```
+ */
+export function resolveMetadataFormSchemaTitles<T extends Record<string, any>>(
+  schema: T,
+  type: string,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): T {
+  if (!schema || typeof schema !== 'object') return schema;
+  if (!lookupMetadataForm(bundle, type, opts)) return schema;
+  let next: any = schema;
+  for (const path of listMetadataFormFieldPaths(bundle, type, opts)) {
+    const title = lookupMetadataFormField(bundle, type, path, 'label', opts);
+    if (!title) continue;
+    next = setSchemaTitleAtPath(next, path.split('.'), title);
   }
   return next as T;
 }

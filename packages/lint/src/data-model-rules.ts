@@ -16,6 +16,8 @@
  * schema-valid AND lint-clean here.
  */
 
+import { BOOLEAN_VALUE_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
+
 export type Severity = 'error' | 'warning' | 'suggestion';
 
 export interface LintIssue {
@@ -105,6 +107,57 @@ const NUMERIC_TYPES = new Set([
   'number', 'currency', 'integer', 'decimal', 'percent', 'float', 'double',
 ]);
 const OPTION_FIELD_TYPES = new Set(['select', 'multiselect', 'radio', 'enum']);
+
+/**
+ * Does a `min` / `max` roll-up over a child field of `childFieldType` produce
+ * an answer that fits the column a `summary` field is stored in?
+ *
+ * This is the roll-up door's OWN predicate, and it is deliberately NOT
+ * `isAggregateCompatibleWithFieldType`
+ * (`packages/spec/src/data/aggregate-field-type-compatibility.ts`). The two
+ * answer different questions about the same pair:
+ *
+ *   - That table asks **"can every backend give one answer"** — and for
+ *     `min` / `max` it ACCEPTS the temporal class on purpose, because there
+ *     they "return a value of the field's OWN type (#15768)". A `DatasetMeasure`
+ *     hands that answer straight to the caller, so a temporal answer is fine.
+ *   - This rule asks **"does that answer fit the column this roll-up is
+ *     STORED into"**. A roll-up's answer is not returned, it is persisted in
+ *     the `summary` field, whose value contract is `z.number().finite()`
+ *     (`valueSchemaFor`, ADR-0104 D1) because `summary` is a member of
+ *     `NUMERIC_VALUE_TYPES`.
+ *
+ * So this predicate is the analytics table's `min` / `max` row NARROWED by
+ * exactly the temporal class. Reusing that table here would accept
+ * `max(child.shipped_at)` — the very declaration this rule exists to refuse —
+ * and the gate would be green because it never fires. ⛔ Do not "simplify"
+ * the two into one call; `data-model-rules.summary-rollup.test.ts` pins the
+ * disagreement.
+ *
+ * Membership is READ from the spec's own value classes rather than typed out
+ * here, and from these two specifically:
+ *
+ *   - `NUMERIC_VALUE_TYPES` is the set that DEFINES the acceptance criterion —
+ *     it is the very membership `valueSchemaFor` consults to answer
+ *     `z.number().finite()`. A type joining that class changes the `summary`
+ *     value contract and this door with it, in one edit.
+ *   - `BOOLEAN_VALUE_TYPES` is admitted on the authority of maintainer ruling
+ *     #11152: booleans aggregate as NUMBERS on every backend with no
+ *     per-aggregate exception, pinned by the spec's own `AGGREGATION_CASES`
+ *     (`min(flag)=0`, `max(flag)=1`, enrolled on six backends) and implemented
+ *     by `driver-sql`'s `int` cast on Postgres (#11635). The answer is a
+ *     number, so it fits.
+ *
+ * ⛔ Deliberately NOT read: `NON_TEXT_STORED_VALUE_TYPES`, whose membership is
+ * these same two classes TODAY. It is defined by a third question — "is the
+ * stored value never text" (#14079) — and excludes the temporal class for a
+ * DIALECT reason, not for this one. Composing the union here states why each
+ * half is in, so a future member of that set cannot widen this door as a side
+ * effect.
+ */
+function summaryRollupAnswerFitsColumn(childFieldType: string): boolean {
+  return NUMERIC_VALUE_TYPES.has(childFieldType) || BOOLEAN_VALUE_TYPES.has(childFieldType);
+}
 /**
  * Field names that give an object a title FACE, for R9
  * (`object/missing-name-field`).
@@ -491,6 +544,12 @@ export function lintDataModel(objects: any[]): LintIssue[] {
   ];
   if (!Array.isArray(objects) || objects.length === 0) return issues;
 
+  // Index: object name → the object, for resolving a roll-up's child object.
+  const objectsByName: Record<string, any> = {};
+  for (const o of objects) {
+    if (o?.name && !(o.name in objectsByName)) objectsByName[o.name] = o;
+  }
+
   // Index: parent object name → child relationships pointing at it.
   const childrenByParent: Record<string, Array<{ child: any; fieldName: string; def: any }>> = {};
   for (const child of objects) {
@@ -571,6 +630,71 @@ export function lintDataModel(objects: any[]): LintIssue[] {
             message: `${type} field "${obj.name}.${fieldName}" has no options`,
             path: `${fieldPath}.options`,
           });
+        }
+      }
+
+      // R13 — a `min`/`max` roll-up must aggregate a child field whose ANSWER
+      // fits the column the roll-up is stored into.
+      //
+      // `FieldSchema.summaryOperations` admits `min`/`max` over ANY child
+      // field, and `aggregateSummaryValue` (objectql) returns the driver's
+      // answer verbatim — only an empty-set fallback stands between the
+      // backend and the stored value. So an ordinary "latest shipment"
+      // roll-up, `max` over a `datetime` child field, computes an INSTANT into
+      // a field whose value contract says finite number. Nothing between
+      // author and driver correlated the two, so it is refused here, at
+      // authoring time, at `error` (Prime Directive #12: reject at authoring,
+      // never tolerate in a consumer).
+      //
+      // Scoped to `min`/`max` deliberately: `count` ignores the field
+      // entirely, and `sum`/`avg` over a non-numeric child is a different
+      // shape, whose accept set the analytics table's own rows already
+      // EXCLUDE. Measured on this tree, nothing consults that table on the
+      // roll-up door (or anywhere else), so that is an open gap, not a
+      // refusal this rule may lean on — and widening here to cover it would
+      // be a second account of a pair the table already rules on.
+      if (type === 'summary') {
+        const ops = def.summaryOperations;
+        const fn = ops?.function;
+        const childName = ops?.object;
+        const childFieldName = ops?.field;
+        if (
+          (fn === 'min' || fn === 'max') &&
+          typeof childName === 'string' && childName !== '' &&
+          typeof childFieldName === 'string' && childFieldName !== ''
+        ) {
+          // SILENCE, never a guess, on anything this pass cannot resolve: a
+          // child object contributed by another package, a partially-loaded
+          // stack, or a field name that resolves to no declaration. The spec's
+          // own aggregate table states the tier — "a consumer that cannot
+          // resolve a field's type … must NOT call the predicate with a guess;
+          // 'cannot answer, do not block' is the consumer's tier". A refusal
+          // fired on an unresolvable model would redden an app for metadata
+          // this pass simply never saw.
+          const child = objectsByName[childName];
+          const childField = child
+            ? fieldEntries(child.fields).find((f) => f.name === childFieldName)
+            : undefined;
+          const childType = childField?.def?.type;
+          if (typeof childType === 'string' && !summaryRollupAnswerFitsColumn(childType)) {
+            issues.push({
+              severity: 'error',
+              rule: 'rollup/non-numeric-aggregand',
+              message:
+                `summary field "${obj.name}.${fieldName}" rolls up ` +
+                `${fn}(${childName}.${childFieldName}), but "${childName}.${childFieldName}" is ` +
+                `a ${childType} field — ${fn} answers with a value of the CHILD field's own type, ` +
+                `while a summary field's value contract is a finite number (it is a member of the ` +
+                `spec's NUMERIC_VALUE_TYPES class), so the answer does not fit the column the ` +
+                `roll-up is stored in`,
+              path: `${fieldPath}.summaryOperations.field`,
+              fix:
+                `Aggregate a numeric or boolean child field instead (min/max over those answer ` +
+                `with a number), or use function: 'count' — which reads no value off the field. ` +
+                `To carry a ${childType} on "${obj.name}", declare a ${childType} field and ` +
+                `maintain it from a flow; a roll-up cannot store one.`,
+            });
+          }
         }
       }
 

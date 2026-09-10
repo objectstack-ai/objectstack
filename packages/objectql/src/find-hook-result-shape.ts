@@ -15,11 +15,13 @@
  * diagnostic, no log. Measured on a real engine over a real SQL driver —
  * `ARRAY(len=1)` with no hooks, `OBJECT{records}` with the handler.
  *
- * Of the four `return hookContext.result` sites in `engine.ts` this is the only
- * one with a concrete declared shape to violate; `findOne`, `update` and
- * `delete` all declare `Promise<any>` and carry no enforceable declaration at
- * all. That is a separate question about those declarations and is deliberately
- * NOT answered here.
+ * Of the four `return hookContext.result` sites in `engine.ts` this was, when
+ * #15823 landed, the only one with a concrete declared shape to violate:
+ * `findOne`, `update` and `delete` all declared `Promise<any>` and carried no
+ * enforceable declaration at all. #15823 fenced that out as a separate question
+ * about those declarations; #16231 answered it (maintainer ruling, option A,
+ * 2026-09-07). All four verbs declare now, and the other three seams are closed
+ * on these terms in `verb-hook-result-shape.ts`.
  *
  * ## Why a refusal rather than a wider declaration
  *

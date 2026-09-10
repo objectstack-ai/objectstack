@@ -1,5 +1,120 @@
 # @objectstack/hono
 
+## 17.4.0
+
+### Minor Changes
+
+- cfb64a6: `createHonoApp` mounts the auth surface where the auth service actually serves, and refuses a prefix it cannot serve it under.
+  
+  The documented embed did not reach better-auth at all. `createHonoApp` mounted `/auth/*` under its own `prefix` (default `/api`) while `AuthPlugin` configures better-auth with `basePath: '/api/v1/auth'`, so the two never intersected. The forwarded request could only 404, that 404 fell through to the terminal dispatcher catch-all, and the caller got a `200` with an empty body. Measured on a real kernel with `AuthPlugin`, driving `createHonoApp({ kernel })` with both defaults untouched:
+  
+  ```
+  POST /api/auth/sign-in/email   (valid shape, wrong password)  ->  200  {}
+  GET  /api/auth/get-session                                    ->  200  {}
+  POST /api/auth/sign-up/email                                  ->  200  {}
+  ```
+  
+  A failed sign-in answering `200 {}` is the silent-success shape: a client that reads `res.ok` sends the user into an authenticated view with no session. The same boot now answers, through the same embed:
+  
+  ```
+  POST /api/v1/auth/sign-in/email  (wrong password)  ->  401  {"message":"Invalid email or password","code":"INVALID_EMAIL_OR_PASSWORD"}
+  GET  /api/v1/auth/get-session                      ->  200  null
+  POST /api/v1/auth/delete-user                      ->  401  {"message":"Unauthorized","code":"UNAUTHORIZED"}
+  ```
+  
+  **Neither default moves.** `prefix` still defaults to `/api` and the auth `basePath` still defaults to `/api/v1/auth`. What changed is which of the two decides the mount:
+  
+  - **`@objectstack/hono`** — the `/auth/*` mount is derived from the auth service's configured `basePath`, read at app-construction time, rather than from `prefix`. An auth service that does not expose its base path keeps the previous `${prefix}/auth` mount, so a custom or older auth service is unaffected.
+  - **`@objectstack/hono`** — a `prefix` the auth base path is not inside now **refuses at construction**, naming both values and every one-line fix that actually constructs: move the app up to the base path's own parent namespace, or configure better-auth down under the prefix (carrying the leading slash the prefix may itself be missing). ⛔ A direction with no working answer is not offered rather than offered wrongly — a single-segment base has no usable parent prefix, because `''` falls back to `/api` and `'/'` mounts every other route of the app under `//`. Previously that composition served auth outside the namespace the host asked for while `${prefix}/auth/*` answered `200 {}`. This is the one behaviour that can stop an app booting: a deployment passing, say, `prefix: '/custom'` alongside the default auth base path was already not serving auth, and now says so instead of failing silently.
+  - **`@objectstack/plugin-auth`** — `AuthManager.getBasePath()` is new and public: the configured base path in its one normalised spelling (a leading slash added when absent, trailing slashes stripped), which is the spelling an HTTP adapter can mount on. ⛔ **Purely additive — no configured `basePath` changes anything this package does.** better-auth is still handed the configured string verbatim, and the route-ownership walk still normalises its own copy; that copy now reads this accessor instead of repeating the expression. ⛔ It is **not** the string better-auth receives, and it is **not** the single definition of the value. `getAuthIssuer()` and `getMcpResourceUrl()` still derive their own copies and are deliberately unchanged: they are the OAuth `iss` this AS advertises and the RFC 8707 resource identifier a token's `aud` is matched against, both compared by exact string by relying parties, so retiring their copies moves published identifiers and is not a tidy-up that belongs on this card (filed as #16399). Normalising the string handed to better-auth is that same move seen from the other side — it shifts the access-token `iss` off `getAuthIssuer()`, and this manager's own `verifyMcpAccessToken` then rejects every MCP token the deployment mints. Measured on a real `client_credentials` token, and not done.
+
+### Patch Changes
+
+- 1c00b01: The Hono adapter's `/auth/*` mount yields only a 404 that disclaims ownership
+  
+  `createHonoApp`'s `${prefix}/auth/*` mount forwards every request under it to the
+  kernel's `auth` service and, since #4117, hands the request on to the rest of the
+  chain when that service answers 404 — which is what keeps `/auth/me/permissions`
+  and `/auth/me/localization` reachable through the gated `dispatch()`. The yield
+  had only the status to go on, so it could not tell "I do not serve this path"
+  from "I serve it and the answer is 404".
+  
+  Measured on a real boot through this adapter (a real kernel with `AuthPlugin`,
+  `prefix: '/api/v1'`), `GET /api/v1/auth/delete-user/callback?token=…&callbackURL=…`
+  answered `404 {"message":"Not found","code":"NOT_FOUND"}` from better-auth and
+  `200 {}` on the wire. `plugin-auth`'s route ledger carries that route under its
+  `disabled` disposition precisely because it is published and answers 404, so the
+  ledger's recorded answer was true of the auth service and false on this adapter's
+  wire. Nothing had to be composed in for that: the `${prefix}/*` dispatcher
+  catch-all this same function registers is terminal and answers `200 {}` for paths
+  under `/auth/`.
+  
+  The mount now asks the auth service whether its own router serves the path, via
+  an optional `ownsRoute(request)` — the seam `AuthManager` grew in the plugin-side
+  fix for the same defect — and yields only when it does not. Every answer that is
+  not a literal `true` (no such method, a throw, anything else) means yield, so a
+  service predating the method behaves exactly as before and a failure to decide
+  can never cost the ordering-independent surface.
+  
+  ⛔ The mount is unchanged and still claims `${prefix}/auth/*`; 401/403 were never
+  yielded and still are not. What narrowed is only which 404 may be handed on.
+- fc0a783: `createHonoApp` no longer discards the status and body of a dispatcher result that is already a `Response` — it hands the object on unchanged.
+  
+  `HttpDispatcherResult.result` is declared for direct response objects ("For flexible return types or direct response objects (Response/NextResponse)"), and the runtime really puts one there: the `/auth` domain returns whatever the auth service answered as `{ handled: true, result: response }`. The adapter's `toResponse` had no arm for that. It tested `result.type` for the `redirect` and `stream` descriptors, a `Response` spells neither, and the fall-through was `c.json(res, 200)` — so the real status was replaced by a literal `200` and the real body by `JSON.stringify` of a `Response`, which is `{}` because a `Response` has no own enumerable properties.
+  
+  Measured on a real boot through this adapter (a real kernel, the real dispatcher, `prefix: '/api/v1'`), an auth service answering an honest 404 on a path it does not serve:
+  
+  ```
+  GET /api/v1/auth/me/permissions
+    the door answered : 404 {"message":"Not found","code":"NOT_FOUND"}
+    the caller read   : 200 {}
+  ```
+  
+  A discarded status is not a missing answer, it is a wrong one that reads as success: `res.ok`, `status === 200` and "nothing threw" all report a refusal, a 404 or a 500 as a completed operation, and a fail-closed guard written as `if (!data) return false` does not fire on `{}` because `{}` is truthy. Callers embedding this adapter now see the status and the body the door actually produced, along with its headers, and a non-JSON body arrives byte-identical instead of being re-serialized.
+  
+  The check is `instanceof Response` and nothing else: the `redirect` and `stream` descriptor arms, the plain-object rendering after them, and the separate `response` arm all behave exactly as before.
+- Updated dependencies [429ec1e]
+- Updated dependencies [233222e]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [98191d2]
+- Updated dependencies [f1a1028]
+- Updated dependencies [c1eafe6]
+- Updated dependencies [68437d4]
+- Updated dependencies [44c849c]
+- Updated dependencies [68f8f77]
+- Updated dependencies [6491463]
+- Updated dependencies [da1cffb]
+- Updated dependencies [ce8bfc9]
+- Updated dependencies [bca21f7]
+- Updated dependencies [2c753fe]
+- Updated dependencies [fa85759]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [088f761]
+- Updated dependencies [3e560da]
+- Updated dependencies [6615a02]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [f2f6684]
+- Updated dependencies [ac6213e]
+- Updated dependencies [4db3c61]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [8a12067]
+- Updated dependencies [de75e40]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [401e50a]
+- Updated dependencies [b834b48]
+- Updated dependencies [ee32e1c]
+- Updated dependencies [4b0508e]
+- Updated dependencies [b31ebfe]
+- Updated dependencies [4c0b22b]
+- Updated dependencies [8744de9]
+- Updated dependencies [c5d6803]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [3d3f60e]
+  - @objectstack/runtime@17.4.0
+  - @objectstack/plugin-hono-server@17.4.0
+  - @objectstack/types@17.4.0
+
 ## 17.3.0
 
 ### Patch Changes

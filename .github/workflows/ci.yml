@@ -4,9 +4,33 @@ on:
   push:
     branches:
       - main
+  # ⭐ NO `branches:` filter here, deliberately (#16482). A `pull_request:`
+  # trigger filtered to `branches: [main]` does not run at all when the PR's
+  # base is a feature branch — and a workflow that does not run publishes NO
+  # check run, which is an ABSENCE, not a skip. Branch protection reads that as
+  # permanently pending, so every required context this file publishes reports
+  # nothing on such a PR. Measured on the #14478 stack: six card PRs showed
+  # 8-11 light checks and ZERO of the six required contexts; the first real
+  # signal arrived at the trunk PR, after every card was written, reviewed and
+  # merged. Correctness rested on local runs quoted into PR bodies — a
+  # discipline, not a gate.
+  #
+  # Runner cost of removing the filter, measured 2026-09-08 over the 30 days
+  # 2026-08-09 → 2026-09-08 (4000 PRs read, `sort=created&direction=desc` paged
+  # until the window closed): 6 of 4000 PRs had a base other than `main`
+  # (0.15%), all six the #14478/#15679 stack. At the window's measured 7008
+  # pull_request runs per workflow, 0.15% is ~10.5 extra runs per workflow per
+  # 30 days ≈ 2.5/week, or ~57 job-runs/week across both files at 23 job-runs
+  # per PR event. Even the pessimistic bound — one uncancelled run per one of
+  # those PRs' 115 commits — is 1.6% of current pull_request spend. Small, so
+  # the trigger is widened unconditionally rather than gated on a label or on
+  # "the base is an open PR's head" (#16482 records the arithmetic).
+  #
+  # ⛔ Do NOT mirror this widening onto the `push:` trigger above. `push:` is
+  # per-branch, not per-PR: unfiltering it would run this workflow on every
+  # push to every agent branch in the repo, which is a different and far larger
+  # population than the 6 PRs measured here.
   pull_request:
-    branches:
-      - main
   # Merge queue: the queue builds each PR as speculatively merged onto the
   # current main and only lands it if this workflow is green on that result —
   # the race-free version of the "pull main and re-verify before merging"
@@ -14,12 +38,55 @@ on:
   # branch-protection-required check MUST carry this trigger, or queue builds
   # wait forever on a check that never reports.
   merge_group:
+  # ── THE HOURLY FULL RUN (#16467) ─────────────────────────────────────────
+  # `push` above now computes the Test Core package set with `--affected`
+  # against `github.event.before`, so a merge no longer re-tests the whole
+  # workspace it just tested in the queue. Something still has to run the FULL
+  # battery on `main`, on a clock, or "main is green" stops being a statement
+  # about the workspace and becomes a statement about the last diff.
+  #
+  # This is that run. Minute 0 rather than an offset minute ON PURPOSE, and
+  # against the sibling convention in test-nightly-tiers.yml: the reading this
+  # feeds — `scripts/ci/select-shard-timings-run.mjs` — wants one complete run
+  # per hour far more than it wants a short queue wait, and a run that starts
+  # a few minutes late is still the hour's run. What it must NOT do is collide
+  # with the next hour's, which the concurrency group below decides.
+  #
+  # ⛔ This is a NEW TRIGGER KEY, not a widening of `push:`. The ⛔ above still
+  # binds: `push:` stays filtered to `main`.
+  schedule:
+    - cron: '0 * * * *'
+  # The same full battery, on demand: an operator who has just landed a fix for
+  # a red hourly run should not have to wait up to an hour to see it answered.
+  # Treated as `full` by the selection script for the same reason `schedule` is.
+  workflow_dispatch:
 
 # Superseded runs on the same PR/branch waste runners and delay feedback;
 # cancel them. Push runs to main group by commit ref as well, so an in-flight
 # main run is cancelled only by a newer main push.
+#
+# ⭐ `github.event_name` IS LOAD-BEARING IN THIS KEY, and it is the whole
+# reason the hourly run above can finish (#16467). On a `schedule` event
+# `github.event.pull_request.number` is empty and `github.ref` is
+# `refs/heads/main` — BYTE-IDENTICAL to what a push to `main` produces. Without
+# the event name in the key the hourly run and the next merge share one group,
+# `cancel-in-progress: true` applies, and the next merge kills the hourly run.
+# That is not a hypothetical: this card's own measurement is that 36 of the
+# last 60 push runs on `main` were already cancelled that way, at a merge
+# cadence that would censor most hours.
+#
+# ⛔ Do not "simplify" this back to two segments. `scripts/ci/scheduled-full-
+# run.mjs --check-concurrency` evaluates this expression against a push-shaped
+# and a schedule-shaped context and reds when the two groups are equal, so the
+# collision cannot come back silently.
+#
+# `cancel-in-progress` stays `true` for every event including `schedule`: two
+# hourly runs overlapping means one of them is over an hour old, and an hour-old
+# measurement of `main` is strictly the worse of the two. Test Core's wall clock
+# is well inside the cadence (~39 shard-minutes across six shards), so this is
+# the exceptional path, not the normal one.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -30,11 +97,13 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      # On merge_group, everything counts as changed: dorny/paths-filter has no
-      # merge_group support, and the queue build is the last validation before
-      # main — the one place a skipped job can never be the right answer. A
-      # skipped step's output is the empty string (falsy), so `|| 'true'`
-      # supplies the merge-group value without touching PR/push behavior.
+      # On merge_group — and on the `schedule` / `workflow_dispatch` full runs
+      # (#16467) — everything counts as changed: dorny/paths-filter resolves a
+      # diff only on `pull_request` and `push`, and each of these three events
+      # is a place a skipped job can never be the right answer (the queue build
+      # is the last validation before main; the hourly run IS the full battery).
+      # A skipped step's output is the empty string (falsy), so `|| 'true'`
+      # supplies their value without touching PR/push behavior.
       docs: ${{ steps.changes.outputs.docs || 'true' }}
       core: ${{ steps.changes.outputs.core || 'true' }}
       console: ${{ steps.changes.outputs.console || 'true' }}
@@ -76,9 +145,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      # ⭐ SPELLED AS AN ALLOW-LIST, not as `!= 'merge_group'` (#16467). This
+      # action reads a diff, and the only two events that hand it one it can
+      # resolve unaided are `pull_request` (base vs head) and `push`
+      # (`event.before` vs `after`). `merge_group` was the first event with
+      # neither, and the exclusion was written as its name; `schedule` and
+      # `workflow_dispatch` are the second and third, and under the old
+      # spelling they would have RUN the action with no resolvable base.
+      #
+      # That failure direction is the dangerous one: every filter output would
+      # come back `false`, `|| 'true'` supplies nothing (the output exists and
+      # says `false`), and every downstream `!= 'false'` guard SKIPS — so the
+      # hourly full run would have been an entirely green, entirely empty run
+      # of nothing at all. An allow-list makes each new event fail toward
+      # THE FILTER CONTRACT's half 1 instead: the step is skipped, its outputs
+      # are the empty string, `|| 'true'` fills them in, and everything runs.
       - uses: dorny/paths-filter@v4
         id: changes
-        if: github.event_name != 'merge_group'
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         with:
           filters: |
             docs:
@@ -449,13 +533,21 @@ jobs:
       #                 on this shard" exit below, every shard still attests,
       #                 and Test Core is an honest green. It is NOT the #10057
       #                 case, which is pull_request-only (the script says why).
-      #   push          unchanged: the FULL list.
+      #   push          affected set against `github.event.before`, the commit
+      #                 `main` was on before this merge landed (#16467). A zero
+      #                 sha -- a first push, or a force-push that rewrote
+      #                 history -- falls back to the FULL list, loudly.
+      #   schedule      the FULL list: the hourly run IS the full battery, and
+      #   workflow_     the on-demand rerun of it. Neither carries a diff base,
+      #     dispatch    and neither should: they are the run that says whether
+      #                 the whole workspace is green on `main`.
       - name: Compute this shard's package set
         env:
           OS_SHARD_EVENT_NAME: ${{ github.event_name }}
           OS_SHARD_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           OS_SHARD_PR_PINNED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           OS_SHARD_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          OS_SHARD_PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
           bash scripts/ci/select-shard-packages.sh
           node scripts/partition-test-shards.mjs "$RUNNER_TEMP/turbo-ls.json" \
@@ -463,6 +555,70 @@ jobs:
             > "$RUNNER_TEMP/shard-packages.txt"
           echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
+
+      # ⛔ A FILE-LEVEL SLICE BUILDS ITS DEPENDENCY CLOSURE HERE, IN A RUN THAT
+      # CARRIES NO PASSTHROUGH, so that the sharded run in the next step can be
+      # `--only` (#16395).
+      #
+      # Turbo folds a run-level passthrough into the hash of EVERY task in the
+      # run, not only the task that receives it -- and `-- "--shard=k/n"` is the
+      # whole reason a slice gets its own invocation at all (the next step's
+      # comment says why it cannot ride the shared run). Measured on turbo
+      # 2.10.10, `--filter=@objectstack/cli`, `turbo run test ... --dry=json`
+      # (60 tasks: 59 `build` + 1 `test`):
+      #
+      #   plain vs plain             60 identical,  0 changed   <- control, fires
+      #   plain vs -- --shard=1/2     0 identical, 60 changed
+      #   --shard=1/2 vs 2/2          0 identical, 60 changed
+      #
+      # So the sliced leg could hit NEITHER the main-seeded Turbo cache restored
+      # above NOR the builds the shared leg ran seconds earlier in the SAME job:
+      # it re-executed the closure every run, and shards 5/6 and 6/6 -- the two
+      # that carry a slice -- paid that closure twice per job. Live reading,
+      # `Test Core (5/6)` of run 34193080219 (a `packages/spec` PR, so the
+      # affected set reaches cli): the slice leg reported
+      # `Cached: 2 cached, 58 total` / `Time: 9m18.941s` while
+      # `@objectstack/cli:test` itself measured `Duration 187.49s` -- six of those
+      # nine minutes were the duplicate rebuild, on a job that was then standing
+      # against a 30-minute wall (#16395's measurement).
+      #
+      # `turbo run build --filter=$PKG` is that closure and nothing more:
+      # measured 59 build tasks, all 59 hash-IDENTICAL to the ones in the
+      # passthrough-free test plan (0 differing, 0 extra, and 0 missing against
+      # the test's own `^build` closure), so they REPLAY rather than re-execute.
+      # `--filter=...^$PKG` was measured too and schedules 12 packages this
+      # closure does not need. Locally, back-to-back invocations of this exact
+      # command measured `57 cached, 57 total` / `Time: 153ms >>> FULL TURBO` on
+      # the second, against `5 cached, 57 total` / `3m45.918s` on the first.
+      #
+      # ⚠ THIS IS ITS OWN STEP, not a second guarded run inside the step below,
+      # because a guarded SITE is the triple (file, job, step) --
+      # `measure-stall-guard-headroom` REFUSES to report a verdict when two
+      # guarded runs share one, and refusing is right: the two would be judged
+      # against the worst reading of their union. `pnpm check:stall-guard-budget`
+      # and `pnpm check:stall-guard-headroom` both read this step, so it keeps
+      # its own `--stall-minutes` and its own headroom row.
+      #
+      # A shard with no slice runs zero iterations here; every shard still
+      # reaches the step, so its name is a stable site for those two gates.
+      - name: Build the sliced package's dependency closure
+        env:
+          NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
+        run: |
+          if [ ! -s "$RUNNER_TEMP/shard-packages.txt" ]; then
+            echo "No packages on this shard — nothing to build."
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/stall-reports"
+          while read -r PKG SLICE; do
+            [ -n "$PKG" ] || continue
+            [ -n "$SLICE" ] || continue
+            echo "Slice $PKG=$SLICE — building its dependency closure with no passthrough."
+            LOG="$RUNNER_TEMP/test-core-slice-build-$(printf '%s' "$PKG" | tr -c 'A-Za-z0-9' '-').log"
+            node scripts/run-with-stall-guard.mjs --log "$LOG" --stall-minutes 10 \
+              --report-dir "$RUNNER_TEMP/stall-reports" -- \
+              pnpm turbo run build "--filter=$PKG" --concurrency=4 --log-order=stream
+          done < "$RUNNER_TEMP/shard-packages.txt"
 
       # --concurrency=4: turbo's default (10) oversubscribes the 4-vCPU
       # hosted runner; matching the core count bounds peak memory and the
@@ -571,7 +727,15 @@ jobs:
               PKG="${LEG%%=*}"
               SLICE="${LEG#*=}"
               LOG="$RUNNER_TEMP/test-core-slice-$(printf '%s' "$PKG" | tr -c 'A-Za-z0-9' '-').log"
-              set -- pnpm turbo run test "--filter=$PKG" --concurrency=4 --summarize --log-order=stream -- "--shard=$SLICE"
+              # `--only` (#16395): the step above already built this slice's
+              # dependency closure in a passthrough-free run, so this run must
+              # schedule the ONE task the passthrough is for. Without it turbo
+              # re-hashes the whole `^build` closure under `--shard=k/n` and
+              # rebuilds it -- that comment carries the measurement. ⚠ The build
+              # step is load-bearing for this flag: a sliced package whose build
+              # never ran fails LOUDLY here (its imports resolve to a missing
+              # dist), never as a silent green.
+              set -- pnpm turbo run test "--filter=$PKG" --only --concurrency=4 --summarize --log-order=stream -- "--shard=$SLICE"
             fi
             LOGS="$LOGS $LOG"
             node scripts/run-with-stall-guard.mjs --log "$LOG" --stall-minutes 10 \
@@ -724,6 +888,81 @@ jobs:
             --scheduled "$RUNNER_TEMP/shard-packages.txt" \
             --package-list "$RUNNER_TEMP/turbo-ls.json"
 
+      # ── Per-file test timings, captured for the aggregator (#16454) ───────
+      #
+      # Cutting tests is decided per test file BY COST, so the cost has to be
+      # visible first. This shard reads the timings it already printed and
+      # hands them up; `Test Core` merges the six and publishes the table.
+      #
+      # WHERE THE NUMBERS COME FROM, and why no second test run is needed:
+      #   per FILE     the vitest module lines already in `test-core.log`.
+      #                Measured before this was written, because the default
+      #                reporter appends a file's duration only when the module
+      #                HAS one: on run 34317273493 every file line carried its
+      #                milliseconds, including files far under the 300ms
+      #                slowTestThreshold (which this repo never sets — it picks
+      #                the colour, not the presence). So the stream is enough
+      #                and no machine-readable reporter is added to the shard's
+      #                30-minute wall. The script's header carries the
+      #                measurement and its control.
+      #   per PACKAGE  `.turbo/runs/*.json`, the same `--summarize` output the
+      #                step above already uploads — turbo's own execution
+      #                windows, the unit scripts/test-shard-timings.json was
+      #                measured in, so the drift column compares like with
+      #                like. Cache REPLAYS and FAILED tasks are refused there
+      #                rather than averaged in as near-zero measurements.
+      #
+      # ⛔ REPORT ONLY — `if: always()` + `continue-on-error: true`, both
+      # load-bearing and for different reasons. `always()` so a red shard still
+      # contributes what it timed (a slow suite is most interesting when it has
+      # just failed), and `continue-on-error` because an unguarded step here
+      # sits on the shard's PASS/FAIL path: it would abort the job before the
+      # attestation pair below ever ran, evicting a green shard from the merge
+      # queue on a diagnostics fault. That is #14469, measured on the upload
+      # step above. This card's ruling is report only, no red.
+      #
+      # ⛔ These two steps must stay ABOVE the attestation pair at the bottom of
+      # the job, exactly like the run-summary upload above:
+      # check-shard-attestation.mjs requires `--emit` + upload-artifact to be
+      # the job's LAST TWO steps and pins that statically (#6082). Adding steps
+      # here is fine; moving them below that pair is not — and ⛔ that pair does
+      # not acquire an `if:` or a `continue-on-error:` to "match" these.
+      #
+      # The `--self-test` runs here because this is where CI names the script,
+      # which is what check:self-test-wired requires. ⚠ Under
+      # `continue-on-error` its verdict is VISIBLE but not enforcing: inside
+      # this workflow, no step this card may add is permitted to fail anything.
+      # Giving that self-test teeth means a `check:` step in lint.yml, which is
+      # deliberately NOT taken here.
+      - name: Capture this shard's test timings
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ ! -f "$RUNNER_TEMP/test-core.log" ]; then
+            echo "No test log — the test step did not get far enough to produce one."
+            exit 0
+          fi
+          node scripts/report-test-timings.mjs --self-test
+          node scripts/report-test-timings.mjs --capture \
+            --log "$RUNNER_TEMP/test-core.log" \
+            --summaries .turbo/runs \
+            --shard "${{ matrix.shard }}/6" \
+            --out "$RUNNER_TEMP/test-timings/shard-${{ matrix.shard }}.json"
+
+      # 1 day, matching the run-summary upload above: this is an intermediate
+      # the aggregator consumes minutes later in the SAME run. The 14-day
+      # retention this card asks for is on the MERGED table, published by
+      # `Test Core`.
+      - name: Publish this shard's test timings
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-core-timings-${{ matrix.shard }}-of-6
+          path: ${{ runner.temp }}/test-timings/
+          if-no-files-found: ignore
+          retention-days: 1
+
       # A stall's full diagnostic reports (JS stacks, libuv handles, heap
       # summary per process) outlive the in-log digest — keep them so a #4250
       # occurrence can be dissected offline. Free when nothing stalled: the
@@ -862,6 +1101,76 @@ jobs:
             --filter-result "$OS_FILTER_RESULT" \
             --download-outcome "$OS_DOWNLOAD_OUTCOME" \
             --leg "test/6:$OS_TEST_RESULT"
+
+      # ── The timing table this gate publishes (#16454) ─────────────────────
+      #
+      # The slowest 20 test FILES and slowest 10 PACKAGES of this run, each
+      # package's measured seconds beside its pinned weight from
+      # scripts/test-shard-timings.json, written to the job summary and kept as
+      # an artifact for 14 days.
+      #
+      # ⛔ BOTH STEPS SIT AFTER `Verify test shard results` AND CARRY
+      # `if: always()` + `continue-on-error: true`. `Test Core` is the required
+      # branch-protection context and the verdict above is the whole reason the
+      # job exists; a reporting step must be unable to delay it, displace it, or
+      # redden it. Ordering after the verdict is what makes "cannot delay"
+      # true, and the two flags are what make "cannot redden" true — a
+      # diagnostics fault here (an artifact-service 403 is the measured one,
+      # #14469) must not evict a green run.
+      #
+      # ⛔ Steps, deliberately, NOT a new `needs:` entry: this job's
+      # `OS_AGGREGATOR_MEMBERS` / `OS_AGGREGATOR_NON_MEMBERS` block is asserted
+      # EQUAL to `needs:` in both directions by check:aggregator-roster
+      # (#10490), so widening `needs:` here to reach the shards' artifacts would
+      # red that gate and, worse, enlarge what this required context claims to
+      # stand for. The shard captures are same-run artifacts and need nothing
+      # beyond the `contents: read` this job already has.
+      #
+      # An EMPTY merge is reported as NOT MEASURED in words rather than as an
+      # empty table — the two look identical on a summary page and only one of
+      # them needs a person. The tool exits EXIT_PREREQUISITE_NOT_MET there,
+      # which `continue-on-error` absorbs while the words stay on the page.
+      #
+      # BOOTSTRAP WINDOW: the first runs after this lands have shard captures
+      # only from shards that ran WITH it. A `pull_request` run always builds
+      # its own shards from this ref, so a PR sees a complete table from the
+      # first run; there is no back-fill and no window in which this reads a
+      # partial merge as a whole one — the "parsed X of Y declared" counter
+      # under the table is what says so on every run, including the first.
+      - name: Download this run's shard test timings
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: test-core-timings-*
+          path: ${{ runner.temp }}/test-timings
+          merge-multiple: true
+
+      - name: Publish the test timing table
+        if: always()
+        continue-on-error: true
+        run: |
+          node scripts/report-test-timings.mjs --merge \
+            --captures "$RUNNER_TEMP/test-timings" \
+            --out "$RUNNER_TEMP/test-timing-table/test-timing-table.md" \
+            --json "$RUNNER_TEMP/test-timing-table/test-timing-table.json"
+          # Echo the table into the JOB LOG as well as the job summary. A job
+          # summary is readable in the web UI and by essentially nothing else —
+          # there is no REST endpoint that returns one — so without this the
+          # only machine-readable copy is the artifact, and reaching that needs
+          # an artifact download. The log is the copy a seat, a script or
+          # `gh run view --log` can actually read.
+          cat "$RUNNER_TEMP/test-timing-table/test-timing-table.md" || true
+
+      - name: Publish the merged timing table artifact
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-core-timing-table
+          path: ${{ runner.temp }}/test-timing-table/
+          if-no-files-found: ignore
+          retention-days: 14
 
 
   # ── Temporal conformance against live, non-UTC servers (ADR-0053 D-A3) ─────
@@ -1622,6 +1931,21 @@ jobs:
       # (exit 3) rather than passing silently when there is none.
       - name: No published source map embeds source text
         run: pnpm check:sourcemap-no-sources-content
+
+      # #15347. The ADR-0076 D2 boundary ratchet beside `core.ts` scans SOURCE
+      # TEXT for two hard-coded names, so it is neither transitive nor able to
+      # see a heavyweight arriving through any other specifier — which is
+      # exactly how #14680 arrived, three packages deep, invisible to every
+      # gate for the whole time it was live. This one loads the built lean
+      # entry in a fresh child per published condition and asserts the PACKAGE
+      # SET it evaluates: an exclusion claim, decidable and unit-carrying, with
+      # no size figure anywhere (#9803). Lives here for the same reason the two
+      # steps above do — it reads a real `dist/`, and with none it exits 3
+      # (PREREQUISITE NOT MET), never a silent green. Its header is the
+      # authority on detail, including why it is not a case in the vitest file
+      # it guards beside.
+      - name: The lean engine entry loads no forbidden or unlisted package
+        run: pnpm check:lean-entry-closure
 
       - name: Analyze bundle size
         run: pnpm --filter @objectstack/spec analyze

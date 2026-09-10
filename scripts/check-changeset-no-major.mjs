@@ -5,9 +5,15 @@
  *   1. LAUNCH-WINDOW GUARD — a PR may not introduce a changeset that declares a
  *      `major` bump. Everything above "The LEVEL axis" below is this.
  *   2. THE LEVEL AXIS (#16055) — a PR that DECLARES clause ② (a new key on a
- *      published payload) may not grade a package it grew `patch`. Read the
- *      block headed "The LEVEL axis" for what it cross-checks, where the
- *      declaration comes from, and the three residuals it records.
+ *      published payload) must grade AT LEAST ONE package whose published
+ *      source it moves `minor` or above; and (#16776) a PR that
+ *      grades none of them that way must not leave the declaration UNREADABLE:
+ *      where the missing reading is what decides the verdict, this refuses
+ *      rather than exiting 0 into a check run that concludes `success`. The
+ *      "at least one" is #16361 — the declaration is PR-scoped and names no
+ *      package, so a PR-scoped predicate is the whole of what it entails. Read
+ *      the block headed "The LEVEL axis" for what it cross-checks, where the
+ *      declaration comes from, and the residual it records.
  *
  * The run exits with the WORSE of the two verdicts and prints both, because
  * they are independent facts about one changeset set.
@@ -759,7 +765,7 @@ export function render(result) {
 //      the fixed `Clause-②: yes` line the PM protocol spells (read here through
 //      `check-clause2-carriers.mjs`'s own `readClause2Line`, imported rather
 //      than restated, so the two readers cannot drift);
-//   ② the CHANGESET LEVEL for the package whose `packages/*/src/**` the diff
+//   ② the CHANGESET LEVEL for the package whose `packages/**/src/**` the diff
 //      moves.
 //
 // A declaration of ① plus a `patch` in ② is a self-contradiction inside one
@@ -779,6 +785,58 @@ export function render(result) {
 // silent wrong level into a loud one inside a window the PR is already waiting
 // out.
 //
+// ## THE GRAIN: the declaration is PR-scoped, so the predicate is too (#16361)
+//
+// ⭐ The rule above is right and is NOT what this section changes. What changed
+// is the LEVEL THE RULE IS APPLIED AT, and it was measured on two PRs from one
+// dispatch round — the pair, not either half alone:
+//
+//   * PR #16342 (head `273247e56f24`) — spec and runtime, both moved under
+//     `src/**`, both graded `patch`. Six new published `STACK_*` error codes.
+//     A CORRECT fire.
+//   * PR #16347 (head `23443ce169af`) — `@objectstack/lint` graded `minor`, and
+//     that is where the widening is (a new field-typed refusal arm on
+//     `filter-preset-comparand`); `@objectstack/spec` graded `patch`, and what
+//     it received is ONE re-worded TSDoc comment at `date-range-presets.ts:101`.
+//     The gate refused, and it refused the SPEC line — the package that did not
+//     grow — while never naming the package that did.
+//
+// The per-package predicate could not have done otherwise. Clause ② is declared
+// ONCE, FOR THE PR: the carrier is a PR label and the `Clause-②:` line is a PR
+// body line, and NEITHER NAMES A PACKAGE. Applying a PR-scoped declaration to
+// every package the diff moved `src/**` of asserts something the declaration
+// never said — that EACH of them was widened — and #16347 is that assertion
+// being false while the gate printed it as the reason for a refusal.
+//
+// ⇒ The predicate is now the strongest thing the declaration actually entails,
+// asked at the declaration's own grain:
+//
+//     A PR that declares clause-② `yes` must grade AT LEAST ONE package whose
+//     `packages/**/src/**` it moves at `minor` or above.
+//
+// The widened package IS one of the packages the diff moved src of — a widening
+// moves source — so "the widened package is graded `minor`+" IMPLIES "some
+// moved package is graded `minor`+. The converse does not hold, and that gap is
+// the residual this gate now NAMES rather than papering over (see `discharged`
+// below). On a single-package PR the two predicates are identical; they diverge
+// only where a PR moves several packages' src, which is exactly the shape that
+// produced the false refusal.
+//
+// ⛔ WHAT THIS IS NOT. It is not a tolerance, not an allowlist, and not "skip if
+// the diff is comment-only" — the filing card forbids all three and is right to:
+// a comment-only heuristic goes quiet on precisely the case it was built for.
+// Nothing here reads the CONTENT of a diff hunk. The inputs are unchanged — the
+// packages whose `src/**` moved, the levels the changesets grade them, and the
+// PR-scoped declaration — and the only thing that moved is the quantifier.
+//
+// ⚠️ WHAT IT CANNOT SEE, stated because an instrument that under-reads must say
+// where: it cannot see WHICH package the declared act landed in, so it cannot
+// catch a PR that widens TWO packages, grades one `minor` and the other `patch`.
+// That was never readable from a declaration that names no package; before
+// #16361 the gate did not read it either, it demanded `minor` on every moved
+// package and called the demand a finding about each. The `discharged` verdict
+// exists so this residual is printed on the green rather than left silent.
+//
 // ## Where the declaration is read from — the event payload, and nothing else
 //
 // This gate makes NO API call and needs NO token. Its whole input is the
@@ -795,21 +853,35 @@ export function render(result) {
 // heads (`e0938d3fdce` was HEAD from 21:43:58Z until 22:18:39Z, `98179cae022`
 // from then until the strip).
 //
-// ## Two residuals, recorded rather than implied
+// ## What the payload is read on, and the one residual left
 //
-//   * THE PAYLOAD LABEL SET IS A SNAPSHOT. A carrier applied after the event
-//     fired is invisible to that run — the same stale cell this job documents
-//     at length for `skip-changeset` and `allow-major`, and closed the same
-//     way: `pull_request` here is triggered on `labeled`/`unlabeled` too, so
-//     hanging the carrier fires a run that DOES see it. Measured on #16044: the
-//     `opened` run at 21:40Z would have read NOT MEASURED, and the `labeled`
-//     run three minutes later reads the carrier and refuses the `patch`.
-//   * THE CARRIER IS STRIPPED AT REVIEW PASS, so a run after the PASS reads NOT
-//     MEASURED and this axis stands down. That is the intended order — the
-//     human review that clears the carrier is the authority on the level, and
-//     on #16044 its verdict comment concurred with the `minor` grading
-//     explicitly — but it means this axis is a PRE-review reading, never a
-//     landing-time one.
+//   * THE PAYLOAD IS A SNAPSHOT, and both carriers move after it is taken. A
+//     LABEL applied after the event fired is invisible to that run — the same
+//     stale cell this job documents at length for `skip-changeset` and
+//     `allow-major`, and closed the same way: `pull_request` here is triggered
+//     on `labeled`/`unlabeled` too, so hanging the carrier fires a run that DOES
+//     see it. Measured on #16044: the `opened` run at 21:40Z would have read NOT
+//     MEASURED, and the `labeled` run three minutes later reads the carrier and
+//     refuses the `patch`. The BODY moved on no trigger at all until #16776:
+//     there was no `edited` type, so a `Clause-②:` line added to the body after
+//     the last push was never read until somebody pushed again. That is now
+//     subscribed, for the same reason and by the same argument the two other
+//     PR-body-scoped gates in this repo already carry (`duplicate-fix-guard`,
+//     `partof-closing-keyword-guard`): a verdict whose input is the body must
+//     re-fire when the body changes, or its red cannot be cleared without a push
+//     — `rerun_failed_jobs` replays the SAME frozen payload.
+//   * THE CARRIER IS STRIPPED AT REVIEW PASS, so a run after the PASS no longer
+//     reads a `yes` from it. That is the intended order — the human review that
+//     clears the carrier is the authority on the level, and on #16044 its verdict
+//     comment concurred with the `minor` grading explicitly. What it USED to mean
+//     was that the axis silently stood down at exactly that moment (#16776's
+//     composed failure: strip the carrier, add the durable line, push nothing,
+//     and the gate concludes `success` having judged nothing). It no longer does:
+//     a run with no readable declaration and a `patch` on a package the diff grew
+//     REFUSES, so the standing-down is now confined to the diffs where the
+//     declaration could not have changed the answer. The axis is still a
+//     pre-review reading rather than a landing-time one; what it is not any more
+//     is a reading that can vanish without saying so.
 //   * THE `allow-major` LABEL SKIPS THE WHOLE STEP, this block included,
 //     because the step it lives in is the launch-window major guard. A PR that
 //     is granted a whole-stack major and ALSO grades a clause-②-declared
@@ -817,19 +889,311 @@ export function render(result) {
 //     a two-condition case with no motive, and the alternative — a second step
 //     — is refused by `check-empty-changeset.mjs`'s pin on this job's failable
 //     step count.
-
-/** The paths whose movement makes a package's PUBLISHED surface the thing that grew. */
-const PUBLISHED_SOURCE_PATH = /^packages\/([^/]+)\/src\//;
+//
+// ## THE DEPTH: which packages this axis can see at all (#16713)
+//
+// ⭐ Everything above describes what the axis DOES with a package it can see.
+// Until #16713 it could see 23 of this workspace's 74 packages, because the
+// package half of the path reading was one path segment wide and 51 packages
+// sit at `packages/<group>/<name>/`. That is not a weaker verdict on the other
+// 51 — it is NO verdict, rendered identically to a pass, and it is the failure
+// this whole file is otherwise built to refuse: the green printed for them said
+// "the axis looked and approved" while meaning "the axis did not look".
+//
+// It also escaped the one instrument that should have caught it. `unreadable`
+// exists so a package this reading cannot NAME is never mistaken for a package
+// the diff did not TOUCH (#4690) — and it stayed empty here, because a nested
+// package was not an unreadable reading, it was never a candidate. ⇒ A gate
+// cannot report a limb it never grew, and the residual an instrument names is
+// only ever a residual of what it looks at.
+//
+// The reach is now the manifest set rather than a depth, and the widening was
+// measured before it was chosen rather than after: over the 150 most recently
+// merged PRs, driving this file's own `judgeLevel` at each merge commit against
+// its parent, SEVEN verdicts move from exit 0 to exit 1 — six of them
+// `not-measured-moot` -> `not-measured-material`, which one `Clause-②:` line in
+// the PR body clears with no push, and one — PR #16650, `@objectstack/driver-sql`
+// and `@objectstack/driver-turso` graded `patch` under a durable `Clause-②: yes`
+// body line — `clean` -> `enforce`, which is this gate's own rule finding, on a
+// merged PR, the thing it exists to find. ⛔ That count is a reading for the
+// maintainer, never an argument for a tolerance: there is no allowlist and no
+// grandfathering here, and the six are cleared by declaring, not by softening.
+//
+// ## THE LEVEL: `src/**` as a proxy for a public face — measured, left alone (#16985)
+//
+// Everything above decides WHICH packages this axis can see. This section is
+// about what it then asserts about one: that a moved `packages/**/src/**` byte
+// means the package's published surface grew. Those two facts do come apart —
+// a module under `src/**` that no entry point reaches ships nothing at all —
+// and #16985 filed the gap, correctly refusing to prescribe a repair before
+// somebody produced a RATE. Its one instance (PR #16694, whose only `rest`
+// change was `packages/rest/src/rest-route-ledger.ts`, a review record nothing
+// imports) had an exit, and one instance is not a rate.
+//
+// MEASURED over the axis's WHOLE life, so the population is the thing itself
+// rather than a sample of it: the axis was born at `c3b63f7add` (#16264,
+// 2026-09-06) and 449 commits landed to `3c5f3c5991`, 233 of them introducing
+// a changeset entry AND moving a package this axis calls «grown». Method as in
+// the DEPTH note above — drive this file's own `scan`, `packagesTouched` and
+// `judgeLevel` at each merge commit against its parent — with one reading added
+// per package: does this diff ship anything? That question is answered from the
+// build each package actually runs, never from the path (see
+// `PUBLISHED_SOURCE_ROOT` for why the distinction is the whole ballgame).
+//
+//   * THE OVER-READ IS COMMON. 50 of 358 (package, PR) pairs — 14.0%, spread
+//     across 37 of the 233 PRs — name a package the diff ships NOTHING for. 35
+//     of the 50 moved only `src/**/*.test.ts`, which a bundled package never
+//     emits; 12 moved only modules no entry point reaches; 3 moved both.
+//   * ITS COST IS ZERO, and that is the number that sizes the repair. 47 of the
+//     50 never reach the offender list at all — the package is graded `minor`+,
+//     or is not graded. THREE do. Two of those sit beside a co-offender that
+//     genuinely ships (PR #17020, PR #17095), so the refusal is earned and the
+//     over-read costs a line in the message, not a verdict. The third is #16694
+//     itself, which on TODAY's rule reads `discharged` at exit 0: the
+//     `@objectstack/client: minor` in its own changeset discharges the PR under
+//     #16361, which landed after it. ⇒ Not one false refusal exists in the
+//     axis's entire history, including the instance the card was filed on.
+//   * THE ZERO IS DECLARATION-INDEPENDENT, which is what makes it a bound and
+//     not a coincidence of who declared what. It is measured with the
+//     declaration forced to `yes` on EVERY PR — the maximally exposed
+//     assumption, stronger than anything that actually happened — and
+//     `refusable` is computed before the declaration is consulted, so the same
+//     zero covers the `not-measured-material` lane too.
+//
+// ⇒ Triage sized the repair in advance: an exemption list if the false red is
+// rare, an exported-surface reading if it is common. It is neither — it is
+// ABSENT — so neither instrument is bought, and the proxy stands. #16361
+// already took the half of this that was real by deleting the per-line claim
+// from the rendering, which is why the residual is two noisy lines rather than
+// a reader mistaking the pair for the finding.
+//
+// ⛔ This is a reading for the maintainer, never a verdict that the proxy is
+// SOUND. It says the repair is unbought AT TODAY'S RATE. The shape that would
+// buy it is named and still unobserved: a PR genuinely `Clause-②: yes` for
+// package A that also moves a package-internal line under package B's `src/**`
+// — there the author has no exit at all, because a carrier alone forces `yes`
+// (see `declarationFromPullRequest`) and only the review seat can clear it. Two
+// of the 128 refusable PRs already have the mixed offender shape; none has the
+// declaration to go with it. ⇒ Re-measure before repairing, not instead of it.
 
 /**
- * The workspace package names whose `src/**` this diff moves, read from the
- * HEAD tree rather than from the working directory — the self-test and the
- * acceptance run both drive commits that are not checked out.
+ * The compiled-source root whose movement makes a package's PUBLISHED surface
+ * the thing that grew — the FIRST of this reading's two legs.
  *
- * `unreadable` is returned beside them, never folded into them: a
- * `packages/<dir>/src/**` path whose manifest could not be read is a package
- * this reading could not name, and a name it could not read must not look like
- * a package the diff did not touch (#4690).
+ * ⚠️ It is deliberately a path shape and not a question about the packed set,
+ * and the difference is load-bearing enough to write down: `packages/cli`'s
+ * `files` is `["dist","README.md","CHANGELOG.md"]`, so `src/**` is NOT packed —
+ * it is what `dist` is COMPILED FROM. A predicate rewritten to ask "is this
+ * path in the tarball?" would therefore stop counting `src/**` as growth, gut
+ * this axis outright, and print a tick while doing it: the exact shape #16692
+ * and #16713 both document. ⇒ The packed set is the reason for a SECOND leg
+ * below, never a replacement for this one.
+ *
+ * ⛔ Nor is the repair "exempt a file no entry point transitively re-exports",
+ * the cheaper alternative #16985 left open — MEASURED UNSOUND, and unsound by
+ * the same asymmetry that condemns the packed-set predicate. It holds only for
+ * a BUNDLED package: `tsup` builds from `src/index.ts`, so a module nothing
+ * reaches contributes no emitted byte. `packages/cli` does not bundle. It runs
+ * `tsc -p tsconfig.build.json`, which emits the whole `include` program, so a
+ * `src/**` file nothing imports STILL ships as its own `dist/*.js` — which is
+ * why that tsconfig carries an explicit `exclude` line for a review-record
+ * module, and says in prose that its bundled siblings needed none. It is the
+ * only whole-program public package here, 1 of 69, and one is enough: an
+ * entry-graph exemption applied uniformly would turn this axis OFF for exactly
+ * the package where it must not be, printing a GREEN — the expensive
+ * direction, and the same failure #16692 and #16713 each landed to undo.
+ *
+ * ⚠️ That is measured rather than reasoned. While sizing #16985 an instrument
+ * that skipped the build mode reported TWELVE false refusals for
+ * `@objectstack/cli`; reading the build mode collapsed them to zero. An
+ * exemption written from the same blind spot would have shipped that error as
+ * a rule.
+ */
+const PUBLISHED_SOURCE_ROOT = 'src';
+
+/**
+ * The `bin` targets a manifest declares, as package-relative paths.
+ *
+ * npm packs a `bin` target REGARDLESS of `files` (#14874), which is what makes
+ * this leg a published surface rather than a convenience: `packages/cli`'s
+ * `files` names only `dist`, and `bin/run.js` ships anyway.
+ *
+ * Both spellings npm accepts are read — a bare string, and an object of command
+ * names to paths — because a package that grew a second command would otherwise
+ * change shape out from under a string-only reading. Anything else (an array, a
+ * number, a `null`) declares no target and yields none: this is a reader, and a
+ * malformed field is not a licence to guess.
+ *
+ * ⛔ The returned paths are the target FILES, not the directory holding them,
+ * and that is measured rather than tidy. `packages/cli/bin/` holds two files:
+ * `run.js`, which `bin` names and npm packs, and `run-dev.js`, which nothing
+ * names and `files` excludes — it does not ship. Counting the whole directory
+ * would call a non-shipping developer script a published surface, and this gate
+ * may over-include only where it cannot tell the difference; here it can.
+ *
+ * @param {unknown} manifest a parsed package.json, or anything at all
+ * @returns {string[]} package-relative target paths, `./` stripped, deduped
+ */
+export function binTargetsOf(manifest) {
+  const bin = /** @type {{ bin?: unknown }} */ (manifest ?? {}).bin;
+  const raw = typeof bin === 'string' ? [bin] : bin !== null && typeof bin === 'object' && !Array.isArray(bin) ? Object.values(bin) : [];
+  const targets = new Set();
+  for (const value of raw) {
+    if (typeof value !== 'string') continue;
+    // `./bin/run.js` and `bin/run.js` are the same target; a trailing slash and
+    // a doubled separator are not, until they are normalised.
+    // Order matters: separators collapse FIRST, or `.//bin/x.js` strips to
+    // `/bin/x.js` and reads as absolute — a real target dropped by its spelling.
+    const rel = value
+      .replace(/\/+/g, '/')
+      .replace(/^(?:\.\/)+/, '')
+      .replace(/\/+$/, '');
+    // An absolute path or one that climbs out of the package names nothing this
+    // package publishes, so it is dropped rather than resolved.
+    if (rel === '' || rel === '.' || rel.startsWith('/') || rel.split('/').includes('..')) continue;
+    targets.add(rel);
+  }
+  return [...targets];
+}
+
+/**
+ * Every directory this path could be the published surface OF: each ancestor
+ * `D` under `packages/` that publishes the path, SHALLOWEST FIRST.
+ *
+ * ## Two legs, and why the second one cannot be a list (#16692)
+ *
+ * `D` owns the path when EITHER holds:
+ *
+ *   1. **compiled source** — the path reads `D/src/**`. Shape only, no manifest
+ *      needed, and byte-for-byte the reading #16713 landed.
+ *   2. **a packed `bin` target** — `D`'s own manifest names the path in `bin`.
+ *      Manifest-derived, so it is not a written-down list of roots and cannot
+ *      drift the way the one this card was filed against did.
+ *
+ * ⛔ Leg 2 is NOT "`bin/**` added to a list of roots". Triage ruled that out in
+ * this card's own words — «it is a list, and lists drift — this finding exists
+ * because of a list» — and the difference is real, not stylistic: a package that
+ * points `bin` at `dist/cli.js` or `scripts/run.js` is read here and would be
+ * invisible to a directory-name list.
+ *
+ * ## Why this is shape only for leg 1, and not a deeper pattern (#16713)
+ *
+ * The reading used to be a single regular expression whose package segment was
+ * one-path-segment-wide, so it saw `packages/<name>/src/**` and nothing else.
+ * This workspace is not flat: 51 of its 74 packages live at
+ * `packages/<group>/<name>/` — every driver, service, plugin, connector,
+ * trigger, adapter and app — and for all of them the segment after `packages/`
+ * is the GROUP, which no `/src/` follows. So 69% of the workspace was not a
+ * candidate this gate could refuse, and — worse than unrefusable — not even
+ * REPORTABLE: `unreadable` stayed empty too, because a nested package never
+ * entered the reading at all. #4690's distinction ("a name it could not read
+ * must not look like a package the diff did not touch") was kept for an
+ * unreadable manifest and could not be kept here, because the gate cannot
+ * report a limb it never grew.
+ *
+ * ⛔ The repair is NOT a second segment in the pattern. That re-encodes today's
+ * layout in a second place and goes blind again the day a package sits one
+ * level deeper — the same defect by the same means, its recurrence merely
+ * postponed. What is enumerated here is SHAPE ONLY, at any depth; WHICH of the
+ * candidates is a real package is decided by reading its manifest out of the
+ * tree in `packagesTouched`, so the layout is read rather than written down.
+ *
+ * ## Why SHALLOWEST first — measured, not assumed
+ *
+ * A path can have more than one candidate, and this repo contains the case:
+ * `packages/create-objectstack/src/templates/blank/src/objects/note.object.ts`
+ * is `D/src/**` for BOTH `packages/create-objectstack` and the scaffold
+ * template dir `packages/create-objectstack/src/templates/blank`, which carries
+ * its own manifest (`objectstack-blank`, `private: true`) — template CONTENT
+ * that create-objectstack ships, not a workspace member. Resolving to the
+ * NEAREST manifest would name that private template and drop the real package:
+ * a regression against the one-segment reading this replaces. Shallowest first
+ * returns the old answer on every path the old pattern matched and adds the
+ * nested ones — measured over the whole tree, 22 package dirs matched before,
+ * 72 after, and none lost.
+ *
+ * ## SUPERSET-ONLY, and why the reader is a required argument
+ *
+ * Leg 1 runs first and unconditionally, so every path that owned a directory
+ * before this card owns it still: the two legs are a union and leg 2 only adds.
+ * That is a SAFETY property, not a nicety — this axis may over-include
+ * harmlessly and can never under-include harmlessly — and it is pinned by a
+ * control rather than argued.
+ *
+ * ⛔ `manifestOf` is therefore REQUIRED and this throws without it. A default
+ * that quietly skipped leg 2 would restore precisely the blindness this card
+ * closes, at a call site that reads as if it asked the whole question, and the
+ * gate would print a tick meaning "the axis did not look" (#4690). Missing
+ * input is a failure, never a pass — including when the missing input is a
+ * collaborator.
+ *
+ * @param {string} path a repo-relative path, as `git diff --name-only` prints it
+ * @param {(dir: string) => object | false | null} manifestOf reads `<dir>/package.json`
+ *   out of the tree under judgement: the parsed object, `false` when a manifest is
+ *   THERE but will not parse, `null` when there is none. The three answers are not
+ *   two: `false` makes `D` a candidate whose name cannot be read, so the path lands
+ *   in `packagesTouched`'s `unreadable` set instead of in neither set — the same
+ *   invariant leg 1 owes, extended to leg 2. ⚠️ Residual, stated rather than
+ *   implied: where a manifest is ABSENT there is no `bin` field to have named
+ *   anything, so leg 2 contributes no candidate and none is owed.
+ * @returns {string[]} candidate package directories, shallowest first, deduped
+ */
+export function publishedSourceOwners(path, manifestOf) {
+  if (typeof manifestOf !== 'function') {
+    throw new TypeError(
+      'publishedSourceOwners(path, manifestOf): the manifest reader is required — the `bin` leg (#16692) ' +
+        'is manifest-derived, and a call that omits it would silently read `src/**` alone while looking ' +
+        'like it asked the whole question (#4690).',
+    );
+  }
+  const segments = path.split('/');
+  if (segments[0] !== 'packages') return [];
+  const owners = [];
+  // `i` indexes the segment AFTER the candidate directory, so the candidate is
+  // `segments.slice(0, i)`. It starts at 2 so the owner is at least
+  // `packages/<something>` — `packages/src/**` names no package — and runs to
+  // the last segment, so the candidate is always a proper ancestor of the path.
+  for (let i = 2; i < segments.length; i += 1) {
+    const dir = segments.slice(0, i).join('/');
+    // LEG 1, compiled source. `i < segments.length - 1` keeps the path INSIDE
+    // `src/` rather than being a file called `src`.
+    if (segments[i] === PUBLISHED_SOURCE_ROOT && i < segments.length - 1) {
+      owners.push(dir);
+      continue;
+    }
+    // LEG 2, a packed `bin` target. `false` is a candidate on purpose: a
+    // manifest that is present and will not parse cannot be asked what it
+    // publishes, and that must be REPORTED rather than read as a no.
+    const manifest = manifestOf(dir);
+    if (manifest === false) {
+      owners.push(dir);
+      continue;
+    }
+    if (manifest && binTargetsOf(manifest).some((target) => path === `${dir}/${target}`)) owners.push(dir);
+  }
+  return owners;
+}
+
+/**
+ * The workspace package names whose PUBLISHED surface this diff moves — its
+ * `src/**` or a `bin` target it packs — read from the HEAD tree rather than
+ * from the working directory, because the self-test and the acceptance run both
+ * drive commits that are not checked out.
+ *
+ * `unreadable` is returned beside them, never folded into them: a path this
+ * reading matched but whose owning manifest could not be read is a package it
+ * could not name, and a name it could not read must not look like a package the
+ * diff did not touch (#4690).
+ *
+ * ⭐ That distinction is the bill each widening has to keep paying, and both
+ * widenings pay it here. #16713: a nested path now MATCHES, so a nested
+ * directory whose manifest is missing or unparseable is REPORTED as unreadable
+ * instead of vanishing the way every nested path used to. #16692: a directory
+ * whose manifest is THERE but will not parse cannot be asked what it packs, so
+ * it becomes a candidate the reader cannot name and lands in `unreadable` too
+ * — rather than being read as a package that publishes nothing. The invariant,
+ * stated so it can be tested: a path this reading matches lands in `packages`
+ * or in `unreadable` — never in neither.
  *
  * @param {{ cwd: string, from: string, head: string }} opts
  * @returns {{ packages: string[], unreadable: string[] }}
@@ -841,27 +1205,54 @@ export function packagesTouched({ cwd, from, head }) {
   } catch {
     return { packages: [], unreadable: [] };
   }
-  const dirs = new Set();
-  for (const line of out.split('\n')) {
-    const m = PUBLISHED_SOURCE_PATH.exec(line.trim());
-    if (m) dirs.add(m[1]);
-  }
-  const packages = [];
-  const unreadable = [];
-  for (const dir of [...dirs].sort()) {
-    const manifest = showOrNull(head, `packages/${dir}/package.json`, cwd);
-    let name = null;
-    if (manifest !== null) {
-      try {
-        name = JSON.parse(manifest).name ?? null;
-      } catch {
-        name = null;
+  // One manifest read per candidate DIRECTORY rather than per changed file: a
+  // diff that moves forty files in one package would otherwise ask forty times.
+  //
+  // ⚠️ The cache is on the MANIFEST rather than on the name, because the `bin`
+  // leg (#16692) needs the whole object and the name leg needs one field of it;
+  // caching the name would make the reader read the same blob twice per dir.
+  //
+  // Three answers, never two — `false` is a manifest that is THERE and will not
+  // parse, and it is what keeps #4690's distinction alive through leg 2: such a
+  // directory becomes a candidate that cannot be NAMED, so its path lands in
+  // `unreadable` below instead of in neither set.
+  const manifestOfDir = new Map();
+  /** @returns {object | false | null} */
+  const manifestOf = (dir) => {
+    if (!manifestOfDir.has(dir)) {
+      const blob = showOrNull(head, `${dir}/package.json`, cwd);
+      let value = null;
+      if (blob !== null) {
+        try {
+          const parsed = JSON.parse(blob);
+          value = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : false;
+        } catch {
+          value = false;
+        }
       }
+      manifestOfDir.set(dir, value);
     }
-    if (typeof name === 'string' && name) packages.push(name);
-    else unreadable.push(`packages/${dir}`);
+    return manifestOfDir.get(dir);
+  };
+  const nameFor = (dir) => {
+    const manifest = manifestOf(dir);
+    const name = manifest === false || manifest === null ? null : manifest.name;
+    return typeof name === 'string' && name ? name : null;
+  };
+
+  const packages = new Set();
+  const unreadable = new Set();
+  for (const line of out.split('\n')) {
+    const owners = publishedSourceOwners(line.trim(), manifestOf);
+    if (owners.length === 0) continue;
+    const owner = owners.find((dir) => nameFor(dir) !== null);
+    if (owner) packages.add(nameFor(owner));
+    // Nothing nameable on the chain: the SHALLOWEST candidate is what gets
+    // reported, because it is the directory the old one-segment reading named,
+    // so an unreadable manifest keeps reporting the dir it always reported.
+    else unreadable.add(owners[0]);
   }
-  return { packages, unreadable };
+  return { packages: [...packages].sort(), unreadable: [...unreadable].sort() };
 }
 
 /**
@@ -878,12 +1269,16 @@ export function packagesTouched({ cwd, from, head }) {
  * which is what #16044 did, is still read.
  *
  * @param {{ labels?: ({ name?: string }|string)[], body?: string }|null} pr
- * @returns {{ value: 'yes'|'no'|null, readings: string[] }}
+ * @returns {{ value: 'yes'|'no'|null, payload: boolean, readings: string[] }}
  */
 export function declarationFromPullRequest(pr) {
   const readings = [];
   if (!pr || typeof pr !== 'object') {
-    return { value: null, readings: ['no `pull_request` payload was available to read a declaration from'] };
+    // `payload: false` is returned beside the null value, never folded into it:
+    // "no pull request to read" and "a pull request that declared nothing" are
+    // different facts about different runs, and #16776 is the card about two
+    // facts sharing one exit code. `judgeLevel` routes on this flag.
+    return { value: null, payload: false, readings: ['no `pull_request` payload was available to read a declaration from'] };
   }
 
   const labels = Array.isArray(pr.labels)
@@ -905,50 +1300,138 @@ export function declarationFromPullRequest(pr) {
   else if (line?.kind === 'near-miss') readings.push(`declaration line: a near miss, not a declaration — ${line.line}`);
   else readings.push('declaration line: the PR body carries no `Clause-②:` line');
 
-  if (carrier || (line?.kind === 'declared' && line.value === 'yes')) return { value: 'yes', readings };
-  if (line?.kind === 'declared' && line.value === 'no') return { value: 'no', readings };
-  return { value: null, readings };
+  if (carrier || (line?.kind === 'declared' && line.value === 'yes')) return { value: 'yes', payload: true, readings };
+  if (line?.kind === 'declared' && line.value === 'no') return { value: 'no', payload: true, readings };
+  return { value: null, payload: true, readings };
 }
 
 /**
  * Decide the level axis. Pure, for the same reason `judge` is: the self-test
  * drives the real decision rather than an imitation of it.
  *
- *   unreadable-diff  the diff could not be computed          -> exit 1 (#4690)
- *   not-measured     no declaration was readable             -> exit 0, LOUD
- *   not-declared     the declaration reads `no`              -> exit 0
- *   clean            declared `yes`, no `patch` on a grown package -> exit 0
- *   enforce          declared `yes`, `patch` on a grown package    -> exit 1
+ *   unreadable-diff       the diff could not be computed               -> exit 1 (#4690)
+ *   payload-unreadable    a `pull_request` run whose payload would not read -> exit 1 (#4690)
+ *   no-pull-request       not a PR run at all (RC cut, local run)      -> exit 0
+ *   not-measured-moot     no declaration, and nothing a `yes` could have refused -> exit 0
+ *   not-measured-material no declaration, and a `yes` WOULD have refused  -> exit 1
+ *   not-declared          the declaration reads `no`                   -> exit 0
+ *   clean                 declared `yes`, no moved package graded `patch` -> exit 0
+ *   discharged            declared `yes`, a moved package IS graded `minor`+,
+ *                         and others are graded `patch`                -> exit 0
+ *   enforce               declared `yes`, moved packages graded `patch` and
+ *                         NONE of them graded `minor` or above         -> exit 1
  *
- * `not-measured` and `not-declared` are separate verdicts and must stay so: one
- * is a missing reading and the other is a decision, and the card this block
- * closes is precisely about two readings that looked alike.
+ * Nine verdicts and no two of them collapse, because every collapse in this
+ * family has been a defect. `not-measured-*` and `not-declared` are a missing
+ * reading and a decision (#16055). The two `not-measured-*` are a missing
+ * reading that could not have mattered and one that decided the verdict
+ * (#16776) — sharing exit 0 is what let a gate that judged nothing conclude
+ * `success` on the surfaces that read conclusions rather than logs. `clean` and
+ * `discharged` are #16361's: "no moved package is graded `patch`" and "some are,
+ * and this gate is deliberately not refusing them" are different facts, and the
+ * second one carries a residual that must be printed rather than implied by a
+ * tick.
  *
  * @param {{
  *   levels: { file: string, entries: { pkg: string, bump: string }[] }[] | null,
  *   touched: { packages: string[], unreadable: string[] },
- *   declaration: { value: 'yes'|'no'|null, readings: string[] },
+ *   declaration: { value: 'yes'|'no'|null, readings: string[], payload?: boolean },
+ *   prEvent?: boolean,
  * }} input
  */
-export function judgeLevel({ levels, touched, declaration }) {
+export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
   const readings = declaration?.readings ?? [];
-  if (!levels) return { verdict: 'unreadable-diff', offenders: [], readings, unreadable: [] };
+  if (!levels) return { verdict: 'unreadable-diff', offenders: [], raised: [], readings, unreadable: [] };
   const unreadable = touched?.unreadable ?? [];
-  if (declaration?.value === null || declaration?.value === undefined) {
-    return { verdict: 'not-measured', offenders: [], readings, unreadable };
-  }
-  if (declaration.value === 'no') return { verdict: 'not-declared', offenders: [], readings, unreadable };
 
+  // NO PR TO READ A DECLARATION FROM. This is a different fact from "a PR that
+  // did not declare", and #16776 is what happens when the two share an exit
+  // code, so they do not share a verdict either. Two callers reach it and
+  // neither is a PR: the RC cut (`cut-rc.yml`, `workflow_dispatch`, no
+  // `--event`) and a developer running this script in a checkout. The
+  // declaration lives on a pull request; where there is none, this axis has no
+  // input by construction rather than by omission, and it stands down.
+  //
+  // ⚠️ `prEvent` is what stops that from becoming the hole this card closes: on
+  // a real `pull_request` run the payload is written by the runner, so an
+  // unreadable one is a broken job rather than a non-PR context, and a gate
+  // that could not read the input it was owed has verified nothing (#4690).
+  //
+  // The test is `payload === false`, never `!== true`, and the difference is the
+  // direction it fails in. `false` is written by ONE place — the reader above,
+  // when there was no `pull_request` object at all — so standing down requires a
+  // positive statement that there was nothing to read. A caller that omits the
+  // flag entirely falls through to the lanes below, where an undeclared PR can
+  // still be refused: unknown provenance enforces, which is the #4690 direction
+  // this file takes everywhere else.
+  if (declaration?.payload === false) {
+    return prEvent
+      ? { verdict: 'payload-unreadable', offenders: [], raised: [], readings, unreadable }
+      : { verdict: 'no-pull-request', offenders: [], raised: [], readings, unreadable };
+  }
+
+  // The offenders are computed BEFORE the declaration is consulted, because
+  // #16776's whole repair turns on a question the old order could not ask:
+  // would the missing declaration have CHANGED anything? The shape a `yes`
+  // refuses is exactly the materiality of the reading that did not happen, so
+  // that shape has to be known first.
+  //
+  // #16361 changes what that shape IS, and the two halves are computed
+  // separately because the message needs both. `offenders` are the moved
+  // packages graded `patch` — the lines an author is being asked about.
+  // `raised` are the moved packages graded `minor` or above — the ones that
+  // ACCOUNT for the declared widening. A `yes` refuses only when the first set
+  // is non-empty and the second is EMPTY: the declaration names no package, so
+  // the most it can entail is that one of the moved packages carries the level,
+  // and one that does discharges it for the PR.
   const grown = new Set(touched?.packages ?? []);
   const offenders = [];
+  const raised = [];
   for (const { file, entries } of levels) {
     const bad = entries.filter((entry) => entry.bump === 'patch' && grown.has(entry.pkg)).map((entry) => entry.pkg);
     if (bad.length) offenders.push({ file, packages: bad });
+    for (const entry of entries) {
+      if (grown.has(entry.pkg) && (entry.bump === 'minor' || entry.bump === 'major')) raised.push({ file, pkg: entry.pkg, bump: entry.bump });
+    }
   }
+  // The one condition a `yes` refuses. Written once and read by both the
+  // declared lane and the NOT MEASURED lane, so materiality cannot drift from
+  // enforcement — two copies of this predicate is how the two would come to
+  // disagree about whether an unread declaration mattered.
+  const refusable = offenders.length > 0 && raised.length === 0;
+
+  if (declaration?.value === null || declaration?.value === undefined) {
+    // ⭐ #16776. `NOT MEASURED` used to be one verdict at exit 0, and the check
+    // run therefore concluded `success` whether the reading was IMMATERIAL or
+    // whether it was the one thing the gate needed. Those are the two halves
+    // split here, and only the second one fails:
+    //
+    //   * MOOT — no candidate offender exists, so `yes` and `no` reach the same
+    //     verdict. The exit 0 is a DECIDED one: the missing input could not have
+    //     moved it, and the reader is told exactly that rather than being handed
+    //     a tick that means nothing.
+    //   * MATERIAL — a `patch` sits on a package this PR grew, so the declaration
+    //     is the difference between `clean` and `enforce`, and it was not
+    //     readable. The gate refuses. Not because the level is wrong — it may
+    //     well be right — but because nobody can tell, and a reading that did
+    //     not happen must not be indistinguishable from one that passed at the
+    //     only layer anything downstream reads (#4690).
+    return refusable
+      ? { verdict: 'not-measured-material', offenders, raised, readings, unreadable }
+      : { verdict: 'not-measured-moot', offenders, raised, readings, unreadable };
+  }
+  if (declaration.value === 'no') return { verdict: 'not-declared', offenders: [], raised: [], readings, unreadable };
+
   // An unread manifest can only ever hide an offender, so it cannot be reported
-  // under a tick: `clean` states it, and the reader is told what was not named.
-  if (offenders.length) return { verdict: 'enforce', offenders, readings, unreadable };
-  return { verdict: 'clean', offenders: [], readings, unreadable };
+  // under a tick: every green below states it, and the reader is told what was
+  // not named.
+  if (refusable) return { verdict: 'enforce', offenders, raised, readings, unreadable };
+  // #16361. A `patch` on a moved package that this gate is NOT refusing is a
+  // reading it made and set aside, not an absence — it gets its own verdict so
+  // the residual is printed rather than folded into a tick that means "nothing
+  // to see".
+  if (offenders.length) return { verdict: 'discharged', offenders, raised, readings, unreadable };
+  return { verdict: 'clean', offenders: [], raised, readings, unreadable };
 }
 
 /**
@@ -963,6 +1446,23 @@ export function renderLevel(result) {
   const stdout = [];
   const stderr = [];
   const readings = (result?.readings ?? []).map((r) => `   · ${r}`);
+  // The `patch` lines, listed WITHOUT a per-package claim about what the diff
+  // did to each one. The old rendering appended "← this PR moves <pkg>'s
+  // packages/*/src/**" to every line, which is true, directly under a headline
+  // that said the PR "grew" them — and a reader took the pair for the finding.
+  // It was not one: moving a file under `src/**` is all this gate reads, and a
+  // re-worded TSDoc comment moves one (#16361, PR #16347). What each line now
+  // carries is the reading itself, and the claim is made once, in prose, at the
+  // grain it holds at.
+  const patchLines = (offenders) => {
+    const lines = [];
+    for (const { file, packages } of offenders ?? []) {
+      lines.push(`   ${file}`);
+      for (const pkg of packages) lines.push(`     - ${pkg}: patch`);
+    }
+    return lines;
+  };
+  const raisedLines = (raised) => (raised ?? []).map(({ file, pkg, bump }) => `     - ${pkg}: ${bump}   (${file})`);
   const unreadableNote =
     (result?.unreadable ?? []).length > 0
       ? [`   ⚠️ ${result.unreadable.length} touched package dir(s) could not be named: ${result.unreadable.join(', ')} — an offender there could not be seen.`]
@@ -976,14 +1476,71 @@ export function renderLevel(result) {
       );
       return { exitCode: 1, stdout, stderr };
 
-    case 'not-measured':
+    case 'payload-unreadable':
+      stderr.push(
+        '⛔ check-changeset-no-major (level axis): this is a `pull_request` run and its event payload could not be ' +
+          'read, so the clause-② declaration had no carrier to come from. The runner writes that file; a run that ' +
+          'cannot read it has verified nothing, and missing input is a failure, never a pass (#4690).',
+        ...readings,
+      );
+      return { exitCode: 1, stdout, stderr };
+
+    case 'no-pull-request':
       stdout.push(
-        'ℹ️ LEVEL AXIS: NOT MEASURED — no clause-② declaration was readable for this PR, so whether ' +
-          '`patch` fits the surface was not judged. This is neither a pass nor a failure (#4690).',
+        'ℹ️ LEVEL AXIS: NOT APPLICABLE — this run has no `pull_request` to read a declaration from, so the ' +
+          'clause-② axis has no input by construction rather than by omission. It is a PR-scoped reading: the RC cut ' +
+          '(`cut-rc.yml`) and a local run reach here, and neither is a PR that could have declared.',
         ...readings,
         ...unreadableNote,
       );
       return { exitCode: 0, stdout, stderr };
+
+    case 'not-measured-moot':
+      stdout.push(
+        'ℹ️ LEVEL AXIS: NOT MEASURED, and it could not have changed this verdict — no clause-② declaration was ' +
+          'readable for this PR, AND there is nothing here a `yes` would have refused: either no changeset grades ' +
+          '`patch` a package whose `packages/**/src/**` this PR moves, or one of the packages it moves is already ' +
+          'graded `minor` or above and carries the level for the PR (#16361). ' +
+          '`yes` and `no` reach the same answer on this diff, so this exit 0 is a decided one rather than an unread one (#16776).',
+        ...readings,
+        ...unreadableNote,
+      );
+      return { exitCode: 0, stdout, stderr };
+
+    case 'not-measured-material':
+      stderr.push('⛔ LEVEL AXIS: NOT MEASURED, and it is the one reading this PR needed.\n');
+      stderr.push('   The packages this PR moves `packages/**/src/**` of, and the level each is graded:');
+      stderr.push(...patchLines(result.offenders));
+      stderr.push('   ⇒ none of them is graded `minor` or above, so a `yes` here would REFUSE (#16361).\n');
+      stderr.push(
+        'No clause-② declaration was readable, so whether this PR widened a published surface at all was not judged:\n' +
+          `${(result.readings ?? []).map((r) => `   · ${r}`).join('\n')}\n` +
+          '\n' +
+          'This is a REFUSAL rather than the tick it used to be, and the reason is the layer above this log. A check run\n' +
+          'concludes `success` or `failure`; it has no third word for "did not judge". Exiting 0 published the same\n' +
+          'conclusion for a reading that passed and a reading that never happened, on every surface that reads\n' +
+          'conclusions rather than step logs (#16776, and #4690: a reading that cannot fail is indistinguishable from\n' +
+          'one that passed). Where the declaration could not have mattered this gate still exits 0 and says so — it is\n' +
+          'refusing HERE because every package this diff moves under `packages/**/src/**` is graded `patch`, which is\n' +
+          'exactly the shape a `yes` refuses (#16361).\n' +
+          '\n' +
+          'DECLARE IT. One line, at the START of a line in the PR BODY (a `- `, `> ` or `**` prefix is read too):\n' +
+          '\n' +
+          '  Clause-②: no    — this PR puts no new key on a published payload. The axis stands down and the `patch`\n' +
+          '                    above is yours to keep. Say it in the line, not only in the prose around it.\n' +
+          '  Clause-②: yes   — it does. Then the level rule applies, and ONE of the packages listed above — the one\n' +
+          '                    that actually grew — must be graded at least `minor`. This gate cannot read which of\n' +
+          '                    them that is, so it asks only that one of them carries it (maintainer ruling\n' +
+          '                    2026-09-04, decision batch #35, on #15294 — written out under "WHICH LEVEL" in the\n' +
+          '                    `Check Changeset` step of pr-automation.yml).\n' +
+          '\n' +
+          'The review seat\'s `' + CONTRACT_REVIEW_LABEL + '` carrier declares `yes` on its own and needs no line.\n' +
+          '\n' +
+          '⛔ The remedy is the declaration, never the deletion: dropping the changeset, or regrading the package to\n' +
+          'dodge this message, changes what ships in order to quiet a gate. And the line is read from the body on the\n' +
+          'next `edited` event (pr-automation.yml subscribes to it), so this red clears with no push and no re-run.',
+      );
+      return { exitCode: 1, stdout, stderr };
 
     case 'not-declared':
       stdout.push('✓ LEVEL AXIS: this PR declares clause-② `no`, so no package here is declared to have grown a published surface.', ...readings, ...unreadableNote);
@@ -991,20 +1548,46 @@ export function renderLevel(result) {
 
     case 'clean':
       stdout.push(
-        '✓ LEVEL AXIS: this PR declares clause-② `yes`, and no package whose `packages/*/src/**` it moves is graded `patch`.',
+        '✓ LEVEL AXIS: this PR declares clause-② `yes`, and no package whose `packages/**/src/**` it moves is graded `patch`.',
+        ...readings,
+        ...unreadableNote,
+      );
+      return { exitCode: 0, stdout, stderr };
+
+    // #16361. A green that judged something and set it aside, printed as such.
+    // It is separate from `clean` because `clean` means there was nothing of
+    // this shape in the diff at all, and a tick that covers both would hide the
+    // one case where this gate knowingly does not look — which is the failure
+    // mode the filing card is about, one layer along.
+    case 'discharged':
+      stdout.push(
+        '✓ LEVEL AXIS: this PR declares clause-② `yes`, and it grades a package whose `packages/**/src/**` ' +
+          'it moves at `minor` or above — the declared widening is accounted for:',
+        ...raisedLines(result.raised),
+        '',
+        '   These packages the diff also moves are graded `patch`, and are NOT refused:',
+        ...patchLines(result.offenders),
+        '',
+        '   ⚠️ Because clause ② is declared once FOR THE PR and names no package, this gate cannot read WHICH ' +
+          'package the act landed in. It therefore does not ask every moved package to carry the level — it asks ' +
+          'that ONE of them does (#16361). The residual, named rather than left silent: a SECOND widening in this ' +
+          'PR, graded `patch` beside the `minor` above, would not be seen here. The contract review that placed the ' +
+          `\`${CONTRACT_REVIEW_LABEL}\` carrier is what reads the diff; this axis only cross-checks the levels.`,
         ...readings,
         ...unreadableNote,
       );
       return { exitCode: 0, stdout, stderr };
 
     case 'enforce':
-      stderr.push('⛔ This PR declares clause-② YES and grades a package it grew `patch`.\n');
-      for (const { file, packages } of result.offenders) {
-        stderr.push(`   ${file}`);
-        for (const pkg of packages) stderr.push(`     - ${pkg}: patch   ← this PR moves ${pkg}'s packages/*/src/**`);
-      }
       stderr.push(
-        '\nThe two declarations disagree, inside one PR:\n' +
+        '⛔ This PR declares clause-② YES, and it grades NO package whose `packages/**/src/**` it moves\n' +
+          '   at `minor` or above.\n',
+      );
+      stderr.push('   The packages this PR moves `packages/**/src/**` of, and the level each is graded:');
+      stderr.push(...patchLines(result.offenders));
+      stderr.push('   ⇒ none of them is graded `minor` or above.\n');
+      stderr.push(
+        'The two declarations disagree, inside one PR:\n' +
           `${(result.readings ?? []).map((r) => `   · ${r}`).join('\n')}\n` +
           '\n' +
           'A purely additive widening of a published package\'s public surface takes AT LEAST `minor`;\n' +
@@ -1012,9 +1595,17 @@ export function renderLevel(result) {
           'ruling 2026-09-04, decision batch #35, on #15294 — written out in full under "WHICH LEVEL" in\n' +
           'the `Check Changeset` step of .github/workflows/pr-automation.yml).\n' +
           '\n' +
+          '⚠️ WHICH of the packages above received that widening is NOT something this gate can read, and it\n' +
+          'does not claim to. Clause ② is declared ONCE, FOR THE PR — the `' + CONTRACT_REVIEW_LABEL + '`\n' +
+          'carrier is a PR label and the `Clause-②:` line is a PR-body line, and neither names a package. So\n' +
+          'the finding above is not "each of these was widened"; it is the whole of what a PR-scoped\n' +
+          'declaration entails: THE WIDENED PACKAGE IS ONE OF THEM, AND NONE OF THEM CARRIES THE LEVEL.\n' +
+          'Raise the one that actually grew. Raising a package that only received a comment is not asked\n' +
+          'for here, and one `minor` on a package this diff moved clears this red for the PR (#16361).\n' +
+          '\n' +
           'TWO ways forward, and they are not interchangeable:\n' +
-          '  1. The declaration is right and the level is wrong -> raise it to `minor`. This is the\n' +
-          '     ordinary case; #16044 is the measured one, one word in one changeset.\n' +
+          '  1. The declaration is right and the level is wrong -> raise the widened package to `minor`.\n' +
+          '     This is the ordinary case; #16044 is the measured one, one word in one changeset.\n' +
           '  2. The level is right and the DECLARATION is wrong -> correct it at the producer: the\n' +
           `     \`${CONTRACT_REVIEW_LABEL}\` carrier is the review seat's to place and to clear, and the\n` +
           '     `Clause-②:` line is the claim\'s. ⛔ Do not add a tolerance here to route around a\n' +
@@ -1210,10 +1801,17 @@ function main(argv) {
   // the exit code is the MAX of the two: two independent facts about one
   // changeset set, and a gate that reported only the first one it found would
   // hand an author one word to change and then fail them again on the next run.
+  // `prEvent` separates "not a pull request" from "a pull request whose payload
+  // would not read" (#16776). It is read from the event NAME rather than from
+  // the payload's shape, because the payload's shape is the thing in doubt: on a
+  // `pull_request` run the runner has written a `pull_request` object, so its
+  // absence is a broken job and not a context this axis may stand down in.
+  const eventName = process.env.GITHUB_EVENT_NAME ?? null;
   const levelResult = judgeLevel({
     levels: scanned?.levels ?? null,
     touched: scanned ? packagesTouched({ cwd: REPO_ROOT, from: scanned.base, head }) : { packages: [], unreadable: [] },
     declaration: declarationFromPullRequest(readEventPullRequest(eventPath)),
+    prEvent: eventName === 'pull_request' || eventName === 'pull_request_target',
   });
   const level = renderLevel(levelResult);
   for (const line of level.stdout) console.log(line);
@@ -1259,13 +1857,16 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#7107: an `R` row whose BASE side is README.md subtracts NOTHING': 4,
   '#6129 proper: main drift must not move the verdict': 5,
   'Missing input is a failure, never a pass (#4690)': 4,
-  'The wiring: these fixtures must actually run on every PR': 15,
-  "The LEVEL axis: #16044's two heads, one word apart (#16055)": 41,
+  'The wiring: these fixtures must actually run on every PR': 22,
+  "The LEVEL axis: #16044's two heads, one word apart (#16055)": 56,
+  'The GRAIN: a PR-scoped declaration judged at PR scope (#16361)': 25,
+  'THE DEPTH: a nested package is a candidate the axis can refuse (#16713)': 21,
+  'THE ROOT: a packed `bin` target is a published surface the axis can refuse (#16692)': 37,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 14;
+const SELF_TEST_BATTERY_FLOOR = 17;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1952,20 +2553,98 @@ function selfTest() {
       // The declaration axis, held against the SAME patch head. Each of these
       // is the byte-identical offending tree with one input changed, so a green
       // here is about the declaration and cannot be about the changeset.
-      const notMeasured = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: { value: null, readings: [] } });
-      assert(notMeasured.verdict === 'not-measured', `no readable declaration is NOT MEASURED, never a pass and never a failure (#4690) — got ${notMeasured.verdict}`);
-      assert(renderLevel(notMeasured).exitCode === 0 && renderLevel(notMeasured).stdout.join('\n').includes('NOT MEASURED'), 'NOT MEASURED must exit 0 AND say so in words — a silent 0 is the reading this whole card is about');
-      const declaredNo = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: { value: 'no', readings: [] } });
+      //
+      // ⭐ #16776 splits the old single `not-measured` in two, and the pair below
+      // is the whole of it: the SAME missing declaration, over two trees that
+      // differ by exactly the bump word, must reach two different EXIT CODES.
+      // The old verdict exited 0 on both, so the check run concluded `success`
+      // whether the unread declaration was immaterial or whether it was the one
+      // input that decided the answer — indistinguishable at every surface that
+      // reads a conclusion rather than a step log.
+      const noDeclaration = { value: null, payload: true, readings: ['carrier: not on this PR', 'declaration line: the PR body carries no `Clause-②:` line'] };
+      const notMeasuredMaterial = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: noDeclaration });
+      const notMeasuredMoot = judgeLevel({ levels: levelsFor(MINOR_HEAD), touched: touchedCli, declaration: noDeclaration });
+      assert(
+        notMeasuredMaterial.verdict === 'not-measured-material',
+        `an unread declaration over a \`patch\` on a package this diff grew is MATERIAL — got ${notMeasuredMaterial.verdict}`,
+      );
+      assert(
+        notMeasuredMoot.verdict === 'not-measured-moot',
+        `an unread declaration that could not have changed the verdict is MOOT — got ${notMeasuredMoot.verdict}`,
+      );
+      assert(
+        renderLevel(notMeasuredMaterial).exitCode === 1 && renderLevel(notMeasuredMoot).exitCode === 0,
+        'the two must differ in EXIT CODE, not merely in verdict name — the exit code is what becomes the check-run conclusion, and that conclusion is the whole of #16776',
+      );
+      assert(
+        PATCH_HEAD.replace('patch', 'minor') === MINOR_HEAD,
+        'control: the material/moot pair must differ by exactly the bump word, and by nothing about the declaration — both are judged on the same `noDeclaration` reading',
+      );
+      const materialText = renderLevel(notMeasuredMaterial).stderr.join('\n');
+      assert(materialText.includes('NOT MEASURED'), 'the refusal must still SAY it did not measure — #16055 bought that honesty and #16776 does not spend it');
+      assert(
+        materialText.includes(CLI) && materialText.includes(CHANGESET),
+        'the refusal must NAME the package and the changeset whose `patch` made the missing reading material — an author must not have to guess which line asked the question',
+      );
+      assert(
+        materialText.includes('Clause-②: no') && materialText.includes('Clause-②: yes'),
+        'the refusal must spell BOTH declarations — the way out of this red is a declaration, and a message that names only the `yes` reads as a demand to raise the level',
+      );
+      assert(
+        renderLevel(notMeasuredMoot).stdout.join('\n').includes('could not have changed this verdict'),
+        'the moot green must say WHY it is green — an exit 0 that means "the missing input could not have moved this" is a different claim from a tick, and #16776 is what happens when they print alike',
+      );
+      assert(
+        renderLevel(notMeasuredMaterial).stderr.join('\n') !== renderLevel(judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: declaredYes })).stderr.join('\n'),
+        'a missing reading and a self-contradiction must not print the same refusal: one asks for a declaration, the other says the declaration and the level disagree',
+      );
+      const declaredNo = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: { value: 'no', payload: true, readings: [] } });
       assert(declaredNo.verdict === 'not-declared', `a declaration of \`no\` is a DECISION, distinct from an unread one — got ${declaredNo.verdict}`);
       assert(
-        renderLevel(declaredNo).stdout.join('\n') !== renderLevel(notMeasured).stdout.join('\n'),
+        renderLevel(declaredNo).exitCode === 0,
+        'the explicit `no` is the opt-out this refusal is built around: it must stay a PASS on the very tree the unread reading refuses, or #16776 has been closed by making the gate uncloseable',
+      );
+      assert(
+        renderLevel(declaredNo).stdout.join('\n') !== renderLevel(notMeasuredMoot).stdout.join('\n'),
         'a decision and a missing reading must not print the same thing — collapsing them is the defect #16055 records',
+      );
+
+      // The two contexts that are NOT a pull request, and the one that only
+      // looks like it. `cut-rc.yml` runs this script on a `workflow_dispatch`
+      // with no `--event` at all, over a whole RC snapshot range that certainly
+      // contains `patch` bumps on packages whose src moved; a rule that reddened
+      // there would have made the material refusal above unshippable.
+      const noPayload = declarationFromPullRequest(readEventPullRequest(null));
+      assert(noPayload.payload === false && noPayload.value === null, 'no payload at all reports `payload: false` beside the null value — the two facts are read separately');
+      assert(
+        judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: noPayload, prEvent: false }).verdict === 'no-pull-request',
+        'a run with no pull request is NOT APPLICABLE, never an unread declaration: the RC cut and a local run reach here and neither could have declared',
+      );
+      assert(
+        renderLevel(judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: noPayload, prEvent: false })).exitCode === 0,
+        'and it exits 0 — `cut-rc.yml` gates a whole snapshot range through this script with no event payload, and reddening it would be a rule that cannot ship',
+      );
+      assert(
+        judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: noPayload, prEvent: true }).verdict === 'payload-unreadable',
+        'the same absence ON a `pull_request` run is a FAILURE: the runner writes that payload, so a run that cannot read it is broken, and standing down there would reopen this card through the back door (#4690)',
+      );
+      assert(
+        renderLevel(judgeLevel({ levels: levelsFor(MINOR_HEAD), touched: touchedCli, declaration: noPayload, prEvent: true })).exitCode === 1,
+        'control: the unreadable payload on a PR run fails on the MOOT tree too — it is about the input this run owed, not about what the diff happens to contain',
+      );
+      assert(
+        declarationFromPullRequest({ labels: [], body: 'nothing here\n' }).payload === true,
+        'control: a payload that WAS read but declared nothing reports `payload: true` — otherwise every undeclared PR would take the not-applicable lane and this card would be closed by relabelling it',
+      );
+      assert(
+        judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: { value: null, readings: [] } }).verdict === 'not-measured-material',
+        'a declaration with NO `payload` field at all enforces rather than standing down — the stand-down lane needs a positive `payload: false` from the reader, so a caller that forgets the flag fails closed (#4690)',
       );
 
       // The package axis, same patch head: `patch` for a package this diff did
       // not grow is not this gate's business.
       const untouched = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: { packages: ['@objectstack/spec'], unreadable: [] }, declaration: declaredYes });
-      assert(untouched.verdict === 'clean', `\`patch\` for a package the diff does not move under packages/*/src/** is not refused — got ${untouched.verdict}`);
+      assert(untouched.verdict === 'clean', `\`patch\` for a package the diff does not move under packages/**/src/** is not refused — got ${untouched.verdict}`);
 
       // #4690, on this axis too.
       assert(judgeLevel({ levels: null, touched: touchedCli, declaration: declaredYes }).verdict === 'unreadable-diff', 'an uncomputable diff is a failure on the level axis as well');
@@ -2044,7 +2723,7 @@ function selfTest() {
         );
         const scanned = scan({ cwd: dir, base });
         const touched = packagesTouched({ cwd: dir, from: scanned.base, head: 'HEAD' });
-        assert(touched.packages.length === 0, `a diff outside packages/*/src/** grows no published surface — got ${JSON.stringify(touched.packages)}`);
+        assert(touched.packages.length === 0, `a diff outside packages/**/src/** grows no published surface — got ${JSON.stringify(touched.packages)}`);
         assert(
           judgeLevel({ levels: scanned.levels, touched, declaration: declaredYes }).verdict === 'clean',
           'end to end: `patch` beside a tests-only diff is not this gate\'s business, even under a `yes` declaration',
@@ -2099,6 +2778,629 @@ function selfTest() {
       assert(
         JSON.stringify(majorPackagesIn(MAJOR)) === JSON.stringify(entriesIn(MAJOR).filter((e) => e.bump === 'major').map((e) => e.pkg)),
         'majorPackagesIn must equal the `major` filter over entriesIn — one block, one parse',
+      );
+    }
+
+    // ── The GRAIN: a PR-scoped declaration judged at PR scope (#16361) ───────
+    //
+    // The fixtures are the two PRs of one dispatch round, at the heads that
+    // actually carried the `patch` the gate judged, and THE PAIR IS THE CONTROL.
+    // #16347 alone going green would be a gate that stopped firing; #16342 still
+    // redding beside it is what says the rule survived the regrain.
+    //
+    //   #16342 @ 273247e56f24 — spec `patch` + runtime `patch`, both moved under
+    //     src/. Six new published STACK_* error codes. Must STAY refused.
+    //   #16347 @ 23443ce169af — lint `minor` (the real widening: a field-typed
+    //     refusal arm) + spec `patch` (one re-worded TSDoc comment). Must PASS,
+    //     and must SAY what it is not refusing.
+    battery('The GRAIN: a PR-scoped declaration judged at PR scope (#16361)');
+    {
+      const SPEC = '@objectstack/spec';
+      const RUNTIME = '@objectstack/runtime';
+      const LINT = '@objectstack/lint';
+      const yes = { value: 'yes', payload: true, readings: ['carrier: on'] };
+      const unread = { value: null, payload: true, readings: ['carrier: not on this PR'] };
+      const cs = (file, entries) => ({ file, entries });
+
+      // ---- #16342: every moved package graded `patch` -> REFUSED ------------
+      const p16342 = {
+        levels: [cs('.changeset/stack-refusal-envelopes.md', [
+          { pkg: SPEC, bump: 'patch' },
+          { pkg: RUNTIME, bump: 'patch' },
+        ])],
+        touched: { packages: [SPEC, RUNTIME], unreadable: [] },
+      };
+      // ---- #16347: one moved package graded `minor`, another `patch` -> PASS -
+      const p16347 = {
+        levels: [
+          cs('.changeset/lint-preset-comparand-field-typed-arm.md', [{ pkg: LINT, bump: 'minor' }]),
+          cs('.changeset/spec-preset-comparand-message-tsdoc.md', [{ pkg: SPEC, bump: 'patch' }]),
+        ],
+        touched: { packages: [LINT, SPEC], unreadable: [] },
+      };
+
+      const fire = judgeLevel({ ...p16342, declaration: yes });
+      const pass = judgeLevel({ ...p16347, declaration: yes });
+      assert(fire.verdict === 'enforce', `#16342 is the CORRECT fire and must stay refused — got ${fire.verdict}`);
+      assert(pass.verdict === 'discharged', `#16347 fired on the wrong package and must now pass — got ${pass.verdict}`);
+      assert(
+        renderLevel(fire).exitCode === 1 && renderLevel(pass).exitCode === 0,
+        'the pair must differ in EXIT CODE: #16347 going green proves nothing unless #16342 still reds beside it in the same harness',
+      );
+
+      // The ablation that makes the green about the RAISE and not about the
+      // diff: strip the lint `minor` from #16347 and the identical spec `patch`
+      // must be refused again.
+      const withoutRaise = judgeLevel({
+        levels: [cs('.changeset/spec-preset-comparand-message-tsdoc.md', [{ pkg: SPEC, bump: 'patch' }])],
+        touched: p16347.touched,
+        declaration: yes,
+      });
+      assert(
+        withoutRaise.verdict === 'enforce',
+        `control: with the lint \`minor\` removed, #16347's spec \`patch\` is refused again — the green above is about the raise, not about the diff (got ${withoutRaise.verdict})`,
+      );
+      // ...and the raise has to be on a package the diff MOVED. A `minor` on a
+      // package whose src this PR never touched cannot be the declared widening.
+      const raiseOffDiff = judgeLevel({
+        levels: p16347.levels,
+        touched: { packages: [SPEC], unreadable: [] },
+        declaration: yes,
+      });
+      assert(
+        raiseOffDiff.verdict === 'enforce',
+        `control: a \`minor\` on a package this diff does NOT move under packages/[pkg]/src/ does not discharge the declaration — got ${raiseOffDiff.verdict}`,
+      );
+      // A `major` is a raise too — the vocabulary is "minor or above", not
+      // "exactly minor". (The major guard reds it on its own axis; this axis
+      // must not ALSO call it an unraised package.)
+      assert(
+        judgeLevel({
+          levels: [cs('.changeset/x.md', [{ pkg: LINT, bump: 'major' }, { pkg: SPEC, bump: 'patch' }])],
+          touched: p16347.touched,
+          declaration: yes,
+        }).verdict === 'discharged',
+        '`major` counts as a raise on this axis — the level rule says "AT LEAST `minor`", and the major guard is a separate verdict',
+      );
+
+      // ---- the messages. This is the deliverable, not cleanup ---------------
+      const fireText = renderLevel(fire).stderr.join('\n');
+      assert(
+        !/← this PR moves/.test(fireText),
+        'THE FALSE PREMISE IS GONE: the refusal must no longer tag each listed package with a per-package claim about what the diff did to it — that arrow, under a headline saying the PR "grew" them, is what made #16347 read as a finding about @objectstack/spec',
+      );
+      assert(
+        fireText.includes('WHICH of the packages above received that widening is NOT something this gate can read'),
+        'the refusal must SAY it cannot tell which package was widened — a false premise in a refusal message trains readers to stop checking premises, and that is the cost this card is paying off',
+      );
+      assert(
+        fireText.includes('THE WIDENED PACKAGE IS ONE OF THEM, AND NONE OF THEM CARRIES THE LEVEL'),
+        'and it must state the claim it DOES make, at the grain a PR-scoped declaration holds at',
+      );
+      assert(
+        fireText.includes(SPEC) && fireText.includes(RUNTIME) && fireText.includes('.changeset/stack-refusal-envelopes.md'),
+        'the refusal must still name every candidate line and its file — an author who cannot see the lines cannot raise the right one',
+      );
+      assert(
+        fireText.includes('Raise the one that actually grew'),
+        'the refusal must ask for the RIGHT package, not for all of them — asking an author to raise a package that only received a comment is the defect, restated as an instruction',
+      );
+
+      const passText = renderLevel(pass).stdout.join('\n');
+      assert(passText.includes(LINT) && passText.includes('minor'), 'the green must NAME the package that carries the level — the old gate never named it, and it is the only package the declaration is about');
+      assert(
+        passText.includes(SPEC) && passText.includes('are NOT refused'),
+        'ANTI-QUIET: the green must print the `patch` lines it is deliberately not refusing. A gate that stops firing silently is the failure mode this repo has three open cards about; this one says out loud what it set aside',
+      );
+      assert(
+        passText.includes('a SECOND widening in this PR, graded `patch` beside the `minor` above, would not be seen here'),
+        'and it must name its own residual: what this predicate cannot see is stated on the green, not left for a reader to discover on the case it misses',
+      );
+      assert(
+        !/tolerance|allowlist|comment-only/i.test(passText),
+        'control: the green is not a tolerance, an allowlist, or a comment-only skip — none of those words appear because none of those mechanisms is here. Nothing reads the CONTENT of a diff hunk',
+      );
+
+      // `clean` and `discharged` are two different greens and must not print
+      // alike: one means there was nothing of this shape, the other means there
+      // was and this gate knowingly did not refuse it.
+      const cleanGreen = judgeLevel({
+        levels: [cs('.changeset/lint-preset-comparand-field-typed-arm.md', [{ pkg: LINT, bump: 'minor' }])],
+        touched: { packages: [LINT], unreadable: [] },
+        declaration: yes,
+      });
+      assert(cleanGreen.verdict === 'clean', `no moved package graded \`patch\` at all is still \`clean\` — got ${cleanGreen.verdict}`);
+      assert(
+        renderLevel(cleanGreen).stdout.join('\n') !== passText,
+        'a green with nothing to set aside and a green that set something aside must not print the same thing — collapsing them is the defect #16055 records, one lane along',
+      );
+
+      // ---- materiality moved with the predicate, and had to (#16776) --------
+      // The unread declaration is MATERIAL exactly where a `yes` would have
+      // refused. Both halves are read from one `refusable`, so the NOT MEASURED
+      // lane cannot drift from the enforcing lane.
+      assert(
+        judgeLevel({ ...p16342, declaration: unread }).verdict === 'not-measured-material',
+        "#16342's shape with no declaration is MATERIAL — a `yes` would have refused it, so the missing reading decided the verdict",
+      );
+      assert(
+        judgeLevel({ ...p16347, declaration: unread }).verdict === 'not-measured-moot',
+        "#16347's shape with no declaration is MOOT — `yes` and `no` reach the same answer once a moved package carries the level, and refusing here would re-open this card through the NOT MEASURED lane",
+      );
+      assert(
+        renderLevel(judgeLevel({ ...p16342, declaration: unread })).exitCode === 1 &&
+          renderLevel(judgeLevel({ ...p16347, declaration: unread })).exitCode === 0,
+        'and the two differ in EXIT CODE — #16776 bought that split and #16361 must not spend it',
+      );
+      assert(
+        renderLevel(judgeLevel({ ...p16347, declaration: unread })).stdout.join('\n').includes('carries the level for the PR'),
+        'the moot green must say WHICH of the two reasons made it moot — "no `patch` at all" and "a raise already carries it" are different facts about the diff',
+      );
+      assert(
+        judgeLevel({ ...p16342, declaration: { value: 'no', payload: true, readings: [] } }).verdict === 'not-declared',
+        'control: an explicit `no` is still a DECISION on the very tree the unread reading refuses — the opt-out survives the regrain',
+      );
+
+      // ---- end to end, on a real temp git repository ------------------------
+      // #16347's shape with nothing stubbed: two packages' src moved, two
+      // changesets, one `minor` and one `patch`.
+      {
+        const manifest = (name) => JSON.stringify({ name, version: '0.0.0' });
+        const { dir, base } = makeRepo(
+          {
+            'packages/lint/package.json': manifest(LINT),
+            'packages/spec/package.json': manifest(SPEC),
+            'packages/lint/src/rules/filter-preset-comparand.ts': 'export const arm = 1;\n',
+            'packages/spec/src/data/date-range-presets.ts': '/** old wording */\nexport const m = 1;\n',
+          },
+          {
+            'packages/lint/src/rules/filter-preset-comparand.ts': 'export const arm = 1;\nexport const fieldTyped = 2;\n',
+            'packages/spec/src/data/date-range-presets.ts': '/** new wording */\nexport const m = 1;\n',
+            '.changeset/lint-preset-comparand-field-typed-arm.md': `---\n'${LINT}': minor\n---\n\nbody\n`,
+            '.changeset/spec-preset-comparand-message-tsdoc.md': `---\n'${SPEC}': patch\n---\n\nbody\n`,
+          },
+        );
+        const scanned = scan({ cwd: dir, base });
+        const touched = packagesTouched({ cwd: dir, from: scanned.base, head: 'HEAD' });
+        assert(
+          touched.packages.includes(LINT) && touched.packages.includes(SPEC),
+          `end to end: both packages' src moved and both must be read — got ${JSON.stringify(touched)}`,
+        );
+        assert(
+          judgeLevel({ levels: scanned.levels, touched, declaration: yes }).verdict === 'discharged',
+          'end to end: the real #16347 shape passes, and passes as `discharged` rather than as an empty tick',
+        );
+        // The same repository with the lint changeset graded `patch` instead:
+        // now nothing carries the level and the refusal is right again.
+        const { dir: dir2, base: base2 } = makeRepo(
+          {
+            'packages/lint/package.json': manifest(LINT),
+            'packages/spec/package.json': manifest(SPEC),
+            'packages/lint/src/rules/filter-preset-comparand.ts': 'export const arm = 1;\n',
+            'packages/spec/src/data/date-range-presets.ts': '/** old wording */\nexport const m = 1;\n',
+          },
+          {
+            'packages/lint/src/rules/filter-preset-comparand.ts': 'export const arm = 1;\nexport const fieldTyped = 2;\n',
+            'packages/spec/src/data/date-range-presets.ts': '/** new wording */\nexport const m = 1;\n',
+            '.changeset/lint-preset-comparand-field-typed-arm.md': `---\n'${LINT}': patch\n---\n\nbody\n`,
+            '.changeset/spec-preset-comparand-message-tsdoc.md': `---\n'${SPEC}': patch\n---\n\nbody\n`,
+          },
+        );
+        const scanned2 = scan({ cwd: dir2, base: base2 });
+        assert(
+          judgeLevel({
+            levels: scanned2.levels,
+            touched: packagesTouched({ cwd: dir2, from: scanned2.base, head: 'HEAD' }),
+            declaration: yes,
+          }).verdict === 'enforce',
+          'end to end control: one word along — the lint entry graded `patch` — and the same two-package diff is refused, so the pass above is about the level and not about the shape of the diff',
+        );
+      }
+    }
+
+    // ── THE DEPTH: a nested package is a candidate at all (#16713) ───────────
+    //
+    // The axis used to read the package segment one path segment wide, so it
+    // saw 23 of this workspace's 74 packages and the other 51 — every driver,
+    // service, plugin, connector, trigger, adapter and app — could pair a
+    // `Clause-②: yes` with a `patch` and stay green. THE PAIR IS THE CONTROL
+    // here exactly as it is above: the nested leg going red proves nothing on
+    // its own, because "the matcher was widened" and "the gate now refuses
+    // everything" produce the same red. So every fixture below is answered by a
+    // control that must STAY green, and the flat leg is re-asserted in this
+    // same harness so a nested red is readable as a widening rather than as a
+    // gate that lost its discrimination.
+    battery('THE DEPTH: a nested package is a candidate the axis can refuse (#16713)');
+    {
+      // ⚠️ #16692 made this reading TWO-legged, so the shape helper has to be
+      // handed a manifest reader. This one answers for exactly ONE directory,
+      // which is what keeps every assertion in this battery about DEPTH: no
+      // other candidate on any walk below can resolve a `bin` target, so a
+      // green here cannot be coming from the other leg.
+      const cliManifest = { name: '@objectstack/cli', version: '0.0.0', files: ['dist'], bin: { os: './bin/os.mjs' } };
+      const owners = (p) => JSON.stringify(publishedSourceOwners(p, (dir) => (dir === 'packages/cli' ? cliManifest : null)));
+      const declaredYes = { value: 'yes', payload: true, readings: ['carrier: on'] };
+
+      // The shape reading, at three depths and its controls. Depth-agnostic is
+      // the whole point: a repair that merely allowed ONE extra segment passes
+      // the first two of these and fails the third.
+      assert(owners('packages/cli/src/commands/lint.ts') === '["packages/cli"]', `flat: one segment ⇒ the package dir — got ${owners('packages/cli/src/commands/lint.ts')}`);
+      assert(
+        owners('packages/drivers/driver-sql/src/sql-driver.ts') === '["packages/drivers/driver-sql"]',
+        `nested: the GROUP is not the package, the dir under it is — got ${owners('packages/drivers/driver-sql/src/sql-driver.ts')}`,
+      );
+      assert(
+        owners('packages/a/b/c/src/x.ts') === '["packages/a/b/c"]',
+        `three levels deep reads the same way — a fix that hard-codes ONE optional group segment fails HERE, which is why the reading is a walk and not a wider pattern — got ${owners('packages/a/b/c/src/x.ts')}`,
+      );
+      assert(owners('packages/drivers/driver-sql/README.md') === '[]', 'control: a path with no `src/` segment owns nothing — otherwise the three positives above would hold for every file in the repo');
+      // ⭐ INVERTED by #16692, deliberately and in place. This control was
+      // written by #16713 to hold the ROOT axis OPEN — «`bin/**` is still NOT
+      // read … a fix that reddened here would be answering a different card» —
+      // and it did its job: the boundary could not close by accident, and this
+      // is the card that came to close it on purpose. The reasoning is kept and
+      // the direction is flipped, because that is the difference between a
+      // boundary that was moved and one that was forgotten.
+      assert(
+        owners('packages/cli/bin/os.mjs') === '["packages/cli"]',
+        'INVERTED (#16692): a `bin` target IS read now — npm packs it regardless of `files` (#14874), so a diff confined to it names its package. ' +
+          'What is STILL not read, and is a different instrument entirely: whether an `src/**` change grew the PUBLIC FACE at all. A package-internal ' +
+          'data line under `src/` is counted as growth on path alone — the 误判 half, filed separately — and no reading of the PACKED set can answer it. ' +
+          `got ${owners('packages/cli/bin/os.mjs')}`,
+      );
+      assert(owners('scripts/check-changeset-no-major.mjs') === '[]', 'control: outside `packages/` there is no owner at all');
+      assert(owners('packages/src/x.ts') === '[]', 'control: the owner must be at least `packages/<something>` — `packages` itself is not a package');
+      assert(owners('packages/cli/src') === '[]', 'control: a path that IS `src` is not a path INSIDE `src/` — the walk stops one short of the end');
+
+      // The multi-candidate case, which this repo really contains, and the
+      // reason the walk resolves SHALLOWEST first. `packages/create-objectstack`
+      // ships a scaffold template that carries its own `package.json`
+      // (`objectstack-blank`, private, not a workspace member), and the template
+      // has a `src/` of its own. Resolving to the NEAREST manifest would name
+      // the private template and DROP the real package — a regression against
+      // the one-segment reading this replaces.
+      const twin = 'packages/create-objectstack/src/templates/blank/src/objects/note.object.ts';
+      assert(
+        owners(twin) === '["packages/create-objectstack","packages/create-objectstack/src/templates/blank"]',
+        `a path can own two candidates and they are ordered SHALLOWEST first — got ${owners(twin)}`,
+      );
+
+      const NESTED = '@objectstack/driver-sql';
+      const NESTED_DIR = 'packages/drivers/driver-sql';
+      const CS = '.changeset/depth-leg.md';
+      const nestedRepo = (bump) =>
+        makeRepo(
+          { [`${NESTED_DIR}/package.json`]: JSON.stringify({ name: NESTED, version: '0.0.0' }), [`${NESTED_DIR}/src/sql-driver.ts`]: 'export const before = 1;\n' },
+          { [`${NESTED_DIR}/src/sql-driver.ts`]: 'export const after = 2;\n', [CS]: `---\n"${NESTED}": ${bump}\n---\n\nbody\n` },
+        );
+      const levelOf = ({ dir, base }) => {
+        const scanned = scan({ cwd: dir, base });
+        const touched = packagesTouched({ cwd: dir, from: scanned.base, head: 'HEAD' });
+        return { touched, result: judgeLevel({ levels: scanned.levels, touched, declaration: declaredYes }) };
+      };
+
+      // THE LEG THIS CARD IS ABOUT. Byte for byte the assertion the flat leg
+      // has carried since #16055, with the package one directory deeper.
+      const nestedPatch = levelOf(nestedRepo('patch'));
+      assert(
+        nestedPatch.touched.packages.includes(NESTED),
+        `end to end: a nested package's src moved must NAME the package from its own manifest — got ${JSON.stringify(nestedPatch.touched)}`,
+      );
+      assert(
+        nestedPatch.result.verdict === 'enforce',
+        `end to end: a real diff that moves ${NESTED_DIR}/src/** and grades it \`patch\` under a \`yes\` declaration is REFUSED — got ${nestedPatch.result.verdict}`,
+      );
+      assert(renderLevel(nestedPatch.result).exitCode === 1, 'and it EXITS 1 — the exit code is what becomes the check-run conclusion, and a verdict name CI never reads is not a refusal');
+      assert(
+        renderLevel(nestedPatch.result).stderr.join('\n').includes(NESTED),
+        'the refusal must NAME the nested package — an author who cannot see which line is being asked about cannot act on it',
+      );
+
+      // CONTROL 1, the level: the same repository one word along. Without this,
+      // the red above is equally consistent with "any nested diff is now
+      // refused", which is the shape a tolerance-free fix must not have.
+      const nestedMinor = levelOf(nestedRepo('minor'));
+      assert(
+        nestedMinor.touched.packages.includes(NESTED) && nestedMinor.result.verdict === 'clean',
+        `control: the same nested diff graded \`minor\` PASSES while still being SEEN — so the refusal is about the level, not about the depth — got ${JSON.stringify(nestedMinor.touched)} / ${nestedMinor.result.verdict}`,
+      );
+      assert(renderLevel(nestedMinor.result).exitCode === 0, 'and the two nested legs differ in EXIT CODE, one word apart');
+
+      // CONTROL 2, the flat leg, re-driven HERE. #16055's assertion lives in
+      // its own battery; re-stating it inside this harness is what makes the
+      // nested red above readable as a WIDENING rather than as a gate that
+      // stopped discriminating.
+      const flat = levelOf(
+        makeRepo(
+          { 'packages/cli/package.json': JSON.stringify({ name: '@objectstack/cli', version: '0.0.0' }), 'packages/cli/src/commands/lint.ts': 'export const before = 1;\n' },
+          { 'packages/cli/src/commands/lint.ts': 'export const after = 2;\n', [CS]: '---\n"@objectstack/cli": patch\n---\n\nbody\n' },
+        ),
+      );
+      assert(
+        flat.result.verdict === 'enforce' && renderLevel(flat.result).exitCode === 1,
+        `control: the FLAT leg still reds in this same harness — a nested red beside a flat green would mean the reading moved rather than widened — got ${flat.result.verdict}`,
+      );
+
+      // CONTROL 3, the nonsense leg: a diff that publishes nothing must stay
+      // green under the very same `yes`. An implementation that simply always
+      // enforced would satisfy every positive above and fail only here.
+      const nonsense = levelOf(
+        makeRepo(
+          { 'packages/cli/package.json': JSON.stringify({ name: '@objectstack/cli', version: '0.0.0' }), 'content/docs/a.mdx': 'a\n' },
+          { 'content/docs/a.mdx': 'b\n', [CS]: '---\n"@objectstack/cli": patch\n---\n\nbody\n' },
+        ),
+      );
+      assert(
+        nonsense.touched.packages.length === 0 && nonsense.result.verdict === 'clean' && renderLevel(nonsense.result).exitCode === 0,
+        `control: a diff that moves no published source is still not this gate's business under a \`yes\` — got ${JSON.stringify(nonsense.touched)} / ${nonsense.result.verdict}`,
+      );
+
+      // ⭐ THE NEW FAILURE MODE. Widening the shape means nested paths now
+      // MATCH, so a nested dir whose manifest cannot be read has somewhere to
+      // land. Before this change it landed in NEITHER set — the exact shape
+      // #4690 forbids, and the one the filing card names: the gate could not
+      // report a limb it never grew. `packages/mystery` pins this for a flat
+      // dir in the battery above; this pins it at depth.
+      const { dir: nmDir, base: nmBase } = makeRepo(
+        { 'packages/newgroup/newpkg/src/a.ts': 'a\n' },
+        { 'packages/newgroup/newpkg/src/a.ts': 'b\n', [CS]: '---\n"@objectstack/cli": patch\n---\n\nbody\n' },
+      );
+      const nmScanned = scan({ cwd: nmDir, base: nmBase });
+      const nmTouched = packagesTouched({ cwd: nmDir, from: nmScanned.base, head: 'HEAD' });
+      assert(
+        nmTouched.unreadable.includes('packages/newgroup/newpkg'),
+        `a NESTED dir whose manifest cannot be read is reported as unreadable, not as absent (#4690) — got ${JSON.stringify(nmTouched)}`,
+      );
+      assert(nmTouched.packages.length === 0, 'and it is not named as a package either — an unreadable manifest yields no name to report');
+      assert(
+        nmTouched.unreadable.length + nmTouched.packages.length === 1,
+        'the invariant the widening owes: a path that MATCHES the shape lands in exactly one of the two sets, never in neither — landing in neither is the whole finding this battery closes',
+      );
+      assert(
+        renderLevel(judgeLevel({ levels: nmScanned.levels, touched: nmTouched, declaration: declaredYes })).stdout.join('\n').includes('packages/newgroup/newpkg'),
+        'and the tick PRINTS it — an offender that could not be seen must be stated beside the green, or the green is the same silent pass this card is about',
+      );
+    }
+
+    // ── THE ROOT: a packed `bin` target is a published surface (#16692) ──────
+    //
+    // The DEPTH battery above answers HOW DEEP the package owning a root may
+    // sit. This one answers WHICH ROOTS SHIP, and it is the other half of the
+    // same finding: a diff confined to `packages/cli/bin/**` paired a
+    // `Clause-②: yes` with a `patch` and stayed GREEN on PR #16686, while the
+    // byte-for-byte same declaration over `src/**` went RED on PR #16672 the
+    // same day. ⇒ Same declaration, same grade, opposite verdicts, because
+    // `bin/` ships (npm packs a `bin` target REGARDLESS of `files`, #14874) and
+    // the axis could not see it. The dispatching seat then read that green as
+    // "the axis looked and approved" and had to correct itself publicly — the
+    // concrete cost this card records.
+    //
+    // ⛔ THE TRAP THIS BATTERY GUARDS, stated because it is the failure this
+    // repair could most plausibly have shipped: triage's ruling said to judge a
+    // package by its PACKED set. Taken literally that GUTS the axis, because
+    // `files` is `["dist", ...]` and `src/**` is not packed — it is compiled
+    // into what is. Such a fix reds nothing and prints ticks. So the `src/**`
+    // leg is untouched and the packed reading is an ADDITIONAL leg, and the
+    // superset control below is what proves that rather than asserting it.
+    //
+    // Every count here is paired the way the DEPTH battery pairs its own: a red
+    // proves nothing alone, because "the reading widened" and "the gate refuses
+    // everything now" produce the same red.
+    battery('THE ROOT: a packed `bin` target is a published surface the axis can refuse (#16692)');
+    {
+      const declaredYes = { value: 'yes', payload: true, readings: ['carrier: on'] };
+      const CLI = '@objectstack/cli';
+      const CS = '.changeset/root-leg.md';
+
+      // ── The reader for `bin`, in both spellings npm accepts and its junk ───
+      const targets = (bin) => JSON.stringify(binTargetsOf({ bin }));
+      assert(targets({ os: './bin/run.js' }) === '["bin/run.js"]', `the object spelling, with \`./\` stripped — got ${targets({ os: './bin/run.js' })}`);
+      assert(targets('bin/run.js') === '["bin/run.js"]', `the STRING spelling is the same target — a package with one command may write either — got ${targets('bin/run.js')}`);
+      assert(
+        targets({ objectstack: './bin/run.js', os: './bin/run.js' }) === '["bin/run.js"]',
+        `two command NAMES pointing at one file is one target — this is the real manifest of packages/cli — got ${targets({ objectstack: './bin/run.js', os: './bin/run.js' })}`,
+      );
+      assert(
+        targets({ a: './bin/a.js', b: 'bin/b.js' }) === '["bin/a.js","bin/b.js"]',
+        `two DIFFERENT targets are both read — a package that grew a second command must not be read through its first — got ${targets({ a: './bin/a.js', b: 'bin/b.js' })}`,
+      );
+      assert(targets(undefined) === '[]', 'control: no `bin` field declares no target — otherwise every package would own its whole tree through this leg');
+      assert(targets(['bin/run.js']) === '[]', 'control: an ARRAY is not a spelling npm accepts, and a reader that guessed here would be inventing a published surface');
+      assert(targets({ a: 42, b: null }) === '[]', 'control: non-string values name nothing — a malformed manifest is not a licence to guess');
+      assert(targets({ a: '../../etc/passwd', b: '/abs.js' }) === '[]', 'control: a target that climbs out of the package, or is absolute, names nothing THIS package publishes');
+      assert(targets({ a: './/bin//run.js/' }) === '["bin/run.js"]', `control: a target is normalised before it is compared, or the same file spelt twice is two targets — got ${targets({ a: './/bin//run.js/' })}`);
+
+      // ── The walk, with a manifest under `packages/cli` and nowhere else ────
+      const manifestWith = (bin) => (dir) => (dir === 'packages/cli' ? { name: CLI, version: '0.0.0', files: ['dist'], bin } : null);
+      const seen = (p, bin) => JSON.stringify(publishedSourceOwners(p, manifestWith(bin)));
+
+      assert(seen('packages/cli/bin/run.js', { os: './bin/run.js' }) === '["packages/cli"]', `THE CARD: a packed \`bin\` target names its package — got ${seen('packages/cli/bin/run.js', { os: './bin/run.js' })}`);
+      assert(seen('packages/cli/bin/run.js', 'bin/run.js') === '["packages/cli"]', `... in the string spelling too — got ${seen('packages/cli/bin/run.js', 'bin/run.js')}`);
+      // ⭐ THE CONTROL THAT SAYS THIS IS NOT A LIST OF ROOTS. `bin/run-dev.js`
+      // really sits beside `bin/run.js` in this repo; `bin` does not name it and
+      // `files` is `["dist","README.md","CHANGELOG.md"]`, so it does NOT ship.
+      // A repair that added `bin/**` as a root — the option triage refused —
+      // would count it, and would be over-including where the tree can tell.
+      assert(
+        seen('packages/cli/bin/run-dev.js', { os: './bin/run.js' }) === '[]',
+        `control: a sibling in the SAME directory that \`bin\` does not name is not published — this leg reads the manifest, it does not add \`bin/\` to a list of roots — got ${seen('packages/cli/bin/run-dev.js', { os: './bin/run.js' })}`,
+      );
+      // And the converse, which no directory list could ever get right.
+      assert(
+        seen('packages/cli/dist/cli.js', { os: './dist/cli.js' }) === '["packages/cli"]',
+        `control: a \`bin\` that points OUTSIDE \`bin/\` is read — «add \`bin/**\` to the roots» is blind here, and lists drifting is why this card exists — got ${seen('packages/cli/dist/cli.js', { os: './dist/cli.js' })}`,
+      );
+      assert(
+        JSON.stringify(publishedSourceOwners('packages/cli/bin/run.js', () => null)) === '[]',
+        'FIRING control: the identical path owns nothing when no manifest answers — so the positives above are the MANIFEST being read, not the path shape',
+      );
+      const unparseableAt = (at) => (dir) => (dir === at ? false : null);
+      assert(
+        JSON.stringify(publishedSourceOwners('packages/cli/bin/run.js', unparseableAt('packages/cli'))) === '["packages/cli"]',
+        `#4690 extended to this leg: a manifest that is THERE and will not parse cannot be asked what it packs, so its directory is a CANDIDATE that cannot be named — it lands in \`unreadable\`, never in neither set — got ${JSON.stringify(publishedSourceOwners('packages/cli/bin/run.js', unparseableAt('packages/cli')))}`,
+      );
+      assert(
+        JSON.stringify(publishedSourceOwners('packages/cli/README.md', unparseableAt('packages/cli'))) === '["packages/cli"]',
+        'and the residual is honest about its own width: with the manifest unparseable, NO path under that directory can be ruled out either, so an ordinary file there is reported too — over-reporting a residual is this axis\'s safe direction, under-reporting it is #4690',
+      );
+      let threw = null;
+      try {
+        publishedSourceOwners('packages/cli/bin/run.js');
+      } catch (error) {
+        threw = error;
+      }
+      assert(
+        threw instanceof TypeError && /manifest reader is required/.test(threw.message),
+        `the reader is REQUIRED: a default would silently read \`src/**\` alone at a call site that reads as if it asked the whole question — got ${threw && threw.message}`,
+      );
+
+      // ── SUPERSET-ONLY, measured rather than argued ────────────────────────
+      //
+      // The safety property this card owes: no path that was «grown» before may
+      // stop being «grown». Driven with a bin-bearing manifest under EVERY
+      // ancestor — the most a second leg could ever perturb — every answer the
+      // DEPTH battery pins must come back byte for byte.
+      const everywhere = () => ({ name: 'x', version: '0.0.0', bin: { x: './bin/x.js' } });
+      for (const [path, expected] of [
+        ['packages/cli/src/commands/lint.ts', '["packages/cli"]'],
+        ['packages/drivers/driver-sql/src/sql-driver.ts', '["packages/drivers/driver-sql"]'],
+        ['packages/a/b/c/src/x.ts', '["packages/a/b/c"]'],
+        ['packages/create-objectstack/src/templates/blank/src/objects/note.object.ts', '["packages/create-objectstack","packages/create-objectstack/src/templates/blank"]'],
+      ]) {
+        const got = JSON.stringify(publishedSourceOwners(path, everywhere));
+        assert(got === expected, `superset: \`${path}\` still resolves exactly as it did before the \`bin\` leg — got ${got}, want ${expected}`);
+      }
+      assert(
+        JSON.stringify(publishedSourceOwners('packages/drivers/driver-sql/README.md', everywhere)) === '[]',
+        'nonsense control on the superset run: a manifest under every ancestor must NOT make an ordinary file owned — otherwise the four rows above would hold for any input at all',
+      );
+
+      // ── #16985: `src/**` is owned WITHOUT asking what re-exports it ────────
+      //
+      // These two rows are a DECISION, not an oversight, and they are here so
+      // that undoing it costs a deliberate deletion. The over-read they pin is
+      // real and was measured rather than denied — 14.0% of (package, PR) pairs
+      // over the axis's whole life name a package the diff ships nothing for —
+      // and it is KEPT because that over-read has never once changed a verdict
+      // (zero false refusals, declaration-independent) and because the cheaper
+      // repair is unsound for a whole-program build. Both readings, with their
+      // method and their controls, are in the header; the unsoundness is at
+      // `PUBLISHED_SOURCE_ROOT`. ⇒ An edit that exempts unreachable files must
+      // delete these rows and bring a rate that buys the change.
+      const noManifest = () => null;
+      assert(
+        JSON.stringify(publishedSourceOwners('packages/rest/src/rest-route-ledger.ts', noManifest)) === '["packages/rest"]',
+        '#16985: a module no entry point re-exports is owned all the same — the proxy is deliberate, and an entry-graph exemption is a false GREEN for a whole-program `tsc` package',
+      );
+      assert(
+        JSON.stringify(publishedSourceOwners('packages/rest/src/rest-route-ledger.test.ts', noManifest)) === '["packages/rest"]',
+        '#16985: a test file under `src/**` is owned too — 35 of the 50 measured over-reads are this shape, kept for the same reason and refused an exemption on the same evidence',
+      );
+      // Nonsense control on THIS pair, so the two rows above cannot be read as
+      // "any path at all is owned": one segment over, nothing is.
+      assert(
+        JSON.stringify(publishedSourceOwners('packages/rest/rest-route-ledger.ts', noManifest)) === '[]',
+        '#16985 control: the same file name outside `src/**` is owned by nobody — the two rows above are about `src/**`, not about the name',
+      );
+
+      // ── End to end, on real temp git repositories ─────────────────────────
+      const manifestJson = (bin) => JSON.stringify({ name: CLI, version: '0.0.0', files: ['dist', 'README.md'], bin });
+      const levelOf = ({ dir, base }) => {
+        const scanned = scan({ cwd: dir, base });
+        const touched = packagesTouched({ cwd: dir, from: scanned.base, head: 'HEAD' });
+        return { touched, result: judgeLevel({ levels: scanned.levels, touched, declaration: declaredYes }) };
+      };
+      const binRepo = (bump, file, bin = { objectstack: './bin/run.js', os: './bin/run.js' }) =>
+        makeRepo(
+          { 'packages/cli/package.json': manifestJson(bin), [file]: '#!/usr/bin/env node\nrun(1);\n' },
+          { [file]: '#!/usr/bin/env node\nrun(2);\n', [CS]: `---\n"${CLI}": ${bump}\n---\n\nbody\n` },
+        );
+
+      // THE LEG THIS CARD IS ABOUT — the pairing that was green on PR #16686.
+      const binPatch = levelOf(binRepo('patch', 'packages/cli/bin/run.js'));
+      assert(binPatch.touched.packages.includes(CLI), `end to end: a diff confined to a packed \`bin\` target must NAME the package from its own manifest — got ${JSON.stringify(binPatch.touched)}`);
+      assert(binPatch.result.verdict === 'enforce', `end to end: \`bin/**\` + \`Clause-②: yes\` + \`patch\` is REFUSED — got ${binPatch.result.verdict}`);
+      assert(renderLevel(binPatch.result).exitCode === 1, 'and it EXITS 1 — a verdict name CI never reads is not a refusal');
+      assert(renderLevel(binPatch.result).stderr.join('\n').includes(CLI), 'and the refusal NAMES the package — an author who cannot see which line is being asked about cannot act on it');
+      assert(levelOf(binRepo('patch', 'packages/cli/bin/run.js', 'bin/run.js')).result.verdict === 'enforce', 'end to end: the STRING spelling of `bin` refuses identically — a package with one command must not be graded by which spelling it chose');
+
+      // CONTROL 1, the level. Without it the red above is equally consistent
+      // with "any diff under a package is now refused".
+      const binMinor = levelOf(binRepo('minor', 'packages/cli/bin/run.js'));
+      assert(
+        binMinor.touched.packages.includes(CLI) && binMinor.result.verdict === 'clean' && renderLevel(binMinor.result).exitCode === 0,
+        `control: the same \`bin\` diff graded \`minor\` PASSES while still being SEEN — the refusal is about the LEVEL, not about the root — got ${JSON.stringify(binMinor.touched)} / ${binMinor.result.verdict}`,
+      );
+
+      // CONTROL 2, the `src` leg re-driven in THIS harness, so the red above
+      // reads as a widening rather than as a reading that moved.
+      const srcLeg = levelOf(
+        makeRepo(
+          { 'packages/cli/package.json': manifestJson({ os: './bin/run.js' }), 'packages/cli/src/commands/lint.ts': 'export const before = 1;\n' },
+          { 'packages/cli/src/commands/lint.ts': 'export const after = 2;\n', [CS]: `---\n"${CLI}": patch\n---\n\nbody\n` },
+        ),
+      );
+      assert(
+        srcLeg.result.verdict === 'enforce' && renderLevel(srcLeg.result).exitCode === 1,
+        `control: the \`src/**\` leg still reds in this same harness — a \`bin\` red beside an \`src\` green would mean the reading MOVED rather than widened, which is the fix this card must not ship — got ${srcLeg.result.verdict}`,
+      );
+
+      // CONTROL 3, the non-target sibling, end to end. The unit row above says
+      // the walk does not own it; this says the GATE does not refuse it.
+      const sibling = levelOf(binRepo('patch', 'packages/cli/bin/run-dev.js'));
+      assert(
+        sibling.touched.packages.length === 0 && sibling.result.verdict === 'clean' && renderLevel(sibling.result).exitCode === 0,
+        `control: a file beside the target that \`bin\` does not name and \`files\` excludes does NOT ship, and is not refused — got ${JSON.stringify(sibling.touched)} / ${sibling.result.verdict}`,
+      );
+
+      // CONTROL 4, the NEGATIVE control triage made mandatory: a diff touching
+      // no published surface at all must still pass under the very same `yes`.
+      // ⛔ Without this leg an implementation that simply always enforced would
+      // satisfy every positive above and be indistinguishable from a correct one.
+      for (const [label, file] of [
+        ['content/docs/**', 'content/docs/a.mdx'],
+        ['.github/**', '.github/workflows/x.yml'],
+      ]) {
+        const nothing = levelOf(
+          makeRepo({ 'packages/cli/package.json': manifestJson({ os: './bin/run.js' }), [file]: 'a\n' }, { [file]: 'b\n', [CS]: `---\n"${CLI}": patch\n---\n\nbody\n` }),
+        );
+        assert(
+          nothing.touched.packages.length === 0 && nothing.touched.unreadable.length === 0 && nothing.result.verdict === 'clean' && renderLevel(nothing.result).exitCode === 0,
+          `NEGATIVE control (${label}): a diff that publishes nothing still PASSES under a \`yes\` — got ${JSON.stringify(nothing.touched)} / ${nothing.result.verdict}`,
+        );
+      }
+
+      // ⭐ #4690, extended to this leg end to end. A manifest that is THERE and
+      // will not parse cannot be asked what it packs. Before this change such a
+      // directory was simply not a candidate for anything outside `src/**`, so a
+      // `bin` change under it landed in NEITHER set — the shape this whole file
+      // is built to refuse.
+      const { dir: brokenDir, base: brokenBase } = makeRepo(
+        { 'packages/broken/package.json': '{ "name": "@objectstack/broken",\n', 'packages/broken/bin/run.js': 'a\n' },
+        { 'packages/broken/bin/run.js': 'b\n', [CS]: `---\n"${CLI}": patch\n---\n\nbody\n` },
+      );
+      const brokenScanned = scan({ cwd: brokenDir, base: brokenBase });
+      const brokenTouched = packagesTouched({ cwd: brokenDir, from: brokenScanned.base, head: 'HEAD' });
+      assert(brokenTouched.unreadable.includes('packages/broken'), `a dir whose manifest will not parse is reported as unreadable, not as absent (#4690) — got ${JSON.stringify(brokenTouched)}`);
+      assert(brokenTouched.packages.length === 0, 'and it is not named as a package either — an unparseable manifest yields no name to report');
+      assert(
+        brokenTouched.unreadable.length + brokenTouched.packages.length === 1,
+        'the invariant this leg owes: a path this reading matches lands in exactly one of the two sets, never in neither',
+      );
+      assert(
+        renderLevel(judgeLevel({ levels: brokenScanned.levels, touched: brokenTouched, declaration: declaredYes })).stdout.join('\n').includes('packages/broken'),
+        'and the tick PRINTS it — an offender that could not be seen must be stated beside the green, or the green is the silent pass this card is about',
+      );
+      // The nonsense control on that reading: a dir with NO manifest at all has
+      // no `bin` field to have named anything, so an ordinary file under it is
+      // not a candidate and nothing is owed. ⛔ Otherwise the row above would
+      // hold for every path in the repo and `unreadable` would mean nothing.
+      const { dir: bareDir, base: bareBase } = makeRepo({ 'packages/bare/bin/run.js': 'a\n' }, { 'packages/bare/bin/run.js': 'b\n', [CS]: `---\n"${CLI}": patch\n---\n\nbody\n` });
+      const bareScanned = scan({ cwd: bareDir, base: bareBase });
+      const bareTouched = packagesTouched({ cwd: bareDir, from: bareScanned.base, head: 'HEAD' });
+      assert(
+        bareTouched.packages.length === 0 && bareTouched.unreadable.length === 0,
+        `nonsense control: an ABSENT manifest declares no \`bin\`, so nothing under it is a candidate and no residual is owed — got ${JSON.stringify(bareTouched)}`,
       );
     }
 
@@ -2208,6 +3510,54 @@ function selfTest() {
     assert(
       !/check-changeset-no-major\.mjs/.test(uncommented(lintYaml)),
       'wiring: lint.yml must NOT invoke this script directly — the self-test reaches it through `check:changeset-gate-self-tests`, and a real scan here would bypass the `allow-major` escape hatch its own error message prescribes and have no branch point to judge against',
+    );
+
+    // ── The trigger the `not-measured-material` refusal depends on (#16776) ──
+    //
+    // This is the A-and-B coupling of that card, pinned rather than trusted to
+    // prose. The refusal above is cleared by writing `Clause-②: no` (or `yes`
+    // plus a level) into the PR BODY. A `pull_request` payload is a snapshot and
+    // `rerun_failed_jobs` replays the frozen one, so WITHOUT `edited` in this
+    // trigger list the body a author just fixed is never re-read and the red
+    // cannot be cleared by any action short of pushing a commit — measured on PR
+    // #16342, which took a deliberate `git merge origin/main` after a body edit
+    // purely to manufacture a `synchronize`. Removing `edited` therefore does not
+    // merely lose a convenience: it turns this gate's own refusal into the
+    // permanently-red-by-construction shape #5580 and #6378 exist to remove.
+    const triggerTypes = prAutomation.match(/\n\s*types:\s*\[([^\]]*)\]/);
+    assert(triggerTypes !== null, 'wiring: pr-automation.yml must name its `pull_request` activity types explicitly — the assertion below would judge nothing');
+    const types = (triggerTypes?.[1] ?? '').split(',').map((t) => t.trim()).filter(Boolean);
+    assert(
+      types.includes('edited'),
+      `wiring: pr-automation.yml must subscribe to \`edited\` — the level axis reads the clause-② declaration out of the PR BODY, and a verdict whose input is the body must re-fire when the body changes or its refusal cannot be cleared without a push (#16776). Got ${JSON.stringify(types)}`,
+    );
+    assert(
+      ['opened', 'synchronize', 'reopened', 'labeled', 'unlabeled'].every((t) => types.includes(t)),
+      `wiring: naming \`types:\` REPLACES GitHub's default set, so the five this job already needed must all still be listed beside \`edited\` — the label carriers are read on \`labeled\`/\`unlabeled\` and the diff on \`opened\`/\`synchronize\`/\`reopened\`. Got ${JSON.stringify(types)}`,
+    );
+
+    // The OTHER consumer, and why the refusal above may exit 1 at all: the RC cut
+    // runs this same script over a whole snapshot range on a `workflow_dispatch`,
+    // where there is no pull request and therefore no declaration to read. It
+    // reaches the `no-pull-request` lane BECAUSE it hands over no `--event` and
+    // GitHub sets no `pull_request` payload there. A `--event` grown onto that
+    // call site, or a second one that is a PR run, would put an RC cut into the
+    // lane that can refuse — so the shape is pinned where the refusal lives.
+    const cutRcPath = join(REPO_ROOT, '.github/workflows/cut-rc.yml');
+    assert(existsSync(cutRcPath), 'wiring: .github/workflows/cut-rc.yml must exist — it is this script\'s other consumer, and the one the level axis must never red');
+    const cutRc = uncommented(existsSync(cutRcPath) ? readFileSync(cutRcPath, 'utf8') : '');
+    const cutRcCalls = [...cutRc.matchAll(/node scripts\/check-changeset-no-major\.mjs([^\n]*)/g)].map((m) => m[1]);
+    assert(
+      cutRcCalls.length === 2 && cutRcCalls.some((c) => /^\s*--self-test\s*$/.test(c)),
+      `wiring: cut-rc.yml is expected to invoke this script exactly twice — \`--self-test\` then the real scan (found ${cutRcCalls.length}: ${JSON.stringify(cutRcCalls)})`,
+    );
+    assert(
+      cutRcCalls.every((c) => !/--event\b/.test(c)),
+      'wiring: no cut-rc.yml call site may pass `--event` — the RC cut is a `workflow_dispatch` with no pull request, and the level axis stands down there by having no declaration carrier at all. Handing it one would put a whole snapshot range into the lane that can refuse (#16776)',
+    );
+    assert(
+      !/pull_request/.test((cutRc.match(/^on:[\s\S]*?\njobs:/m) ?? [''])[0]),
+      'wiring: cut-rc.yml must stay off `pull_request` triggers — its `no-pull-request` lane is what keeps the #16776 refusal shippable, and a PR trigger there would make it a PR run with a payload',
     );
   }
 

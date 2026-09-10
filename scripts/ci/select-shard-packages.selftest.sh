@@ -165,15 +165,30 @@ git_q -C "$UP" branch release "$C1"
 
 SHALLOW="$FIX/shallow"
 git_q clone -q --depth 1 "file://$UP" "$SHALLOW" 2>/dev/null
+# A SECOND shallow clone, for the push fetch case. One clone cannot serve both:
+# the fetch under test mutates it, so the case that ran second would open on a
+# checkout that already holds the object -- its precondition would fail, and if
+# the precondition were dropped instead, the case would pass with the fetch
+# removed from the script entirely.
+SHALLOW_PUSH="$FIX/shallow-push"
+git_q clone -q --depth 1 "file://$UP" "$SHALLOW_PUSH" 2>/dev/null
 
 ZEROS=0000000000000000000000000000000000000000
+# Well-formed, and in no fixture repository: the "resolvable shape, absent
+# object" case, which is what a force-pushed-away previous tip looks like.
+ABSENT=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
 
 # ── The runner and the assertions ───────────────────────────────────────────
 at() { git_q -C "$REPO" checkout -q --detach "$1"; }
 
 RT=''
 rc=0
-# run_case <label> <cwd> <event> <pr base ref> <pr pinned sha> <merge-group base sha>
+# run_case <label> <cwd> <event> <pr base ref> <pr pinned sha> <merge-group base sha> [push before sha]
+#
+# The trailing argument is OPTIONAL and defaults to empty, so every case
+# written before push gained a diff base (#16467) drives the script with the
+# variable absent -- which is what the runner hands over for a field the event
+# does not carry, and what those cases were always asserting about.
 run_case() {
   label=$1
   cases=$((cases + 1))
@@ -185,6 +200,7 @@ run_case() {
     cd "$2" && PATH="$FIX/bin:$PATH" RUNNER_TEMP="$RT" \
       OS_SHARD_EVENT_NAME="$3" OS_SHARD_PR_BASE_REF="$4" \
       OS_SHARD_PR_PINNED_BASE_SHA="$5" OS_SHARD_MERGE_GROUP_BASE_SHA="$6" \
+      OS_SHARD_PUSH_BEFORE_SHA="${7:-}" \
       bash "$SCRIPT"
   ) > "$RT/out.txt" 2>&1
   rc=$?
@@ -263,9 +279,100 @@ echo "case: usage: no RUNNER_TEMP is a usage error, not a selection"
 expect_rc 2
 expect_line 'usage: RUNNER_TEMP='
 
-# ── push ────────────────────────────────────────────────────────────────────
+# ── push (#16467) ───────────────────────────────────────────────────────────
+# push now takes the affected set against `github.event.before`. Every fallback
+# below is the FULL list plus a `::warning::`; there is no branch anywhere in
+# this section that selects a narrower set quietly.
 reset_controls; at "$M"
-run_case 'push: the FULL list, one turbo call, no warnings' "$REPO" push '' '' ''
+run_case 'push: affected against event.before, unioned' "$REPO" push '' '' '' "$C1"
+expect_rc 0
+expect_warnings '' ''
+expect_turbo 'affected only, base = before sha' "$(affected_call "$C1")"
+expect_union 'the diff before..HEAD' "$(union_lines packages/a/leaf.ts)"
+expect_packages '1:a'
+expect_line "Affected-set diff base: $C1  (this push's before sha)"
+expect_no_line 'Frozen payload base.sha'
+expect_no_line "the merge group's base_sha"
+
+reset_controls; at "$M"
+run_case 'push: the event decides -- the pull_request and merge_group fields are ignored' "$REPO" push main "$C0" "$C0" "$C1"
+expect_rc 0
+expect_warnings '' ''
+expect_turbo 'affected only, base = before sha (NOT the pinned or group sha)' "$(affected_call "$C1")"
+expect_packages '1:a'
+expect_no_line 'Frozen payload base.sha'
+
+# The ZERO sha is the branch's first push or a force-push that rewrote history.
+# It is NOT reported as a fetch failure: there is nothing to fetch.
+reset_controls; at "$M"
+run_case 'push: a ZERO before sha is the FULL list, loudly' "$REPO" push '' '' '' "$ZEROS"
+expect_rc 0
+expect_warnings 'zero sha + resolve' "::warning::This push event's before sha is all zeroes -- the branch's first push, or a force-push that rewrote history -- so there is no previous commit to diff from.
+::warning::Could not resolve this push's previous commit '$ZEROS' in this checkout; falling back to the full package list for this shard rather than selecting nothing (#16467)."
+expect_no_line 'Could not fetch'
+expect_turbo 'full only' "$full_call"
+expect_union 'not invoked' ''
+expect_packages '3:a,b,c'
+
+reset_controls; at "$M"
+run_case 'push: no before sha in the payload' "$REPO" push '' '' '' ''
+expect_rc 0
+expect_warnings 'no before + resolve' "::warning::This push event carries no before sha, so the affected-set diff base cannot be computed.
+::warning::Could not resolve this push's previous commit '' in this checkout; falling back to the full package list for this shard rather than selecting nothing (#16467)."
+expect_turbo 'full only' "$full_call"
+expect_union 'not invoked' ''
+expect_packages '3:a,b,c'
+
+reset_controls; at "$M"
+run_case 'push: an unresolvable before sha warns twice and falls back' "$REPO" push '' '' '' "$ABSENT"
+expect_rc 0
+expect_warnings 'fetch + resolve' "::warning::Could not fetch this push's previous commit $ABSENT; the resolution below will decide.
+::warning::Could not resolve this push's previous commit '$ABSENT' in this checkout; falling back to the full package list for this shard rather than selecting nothing (#16467)."
+expect_turbo 'full only' "$full_call"
+expect_packages '3:a,b,c'
+
+# An empty diff on push means the push added no files to the branch. That is a
+# legitimate nothing, exactly as on merge_group -- the #10057 guard stays
+# pull_request-only, where an empty diff is impossible by construction.
+reset_controls; at "$C1"; set_affected
+run_case 'push: an EMPTY diff is NOT #10057 -- nothing selected, no warning' "$REPO" push '' '' '' "$C1"
+expect_rc 0
+expect_warnings '' ''
+expect_no_line '#10057'
+expect_turbo 'affected only' "$(affected_call "$C1")"
+expect_union 'ran over an empty list' "$(union_lines '(none)')"
+expect_packages '0:'
+
+reset_controls
+if git_q -C "$SHALLOW_PUSH" cat-file -e "$C0^{commit}" 2>/dev/null; then
+  bad 'precondition: the push shallow clone lacks C0 before the fetch case'
+else
+  ok 'precondition: the push shallow clone lacks C0 before the fetch case'
+fi
+run_case 'push: a before sha absent from a shallow checkout is fetched BY SHA' "$SHALLOW_PUSH" push '' '' '' "$C0"
+expect_rc 0
+expect_warnings '' ''
+if git_q -C "$SHALLOW_PUSH" cat-file -e "$C0^{commit}" 2>/dev/null; then
+  ok 'C0 is present after the run (the fetch happened)'
+else
+  bad 'C0 is present after the run (the fetch happened)'
+fi
+expect_turbo 'affected only, base = before sha' "$(affected_call "$C0")"
+expect_packages '1:a'
+
+reset_controls; at "$M"; printf '1' > "$FIX/affected-exit"
+run_case 'push: a failing `turbo ls --affected` reds the step, exactly as on the other two events' "$REPO" push '' '' '' "$C1"
+expect_rc 1
+expect_turbo 'affected only' "$(affected_call "$C1")"
+expect_union 'not reached' ''
+
+# ── the full-battery events (#16467) ────────────────────────────────────────
+# `schedule` is the hourly full run and `workflow_dispatch` is the same battery
+# on demand. Neither carries a diff base, and neither may acquire one by
+# accident: both cases below hand the script every base variable it knows and
+# pin that it still asks `turbo ls` for the whole workspace.
+reset_controls; at "$M"
+run_case 'schedule: the FULL list, one turbo call, no warnings' "$REPO" schedule '' '' '' ''
 expect_rc 0
 expect_warnings '' ''
 expect_turbo 'full only' "$full_call"
@@ -273,14 +380,21 @@ expect_union 'not invoked' ''
 expect_packages '3:a,b,c'
 
 reset_controls; at "$M"
-run_case 'push: the event decides, not the variables that happen to be set' "$REPO" push main "$C0" "$C1"
+run_case 'schedule: still FULL with every base variable set' "$REPO" schedule main "$C0" "$C1" "$C1"
 expect_rc 0
 expect_warnings '' ''
 expect_turbo 'full only' "$full_call"
 expect_packages '3:a,b,c'
 
 reset_controls; at "$M"
-run_case 'an event that is neither: the FULL list' "$REPO" workflow_dispatch '' '' ''
+run_case 'workflow_dispatch: the FULL list' "$REPO" workflow_dispatch '' '' '' ''
+expect_rc 0
+expect_warnings '' ''
+expect_turbo 'full only' "$full_call"
+expect_packages '3:a,b,c'
+
+reset_controls; at "$M"
+run_case 'an event nobody listed: the FULL list, fail-open' "$REPO" repository_dispatch '' '' '' "$C1"
 expect_rc 0
 expect_warnings '' ''
 expect_turbo 'full only' "$full_call"
@@ -360,6 +474,21 @@ run_case 'pull_request: a failing `turbo ls --affected` reds the step (bash -e p
 expect_rc 1
 expect_turbo 'affected only' "$(affected_call "$C1")"
 expect_union 'not reached' ''
+
+# NEGATIVE CONTROL (#16467). The pull_request branch must be exactly what it
+# was before push gained a diff base, so it is driven once with the new
+# variable set to a REAL, resolvable commit -- the value that would change the
+# answer if it leaked -- and pinned to the same base, the same union input and
+# the same package set as the first pull_request case above.
+reset_controls; at "$F1"
+run_case 'pull_request: the push before sha is not read' "$REPO" pull_request main "$C0" '' "$C0"
+expect_rc 0
+expect_warnings '' ''
+expect_turbo 'affected only, base = merge-base (NOT the before sha)' "$(affected_call "$C1")"
+expect_union 'the diff base..HEAD' "$(union_lines packages/a/leaf.ts)"
+expect_packages '1:a'
+expect_line "Affected-set diff base: $C1  (merge-base of origin/main and HEAD)"
+expect_no_line "this push's before sha"
 
 # ── merge_group ─────────────────────────────────────────────────────────────
 reset_controls; at "$M"
@@ -444,9 +573,27 @@ expect_rc 1
 expect_turbo 'affected only' "$(affected_call "$C1")"
 expect_union 'not reached' ''
 
+# NEGATIVE CONTROL (#16467), the merge_group half. Same argument as the
+# pull_request control above: a resolvable before sha that is NOT the group's
+# base, pinned not to move the answer.
+reset_controls; at "$M"
+run_case 'merge_group: the push before sha is not read' "$REPO" merge_group '' '' "$C1" "$C0"
+expect_rc 0
+expect_warnings '' ''
+expect_turbo 'affected only, base = base_sha (NOT the before sha)' "$(affected_call "$C1")"
+expect_union 'the diff base_sha..HEAD' "$(union_lines packages/a/leaf.ts)"
+expect_packages '1:a'
+expect_line "Affected-set diff base: $C1  (the merge group's base_sha)"
+expect_no_line "this push's before sha"
+
 # ── Verdict ─────────────────────────────────────────────────────────────────
 # #4690: a battery that ran nothing is a failure, never a pass.
-if [ "$cases" -lt 20 ] || [ "$checks" -lt 80 ]; then
+# The floor RATCHETS: it was 20/80 when this battery covered three events, and
+# it is raised here to what push's own diff base and the two full-battery
+# events actually register (#16467). It is a floor, never a target -- a run
+# below it means cases stopped running, and the remedy is to find which,
+# never to lower the number.
+if [ "$cases" -lt 32 ] || [ "$checks" -lt 158 ]; then
   echo "SELFTEST FAILED: only $cases case(s) / $checks check(s) ran -- the battery is short"
   exit 1
 fi

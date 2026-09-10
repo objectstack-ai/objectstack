@@ -1514,15 +1514,29 @@ describe('MetadataManager auto-configuration', () => {
  * (`packages/spec/src/system/metadata-persistence.zod.ts`) — stricter than the
  * sibling `MetadataItem.authoredAt`, which is a bare `z.string()`. `stat()`
  * built it from `record.updatedAt ?? record.createdAt`, and `created_at` /
- * `updated_at` are BUILTIN audit columns: not in `datetimeFields`, and
- * `SqlDriver#formatOutput` repairs them only inside its `if (this.isSqlite)`
- * arm. On Postgres and MySQL they arrive as a JS `Date`, pinned live in
- * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`.
+ * `updated_at` are BUILTIN audit columns: not in `datetimeFields`, and when
+ * this landed `SqlDriver#formatOutput` repaired them only inside its
+ * `if (this.isSqlite)` arm, so on Postgres and MySQL they arrived as a JS
+ * `Date`. #13973 ([ADR-0053 D-F1]) has since lifted both of `formatOutput`'s
+ * timestamp passes out of that gate — they run on EVERY dialect — and the pin
+ * that recorded the asymmetry records the canonical-text contract instead
+ * (`packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`
+ * §B1, inverted on purpose).
  *
- * ⚠️ `rowToRecord` reaches `createdAt` / `updatedAt` through an unchecked
- * `row.created_at as string | undefined` cast, so the `string` in
- * `MetadataRecord` is an assertion about a driver row and never a measurement
- * of one — which is why tsc reported nothing.
+ * ⚠️ The `Date` these cases drive is still a shape `stat()` receives, so they
+ * pin a LIVE arm: `withPostgresCalendarDayAsText` is untouched by that ruling
+ * ([ADR-0053 D-F2]) so the CLIENT still materialises the column as a `Date`,
+ * `driver-sql` hands an INVALID `Date` through unchanged ([ADR-0053 D-F3]),
+ * and non-SQL drivers materialise their own.
+ *
+ * ⚠️ `rowToRecord` USED to reach `createdAt` / `updatedAt` through an
+ * unchecked `row.created_at as string | undefined` cast, so the `string` in
+ * `MetadataRecord` was an assertion about a driver row and never a measurement
+ * of one — which is why tsc reported nothing. #16422 replaced that cast with
+ * `canonicalIsoInstant`, whose return type IS `string | undefined`, so the
+ * shape reaching `stat()` from that adapter is measured now. The cases below
+ * are unaffected: a valid `Date` and an already-canonical string were never
+ * shapes the two spellings disagreed on.
  *
  * ## Why the double is overridden rather than replaced
  *

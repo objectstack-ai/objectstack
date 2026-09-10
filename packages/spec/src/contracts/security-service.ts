@@ -381,6 +381,52 @@ export interface ISecurityService {
   canExport(object: string, context?: SecurityContext): Promise<boolean>;
 
   /**
+   * Whether `context` may READ `object` AT ALL — the OBJECT-level admission the
+   * engine middleware answers before it ever composes a row filter.
+   *
+   * **This is the object-level half of a read, and {@link getReadFilter} is the
+   * row-level half.** The two are not interchangeable and the name says so on
+   * purpose: `getReadFilter` answers "which rows", and it answers `undefined`
+   * — "no row restriction" — for a caller who may not read the object at all.
+   * A door that asks only for the filter therefore reads a caller with NO grant
+   * as a caller with NO restriction, which is the exact inversion that let an
+   * ungranted principal `COUNT(*)` an object through the analytics raw-SQL path
+   * while `GET /data/<object>` answered 403 for the same principal on the same
+   * deployment. Any door that bypasses the engine middleware MUST ask both.
+   *
+   * The verdict is the middleware's own read gate, arm for arm and in its order:
+   * the `isSystem` bypass, the "no permission sets resolved" skip, the
+   * fail-closed refusal on an unresolvable object posture, the ADR-0066 D3
+   * `requiredPermissions` capability AND-gate, the `allowRead` CRUD grant, and
+   * the ADR-0090 D10 delegator intersection for an on-behalf-of caller. It is
+   * computed from the SAME resolution the enforcement path uses — never
+   * re-derived from permission sets by the caller — so a door that asks reaches
+   * the same admission verdict `/data` reaches, by construction.
+   *
+   * It answers the object-level question ONLY. A `true` here says nothing about
+   * which rows the caller may see: the row scope is still
+   * {@link getReadFilter}'s, and it is still mandatory. Nothing here may be used
+   * to widen — `true` is "not refused at this layer", never "unrestricted".
+   *
+   * **Fails CLOSED.** This is an access-narrowing answer: implementations return
+   * `false` (and callers must treat a throw as `false`) rather than degrading to
+   * "allowed". A system context bypasses and returns `true`; so does a caller
+   * with no resolved permission sets, mirroring the middleware, whose CRUD gate
+   * is skipped entirely when set resolution comes back empty.
+   *
+   * **OPTIONAL, and absence is a defined state — not a bug.** A security service
+   * that predates this method omits it, and a consumer resolving the service as
+   * `Partial<ISecurityService>` (the availability rule at the top of this file)
+   * feature-detects (`typeof svc.canReadObject === 'function'`). ⛔ The fallback
+   * for an absent method is NOT "admit": the caller composes the same verdict
+   * from {@link explain}, which is NOT optional and whose `allowed` is the same
+   * bottom line ("would the middleware allow this operation?") computed by the
+   * same enforcement walk. Declaring it optional is what keeps a partial
+   * implementation legal without making its absence a hole.
+   */
+  canReadObject?(object: string, context?: SecurityContext): Promise<boolean>;
+
+  /**
    * [ADR-0111 D2] Whether `context` holds the super-user WRITE bypass
    * (`modifyAllRecords`, "Modify All Data") for `object` — the EXPLICIT bit
    * only, resolved from the caller's permission sets exactly as the CRUD

@@ -429,6 +429,7 @@ Canonical cross-paradigm action/node descriptor (ADR-0018)
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -569,7 +570,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **object** | `string` | ✅ | Object name |
 | **records** | `Record<string, any>[]` | ✅ | Created records |
 | **count** | `number` | ✅ | Number of records created |
-| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability: caller-supplied `readonly` fields the in-engine create-side strip (`engine.insert`, `isSystem`-gated) removed before the rows were written. AGGREGATED across the batch (one event per object/reason with the union of dropped field names) rather than per-row, because the insert-time strip is static-`readonly` only — schema-uniform, so every row drops the same set. Present ONLY when ≥1 field was dropped; the creates still succeeded without them (count/success unchanged). Optional — omit-when-empty keeps the shape backward-compatible. (The per-row `insertMany`/`batch` paths carry per-row `droppedFields` on each result instead — see BatchOperationResultSchema.) |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability: caller-supplied `readonly` fields the in-engine create-side strip (`engine.insert`, `isSystem`-gated) removed before the rows were written. AGGREGATED across the batch (one event per object/reason with the UNION of dropped field names) rather than per-row, because this response is `{ object, records, count }` and has no per-row slot to hang a drop set on — a union is the only view it can represent. So read a name here as "at least one row dropped this field", NOT "every row dropped the same set": the strip runs INSIDE `engine.insert` after the `beforeInsert` hooks and exempts keys a hook itself wrote, tracked per row: rows where a hook stamped a protected key drop a different set from rows where it did not. Present ONLY when ≥1 field was dropped; the creates still succeeded without them (count/success unchanged). Optional — omit-when-empty keeps the shape backward-compatible. (The per-row `insertMany`/`batch` paths carry per-row `droppedFields` on each result instead — see BatchOperationResultSchema.) |
 
 ### Nested Shape: `CreateManyDataResponse.droppedFields[number]`
 
@@ -655,6 +656,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
@@ -1575,7 +1577,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
-| **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object> }>` | optional | Dashboard translations keyed by dashboard name |
+| **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; screens?: Record<string, object> }>` | optional | Screen-flow translations keyed by flow name |
@@ -2832,6 +2834,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim. Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |

@@ -175,28 +175,48 @@ function usableSize(value: unknown): number | undefined {
  * ## Why a `typeof v === 'string'` test alone is wrong here
  *
  * `created_at` is a BUILTIN audit column: it is not in `datetimeFields`, so no
- * declared-field coercion reaches it, and `SqlDriver#formatOutput` repairs the
- * audit columns only inside its `if (this.isSqlite)` arm. So the read door the
- * walk below goes through hands this value back as canonical ISO-Z TEXT on
- * SQLite and as a JS `Date` on Postgres and MySQL — the production default
- * drivers. Pinned per dialect, at that door, in driver-sql's
- * `sql-driver-13567-audit-stamp-materialisation.test.ts` (§B1).
+ * declared-field coercion reaches it, and `SqlDriver#formatOutput` USED TO
+ * repair the audit columns only inside its `if (this.isSqlite)` arm. While that
+ * gate stood, the read door the walk below goes through handed this value back
+ * as canonical ISO-Z TEXT on SQLite and as a JS `Date` on Postgres and MySQL —
+ * the production default drivers — and that asymmetry is what this guard was
+ * written against. #13973 ([ADR-0053 D-F1]) has since lifted BOTH of
+ * `formatOutput`'s timestamp passes out of that gate — the
+ * `AUDIT_TIMESTAMP_COLUMNS` pass and the `normalizeSqliteDatetimeOutput` pass
+ * over `datetimeFields` — so they run on EVERY dialect and the read door
+ * presents the canonical text. The pin that recorded the asymmetry records the
+ * new contract instead: driver-sql's
+ * `sql-driver-13567-audit-stamp-materialisation.test.ts` §B1, inverted on
+ * purpose.
  *
- * A bare string test therefore answers FALSE for EVERY row on the live
- * dialects: a field the walk explicitly projects (`fields: [… 'created_at']`)
+ * A bare string test answered FALSE for EVERY row on the live dialects while
+ * that gate stood: a field the walk explicitly projects (`fields: [… 'created_at']`)
  * was asked for from the driver and then silently discarded, so every sample
  * in the operator's report carried `createdAt: undefined` there while looking
  * correct on the SQLite the tests run. The sibling guards on `key` and `name`
  * are NOT this — those are text columns on every dialect. Only the timestamp
- * straddles the divergence, which is why reading the code did not show it.
+ * straddled the divergence, which is why reading the code did not show it.
+ *
+ * ## Why the `Date` arm is still live after that ruling
+ *
+ * ⚠️ The `Date` domain did not close, so under [ADR-0053 D-F1]'s B1 ruling this
+ * consumer arm became a NO-OP for the valid-`Date` case, ⛔ never dead code and
+ * ⛔ never a conflict with the driver-side fold. `driver-sql` still hands an
+ * INVALID `Date` through unchanged — the one shape with no canonical text to
+ * fold to ([ADR-0053 D-F3], `isoFromValidDate`), measured reachable on both
+ * live dialects — and a non-SQL driver materialises its own (`driver-mongodb`
+ * stamps `new Date()` and BSON round-trips it).
  *
  * ## Why the consumer owes the canonical spelling
  *
- * Normalising at the driver's read door instead would reverse the deliberate
- * `withPostgresCalendarDayAsText` decision — that a `timestamptz` IS an
- * instant and a `Date` is the right materialisation for it. So the repair is
- * the one `@objectstack/metadata-protocol` already carries for `occurred_at`:
- * accept both shapes where the value is consumed.
+ * ⚠️ `withPostgresCalendarDayAsText` is UNCHANGED by that ruling
+ * ([ADR-0053 D-F2]): a `timestamptz` IS an instant, a `Date` is the right
+ * materialisation for it at the CLIENT parser, and the driver still leaves that
+ * parser alone. What #13973 moved is WHERE the fold happens — at the driver's
+ * own read boundary, not at the parser — so folding there never reversed the
+ * D-F2 decision. Accepting both shapes where the value is consumed, the repair
+ * `@objectstack/metadata-protocol` already carries for `occurred_at`, is what
+ * covers the residue above.
  *
  * ⛔ NOT `row.created_at ?? undefined`. That reads as fixed and is worse: it
  * puts a raw `Date` into a field declared `string | undefined`, trading a

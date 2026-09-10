@@ -1,0 +1,199 @@
+---
+title: v17
+description: "The v17 line — a truth-telling release. Files become owned records, the export privilege stops riding on read, the SDK is reconciled against the routes the server mounts, and a boot that cannot reach its datasource stops pretending it can. Per-release notes for 17.0.0 through 17.4.0."
+---
+
+**The v17 line** is a truth-telling release. Where v16 made *declared metadata*
+honest, v17 does the same for the surfaces around it: files stop being inline
+blobs and become owned `sys_file` records with a governed download path; the
+export privilege stops being a free rider on read; the SDK stops shipping
+methods no server ever answered; a datasource that cannot connect stops booting
+clean and failing every query afterwards; and an approval request stops being
+readable by everyone in the tenant. Alongside that, `agent.tools[]`, the
+GraphQL surface, the `ObjectStackProtocol` alias, and a long tail of
+parsed-but-never-enforced spec clusters are removed rather than maintained.
+
+> **Release status: 17.4.0 is released**, and is the current version of the v17
+> line. It was published on 2026-09-09, taking over from
+> 17.3.0 — published 2026-09-04, which took over from
+> 17.2.0 — published 2026-08-23, which took over from 17.1.0 — published
+> 2026-08-20, which took over from 17.0.0 — published 2026-08-14, closing a
+> train that ran through `17.0.0-rc.0` … `rc.6` (the last of them cut
+> 2026-08-10). A plain install now resolves 17.4.0. `changeset pre
+> exit` ran with the 17.0.0 cut, so the `@objectstack/*` packages no longer
+> publish as `17.0.0-rc.N`. Caret ranges on `^16.x` hold at 16.x until you opt
+> in, which is the reason this train is a major at all: its breaking density
+> (the `ApiMethod` shrink, the GraphQL removal, the ADR-0104 write cutover, the
+> dead-cluster retirements) is too high to auto-upgrade `^16.x` consumers into
+> on their next install.
+>
+> ⚠️ **17.1.0, 17.2.0, 17.3.0 and 17.4.0 are minors by version number, not by
+> blast radius. Moving between them is not a tag swap.** Several of 17.1.0's security
+> corrections change who can read or write on an existing deployment — read its
+> upgrade checklist below. 17.2.0 adds write-path accept-set tightenings of the
+> same shape: a by-id `update`/`delete` that used to silently drop an extra
+> `where` predicate, or a mismatched `data.id` / `where.id`, now refuses loudly
+> instead (#11009, #11142). 17.3.0 goes further still: it renames a published
+> SDK namespace with **no aliases** (`client.projects.*` →
+> `client.environments.*`), flips the self-registration default to
+> `invite_only`, starts enforcing `unique` / `indexes[]` on `driver-memory`,
+> makes a permission-store outage fail loudly, and tenant-scopes
+> `sys_record_share` with an operator-invoked backfill for the rows written
+> before it. Read **[Breaking changes & migration in
+> 17.2.0](/docs/releases/v17/17-2#breaking-changes--migration-in-1720)** and **[Breaking changes &
+> migration in 17.3.0](/docs/releases/v17/17-3#breaking-changes--migration-in-1730)** before upgrading.
+>
+> ⛔ **17.4.0's notes are a machine draft, not curated.** 396 changesets across 61
+> packages landed in it, 35 of them carrying a breaking marker, and no editorial
+> pass has been made — see **[17.4.0](/docs/releases/v17/17-4)**, which says so at
+> the top and lists what it does and does not cover. Its upgrade checklist is
+> **not written**: nobody has walked 17.3.0 → 17.4.0.
+
+## Per-release notes
+
+Each release below is a self-contained page: what it changed, what breaks, and its own upgrade checklist.
+
+- **[17.4.0](/docs/releases/v17/17-4)** — current
+- **[17.3.0](/docs/releases/v17/17-3)**
+- **[17.2.0](/docs/releases/v17/17-2)**
+- **[17.1.0](/docs/releases/v17/17-1)**
+- **[17.0.0](/docs/releases/v17/17-0)** — the major cut
+
+## Upgrade checklists
+
+One checklist per release, for the release you are landing on **and** every
+release you cross to get there.
+
+<Callout type="warn">
+**How far each list below has actually been walked.** The 17.3.0 list is the only
+one on this page written against a **measured upgrade**: an application
+repository was moved 17.2.0 → 17.3.0 by a reader holding nothing but the
+published documentation, the `CHANGELOG.md` files inside the published npm
+tarballs, and the `os` CLI's own output. Every line it produced is marked
+**measured**, and several of them are changes whose own changelog entries are not
+marked breaking — which is exactly why a checklist is not a restatement of
+[Breaking changes & migration in 17.3.0](/docs/releases/v17/17-3#breaking-changes--migration-in-1730).
+
+⛔ **That run covered one hop, 17.2.0 → 17.3.0. Nobody has walked 17.1.0 →
+17.2.0.** Every line in the 17.2.0 list is derived from a change's own
+**Migration** note and is marked **not exercised**: accurate about what changed,
+unproven about what it costs to cross. The two are kept apart on purpose — a step
+nobody has run, presented beside steps that were, is how a reader finishes a
+checklist and believes they are done.
+</Callout>
+
+Per-release checklists: [17.4.0](/docs/releases/v17/17-4#upgrade-checklist) · [17.3.0](/docs/releases/v17/17-3#upgrade-checklist) · [17.2.0](/docs/releases/v17/17-2#upgrade-checklist) · [17.1.0](/docs/releases/v17/17-1#upgrade-checklist) · [17.0.0](/docs/releases/v17/17-0#upgrade-checklist)
+
+## References
+
+ADR-0104 (field runtime value-shape contract / file-as-reference) · ADR-0105
+(group tenancy posture) · ADR-0106 (metadata-plane FLS, proposed) · ADR-0108
+(membership grade is not capability) · ADR-0109 (agent tools from skills) ·
+ADR-0076 D9/D11 (protocol alias dissolution, dispatcher decomposition) ·
+ADR-0087 D4 (change manifest / `migrate meta`) · ADR-0049 (enforce-or-remove) ·
+ADR-0078 (loud at the producer) · ADR-0090 D3 (`team` recipient) ·
+#3825 (Node 22) · #3544/#3710 (export axis) · #3543/#3391 (ApiMethod
+derivation) · #3760 (user-less runs) · #3855 (alias retirement) ·
+#3820 (agent authoring) · #3590 (approval visibility) · #3865 (sharing `full`) ·
+#3617 (files-to-references migration) · #3447 (dynamic approver routing) ·
+#3563/#3587/#3612/#3718 (route ledger + SDK surface) · #2462 (GraphQL removal) ·
+#3741/#3758/#3826 (datasource fail-fast) · #3696 (per-tenant `unique`) ·
+#3676/#3778/#3847 (i18n contract conformance).
+
+Landed since rc.0: ADR-0110 (action declaration admission) · ADR-0111 (sharing
+authority) · ADR-0112 (error-code vocabulary) · ADR-0113 (`required` split) ·
+ADR-0114 (field-error catalog) · ADR-0115 (no fabricating fallbacks) ·
+ADR-0116 (declared plugin ordering) · ADR-0053 (temporal semantics) ·
+#3962/#3951 (actions speak HTTP) · #3915 (action type dispatch) ·
+#4121/#4134/#4164/#4181/#4226/#4254/#4256/#4363 (list queries apply or fail) ·
+#3795/#4346/#4371 (one alias fold) · #3899/#3878 (request-body validation) ·
+#3939/#3897/#3933/#3946/#3960 (bulk binding + caps) · #3843/#3983/#4038/#4053
+(envelope convergence) · #3957 (localized validation) · #4093/#4113/#3891/#4087
+(honest absence) · #4073 (Hono transport adapter) · #4065/#4083 (memory-driver
+persistence) · #4246 (`artifact-api` removal) · #3903 (stored-metadata
+conversion replay) · #4277/#4045/#4027/#4347 (flow config enforcement) ·
+#3948/#4029 (view-filter operator parity) · #4157/#4128 (analytics stops
+guessing) · #3916 (report ordering) · #4350 (protocol-17 relabel) ·
+#4127/#4251 (typed service slots + fail-open fixes) · #3917/#3924 (`os migrate`
+occupancy + deferred DDL) · #4243/#4270 (platform-objects infrastructure) ·
+#4395/#4396 (unmeasured effects) · #4365/#4366 (approval reassign + audit
+attribution) · #4261/#4248 (published-files hygiene).
+
+Landed since rc.1: ADR-0118 (non-user actor contract) · ADR-0119
+(plugin-reachable transactions, migration journal) · ADR-0088 (metadata-kind
+admission) · ADR-0103 (`managedBy` buckets) · #4535 + #4411 (dual-source
+convergence C1–C17: #4572, #4587, #4610, #4641, #4653, #4658, #4661, #4684,
+#4688, #4691, #4703, #4737, #4738, #4739, #4740, #4741) · #4537/#4538/#4539
+(enum, contracts and cross-form convergence) · #4446 (symbol-identity ratchet) ·
+#4001 final batches (#4514/#4519/#4522/#4527/#4528/#4529/#4530/#4531/#4532/#4533/#4534/#4541) ·
+#4544 (ADR-0078 completeness, Phases 1/3/4: #4501, #4565, #4574, #4599) ·
+#4463 (runtime authoring gate) · #4409/#4487/#4488 (rule + liveness coverage) ·
+#4583/#4634/#4484/#4618/#4579/#4657/#4673/#4616 (enforce-or-remove: datasource,
+driver and contract surfaces) · #4509 (validation kind, job door, doc.tags,
+email-template bridge) · #4667 (authorWarn keys) · #3355 (`system-data`) ·
+#4612/#4617/#4620 (atomicity + migration journal) · #4793 (batch row shape) ·
+#4639/#4626/#4602/#4678 (event contracts + client-react) · #4343 (`script`
+node) · #4649/#4770/#4775/#4784 (predicate and condition semantics) ·
+#4419 (`findOne`) · #4462/#4410/#4456 (datasource routing + config contract) ·
+#4630/#4651/#4722/#4757 (security corrections) · #4433/#4434/#4640/#4669
+(sharing + permission corrections) · #4467/#4437/#4442/#4708/#4820 (analytics) ·
+#4327/#4454/#4542 (stored-metadata migration).
+
+Landed since rc.2: ADR-0122 (parsed/author state naming: #5551, #6350 phase 2) ·
+ADR-0045 (app publish gate: #4829) · ADR-0097 §3 (connector credential
+references) · #4936/#4939/#5111/#5040 (declarative `apis:` goes live) ·
+#6345 (one driver vocabulary, `mongo` → `mongodb`) ·
+#6212/#6075/#6320/#6321 (driver query contract narrowing) ·
+#5488 (`api` is code-only) · #5561 (`resumeAuthority` fail-closed) ·
+#6361 (notification `cursor` retirement) · #5775/#6776 (SDUI component props) ·
+#6239 (`ViewProtocol` retirement) · #6188 (aggregation function narrowing) ·
+#5051 (`composeStacks` i18n) · #5945 (`HookContext.api`) · #6139
+(`HierarchyScopeContext` posture) · #5599 (view union identity) ·
+#4671 (`system-data` import) · #5696/#5351 (transaction tightening) ·
+#6536 (`ExportFieldMeta`) · #6704 (`runAutomations` default) ·
+#6748 (`ActionDescriptor.isAsync`) · #6771 (overlay index producer).
+
+Landed since rc.6: ADR-0123 D2 (active-organization write refusal:
+#8247/#8208) · #7990/#8082/#8336/#8075 (inline credentials refused at publish) ·
+#7986/#7799/#7722/#8022/#8542/#8558 (webhook credential handling) ·
+#7522/#8273 (settings crypto fail-closed + wire code) · #7728 (`internal: true`) ·
+#8136/#8333/#8441/#8442/#8443/#8086/#8502 (driver-text disclosure) ·
+#8323/#8468/#8554/#8555/#8577/#8459/#8375 (per-organization uniqueness) ·
+#7626 (expand disclosure) · #7835/#7738/#8119 (federated tenancy) ·
+#8095/#8240/#7761/#7795/#8158 (org-scoped sharing + invitation reads) ·
+#5222/#7597/#7598/#8220/#7929/#7988 (`$field` cross-field comparison) ·
+#7606 (closed query-parameter ingress) · #6682/#6518 (`$contains` case
+sensitivity) · #8010 (`view.exportOptions`) · #7176 (list-view passthrough
+keys) · #7893 (`field.allowRuntimeCreate`) · #8057 (`engine.update` upsert) ·
+#7481 (auth config flags) · #7596 (list comparand references) · #7496
+(`submitBehavior.url`) · #7780 (cross-tenant uninstall) · #6915 (memory-driver
+tenancy) · #7501/#7918/#7768 (number and currency contracts) ·
+#8445/#8567/#8592 (unbacked conflict targets) · #8269/#8283 (autonumber) ·
+#7580/#5346/#5376 (MongoDB query surface) · #8144/#8145/#8594/#8400 (audit
+writers) · #7533/#8050/#7639/#7546 (automation run durability) ·
+#8368 (`OS_ARTIFACT_URL`) · #5320/#8070 (`viewItems:`) · #7616/#8326 (security
+service surface) · #8600/#7891 (authored OWD at the object door) ·
+#8309/#8307/#7220 (security posture at runtime publish) · #7751 (`object-*`
+block props) · #8315/#7675 (audit action enum) · #7735/#8019 (change-email) ·
+#7762/#7978/#7685 (verification harness).
+
+**17.1.0** — ADR-0049 (enforce-or-remove) · ADR-0055 (`controlled_by_parent`) ·
+ADR-0066 D3 (field `requiredPermissions`) · ADR-0067 (revert plans) · ADR-0068
+(platform-admin gate) · ADR-0090 D1 (OWD baseline) · ADR-0105 D7 (extension
+fields) · ADR-0110 D3 (failure is not emptiness) · ADR-0111 D7 (inert grants) ·
+ADR-0112 (error-code vocabulary, amended 2026-08-18) · ADR-0120 D3 (partitioned
+uniqueness) · #8613 (`active` stops granting) · #8710 (deactivated position,
+sharing rules) · #8681 (admin export wildcard) · #8993 (partial field masking) ·
+#8652 (read-only approval visibility) · #8155 (credential re-homing) · #8287
+(API-key organization) · #8778 (`tenancy.organizationField`) · #9934
+(`userMessage`) · #9106 (`error.code` closed at every door) · #9446 / #9462
+(flow-dispatch status table) · #8896 (four read seams) · #7529 / #9612 / #9176
+(runtime publish gate) · #8687 (strict top-level stack keys) · #9013 (dashboard
+`modal` target) · #9698 (sharing-rule enforceability) · #9257 (list-view `sort`) ·
+#8934 (`icontains`) · #8704 (`relatedListFilter`) · #9566 / #9474
+(`ActionSchema.onSuccess`) · #9225 / #9205 (email template rendering) · #8928
+(`os migrate duplicates`) · #9666 (scaffolds compile) · #8978 (ready banner) ·
+#8985 (`OS_INTERNAL_ARTIFACT_PATH`) · #9683 (`storage` slot) · #9730
+(`delegated_from`) · #8926 / #8807 / #8755 / #8622 / #9354 (MySQL driver) ·
+#9040 / #8337 / #9041 / #9091 / #9147 / #8495 (credential refusals at publish) ·
+#8873 / #8874 / #8696 (credentials reach the driver).

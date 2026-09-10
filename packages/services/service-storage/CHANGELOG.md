@@ -1,5 +1,258 @@
 # @objectstack/service-storage
 
+## 17.4.0
+
+### Minor Changes
+
+- dd2184a: feat(storage): `mountStorageRoutes` — mount the storage routes on a host-owned HTTP surface, composed from a kernel that has no `http-server` service (#15169)
+  
+  `StorageServicePlugin` mounts `/api/v1/storage/*` itself, at `kernel:ready`, on the kernel's `http-server` service. A hosted per-environment tenant kernel registers no such service, so the storage service, `sys_file`, the lifecycle hooks and the reap guards were all present while every `/api/v1/storage/*` request answered 404 — an app with an attachment field could not upload. The settings service already had a working host bridge because `registerSettingsRoutes` and everything it needs are public; storage could not be bridged the same way because `registerStorageRoutes` needs three package-internal seams: the upload session resolver, the ADR-0104 D3 download authorization gate, and the tombstone holder predicate.
+  
+  **New export: `mountStorageRoutes(http, kernel, options?)`** (with `MountStorageRoutesOptions`, `StorageRouteKernel`, `StorageRoutesMountReport`). One entry point that takes the host's `IHttpServer`-shaped surface and the environment kernel, binds the three seams from that kernel's own `auth` service and data engine, and registers the full route table — the composition the plugin's own mount now calls too, so a host's storage door and the plugin's are one code path. The options carry wire knobs only (`basePath`, `presignedTtl`, `sessionTtl`, `downloadTtl`, `logger`): the three gate seams are not accepted in any form, so a consumer cannot substitute, omit or bypass the download gate, and the platform keeps exactly one definition of it. The return value reports which gates bound, as booleans. A kernel with no `storage` service throws naming the remedy; a kernel with no `auth` service or no data engine mounts with the matching gate off and warns — the plugin's existing bare-kernel behaviour, said out loud.
+  
+  Deliberately NOT published: `buildAuthSessionResolver`, `buildFileReadAuthorizer` and `findFileHolder` stay package-internal. The narrower surface serves the one consumer that exists (a host mounting the door) and is easier to walk back than three loose functions.
+  
+  Nothing existing changes shape or behaviour: `registerStorageRoutes` and `StorageRoutesOptions` are untouched, and `StorageServicePlugin` mounts exactly what it mounted before.
+
+### Patch Changes
+
+- ac9376a: An authorization-store OUTAGE now reaches the caller as the `503 SERVICE_UNAVAILABLE` it declares, on the storage download doors and on all four settings routes.
+  
+  `AuthzStoreUnavailableError` exists so an outage is distinguishable from a capability denial on the wire: it declares `status: 503` and `code: SERVICE_UNAVAILABLE`, and every producer in this family already re-raises it rather than laundering it into a verdict. Two consumers then flattened it back, each in its own way, so the declared envelope never arrived.
+  
+  **What changes on the wire.** Only on the path where the authorization store could not be READ — never when it legitimately returned no rows, and never for any other fault.
+  
+  | door | before | after |
+  | --- | --- | --- |
+  | `GET /api/v1/storage/files/:fileId/url` | `403 FILE_DOWNLOAD_DENIED` / `403 ATTACHMENT_DOWNLOAD_DENIED` | `503 SERVICE_UNAVAILABLE` |
+  | `GET /api/v1/storage/files/:fileId` | same 403, and no redirect | `503 SERVICE_UNAVAILABLE`, still no `Location` |
+  | `GET /api/settings` | `500 INTERNAL_ERROR` | `503 SERVICE_UNAVAILABLE` |
+  | `GET /api/settings/:namespace` | `500 INTERNAL_ERROR` | `503 SERVICE_UNAVAILABLE` |
+  | `PUT /api/settings/:namespace` | `500 INTERNAL_ERROR` | `503 SERVICE_UNAVAILABLE` |
+  | `POST /api/settings/:namespace/:actionId` | `500 INTERNAL_ERROR` | `503 SERVICE_UNAVAILABLE` |
+  
+  The storage row is the one worth reading twice: an outage was answered as a **permission denial**, byte-indistinguishable from a genuine refusal, which is the precise confusion the loud-outage discipline exists to prevent. The message now names the object whose read failed and says in words that this is not a permission denial.
+  
+  **What does NOT change.** The security posture is identical — these doors were already fail-CLOSED and still are, and the storage gate still mints no capability on an outage. Every other refusal keeps its status and code: `deny` is still `403`, `unauthenticated` still `401`, an unknown namespace still `404`, a forbidden settings context still `403`, and any fault that is not this branded outage still lands on the same untyped `500 INTERNAL_ERROR` tail it did before. The repair is scoped to the brand, not to "anything carrying a status".
+  
+  **Why `patch` and not `minor`.** No API is added, removed or renamed; no exported signature moves; no authorable key changes. This is a released package delivering an envelope it already declared — a bug fix, which this repo bumps `patch`. The change *is* observable, which is why the FROM → TO table above is in the changeset body rather than encoded in the bump: a version number carries no mapping, and this text is what an upgrading consumer greps in `CHANGELOG.md`.
+  
+  **If you branch on these statuses.** A client that treated the storage `403` as "this user may not have this file" was, during an outage, retrying or re-authenticating against a fault that no credential could fix; it should now treat `503` as retryable and leave the caller's permissions alone. A client that treated the settings `500` as an unrecoverable server error can now distinguish a transient store outage from a genuine internal fault.
+- ebb5550: fix(service-storage): put the test layer in front of tsc, and repair what it was hiding (#15050)
+  
+  `packages/services/service-storage` had **no `typecheck` script at all** — its
+  scripts were `build` and `test` — so no tsc program anywhere read this
+  package's test layer, and its errors were carried instead as a 51-error DEBT
+  entry in `scripts/check-type-check-coverage.mjs`. Gives it the #14062 /
+  #14181 "checked test zone" shape: a sibling `tsconfig.test.json` (module
+  semantics only — `esnext` / `bundler` / `lib: ES2022` — matching how vitest
+  actually executes these files; strictness inherited and untouched) plus a
+  `tsconfig.scripts.json` for `scripts/i18n-extract.config.ts` (the ninth
+  instance of #11351, previously excluded from that ledger only because this
+  package had no `typecheck` script to hang it on), both named by a new
+  `typecheck` script.
+  
+  Measured before repair: 51 errors under BUILD semantics (`tsc --noEmit -p
+  tsconfig.json`, which already includes the tests — matching the DEBT entry's
+  recorded number exactly), 10 under the split. Unlike `service-cluster`
+  (#14181), this package's BUILD reading was *not* already clean, so both
+  programs needed genuine repair, not just the test-only split: 23 `TS2835`
+  (relative imports missing their `.js` extension, required under BUILD's
+  NodeNext resolution) were fixed by *adding* the extension — which resolves
+  correctly under both NodeNext and the split's bundler mode — and clearing
+  that also cleared all 15 `TS7006` "implicitly any" as a downstream cascade
+  from the same unresolved imports (the shape `@objectstack/core` reported at
+  98 → 4). The remaining 3 `TS2550` (`Array.prototype.at` needing `lib`
+  es2022) are rewritten to indexed access rather than widening the shared
+  BUILD `tsconfig.json`. The 8 code-tier errors (`TS2339` × 4 — a test
+  helper's object-spread dropped its `Record<string, unknown>` index
+  signature, fixed with an explicit return-shape annotation; `TS2347` × 4 — a
+  fake `ctx: any`'s `getService<T>(...)` calls converted to `getService(...)
+  as T`, the pattern one call site in the same file had already adopted for
+  exactly this reason) are genuine test-file fixes. Both readings now agree at
+  0/0 — the same result `service-cluster` reported, reached by a longer road.
+  
+  The package's DEBT entry (51 errors) is **deleted**, not lowered — the
+  graduation this ratchet's invariant requires. No `test-typecheck-debt.json`
+  is added: residue is 0, so none is owed (#5286, maintainer-only to open).
+  `check:type-source-resolution` went red from onboarding the two new
+  programs (the documented onboarding-limb case): a registry entry is added
+  rather than `paths`, measured both ways — `paths` takes this package's test
+  layer from 0 errors to 306, all in other packages' source.
+  
+  No runtime code changes: `src/**` excluding tests is byte-identical, so no
+  shipped behaviour moves. The `patch` level reflects the published
+  `package.json` gaining `typecheck` / `check:test-typecheck` scripts and a
+  `tsx` devDependency.
+- b8c82de: The storage download door derives the tenancy posture before resolving the caller
+  
+  `buildFileReadAuthorizer` resolved every gated download with `resolveAuthzContext({ ql: engine, headers, getSession })` and supplied no `tenancyPosture`. Both posture-conditional API-key refusals are gated on the caller supplying one — `organization_required` and `organization_membership_ended` — so neither ran at this door. Its headers come from the real request, so `x-api-key` is accepted, and an API key's tenant is `sys_api_key.active_organization_id` copied verbatim: the caller's own stored claim, never vetted against current membership. Under a wall-enforcing posture a key stamped with an organization its owner had left therefore authenticated for downloads and was judged by the ownership and record-reachability checks — checks evaluated for a principal the wall should have refused at the door.
+  
+  The posture is now read off the kernel's `tenancy` service, per download, and classified rather than swallowed: a service that was never registered stays quiet (`undefined` — the supported no-tenancy composition, unchanged behaviour), while one that was registered and failed to build raises `AuthzStoreUnavailableError` instead of degrading to "no posture". Under `isolated` and `group` an ex-member's stamped key is now refused and no download capability is minted; an organization-less key is refused under `isolated` and stays admitted under `group`, whose union scope makes it legitimate. Under `single` nothing changes. Patch rather than minor: no accept set widens, and a declared guard returns to enforced.
+- Updated dependencies [fe0d9a4]
+- Updated dependencies [ecd2158]
+- Updated dependencies [f2b5e46]
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ed7243d]
+- Updated dependencies [6ba0db4]
+- Updated dependencies [625b0c3]
+- Updated dependencies [233222e]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [90e7e6d]
+- Updated dependencies [2bdabe6]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [159dbad]
+- Updated dependencies [68437d4]
+- Updated dependencies [abb140c]
+- Updated dependencies [8333a6c]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [3030369]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [e08892d]
+- Updated dependencies [ae05f2e]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [b0529e1]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [50dc214]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8976ea1]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [acabd24]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [21c5dcb]
+- Updated dependencies [6d4d5d3]
+- Updated dependencies [ed5d557]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [cbca47d]
+- Updated dependencies [acf4d38]
+- Updated dependencies [ef3a138]
+- Updated dependencies [68d5dfd]
+- Updated dependencies [3e21cf0]
+- Updated dependencies [4cfc93b]
+- Updated dependencies [efd6b43]
+- Updated dependencies [859ded3]
+- Updated dependencies [fa125f3]
+- Updated dependencies [74628d9]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [21aabbc]
+- Updated dependencies [9c270bb]
+- Updated dependencies [76c8c5a]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [32c917d]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [51ae731]
+- Updated dependencies [af7edfe]
+- Updated dependencies [b60f48b]
+- Updated dependencies [c78c918]
+- Updated dependencies [4ca358d]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [7629f4d]
+- Updated dependencies [51df9fd]
+- Updated dependencies [a7da4de]
+- Updated dependencies [de0bcdd]
+- Updated dependencies [70f7d6d]
+- Updated dependencies [c677cda]
+- Updated dependencies [6acb37e]
+- Updated dependencies [7797102]
+- Updated dependencies [554a160]
+- Updated dependencies [f7da71e]
+- Updated dependencies [7f745c3]
+- Updated dependencies [0a038cc]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [97adce2]
+- Updated dependencies [a83482c]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [2a3decc]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [f4e6adf]
+- Updated dependencies [ee4a59b]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [e0af1a8]
+- Updated dependencies [4771bd9]
+- Updated dependencies [414c1fc]
+- Updated dependencies [22c0279]
+- Updated dependencies [c930f85]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [613bfbd]
+- Updated dependencies [abae16a]
+- Updated dependencies [094b8fd]
+- Updated dependencies [c7aca0d]
+- Updated dependencies [c1d8f98]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [c5d6803]
+- Updated dependencies [10d05bb]
+- Updated dependencies [69602e5]
+- Updated dependencies [c3ce76c]
+- Updated dependencies [7936b29]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [9f890d3]
+- Updated dependencies [0bb2318]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [1ecee3e]
+- Updated dependencies [9408b7f]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b3820c3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [9bcd9be]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [001af1c]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f89812e]
+- Updated dependencies [7a7fb03]
+- Updated dependencies [8fd246d]
+- Updated dependencies [021a735]
+- Updated dependencies [7bdb163]
+  - @objectstack/spec@17.4.0
+  - @objectstack/core@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/observability@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

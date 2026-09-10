@@ -332,8 +332,44 @@ function scriptSymbolClass(source, symbol) {
     new RegExp(`\\b(?:export\\s+)?(?:default\\s+)?(?:declare\\s+)?(?:abstract\\s+)?(?:async\\s+)?(?:function\\s*\\*?|class|interface|type|enum|namespace|module)\\s+${n}\\b`),
     // value binding
     new RegExp(`\\b(?:export\\s+)?(?:declare\\s+)?(?:const|let|var)\\s+${n}\\b`),
-    // a member or object-literal key written at the start of a line
-    new RegExp(`^[ \\t]*(?:readonly |static |public |private |protected |abstract |declare |async |\\* )*(?:get |set )?(?:${n}|'${n}'|"${n}"|\\[${n}\\]|\\['${n}'\\]|\\["${n}"\\])\\s*[?!]?\\s*[:(<=]`, 'm'),
+    /* A member or object-literal key written at the start of a line.
+     *
+     * ⚠️ The modifier alternation below is HAND-ENUMERATED, and it has been
+     * demonstrated INCOMPLETE once (#16821): `override` was absent, so a
+     * symbol anchor naming any `override` member -- a dated reading: 276 of
+     * them under packages/ when this was measured, 207 of those the
+     * `static override` metadata on CLI command classes -- returned
+     * `unresolved-symbol` for a declaration that was really there. The gate's
+     * own remedy text ("name the real symbol, or drop to a file-level
+     * anchor") then left an author only the WEAKER anchor, because the real
+     * symbol was already named correctly.
+     *
+     * ⭐ And the shape being refused was the one the anchor rule exists for:
+     * an `override` member is where a subclass restates a base contract, so
+     * it is exactly where a citation most needs to be checkable. The failure
+     * was loud per author and silent in aggregate -- the corpus censuses read
+     * like coverage while being structurally unable to contain an `override`
+     * member.
+     *
+     * ⇒ Widening this list is ADDITIVE: it makes a real declaration resolve
+     * and refuses nothing that resolved before. But this list is the SHARED
+     * one -- every registered corpus resolves through it -- so a widening
+     * moves every census in the same stroke, and a PR that widens it re-takes
+     * them all and says what moved.
+     *
+     * ⛔ Whether this set should be DERIVED rather than enumerated is a live
+     * question about this resolver and is NOT settled here. It is a
+     * maintainer's call, because the ruling this module implements is that a
+     * corpus joins by REGISTRATION and there is to be no second
+     * implementation -- so a rewrite of the rule is a change to every corpus
+     * at once, not a local cleanup.
+     *
+     * ⛔ The alternation stays a free-order `*` group on purpose. TS fixes the
+     * written order (accessibility, `static`, `override`, `readonly`,
+     * `abstract`), but pinning that order here would refuse a spelling for
+     * being unidiomatic rather than for being ABSENT, and judging style is not
+     * this rule's job. */
+    new RegExp(`^[ \\t]*(?:readonly |static |public |private |protected |override |abstract |declare |async |\\* )*(?:get |set )?(?:${n}|'${n}'|"${n}"|\\[${n}\\]|\\['${n}'\\]|\\["${n}"\\])\\s*[?!]?\\s*[:(<=]`, 'm'),
     // named re-export
     new RegExp(`\\bexport\\s*\\{[^}]*\\b${n}\\b[^}]*\\}`),
     // destructured binding
@@ -734,8 +770,11 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ symbol-anchors --se
 // to find what stopped registering.
 // 63 → 67 when `declinedShape` gained a case per arm (#15809).
 // 67 → 69 when the sweep's git child gained an explicit environment (#16624).
+// 69 → 93 when the member-modifier spellings gained a case EACH, every one of
+//         them paired with its own negative control, after `override` was found
+//         missing from the hand-enumerated accept set (#16821).
 const SELF_TEST_BATTERIES = Object.freeze({
-  'symbol-anchors self-test': 69,
+  'symbol-anchors self-test': 93,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -800,6 +839,39 @@ export function selfTest() {
   }
   check(symbolResolutionClass(ts, 'x.ts', 'sys_metadata') === 'literal', 'a quoted data identifier resolves as `literal`, not `declaration`');
   check(symbolResolutionClass(ts, 'x.ts', 'notPresentAnywhere') === null, 'an absent symbol must NOT resolve');
+
+  // 1b. ⭐ MEMBER MODIFIERS, one case per spelling, each with its own control.
+  //     The modifier alternation in `scriptSymbolClass` is hand-enumerated and
+  //     has been demonstrated incomplete once (#16821: `override` was missing,
+  //     so no `override` member in the tree could carry a symbol anchor and the
+  //     only remedy on offer was a weaker anchor). ⛔ One token per finding is
+  //     NOT the repair -- an enumeration is worth exactly what it is provoked
+  //     with, so every spelling is driven by name here rather than trusted to
+  //     the one that happened to be reported.
+  //     ⭐ The negative control rides the SAME source as each positive row: a
+  //     matcher that answered `declaration` to everything would satisfy every
+  //     row above and this battery would never be able to fail.
+  const memberSpellings = [
+    ['plain', 'initObjects(o) {}'],
+    ['async', 'async initObjects(o) {}'],
+    ['public async', 'public async initObjects(o) {}'],
+    ['protected async', 'protected async initObjects(o) {}'],
+    ['private', 'private initObjects(o) {}'],
+    ['override', 'override initObjects(o) {}'],
+    ['override async', 'override async initObjects(o) {}'],
+    ['protected override async', 'protected override async initObjects(o) {}'],
+    ['public override', 'public override initObjects(o) {}'],
+    ['static override', 'static override initObjects(o) {}'],
+    ['override get', 'override get initObjects() { return 1; }'],
+    ['override readonly property', 'override readonly initObjects: number = 1;'],
+  ];
+  for (const [spelling, member] of memberSpellings) {
+    const cls = `class Subclass extends Base {\n  ${member}\n}\n`;
+    check(symbolResolutionClass(cls, 'x.ts', 'initObjects') === 'declaration',
+      `a member declared \`${spelling}\` must resolve as a declaration`);
+    check(symbolResolutionClass(cls, 'x.ts', 'notPresentAnywhere') === null,
+      `CONTROL: an absent name must NOT resolve against a \`${spelling}\` member`);
+  }
 
   // 2. ⭐ The census caveat, enforced: prose is not resolution. A symbol named
   //    only in a comment is exactly the false green that made 72.1% a LOWER

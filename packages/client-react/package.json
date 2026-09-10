@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/client-react",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "React hooks for ObjectStack Client SDK",
   "main": "dist/index.js",
@@ -34,7 +34,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "objectstack",

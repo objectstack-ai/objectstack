@@ -35,12 +35,13 @@
  * - `lookup`/`master_detail` w/o `reference` → `objectql/engine.ts:3191`
  *   `$expand` `if (!referenceObject) continue;` — the relationship silently
  *   never resolves, and the record picker has no target to search.
- * - `select`/`radio` w/o `options` → `record-validator.ts:452`
- *   `allowed.length > 0 && …`: an empty option list disables server-side
- *   value validation entirely, while the form control offers nothing to pick.
- * - **NON-rule:** `multiselect` w/o `options` — `record-validator.ts:471`
- *   says, verbatim, `// free-form (tags without options)`. The runtime
- *   blesses it as a deliberate mode, which makes it ADR-0078 case (3)
+ * - `select`/`radio` w/o `options` → `record-validator.ts`'s `validateOne`,
+ *   verbatim `allowed.length > 0 && !allowed.includes(String(value))`: an
+ *   empty option list disables server-side value validation entirely, while
+ *   the form control offers nothing to pick.
+ * - **NON-rule:** `multiselect` w/o `options` — `record-validator.ts`'s
+ *   `validateOne` says, verbatim, `// free-form (tags without options)`. The
+ *   runtime blesses it as a deliberate mode, which makes it ADR-0078 case (3)
  *   "genuinely optional", not an omission. Flagging it would be this
  *   campaign's own false-prescription mistake again.
  * - `checkboxes` w/o `options` sits between the two: it shares the multi
@@ -105,8 +106,9 @@ const hasEntries = (v: unknown): boolean => Array.isArray(v) && v.length > 0;
 
 /**
  * Field types whose single-choice control is dead without `options`
- * (`record-validator.ts:452` skips validation on an empty list, and the form
- * control has nothing to offer). `multiselect` is deliberately absent — see
+ * (`record-validator.ts`'s `validateOne` skips validation on an empty list —
+ * verbatim `allowed.length > 0 && !allowed.includes(String(value))` — and the
+ * form control has nothing to offer). `multiselect` is deliberately absent — see
  * the NON-rule note in the module doc.
  */
 const DEAD_WITHOUT_OPTIONS_ERROR: ReadonlySet<string> = new Set(['select', 'radio']);

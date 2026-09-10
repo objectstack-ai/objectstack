@@ -330,9 +330,11 @@ const underFlow = (key: string, valid?: AnyRec): SweptCollection => ({
  * and `collectFlowGraphs` turns each into its own `FlowGraph` after checking
  * only `Array.isArray` on the inner list — so a non-record member here is one
  * the PRODUCER picked up, not one a caller passed in, and no coercion at the
- * call site can reach it. Kept in the sweep with its throw recorded below
- * rather than left unexpressed: an unaddressable shape is exactly what let this
- * class survive three closures.
+ * call site can reach it. That is what #16752 repaired, at the producer: the
+ * walk now drops a non-record member from the graph it hands out, and this arm
+ * carries no `RESIDUAL_THROWS` row. It stays in the sweep as the pin on that
+ * repair — an unaddressable shape is exactly what let this class survive three
+ * closures, so the addressing is the part worth keeping.
  */
 const underNestedRegion = (valid?: AnyRec): SweptCollection => ({
   label: 'flows[].nodes[].config.body.nodes',
@@ -399,7 +401,7 @@ const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
  * "nothing throws" would have had to be deleted or weakened on the day it was
  * written, and would then never have caught the next one.
  *
- * Three rows have come out since it was written, each because the sweep went
+ * Five rows have come out since it was written, each because the sweep went
  * red demanding a throw that no longer happens — which is the both-directions
  * half earning its keep, since no removal started with anyone going looking:
  *
@@ -413,37 +415,55 @@ const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
  *    field readers already did.
  *  - `flows[].nodes` / `validateStackExpressions` — the two casts #15793
  *    repaired, and the reason the two graph-shaped arms below exist at all.
+ *  - `flows[].nodes[].config.body.nodes` / `validateStackExpressions` +
+ *    `lintFlowPatterns` (#16752) — the throw was `collectFlowGraphs`'
+ *    (`packages/spec`), which handed out a `FlowGraph` whose `nodes` held the
+ *    junk member it had picked up out of a container's open `z.record` config.
+ *    Both rules stopped throwing the moment the PRODUCER stopped handing it
+ *    out, which is what #15793 predicted when it refused to widen the
+ *    `packages/spec` contract and filed the fork instead. ⛔ Note what did NOT
+ *    fix it: #16134 had already stopped that walk DEREFERENCING the member, and
+ *    both rows survived it — a guard against reading junk is not a guard
+ *    against passing it on.
  *
- * ## The rows it holds today, both found by the arms that added them
+ *    ⭐ These two arms are now green for TWO independent reasons, and both were
+ *    measured. #16751 landed alongside and re-pointed the two CONSUMER readers
+ *    this shape reached — `lint-flow-patterns.ts`' own `graph.nodes` reader and
+ *    `collectFlowVariableNames`' unguarded `graph.nodes` walk — and on the tree
+ *    before either fix those were the frames the throws carried, one in each
+ *    rule, neither inside `packages/spec`. So "neither rule's own reader was at
+ *    fault" is the wrong reading of this pair in one direction only: the
+ *    producer's declared `FlowNodeParsed[]` really did lie about what it
+ *    returned, AND the consumers really did dereference without a guard.
+ *    Neither repair makes the other unnecessary — remove the producer fix and
+ *    the junk is handed out again to every other consumer; remove the consumer
+ *    coercion and these two readers are back to trusting a declared element
+ *    type. Read the pair as belt and braces, ⛔ not as one change that turned
+ *    out to be redundant.
+ *  - `flows[].nodes` / `lintFlowPatterns` (#16751) — the SAME two spellings one
+ *    file over. `lint-flow-patterns.ts` inline-cast `flow.nodes` and then read
+ *    `.type` off each member, and double-cast `graph.nodes` at two further
+ *    readers; `flow-variable-scope.ts` walked `graph.nodes` with no member
+ *    guard while guarding `flow.variables` seven lines up. All re-pointed at
+ *    `recordsOf`, with the COERCED array — never `flow.nodes` raw — handed on
+ *    to `collectFlowGraphs`, measured: hand the raw one on and the crash
+ *    RELOCATES to the graph-node reader instead of going away. This is the
+ *    shallow half, and the producer repair above never covered it: `flow.nodes`
+ *    is a list the RULE reads itself, before any producer sees it.
+ *
+ * ## It holds no row today
  *
  * It went from empty to two the moment a flow's inner node list became
  * addressable, which is the point #15793 was filed to make: this class was
  * closed three times over collections while the same defect stood untouched one
- * addressing mode away.
- *
- *  - `flows[].nodes` / `lintFlowPatterns` (#16751) — `lint-flow-patterns.ts`
- *    holds the SAME two spellings #15793 removed from `validate-expressions.ts`
- *    (`:1426` inline-casts `flow.nodes`, then `:1430` reads `.type` off each
- *    member; `:456` and `:1522` double-cast `graph.nodes`). Shallowly
- *    reachable — an ordinary flow with an empty YAML list item.
- *  - `flows[].nodes[].config.body.nodes` / `validateStackExpressions` +
- *    `lintFlowPatterns` (#16752) — neither rule's own reader is at fault here:
- *    both throw from INSIDE `collectFlowGraphs`, whose region walk reads
- *    `node.config` off a member of an inner list it checked only with
- *    `Array.isArray`. No coercion at either call site reaches that list, which
- *    is why #15793 stopped and filed the fork instead of widening a
- *    `packages/spec` contract to tolerate malformed members.
+ * addressing mode away. The graph-shaped pair went out when the producer
+ * stopped handing a junk member out, the shallow one when the last flow-node
+ * list reader stopped trusting `Array.isArray` about members, and the table is
+ * empty again. Empty is this ratchet's resting state, not its retirement: it
+ * stays exact in both directions, so a rule that starts throwing on any swept
+ * collection reds here because it is not listed.
  */
-const RESIDUAL_THROWS: Readonly<Record<string, readonly string[]>> = {
-  // 2026-09-08 — #16751. Removed when `lint-flow-patterns.ts` reads its node
-  // lists through `recordsOf`, as `validate-expressions.ts` now does.
-  'flows[].nodes · null': ['lintFlowPatterns'],
-  'flows[].nodes · undefined': ['lintFlowPatterns'],
-  // 2026-09-08 — #16752. Both entries are ONE defect in `collectFlowGraphs`,
-  // surfacing through the two rules that call it. Removed together.
-  'flows[].nodes[].config.body.nodes · null': ['lintFlowPatterns', 'validateStackExpressions'],
-  'flows[].nodes[].config.body.nodes · undefined': ['lintFlowPatterns', 'validateStackExpressions'],
-};
+const RESIDUAL_THROWS: Readonly<Record<string, readonly string[]>> = {};
 
 /**
  * Where a junk member still draws a finding no author's file justifies — the

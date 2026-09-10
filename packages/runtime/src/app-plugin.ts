@@ -1,7 +1,17 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, wireAuthoredTranslationSync } from '@objectstack/core';
+import {
+    Plugin,
+    PluginContext,
+    createPluginPermissionEnforcer,
+    wireAuthoredTranslationSync,
+    type PluginPermissionEnforcer,
+} from '@objectstack/core';
 import { resolveArtifactCollections } from './artifact-collections.js';
+import {
+    registerArtifactGrantedPermissions,
+    type ArtifactGrantBinding,
+} from './security/artifact-granted-permissions.js';
 import { applyArtifactForwardConversions, assertProtocolCompat } from '@objectstack/metadata-core';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
@@ -125,6 +135,22 @@ export class AppPlugin implements Plugin {
      * of arriving at teardown time.
      */
     private initCtx?: PluginContext;
+    /**
+     * The enforcer holding this artifact's install-time GRANTED permission sets
+     * (ADR-0025 F4), or `undefined` when the artifact carried no
+     * `grantedPermissions` key — which is every artifact built before consent
+     * existed and every `defineStack()` config, so this stays `undefined` on
+     * every boot shape that ships today.
+     *
+     * Constructed in `init()` only when there is something to register, so a
+     * boot with no consent record allocates nothing and behaves byte-for-byte
+     * as it did. Public and readonly-by-accessor so the materialize seam that
+     * will QUERY it — and a composition pin — can reach the registry rather
+     * than rebuilding it from the artifact a second time.
+     */
+    private grantEnforcer?: PluginPermissionEnforcer;
+    /** What `grantedPermissions` bound to on this artifact — see {@link ArtifactGrantBinding}. */
+    private grantBindingResult?: ArtifactGrantBinding;
     /** When true, init/start become no-ops — env has no app payload. */
     private readonly empty: boolean = false;
     /**
@@ -169,6 +195,29 @@ export class AppPlugin implements Plugin {
      */
     private get collections(): any {
         return (this.resolvedCollections ??= resolveArtifactCollections(this.bundle));
+    }
+
+    /**
+     * The enforcer this artifact's consent records were registered on, or
+     * `undefined` when the artifact declared no `grantedPermissions` key.
+     *
+     * ⛔ `undefined` here means "no consent record for this environment", NEVER
+     * "denied": a caller that reads `undefined` as a deny bricks every boot
+     * shape that ships today (clause 1.3). The three states this distinguishes
+     * are written out on `registerArtifactGrantedPermissions`.
+     */
+    get permissionEnforcer(): PluginPermissionEnforcer | undefined {
+        return this.grantEnforcer;
+    }
+
+    /**
+     * What the artifact's `grantedPermissions` map bound to on this boot —
+     * `undefined` when the key was absent. Public so a composition pin can read
+     * the binding without re-deriving it, and so a caller can tell a declared
+     * empty map (`declared: true`, nothing registered) from an absent one.
+     */
+    get grantBinding(): ArtifactGrantBinding | undefined {
+        return this.grantBindingResult;
     }
 
     constructor(
@@ -264,6 +313,16 @@ export class AppPlugin implements Plugin {
         // empty-env early return, so teardown is armed on every path init
         // takes.
         this.initCtx = ctx;
+        // Bind the install-time GRANTED permission set (ADR-0025 F4, #13457)
+        // BEFORE anything this plugin registers on the kernel. This is the
+        // materialize-time moment the artifact contract names as the consumer
+        // of `EnvironmentArtifactSchema.grantedPermissions`, and it runs ahead
+        // of the empty-env return on purpose: a consent record that binds to
+        // nothing has to be heard on an empty environment too, which is exactly
+        // where an artifact carrying grants for packages it does not ship shows
+        // up. A no-op — not even an allocation — on every artifact that carries
+        // no `grantedPermissions` key.
+        this.bindGrantedPermissions(ctx);
         // Install the engine-wide default hook body runner FIRST — even for
         // empty envs (an empty env is exactly where a user will author their
         // first Studio hook). Runs in init (Phase 1) so it is in place before
@@ -324,6 +383,38 @@ export class AppPlugin implements Plugin {
             : this.bundle;
 
         ctx.getService<{ register(m: any): void }>('manifest').register(servicePayload);
+    }
+
+    /**
+     * Register the install-time GRANTED permission set this artifact carries,
+     * one entry per consent-bearing package, on an enforcer this plugin owns
+     * (ADR-0025 F4 / #13457 — the consumer half of
+     * `EnvironmentArtifactSchema.grantedPermissions`).
+     *
+     * The whole method is behind the `=== undefined` gate below, and that gate
+     * is the clause-1.3 guarantee in code: an artifact with no consent record
+     * takes no branch, allocates no enforcer and registers nothing, so ABSENT
+     * can never become "denied". `{}` is not absent and does not take the early
+     * return — a declared-but-empty map is a consent record that names no
+     * package, which is a different reading and is recorded as one.
+     *
+     * ⛔ Never `??`/`||` on `grantedPermissions`: both spellings turn a declared
+     * `{}` into absence and erase a distinction the producer pins both ways.
+     */
+    private bindGrantedPermissions(ctx: PluginContext): void {
+        if ((this.bundle as { grantedPermissions?: unknown } | null | undefined)?.grantedPermissions === undefined) {
+            return;
+        }
+        const enforcer = createPluginPermissionEnforcer(ctx.logger);
+        const binding = registerArtifactGrantedPermissions(this.bundle, enforcer, { logger: ctx.logger });
+        this.grantEnforcer = enforcer;
+        this.grantBindingResult = binding;
+        ctx.logger.info('[AppPlugin] registered install-time granted permissions', {
+            pluginName: this.name,
+            registered: [...binding.registered],
+            unregistered: [...binding.unregistered],
+            unbound: [...binding.unbound],
+        });
     }
 
     /**
@@ -1215,6 +1306,11 @@ export class AppPlugin implements Plugin {
                  const sharedDatasets = mergeSeedDatasets(ctx, normalizedDatasets);
 
                  const loggerRef = ctx.logger;
+                 // [#16595] Same capture posture as `loggerRef`: the replayer
+                 // outlives `start()` and is invoked by SecurityPlugin's
+                 // sys_organization hook, so the locale is resolved once, here,
+                 // from the boot bundle rather than re-read per replay.
+                 const seedLocale = this.resolveSeedLocale();
                  const replayer = async (organizationId: string) => {
                      if (!organizationId) return { inserted: 0, updated: 0, skipped: 0, errors: [] as any[] };
                      const md = ctx.getService('metadata') as IMetadataService | undefined;
@@ -1244,6 +1340,13 @@ export class AppPlugin implements Plugin {
                              // unless a seed embeds `cel`os.user.id`` — see the
                              // lazy guard where it is resolved.
                              identity: seedIdentity,
+                             // [#16595] `Seed.locale`'s producer. Spread rather
+                             // than written as `locale: seedLocale` so an app
+                             // with no `i18n.defaultLocale` sends NO key at all
+                             // — `undefined` and absent parse the same here, but
+                             // absence is what the loader's unresolved-scope
+                             // warning is keyed on.
+                             ...(seedLocale ? { locale: seedLocale } : {}),
                          },
                      });
                      const result = await seedLoader.load(request);
@@ -1319,9 +1422,17 @@ export class AppPlugin implements Plugin {
                   if (metadata) {
                       const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger);
                       const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
+                      // [#16595] `Seed.locale`'s producer on the DEFAULT boot
+                      // path — see {@link resolveSeedLocale}.
+                      const seedLocale = this.resolveSeedLocale();
                       const request = SeedLoaderRequestSchema.parse({
                           seeds: normalizedDatasets,
-                          config: { defaultMode: 'upsert', multiPass: true, identity: seedIdentity },
+                          config: {
+                              defaultMode: 'upsert',
+                              multiPass: true,
+                              identity: seedIdentity,
+                              ...(seedLocale ? { locale: seedLocale } : {}),
+                          },
                       });
                       const result = await seedLoader.load(request);
                       const { totalInserted, totalUpdated, totalSkipped, totalErrored } = result.summary;
@@ -1578,6 +1689,38 @@ export class AppPlugin implements Plugin {
     }
 
     /**
+     * The producer half of `Seed.locale` (#16595) — the BCP-47 tag every seed
+     * load started by this plugin filters on, read off the app's declared
+     * `i18n.defaultLocale`.
+     *
+     * Same source, same spelling and the same envelope-vs-collection posture as
+     * {@link loadTranslations}' `setDefaultLocale` call: `i18n` is an ENVELOPE
+     * key, so it is read off `this.bundle` (with the legacy nested-manifest
+     * fallback) and NOT through `this.collections`.
+     *
+     * ⛔ Resolved HERE rather than inside `SeedLoaderService.load()`, which is
+     * where the sibling `env` axis resolves ITSELF (`resolveEnvConfig`, off
+     * `NODE_ENV`). That asymmetry is forced, not a style choice: `env` has an
+     * ambient, process-wide source the loader can read on its own, and a locale
+     * has none — the only thing that knows which locale this stack runs in is
+     * the app config the loader is never handed. So this axis needs a real
+     * producer at the call sites, which is what #16595 is.
+     *
+     * Returns `undefined` — never a `'en'` default — when the app declares no
+     * locale. Absence is the loader's UNRESTRICTED spelling ("seed every
+     * dataset"), i.e. today's behaviour; defaulting to `'en'` would silently
+     * DROP a `locale: ['zh-CN']` dataset on every stack that never declared an
+     * `i18n` block, turning a wiring change into a data change.
+     * `SeedLoaderService#warnOnUnresolvedLocaleScope` is what keeps that
+     * absence loud rather than silent.
+     */
+    private resolveSeedLocale(): string | undefined {
+        const i18nConfig = this.bundle?.i18n || (this.bundle?.manifest || this.bundle)?.i18n;
+        const declared = i18nConfig?.defaultLocale;
+        return typeof declared === 'string' && declared.length > 0 ? declared : undefined;
+    }
+
+    /**
      * 15.1 third-party eval — dev hot-reload of a NEW object registered its
      * metadata (and, via ObjectQL's `metadata:reloaded` hook, created its
      * table) but its seeds never ran: the seed pipeline in `start()` only
@@ -1635,9 +1778,18 @@ export class AppPlugin implements Plugin {
                 }
                 const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger);
                 const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
+                // [#16595] `Seed.locale`'s producer on the dev hot-reload
+                // path. Resolved from the BOOT bundle, not from `payload`: a
+                // reload re-parses the artifact's metadata collections, and
+                // `i18n` is an envelope key that does not travel in it.
+                const seedLocale = this.resolveSeedLocale();
                 const request = SeedLoaderRequestSchema.parse({
                     seeds,
-                    config: { defaultMode: 'upsert', multiPass: true },
+                    config: {
+                        defaultMode: 'upsert',
+                        multiPass: true,
+                        ...(seedLocale ? { locale: seedLocale } : {}),
+                    },
                 });
                 const result = await seedLoader.load(request);
                 const { totalInserted, totalUpdated, totalErrored } = result.summary;

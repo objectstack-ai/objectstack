@@ -102,10 +102,21 @@ try {
  *     at one write 1 ms before exit, and at 59 warning blocks whose EPIPE
  *     arrives synchronously inside the write.
  *   • a RAW `process.stderr.write`. Node's `console.error` carries
- *     `ignoreErrors`, which parks a temporary `error` listener across the write
- *     — so oclif's warning blocks cannot crash this process at any size
- *     (measured: 1 MiB through `console.error` does not, one line through
- *     `process.stderr.write` does, 3/3 each).
+ *     `ignoreErrors`: its write CALLBACK re-attaches a `noop` `error` listener
+ *     when the completion reports one — so oclif's warning blocks cannot crash
+ *     this process at any size (measured: 1 MiB through `console.error` does
+ *     not, one line through `process.stderr.write` does, 3/3 each).
+ *
+ *     ⚠️ That protection is CONDITIONAL, and the condition is a fact about THIS
+ *     process rather than about `console.error`: the callback re-attaches only
+ *     `if (stream.listenerCount('error') === 0)`. Here nothing else ever listens
+ *     — measured, the only `error` listener on `process.stderr` for a whole run
+ *     is this file's own, below. `bin/run-dev.js` runs under `tsx`, which
+ *     registers an off-thread module-customization hook; node pipes that
+ *     worker's stderr into `process.stderr`, `Stream.prototype.pipe` prepends an
+ *     `onerror` there, the count is 1, the keep-alive is never installed, and
+ *     ONE SHORT `console.error` crashes 3/3 (#16691). ⛔ So "a `console.error`
+ *     site needs no guard" is never a general reading of this paragraph.
  *
  * `os serve` is both: `printDiagnostic` in `src/commands/serve.ts` writes
  * straight to stderr (#7915) and the boot around it is asynchronous, so the

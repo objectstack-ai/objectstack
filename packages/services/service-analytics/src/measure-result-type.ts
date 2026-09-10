@@ -169,13 +169,19 @@ import {
  *
  * Both shipped statements agree: `summary` is a member of the spec's
  * `NUMERIC_VALUE_TYPES` (so `valueSchemaFor` answers `z.number().finite()`)
- * and `driver-sql`'s DDL answers `col = table.float(name)`. The producer's
- * `number` is therefore the CORRECT word and no correction applies. That a
+ * and `driver-sql`'s DDL answers with a numeric column. Since #16318 that
+ * column is the exact decimal `NUMERIC_COLUMN_REPRESENTATION` states — `col =
+ * table.decimal(name, 65, 30)` on a NEW table, where it was `col =
+ * table.float(name)` before and still is on every table created earlier. The
+ * producer's `number` is the CORRECT word either way and no correction
+ * applies; ⛔ nothing in this rule reads the column's precision. That a
  * roll-up may declare `summaryOperations.function: 'min'` over a non-numeric
  * child field — which `aggregateSummaryValue` returns verbatim, into that
- * float column — is a defect one layer down in the same family; it is filed,
+ * numeric column — is a defect one layer down in the same family; it is filed,
  * and it is a statement about `summary`'s own storage, not about what this
- * rule should say for the declared type.
+ * rule should say for the declared type. ⚠️ The exact column REFUSES that
+ * verbatim text where the float column refused it too, so the retype neither
+ * creates nor closes it.
  *
  * ## What this rule deliberately cannot see: `multiple`
  *

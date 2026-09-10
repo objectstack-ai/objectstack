@@ -292,6 +292,17 @@ export function isDeclaredByHost(specifier: string, hostRoot?: string): boolean 
  *   in the app and install.
  * - `declared-unresolvable` — the app declares it and it still would not
  *   resolve. Remedy: fix the INSTALL. Re-reading the manifest is wasted effort.
+ *   ⚠️ One sub-case under this kind is NOT an install problem and does not say
+ *   it is (#15045): a `link:` / `file:` (or git / tarball) declaration names a
+ *   LOCATION, so the fallback has only the KEY to expect, and a linked manifest
+ *   naming something else is refused with
+ *   {@link unverifiableLocationMessage}'s wording instead. The KIND is shared
+ *   deliberately — the refusal, the `MODULE_NOT_FOUND` code and every consumer
+ *   branch are unchanged; minting a fourth kind would widen a published union
+ *   for a wording fix. ⛔ A consumer that re-words this kind LOCALLY instead of
+ *   deferring to `err.message` therefore still prints its own install remedy
+ *   here — the #14270 class, and the reason both seams in `packages/cli` that
+ *   got it right interpolate the kind TOKEN only.
  * - `declared-no-loadable-entry` (#14041) — the app declares it, the install
  *   delivered it, and the package's own `exports` names NO entry Node can load
  *   for the requested subpath — no `require`-condition target (which is why the
@@ -657,6 +668,60 @@ function declaredManifestName(declaration: HostDeclaration): string {
 }
 
 /**
+ * Declaration value prefixes that name a LOCATION on disk or a REMOTE ARTEFACT
+ * instead of a package (#15045).
+ *
+ * The complement of {@link ALIAS_DECLARATION_PROTOCOLS} on the axis that
+ * matters to the FALLBACK's diagnostic: an alias protocol names a package, and
+ * a plain range leaves the KEY naming it — a registry install lands under its
+ * own name, so a directory holding something else there really is a broken
+ * install. These do neither. `link:../bar` names a directory whose manifest may
+ * say anything; a git or tarball URL names no on-disk location at all and
+ * installs under the key with whatever the published manifest carries. For all
+ * of them the key is a FALLBACK expectation rather than a promise the host
+ * made, so a mismatch is the finder's declared limit and NOT an install fault
+ * — which is the whole difference between the two messages below.
+ *
+ * ⚠️ Read for WORDING only. It moves no expectation and licenses no directory:
+ * {@link hostInstalledPackageDir} refuses exactly what it refused before, and
+ * the second verification axis the card names (comparing
+ * `realpath(node_modules/<key>)` against the declared location, which WOULD
+ * make these load) is deliberately not built here.
+ *
+ * An unrecognised spelling falls out as "the key is a promise" and keeps
+ * today's INSTALL wording — the conservative direction, matching
+ * {@link ALIAS_DECLARATION_PROTOCOLS}'s own default.
+ */
+const NAMELESS_DECLARATION_PREFIXES = [
+  'link:',
+  'file:',
+  'portal:',
+  'git:',
+  'git+',
+  'github:',
+  'gitlab:',
+  'bitbucket:',
+  'gist:',
+  'http:',
+  'https:',
+] as const;
+
+/**
+ * Does the host's declaration leave this key's manifest name UNKNOWABLE from
+ * the declaration alone (#15045)? See {@link NAMELESS_DECLARATION_PREFIXES}.
+ */
+function declarationNamesNoPackage(declaration: HostDeclaration): boolean {
+  const { specifier } = declaration;
+  if (specifier === undefined) return false;
+  if (NAMELESS_DECLARATION_PREFIXES.some((prefix) => specifier.indexOf(prefix) === 0)) return true;
+  // npm's protocol-less GitHub shorthand, `<owner>/<repo>[#<ref>]`. It is a
+  // repository like `github:owner/repo` and carries no name for the same
+  // reason; no semver range spelling contains a `/`, so the two do not
+  // overlap. A leading `/` is an absolute path, which is not a shorthand.
+  return specifier.indexOf('/') > 0 && specifier.indexOf(':') === -1;
+}
+
+/**
  * The directory of the package named `manifestName` that owns `resolvedFile`.
  *
  * Walked up from the resolved entry rather than computed from the specifier,
@@ -802,6 +867,13 @@ function esmEntryForDeclared(
 type DeclaredCjsResolveFallback =
   /** Not present in the host's own `node_modules` — the install really is the problem. */
   | { outcome: 'absent' }
+  /**
+   * Present at the key, holding a package named something ELSE, under a
+   * declaration that names no package to expect (#15045). Refused exactly as
+   * `absent` is — same kind, same throw — but it is a different measurement and
+   * gets its own wording: nothing about the install is broken.
+   */
+  | { outcome: 'unverifiable-location'; packageDir: string; installedName: string }
   /** Rescued: the `import`-condition entry to load. */
   | { outcome: 'entry'; entry: string }
   /** Present, and its manifest names a runtime target — the FILES are the problem. */
@@ -850,6 +922,26 @@ function hasInvalidExportsSubpathSegments(subpath: string): boolean {
 }
 
 /**
+ * The `name` of the manifest in `dir`, or `undefined` when there is no readable,
+ * parseable `package.json` there or its `name` is not a string.
+ *
+ * ⚠️ Absent and PRESENT-BUT-NAMED-OTHERWISE both answer `undefined` to the
+ * check that consults it, which is correct — neither is the declared package's
+ * install. They are different FACTS about the app, though, and #15045 is the
+ * card about telling an operator which one was measured.
+ */
+function manifestNameAt(dir: string): string | undefined {
+  try {
+    const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as {
+      name?: unknown;
+    };
+    return typeof manifest.name === 'string' ? manifest.name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * The one directory the fallback finder consults, verified to hold the
  * declared package (a `package.json` whose `name` is the one
  * {@link declaredManifestName} reads out of the host's declaration) and then
@@ -861,14 +953,10 @@ function hasInvalidExportsSubpathSegments(subpath: string): boolean {
 function hostInstalledPackageDir(declaration: HostDeclaration): string | undefined {
   const { packageName, hostRoot } = declaration;
   const linked = join(hostRoot, 'node_modules', ...packageName.split('/'));
-  try {
-    const manifest = JSON.parse(readFileSync(join(linked, 'package.json'), 'utf8')) as {
-      name?: unknown;
-    };
-    if (manifest.name !== declaredManifestName(declaration)) return undefined;
-  } catch {
-    return undefined;
-  }
+  // Unreadable, unparseable, or named something else — all `undefined`, exactly
+  // as before #15045; the CALLER is what now distinguishes them, and only to
+  // pick the wording.
+  if (manifestNameAt(linked) !== declaredManifestName(declaration)) return undefined;
   try {
     return realpathSync(linked);
   } catch {
@@ -883,9 +971,24 @@ function declaredCjsResolveFallback(
   specifier: string,
   declaration: HostDeclaration,
 ): DeclaredCjsResolveFallback {
-  const { packageName } = declaration;
+  const { packageName, hostRoot } = declaration;
   const packageDir = hostInstalledPackageDir(declaration);
-  if (packageDir === undefined) return { outcome: 'absent' };
+  if (packageDir === undefined) {
+    // #15045: the finder has REFUSED. Re-read the one directory it consulted so
+    // the failure can say which of the two absences it measured. A cold error
+    // path that was already about to build a multi-line message, so the second
+    // read costs nothing anyone can observe.
+    const linked = join(hostRoot, 'node_modules', ...packageName.split('/'));
+    const installedName = manifestNameAt(linked);
+    if (
+      installedName !== undefined &&
+      installedName !== packageName &&
+      declarationNamesNoPackage(declaration)
+    ) {
+      return { outcome: 'unverifiable-location', packageDir: linked, installedName };
+    }
+    return { outcome: 'absent' };
+  }
 
   let exportsField: unknown;
   try {
@@ -926,6 +1029,71 @@ function declaredCjsResolveFallback(
   }
 
   return { outcome: 'no-loadable-entry', packageDir };
+}
+
+/**
+ * The wording for {@link DeclaredCjsResolveFallback} `unverifiable-location`
+ * (#15045) — a `link:` / `file:` (or git / tarball) install whose linked
+ * manifest names something other than the key.
+ *
+ * The refusal it explains is unchanged and deliberate; what changed is that it
+ * no longer prescribes {@link unresolvableMessage}'s remedies, every one of
+ * which is measurably false here: the package IS on disk, so it was neither
+ * "never installed" nor pruned away, and its `import` target exists. An
+ * operator handed those runs `pnpm install`, watches nothing change, and then
+ * goes looking for a build that is not broken.
+ *
+ * The closing remedy is one fact stated from both ends, and it was MEASURED,
+ * not reasoned: make the key and the linked manifest's `name` agree — rename
+ * either — and the key becomes a true expectation, so this same fallback
+ * rescues the load.
+ *
+ * ⛔ Deliberately NOT offered: "have the package publish a `require`
+ * condition". It does make the load succeed, and that is the problem — a dual
+ * build resolves through CommonJS, so #13330's condition re-decision runs
+ * instead, {@link packageRootOf} fails to recognise the differently-named root
+ * for the same reason this finder does, and `?? resolved` hands back the
+ * `require` build. The operator gets a load, plus the second-instance split
+ * #13330 exists to close, and no warning. A remedy the runtime honours while
+ * making things quietly worse is not one worth printing.
+ */
+function unverifiableLocationMessage(
+  declaration: HostDeclaration,
+  found: { packageDir: string; installedName: string },
+  cause: unknown,
+): string {
+  const { packageName, hostRoot, field, specifier } = declaration;
+  const { packageDir, installedName } = found;
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  return (
+    `Cannot load module '${packageName}': the host app DECLARES it ` +
+    `(${field}: ${JSON.stringify(specifier)}), a package IS installed at that key, and ` +
+    'this ESM fallback cannot confirm it is the declared one.\n' +
+    `  host app: ${hostRoot}\n` +
+    `  installed at: ${packageDir}\n` +
+    `  its package.json is named: ${JSON.stringify(installedName)}\n` +
+    `  this finder expected: ${JSON.stringify(packageName)}\n` +
+    '\n  This is NOT an install problem, and NOT a declaration problem — the package is\n' +
+    '  on disk and the declaration is right, so re-running `pnpm install`, un-pruning a\n' +
+    '  deploy and rebuilding a dist all change nothing here.\n' +
+    '  What it IS: a "link:" / "file:" declaration names a LOCATION, not a package. The\n' +
+    '  manifest at the other end may carry any name, and the specifier holds none for\n' +
+    '  this finder to expect, so the KEY is all it has to check against. A git or\n' +
+    '  tarball URL (github:owner/repo, https://.../pkg.tgz) names no on-disk location\n' +
+    '  either and lands here the same way.\n' +
+    '  The refusal is deliberate: this fallback stays strictly tighter than the\n' +
+    '  CommonJS resolution it backs up, and will not load a directory it cannot tie to\n' +
+    '  the declaration. Only a package publishing no `require` condition reaches it at\n' +
+    '  all, so nothing that loads today is affected either way.\n' +
+    '  What DOES change it — make the two names AGREE, from whichever end you own:\n' +
+    `    • declare the linked package under its own name: key ${JSON.stringify(installedName)},\n` +
+    '      pointing at the same location, and import it under that name\n' +
+    `    • or set the linked package's own "name" to ${JSON.stringify(packageName)}, if that\n` +
+    '      directory is yours to edit\n' +
+    '  Either way the key becomes the expectation this finder checks, and the load\n' +
+    '  succeeds through this same fallback.\n' +
+    `  (resolver: ${detail})`
+  );
 }
 
 function noLoadableEntryMessage(
@@ -1071,6 +1239,17 @@ export function createHostImporter(
         const fallback = declaredCjsResolveFallback(pkg, declaration);
         if (fallback.outcome === 'entry') {
           return import(pathToFileURL(fallback.entry).href);
+        }
+        if (fallback.outcome === 'unverifiable-location') {
+          // #15045: the SAME kind and the SAME throw as every other unrescued
+          // outcome below — this branch decides WORDING only. Turning this into
+          // a load is the second verification axis the card holds open, and is
+          // a contract change, not a diagnostic one.
+          throw hostImportError(
+            'declared-unresolvable',
+            unverifiableLocationMessage(declaration, fallback, cause),
+            cause,
+          );
         }
         if (fallback.outcome === 'no-loadable-entry') {
           throw hostImportError(

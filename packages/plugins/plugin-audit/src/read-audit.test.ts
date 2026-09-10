@@ -17,9 +17,30 @@
  *     (`{ object: [...] }`), so "an object that is not opted in produces no
  *     row" has to be the engine's real dispatch declining to call us;
  *   - "record-detail views only" turns on the real shapes `find` and `findOne`
- *     leave on `ctx.result` and `ctx.input.ast.where`;
- *   - the row keeps the VIEW instant, which depends on the real engine's
- *     `created_at` strip and its system-context exemption (#4447).
+ *     leave on `ctx.result` and `ctx.input.ast.where`.
+ *
+ * ⚠️ [#16829] A THIRD pin used to be claimed here — "the row keeps the VIEW
+ * instant, which depends on the real engine's `created_at` strip and its
+ * system-context exemption (#4447)". This file CANNOT make that one, and the
+ * claim was false in both of its halves.
+ *
+ * `makeEngine` below builds a bare `new ObjectQL()`. The audit stamp hooks are
+ * registered by `ObjectQLPlugin` (`objectql/src/plugin.ts`, `builtinHooks`
+ * bound as `sys:audit`), never by the engine, so NO stamp hook runs in this
+ * harness: whatever `created_at` the writer puts on a row is what the stub
+ * driver stores, on both sides of any change to the write's context. And the
+ * mechanism named was the wrong one anyway — `isSystem` exempts a write from
+ * the readonly strip; `created_at` is decided by the stamp hook, which reads
+ * `preserveAudit` alone.
+ *
+ * ⇒ the VIEW-instant case below is kept, but it is a pin on THIS MODULE's own
+ * behaviour (the writer stamps `viewedAt` rather than leaving the column to the
+ * engine), ⛔ not on the engine's treatment of that value. The pin that covers
+ * the engine half is `read-audit-view-instant-preservation.integration.test.ts`
+ * — a real kernel, the real `ObjectQLPlugin`, a real driver. ⛔ Do not restate
+ * an engine-behaviour guarantee here: a green reading from an instrument that
+ * cannot fail is indistinguishable from a pass, and that is precisely how
+ * #16829 shipped.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -517,11 +538,17 @@ describe('#8992 what the row must NOT contain, and when it says it happened', ()
   /**
    * Batching moves the INSERT off the request path, which is exactly what makes
    * `created_at`'s `NOW()` default wrong here: it would stamp the whole batch
-   * with the moment the buffer drained. The engine strips a client-supplied
-   * `created_at` from ordinary writes (#4447) and exempts system-context writes
-   * — the writer relies on that exemption, so this pins both halves.
+   * with the moment the buffer drained. So the writer puts `viewedAt` on the
+   * row itself rather than leaving the column to the engine — and that, the
+   * writer's own behaviour, is the whole of what this case pins.
+   *
+   * ⛔ [#16829] It does NOT pin that the engine keeps the value. This harness's
+   * engine registers no audit stamp hook at all (see this file's header), so
+   * this case reads green whether the ledger write declares `preserveAudit` or
+   * not. The engine half is pinned by
+   * `read-audit-view-instant-preservation.integration.test.ts`.
    */
-  it('records the VIEW instant, not the flush instant', async () => {
+  it('records the VIEW instant on the row it hands the engine (⛔ see header: no stamp hook runs here)', async () => {
     const viewedAt = new Date('2026-08-18T09:15:00.000Z');
     const writer = installReadAuditWriter(engine, {
       objects: ['contact'],

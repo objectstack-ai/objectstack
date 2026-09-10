@@ -18,13 +18,16 @@ import type { DroppedFieldsEvent } from '@objectstack/spec/data';
  * static `readonly` (#2948), a TRUE `readonlyWhen` predicate (#3042), the
  * implicitly-readonly runtime-owned types (#5503), and the `primary_key` strip
  * of a payload `id` the update dispatch ruled is not an identifier (#6437); on
- * INSERT only the runtime-owned ones, because a create is deliberately exempt
- * from the author-declared strips (#3413). One error names everything wrong
- * with the payload instead of forcing a round-trip per field. `drops`
- * keeps the per-reason breakdown (the same `DroppedFieldsEvent` shape
- * `onFieldsDropped` would have received, had the write been allowed to
- * complete), so a caller can tell a schema-level lock from a state-dependent
- * one without parsing the message.
+ * INSERT the runtime-owned ones and, since the 2026-09-03 ruling (#14147)
+ * superseded the create-side exemption #3413 had granted, static `readonly`
+ * too — judged over `staticReadonlyInsertSubject`, which leaves a
+ * `sys_`-prefixed or `managedBy` object to its own guards (#15719), while
+ * `readonlyWhen` still locks nothing on a create (a conditional lock needs a
+ * prior record). One error names everything wrong with the payload instead of
+ * forcing a round-trip per field. `drops` keeps the per-reason breakdown (the
+ * same `DroppedFieldsEvent` shape `onFieldsDropped` would have received, had
+ * the write been allowed to complete), so a caller can tell a schema-level
+ * lock from a state-dependent one without parsing the message.
  *
  * ## The message is composed from `drops`, not from the error's name (#6437)
  *

@@ -275,10 +275,10 @@ conversion 是消费者跟的。两个都要写。
       到的那个文件,漏网的恰是他不知道的引用(实测五处、三个包、两张卡,其中两处还
       是删除**之后**新写的)。排除 `**/CHANGELOG.md`、`.changeset/` 与 pin 自身,理由
       写在旁边,⛔ 不建允许清单文件;⛔ 缺席断言不是陈旧提及,「修好它」即删掉守卫。
-      ⭐ **半径按包申报一次**:写进 `scripts/cross-package-test-inputs.mjs` 的
-      `CROSS_PACKAGE_TEST_INPUTS` 并配齐 `turbo.json` 的 `<pkg>#test` inputs,turbo 才
-      hash 得到它、CI 分片并集才看得见;walk 降在循环变量上、门禁点不出名字,那条 glob
-      还要一条 `heldBy` 证人。⛔ 半径未申报的 tree-scoped pin 不是完成的退役。
+      ⭐ **半径按包申报一次**:`CROSS_PACKAGE_TEST_INPUTS` 写进 `scripts/cross-package-test-inputs.mjs`,并配
+      齐 `turbo.json`:声明 `test:repo` 脚本的包配 `<pkg>#test:repo` 且 `<pkg>#test` 不带根输入,否则配
+      `<pkg>#test`;分歧以 `scripts/check-cross-package-test-inputs.mjs` 为准。walk 降在循环变量上、门禁
+      点不出名字的 glob 另配 `heldBy` 证人。⛔ 半径未申报的 tree-scoped pin 不是完成的退役。
 - [ ] **Examples** —— `examples/app-showcase/**` 必须停止编写该键。墓碑路线上
       `tsc` 替你找齐。
 - [ ] **已发布 skills** —— 教这个键的 `skills/*/SKILL.md`(表格、`defineX` 示例)

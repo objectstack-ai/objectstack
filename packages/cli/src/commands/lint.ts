@@ -28,6 +28,7 @@ import {
   emitJson,
   isExitSignal,
   errorCodeFields,
+  isReportedError,
 } from '../utils/format.js';
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -895,8 +896,13 @@ export default class Lint extends Command {
         );
         process.exit(1);
       }
-      console.log('');
-      printError(error.message || String(error));
+      // [#15547] `resolveConfigPath()` already wrote its refusal and hint
+      // lines to stderr before throwing; printing the sentence again here
+      // would put a second copy on stdout.
+      if (!isReportedError(error)) {
+        console.log('');
+        printError(error.message || String(error));
+      }
       process.exit(1);
     }
   }
@@ -1022,7 +1028,34 @@ export default class Lint extends Command {
         }
         generate = fn;
       } catch (error: any) {
-        const msg = `Failed to load generator "${flags.generator}": ${error?.message || error}`;
+        // [#16359] Our separator `": "` already carries the ONE space between
+        // the quoted value and the reason; the detail must not bring a second.
+        // `bundle-require` composes its own refusal as
+        // `${filepath} is not a valid JS file`, so an EMPTY filepath
+        // contributes no characters and that fragment arrives with a LEADING
+        // space, which lands against ours. Re-driven at 923caede80 through
+        // `od -c`, both faces, `bin/run-dev.js`, `NO_COLOR=1`:
+        //
+        //   os lint --eval        --generator ""   -> `generator "":  is not a valid JS file`
+        //   os lint --eval --json --generator ""   -> the same two spaces inside `{error}`
+        //   os lint --eval [--json] --generator <unresolvable path>  -> ONE space
+        //
+        // ⛔ This is NOT a branch on the empty value. #16161 ruled that the
+        // empty string must answer through the door an unresolvable path
+        // already answers through, and a bespoke message for it would be the
+        // second refusal shape that card exists to avoid. The normalisation
+        // below reads the SEAM and never `flags.generator`, and applies to
+        // every detail alike — so both inputs still reach this one `catch`,
+        // this one composition, this one envelope and this one exit code, and
+        // every detail that does not open with a space is byte-identical.
+        //
+        // Leading SPACES only, deliberately not `trimStart()`: a detail that
+        // opens with a newline is a different shape (our space then a line
+        // break), not a doubled separator, and stays exactly as it prints
+        // today. `test/lint-eval-generator-refusal-separator.test.ts` pins the
+        // bytes on both faces, with the unresolvable path as the control.
+        const detail = `${error?.message || error}`.replace(/^ +/, '');
+        const msg = `Failed to load generator "${flags.generator}": ${detail}`;
         // [#15549] The ADR-0112 carriers, spread from the SAME helper the
         // project-lint catch-all in `run()` uses — not a second shape invented
         // here. Before this, the `catch` built `msg` and DISCARDED `error`, so

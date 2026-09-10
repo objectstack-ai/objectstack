@@ -119,8 +119,13 @@ describe('filter → where folds on every engine method (#4346)', () => {
 
     it('findOne({filter}) returns a MATCHING row, not the first row of the table', async () => {
         const row = await engine.findOne('task', { filter: { status: 'done' } } as any);
-        expect(row.status).toBe('done');
-        expect(row.id).not.toBe(a.id);
+        // [#16231] The `null` is part of the declaration now, and it is part of
+        // what this case measures: an unfolded `filter` used to match ALL rows,
+        // so "a row came back at all" and "it is the MATCHING one" are two
+        // different assertions and both have to be made.
+        expect(row).not.toBeNull();
+        expect(row!.status).toBe('done');
+        expect(row!.id).not.toBe(a.id);
     });
 
     it('count({filter}) counts the matching rows, not the whole table', async () => {
@@ -201,7 +206,8 @@ describe('filter → where folds on every engine method (#4346)', () => {
 
     it('findOne({top}) stays single-row — the forced limit: 1 wins over the folded alias', async () => {
         const row = await engine.findOne('task', { top: 5, filter: { status: 'done' } } as any);
-        expect(row.status).toBe('done');
+        expect(row).not.toBeNull();
+        expect(row!.status).toBe('done');
     });
 
     // ── the documented hook call path (ScopedContext / ObjectRepository) ─

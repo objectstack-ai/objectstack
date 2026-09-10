@@ -40,6 +40,8 @@
  */
 
 import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
+import { operatorFacingErrorText } from '@objectstack/types';
+
 import {
     DATA_MIGRATION_FLAG_OBJECT,
     NOTIFICATION_EVENT_MIGRATION_ID,
@@ -284,7 +286,7 @@ async function runNotificationEventMigration(
 
         return { status: 'migrated', migrated };
     } catch (err: any) {
-        return { status: 'error', migrated, error: err?.message ?? String(err) };
+        return { status: 'error', migrated, error: operatorFacingErrorText(err) };
     }
 }
 
@@ -491,20 +493,32 @@ async function recordNotificationEventReceipt(
  * `formatOutput`, so none of its repairs apply here on any dialect:
  *
  *  - `created_at` is a BUILTIN audit column, so it is never in `datetimeFields`
- *    and no declared-field coercion reaches it; `formatOutput` repairs it only
- *    inside its `if (this.isSqlite)` arm (`repairNaiveUtcAuditTimestamp` over
- *    `AUDIT_TIMESTAMP_COLUMNS`).
+ *    and no declared-field coercion reaches it; what repairs it is
+ *    `formatOutput`'s own `AUDIT_TIMESTAMP_COLUMNS` pass
+ *    (`repairNaiveUtcAuditTimestamp`) at the RECORD read door — a door this
+ *    path does not go through.
  *  - `read_at` is a LEGACY column ADR-0030 removed from the object, so it is
  *    not declared either — it can never enter `datetimeFields`, and it is not
  *    an audit column, so no arm of `formatOutput` could reach it even at the
  *    record read door.
  *
+ * ⚠️ The reason no repair reaches this path is the SEAM, ⛔ not an
+ * `if (this.isSqlite)` gate inside `formatOutput`. Both of `formatOutput`'s
+ * timestamp passes — the `AUDIT_TIMESTAMP_COLUMNS` pass and the
+ * `normalizeSqliteDatetimeOutput` pass over `datetimeFields` — sat inside that
+ * arm until #13973 ([ADR-0053 D-F1]) lifted them out, and they run on EVERY
+ * dialect now. So the record read door presents canonical text everywhere while
+ * this raw-SQL door still hands back whatever the client materialised, which is
+ * why the divergence below survives the ruling HERE and nowhere upstream of it.
+ *
  * On SQLite both arrive as canonical ISO text and `String()` is the identity —
  * which is why every test in this directory stayed green. On Postgres and
  * MySQL an instant column materialises as a JS `Date`
- * (`withPostgresCalendarDayAsText` leaves the instant types alone deliberately;
- * pinned in `sql-driver-13567-audit-stamp-materialisation.test.ts`), and
- * `String(date)` spells
+ * (`withPostgresCalendarDayAsText` leaves the instant types alone deliberately,
+ * [ADR-0053 D-F2]; pinned in
+ * `sql-driver-13567-audit-stamp-materialisation.test.ts` §B3, which reads the
+ * same row raw through knex and still gets the dialect's `Date` on the live
+ * cells), and `String(date)` spells
  *
  *   Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)
  *

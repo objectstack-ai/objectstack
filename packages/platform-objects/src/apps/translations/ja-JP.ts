@@ -154,6 +154,12 @@ export const jaJP: TranslationData = {
         widget_events_by_user: { title: 'ユーザー別イベント', description: 'ユーザー別アクティビティ分布' },
         widget_recent_events: { title: 'アクション別イベント件数', description: 'アクション別にグループ化されたイベント件数（ログイン、ログアウト、構成など）' },
       },
+      // The date-range bar above the widgets — addressable since
+      // `dashboards.<name>.globalFilters` (#16772), keyed by the filter's
+      // `field` because it authors no `name`.
+      globalFilters: {
+        created_at: { label: '日付範囲' },
+      },
     },
   },
 

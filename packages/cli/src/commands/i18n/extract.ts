@@ -16,6 +16,7 @@ import {
   emitJson,
   isExitSignal,
   errorCodeFields,
+  isReportedError,
 } from '../../utils/format.js';
 import {
   extractTranslations,
@@ -24,6 +25,7 @@ import {
   parseSourceHashModule,
   narrowToCommittedSections,
   translationModulePayload,
+  translationModuleSections,
   countTranslationLeaves,
   type FillStrategy,
   type TranslationModuleKind,
@@ -448,15 +450,44 @@ export default class I18nExtract extends Command {
        * bundle files — {@link emittedModules} — never by a second rule. A set that commits both —
        * `platform-objects` is the one today — keeps every record it had. The
        * narrowing itself is `narrowToCommittedSections`, a pure function in the
-       * extractor's utils so it can be pinned without driving oclif; this layer
-       * contributes only the two booleans it alone knows.
+       * extractor's utils so it can be pinned without driving oclif.
+       *
+       * ⭐ And the sections are read off the PAYLOADS those modules hold
+       * (`translationModuleSections`), not written here as literals. This layer
+       * used to push `'objects'` and `'metadataForms'` — the emitted-module half
+       * already read `emittedModules`, but what it pushed was a hand-copied
+       * name, so under `kind: 'stack'` it named one of the several groups the
+       * module actually commits. Nothing in this repository's provenance tables
+       * is filtered by that mismatch today, because the tables only ever carry
+       * the two GENERATED sections (`GENERATED_SECTIONS` in
+       * `@objectstack/platform-objects`), and `'objects'` is the right name for
+       * both stack kinds — the list was correct by COINCIDENCE, not by
+       * construction, and a third generated section would have broken it
+       * silently. It is now derived.
+       *
+       * ⭐ Returning `undefined` when nothing is committed is the second half,
+       * and it is a file-set decision rather than a narrowing one:
+       * `narrowToCommittedSections` returns `{}` for an empty section set, `{}`
+       * is truthy at the emit site, and the run therefore wrote a zero-record
+       * companion with NO bundle module beside it for it to be about. `--check`
+       * compares the companion by bytes like any other emitted file, so that
+       * orphan, once committed, is a file the gate demands forever.
        */
       const committedSourceHashes = (locale: string): Record<string, string> | undefined => {
         const table = result.sourceHashes[locale];
         if (!table) return undefined;
-        const committed: string[] = [];
-        if (emittedModules(locale).some((m) => m.kind !== 'metadataForms')) committed.push('objects');
-        if (emittedModules(locale).some((m) => m.kind === 'metadataForms')) committed.push('metadataForms');
+        const committed = new Set<string>();
+        for (const mod of emittedModules(locale)) {
+          for (const section of translationModuleSections(result.bundles[locale], mod.kind)) {
+            committed.add(section);
+          }
+        }
+        // No module is committed for this locale, so there is nothing beside a
+        // companion for it to be ABOUT — and an orphan is worse than nothing:
+        // `--check` compares by bytes against the emitted list, so a zero-record
+        // companion written once is a file the gate demands forever. `{}` is
+        // truthy, so returning the narrowed table here wrote exactly that.
+        if (committed.size === 0) return undefined;
         return narrowToCommittedSections(table, committed);
       };
 
@@ -777,8 +808,13 @@ export default class I18nExtract extends Command {
         await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
         process.exit(1);
       }
-      console.log('');
-      printError(error.message || String(error));
+      // [#15547] `resolveConfigPath()` already wrote its refusal and hint
+      // lines to stderr before throwing; printing the sentence again here
+      // would put a second copy on stdout.
+      if (!isReportedError(error)) {
+        console.log('');
+        printError(error.message || String(error));
+      }
       process.exit(1);
     }
   }

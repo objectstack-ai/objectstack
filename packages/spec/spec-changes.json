@@ -159,12 +159,6 @@
         "toMajor": 17
       },
       {
-        "surface": "object.fields.*.required / object.fields.*.storage.notNull",
-        "to": "required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract)",
-        "conversionId": "field-required-notnull-explicit",
-        "toMajor": 17
-      },
-      {
         "surface": "action.shortcut / action.bulkEnabled",
         "to": "action keys 'shortcut'/'bulkEnabled' removed (#3896 close-out — no keydown path dispatches shortcuts; the multi-select toolbar reads the view's bulkActions)",
         "conversionId": "action-inert-keys-removed",
@@ -1311,12 +1305,6 @@
           "surface": "app.areas.visible / app.areas.requiredPermissions",
           "to": "navigation-area keys 'visible'/'requiredPermissions' removed (#4651, ADR-0049 — FAIL-OPEN access gates: no layer ever read them, so a 'hidden' or permission-gated area was served and rendered to every user, while the identically named keys on a navigation ITEM and on the APP are enforced; gate the items inside the area, or gate the app)",
           "conversionId": "app-area-fail-open-gates-removed",
-          "toMajor": 17
-        },
-        {
-          "surface": "object.fields.*.required / object.fields.*.storage.notNull",
-          "to": "required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract)",
-          "conversionId": "field-required-notnull-explicit",
           "toMajor": 17
         },
         {

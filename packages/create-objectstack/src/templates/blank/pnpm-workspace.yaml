@@ -36,13 +36,18 @@ allowBuilds:
 # first thing a brand-new project shows you — and none is a real
 # incompatibility:
 #
-#   better-auth peers better-sqlite3 ^12.0.0 while the tree resolves 13.x. That
-#   peer is optional and covers handing better-auth a raw better-sqlite3
-#   `Database`; ObjectStack hands it an ObjectQL adapter instead, so nothing
-#   here goes down that path. Measured on the configuration the range does
-#   cover — better-auth's own Kysely dialect, running its migrations, sign-up,
-#   sign-in and adapter find/update/delete — 1.7.1 behaves identically on
-#   better-sqlite3 13.0.3 and on 12.11.1. The upstream range is stale.
+#   better-auth peers better-sqlite3 ^12.0.0 while the tree resolves 13.x — the
+#   copy @objectstack/cli declares for its own sqlite tooling, and the one pnpm
+#   names in the report. That peer is optional and covers handing better-auth a
+#   raw better-sqlite3 `Database`; ObjectStack hands it an ObjectQL adapter
+#   instead, so nothing here goes down that path. First measured behaviourally
+#   on 1.7.1 — better-auth's own Kysely dialect, running its migrations,
+#   sign-up, sign-in and adapter find/update/delete, behaves identically on
+#   better-sqlite3 13.0.3 and on 12.11.1. Re-measured on the pinned 1.7.2 and
+#   now structural: no file in the published package references better-sqlite3
+#   at all, so no better-auth call site can depend on what moved between 12 and
+#   13. The upstream range is stale. Pinning our own declaration back to 12
+#   would clear the report only by installing a second, unused native copy.
 #
 #   (The '@better-auth/scim>better-call' entry that used to sit here retired
 #   with the scim release-candidate pin — stable @better-auth/scim 1.7.1 peers

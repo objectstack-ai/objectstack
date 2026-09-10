@@ -735,6 +735,26 @@ export interface ApprovalDecisionResult {
    * whose parent then stranded (#15556) still answers `true`, and the
    * parent's strand is told on {@link resumeFailure} — carried on the
    * success answer per the #16472 ruling, never thrown.
+   *
+   * What that throw carries is published, not prose only (#13807, maintainer
+   * ruling 2026-09-04, decision batch #37). The status code does not move — a
+   * durable decision over a run that will not advance is still a failure —
+   * but the 500-class `RESUME_FAILED` it raises names, on its ERROR body, the
+   * four facts a caller needs: `finalized` (the decision stands), `decision`,
+   * `runId`, and `repairable` — the engine's own `'stranded'` discriminator
+   * carried through, never inferred from the message text. That envelope is
+   * `StrandedDecisionDetails` (`@objectstack/types`), attached by
+   * `strandedDecisionFailure` and read back by `strandedDecisionDetails`; the
+   * REST approvals door merges it into the `RESUME_FAILED` response body.
+   * Those four facts are the published way to read the posture this member
+   * declares — a caller holding only the status code reads a bare 500 as "the
+   * decision did not happen", and the row IS terminal.
+   *
+   * ⛔ They are not members of this result and must never be added to it:
+   * they ride the ERROR, so declaring them here would declare a success shape
+   * that never carries them. ⛔ Nor are they {@link resumeFailure}, which
+   * reports the other event of the #16472 ruling — a resume failure behind an
+   * answer that still succeeded.
    */
   resumed?: boolean;
   /**

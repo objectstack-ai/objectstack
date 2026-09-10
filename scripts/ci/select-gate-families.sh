@@ -61,17 +61,17 @@
 #                          `AGENTS.md`, `CLAUDE.md`, `tsconfig.json`,
 #                          .gitignore, and sweeps `git ls-files` for hint
 #                          reachability and test-file residue. It also reads
-#                          the CONTENT of every JS/TS file in the tree: the
-#                          compound-anchor census of `function ...SelfTest...(`
-#                          declarations asserts none is unlisted, and the
-#                          exposed-scratch-dir sweep reads every
-#                          mkdtempSync/mkdirSync caller and consults nested
-#                          .gitignore files. So any masked source file and any
-#                          .gitignore runs it, and because the name sweep reads
-#                          the tracked NAME set an ADDED file anywhere runs it
-#                          too; only modifications of docs, changesets and
-#                          non-source workspace files that are neither a
-#                          manifest nor a script skip it.
+#                          the CONTENT of every JS/TS and shell (`.sh`) file in
+#                          the tree: the compound-anchor census of
+#                          `function ...SelfTest...(` declarations asserts none
+#                          is unlisted, and the exposed-scratch-dir sweep reads
+#                          every mkdtempSync/mkdirSync caller and consults
+#                          nested .gitignore files. So any masked source file,
+#                          any `.sh` file, and any .gitignore runs it, and
+#                          because the name sweep reads the tracked NAME set an
+#                          ADDED file anywhere runs it too; only modifications
+#                          of docs, changesets and non-source workspace files
+#                          that are neither a manifest nor a script skip it.
 #   query_options_erasure  `pnpm check:query-options-erasure`. Lints
 #                          packages/**/*.{ts,tsx,mts,cts} under
 #                          `eslint.config.mjs`, reads its baseline
@@ -314,9 +314,12 @@ family_reads() {
       # The self-test reads the CONTENT of every JS/TS file in the tree (the
       # compound-anchor census of `function ...SelfTest...(` declarations, the
       # exposed-scratch-dir sweep of every mkdtempSync/mkdirSync caller) and
-      # consults nested .gitignore files, so any masked source and any
-      # .gitignore runs it whatever class it sits in.
+      # every tracked `.sh` file (the same watch-hint extraction, run through
+      # the comment mask), and consults nested .gitignore files, so any masked
+      # source, any `.sh` file, and any .gitignore runs it whatever class it
+      # sits in.
       is_masked_source "$path" && return 0
+      case "$path" in *.sh) return 0 ;; esac
       case "$path" in */.gitignore) return 0 ;; esac
       case "$class" in
         docs|changeset) return 1 ;;

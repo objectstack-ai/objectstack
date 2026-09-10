@@ -322,6 +322,36 @@ export interface ObjectTitleCompleteness {
    * - `synthesized` — `nameField` points at a field NOT present in `fields`
    *   (e.g. a synthesized/expected `name`); the runtime must materialize it.
    * - `none`        — no pointer and nothing derivable. Lint/quality should flag.
+   *
+   * ⚠️ `explicit` means "a pointer is PRESENT", never "the AUTHOR designated
+   * this", and which grade you get is decided by the body's PROVENANCE rather
+   * than by the object. Read the four rows above against where the body came
+   * from:
+   *
+   * - **A body served by a `/meta` READ EXIT is already designated.** The exit
+   *   replays the registry's object-materialization seam
+   *   (`materializeServedObjectOnto` in `@objectstack/objectql`, which runs
+   *   `provisionPrimary` in designate-only mode), so a pointer is stamped
+   *   whether or not the author wrote one. There `explicit` carries no
+   *   authorship information, and `derived` is unreachable except where that
+   *   replay WITHHELD the designation — an object the registry has resolved
+   *   whose own answer carries no `nameField`, served with a title-eligible
+   *   field an `extend` fold added.
+   * - **A body captured BEFORE the write seam still separates the two.** An
+   *   authored definition as written — what `os build` / `os lint` hand this
+   *   predicate through `@objectstack/lint`'s `validateRecordTitle` — grades
+   *   `explicit` only when the author really did write a pointer.
+   *
+   * ⛔ Authorship is NOT recoverable after that write, deliberately. The
+   * write-side inverse (`stripProvisionedPrimaryFrom`, declared beside the
+   * stamp) removes the pointer exactly when it is byte-identical to what the
+   * derivation would produce, and says so in its own words: the two are
+   * "indistinguishable by construction — the read serves one body, and 'the
+   * author wrote `nameField`' and 'the read derived `nameField`' are the same
+   * bytes". So neither the served document nor the stored row can answer
+   * "did the author designate this?" — only a pre-write body can. ⇒ ⛔ Never
+   * build a check on `explicit` that needs the authored answer without first
+   * proving your input is a pre-write body.
    */
   status: 'explicit' | 'derived' | 'synthesized' | 'none';
   /** The resolved field name when one exists. */
@@ -331,6 +361,12 @@ export interface ObjectTitleCompleteness {
 /**
  * Classify how an object's title is satisfied, for lint / quality reporting.
  * Does not mutate; mirrors `resolveDisplayField` precedence.
+ *
+ * ⚠️ A pure function of the BODY handed in, so the input's PROVENANCE decides
+ * the answer: a body served by a `/meta` read exit grades `explicit` whether or
+ * not its author wrote a pointer, because that exit designates one. Read
+ * {@link ObjectTitleCompleteness.status} before treating any grade as an
+ * authorship signal.
  */
 export function objectTitleCompleteness(objectMeta: DisplayNameObjectMeta | undefined | null): ObjectTitleCompleteness {
   if (!objectMeta) return { status: 'none' };

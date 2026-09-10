@@ -555,14 +555,42 @@ const maskedModuleBody = memoiseMask((source) => maskSelfTests(maskedComments(so
  * unbounded under-mask measured above.
  *
  * Same projection as `blank` next door — spans become spaces, newlines and byte
- * offsets survive — so this composes onto `maskedModuleBody`'s output rather
- * than replacing it. The order is measured too, and it is the one that cannot
- * widen: masking `#` FIRST stops a `#` comment containing `@objectstack/*` from
- * opening a phantom JS block comment, which UNCOVERS code below it and adds
- * hints (2 on this tree — `scripts/downstream-smoke.sh` and
- * `.claude/hooks/guard-tree-enum.sh`). Masking `#` LAST can only blank more of
- * an already-masked body, so the shell hint set is a subset of today's by
- * construction.
+ * offsets survive — so this composes WITH the JS mask rather than replacing it.
+ *
+ * ## The ORDER, and why it is now `#` FIRST (#16744)
+ *
+ * Masking `#` LAST can only blank more of an already-masked body, so the shell
+ * hint set was a subset of the JS-masked one by CONSTRUCTION. That is why the
+ * card above took it: it could not widen, and widening was out of its scope.
+ * The price it left unpaid is the OTHER direction of the same "THIRD kind"
+ * defect. A `#` comment spelling `@objectstack/*`, a glob, or any other
+ * two-character block-comment opener is not a comment to the JS scanner — it
+ * opens a BLOCK comment that runs to the next terminator and blanks every line
+ * of real shell CODE in between, with nothing in the output saying a region was
+ * skipped. Re-measured per byte on `ce7bae8b`, over the 31 tracked `.sh` files:
+ * 12 of them hand a caller shell code as prose, 73,859 bytes in
+ * `scripts/pm/os-verify-lock.sh` alone.
+ *
+ * So `#` is masked FIRST now: shell prose never reaches the JS scanner and
+ * cannot open a phantom comment. This UNCOVERS the code below such a comment
+ * and therefore ADDS hints — 2 on this tree, `node_modules/@objectstack/spec/dist`
+ * in `scripts/downstream-smoke.sh` and one site in
+ * `.claude/hooks/guard-tree-enum.sh`, both of them real code the follow was
+ * blind to. ⛔ The shell hint set is therefore NOT a subset of the JS-masked one
+ * any more, and the live sweep in the self-test pins what the additions ARE —
+ * ⛔ never that there are none, which is the blindness this removed.
+ *
+ * The JS mask still RUNS on a shell source, and still runs BEFORE
+ * `maskSelfTests` as that function's header requires. Keeping it is the whole
+ * difference between this order and "do not run the JS scanner over a non-JS
+ * kind at all": the latter also drops the `//` masking pinned below on a `.sh`
+ * source, which is a reconciliation across both cards rather than this fix.
+ *
+ * Composed from the raw maskers rather than through `maskedModuleBody` — the
+ * intermediate is a DIFFERENT string on this path, so there is no half to
+ * share, and routing it through the JS memo would only fill that cache with
+ * shell-derived keys no JS caller can hit. The memo below is keyed on the raw
+ * source, so the whole chain is still derived once per source.
  */
 const SHELL_WORD_START = /[\s;&|()<>]/;
 
@@ -621,8 +649,10 @@ export function maskShellComments(source) {
   return blank(String(source), shellCommentSpans(String(source)));
 }
 
-/** `maskShellComments(maskedModuleBody(source))`, memoised — see the block above. */
-const maskedHashCommentBody = memoiseMask((source) => maskShellComments(maskedModuleBody(source)));
+/** `maskSelfTests(maskComments(maskShellComments(source)))`, memoised — see the block above. */
+const maskedHashCommentBody = memoiseMask((source) =>
+  maskSelfTests(maskComments(maskShellComments(source))),
+);
 
 // ── What a gate that IMPORTS this module inherits (#11556) ─────────────────
 //
@@ -1349,10 +1379,19 @@ export function jobFilterPopulation(job, filterStepsByOutputSource) {
 }
 
 /**
- * Every job in one workflow that resolves to a path population, with the check
- * families it invokes: `[{ job, name, outputs, paths, dropped, checks }]`.
+ * Every job in one workflow whose `if:` resolves to a path population, WITH the
+ * job's own text: `[{ job, name, text, outputs, paths, dropped }]`.
+ *
+ * ⛔ No check filter here, and that is the whole reason this is its own
+ * function. The caller below drops a job that invokes no discoverable check
+ * family, because a family is what IT is keying; `jobFilteredSteps` keeps
+ * exactly those jobs, because a job CI schedules for your path and whose work
+ * this derivation names no family for is the thing that reader is owed. Two
+ * callers, opposite dispositions, ONE walk — spelled twice they would be two
+ * readings of one workflow, which is the drift this file's whole contract
+ * refuses.
  */
-export function jobPathPopulations(workflowText, workflowFile) {
+export function jobFilterPopulations(workflowText) {
   const stepFilters = extractPathsFilterSteps(workflowText);
   if (stepFilters.size === 0) return [];
   const jobs = extractJobBlocks(workflowText);
@@ -1370,9 +1409,21 @@ export function jobPathPopulations(workflowText, workflowFile) {
   for (const job of jobs) {
     const population = jobFilterPopulation(job, byOutput);
     if (!population) continue;
-    const checks = [...new Set(extractCheckInvocations(job.text, workflowFile).map((i) => i.check))];
+    out.push({ job: job.id, name: job.name, text: job.text, ...population });
+  }
+  return out;
+}
+
+/**
+ * Every job in one workflow that resolves to a path population, with the check
+ * families it invokes: `[{ job, name, outputs, paths, dropped, checks }]`.
+ */
+export function jobPathPopulations(workflowText, workflowFile) {
+  const out = [];
+  for (const { text, ...population } of jobFilterPopulations(workflowText)) {
+    const checks = [...new Set(extractCheckInvocations(text, workflowFile).map((i) => i.check))];
     if (!checks.length) continue;
-    out.push({ job: job.id, name: job.name, ...population, checks });
+    out.push({ ...population, checks });
   }
   return out;
 }
@@ -2466,6 +2517,139 @@ export function alwaysRunSteps(entries) {
 }
 
 /**
+ * ⭐ The OTHER half of the same partition: every step of a CI job that YOUR
+ * paths schedule, which this derivation names no check family for.
+ *
+ * `alwaysRunSteps` above answers "what does CI run on every PR that I derive
+ * nothing for". It answers that question only for the jobs CI CANNOT narrow —
+ * it excludes a path-filtered workflow, and it excludes any job carrying an
+ * `if:`, which is every job whose schedule a `dorny/paths-filter` output
+ * decides. Those two exclusions are correct for the claim that tail makes
+ * ("CI runs this whatever your diff is") and they are exactly why the
+ * path-narrowed jobs had no reader at all: the family derivation looks INSIDE
+ * them for `check:*` invocations and reports what it finds, and nothing
+ * anywhere reported the rest of what those jobs run.
+ *
+ * ## The measured failure (#16285)
+ *
+ * `packages/qa/dogfood` routes to no gate family. A dev editing
+ * `packages/qa/dogfood/test/authz-probe-blind-spot.census.ts` derived 43
+ * commands with not one mention of dogfood on stdout, ran all 43, reconciled
+ * with `--ran`, and truthfully reported full coverage while
+ * `Dogfood Regression Gate (3/3)` was red on a test file in the very package
+ * they had edited. `--ran` cannot catch it: it reconciles against what the
+ * derivation produced, and the derivation never named the job.
+ *
+ * ⛔ The instance fix is REFUSED, and the count is why. Of the 74 workspace
+ * packages that declare a `test` script, ZERO are run by any of the 215
+ * `check:*` scripts in this tree — every one of them is run by a workflow job
+ * (`Test Core (N/6)` over the affected set, `Dogfood Regression Gate (N/3)`
+ * over the one package the partitioner excludes from it). So `packages/qa/
+ * dogfood` is not a missing edge, it is the first instance of a whole
+ * VOCABULARY this derivation did not have: its words are `check:*` families,
+ * and a workflow job watches a path just as much as a gate script does. A
+ * per-package edge would have to be re-derived for every one of the 74 and
+ * would still say nothing about the 75th.
+ *
+ * ## What is claimed for a row, and what is deliberately NOT
+ *
+ * Claimed: CI schedules this JOB for this path of yours, through the job
+ * `if:` this tool already resolves for the family derivation — and this step
+ * of it runs a command no discovered family accounts for. Both halves are
+ * read off the workflow text on every run; nothing here is listed.
+ *
+ * ⛔ NOT claimed: that a row is a test, a build or a setup step.
+ * `alwaysRunLines` refuses that classification for its own rows and the reason
+ * carries unchanged — every rule that separates them is a guess about a step's
+ * intent, and a guess in this position fabricates. `pnpm install
+ * --frozen-lockfile` and the sharded `turbo run test` sit in the same job and
+ * the reader judges which is which; what the tool states is only what it
+ * measured.
+ *
+ * ⛔ NOT a runnable command. Every row is CI's own shell, in CI's environment,
+ * with `${{ … }}` and `$RUNNER_TEMP` in it — so this block is OUTSIDE the
+ * runnable total and ⛔ never in `--commands`' stdout, for the reason
+ * `notRunnableRows` states one channel over: a stream a consumer executes must
+ * not carry a command that cannot run.
+ *
+ * ## What is excluded, and why each exclusion is the safe direction
+ *
+ *   - a job whose `if:` this tool cannot resolve to a filter output: it
+ *     contributes no population, exactly as it contributes none to the family
+ *     derivation, and a population guessed at would fabricate a schedule;
+ *   - a job whose population covers none of your paths: CI may skip it, so no
+ *     per-card claim is available;
+ *   - a step carrying an `if:`: counted and RETURNED, never silently dropped —
+ *     the claim is "CI runs this for your path", and a condition this walk did
+ *     not evaluate could falsify it, the same standard the tail holds;
+ *   - a step the family derivation DOES name a check family for: it is already
+ *     in the matched block above, and a row here would double-count it. The two
+ *     halves are disjoint by construction, which is what makes either count
+ *     mean anything.
+ */
+export function jobFilteredSteps(entries, paths) {
+  const rows = [];
+  const counts = {
+    populations: 0,
+    covering: 0,
+    named: 0,
+    steps: 0,
+    accounted: 0,
+    unaccounted: 0,
+    conditionalSteps: 0,
+  };
+  for (const { file, text } of entries) {
+    for (const job of jobFilterPopulations(text)) {
+      counts.populations += 1;
+      // Every path of yours this job's population covers, with the pattern that
+      // covered it — the same provenance the matched column carries, and for
+      // the same reason: a row is a claim and the reader is owed what backs it.
+      const hits = [];
+      for (const path of paths) {
+        const pattern = triggerListCovers(job.paths, path);
+        if (pattern) hits.push({ path, pattern });
+      }
+      if (hits.length === 0) continue;
+      counts.covering += 1;
+      const steps = [];
+      for (const step of extractStepBlocks(job.text)) {
+        // Continuations are SPLICED before the split, so a row is the command
+        // the shell sees rather than a fragment of its argv. It is the same
+        // reading `extractCheckInvocations` takes for the same body, and here
+        // it is what keeps the disclosure intact under the cap below: the
+        // dogfood job's test invocation is the FIFTH physical line of a
+        // backslash-continued command and the FIRST logical one, so unspliced
+        // it is the line the elision eats — a pointer that elides the one line
+        // the reader came for. ⛔ The always-runs tail is deliberately left
+        // reading physical lines: its rows are a disjoint set of jobs with
+        // their own pins, and changing a rendering this card does not touch is
+        // scope this card does not have.
+        const commands = runCommandTexts(step.text)
+          .flatMap((c) => joinLineContinuations(c).split('\n'))
+          .map((l) => l.trim())
+          .filter((l) => l !== '');
+        if (commands.length === 0) continue;
+        if (step.if) {
+          counts.conditionalSteps += 1;
+          continue;
+        }
+        counts.steps += 1;
+        if (extractCheckInvocations(step.text, file).length > 0) {
+          counts.accounted += 1;
+          continue;
+        }
+        counts.unaccounted += 1;
+        steps.push({ step: step.name, commands });
+      }
+      if (steps.length === 0) continue;
+      counts.named += 1;
+      rows.push({ workflow: file, job: job.name, outputs: job.outputs, hits, dropped: job.dropped, steps });
+    }
+  }
+  return { rows, counts };
+}
+
+/**
  * A workflow's OWN declaration that it deliberately has no check family to
  * discover — a whole-line comment anywhere in the workflow text:
  *
@@ -2858,6 +3042,47 @@ export function wholeTreePopulationRefusal(entry) {
 }
 
 /**
+ * Whether a hint sitting beside a WIDE-population declaration is compatible
+ * with it, rather than a competing claim about the population (#16828, found
+ * on `check:route-envelope`).
+ *
+ * The refusal below used to fire on ANY named hint at all, on the theory that
+ * a gate claiming "no subtree glob places me" contradicts itself the moment
+ * its own source spells one. That is true of a hint that REACHES beyond the
+ * one file it names — a bare directory, or a glob — because such a hint is
+ * itself an attempt to spell the population, and two competing spellings of
+ * one population is exactly the coin toss this file refuses everywhere else.
+ * It is NOT true of a hint that reaches nothing but itself: an exact file path
+ * ending in a source/doc extension. `hintCovers`'s own plain branch matches
+ * such a hint only by EQUALITY — nothing can start with `<file>.ts/` — so
+ * admitting one changes nothing the marker claims about the population's
+ * WIDTH; it only records that one member of it happens to already be on
+ * record (`check:route-envelope`'s `MODULES` table, keyed by exact path, is
+ * the specimen: 30-plus such hints, every one a route module the gate already
+ * audits, none of them any narrower a claim than "this one file exists").
+ *
+ * A hint that DOES reach beyond itself is admitted only when the marker's own
+ * REASON TEXT names it — the same bar `wholeTreePopulationRefusal` holds a
+ * repo-root walk to (a claim with no reason behind it puts a row out on
+ * nothing). `check:route-envelope` carries exactly one such hint,
+ * `DISPATCHER_DOMAIN_DIR` (`packages/runtime/src/domains`): a directory whose
+ * own membership is exhaustively audited by `discoverDomains()` against the
+ * separate `DISPATCHER_DOMAINS` table, so it is a second, independently closed
+ * surface rather than a rival spelling of the FIRST one the marker is about.
+ * Naming it in the reason is what lets a reader tell the two apart instead of
+ * being asked to trust a silent exemption.
+ *
+ * A glob is never exempt this way, named or not: `judgedAsPattern` reports a
+ * hint that is ITSELF a population spelling — reason text that repeats it
+ * back is not an account of it, it is the same contradiction typed twice.
+ */
+function widePopulationHintCompatible(hint, reason) {
+  if (judgedAsPattern(hint)) return false;
+  if (/\.[A-Za-z0-9]{1,6}$/.test(hint)) return true;
+  return reason.includes(hint);
+}
+
+/**
  * Why this family's WIDE-population declaration must be refused, or null when
  * it stands. Pure, and reading only what the discovery already put on the
  * entry — the same contract `wholeTreePopulationRefusal` above states, and for
@@ -2874,12 +3099,17 @@ export function wholeTreePopulationRefusal(entry) {
  *                  card — the opposite disposition from this one — so the pair
  *                  would place the family by whichever branch was read first.
  *   NAMES PATHS    the declaration says no subtree glob places this gate, and
- *                  the gate's own source spells one. One of the two is wrong
- *                  and the derivation cannot tell which: the marker's whole
- *                  content is the sentence a reader trusts, so a marker sitting
- *                  above a live population is the rot direction that costs —
- *                  the reader is told "nothing here can be narrowed" while the
- *                  matched column narrows it.
+ *                  the gate's own source spells one anyway — a hint
+ *                  `widePopulationHintCompatible` above does not clear. One of
+ *                  the two is wrong and the derivation cannot tell which: the
+ *                  marker's whole content is the sentence a reader trusts, so
+ *                  a marker sitting above an unaccounted-for population is the
+ *                  rot direction that costs — the reader is told "nothing
+ *                  here can be narrowed" while the matched column narrows it.
+ *                  ⚠️ This is deliberately NOT "does the gate name any path at
+ *                  all" (#16828): an enumerated exact-file member, or a
+ *                  subtree the reason itself names, is not that contradiction
+ *                  — see `widePopulationHintCompatible`'s own docblock.
  */
 export function widePopulationRefusal(entry) {
   const reason = entry?.widePopulationReason ?? null;
@@ -2894,13 +3124,14 @@ export function widePopulationRefusal(entry) {
       + 'these two carry OPPOSITE dispositions: a whole-tree family is owed by every card and its command is inside every '
       + "card's runnable total, a wide-population one is owed by CI and is in no card's. Delete the one that is not true.";
   }
-  if ((entry?.hints ?? []).length > 0) {
-    return 'declares wide-population and its own source NAMES paths: '
-      + `${(entry.hints ?? []).slice(0, 4).join(', ')}${(entry.hints ?? []).length > 4 ? ', …' : ''}. `
-      + 'The declaration says no subtree glob places this gate and the gate spells one, so one of the two is wrong and '
-      + 'nothing here can tell which. If the literals are the real population, delete the marker and let the matched '
-      + 'column do its job; if they are artifacts rather than a population, the marker stands and the literals do not '
-      + 'belong in a scanned position.';
+  const uncovered = (entry?.hints ?? []).filter((h) => !widePopulationHintCompatible(h, reason));
+  if (uncovered.length > 0) {
+    return 'declares wide-population and its own source NAMES paths that reach beyond the single file each one names: '
+      + `${uncovered.slice(0, 4).join(', ')}${uncovered.length > 4 ? ', …' : ''}. `
+      + 'The declaration says no subtree glob places this gate and the gate spells one it does not account for, so one of '
+      + 'the two is wrong and nothing here can tell which. If the literal is the real population, delete the marker and '
+      + 'let the matched column do its job; if it is a second, separately audited surface, name it in the reason text; '
+      + 'if it is an artifact rather than a population, it does not belong in a scanned position.';
   }
   return null;
 }
@@ -2992,8 +3223,9 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
     'scripts/symbol-anchors.mjs --self-test',
     'a shared grammar-and-extractor LIBRARY, invoked by CI only as its own self-test; its `git ls-files` runs over a '
       + 'corpus its caller passes in. The corpus walk it lends is exercised by its registrations — '
-      + 'check-adr-symbol-anchors.mjs, which declares ROOT_DIR_WATCH_HINTS = [docs/adr/**], and '
-      + 'check-scripts-symbol-anchors.mjs, which declares [scripts/**] — and each is placed by its own.',
+      + 'check-adr-symbol-anchors.mjs, which declares ROOT_DIR_WATCH_HINTS = [docs/adr/**], '
+      + 'check-scripts-symbol-anchors.mjs, which declares [scripts/**], and '
+      + 'check-spec-docblock-symbol-anchors.mjs, which declares [packages/spec/src/**] — and each is placed by its own.',
   ],
 ];
 
@@ -9938,6 +10170,75 @@ export function alwaysRunLines(rows, counts) {
 }
 
 /**
+ * The path-scheduled CI jobs, rendered (#16285) — printed BELOW the
+ * reconciliation, because everything under that total names something OUTSIDE
+ * this card's runnable answer and these rows are outside it by construction:
+ * they are CI's own shell, in CI's environment, and no local run of them is on
+ * offer.
+ *
+ * Placed directly ABOVE the always-runs tail because the two are the halves of
+ * one partition and the adjacency is the claim: the tail reads the jobs CI
+ * CANNOT narrow by path, this reads the jobs your paths narrow it TO. A reader
+ * meeting one and not the other has half the account of what CI runs.
+ *
+ * Rows carry the job NAME, which is what CI, branch protection and a red check
+ * call it — a lead a dev cannot find in the Checks tab is a lead they will not
+ * act on, the reason `extractJobBlocks` reads the name at all.
+ *
+ * The command transcript is capped and elided on `ALWAYS_RUN_COMMAND_CAP`, the
+ * tail's own cap and the same pointer text, because it is the same decision for
+ * the same reason: a row is a POINTER to a step, not a transcript of it, and a
+ * block nobody reads discloses nothing. ⛔ One cap, one spelling — a second
+ * constant here would be a second rule about one thing.
+ */
+export function jobFilteredStepLines(rows, counts) {
+  if (rows.length === 0) return [];
+  const { covering = 0, named = 0, steps = 0, accounted = 0, unaccounted = 0, conditionalSteps = 0 } = counts ?? {};
+  if (named !== rows.length) {
+    throw new Error(
+      `the path-scheduled job block counted ${named} job(s) with an unnamed step but carries ${rows.length} row(s)`,
+    );
+  }
+  if (accounted + unaccounted !== steps) {
+    throw new Error(
+      `the path-scheduled job block does not account for its own steps: ${accounted} accounted + ` +
+        `${unaccounted} unaccounted != ${steps} walked`,
+    );
+  }
+  const lines = [
+    `CI jobs YOUR paths schedule — ${covering} job(s) CI runs because one of your paths is in the population its \`if:\` reads,` +
+      ` ${named} of them carrying ${unaccounted} step(s) this derivation names NO check family for (over ${accounted} it does).`,
+    '  ⛔ NOT runnable and ⛔ NOT in --commands: every row is CI\'s own shell in CI\'s environment. They sit OUTSIDE the runnable',
+    '    total above — running every family named there does NOT cover them, which is the gap this block exists to close.',
+    '  ⛔ NOT classified into tests, builds and setup — the same refusal the always-runs tail makes, for the same reason: every rule',
+    '    that tells them apart is a guess about a step\'s intent. What is claimed for a row is only what was measured — YOUR path puts',
+    '    this job on the PR, and nothing above names a family for this step. The reader judges the rest.',
+    '  ⇒ The always-runs tail below is the OTHER half of this partition: it reads the jobs CI cannot narrow by path, this one reads',
+    '    the jobs your paths narrow it TO — and a job carrying an `if:` is excluded there, which is every job on this list.',
+  ];
+  if (conditionalSteps) {
+    lines.push(
+      `  Excluded as conditional, and sized rather than dropped: ${conditionalSteps} step(s) of these jobs carry an \`if:\`,` +
+        ' so CI may skip them and this block makes no claim about those.',
+    );
+  }
+  for (const row of rows) {
+    const via = row.hits.map((h) => `${h.path} ⇢ '${h.pattern}'`).join('; ');
+    const dropped = row.dropped ? `, ${row.dropped} glob(s) of it untranslatable and dropped` : '';
+    lines.push(
+      `  - [${row.workflow} · ${row.job}]   scheduled by ${via}   (job \`if:\` reads ${row.outputs.join(', ')}${dropped})`,
+    );
+    for (const { step, commands } of row.steps) {
+      lines.push(`      · ${step}`);
+      for (const command of commands.slice(0, ALWAYS_RUN_COMMAND_CAP)) lines.push(`          ${command}`);
+      const elided = commands.length - ALWAYS_RUN_COMMAND_CAP;
+      if (elided > 0) lines.push(`          … ${elided} more line(s) — read the step in ${row.workflow}`);
+    }
+  }
+  return lines;
+}
+
+/**
  * The whole-tree channel, rendered (#14189) — its own heading, identical on
  * every card, printed ABOVE the reconciliation because its commands are inside
  * that total.
@@ -10998,10 +11299,12 @@ export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows 
  * the artifact rosters and the declared WIDE population. A harvester who
  * followed the enumeration and stopped never reached either, and CI caught the
  * difference on a family printed in the WIDE block (#16398). The list now
- * exists ONCE, as `outsideBlockNames` in `familyReconciliationLines`, built
- * from the block counts on `recon` so a block that printed cannot be missing
- * from it and a block that did not print cannot be named. Amend it there;
- * there is no second copy here to keep in step.
+ * exists ONCE, as the exported `outsideBlockNames`, built from the block counts
+ * its callers hand it so a block that printed cannot be missing from it and a
+ * block that did not print cannot be named. All THREE output lanes read it —
+ * this one, `--ran` and the `--commands`/`--json` stderr accounting, which used
+ * to carry short prose copies of their own (#16795). Amend it there; there is
+ * no second copy here to keep in step.
  *
  * `staleRows` and the row/family gap are surfaced rather than smoothed. A
  * consumer counting PRINTED rows in the convention block and comparing them
@@ -11010,7 +11313,8 @@ export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows 
  * hit by two kinds prints twice. Both are stated in the rendering.
  */
 export function familyReconciliation({
-  matchedRows = [], kindGroups = [], alwaysRunsRows = [], rosterRows = [], widePopulationRows = [],
+  matchedRows = [], kindGroups = [], alwaysRunsRows = [], rosterRows = [], widePopulationRows = [], pendingRows = [],
+  jobFilteredRows = [],
 } = {}) {
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   // The SAME expression commandsFor uses for its matched half. Written as a
@@ -11084,15 +11388,27 @@ export function familyReconciliation({
     staleRows,
     ciOnlyConventionRows,
     notRunnableConventionRows,
-    // Two counts that are NOT terms of the total and never enter the closure
-    // assertion below — they are the SIZES of two blocks printed under this
+    // Three counts that are NOT terms of the total and never enter the closure
+    // assertion below — they are the SIZES of three blocks printed under this
     // line, carried here for the same reason `ciOnly` and `notRunnable` are:
     // the rendering has to name what sits outside the answer, and a count it
     // reads from the arrays that RENDER those blocks cannot disagree with them
-    // (#16398). `familyReconciliationLines` is where they are used; its
-    // `outsideBlockNames` is the only place the list of outside blocks exists.
+    // (#16398). They are handed to `outsideBlockNames`, which is the only place
+    // the list of outside blocks exists.
     artifactRosters: rosterRows.length,
     widePopulation: widePopulationRows.length,
+    // The THIRD block size (#16795). Its name was the one the enumeration still
+    // spelled UNCONDITIONALLY, while `pendingChangesetLines` returns nothing at
+    // zero — so on a card with no pending family the sentence pointed a reader
+    // below at a heading that is not there. That is this same defect facing the
+    // other way, and it is fixed the same way: by counting the array that
+    // renders the block rather than by writing the name out.
+    pendingChangeset: pendingRows.length,
+    // The FOURTH block size (#16285), carried on exactly the same terms as the
+    // three above: not a term of the total, never in the closure assertion, and
+    // read off the array `jobFilteredStepLines` renders so the enumeration
+    // cannot name a heading the output does not print.
+    jobFilteredJobs: jobFilteredRows.length,
   };
   if (recon.matched + recon.convention - recon.both + recon.alwaysRunsOnly !== recon.total) {
     throw new Error(
@@ -11104,6 +11420,96 @@ export function familyReconciliation({
     );
   }
   return recon;
+}
+
+/**
+ * ⭐ The blocks that sit OUTSIDE a card's runnable total, enumerated ONCE for
+ * ALL THREE output lanes.
+ *
+ * This is one claim, and it has been spelled four different ways. The human
+ * rendering and a comment beside it each wrote it out in prose; the two copies
+ * drifted, and both named three of the five blocks the same run printed — the
+ * artifact rosters and the declared WIDE population, the two nothing else tells
+ * a seat to run. A harvester who followed the enumeration and stopped reached
+ * neither, and CI reddened on a family printed in the WIDE block (#16398). That
+ * card built the list once, for the human lane. The other two lanes kept their
+ * own short prose copies: `--ran` named three of five, and the
+ * `--commands`/`--json` stderr accounting named exactly ONE — on the very
+ * channel this file's own header tells consumers to use INSTEAD of harvesting
+ * the prose, which makes a whole block missing from it the same failure on the
+ * lane that was supposed to be the safe one (#16795).
+ *
+ * ⛔ So a lane never spells its own copy. It calls this with the counts it
+ * holds, and a block it does not know about is absent by construction rather
+ * than by care. Four copies of one sentence is how the sentence went wrong;
+ * this is the one copy.
+ *
+ * ⭐ Built from the block COUNTS, never written out: each count is the length
+ * of the very array `artifactRosterLines`, `widePopulationLines` or
+ * `pendingChangesetLines` renders, so the enumeration cannot name a set the
+ * output does not contain. A count of 0 drops the name, because at zero rows
+ * all three of those return nothing — pointing a reader "below" at a heading
+ * that is not there is this same defect facing the other way, and the
+ * pending-changeset name carried exactly that bug for as long as it was
+ * spelled unconditionally. The last two names have no count and no condition
+ * because their renderings have none: `unreachableLines` and `alwaysRunLines`
+ * print on EVERY run, at zero as at fifty.
+ *
+ * Named in the order a plain run PRINTS them, so a reader walking down the
+ * output meets the blocks in the order this list promised them.
+ */
+export function outsideBlockNames({
+  artifactRosters = 0, widePopulation = 0, pendingChangeset = 0, jobFilteredJobs = 0,
+} = {}) {
+  return [
+    ...(artifactRosters > 0 ? [`the ${artifactRosters} artifact-roster famil(ies)`] : []),
+    ...(widePopulation > 0 ? [`the ${widePopulation} declared WIDE-population famil(ies)`] : []),
+    ...(pendingChangeset > 0 ? [`the ${pendingChangeset} pending-changeset famil(ies)`] : []),
+    'the unreachable listing',
+    // The FOURTH conditional name (#16285), and the only one that is not last
+    // among the conditionals: the list is spelled in the order a plain run
+    // PRINTS the blocks, and this block prints between the unreachable listing
+    // and the always-runs tail, beside the partition half it belongs to. It
+    // arrives HERE and nowhere else for the reason this function exists at all:
+    // the same enumeration is rendered by three lanes, and a block a lane
+    // spells for itself is a block another lane forgets. Counted off the array
+    // that renders it, like the three above, so the name cannot outlive the
+    // heading.
+    ...(jobFilteredJobs > 0 ? [`the ${jobFilteredJobs} path-scheduled CI job(s)`] : []),
+    'the always-runs tail',
+  ];
+}
+
+/**
+ * The same enumeration as one English phrase — the only place the join is
+ * spelled, for the reason the list itself has only one place.
+ *
+ * Every name opens with a lowercase article, so a sentence-initial use raises
+ * the leading letter at the point of use rather than keeping a second,
+ * capitalised copy of the list — which is the duplication this pair exists to
+ * remove.
+ */
+export function outsideBlocksPhrase(counts) {
+  const names = outsideBlockNames(counts);
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/**
+ * The three block sizes a `recon` from `familyReconciliation` carries, read
+ * back off it in the shape `outsideBlockNames` takes.
+ *
+ * A named reader rather than an object literal at each call site: the human
+ * lane and `--ran` both hand the same three counts across, and two literals
+ * spelling the same three key names is the smallest possible version of the
+ * duplication this whole construction removes.
+ */
+export function outsideBlockCounts(recon) {
+  return {
+    artifactRosters: recon?.artifactRosters ?? 0,
+    widePopulation: recon?.widePopulation ?? 0,
+    pendingChangeset: recon?.pendingChangeset ?? 0,
+    jobFilteredJobs: recon?.jobFilteredJobs ?? 0,
+  };
 }
 
 /**
@@ -11144,30 +11550,12 @@ export function familyReconciliationLines(recon) {
         ' Named under their own heading above with the variable in the value position, carried on their row in --json,' +
         ' and omitted from --commands by design.'
       : null;
-  // ⭐ The enumeration of what sits OUTSIDE this total — built ONCE here and
-  // rendered by BOTH branches below, because it is one claim and two copies of
-  // it is exactly how it went wrong. It was prose, and the prose named three
-  // blocks while the same run printed five; the two it omitted, the artifact
-  // rosters and the declared WIDE population, are the ones nothing else in this
-  // rendering tells a seat to run. A harvester who follows this line and stops
-  // reached neither, and CI reddened on a family printed in the WIDE block
-  // (#16398).
-  //
-  // Assembled from the block COUNTS on `recon` rather than written out, so the
-  // list cannot disagree with what was printed: the counts are the lengths of
-  // the very arrays `artifactRosterLines` and `widePopulationLines` render. A
-  // count of 0 drops the name, because at zero rows both of those return
-  // nothing — pointing a reader "below" at a heading that is not there is the
-  // same defect facing the other way. Named in the order they are PRINTED, so
-  // a reader walking down the output meets them as promised.
-  const outsideBlockNames = [
-    ...(recon.artifactRosters > 0 ? [`the ${recon.artifactRosters} artifact-roster famil(ies)`] : []),
-    ...(recon.widePopulation > 0 ? [`the ${recon.widePopulation} declared WIDE-population famil(ies)`] : []),
-    'the pending-changeset families',
-    'the unreachable listing',
-    'the always-runs tail',
-  ];
-  const outsideBlocks = `${outsideBlockNames.slice(0, -1).join(', ')} and ${outsideBlockNames[outsideBlockNames.length - 1]}`;
+  // ⭐ The enumeration of what sits OUTSIDE this total, READ from the one place
+  // it exists (`outsideBlockNames`) and rendered by BOTH branches below. It is
+  // one claim, and a copy of it per lane is exactly how it went wrong — see
+  // that function for the two measured drifts and for why every name is
+  // conditional on the count of the array that renders its block.
+  const outsideBlocks = outsideBlocksPhrase(outsideBlockCounts(recon));
   // Both uses below are sentence-initial and every name opens with a lowercase
   // article, so the leading letter is raised here rather than by keeping a
   // second, capitalised copy of the list — which is the duplication this whole
@@ -11533,8 +11921,19 @@ export function runReconciliation({
  * remainder is classified by the tool: a verdict a reader has to assemble from
  * several counts is a verdict that gets waved through once the counts are
  * routinely non-empty.
+ *
+ * `outside` carries the SIZES of the blocks a run without `--ran` prints below
+ * its reconciliation — the same three counts `familyReconciliation` puts on its
+ * own recon, taken from the same arrays. They are a parameter rather than a
+ * term of `runReconciliation` on purpose: this reconciliation's arithmetic is
+ * record-against-derived and closes over its own classes, and a block size is
+ * not one of them — it is an input to the SENTENCE, so it arrives where the
+ * sentence is written. Defaulting to zero counts keeps every caller that has no
+ * derivation beside it (the self-test's fixtures) naming exactly the two blocks
+ * that print unconditionally, which is the true answer for a run with none of
+ * the other three (#16795).
  */
-export function runReconciliationLines(recon) {
+export function runReconciliationLines(recon, outside = {}) {
   const lines = [];
   const marker = RUN_RECORD_UNMEASURED_MARKER;
   lines.push(
@@ -11595,9 +11994,17 @@ export function runReconciliationLines(recon) {
   for (const command of recon.conflicts) {
     lines.push(`  ⚠️ '${command}' is recorded BOTH as run and as ${marker}. Read as run; fix the record so it states one thing.`);
   }
+  // ⭐ The enumeration READ from the one place it exists, not a prose copy.
+  // This sentence used to spell three of the five blocks a plain run prints,
+  // omitting the artifact rosters and the declared WIDE population — the same
+  // short list, on a second lane, that #16398 measured a CI round trip for on
+  // the first one (#16795). It also named the pending-changeset families
+  // unconditionally, at a heading that is not printed when there are none.
+  // Both are structural now: `outsideBlockNames` cannot name a block whose
+  // count is zero, and cannot omit one whose count is not.
   lines.push(
     '  ⛔ This answers ONE link: what this card DERIVES against what you RAN. It is not a complete account of what CI runs on the PR —' +
-      ' the always-runs tail, the unreachable listing and the pending-changeset families are each outside the derived total, each printed under its own heading by a run without --ran.',
+      ` ${outsideBlocksPhrase(outside)} are each outside the derived total, each printed under its own heading by a run without --ran.`,
   );
   lines.push(
     recon.ok
@@ -11621,7 +12028,7 @@ export function runReconciliationLines(recon) {
  * That distinction is the card's own subject matter: what is left out of a list
  * must be visible in the list.
  */
-export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], widePopulationRows = [], rosters = [] }) {
+export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const { otherCommands, ...spelling } = spellingSplit(commands);
   return {
@@ -11670,6 +12077,17 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
         workflows: [...entry.workflows],
       })),
     },
+    // IN this document and ⛔ NOT in `commands` (#16285) — the same disposition
+    // as `widePopulation` above and for a stricter reason: these rows are not
+    // check families at all. They are CI's own steps, in CI's environment, in
+    // jobs THIS CARD'S PATHS schedule, that no discovered family accounts for.
+    // Its own key so a machine consumer reads the omission the human block
+    // names rather than inferring it from an absence — the whole contract of
+    // this document. `counts` travels beside the rows because the block's
+    // heading is arithmetic (how many jobs cover, how many steps are accounted
+    // for) and a consumer that had to recount it could name a set the rows do
+    // not contain.
+    jobFilteredSteps: { jobs: jobFiltered.rows, counts: jobFiltered.counts },
     counts,
   };
 }
@@ -11685,18 +12103,21 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
  * documented — there is no prose in the stream to pattern-match, and therefore
  * no spelling for a pattern to prefer.
  *
- * The stderr accounting exists so the two things stdout deliberately omits —
- * the pending-changeset families and the always-runs tail — are omitted OUT
- * LOUD. A quiet omission is the defect this mode was added to fix, and adding a
- * new one inside the fix is how that defect reproduces itself one layer up.
+ * The stderr accounting exists so everything stdout deliberately omits is
+ * omitted OUT LOUD. A quiet omission is the defect this mode was added to fix,
+ * and adding a new one inside the fix is how that defect reproduces itself one
+ * layer up — which is exactly what the closing disclaimer did: it named the
+ * always-runs tail and stopped, while FIVE blocks sit outside the command list
+ * and the declared WIDE population was not mentioned in it at all. It reads
+ * `outsideBlockNames` now, with the counts this function already holds (#16795).
  */
-function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], widePopulationRows = [], rosters = [] }) {
+function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], widePopulationRows = [], rosters = [], jobFiltered = { rows: [], counts: {} } }) {
   const identity = repoIdentity();
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const split = spellingSplit(commands);
 
   if (mode === 'json') {
-    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, widePopulationRows, rosters }), null, 2));
+    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, widePopulationRows, rosters, jobFiltered }), null, 2));
   } else {
     for (const command of commands) console.log(command);
   }
@@ -11770,14 +12191,51 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
         'they are derived against a path that does not exist yet. Write the changeset, then derive again.',
     );
   }
+  // The SIXTH thing stdout deliberately omits (#16285), and the one a consumer
+  // of THIS lane is least able to infer: it is not a check family at all, so no
+  // key on any row above hints that it exists. The jobs are NAMED one per line
+  // rather than counted, for the reason the NOT MEASURED lines above are: a
+  // count says something is missing; it does not say that the thing missing is
+  // the CI job that runs the tests of the package this card edits — which is
+  // exactly the report this block was filed on.
+  if (jobFiltered.rows.length) {
+    console.error(
+      `  + ${jobFiltered.rows.length} CI job(s) are scheduled BY YOUR PATHS and run ${jobFiltered.counts.unaccounted} step(s) no family above names` +
+        ` — ${mode === 'json' ? 'under jobFilteredSteps, not in commands' : 'NOT above'}. They are CI's own shell in CI's environment,` +
+        ' so there is no local invocation to hand you, and running every command on stdout does ⛔ NOT cover them.',
+    );
+    for (const row of jobFiltered.rows) {
+      console.error(
+        `      ⊘ NOT MEASURED — [${row.workflow} · ${row.job}] ${row.steps.length} step(s):` +
+          ` ${row.steps.map((s) => s.step).join(' · ')}`,
+      );
+    }
+    console.error('      ⇒ Run without --commands/--json to see each step printed as CI spells it.');
+  }
   // The FOURTH thing stdout deliberately omits (#14880), on stderr for exactly
   // the reason the three above are: the block is prose, and prose in the stream
   // a consumer executes is the harvest hazard this mode exists to make
   // unreachable. ⛔ Never merged into the command list — these families are
   // `silent`, and no path a caller passes can move them.
   for (const line of artifactRosterLines(rosters)) console.error(`  ${line}`);
+  // ⭐ The closing disclaimer, READ from the one place the list exists. It named
+  // the always-runs tail alone, so a `--commands` consumer — the reader this
+  // file's own header sends here INSTEAD of the prose — was never told the
+  // declared WIDE population exists, which is the same defect on the lane that
+  // was supposed to be the safe one (#16795).
+  //
+  // The counts are the LENGTHS OF THE ARRAYS THAT RENDER THE BLOCKS on a plain
+  // run, deliberately not the runnable subsets the count lines above report:
+  // `widePopulationLines` prints its refused rows too, so sizing this name off
+  // `wideRunnable` would name a block by a number the block does not show. Each
+  // name is the block, not the part of it this lane happens to summarise.
   console.error(
-    '  ⛔ Not a complete account of what CI runs on this PR: the always-runs tail (workflows with no path filter) is NOT here. Run without --commands/--json for it.',
+    `  ⛔ Not a complete account of what CI runs on this PR: ${outsideBlocksPhrase({
+      artifactRosters: rosters.length,
+      widePopulation: widePopulationRows.length,
+      pendingChangeset: pending.length,
+      jobFilteredJobs: jobFiltered.rows.length,
+    })} are each OUTSIDE the ${commands.length} command(s) on stdout. Run without --commands/--json to see every one of them named.`,
   );
 }
 
@@ -11913,6 +12371,12 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // and this comes back empty. See pendingChangesetFamilies for the round of
   // five dispatches that measured the gap.
   const pending = pendingChangesetFamilies([...byCheck], new Set(matched.keys()));
+  // Read from the SAME `workflowEntries` the discovery and the always-runs tail
+  // read, for the reason they share it: a block derived from a second read
+  // could describe a different revision of a workflow than the families it is
+  // printed beside, and the whole point of this block is that it states what
+  // the family list does not cover (#16285).
+  const jobFiltered = jobFilteredSteps(workflowEntries, paths);
 
   if (mode === 'ran') {
     // Built from the SAME four expressions the other renderings read, in this
@@ -11937,7 +12401,18 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       pendingCommands: new Set(pending.map(({ entry }) => runnableInvocation(entry))),
       record: runRecord,
     });
-    for (const line of runReconciliationLines(recon)) console.log(line);
+    // The block sizes handed across as the SAME arrays a plain run renders
+    // those blocks from — never as recounts of them, for the reason the human
+    // lane's own call states: a second count could name a set the output does
+    // not contain (#16398, #16795). `--ran` prints none of these blocks itself;
+    // the sentence points at the run that does, and it must point at what THAT
+    // run would print for these paths, which is what these three arrays are.
+    for (const line of runReconciliationLines(recon, {
+      artifactRosters: rosters.length,
+      widePopulation: widePopulationRows.length,
+      pendingChangeset: pending.length,
+      jobFilteredJobs: jobFiltered.rows.length,
+    })) console.log(line);
     return recon.ok ? 0 : 1;
   }
 
@@ -11950,6 +12425,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       alwaysRunsRows,
       widePopulationRows,
       rosters,
+      jobFiltered,
       counts: {
         discovered: byCheck.size,
         workflows: workflows.length,
@@ -11970,13 +12446,14 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // the block it counts) and the reconciliation line below. Recomputing it in
   // either place would be two readings of one derivation, which is the drift
   // this card is about.
-  // `rosters` and `widePopulationRows` are handed in as the SAME arrays the two
-  // blocks below the reconciliation are rendered from, never as recounts of
-  // them: the line has to name every block that sits outside this total, and a
-  // second count of those rows could name a set the output does not contain
-  // (#16398).
+  // `rosters`, `widePopulationRows` and `pending` are handed in as the SAME
+  // arrays the three conditional blocks below the reconciliation are rendered
+  // from, never as recounts of them: the line has to name every block that sits
+  // outside this total, and a second count of those rows could name a set the
+  // output does not contain (#16398, #16795).
   const recon = familyReconciliation({
-    matchedRows, kindGroups, alwaysRunsRows, rosterRows: rosters, widePopulationRows,
+    matchedRows, kindGroups, alwaysRunsRows, rosterRows: rosters, widePopulationRows, pendingRows: pending,
+    jobFilteredRows: jobFiltered.rows,
   });
 
   console.log(`dispatch-gates: ${byCheck.size} check famil(ies) discovered across ${workflows.length} workflow file(s) — derived at runtime, nothing listed in this script.\n`);
@@ -12230,6 +12707,21 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // pass — see `unreachableLines` for the CI failure that made that concrete.
   console.log('');
   for (const line of unreachableLines(unreachable, swept.length)) console.log(line);
+
+  // The path-scheduled CI jobs (#16285), printed on EVERY run for the reason
+  // the unreachable listing and the always-runs tail are: neither is about the
+  // card's paths at all and both print unconditionally, while THIS one is about
+  // the card's paths and is the block whose absence was measured — a truthful
+  // "N derived, N run, 0 NOT-MEASURED" report standing for three hours beside a
+  // red gate in the very package the card edited. Directly ABOVE the always-runs
+  // tail because the two are the halves of ONE partition — the tail reads the
+  // jobs CI cannot narrow by path, this reads the jobs your paths narrow it TO
+  // — and a reader meeting one without the other has half the account.
+  const jobFilteredOut = jobFilteredStepLines(jobFiltered.rows, jobFiltered.counts);
+  if (jobFilteredOut.length) {
+    console.log('');
+    for (const line of jobFilteredOut) console.log(line);
+  }
 
   // The always-runs tail prints on every run for the same reason and with the
   // same standing: it is not about the card's paths either, and the family list
@@ -15080,6 +15572,46 @@ function selfTest() {
     shHints(shJsComment).length === 0,
     shHints(shJsComment),
   );
+  // ── The PHANTOM BLOCK COMMENT the order used to open (#16744) ─────────────
+  //
+  // The other direction of the same "THIRD kind" defect, and the card's whole
+  // acceptance criterion: two sources that differ in FOUR CHARACTERS OF PROSE,
+  // both of which must read the one hint their code spells. The first carries a
+  // block-comment opener inside a `#` comment; while `#` was masked LAST that
+  // opener reached the JS scanner and blanked the real `DEST=` line under it.
+  //
+  // ⛔ The control is not decoration. A change that only makes the first row
+  // fire — by disabling the mask, or by dropping the JS scanner on this kind —
+  // takes the second row down with it or leaves it as the ONLY row that fires.
+  // Both rows read 1, or this is not the fix.
+  const shPhantom = '# published @objectstack/* packages\nDEST="node_modules/@objectstack/spec/dist"\n';
+  const shPhantomControl = '# published packages\nDEST="node_modules/@objectstack/spec/dist"\n';
+  t(
+    '⭐ a `/*` inside a `#` comment no longer opens a block comment over the shell code below it',
+    shHints(shPhantom, 'scripts/x.sh').join() === 'node_modules/@objectstack/spec/dist',
+    shHints(shPhantom, 'scripts/x.sh'),
+  );
+  t(
+    '⭐ CONTROL: the same code under a comment with NO opener still reads its one hint — the mask was fixed, not switched off',
+    shHints(shPhantomControl, 'scripts/x.sh').join() === 'node_modules/@objectstack/spec/dist',
+    shHints(shPhantomControl, 'scripts/x.sh'),
+  );
+  // The span, not just the line: an unterminated opener ran to the END OF FILE,
+  // so the cost was every hint below it rather than the one line beside it.
+  const shPhantomSpan =
+    '# everything below this line is /* invisible\n'
+    + 'bash "scripts/one.sh"\n'
+    + 'bash "scripts/two.sh"\n';
+  t(
+    '…and it ran to END OF FILE, so the recovered span is every hint below the comment, not one line',
+    shHints(shPhantomSpan, 'scripts/x.sh').join() === 'scripts/one.sh,scripts/two.sh',
+    shHints(shPhantomSpan, 'scripts/x.sh'),
+  );
+  t(
+    '…non-vacuously: the JS-kind control on the same bytes still loses both, which is what this order costs a `.sh` file',
+    shHints(shPhantomSpan, 'scripts/x.sh.mjs').length === 0,
+    shHints(shPhantomSpan, 'scripts/x.sh.mjs'),
+  );
   // KIND-SCOPED, in both directions. The same bytes on a `.mjs` path must keep
   // spelling their hint: `#` is not a comment in JavaScript, and a mask that
   // fired there would be a widening rather than this card's narrowing.
@@ -15167,24 +15699,45 @@ function selfTest() {
   let shellShrank = 0;
   let shellBefore = 0;
   let shellAfter = 0;
+  const shellAddedProse = [];
   for (const f of liveShellFiles) {
     const src = readFileSync(nodePath.join(ROOT, f), 'utf8');
     const masked = extractWatchHints(src, f, { tree: hintTree });
     const unmasked = extractWatchHints(src, `${f}.mjs`, { tree: hintTree });
     shellBefore += unmasked.length;
     shellAfter += masked.length;
-    if (masked.some((h) => !unmasked.includes(h))) shellGrew++;
+    const added = masked.filter((h) => !unmasked.includes(h));
+    // An ADDED hint is admissible only if it is spelled in CODE: its literal has
+    // to survive the `#` mask. One spelled only inside a `#` comment would be
+    // the FABRICATING direction arriving through the very reorder that fixed
+    // the under-mask, so it is collected by name rather than counted.
+    const code = maskShellComments(src);
+    for (const h of added) if (!code.includes(h)) shellAddedProse.push([f, h]);
+    if (added.length) shellGrew++;
     else if (masked.length < unmasked.length) shellShrank++;
   }
   t(
-    `⭐ LIVE: over ${liveShellFiles.length} tracked .sh file(s) the mask never ADDS a hint — ${shellBefore} spelled without it, ${shellAfter} with`,
-    liveShellFiles.length > 0 && shellGrew === 0 && shellAfter < shellBefore,
-    JSON.stringify({ files: liveShellFiles.length, shellBefore, shellAfter, shellGrew, shellShrank }),
+    `⭐ LIVE: over ${liveShellFiles.length} tracked .sh file(s) every hint the \`#\` mask ADDS is spelled in CODE — ${shellBefore} hints without the mask, ${shellAfter} with`,
+    liveShellFiles.length > 0 && shellAddedProse.length === 0 && shellAfter < shellBefore,
+    JSON.stringify({ files: liveShellFiles.length, shellBefore, shellAfter, shellGrew, shellShrank, shellAddedProse }),
   );
   t(
     '…non-vacuously: at least one live file really loses a hint, so the sweep is not passing over an instrument that changed nothing',
     shellShrank >= 1,
     JSON.stringify({ shellShrank }),
+  );
+  // ⛔ This case replaced a `shellGrew === 0` pin (#16132), and the replacement
+  // is the point of #16744 rather than a relaxation of it. That spelling was
+  // true only because `#` was masked LAST, which left shell prose to reach the
+  // JS scanner first: a `#` comment containing `/*` opened a phantom block
+  // comment over the real code below it, so the code could not spell a hint in
+  // EITHER column and the difference read 0. Masking `#` FIRST uncovers that
+  // code, so additions are now expected — and the honest invariant is what they
+  // ARE, not that there are none.
+  t(
+    '…and the additions really happen, so the case above is not a subset test wearing a code test\'s name',
+    shellGrew >= 1,
+    JSON.stringify({ shellGrew }),
   );
   // The card's sharpest specimen, both ends. DEPARTURE alone would stay green
   // on a mask that emptied the file, so the ARRIVAL half names a live shell
@@ -15200,6 +15753,26 @@ function selfTest() {
     '…non-vacuously: that path IS spelled in the file, inside a `#` comment, and the unmasked control still reads it',
     extractWatchHints(liveBumpSrc, 'scripts/bump-objectui.sh.mjs', { tree: hintTree }).includes(
       'docs/releases-maintenance.md',
+    ),
+  );
+  // ⭐ LIVE RECOVERY (#16744): the site the card named, both ends. The `.mjs`
+  // control is what makes it a recovery rather than an ordinary arrival — the
+  // JS-only path STILL cannot read this line, because the phantom comment the
+  // header's `@objectstack/*` opens is what hid it, and that is precisely what
+  // masking `#` first removes.
+  const liveDownstream = 'scripts/downstream-smoke.sh';
+  const liveDownstreamSrc = readFileSync(nodePath.join(ROOT, liveDownstream), 'utf8');
+  t(
+    '⭐ LIVE RECOVERY: a path spelled in real shell CODE under a `#` comment carrying a block-comment opener is read again',
+    extractWatchHints(liveDownstreamSrc, liveDownstream, { tree: hintTree }).includes(
+      'node_modules/@objectstack/spec/dist',
+    ),
+    extractWatchHints(liveDownstreamSrc, liveDownstream, { tree: hintTree }),
+  );
+  t(
+    '…non-vacuously: the JS-kind control on the same bytes still cannot see it, so a phantom comment is what was hiding it',
+    !extractWatchHints(liveDownstreamSrc, `${liveDownstream}.mjs`, { tree: hintTree }).includes(
+      'node_modules/@objectstack/spec/dist',
     ),
   );
   const liveShardSelfTest = 'scripts/ci/select-shard-packages.selftest.sh';
@@ -18288,6 +18861,81 @@ function selfTest() {
       const why = widePopulationRefusal({ ...wpLive, hints: ['packages/rest/src', 'docs/adr'] }) ?? '';
       return why.includes('NAMES paths') && why.includes('packages/rest/src');
     })(),
+  );
+  // #16828: the line is NOT "does the gate name any path" — an enumerated
+  // exact-file member never contradicts a wide declaration, because
+  // `hintCovers` can only ever match one by equality. `check:route-envelope`
+  // is the specimen: a `MODULES` table keyed by 30-plus exact file paths,
+  // none of them a claim about the population's width.
+  t(
+    'a wide declaration over ONLY exact-file hints stands — an enumerated member is not a competing spelling of the population',
+    widePopulationRefusal({
+      ...wpLive,
+      hints: ['packages/rest/src/storage-routes.ts', 'packages/rest/src/error-response.ts'],
+    }) === null,
+  );
+  // A hint that reaches beyond itself (no extension — a bare directory) is
+  // still compatible when the marker's own reason text names it: the second,
+  // separately audited surface `check:route-envelope`'s DISPATCHER_DOMAIN_DIR
+  // is, held to the same "the reason is what a reader trusts" bar
+  // `wholeTreePopulationRefusal` holds a repo-root walk to.
+  t(
+    'a directory hint that reaches beyond itself stands when the reason text names it by name',
+    widePopulationRefusal({
+      ...wpLive,
+      widePopulationReason: 'walks packages/ entire; packages/runtime/src/domains is a second, separately audited surface',
+      hints: ['packages/runtime/src/domains'],
+    }) === null,
+  );
+  // The SAME directory hint, unnamed in the reason, is still refused — the
+  // exemption is not "any directory a real gate happens to carry", it is
+  // "an account the reader can check", and a silent one is not that.
+  t(
+    'the same directory hint is still refused when the reason does not name it — silence is not an account',
+    (() => {
+      const why = widePopulationRefusal({ ...wpLive, hints: ['packages/runtime/src/domains'] }) ?? '';
+      return why.includes('NAMES paths') && why.includes('packages/runtime/src/domains');
+    })(),
+  );
+  // A glob is never exempt this way, even repeated verbatim in the reason:
+  // `judgedAsPattern` marks it as ITSELF a population spelling, and a reason
+  // that only echoes it back is the same contradiction typed twice, not an
+  // account of it. A bare trailing `/**` does NOT qualify — it COLLAPSES to
+  // the identical plain directory prefix (`collapseHint`'s own docblock:
+  // `packages/**` -> `packages`), so it is judged exactly like the directory
+  // case above, on purpose. The species this asserts against is the one
+  // `judgedAsPattern` actually flags: a glob in a NON-final segment.
+  t(
+    'a glob hint is refused even when the reason text repeats it back verbatim',
+    (() => {
+      const why = widePopulationRefusal({
+        ...wpLive,
+        widePopulationReason: 'walks packages/ entire; packages/*/src is already covered',
+        hints: ['packages/*/src'],
+      }) ?? '';
+      return why.includes('NAMES paths') && why.includes('packages/*/src');
+    })(),
+  );
+  // The bare-trailing-`/**` spelling is the CONTRAST case: it is not a
+  // `judgedAsPattern` glob at all (it collapses to a plain prefix), so it is
+  // exempt under the SAME "reason names it" rule as any other directory hint.
+  t(
+    'a bare trailing /** hint is not a glob for this purpose — it stands when the reason names it, same as a plain directory',
+    widePopulationRefusal({
+      ...wpLive,
+      widePopulationReason: 'walks packages/ entire; packages/runtime/src/domains/** is a second, separately audited surface',
+      hints: ['packages/runtime/src/domains/**'],
+    }) === null,
+  );
+  // A mix of the two compatible shapes together stands — the predicate is
+  // per-hint, not "the whole set must be one shape".
+  t(
+    'a mix of exact-file hints and a reason-named directory hint stands together',
+    widePopulationRefusal({
+      ...wpLive,
+      widePopulationReason: 'walks packages/ entire; packages/runtime/src/domains is a second, separately audited surface',
+      hints: ['packages/rest/src/storage-routes.ts', 'packages/runtime/src/domains'],
+    }) === null,
   );
 
   // Placement, column by column. The card path is under the very root these
@@ -21475,6 +22123,206 @@ function selfTest() {
   );
   t('the live tail renders without refusing', alwaysRunLines(liveTail.rows, liveTail.counts).length > 0);
 
+  // ── The OTHER half of that partition: the jobs YOUR paths schedule (#16285) ─
+  //
+  // The tail above excludes a path-filtered workflow and every job carrying an
+  // `if:` — which is every job a `dorny/paths-filter` output schedules. Those
+  // exclusions are right for the claim the tail makes and they are exactly why
+  // nothing reported what those jobs run: the family derivation looks INSIDE
+  // them for `check:*` invocations, and the rest of their work had no reader.
+  //
+  // FIXTURE first, so every branch is pinned on input this tree may not hold
+  // tomorrow; the LIVE half below is the card's own acceptance baseline and
+  // cannot be faked by a fixture. ⛔ Neither half touches the network.
+  const jobWf = [
+    'name: Fixture',
+    'on:',
+    '  pull_request:',
+    'jobs:',
+    '  filter:',
+    '    outputs:',
+    "      core: ${{ steps.changes.outputs.core || 'true' }}",
+    "      docs: ${{ steps.changes.outputs.docs || 'true' }}",
+    '    steps:',
+    '      - uses: dorny/paths-filter@v4',
+    '        id: changes',
+    '        with:',
+    '          filters: |',
+    '            core:',
+    "              - 'packages/**'",
+    '            docs:',
+    "              - 'content/**'",
+    '  suite:',
+    '    name: Suite (1/2)',
+    "    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' }}",
+    '    steps:',
+    '      - name: Setup',
+    '        uses: actions/checkout@v4',
+    '      - name: A discoverable family',
+    '        run: pnpm check:engine-double-contract',
+    '      - name: Run the package suite',
+    '        run: |',
+    '          pnpm turbo run test \\',
+    '            --filter=@objectstack/dogfood',
+    '      - name: Conditional, so no claim is made about it',
+    "        if: github.event_name == 'push'",
+    '        run: pnpm exec turbo run build',
+    '  docs-only:',
+    '    name: Docs Only',
+    "    if: ${{ !cancelled() && needs.filter.outputs.docs != 'false' }}",
+    '    steps:',
+    '      - name: Never claimed for a packages path',
+    '        run: pnpm docs:build',
+    '  unresolvable:',
+    '    name: Unresolvable',
+    "    if: github.event_name == 'push'",
+    '    steps:',
+    '      - name: Never claimed at all',
+    '        run: pnpm lint',
+  ].join('\n');
+
+  const jobFixture = jobFilteredSteps([{ file: 'fixture.yml', text: jobWf }], ['packages/qa/dogfood/test/x.test.ts']);
+  const jobRowNames = jobFixture.rows.map((r) => r.job);
+  t('a job whose declared population covers one of your paths is named — by the name CI calls it', jobRowNames.includes('Suite (1/2)'));
+  t('a job whose population covers NONE of your paths is not named', !jobRowNames.includes('Docs Only'));
+  t(
+    'a job whose `if:` resolves to no filter output contributes no population at all — a schedule guessed at would fabricate',
+    !jobRowNames.includes('Unresolvable') && jobFixture.counts.populations === 2,
+  );
+  // ⛔ Every reader below DEGRADES to a failing case rather than a TypeError. The
+  // ablation that proves these cases can fail removes the very row they read, and
+  // a battery that throws there stops before the LIVE controls underneath it are
+  // decided — turning "this pin can fail" into "this pin was never reached".
+  const suiteRow = jobFixture.rows.find((r) => r.job === 'Suite (1/2)') ?? { steps: [], hits: [], outputs: [] };
+  const suiteSteps = suiteRow.steps.map((s) => s.step);
+  t('the step CI runs that no family names IS listed — the whole point of the block', suiteSteps.includes('Run the package suite'));
+  t(
+    'a step whose family the derivation names is NOT listed — the two halves are disjoint',
+    !suiteSteps.includes('A discoverable family') && jobFixture.counts.accounted === 1,
+  );
+  t(
+    'a conditional STEP is excluded and COUNTED, never silently dropped',
+    !suiteSteps.includes('Conditional, so no claim is made about it') && jobFixture.counts.conditionalSteps === 1,
+  );
+  t(
+    'a `uses:` step with no command is neither counted nor listed',
+    !suiteSteps.includes('Setup') && jobFixture.counts.steps === 2,
+  );
+  t('the block accounts for every step it walked', jobFixture.counts.accounted + jobFixture.counts.unaccounted === jobFixture.counts.steps);
+  t(
+    'the row carries the provenance the claim rests on — YOUR path and the pattern that covered it',
+    suiteRow.hits.length === 1
+      && suiteRow.hits[0].path === 'packages/qa/dogfood/test/x.test.ts'
+      && suiteRow.hits[0].pattern === 'packages/**'
+      && suiteRow.outputs.includes('filter.core'),
+  );
+  const suiteRun = suiteRow.steps.find((s) => s.step === 'Run the package suite') ?? { commands: [] };
+  t(
+    'a shell line-continuation is spliced, so a row is the command the shell sees rather than a fragment of its argv',
+    suiteRun.commands.length === 1 && suiteRun.commands[0] === 'pnpm turbo run test --filter=@objectstack/dogfood',
+  );
+
+  const jobLines = jobFilteredStepLines(jobFixture.rows, jobFixture.counts);
+  t('the rendered block sizes itself against the jobs your paths schedule', (jobLines[0] ?? '').includes('1 job(s) CI runs because one of your paths'));
+  t('the rendered block refuses to be read as runnable', jobLines.some((l) => l.includes('NOT in --commands')));
+  t('the rendered block refuses to classify its rows into tests, builds and setup', jobLines.some((l) => l.includes('NOT classified into tests, builds and setup')));
+  t('the rendered block names the always-runs tail as the other half of one partition', jobLines.some((l) => l.includes('OTHER half of this partition')));
+  t('an excluded conditional step is sized in the rendering rather than left as an absence', jobLines.some((l) => l.includes('1 step(s) of these jobs carry an `if:`')));
+  t('a block with no rows renders NOTHING — a zero heading would invite a hunt for rows that are not there', jobFilteredStepLines([], jobFixture.counts).length === 0);
+
+  const longJobRow = [{
+    workflow: 'a.yml',
+    job: 'J',
+    outputs: ['filter.core'],
+    hits: [{ path: 'p/x.ts', pattern: 'p/**' }],
+    dropped: 0,
+    steps: [{ step: 'S', commands: Array.from({ length: 30 }, (_, i) => `line ${i}`) }],
+  }];
+  const longJobCounts = { covering: 1, named: 1, steps: 1, accounted: 0, unaccounted: 1, conditionalSteps: 0 };
+  const longJobLines = jobFilteredStepLines(longJobRow, longJobCounts);
+  t(
+    'a long step is elided to a pointer rather than transcribed, on the TAIL\'s own cap and in its own words',
+    longJobLines.some((l) => l.includes(`${30 - ALWAYS_RUN_COMMAND_CAP} more line(s) — read the step in a.yml`)),
+  );
+  t('the elision still prints the capped head of the command', longJobLines.filter((l) => /^ {10}line \d+$/.test(l)).length === ALWAYS_RUN_COMMAND_CAP);
+
+  const refusedJobBlock = (rows, counts) => {
+    try {
+      jobFilteredStepLines(rows, counts);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  t(
+    'a block whose row count contradicts its own job count refuses rather than prints a total nobody can trust (#4690)',
+    refusedJobBlock(longJobRow, { ...longJobCounts, named: 2 }),
+  );
+  t('a block whose step counts do not add up refuses', refusedJobBlock(longJobRow, { ...longJobCounts, steps: 5 }));
+
+  // ── LIVE, on this tree: the card's own acceptance baseline ────────────────
+  //
+  // ⛔ No count is pinned. The number of path-scheduled jobs moves with every
+  // workflow edit and a frozen one would go stale with nothing failing — the
+  // defect this whole file is about. What is pinned is the CLASS and its two
+  // controls.
+  const liveWorkflows = readdirSync(nodePath.join(ROOT, '.github/workflows'))
+    .filter((f) => /\.ya?ml$/.test(f))
+    .map((f) => ({ file: f, text: readFileSync(nodePath.join(ROOT, '.github/workflows', f), 'utf8') }));
+  const dogfoodCard = 'packages/qa/dogfood/test/authz-probe-blind-spot.census.ts';
+  const liveJobFiltered = jobFilteredSteps(liveWorkflows, [dogfoodCard]);
+  // ⭐ THE POSITIVE CONTROL. This exact change set derived 43 commands with zero
+  // mentions of dogfood while `Dogfood Regression Gate (3/3)` was red on a test
+  // file in the same package. Both halves are asserted, for the reason the tail's
+  // own retirement case states: the job being named is only meaningful while the
+  // family derivation still names nothing for the step that runs its suite —
+  // either half alone goes green for the wrong reason.
+  const dogfoodRow = liveJobFiltered.rows.find((r) => r.job.startsWith('Dogfood Regression Gate'));
+  t(
+    'LIVE: the change set that produced a false "authored to green" claim now names the CI job that runs the package it edits',
+    Boolean(dogfoodRow),
+  );
+  t(
+    '...and names the invocation itself, not just the job — the one line the reader came for',
+    Boolean(dogfoodRow) && dogfoodRow.steps.some((s) => s.commands.some((c) => c.includes('run test') && c.includes('--filter=@objectstack/dogfood'))),
+  );
+  t(
+    '...while the family derivation still names NO check family for that step, which is why the block has to exist',
+    Boolean(dogfoodRow)
+      && dogfoodRow.steps.every((s) => extractCheckInvocations(s.commands.join('\n'), dogfoodRow.workflow).length === 0),
+  );
+  // ⭐ THE NEGATIVE CONTROL. A path no job's declared population covers must be
+  // pointed at NO job. Without it every case above is satisfied by a walk that
+  // names every job for every card, which is the "22 leads is the same as none"
+  // failure this file's header prices.
+  t(
+    'LIVE: a repo-root document no job filter covers is pointed at no job at all',
+    jobFilteredSteps(liveWorkflows, ['ROADMAP.md']).rows.length === 0,
+  );
+  t(
+    '...and that negative is not a broken walk — the same walk finds jobs for a packages path',
+    liveJobFiltered.rows.length > 0,
+  );
+  // The partition, live: every row is a step the family derivation names nothing
+  // for, so a row that yields an invocation would mean this block and the family
+  // list double-count the same step.
+  t(
+    'LIVE: no row yields a check invocation — this block and the family list are disjoint',
+    liveJobFiltered.rows.every((r) => r.steps.every((s) => extractCheckInvocations(s.commands.join('\n'), r.workflow).length === 0)),
+  );
+  t('the live block renders without refusing', jobFilteredStepLines(liveJobFiltered.rows, liveJobFiltered.counts).length > 0);
+  // ⛔ The block sits OUTSIDE the runnable total, and the enumeration that says
+  // so is `outsideBlockNames` — the one place the list of outside blocks exists.
+  t(
+    'the block is NAMED among what sits outside the runnable total, and only while it has rows',
+    outsideBlockNames({ jobFilteredJobs: 3 }).includes('the 3 path-scheduled CI job(s)')
+      && !outsideBlockNames({ jobFilteredJobs: 0 }).some((n) => n.includes('path-scheduled')),
+  );
+  t(
+    'and the count reaches that enumeration off the ARRAY that renders the block, never a recount of it',
+    outsideBlockCounts(familyReconciliation({ jobFilteredRows: [{}, {}] })).jobFilteredJobs === 2,
+  );
+
   // ── The seam between this tool and its caller (#13462) ────────────────────
   //
   // Unit half first: the split and the footer are pure, so their edge cases are
@@ -21609,11 +22457,14 @@ function selfTest() {
     // could name three of the five blocks the same run printed and stay green
     // here for the whole time a harvester following it was missing two of them
     // (#16398). Every name below is its own assertion: dropping ONE reds.
+    // Three DISTINCT counts (2 / 1 / 3), so a name wired to the wrong array
+    // reds here instead of reading right by coincidence.
     const outsideRecon = familyReconciliation({
       matchedRows: rRows,
       kindGroups: rKinds,
       rosterRows: [{ check: 'check:r1' }, { check: 'check:r2' }],
       widePopulationRows: [{ check: 'check:w1' }],
+      pendingRows: [{ check: 'check:p1' }, { check: 'check:p2' }, { check: 'check:p3' }],
     });
     // The enumeration is read case-insensitively per NAME, because the leading
     // name is raised to open the sentence; the exact rendered phrase is pinned
@@ -21624,7 +22475,7 @@ function selfTest() {
     for (const name of [
       'the 2 artifact-roster famil(ies)',
       'the 1 declared WIDE-population famil(ies)',
-      'the pending-changeset families',
+      'the 3 pending-changeset famil(ies)',
       'the unreachable listing',
       'the always-runs tail',
     ]) {
@@ -21635,26 +22486,41 @@ function selfTest() {
     // assert against it, and the order is the claim — a reader walking down the
     // output meets the blocks in the order this line promised them.
     t('and spells them in the order they are PRINTED below, as one phrase', (outsideLine ?? '').includes(
-      'The 2 artifact-roster famil(ies), the 1 declared WIDE-population famil(ies), the pending-changeset families,'
+      'The 2 artifact-roster famil(ies), the 1 declared WIDE-population famil(ies), the 3 pending-changeset famil(ies),'
         + ' the unreachable listing and the always-runs tail below are each OUTSIDE it, each with its own count.',
     ));
-    // The two counts are the lengths of the arrays that RENDER those blocks, so
-    // the enumeration cannot name a block the run did not print: at zero rows
-    // artifactRosterLines and widePopulationLines both return nothing, and a
-    // name pointing "below" at an absent heading is this same defect reversed.
+    // The THREE counts are the lengths of the arrays that RENDER those blocks,
+    // so the enumeration cannot name a block the run did not print: at zero rows
+    // artifactRosterLines, widePopulationLines and pendingChangesetLines all
+    // return nothing, and a name pointing "below" at an absent heading is this
+    // same defect reversed.
     const noBlocksLine = familyReconciliationLines(r).find((l) => l.includes('NOT a complete account of what CI runs'));
     t('and names NEITHER block on a run that printed neither', !(noBlocksLine ?? '').toLowerCase().includes('artifact-roster') && !(noBlocksLine ?? '').toLowerCase().includes('wide-population'));
-    t('...while still naming the three blocks that print unconditionally', namesOutside(noBlocksLine, ['the pending-changeset families', 'the unreachable listing', 'the always-runs tail']));
+    // ⭐ The third name was the one still spelled unconditionally after #16398:
+    // `pendingChangesetLines` returns nothing at zero, so on a card with no
+    // pending family the sentence pointed below at a heading that is not there
+    // (#16795). It is conditional on its own count now, like the two above it.
+    t('nor the pending-changeset block, whose heading is absent at zero too', !(noBlocksLine ?? '').toLowerCase().includes('pending-changeset'));
+    t('...while still naming the two blocks that print unconditionally', namesOutside(noBlocksLine, ['the unreachable listing', 'the always-runs tail']));
+    // ...and the CONTROL for that pair: a run with pending families and nothing
+    // else names the third block and neither of the other two, so the case
+    // above cannot be passing because the name went away for good.
+    const pendingOnlyLine = familyReconciliationLines(familyReconciliation({
+      matchedRows: rRows, kindGroups: rKinds, pendingRows: [{ check: 'check:p1' }, { check: 'check:p2' }],
+    })).find((l) => l.includes('NOT a complete account of what CI runs'));
+    t('and a run that printed ONLY the pending block names exactly that one', namesOutside(pendingOnlyLine, ['the 2 pending-changeset famil(ies)'])
+      && !(pendingOnlyLine ?? '').toLowerCase().includes('artifact-roster') && !(pendingOnlyLine ?? '').toLowerCase().includes('wide-population'));
     // The ZERO-total branch renders the SAME list from the SAME expression: a
     // card with no runnable family of its own still owes every block below, and
     // two branches spelling this claim separately is how it drifted before.
     const zeroOutside = familyReconciliationLines(familyReconciliation({
       matchedRows: [], kindGroups: [], rosterRows: [{ check: 'check:r1' }], widePopulationRows: [{ check: 'check:w1' }],
+      pendingRows: [{ check: 'check:p1' }],
     }));
     t('the zero branch enumerates the same blocks rather than naming one of them', zeroOutside.some((l) => namesOutside(l, [
       'the 1 artifact-roster famil(ies)',
       'the 1 declared WIDE-population famil(ies)',
-      'the pending-changeset families',
+      'the 1 pending-changeset famil(ies)',
       'the unreachable listing',
       'the always-runs tail',
     ])));
@@ -22302,6 +23168,157 @@ function selfTest() {
         && explainedText.includes('pending-changeset famil(ies)')
         && !explainedText.includes("Outside this card's derivation"),
     );
+
+    // ── ⭐ The OUTSIDE enumeration on the OTHER TWO lanes (#16795) ──────────
+    //
+    // The same claim as the human line's, and it was short on both. `--ran`
+    // named three of the five blocks a plain run prints — omitting the artifact
+    // rosters and the declared WIDE population, exactly the pair #16398
+    // measured a CI round trip for on the human lane. Both lanes read
+    // `outsideBlockNames` now, so a name here can neither drift from that list
+    // nor survive the block it points at being absent.
+    //
+    // ⭐ Pinned NAME BY NAME and with a NEGATIVE beside every positive, because
+    // the weak shape is what failed before: a case asking only for a substring
+    // stayed green for the whole time the sentence was naming three of five.
+    const laneCounts = { artifactRosters: 2, widePopulation: 1, pendingChangeset: 3, jobFilteredJobs: 4 };
+    const outsideOf = (lines) => (lines.find((l) => l.includes('This answers ONE link')) ?? '');
+    const ranAllBlocks = outsideOf(runReconciliationLines(full, laneCounts));
+    for (const name of [
+      'the 2 artifact-roster famil(ies)',
+      'the 1 declared WIDE-population famil(ies)',
+      'the 3 pending-changeset famil(ies)',
+      'the unreachable listing',
+      'the 4 path-scheduled CI job(s)',
+      'the always-runs tail',
+    ]) {
+      t(`--ran's disclaimer names "${name}" — every block a plain run prints, not a subset`, ranAllBlocks.includes(name));
+    }
+    t('and spells them in PRINT order, as the one phrase the human lane spells', ranAllBlocks.includes(
+      'the 2 artifact-roster famil(ies), the 1 declared WIDE-population famil(ies), the 3 pending-changeset famil(ies),'
+        + ' the unreachable listing, the 4 path-scheduled CI job(s) and the always-runs tail are each outside the derived total',
+    ));
+    // The NEGATIVE: at zero rows those three blocks are not printed by the run
+    // this sentence points at, so naming them would send a reader to headings
+    // that are not there — the same defect facing the other way.
+    const ranNoBlocks = outsideOf(runReconciliationLines(full, { artifactRosters: 0, widePopulation: 0, pendingChangeset: 0, jobFilteredJobs: 0 }));
+    t(
+      '--ran names NONE of the four conditional blocks on a derivation that has none',
+      !ranNoBlocks.toLowerCase().includes('artifact-roster')
+        && !ranNoBlocks.toLowerCase().includes('wide-population')
+        && !ranNoBlocks.toLowerCase().includes('pending-changeset')
+        && !ranNoBlocks.toLowerCase().includes('path-scheduled'),
+    );
+    t('...while still naming the two that print unconditionally', ranNoBlocks.includes('the unreachable listing and the always-runs tail'));
+
+    // ── Lane 2: the `--commands` / `--json` stderr accounting ───────────────
+    //
+    // Driven through `machineReadableOutput` itself rather than through a
+    // helper, because the defect was in what that function PRINTS: it named the
+    // always-runs tail alone, and a `--commands` consumer — the reader this
+    // file's own header sends here INSTEAD of the prose — was never told the
+    // declared WIDE population exists at all. A case against the helper would
+    // have stayed green through exactly that.
+    const captureStderr = (run) => {
+      const captured = [];
+      const realError = console.error;
+      const realLog = console.log;
+      console.error = (...args) => captured.push(args.join(' '));
+      console.log = () => {};
+      try {
+        run();
+      } finally {
+        console.error = realError;
+        console.log = realLog;
+      }
+      return captured;
+    };
+    const laneTwo = (over = {}) => captureStderr(() => machineReadableOutput('commands', {
+      paths: ['scripts/pm/dispatch-gates.mjs'],
+      matchedRows: [{ check: 'check:m1', command: 'pnpm check:m1' }],
+      kindGroups: [],
+      pending: [{ check: 'check:p1' }, { check: 'check:p2' }, { check: 'check:p3' }],
+      counts: {},
+      alwaysRunsRows: [],
+      widePopulationRows: [{ check: 'check:w1', command: 'pnpm check:w1', workflows: ['w.yml'], reason: 'whole root', refused: null }],
+      rosters: [
+        { check: 'check:r1', command: 'pnpm check:r1', workflows: ['w.yml'], artifacts: [], dir: 'scripts', coversYourPath: false, checkerHealth: null },
+        { check: 'check:r2', command: 'pnpm check:r2', workflows: ['w.yml'], artifacts: [], dir: 'scripts', coversYourPath: false, checkerHealth: null },
+      ],
+      jobFiltered: {
+        rows: Array.from({ length: 4 }, (_, i) => ({
+          workflow: 'w.yml',
+          job: `Job ${i}`,
+          outputs: ['filter.core'],
+          hits: [{ path: 'scripts/pm/dispatch-gates.mjs', pattern: 'scripts/**' }],
+          dropped: 0,
+          steps: [{ step: 'Run it', commands: ['pnpm turbo run test'] }],
+        })),
+        counts: { populations: 4, covering: 4, named: 4, steps: 4, accounted: 0, unaccounted: 4, conditionalSteps: 0 },
+      },
+      ...over,
+    })).find((l) => l.includes('Not a complete account of what CI runs')) ?? '';
+    const commandsAllBlocks = laneTwo();
+    for (const name of [
+      'the 2 artifact-roster famil(ies)',
+      'the 1 declared WIDE-population famil(ies)',
+      'the 3 pending-changeset famil(ies)',
+      'the unreachable listing',
+      'the 4 path-scheduled CI job(s)',
+      'the always-runs tail',
+    ]) {
+      t(`--commands' closing disclaimer names "${name}" — every block outside the command list, where it used to name one`, commandsAllBlocks.includes(name));
+    }
+    // ⭐ The card's own repro, as a case: `grep -c 'WIDE' commands.err` read 0.
+    // The token is what a consumer greps for, and it was absent from the whole
+    // stream because the one line that could carry it named a different block.
+    t("...so the stream a --commands consumer reads carries the token 'WIDE' at all", commandsAllBlocks.includes('WIDE'));
+    // The NEGATIVE, for the reason the --ran one is there: a sentence that
+    // cannot drop a name is the same broken instrument as one that cannot add
+    // one, pointed the other way.
+    const commandsNoBlocks = laneTwo({
+      rosters: [], widePopulationRows: [], pending: [], jobFiltered: { rows: [], counts: {} },
+    });
+    t(
+      '--commands names NONE of the four conditional blocks when the run has none of them',
+      !commandsNoBlocks.toLowerCase().includes('artifact-roster')
+        && !commandsNoBlocks.toLowerCase().includes('wide-population')
+        && !commandsNoBlocks.toLowerCase().includes('pending-changeset')
+        && !commandsNoBlocks.toLowerCase().includes('path-scheduled'),
+    );
+    t('...while still naming the two that print unconditionally', commandsNoBlocks.includes('the unreachable listing and the always-runs tail'));
+    // ⛔ And the stream stays a STREAM: the accounting is stderr-only, so a
+    // consumer redirecting stdout gets commands with no prose in front of them.
+    // That is the property the whole mode exists for, and a disclaimer that
+    // grew onto stdout would delete it.
+    const laneTwoStdout = [];
+    {
+      const realLog = console.log;
+      const realError = console.error;
+      console.log = (...args) => laneTwoStdout.push(args.join(' '));
+      console.error = () => {};
+      try {
+        machineReadableOutput('commands', {
+          paths: ['scripts/pm/dispatch-gates.mjs'],
+          matchedRows: [{ check: 'check:m1', command: 'pnpm check:m1' }],
+          kindGroups: [], pending: [{ check: 'check:p1' }], counts: {}, alwaysRunsRows: [],
+          widePopulationRows: [{ check: 'check:w1', command: 'pnpm check:w1', workflows: ['w.yml'], reason: 'whole root', refused: null }],
+          rosters: [],
+          jobFiltered: {
+            rows: [{
+              workflow: 'w.yml', job: 'Job 0', outputs: ['filter.core'], dropped: 0,
+              hits: [{ path: 'scripts/pm/dispatch-gates.mjs', pattern: 'scripts/**' }],
+              steps: [{ step: 'Run it', commands: ['pnpm turbo run test'] }],
+            }],
+            counts: { populations: 1, covering: 1, named: 1, steps: 1, accounted: 0, unaccounted: 1, conditionalSteps: 0 },
+          },
+        });
+      } finally {
+        console.log = realLog;
+        console.error = realError;
+      }
+    }
+    t('and the enumeration never reaches stdout, which carries the commands and nothing else', laneTwoStdout.join('\n') === 'pnpm check:m1');
 
     // ── argv: a two-token flag's value must not become a path ───────────────
     const ranSplit = splitArgv([RAN_FLAG, 'ran.list', 'packages/spec/src/index.ts', '--residue']);

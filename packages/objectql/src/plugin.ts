@@ -162,7 +162,8 @@ export interface ObjectQLPluginOptions {
    * Skip both `syncRegisteredSchemas()` calls inside `start()` and
    * assume DDL is managed out-of-band (e.g. an `apps/cloud/scripts/migrate.ts`
    * run before deploy that connects directly to the database and creates
-   * all `sys_*` + custom tables once).
+   * all `sys_*` + custom tables once — that script lives in the separate
+   * `objectstack-ai/cloud` repo and is NOT a path in this one).
    *
    * Use this on cold-start-sensitive runtimes (Cloudflare Containers,
    * Lambda) where the platform's inbound-request budget is shorter than

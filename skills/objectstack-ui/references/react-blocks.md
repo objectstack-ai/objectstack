@@ -54,12 +54,11 @@ Server-connected create/edit/view form for one object. Config props come from th
 
 ## `<ListView>` — `list-view`
 
-Server-connected object table with toolbar and switchable visualizations (grid/kanban/calendar/gantt/…). Config props come from the spec ListView schema. Bind the object with the metadata-tier data source — data={{ provider: 'object', object: '…' }} — and pick the visualization with `type`; `objectName` / `viewType` are the deprecated spellings of the same two bindings.
+Server-connected object table with toolbar and switchable visualizations (grid/kanban/calendar/gantt/…). Config props come from the spec ListView schema. Bind the object with the metadata-tier data source — data={{ provider: 'object', object: '…' }} — and pick the visualization with `type`: the same two keys a metadata list view authors, and the only spellings (the `objectName` / `viewType` aliases are retired).
 
 | prop | type | kind | required | description |
 |------|------|------|:--------:|-------------|
-| `objectName` | `string` | binding | ✓ | [DEPRECATED → `data={{ provider: 'object', object }}`] The object this block binds to (server-connected). Converging on the metadata-tier spelling; this alias is removed after the deprecation window. |
-| `viewType` | `'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map'` | binding |  | [DEPRECATED → `type`] Which visualization to render (default grid). Converging on the metadata-tier spelling: write `type`, the same key a metadata list view authors. |
+| `data` | `ViewData — { provider: 'object', object: string } binds an object` | binding | ✓ | The object this block binds to, written as the metadata-tier data source: data={{ provider: 'object', object: '…' }}. Any ViewData provider is accepted (a 'value' provider renders static rows); nothing stamps the object on a react page, so this prop is required. |
 | `navigation` | `{ mode: 'page' \| 'drawer' \| 'modal' \| 'split' \| 'none' }` | binding |  | What a row click does. Use { mode: "none" } when you handle clicks via onRowClick. |
 | `fields` | `string[]` | binding |  | Limit/order the columns shown (defaults to the object list fields). |
 | `options` | `Record<string, any>` | binding |  | View-type-specific options bag (kanban/calendar/gantt extras); prefer the typed spec props where they exist. |
@@ -68,7 +67,6 @@ Server-connected object table with toolbar and switchable visualizations (grid/k
 | `onNavigate` | `(recordId, action: 'view' \| 'edit') => void` | callback |  | Called for page-level navigation. |
 | `columns` | `string[] \| object[]` | data | ✓ | Fields to display as columns |
 | `type` | `'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree' \| 'page'` | data |  |  |
-| `data` | `object` | data |  | Data source configuration (defaults to "object" provider) |
 | `sort` | `string \| object[]` | data |  |  |
 | `searchableFields` | `string[]` | data |  | Fields enabled for search |
 | `userFilters` | `object` | data |  | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |

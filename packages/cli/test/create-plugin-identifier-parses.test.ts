@@ -41,9 +41,15 @@
  *
  * ## What this pin deliberately does not touch
  *
- * The emitted package name, its scope and the emitted directory name are the
- * user's string byte-for-byte (#15530 / #15816) — asserted below, so a future
- * edit that "fixes" the name instead of the identifier reddens here.
+ * The USER'S STRING survives byte-for-byte into the emitted package name and
+ * the emitted directory name (#15816) — asserted below, so a future edit that
+ * "fixes" the name instead of the identifier reddens here.
+ *
+ * ⚠️ What the package name is COMPOSED of is a different question, and it moved
+ * under #15530: the standalone default is now an unscoped `plugin-<name>` and
+ * only `--in-repo` keeps `@objectstack/plugin-<name>`. That rule is pinned in
+ * `create.test.ts`; this file asserts only that whatever the composition is, it
+ * carries the typed name through unaltered.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -151,7 +157,9 @@ describe('`os create plugin <name>` emits a parseable identifier', () => {
       diagnostics.map((d) => ts.flattenDiagnosticMessageText(d.messageText, ' ')),
       name,
     ).toEqual([]);
-    expect(readme).toContain(`import { ${identifier}Plugin } from '@objectstack/plugin-${name}';`);
+    // The DEFAULT placement is standalone, whose package — and therefore whose
+    // import specifier — is unscoped since #15530.
+    expect(readme).toContain(`import { ${identifier}Plugin } from 'plugin-${name}';`);
   });
 
   it.each(CASES)('names the derived identifier in the README prose for $name', ({ name, identifier }) => {
@@ -182,7 +190,9 @@ describe('`os create plugin <name>` emits a parseable identifier', () => {
 
   it.each(CASES)('leaves the emitted package name and directory as typed for $name', ({ name }) => {
     const manifest = JSON.parse(emit('package.json', name, DEFAULT_PLACEMENT)) as { name: string };
-    expect(manifest.name).toBe(`@objectstack/plugin-${name}`);
+    // Unscoped under the DEFAULT placement (#15530) — but still the user's
+    // string, unaltered, which is the property this file is about.
+    expect(manifest.name).toBe(`plugin-${name}`);
     expect(templates.plugin.dirName(name)).toBe(`plugin-${name}`);
   });
 

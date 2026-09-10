@@ -67,6 +67,7 @@ printf '{"name":"a"}\n' > "$UP/packages/a/package.json"
 printf 'export const a = 1;\n' > "$UP/packages/a/src/index.ts"
 printf 'export const t = 1;\n' > "$UP/packages/a/src/index.test.ts"
 printf '{"rows":[]}\n' > "$UP/packages/a/src/data.json"
+printf '#!/usr/bin/env bash\necho foo\n' > "$UP/packages/a/foo.sh"
 printf 'dist/\n' > "$UP/packages/a/.gitignore"
 printf 'console.log(1);\n' > "$UP/packages/a/scripts/build.mjs"
 printf 'export const site = 1;\n' > "$UP/apps/site/src/page.tsx"
@@ -427,6 +428,13 @@ run_case 'merge_group: a non-source, non-manifest workspace file skips every fam
 expect_rc 0
 expect_warnings '' ''
 expect_verdicts
+
+S=$(scenario M:packages/a/foo.sh)
+run_case 'merge_group: a workspace shell script outside scripts/ is still gate source, not a skipped non-source workspace file (#16769)' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts pm_dispatch_gates
+expect_reason pm_dispatch_gates packages/a/foo.sh
 
 S=$(scenario M:packages/a/scripts/build.mjs)
 run_case 'merge_group: a package-local script is a gate source (PM) and a masked source (corpus)' "$REPO" merge_group '' "$C0"

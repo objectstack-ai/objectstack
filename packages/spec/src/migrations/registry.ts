@@ -481,14 +481,22 @@ const step17: MigrationStep = {
       'tombstoned with its prescription.\n\n',
       'ADR-0113 splits the `required` tri-binding: post-17, `required` is ONLY the ',
       'write-time contract (insert must provide; update may not null out; legacy null ',
-      'rows rest), and the physical NOT NULL is the explicit `storage.notNull`. The ',
-      '`field-required-notnull-explicit` conversion preserves every pre-17 source ',
-      'verbatim-in-meaning by stamping `storage.notNull: true` onto each required ',
-      'field — under the old semantics that column WAS created NOT NULL, so the ',
-      'rewrite writes down what the text already meant. Migration-chain-only ',
-      '(retired from the load path): this is a default flip, not a rename, and a ',
-      'loader that auto-applied it would stamp the constraint onto 17-authored ',
-      'sources that deliberately omit it.\n\n',
+      'rows rest), and the physical NOT NULL is the explicit `storage.notNull`. ',
+      '⚠️ NOTHING converts the column half for you, and nothing tightens a column you ',
+      'already have. A `field-required-notnull-explicit` conversion did stamp ',
+      '`storage.notNull: true` onto every `required: true` field; it was WITHDRAWN ',
+      '(maintainer ruling 2026-09-08), because stamping the constraint wherever ',
+      '`required: true` appears is exactly the implication the ADR abolished — and ',
+      'because the artifact-ingestion door replays retired conversions, so the LOADER ',
+      'applied it to 17-authored sources that deliberately omit it and then told their ',
+      'authors to write the same tightening into the source, which on a populated ',
+      'database is a destructive `tighten_not_null` migration prescribed as the remedy ',
+      'for a deprecation notice. Post-17 a column is NOT NULL because its author wrote ',
+      '`storage: { notNull: true }`, and for no other reason. If you are upgrading a ',
+      'pre-17 source whose columns ARE NOT NULL and you want them to stay that way, ',
+      'add `storage: { notNull: true }` to those fields yourself — deliberately, and ',
+      'knowing that doing it to a field whose column is currently nullable is a ',
+      'destructive migration with a backfill ceremony.\n\n',
       'On the wire contract it also retires the `/analytics/query` request ENVELOPE ',
       '(#3878): `AnalyticsQueryRequestSchema` used to describe `{ cube, query: {...}, ',
       'format }` — the dialect of the retired degraded analytics shim (#3891) that the ',
@@ -1388,7 +1396,6 @@ const step17: MigrationStep = {
     'tool-inert-authoring-keys-removed',
     'app-dead-authoring-keys-removed',
     'app-area-fail-open-gates-removed',
-    'field-required-notnull-explicit',
     'action-inert-keys-removed',
     'flow-inert-keys-removed',
     'view-inert-keys-removed',
@@ -9969,6 +9976,34 @@ const step18: MigrationStep = {
         + 'type. Any remaining authored key on the widget is deleted (it never configured '
         + 'anything), and behaviour that seems to need one is a renderer capability request '
         + 'against objectui, not a metadata key.',
+    },
+    {
+      id: 'ui-react-list-view-binding-aliases-retired',
+      surface: '`kind:\'react\'` page source — `<ListView objectName="…">` and `<ListView viewType="…">` '
+        + '(the react-tier overlay aliases #11284 had published as deprecated)',
+      replacement: '`<ListView data={{ provider: \'object\', object: \'…\' }} type="…">` — ListViewSchema\'s own '
+        + '`data` data source and `type` view kind, the same two keys a metadata list view authors. '
+        + '`objectName="x"` → `data={{ provider: \'object\', object: \'x\' }}`; `viewType="kanban"` → '
+        + '`type="kanban"`. A `<ListView>` with no `data` at all is refused too: on a react page no '
+        + 'host stamps the object, so the data source is the required binding there.',
+      reason:
+        'A react page\'s source is a JSX string, not a keyed document: `objectstack migrate meta` '
+        + 'rewrites stored metadata by key and cannot rewrite props inside authored source, so the '
+        + 'move is by hand. The contract deprecated both aliases in favour of the metadata-tier '
+        + 'spelling (#11284) while objectui\'s ListView still read only `objectName`, so the canonical '
+        + 'spelling validated green and rendered an empty list. The consumer fold has landed (objectui '
+        + '`normalizeListViewSchema`, console pin a472b071: `data.provider === \'object\'` → '
+        + '`objectName`, and the author\'s `type` read for the view kind), and the maintainer ruled the '
+        + 'aliases retired with no deprecation window (#14791, 2026-09-07). Writing either alias is now '
+        + 'a publish-time `react-prop-retired` error carrying this prescription — never a silent pass '
+        + 'on a key the renderer happens to still read.',
+      acceptanceCriteria:
+        '`objectstack validate` reports no `react-prop-retired` and no `react-prop-missing-required` '
+        + 'finding on any `kind:\'react\'` page; every `<ListView>` carries `data={{ provider: '
+        + '\'object\', object }}` (or another ViewData provider) and, where a view kind was chosen, '
+        + '`type`; in the console each rewritten list renders the same rows and visualization it '
+        + 'rendered under the alias spelling. The platform\'s own sites are the reference: the '
+        + 'showcase `crm-workbench`, `renewals-pipeline` and `task-desk` pages pass with zero findings.',
     },
     {
       id: 'ui-record-blocks-unknown-keys-refused',

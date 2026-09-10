@@ -64,8 +64,83 @@
  * **False positives are the accepted cost; false negatives are the ruling's.**
  * #16448 fixes both directions: "False positives are acceptable (the author
  * re-declares or explains); false negatives are the cost the ruling accepted."
- * So a fixture whose added line merely LOOKS like a schema key is refused, and
- * the remedy is one word in the claim comment — never a weakened rule here.
+ * So a fixture whose added line merely LOOKS like a schema key is refused.
+ *
+ * ⛔ But never again describe that refusal as costing "one word in the claim
+ * comment". This file said exactly that until #16822, and the sentence was
+ * wrong twice over. It UNDERSTATED the price: C5's exit-0 condition is "no
+ * tell, OR the declaration is not `no`", so the only word that clears a false
+ * tell is flipping `Clause-②: no` to `yes` — writing a widening that does not
+ * exist into a ledger consulted later as evidence of direction, where it is
+ * afterwards indistinguishable from a real one. The refusal sentence's other
+ * door, "explain in the claim", is a reading a human can act on; it moves no
+ * exit code. ⛔ Recording that is not proposing a bypass, and this file offers
+ * none: the #16448 row stands and a non-zero `--pair` exit stays a hard block.
+ * It means a DEMONSTRATED false positive is repaired HERE, in the matcher —
+ * the author is not asked to pay for a regex collision with a false
+ * declaration, because the declaration is a governance record, not a log.
+ *
+ * ⛔ And the sentence's second half — "never a weakened rule here" — was
+ * defending something real, so it is restated rather than dropped: a tell may
+ * be narrowed only on evidence the hunk actually CARRIES, and never in a way
+ * that trades a loud failure for a quiet one. A matcher that stops reporting a
+ * real widening is worse than one that over-reports, because an over-report
+ * argues back and a silence does not. Every narrowing below therefore declines
+ * ONLY on positive evidence; absence of evidence leaves the tell firing.
+ *
+ * ## The two accidental variables #16822 removed — what a hunk DOES carry
+ *
+ * Both refinements read bytes the hunk already contains: the added line's
+ * NEIGHBOURS on the new-file side, and the lines the same hunk REMOVED. ⛔
+ * Neither recovers block state. This file still cannot tell an array element
+ * from a call argument, still does not know whether a property sits inside
+ * `z.object({`, and ⛔ still has no notion of DIRECTION — a tell, never a
+ * proof, exactly as before.
+ *
+ * **A fragment of a multi-line string concatenation is not a set member.**
+ * #16822's filing left the instrument that proves the variable was accidental:
+ * a prose message of EIGHT fragments produced exactly ONE tell, because
+ * fragments 2-8 begin `+ '…'` and `^[ \t]*'` cannot match a leading `+`.
+ * Moving the first fragment up onto the calling line makes the IDENTICAL
+ * string stop being a tell. So the continuation operator is now read on both
+ * sides — the `+` that opens the next line, and the `+` left at the end of the
+ * previous one, since both spellings are in the tree. Measured 2026-09-08 over
+ * `packages/spec/src/**`: of 6,035 lines matching the bare-element shape,
+ * 1,707 are followed by a `+ '…'` continuation and 479 follow a line ending in
+ * `+` — 2,186 prose fragments on the surface T2 polices, none of them a member
+ * of anything.
+ *
+ * ⚠️ The quiet direction that buys, stated plainly rather than buried: a
+ * closed-set MEMBER spelled as a multi-line concatenation — `'be'` on one line,
+ * `+ 'ta',` on the next — is now declined, and adding one would go unreported.
+ * Measured over `packages/spec/src/**` and `packages/runtime/src/**`: of 4,957
+ * member lines inside 401 array / closed-set blocks, the 116 that are
+ * multi-line concatenations are all property VALUES (the `reason:` prose of
+ * the ledger's waiver rows), and no MEMBER is spelled that way. ⛔ That is not
+ * zero risk; it is the only quiet direction #16822 added, and it is here so the
+ * next reader can weigh it rather than discover it.
+ *
+ * **An opener that re-declares the SAME binding adds no value.**
+ * `CLOSED_SET_OPENER` fires on the constructor keyword, identically whether the
+ * rewrite widens the set or narrows it. #16822's second instance was three
+ * `z.union([` → `z.discriminatedUnion('type', [` conversions, which cannot
+ * widen — the discriminated form tries exactly ONE arm where the flat form
+ * tried all of them, so its accept set is a subset — and the gate called them
+ * widening tells. ⛔ The fix does not teach the matcher direction: direction is
+ * no more recoverable from a hunk than block state is. It drops a line that
+ * never carried the information. An opener whose list opens on a LATER line
+ * declares no member at all, and when the SAME hunk removes an opener with the
+ * identical binding prefix, the set was already there; its members are still
+ * read one line each by the two member tells, so an arm the rewrite ADDS still
+ * fires.
+ *
+ * ⚠️ The evidence must be in the hunk: no paired removal, no suppression — a
+ * brand-new `z.union([` still tells. A prefix that differs is not the same
+ * binding and keeps the tell, which is the right answer when the difference is
+ * `const X =` → `export const X =`: that rewrite really does widen, on the
+ * published surface rather than the accept set. And an opener carrying its
+ * members INLINE (`z.enum(['a', 'b'])`) is not an opener-only line, so it is
+ * never suppressed.
  *
  * **An unread diff is not a narrow diff.** A file on a tell surface whose
  * content this gate could not read is reported as a GAP (exit 2), never folded
@@ -81,6 +156,59 @@
  * would be issuing the review verdict, which is 自查放行. ⛔ No new label and no
  * new claim-line syntax exist because of this file — #16448 forbids both, and
  * the reader it uses is the sibling's existing `Clause-②:` reader.
+ *
+ * ## The third accidental variable #16943 removed — a REPLACED line
+ *
+ * Both refinements above read a hunk's bytes and still judged one added line at
+ * a time, so neither could see the commonest thing a diff does: put a line back
+ * where an equivalent one stood. Two live pairs reproduced that independently,
+ * on different tells and different file kinds — PR #16941, a form's
+ * `description:` prose rewritten (T2, on a file containing no `z.enum`, no
+ * union and no `as const` at all, members 4 -> 4 and 7 -> 7), and PR #16968, a
+ * Zod key whose `.describe()` text grew (T1, keys 32 -> 32, the declared type
+ * unchanged). Neither diff moved an accept set, and neither row could be
+ * CLEARED: `c5WideningTell(pair, repo)` reads only the pair and the repo, so
+ * "explain in the claim" moves no exit code and the single input that flips the
+ * number is a `Clause-②: yes` that is false. ⚠️ A gate whose green is reachable
+ * only by lying is worse than one that is merely wrong — and #16822's own note
+ * above already says where a demonstrated false positive is repaired: HERE, in
+ * the matcher.
+ *
+ * ⛔ The fix is NOT a wider tolerance for string literals. That was the card's
+ * own prohibition and it is the right one: a tell that stopped firing on real
+ * closed-set additions would be the more expensive failure, and tightening T2's
+ * pattern could not have stopped T1 anyway — two tells, one root. The reading
+ * added instead is a NET DELTA, per change block, per tell kind: every removed
+ * line that carried a member or a key of kind K buys ONE added line of kind K
+ * the right not to be reported, spent in patch order, so a block that adds more
+ * than it removed still reports the SURPLUS with its own file:line. A genuine
+ * addition has no removal to pay for it; that is the whole sensitivity
+ * guarantee, and it is a property of the arithmetic rather than of a pattern.
+ *
+ * The unit is the change BLOCK — a maximal run of consecutive non-context lines
+ * inside one hunk, which is git's own spelling of "these lines replaced those".
+ * ⛔ Never the hunk: a hunk carries three context lines each side and routinely
+ * holds an unrelated removal at one end and a real addition at the other. The
+ * `FILE_SCHEMA_KEY` fixture in `--self-test` is exactly that shape and must
+ * keep firing — pairing across it would buy silence with the wrong coin.
+ *
+ * Two things deliberately do not pay: a closed-set OPENER (it declares no
+ * member — #16822 established that, and `rewritesExistingOpener` is the reading
+ * that judges an opener), and a removed line #16822 already declines on the OLD
+ * side, since deleted prose is not a member either.
+ *
+ * ⚠️ The quiet direction this buys, stated rather than left to be discovered: a
+ * one-for-one member RENAME inside an existing set now declines. Nothing in a
+ * hunk distinguishes a renamed member from a reworded string, and the ruling
+ * this implements is replacement-vs-net-addition, not spelling. Measured over
+ * the 82 commits touching these surfaces in this tree's history: of 715 change
+ * blocks that add a member or key line, 674 pay nothing and are untouched, 7
+ * are partly paid and still report their surplus, and 34 now decline — 22 of
+ * those keep the identifier of the key they rewrote and all 12 of the rest are
+ * prose / `.describe()` rewrites. Not one is a member rename. What still
+ * catches a rename that slips past: `check:api-surface` on any exported name it
+ * moves, `check:authorable-surface` on any authorable key, and the ADR-0087
+ * registries — instruments a rename must move and a rewording cannot.
  *
  * ## Where the surfaces come from — imported, never hand-copied
  *
@@ -226,6 +354,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the surfaces, imported rather than restated': 11,
   'T1 — a new key on a Zod object schema': 14,
   'T2 — a new member of a closed set': 13,
+  '#16822 — the two accidental variables, and the evidence each one needs': 15,
+  '#16943 — the net member/key delta: a replaced line is not a net addition': 23,
   'T3 — a new row in a published entry point': 8,
   'T4 — a new registration in a registry': 10,
   '#16448 acceptance: the four positive controls, each with its file:line': 8,
@@ -237,7 +367,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 14;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -362,7 +492,15 @@ export function isContractSourceFile(filename) {
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
 /**
- * The ADDED lines of one patch, each with its line number in the NEW file.
+ * Every line of one patch, tagged with the side it is on and the hunk it came
+ * from — `addedLines` below is one projection of this reading.
+ *
+ * The three kinds are kept apart because two of #16822's readings need what an
+ * added line's NEIGHBOURS say: `context` lines are the new file's other lines,
+ * `removed` lines are what the same hunk replaced. ⛔ A removed line carries
+ * `line: null` — it has no position in the new file, and the one thing this
+ * reader must never do is invent one. `hunk` is carried so no caller can read
+ * adjacency ACROSS a hunk boundary, where the file's real lines are missing.
  *
  * The line number is the whole reason this is not a `split('\n').filter()`: the
  * card requires a file:line on every refusal, and a refusal an author cannot
@@ -376,16 +514,18 @@ const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
  *   included. GitHub's `/pulls/N/files` `patch` field is exactly this shape.
  * @returns {{ line: number, text: string }[]}
  */
-export function addedLines(patch) {
+export function patchLines(patch) {
   const out = [];
   if (typeof patch !== 'string' || patch === '') return out;
   let lineNo = 0;
+  let hunk = -1;
   let inHunk = false;
   for (const raw of patch.split('\n')) {
     const header = HUNK_HEADER.exec(raw);
     if (header) {
       lineNo = Number(header[1]);
       inHunk = true;
+      hunk += 1;
       continue;
     }
     // The file headers of a full `git diff` — `+++` must be tested BEFORE the
@@ -394,14 +534,32 @@ export function addedLines(patch) {
     if (raw.startsWith('\\')) continue; // "\ No newline at end of file"
     if (!inHunk) continue;
     if (raw.startsWith('+')) {
-      out.push({ line: lineNo, text: raw.slice(1) });
+      out.push({ line: lineNo, text: raw.slice(1), kind: 'added', hunk });
       lineNo += 1;
       continue;
     }
-    if (raw.startsWith('-')) continue; // removed: consumes no new-file line
+    if (raw.startsWith('-')) {
+      // Removed: consumes no new-file line, so it carries NO number. ⛔ Not 0
+      // and not the next line's — a removal has no position in the file the
+      // author will open, and inventing one is the off-by-one this reader's
+      // whole battery exists against.
+      out.push({ line: null, text: raw.slice(1), kind: 'removed', hunk });
+      continue;
+    }
+    out.push({ line: lineNo, text: raw.startsWith(' ') ? raw.slice(1) : raw, kind: 'context', hunk });
     lineNo += 1; // context (a leading space, and the empty trailing line)
   }
   return out;
+}
+
+/**
+ * The ADDED lines of one patch — the projection of `patchLines` this file's
+ * four tells are written against, and the shape every caller already reads.
+ */
+export function addedLines(patch) {
+  return patchLines(patch)
+    .filter((r) => r.kind === 'added')
+    .map((r) => ({ line: r.line, text: r.text }));
 }
 
 const DIFF_GIT = /^diff --git a\/(.+?) b\/(.+)$/;
@@ -533,6 +691,65 @@ const BARE_STRING_ELEMENT = /^[ \t]*(?:'[^']*'|"[^"]*")[ \t]*,?[ \t]*(?:\/\/.*)?
 /** T2 — a bare schema arm of a multi-line `z.union([…])`. */
 const BARE_SCHEMA_ARM = /^[ \t]*[A-Za-z_$][\w$]*Schema[ \t]*,[ \t]*(?:\/\/.*)?$/;
 
+/**
+ * The two spellings of a string CONCATENATION continuing across lines (#16822).
+ *
+ * `CONTINUATION_HEAD` is the operator opening the NEXT line (`+ 'more prose'`),
+ * `CONTINUATION_TAIL` the one left at the END of the previous line (`'prose ' +`).
+ * Both are in the tree, so both are read; a bare-string line with either
+ * neighbour is a FRAGMENT of one expression, never an element of a list.
+ *
+ * ⛔ `++` is excluded in both directions — an increment is not a concatenation,
+ * and reading one as the other would decline a real member for no reason.
+ */
+const CONTINUATION_HEAD = /^[ \t]*\+(?!\+)[ \t]*(?:['"`]|[A-Za-z_$(])/;
+const CONTINUATION_TAIL = /(?<!\+)\+[ \t]*$/;
+
+/**
+ * An opener whose list opens on a LATER line, with its BINDING PREFIX captured.
+ *
+ * `[^[\]]*` between the constructor and the bracket admits a discriminator
+ * argument (`z.discriminatedUnion('type', [`) while refusing any line that
+ * already carries members, and the anchored end refuses one that closes on the
+ * same line (`z.enum(['a', 'b'])`). Group 1 is everything left of the
+ * constructor — `export const AnyComponentSchema = ` — which is what makes two
+ * openers the same DECLARATION rather than merely the same shape.
+ */
+const CLOSED_SET_OPENER_HEAD = /^(.*?)z\.(?:enum|union|discriminatedUnion|literal)\([^[\]]*\[[ \t]*(?:\/\/.*)?$/;
+
+/** The binding an opener-only line declares, or `null` if it is not one. */
+export function closedSetOpenerBinding(text) {
+  const m = CLOSED_SET_OPENER_HEAD.exec(String(text ?? ''));
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * Is this added line a FRAGMENT of a multi-line string concatenation?
+ *
+ * ⭐ Positive evidence only: a neighbour this hunk actually shows. `null` for a
+ * neighbour means the hunk does not reach that line — a different hunk, or the
+ * edge of this one — and an unseen neighbour is never read as evidence. The
+ * tell keeps firing, which is the loud direction.
+ */
+export function isConcatenationFragment(prev, next) {
+  if (typeof next === 'string' && CONTINUATION_HEAD.test(next)) return true;
+  return typeof prev === 'string' && CONTINUATION_TAIL.test(prev);
+}
+
+/**
+ * Does this added opener merely RE-DECLARE a closed set the same hunk removed?
+ *
+ * ⛔ Not a direction claim — see the header. An opener-only line declares no
+ * member, so when the same hunk removes an opener binding the same name, the
+ * set already existed and this line adds no value to it. The members decide,
+ * and they are read separately, one line each.
+ */
+export function rewritesExistingOpener(text, removedTexts) {
+  const binding = closedSetOpenerBinding(text);
+  if (binding === null || !Array.isArray(removedTexts)) return false;
+  return removedTexts.some((r) => closedSetOpenerBinding(r) === binding);
+}
+
 /** T3 — a row of a published export listing: every entry is a JSON string. */
 const JSON_STRING_ROW = /^[ \t]*"/;
 
@@ -550,6 +767,73 @@ const REGISTRATION_ROW =
   /^[ \t]*(?:'[^']*'|"[^"]*")[ \t]*,[ \t]*(?:\/\/.*)?$|^[ \t]*(?:'[^']+'|"[^"]+"|[A-Za-z_$][\w$]*)[ \t]*:[ \t]*\S/;
 
 /**
+ * The MEMBER or KEY shape one line carries on these surfaces, or `null`.
+ *
+ * The same shapes `tellsInFile` reads, in the same precedence order, extracted
+ * so ONE classifier answers for an added line and for a removed one. #16943's
+ * net-delta reading is a comparison between the two sides, and a comparison
+ * whose sides are classified by two different code paths is a comparison of two
+ * different questions — the drift this family punishes one register over.
+ *
+ * ⛔ A closed-set OPENER is deliberately NOT a member here. An opener-only line
+ * declares no member (#16822 established that and dropped the tell it used to
+ * carry), so counting it would let a `z.union([` -> `z.enum([` rewrite pay for a
+ * member the same block really did add.
+ */
+export function memberTellKind(text, { onContractSource = false, onPublished = false, onRegistry = false } = {}) {
+  const s = String(text ?? '');
+  if (COMMENT_LINE.test(s)) return null;
+  if (onRegistry && REGISTRATION_ROW.test(s)) return 'T4';
+  if (onContractSource && SCHEMA_PROPERTY.test(s)) return 'T1';
+  if (onContractSource && (BARE_STRING_ELEMENT.test(s) || BARE_SCHEMA_ARM.test(s))) return 'T2';
+  if (onPublished && JSON_STRING_ROW.test(s)) return 'T3';
+  return null;
+}
+
+/**
+ * The CHANGE BLOCKS of one `patchLines` reading — maximal runs of consecutive
+ * non-context lines inside one hunk.
+ *
+ * ⭐ This is git's own spelling of "these lines replaced those": a unified diff
+ * emits a contiguous edit as one removed run followed by its added run, and a
+ * context line between two edits means the file keeps a line between them, so
+ * they are two edits and not one replacement.
+ *
+ * ⛔ The block, never the HUNK, is the unit — and the difference is not
+ * cosmetic. A hunk carries three lines of context on each side, so it routinely
+ * holds an unrelated removal at one end and a real addition at the other; the
+ * `FILE_SCHEMA_KEY` fixture in `--self-test` is exactly that shape (a key ADDED
+ * at :44 and a DIFFERENT key removed two lines later, with context between) and
+ * it must keep firing. Pairing across a hunk would pay for the new key with a
+ * removal that has nothing to do with it — a silence bought with the wrong
+ * coin, which is the failure direction this file refuses.
+ *
+ * Blocks never span hunks: `patchLines` carries a hunk index precisely so no
+ * adjacency reading can cross a boundary where the real file's lines are
+ * missing.
+ *
+ * @param {{ kind: string, hunk: number }[]} lines — a `patchLines` reading
+ * @returns {number[][]} each block's indices INTO `lines`, in patch order
+ */
+export function changeBlocks(lines) {
+  const blocks = [];
+  let current = null;
+  for (let i = 0; i < (lines?.length ?? 0); i += 1) {
+    const r = lines[i];
+    if (r.kind === 'context') {
+      current = null;
+      continue;
+    }
+    if (current === null || current.hunk !== r.hunk) {
+      current = { hunk: r.hunk, indices: [] };
+      blocks.push(current);
+    }
+    current.indices.push(i);
+  }
+  return blocks.map((b) => b.indices);
+}
+
+/**
  * Every tell one file's added lines carry.
  *
  * @param {{ filename?: string, status?: string, patch?: string|null }} file
@@ -561,31 +845,115 @@ export function tellsInFile(file, { repo = THIS_REPO } = {}) {
   if (filename === '') return [];
   if (file?.status === 'removed') return []; // a deleted file adds nothing.
   const rows = [];
-  const added = addedLines(file?.patch);
+  const lines = patchLines(file?.patch);
+  // The two SIDES of the patch, each in file order. The new file's lines are
+  // added + context — "the line before / after this one" as the author who
+  // opens the file means it — and the old file's are removed + context, the
+  // same reading taken against the file the diff replaced. Both sides are built
+  // because #16822's fragment rule must judge a removed line by its OWN
+  // neighbours: a prose fragment on the old side is not a member either, and
+  // counting it would let deleted prose pay for an added member.
+  const newFile = [];
+  const oldFile = [];
+  const newAt = new Map();
+  const oldAt = new Map();
+  for (let i = 0; i < lines.length; i += 1) {
+    const r = lines[i];
+    if (r.kind !== 'removed') {
+      if (r.kind === 'added') newAt.set(i, newFile.length);
+      newFile.push(r);
+    }
+    if (r.kind !== 'added') {
+      if (r.kind === 'removed') oldAt.set(i, oldFile.length);
+      oldFile.push(r);
+    }
+  }
+  // What each hunk REPLACED, keyed by hunk so no reading crosses a boundary.
+  const removedByHunk = new Map();
+  for (const r of lines) {
+    if (r.kind !== 'removed') continue;
+    if (!removedByHunk.has(r.hunk)) removedByHunk.set(r.hunk, []);
+    removedByHunk.get(r.hunk).push(r.text);
+  }
+  const neighbourOn = (side, idx, step) => {
+    const n = side[idx + step];
+    return n && n.hunk === side[idx].hunk ? n.text : null;
+  };
+  const fragmentOn = (side, idx) =>
+    typeof idx === 'number' && isConcatenationFragment(neighbourOn(side, idx, -1), neighbourOn(side, idx, 1));
   const onContractSource = surfaceCovers(CONTRACT_SOURCE_SURFACES, filename, repo) && isContractSourceFile(filename);
   const onPublished = surfaceCovers(PUBLISHED_SURFACES, filename, repo);
   const onRegistry = surfaceCovers(REGISTRATION_SURFACES, filename, repo);
-  for (const { line, text } of added) {
+  const surfaces = { onContractSource, onPublished, onRegistry };
+  // #16943 — the REPLACEMENT budget, one per change block, per tell kind.
+  //
+  // Every removed line in the block that carried a member or a key of kind K
+  // buys ONE added line of kind K the right not to be reported: that added line
+  // did not grow the accept set, it took the place of something that was
+  // already in it. The budget is spent in patch order, so when a block adds
+  // MORE than it removed the SURPLUS lines — the ones no removal paid for —
+  // still fire, with their own file:line. That surplus is the whole sensitivity
+  // guarantee: a genuine addition has no removal to pay for it.
+  const budgetOfLine = new Map();
+  for (const block of changeBlocks(lines)) {
+    const budget = new Map();
+    for (const i of block) {
+      const r = lines[i];
+      if (r.kind !== 'removed') continue;
+      if (BARE_STRING_ELEMENT.test(r.text) && fragmentOn(oldFile, oldAt.get(i))) continue;
+      const kind = memberTellKind(r.text, surfaces);
+      if (kind !== null) budget.set(kind, (budget.get(kind) ?? 0) + 1);
+    }
+    for (const i of block) budgetOfLine.set(i, budget);
+  }
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i].kind !== 'added') continue;
+    const { line, text, hunk } = lines[i];
     if (COMMENT_LINE.test(text)) continue;
+    // #16822 — a line that is one FRAGMENT of a multi-line string
+    // concatenation is not a bare element of anything: not a member of a
+    // closed set (T2) and not a registration (T4). The 8-fragment instrument
+    // on the card is the proof that the tell keyed on the accidental absence
+    // of a continuation operator; the header states the one quiet direction
+    // this buys. ⛔ Only the bare-STRING shape is declined — a keyed line
+    // (`reason: 'prose ' +`) is a different reading and keeps its own tells.
+    if (BARE_STRING_ELEMENT.test(text) && fragmentOn(newFile, newAt.get(i))) continue;
     const at = { file: filename, line, text: text.trim().slice(0, 160) };
+    const kind = memberTellKind(text, surfaces);
+    // #16943 — a member or key this block REPLACED is not a net addition.
+    //
+    // ⛔ A line that DECLARES a closed set is never spent against the budget,
+    // however it also reads: an opener carries a declaration, not a member, and
+    // #16822's `rewritesExistingOpener` is the reading that judges it.
+    if (kind !== null && !CLOSED_SET_OPENER.test(text)) {
+      const budget = budgetOfLine.get(i);
+      const paid = budget?.get(kind) ?? 0;
+      if (paid > 0) {
+        budget.set(kind, paid - 1);
+        continue;
+      }
+    }
     // A DECLARED registry is read as a registry first. Its files also sit on
     // the contract source surface (two of the three live under
     // `packages/spec/src/**`), and a ledger code read as "a member of a closed
     // set" would be true but less useful than the reading that names the
     // register it was added to. One line is one row, never one per surface.
-    if (onRegistry && REGISTRATION_ROW.test(text)) {
+    if (kind === 'T4') {
       rows.push({ tell: 'T4', ...at, why: 'a new registration in a registry / catalog — what the runtime accepts grows with no schema file moving' });
       continue;
     }
-    if (onContractSource && SCHEMA_PROPERTY.test(text)) {
+    if (kind === 'T1') {
       rows.push({ tell: 'T1', ...at, why: 'a new key on a Zod object schema — the accept set gains a spelling an author may now write' });
       continue;
     }
-    if (onContractSource && (CLOSED_SET_OPENER.test(text) || BARE_STRING_ELEMENT.test(text) || BARE_SCHEMA_ARM.test(text))) {
+    // #16822 — an opener that re-declares a set the same hunk removed adds no
+    // member; the members are read below, one line each.
+    const opener = CLOSED_SET_OPENER.test(text) && !rewritesExistingOpener(text, removedByHunk.get(hunk));
+    if (onContractSource && (opener || kind === 'T2')) {
       rows.push({ tell: 'T2', ...at, why: 'a new member of a closed set (z.enum / union / an `as const` array) — the accept set gains a value' });
       continue;
     }
-    if (onPublished && JSON_STRING_ROW.test(text)) {
+    if (kind === 'T3') {
       rows.push({ tell: 'T3', ...at, why: 'a new row in a published entry point\'s export listing — the public surface grows (ADR-0059)' });
       continue;
     }
@@ -871,6 +1239,10 @@ export function selfTest() {
   t('the trailing empty split element does not fabricate a line', addedLines('@@ -1,1 +1,1 @@\n+a\n').length === 1);
   t('a `diff --git` header line inside the body is skipped', addedLines('diff --git a/x b/x\n@@ -1,0 +2,1 @@\n+z').length === 1);
   t('mixed context/add/remove keeps every number right', JSON.stringify(addedLines('@@ -1,4 +10,4 @@\n ctx\n-old\n+new\n ctx2\n+tail').map((r) => r.line)) === '[11,13]');
+  t('`patchLines` tags all three sides — the reading `addedLines` is a projection of', JSON.stringify(patchLines('@@ -1,3 +10,2 @@\n ctx\n-old\n+new').map((r) => r.kind)) === '["context","removed","added"]');
+  t('⛔ a REMOVED line carries NO new-file number — it has no line the author can open', patchLines('@@ -1,3 +10,2 @@\n ctx\n-old\n+new')[1]?.line === null);
+  t('…and every added line agrees with `addedLines`, so the two readers cannot drift', JSON.stringify(patchLines('@@ -1,4 +10,4 @@\n ctx\n-old\n+new\n ctx2\n+tail').filter((r) => r.kind === 'added').map((r) => r.line)) === '[11,13]');
+  t('a second hunk gets its own index, so adjacency can never cross a boundary', patchLines('@@ -1,1 +7,1 @@\n+a\n@@ -40,1 +60,1 @@\n+b').map((r) => r.hunk).join(',') === '0,1');
 
   // -- the unified-diff splitter --------------------------------------------
   battery('the unified-diff splitter, for the local `git diff` path');
@@ -970,6 +1342,124 @@ export function selfTest() {
   t('⛔ a REMOVED member is not a tell — the ruling is directional', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -3,1 +3,0 @@\n-  'legacy'," }).length === 0);
   t('T1 wins over T2 on a line that could read as both, so one line is never two rows', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+  kind: z.enum(['a']),") }).length === 1);
   t('…and the row it produces is the key reading', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+  kind: z.enum(['a']),") })[0]?.tell === 'T1');
+
+  // -- #16822: the accidental variables ------------------------------------
+  //
+  // Both halves of the card, each with the evidence it declines on and the
+  // evidence it refuses to invent. ⭐ The instrument first: the SAME string,
+  // spelled two ways, used to read differently.
+  battery('#16822 — the two accidental variables, and the evidence each one needs');
+  const FRAGMENTS = [
+    "'RETIRED (ADR-0049 enforce-or-remove) — `action` had two published faces whose '",
+    "+ 'accept sets were DISJOINT and one of them EMPTY: this mirror admitted a node '",
+    "+ 'or a list of nodes, while the twin declared an object with both members '",
+    "+ 'required, which no JSON document can satisfy. The renderer read neither '",
+    "+ 'face. There is NO replacement spelling and the capability was never '",
+    "+ 'fulfilled. Raise the toast from the node itself and label its trigger '",
+    "+ 'with `buttonLabel` / `buttonVariant`. See ADR-0049 and the retirement '",
+    "+ 'playbook for the conversion.',",
+  ];
+  const proseArgument = (fragments) => ({
+    filename: 'packages/spec/src/kernel/manifest.zod.ts',
+    status: 'modified',
+    patch: patchOf(83, '+  action: retirementTombstone(', ...fragments.map((f) => `+    ${f}`), '+  ),'),
+  });
+  const asWritten = proseArgument(FRAGMENTS);
+  const respelled = {
+    filename: 'packages/spec/src/kernel/manifest.zod.ts',
+    status: 'modified',
+    patch: patchOf(83, `+  action: retirementTombstone(${FRAGMENTS[0]}`, ...FRAGMENTS.slice(1).map((f) => `+    ${f}`), '+  ),'),
+  };
+  t('⭐ an 8-fragment prose ARGUMENT is not a closed-set member — its first fragment used to be the only tell', FRAGMENTS.length === 8 && tells(asWritten).length === 0);
+  t('⭐ …and the IDENTICAL string with that fragment moved up onto the calling line reads the same — the accidental variable is gone', tells(respelled).length === tells(asWritten).length);
+  t('a bare string whose NEXT line opens with `+ \'…\'` is a fragment, not an element', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+  'half a sentence '", "+  + 'and the rest',") }).length === 0);
+  t('…and the other spelling, the operator left at the END of the line before', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+  'half a sentence ' +", "+  'and the rest',") }).length === 0);
+  t('⛔ a bare string with NO continuation neighbour is STILL a tell — absence of evidence is not evidence', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+  'workflow',") })[0]?.tell === 'T2');
+  t('⛔ a neighbour in a DIFFERENT hunk is not a neighbour — the hunk does not show the lines between', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -3,0 +3,1 @@\n+  'workflow'\n@@ -90,0 +90,1 @@\n+  + 'more prose'," })[0]?.line === 3);
+  t('⛔ `++` is an increment, never a concatenation — it must not decline a real member', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+  'workflow',", '+  ++seen;') })[0]?.tell === 'T2');
+  t('⛔ only the BARE-string shape is declined: a keyed prose head keeps its own reading', tells({ filename: 'packages/spec/src/api/error-code-ledger.zod.ts', patch: patchOf(140, "+    reason: 'Pre-gate synonym on the wire ' +", "+      'kept per #8211.',") })[0]?.tell === 'T4');
+  const rewrite = (removed, added) => splitUnifiedDiff(['diff --git a/packages/spec/src/a.zod.ts b/packages/spec/src/a.zod.ts', '@@ -207,4 +207,4 @@', ` ${'/** doc */'}`, `-${removed}`, `+${added}`, '   ArmSchema,', ' ]);'].join('\n'))[0];
+  t('⭐ an opener that RE-DECLARES the set the same hunk removed is not a tell — the constructor changed, no member did', tells(rewrite('export const X = z.union([', "export const X = z.discriminatedUnion('type', [")).length === 0);
+  t('…and that is the card\'s own second instance, arm for arm', tells(rewrite('export const CRUDComponentSchema = z.union([', "export const CRUDComponentSchema = z.discriminatedUnion('type', [")).length === 0);
+  t('⛔ but an ARM the rewrite ADDS still fires — the members were never the suppressed part', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -207,3 +207,4 @@\n-export const X = z.union([\n+export const X = z.discriminatedUnion('type', [\n+  NewlyAdmittedSchema,\n   ArmSchema," })[0]?.tell === 'T2');
+  t('⛔ an opener with NO paired removal still fires — a brand-new closed set is exactly what T2 is for', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+export const X = z.discriminatedUnion('type', [") })[0]?.tell === 'T2');
+  t('⛔ a DIFFERENT binding prefix is not the same declaration — and `export` added is itself a widening', tells(rewrite('const X = z.union([', 'export const X = z.union([')).length === 1);
+  t('⛔ an opener carrying its members INLINE is not an opener-only line, so it is never suppressed', tells(rewrite('export const X = z.enum([', "export const X = z.enum(['a', 'b']);"))[0]?.tell === 'T2');
+  t('⛔ a removed opener in ANOTHER hunk does not pair — the evidence must be where the reader can see it', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -3,1 +3,0 @@\n-export const X = z.union([\n@@ -90,0 +90,1 @@\n+export const X = z.discriminatedUnion('type', [" })[0]?.tell === 'T2');
+
+  // -- #16943: the net member/key delta -------------------------------------
+  //
+  // Both live instances the card measured, each reduced to the shape that made
+  // it fire and nothing else, plus the surplus case that is the whole
+  // sensitivity guarantee. ⭐ The two fixtures below are the two RECORDED
+  // pairs' own bytes (prose abridged, structure verbatim): PR #16941 on a form
+  // `description:` value, PR #16968 on a Zod key whose `.describe()` moved.
+  battery('#16943 — the net member/key delta: a replaced line is not a net addition');
+  const LIVE_T2_PAIR = {
+    filename: 'packages/spec/src/security/permission.form.ts',
+    status: 'modified',
+    patch: [
+      '@@ -21,7 +27,7 @@ export const permissionForm = defineForm({',
+      '     {',
+      "       label: 'Identity',",
+      '       description:',
+      "-        'Permission Sets stack on top of a Profile to grant additional access. …',",
+      "+        'Permission sets are the only capability container: a user gets the union of every set they hold. …',",
+      '       columns: 2,',
+      '       fields: [',
+    ].join('\n'),
+  };
+  const LIVE_T1_PAIR = {
+    filename: 'packages/spec/src/ui/dashboard.zod.ts',
+    status: 'modified',
+    patch: [
+      '@@ -800,8 +800,29 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({',
+      ' ',
+      '-  /** Field name to filter on */',
+      "-  field: z.string().describe('Field name to filter on'),",
+      '+  /**',
+      '+   * Field name to filter on — at the authoring layer it resolves against',
+      "+   * the object behind each bound widget's dataset (`dataset.object`).",
+      '+   */',
+      "+  field: z.string().describe('Field name to filter on — at the authoring layer it resolves …'),",
+      ' ',
+    ].join('\n'),
+  };
+  t('⭐ the live T2 pair — a `description:` VALUE replaced in place is not a new member of a closed set', tells(LIVE_T2_PAIR).length === 0);
+  t('⭐ the live T1 pair — a key whose `.describe()` was rewritten is not a new key on the schema', tells(LIVE_T1_PAIR).length === 0);
+  t('…and the two together read CLEAN end to end, which is the exit code the card could not reach', wideningRefusal({ declaration: 'no', files: [LIVE_T2_PAIR, LIVE_T1_PAIR] }).state === 'clean');
+  const surplus = {
+    filename: 'packages/spec/src/kernel/plugin.zod.ts',
+    status: 'modified',
+    patch: "@@ -95,3 +95,4 @@\n   'core',\n-  'legacy',\n+  'legacy_renamed',\n+  'workflow',\n   'ui',",
+  };
+  t('⭐ a block that removes ONE member and adds TWO reports exactly one — the surplus is the net addition', tells(surplus).length === 1);
+  t('…and the row it reports is the line no removal paid for', at(surplus)[0] === 'packages/spec/src/kernel/plugin.zod.ts:97');
+  t('⛔ a member added with NO removal in its block still fires — a genuine addition has nothing to pay with', tells({ filename: 'packages/spec/src/a.zod.ts', patch: patchOf(3, "+  'workflow',") })[0]?.tell === 'T2');
+  t('⛔ a removal in a DIFFERENT change block does not pay — a context line between two edits means two edits', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -95,4 +95,4 @@\n-  'legacy',\n   'core',\n   'ui',\n+  'workflow'," }).length === 1);
+  t('⛔ nor a removal in another HUNK — the file\'s lines between them are not shown', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -95,1 +95,0 @@\n-  'legacy',\n@@ -300,0 +299,1 @@\n+  'workflow'," }).length === 1);
+  t('⛔ the budget is per KIND — a removed closed-set member does not pay for an added schema KEY', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -95,2 +95,2 @@\n-  'legacy',\n+  extra: z.string()," })[0]?.tell === 'T1');
+  t('⛔ a removed COMMENT pays for nothing — it was never a member', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -95,2 +95,2 @@\n-  // 'legacy',\n+  'workflow'," }).length === 1);
+  t('⛔ #16822 is read on the OLD side too: a removed prose FRAGMENT pays for nothing', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -95,3 +95,2 @@\n-  'half a sentence '\n-  + 'and the rest',\n+  'workflow'," }).length === 1);
+  t('⛔ an OPENER is not a member: a `z.union([` → `z.enum([` rewrite cannot pay for the arm it adds', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -207,3 +207,4 @@\n-export const X = z.union([\n+export const X = z.enum([\n+  'workflow',\n   ArmSchema," }).length === 1);
+  t('⭐ FILE_SCHEMA_KEY still fires — its removal sits across a context line, so it is a different edit', at(FILE_SCHEMA_KEY)[0] === 'packages/spec/src/kernel/manifest.zod.ts:44');
+  t('a replaced REGISTRY row is not a new registration — the T4 half of the same root cause', tells({ filename: 'packages/spec/src/api/error-code-ledger.zod.ts', patch: "@@ -140,2 +140,2 @@\n-    reason: 'the wording this row carried before',\n+    reason: 'the wording it carries now'," }).length === 0);
+  t('…and a replaced row in a published listing is not a new export — the T3 half', tells({ filename: 'packages/spec/api-surface/kernel.json', patch: '@@ -14,2 +14,2 @@\n-    "PluginSchema (const)",\n+    "PluginSchema (type)",' }).length === 0);
+  t('⛔ but a published listing that removes one row and adds two still reports the surplus', tells({ filename: 'packages/spec/api-surface/kernel.json', patch: '@@ -14,3 +14,4 @@\n-    "Gone (const)",\n+    "Renamed (const)",\n+    "WorkflowPluginSchema (const)",\n     "Kept (const)",' }).length === 1);
+  // ⚠️ The quiet direction, asserted rather than described so the next reader
+  // meets it here instead of discovering it. A one-for-one member RENAME inside
+  // an existing set now declines: the block's member count did not move, and
+  // nothing in the hunk distinguishes a renamed member from a reworded string.
+  // What still catches it: `check:api-surface` on any exported type it moves,
+  // `check:authorable-surface` on any authorable key, and the ADR-0087
+  // registries — all three of which a rename must move and a rewording cannot.
+  t('⚠️ QUIET DIRECTION — a one-for-one member rename declines; this case exists so the cost is read, not discovered', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -95,2 +95,2 @@\n-  'legacy',\n+  'legacy_renamed'," }).length === 0);
+  t('`changeBlocks` splits on a context line — two edits, never one replacement', changeBlocks(patchLines("@@ -95,4 +95,4 @@\n-  'a',\n   ctx\n+  'b',")).length === 2);
+  t('…and never spans a hunk boundary', changeBlocks(patchLines("@@ -95,1 +95,0 @@\n-  'a',\n@@ -300,0 +299,1 @@\n+  'b',")).length === 2);
+  t('…while one removed run and its added run are ONE block', changeBlocks(patchLines("@@ -95,3 +95,3 @@\n-  'a',\n-  'b',\n+  'c',")).length === 1);
+  t('`memberTellKind` reads a schema key as T1 and a bare element as T2 on the contract surface', memberTellKind('  extra: z.string(),', { onContractSource: true }) === 'T1' && memberTellKind("  'workflow',", { onContractSource: true }) === 'T2');
+  t('⛔ …and an OPENER as neither — an opener-only line declares no member', memberTellKind('export const X = z.union([', { onContractSource: true }) === null);
+  t('⛔ …and nothing at all off every surface', memberTellKind('  extra: z.string(),', {}) === null);
 
   // -- T3 --------------------------------------------------------------------
   battery('T3 — a new row in a published entry point');
@@ -1103,7 +1593,9 @@ export function selfTest() {
   console.log(
     `✓ check-widening-tells self-test: ${cases.length} cases pass (the patch reader with its ` +
       'line-number directions, the unified-diff splitter, the three imported/declared surfaces, the ' +
-      "four tells, #16448's four positive controls each with its file:line, its negative controls — " +
+      'four tells, the two accidental variables #16822 removed and the evidence each declines on, '
+      + 'the #16943 net member/key delta with its surplus rule and the quiet direction it buys, ' +
+      "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean — and the exit register).',
   );

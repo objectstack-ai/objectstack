@@ -21,6 +21,7 @@ import { FilterConditionSchema } from '../data/filter.zod';
  * batch-draft. This is the safety valve for low-specificity input.
  */
 
+/** Machine-name pattern every object, field and option name in a blueprint must match. */
 const SNAKE_CASE = /^[a-z_][a-z0-9_]*$/;
 
 /**

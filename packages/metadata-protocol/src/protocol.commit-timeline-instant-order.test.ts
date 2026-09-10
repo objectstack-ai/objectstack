@@ -8,10 +8,20 @@
 // The defect
 // ---------------------------------------------------------------------------
 // `created_at` is an engine-injected audit column: it is not in `datetimeFields`
-// and `SqlDriver#formatOutput` repairs it only inside `if (this.isSqlite)`, so
-// the live SQL dialects hand it out of the record read door as a JS `Date` while
-// the SQLite family hands out canonical ISO-Z text. Pinned one layer down by
-// `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`.
+// and, when this landed, `SqlDriver#formatOutput` repaired it only inside
+// `if (this.isSqlite)`, so the live SQL dialects handed it out of the record
+// read door as a JS `Date` while the SQLite family handed out canonical ISO-Z
+// text. #13973 ([ADR-0053 D-F1]) has since lifted both of `formatOutput`'s
+// timestamp passes out of that gate — they run on EVERY dialect now — and the
+// pin one layer down records that contract instead
+// (`packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`
+// §B1, inverted on purpose).
+//
+// The `Date` this file drives is still a shape `compareAuditInstants` receives,
+// so what is pinned below stays a live comparator arm: `withPostgresCalendarDayAsText`
+// is untouched by that ruling ([ADR-0053 D-F2]) so the CLIENT still materialises
+// the column as a `Date`, `driver-sql` hands an INVALID `Date` through unchanged
+// ([ADR-0053 D-F3]), and non-SQL drivers materialise their own.
 //
 // Both timeline consumers in `protocol.ts` compared `String(created_at)`:
 //

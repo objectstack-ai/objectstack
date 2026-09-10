@@ -98,9 +98,18 @@ export const SysReportSchedule = ObjectSchema.create({
     // `invalid cron '<expr>'` — a warning that names the wrong input, since the
     // expression was fine. Neither a throw nor a fall back to UTC: the wrong
     // instant, permanently, which is the outcome this card was told to escalate
-    // on. `scheduleReport`'s eager create-time guard does not catch it either;
-    // it constructs a callback-less `Cron` and so is blind to exactly this half
-    // of its own input. Refusing the write is what closes it.
+    // on. `scheduleReport`'s eager create-time guard did not catch it either;
+    // it constructed a callback-less `Cron` and so was blind to exactly this
+    // half of its own input. Refusing the write is what closes it HERE.
+    //
+    // [#16291] The reader's two halves are closed separately, and this line does
+    // not stand in for either: `scheduleReport` now consults
+    // `isValueDomainMember('iana_time_zone', …)` itself — this declaration's own
+    // predicate, so neither door can accept what the other refuses — and the
+    // sweep quarantines a row that was STORED before this line existed (it does
+    // not run it and does not advance `next_run_at`, and says so in
+    // `last_status` / `last_error`) rather than re-deriving a cadence from
+    // `interval_minutes` that nobody asked for.
     //
     // `maxLength: 64` and `defaultValue: 'UTC'` are BOTH unchanged. The bound is
     // already the value #14238 justified (twice the domain's real ceiling: the

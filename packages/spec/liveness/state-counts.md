@@ -51,7 +51,7 @@ for both corollaries.
 | `email_template` | 21 | 0 | 0 | 0 | 0 | 21 |
 | `job` | 15 | 0 | 0 | 1 | 0 | 16 |
 | `mapping` | 14 | 0 | 0 | 0 | 0 | 14 |
-| `seed` | 12 | 0 | 0 | 0 | 0 | 12 |
+| `seed` | 13 | 0 | 0 | 0 | 0 | 13 |
 | `translation` | 23 | 0 | 0 | 0 | 2 | 25 |
 | `validation` | 18 | 0 | 0 | 0 | 0 | 18 |
 | `api` | 25 | 0 | 0 | 1 | 2 | 28 |
@@ -63,4 +63,4 @@ for both corollaries.
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
-| **total** | **850** | **5** | **1** | **92** | **10** | **958** |
+| **total** | **851** | **5** | **1** | **92** | **10** | **959** |

@@ -14,6 +14,7 @@ import { ExecutionLogSchema, ExecutionStatus, FlowRunSummarySchema } from '../au
  * Base path: /api/automation
  *
  * @example Endpoints
+ * ```
  * GET    /api/automation                         — List flows
  * GET    /api/automation/:name                   — Get flow
  * POST   /api/automation                         — Create flow
@@ -23,6 +24,7 @@ import { ExecutionLogSchema, ExecutionStatus, FlowRunSummarySchema } from '../au
  * POST   /api/automation/:name/toggle            — Enable/disable flow
  * GET    /api/automation/:name/runs              — List execution runs
  * GET    /api/automation/:name/runs/:runId       — Get single execution run
+ * ```
  */
 
 // ==========================================

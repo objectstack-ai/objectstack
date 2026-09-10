@@ -1,9 +1,0 @@
----
-'@objectstack/plugin-approvals': patch
----
-
-Fix: a `department` approver on a seeded business unit no longer routes the approval to another organization's members.
-
-`ApprovalService.expandBusinessUnitUsers` screened the `sys_business_unit` rows with the null-inclusive tenant predicate (#3807 — a seeded unit carries no organization and is admitted on purpose) but read `sys_business_unit_member` with no organization predicate at all, under a system context that carries no tenant either. A seeded unit id exists identically in every tenant, so a `department:<id>` approver on tenant A's request resolved the shared unit and then collected every tenant's membership rows hanging off it — approval authority over A's record, routed to B's users. The member read now carries a strict `organization_id` equality against the directory organization the approver resolves in: the same screen `plugin-sharing` applies to these rows, and the same posture this package already takes for `sys_team_member` and `sys_user_position`.
-
-The screen is strict rather than null-inclusive on purpose. `sys_business_unit_member.organization_id` is filled by REST/session writes but left NULL by seed replay and by elevated system-context writes (tracked in #14570), so a NULL on a membership row means unknown tenancy, not "platform-global", and routing fails closed on it. Declared cost: on a deployment whose membership rows (not merely its units) were seeded or system-written, a `department` approver on a request that carries an organization now expands to nobody — the slot falls to the `department:<id>` literal, the existing `expanded to nobody` warning (#3807) names it, and `onEmptyApprovers` governs the request as for any unstaffed target. The repair is to stamp those membership rows. A request that carries no organization is unchanged, and so is every unit-level screen.

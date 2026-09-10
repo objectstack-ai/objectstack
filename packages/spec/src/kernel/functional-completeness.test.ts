@@ -9,10 +9,10 @@
  *    completeness gate that cannot fail on a known-inert instance is the
  *    hollow-probe defect reproduced in the instrument built against it.
  * 2. The deliberate NON-rules are pinned as hard as the rules. `multiselect`
- *    without options is runtime-blessed free-form (`record-validator.ts:471`,
- *    verbatim: "free-form (tags without options)") — if someone "completes"
- *    this module by flagging it, that is a false prescription, and this test
- *    is where the attempt fails first.
+ *    without options is runtime-blessed free-form (`record-validator.ts`'s
+ *    `validateOne`, verbatim: "free-form (tags without options)") — if someone
+ *    "completes" this module by flagging it, that is a false prescription, and
+ *    this test is where the attempt fails first.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -100,7 +100,8 @@ describe('checkFieldCompleteness — the verified inert shapes go red', () => {
   });
 
   it('does NOT flag multiselect without options — the pinned NON-rule', () => {
-    // record-validator.ts:471, verbatim: "free-form (tags without options)".
+    // record-validator.ts's `validateOne`, verbatim:
+    // "free-form (tags without options)".
     // The runtime blesses this as a mode; flagging it would be a false
     // prescription. If product direction ever changes, change the runtime
     // first — this pin makes the lint follow the code, never lead it.

@@ -119,6 +119,46 @@ const ROOT = new URL('../..', import.meta.url).pathname;
 const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|ROOTS|DIRS|POPULATION|[A-Z0-9_]*_SCOPE)$/;
 
 /**
+ * The same judgement call for a population declared as an object PROPERTY
+ * instead of as a module constant — `roots: [...]` inside a config literal.
+ *
+ * ⚠️ Admitted on 2026-09-09 (#17057), and the defect it repairs is the sharpest
+ * one this instrument can carry: a gate declares its scan population honestly,
+ * in a shape a reader recognises at a glance, and the tool whose entire job is
+ * to find undeclared populations cannot see it — not because the population is
+ * different but because it is SPELLED differently. `POPULATION_CONSTANT` reads
+ * NAMES of `const` declarations, so a lowercase property could never match it,
+ * and the miss left the sweep's own count wrong in a direction no reader of its
+ * output could infer. ⛔ The instance was NOT repaired by renaming it to a
+ * recognised constant: that makes today green and leaves the auditor exactly as
+ * blind, which is the shape this file exists to refuse.
+ *
+ * The alternatives MIRROR `POPULATION_CONSTANT` term for term, with the
+ * camelCase hump doing the work the literal underscore does there — that is
+ * what makes this a translation of the recorded judgement rather than a second,
+ * looser one:
+ *
+ *   [A-Z0-9_]*_ROOTS?  ↔  [a-z][A-Za-z0-9]*Roots?   (`scanRoots`, `docRoot`)
+ *   [A-Z0-9_]*_DIRS?   ↔  [a-z][A-Za-z0-9]*Dirs?    (`searchDirs`)
+ *   [A-Z0-9_]*_SCOPE   ↔  [a-z][A-Za-z0-9]*Scope
+ *   ROOTS · DIRS       ↔  roots · dirs              (bare, PLURAL only)
+ *   POPULATION         ↔  population
+ *
+ * ⛔ The bare singular `root` and `dir` stay OUT, for the reason `ROOT` and
+ * `DIR` stay out above and with more force at this casing: `root` is the
+ * commonest property name in this tree for a single repo-root path fragment,
+ * the exact thing the restriction exists to exclude. The self-test pins both
+ * directions, on the recogniser rather than on any row.
+ *
+ * Measured on 91f65c4ea, the tree this landed against: the property shape adds
+ * exactly ONE row — a real, recursively-walked population — and it is the
+ * instance the card was filed from. That is the positive control this widening
+ * owes and it is recorded here as a number rather than asserted: a sweep that
+ * finds nothing new has to prove it can still find the row it was built for.
+ */
+const POPULATION_PROPERTY = /^(?:[a-z][A-Za-z0-9]*Roots?|[a-z][A-Za-z0-9]*Dirs?|roots|dirs|population|[a-z][A-Za-z0-9]*Scope)$/;
+
+/**
  * The recorded triage — the half of this file that a human decided and the tree
  * cannot re-derive. Keys are `source-file constant word`; the row half of every
  * key is checked against the live sweep by the self-test, in BOTH directions, so
@@ -1342,9 +1382,9 @@ export const CENSUS_REFUSE_WIDE = new Map([
 ]);
 
 /**
- * SEEN, NOT YET JUDGED — the rows the widened recogniser made visible, named
+ * SEEN, NOT YET JUDGED — the rows a widened recogniser made visible, named
  * here so the worklist above does not read as complete while they sit outside
- * it (#15468).
+ * it (#15468, and #17057's property widening after it).
  *
  * ⛔ This is NOT a verdict table and NOT an exemption. An entry records exactly
  * one fact: the sweep SEES this row today and nobody has triaged it. This map
@@ -1374,6 +1414,20 @@ export const CENSUS_REFUSE_WIDE = new Map([
  * and its key is missing. The `base` is the tree the notes were measured on,
  * shared, and pinned to be shared, the way `CENSUS_REFUSE_WIDE` pins its own.
  *
+ * ⚠️ That shared base is what a SECOND widening costs, and the cost is the
+ * point rather than an obstacle to route around: a bucket may not carry notes
+ * measured on two different trees, so #17057's pass could not append its rows
+ * without re-reading every note already here against its own base. It did, and
+ * the base moved 66e68adc6 to 91f65c4ea. Seven of the eleven inherited entries
+ * name gate sources that are BYTE-IDENTICAL across those two commits (compared
+ * by blob id rather than by reading), so their notes could not have drifted; of
+ * the two files that did change, the live-db-isolation gate changed comment
+ * prose only, with no net line movement, and the doc-frontmatter gate grew
+ * ABOVE the line its note cites — the one note whose text this pass corrected,
+ * :436 to :446. ⛔ No `population` boolean and no recorded reason was otherwise
+ * rewritten: a re-measure that quietly re-judges is the thing this map exists
+ * to refuse.
+ *
  * ⚠️ Every path in the notes below is DESCRIBED rather than quoted — "a
  * two-segment path under the content root", not the literal. That is not
  * fussiness: a separator-carrying literal written here would enter THIS file's
@@ -1384,7 +1438,7 @@ export const CENSUS_REFUSE_WIDE = new Map([
 export const UNJUDGED = new Map([
   ['packages/lint/scripts/check-doc-security-posture.mjs ROOTS docs', {
     population: false,
-    base: '66e68adc6',
+    base: '91f65c4ea',
     why: 'the word is the `label` field at check-doc-security-posture.mjs:155, not a walk root: '
       + 'that entry\'s population is the `path` field one line above it, a two-segment path under '
       + 'the content root, which carries a separator and has always been visible to the '
@@ -1392,22 +1446,44 @@ export const UNJUDGED = new Map([
   }],
   ['packages/lint/scripts/check-doc-security-posture.mjs ROOTS skills', {
     population: true,
-    base: '66e68adc6',
+    base: '91f65c4ea',
     why: '`path: \'skills\'` at check-doc-security-posture.mjs:164, walked recursively by the `walk` '
       + 'at :189-:193 from the `for (const root of ROOTS)` at :462, for every `.md` file under it '
       + 'minus the entry\'s own `exclude` list',
   }],
+  ['scripts/check-console-injection.mjs distDir packages', {
+    population: false,
+    base: '91f65c4ea',
+    why: 'the word is a `join()` path COMPONENT at check-console-injection.mjs:940 — the gate '
+      + 'assembles the console dist directory from four bare single-segment words, so the extractor '
+      + 'sees the top-level one and nothing else. It never walks that root: `evaluate` at :247 opens '
+      + 'the index file at :252, the stamp beside it at :268, and every JavaScript asset directly '
+      + 'inside that directory\'s assets child at :269 — `readBundle` in console-spec-probes.mjs, '
+      + 'non-recursive. Surfaced by the #17057 property widening because the component sits inside '
+      + 'the `distDir` property of the argv object, which the recogniser now reads',
+  }],
+  ['scripts/check-console-injection.mjs specDir packages', {
+    population: false,
+    base: '91f65c4ea',
+    why: 'the same shape one line down, at check-console-injection.mjs:941: a `join()` component of '
+      + 'the spec package directory, assembled from bare words. The gate reads that package\'s '
+      + 'manifest and the built JavaScript its `exports` map points at — `readSpecBlob` in '
+      + 'console-spec-probes.mjs, reached at :348 — never an arbitrary file under the top-level '
+      + 'root. ⚠️ Both of this gate\'s real populations are themselves invisible to the derivation, '
+      + 'for the DIFFERENT reason that they are assembled rather than spelled; that is a fact this '
+      + 'note records and not a verdict on what, if anything, should be declared for them',
+  }],
   ['scripts/check-doc-frontmatter.mjs ROOTS docs', {
     population: false,
-    base: '66e68adc6',
-    why: 'the word is the `name` field at check-doc-frontmatter.mjs:436, not a walk root: that '
+    base: '91f65c4ea',
+    why: 'the word is the `name` field at check-doc-frontmatter.mjs:446, not a walk root: that '
       + 'entry\'s directory is a `join(REPO_ROOT, …)` of a two-segment path under the content root '
       + 'on the next line, and both of this gate\'s roots are separator-carrying paths under that '
       + 'root, which the derivation already sees',
   }],
   ['scripts/check-live-db-isolation.mjs ROOTS apps', {
     population: true,
-    base: '66e68adc6',
+    base: '91f65c4ea',
     why: 'one of `const ROOTS = [\'packages\', \'apps\', \'examples\']` at check-live-db-isolation.mjs:178, '
       + 'each walked recursively at :278-:282. The gate carries the #15341 `wide-population` marker '
       + 'at :58 and that marker is read here — but the marker excuses a COVERED row carrying a '
@@ -1418,7 +1494,7 @@ export const UNJUDGED = new Map([
   }],
   ['scripts/check-live-db-isolation.mjs ROOTS examples', {
     population: true,
-    base: '66e68adc6',
+    base: '91f65c4ea',
     why: 'the `examples` member of the same walked triple at check-live-db-isolation.mjs:178, with '
       + 'the same #15341 marker at :58 and the same reading — the marker resolves a contradiction '
       + 'between a declaration and a verdict, and this row has neither. No CENSUS row names '
@@ -1426,7 +1502,7 @@ export const UNJUDGED = new Map([
   }],
   ['scripts/check-live-db-isolation.mjs ROOTS packages', {
     population: true,
-    base: '66e68adc6',
+    base: '91f65c4ea',
     why: 'the `packages` member of the same walked triple at check-live-db-isolation.mjs:178. This '
       + 'is the one of the three that IS judged somewhere: `check:live-db-isolation packages` is a '
       + 'recorded REFUSE-WIDE in CENSUS_REFUSE_WIDE, at 90.3% of tracked packages/ files. It is '
@@ -1435,33 +1511,33 @@ export const UNJUDGED = new Map([
   }],
   ['scripts/check-vendor-version-stamps.mjs ROOTS apps', {
     population: true,
-    base: '66e68adc6',
+    base: '91f65c4ea',
     why: 'one of the four bare `path:` entries of `export const ROOTS` at '
       + 'check-vendor-version-stamps.mjs:232, read by `collectFiles()` at :916 and walked '
       + 'recursively at :885-:890 for the entry\'s own extension list',
   }],
   ['scripts/check-vendor-version-stamps.mjs ROOTS examples', {
     population: true,
-    base: '66e68adc6',
+    base: '91f65c4ea',
     why: 'the `examples` entry of the same walked list at check-vendor-version-stamps.mjs:232, on '
       + 'the same `collectFiles()` walk',
   }],
   ['scripts/check-vendor-version-stamps.mjs ROOTS packages', {
     population: true,
-    base: '66e68adc6',
+    base: '91f65c4ea',
     why: 'the `packages` entry of the same walked list at check-vendor-version-stamps.mjs:232, on '
       + 'the same `collectFiles()` walk',
   }],
   ['scripts/check-vendor-version-stamps.mjs ROOTS scripts', {
     population: true,
-    base: '66e68adc6',
+    base: '91f65c4ea',
     why: 'the `scripts` entry of the same walked list at check-vendor-version-stamps.mjs:232, on '
       + 'the same `collectFiles()` walk. The gate\'s fifth root is a two-segment path under the '
       + 'content root, which carries a separator and was already visible',
   }],
   ['scripts/check-whole-set-label-write.mjs ROOTS scripts', {
     population: true,
-    base: '66e68adc6',
+    base: '91f65c4ea',
     why: 'the third member of `export const ROOTS` at check-whole-set-label-write.mjs:152 — the '
       + 'other two are workflow and action directories under the dotted github root, which carry a '
       + 'separator and were already visible — walked at :492-:496. ⚠️ This gate already DECLARES at '
@@ -1513,9 +1589,52 @@ export function bareRootLiterals(maskedBody, dirs) {
 }
 
 /**
- * The `const NAME = …;` spans in a masked body whose NAME declares a population.
- * The scan walks to the `;` that closes the initializer, tracking quote state so
- * a semicolon inside a string cannot end the span early.
+ * The end of a property VALUE that starts at `from`, tracking quote state so a
+ * terminator inside a string cannot close the span early and BRACKET DEPTH so
+ * the commas separating an array's own members cannot either. It ends at a
+ * depth-zero `,` or `;`, or at the bracket that closes the enclosing object.
+ *
+ * ⚠️ This is deliberately NOT reused for the `const` scan below, whose stop is a
+ * bare `;` with no depth tracking. Folding the two would change which spans the
+ * ALREADY-RECOGNISED shape produces — an arrow body's internal `;` would stop
+ * ending a span — and that is a second, unmeasured widening riding along inside
+ * this one. The `const` half stays byte-for-byte what it was so the before/after
+ * on this change has exactly one variable in it.
+ */
+function propertyValueEnd(maskedBody, from) {
+  let depth = 0;
+  let quote = null;
+  let i = from;
+  for (; i < maskedBody.length; i++) {
+    const c = maskedBody[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+    if (c === '(' || c === '[' || c === '{') { depth += 1; continue; }
+    if (c === ')' || c === ']' || c === '}') {
+      if (depth === 0) break;
+      depth -= 1;
+      continue;
+    }
+    if (depth === 0 && (c === ',' || c === ';')) break;
+  }
+  return i;
+}
+
+/**
+ * The spans in a masked body that DECLARE a population — the two spellings an
+ * author uses for "this is what I walk", returned as one list so no caller has
+ * to hold a roster of them.
+ *
+ * 1. `const NAME = …;` whose NAME matches `POPULATION_CONSTANT`. The scan walks
+ *    to the `;` that closes the initializer, tracking quote state so a semicolon
+ *    inside a string cannot end the span early.
+ * 2. `name: …` object properties whose key matches `POPULATION_PROPERTY`
+ *    (#17057). The value is delimited by `propertyValueEnd`, so an array's own
+ *    commas do not close it.
  */
 export function populationSpans(maskedBody) {
   const spans = [];
@@ -1535,6 +1654,39 @@ export function populationSpans(maskedBody) {
       if (c === ';') break;
     }
     spans.push({ name, start: m.index, end: i });
+  }
+  // The property half. The key may be quoted — `'roots': [...]` is the same
+  // declaration.
+  //
+  // ⚠️ The leading character class excludes ONE of the two shapes an earlier
+  // draft of this comment claimed it did: a `foo.roots:` member expression,
+  // whose `.` is not in the class. It does NOT exclude a ternary's
+  // `a ? roots : dirs` — the `?` is followed by a space and `\s` IS in the
+  // class, so the TIGHT `a?roots:dirs` is the one that gets excluded, the
+  // inversion of what a reader expects — and it does not exclude a `roots:`
+  // label statement. Both produce a span here. Measured, and stated as a
+  // measurement rather than as a guarantee the regex does not give.
+  //
+  // "Benign" is a claim about DIRECTION, so it is checked rather than assumed:
+  // `sweep` admits a literal only when a span CONTAINS it (`if (!span) continue`),
+  // which makes a span an INCLUSION filter. A spurious one can therefore only
+  // ADD a row — the loud direction, where the UNJUDGED coupling forces someone
+  // to judge it — and can never hide one. Measured three ways on 91f65c4ea: a
+  // bare root inside a spurious ternary span yields 1 row; the same root inside
+  // no span yields 0; a root inside BOTH a real `const` span and a spurious
+  // ternary span is still attributed to the `const`, because the constant half
+  // is pushed first and `find` returns the first match. The whole-tree bound is
+  // this widening's own row-set diff: 3 surfaced, 0 gone.
+  //
+  // ⛔ NOT tightened to exclude them. That is a second change to what this
+  // recogniser matches, and it would owe its own full row-set diff proving it
+  // surfaces nothing and hides nothing — the ride-along this file refuses by
+  // name one function up, for the `const` half. A ternary-only fix would leave
+  // the label form matching regardless, so it would not even retire the caveat.
+  for (const m of maskedBody.matchAll(/(?:^|[\s,{[(])(?:(['"])([A-Za-z0-9_$]+)\1|([A-Za-z0-9_$]+))[ \t]*:/g)) {
+    const name = m[2] ?? m[3];
+    if (!POPULATION_PROPERTY.test(name)) continue;
+    spans.push({ name, start: m.index, end: propertyValueEnd(maskedBody, m.index + m[0].length) });
   }
   return spans;
 }
@@ -1927,6 +2079,81 @@ function selfTest() {
   t('control: the underscored spellings the restriction always admitted still match, so the case '
     + 'above is measuring an addition rather than a replacement',
     admits('SCAN_ROOTS') && admits('SCAN_DIRS') && admits('POPULATION'));
+
+  // The PROPERTY spelling, #17057, pinned the same way and for the same reason:
+  // what that card repaired is a judgement about how a population is SPELLED,
+  // so a row-shaped pin would hold it only while the tree happens to contain a
+  // gate spelled that way — and a gate spelled that way being unseen is the
+  // defect itself. The fixture is an object property inside a config literal,
+  // which is the shape the card was filed from, and its root is taken FROM THE
+  // TREE like every probe above so this file still declares no population.
+  const admitsProp = (name) => populationSpans(
+    `const CFG = {\n  ${name}: [${JSON.stringify(someRoot)}],\n};`,
+  ).length === 1;
+  t('the recogniser admits a population declared as a lowercase object property — `roots:` and '
+    + '`dirs:` inside a config literal (#17057)', admitsProp('roots') && admitsProp('dirs'));
+  t('…and the camelCase hump carries the weight the underscore carries above: `scanRoots`, '
+    + '`searchDirs`, `population` and a `…Scope` all match',
+    admitsProp('scanRoots') && admitsProp('searchDirs') && admitsProp('population')
+    && admitsProp('lintScope'));
+  t('…and it admits them EXACTLY: the bare singular `root` and `dir` stay OUT — the commonest '
+    + 'property names in this tree for one repo-root path fragment, the exact thing the '
+    + 'restriction exists to exclude — and so do a plain `label` and a suffixed `rootsX`',
+    !admitsProp('root') && !admitsProp('dir') && !admitsProp('label') && !admitsProp('rootsX'));
+  t('control: the property form is a TRANSLATION of the constant form and not a second, looser '
+    + 'judgement — `skipDirs` matches here exactly as `SKIP_DIRS` already matches there, so the '
+    + 'two spellings of one name are admitted or refused together',
+    admitsProp('skipDirs') === admits('SKIP_DIRS'));
+  t('…and the property span STOPS at its own value: a bare root sitting in the NEXT property of '
+    + 'the same literal is not swept in by the one before it',
+    bareRootLiterals(`const CFG = { roots: ['x/y'], label: [${JSON.stringify(someRoot)}] };`, dirs)
+      .every(({ index }) => !populationSpans(
+        `const CFG = { roots: ['x/y'], label: [${JSON.stringify(someRoot)}] };`,
+      ).some((s) => index > s.start && index < s.end)));
+  // What the leading character class DOES and does NOT keep out, pinned as
+  // three separate facts because the comment beside the regex once asserted all
+  // three and only one of them was true. ⛔ The two matches below are RECORDED,
+  // not accidents to be quietly tightened away: tightening is a second change to
+  // what this recogniser matches and owes its own full row-set diff.
+  const propSpans = (src) => populationSpans(src).length;
+  t('the leading class DOES keep a member expression out — `foo.roots:` is not a declaration, '
+    + 'and the `.` is not in the class', propSpans('const y = { a: cfg.roots };') === 0);
+  t('…and it does NOT keep a ternary out: `a ? roots : dirs` matches because the `?` is followed '
+    + 'by a space and `\\s` is in the class, while the TIGHT `a?roots:dirs` is excluded — the '
+    + 'inversion of what a reader expects, recorded rather than promised away',
+    propSpans('const x = a ? roots : dirs;') === 1 && propSpans('const x = a?roots:dirs;') === 0);
+  t('…nor a `roots:` LABEL statement, which is indistinguishable from a property key without '
+    + 'parsing', propSpans('roots: for (const a of b) { break roots; }') === 1);
+  // The DIRECTION those two benign matches are benign IN. `sweep` admits a
+  // literal only when a span contains it, so a span is an inclusion filter and a
+  // spurious one can only ADD a row. Pinned on the same predicates `sweep`
+  // composes, in both directions, so "benign" stays a measurement.
+  const spanless = `const q = ${JSON.stringify(someRoot)};`;
+  const inSpan = `const CFG = { roots: [${JSON.stringify(someRoot)}] };`;
+  t('a span ADMITS rather than excludes: a bare root with no span containing it is not swept in '
+    + 'at all, so a spurious span can only ever ADD a row and never hide one',
+    bareRootLiterals(spanless, dirs).length === 1
+    && !bareRootLiterals(spanless, dirs).some(({ index }) => populationSpans(spanless)
+      .some((s) => index > s.start && index < s.end)));
+  t('control: the same literal inside a recognised property span IS swept in, so the case above '
+    + 'measures the admission rule rather than a literal the extractor never found',
+    bareRootLiterals(inSpan, dirs).some(({ index }) => populationSpans(inSpan)
+      .some((s) => index > s.start && index < s.end)));
+  t('…and a literal inside BOTH a real `const` span and a spurious ternary span is attributed to '
+    + 'the CONSTANT, because the constant half is pushed first and `find` takes the first match — '
+    + 'so a spurious span cannot steal a row\'s key either',
+    (() => {
+      const both = `const SCAN_ROOTS = [${JSON.stringify(someRoot)}];\nconst y = c ? roots : SCAN_ROOTS;`;
+      const spans = populationSpans(both);
+      const lit = bareRootLiterals(both, dirs)[0];
+      return Boolean(lit) && spans.find((s) => lit.index > s.start && lit.index < s.end)?.name === 'SCAN_ROOTS';
+    })());
+  t('control: the same literal one property EARLIER, under a recognised key, IS swept in — so '
+    + 'the case above measures the span boundary rather than a recogniser that never fires',
+    bareRootLiterals(`const CFG = { roots: [${JSON.stringify(someRoot)}], label: ['x/y'] };`, dirs)
+      .some(({ index }) => populationSpans(
+        `const CFG = { roots: [${JSON.stringify(someRoot)}], label: ['x/y'] };`,
+      ).some((s) => index > s.start && index < s.end)));
   t('the live sweep is non-empty, so the cases below judge something', rows.length > 0);
 
   // ── The FOLD: one row per literal, however many invocations reach it ──────
@@ -2504,7 +2731,10 @@ function selfTest() {
       + 'constant-name restriction is proven to restrict, and neither the triage keys nor this '
       + 'file declare any population of their own. The recogniser is pinned to admit the '
       + 'bare ROOTS and DIRS spellings EXACTLY, singulars and unsuffixed neighbours refused '
-      + `(#15468). ${UNJUDGED.size} UNJUDGED row(s) — seen by that widened recogniser and judged `
+      + '(#15468), and to read a population declared as a lowercase object PROPERTY — the '
+      + 'camelCase mirror of the same judgement, bare singulars refused there too, its span '
+      + 'proven to stop at its own value (#17057). '
+      + `${UNJUDGED.size} UNJUDGED row(s) — seen by those widened recognisers and judged `
       + 'by nobody — are held SET-EQUAL, in both directions, to the open rows carrying no verdict, '
       + 'so none of them is exempted here and none of them is silently fresh. '
       + `${CENSUS_REFUSE_WIDE.size} CENSUS row(s) `

@@ -1410,7 +1410,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // rule therefore stays behind WHOLE (#8310's explicit call), as its own
   // entry.
   //
-  // This entry remains the rest of the D7 block (12 rule ids) as ONE
+  // This entry remains the rest of the D7 block (14 rule ids) as ONE
   // registration, not a per-rule split: the baseline/candidate differential is
   // what keeps a write of one declared type from leaking the other rules'
   // whole-stack findings — every finding derived from a sibling collection is

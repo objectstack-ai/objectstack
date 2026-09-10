@@ -196,6 +196,7 @@ export {
   REACT_BLOCK_NEEDS_RECORD_CONTEXT,
   REACT_PAGE_SOURCE_UNPARSEABLE,
   REACT_PROP_DEPRECATED,
+  REACT_PROP_RETIRED,
 } from './validate-react-page-props.js';
 export type { ReactPropFinding, ReactPropSeverity } from './validate-react-page-props.js';
 
@@ -306,6 +307,7 @@ export {
   SECURITY_PRIVATE_NO_READSCOPE,
   SECURITY_MASTER_DETAIL_UNGRANTED,
   SECURITY_FLS_UNQUALIFIED_KEY,
+  SECURITY_FLS_UNKNOWN_FIELD,
   SECURITY_GRANT_EXPIRED_AT_AUTHORING,
   SECURITY_DELEGATION_MISSING_REASON,
   SECURITY_CBP_NO_RELATION,
@@ -344,11 +346,17 @@ export type {
 // as an authorization and behaves as a blanket refusal. The verdict is
 // `isSupportedRlsExpression` — the runtime's own, hoisted into
 // `@objectstack/formula` in the same change so lint can reach it.
+// [#16119] …and the REFERENCE half of the same gate: the three ids above judge a
+// predicate's SHAPE and never what it POINTS AT, so a policy naming a renamed
+// column or an un-pre-resolved `current_user.*` value was reported by nothing
+// while failing closed on the whole object for every holder of the set.
 export {
   validateRlsPredicateEnforceability,
   RLS_PREDICATE_UNENFORCEABLE,
   RLS_PREDICATE_UNPARSEABLE,
   RLS_PREDICATE_OVER_BUDGET,
+  RLS_PREDICATE_UNKNOWN_FIELD,
+  RLS_PREDICATE_UNKNOWN_USER_VARIABLE,
 } from './validate-rls-predicate-enforceability.js';
 export type {
   RlsPredicateFinding,

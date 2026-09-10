@@ -19,6 +19,7 @@ import {
   ValueDomainSchema,
   ISO_3166_ALPHA2_CODES,
   isValueDomainMember,
+  type ValueDomain,
 } from './value-domain.zod';
 import { SpecifierValueDomainSchema } from '../system/settings-manifest.zod';
 import { CURRENCY_FRACTION_DIGITS } from '../data/currency-fraction-digits';
@@ -168,9 +169,100 @@ describe('isValueDomainMember — iso_3166_alpha2 is the explicit 249-code list'
 
 describe('isValueDomainMember — every vocabulary member has a definition', () => {
   it('answers a boolean for each member, never throws, never returns undefined', () => {
+    // ⚠ The POPULATION here is `ValueDomainSchema.options` — exactly the
+    // domains that behave. That is the right population for THIS claim (every
+    // member has a definition), and the wrong one for "an unknown domain is
+    // refused": the describe below carries that claim over the population this
+    // loop cannot reach.
     for (const domain of ValueDomainSchema.options) {
       expect(typeof isValueDomainMember(domain, 'definitely-not-a-member')).toBe('boolean');
       expect(isValueDomainMember(domain, 'definitely-not-a-member')).toBe(false);
     }
+  });
+});
+
+describe('isValueDomainMember — an OFF-vocabulary domain is refused, never answered truthy', () => {
+  /**
+   * The published contract, exercised the way a consumer actually reaches it.
+   * `isValueDomainMember` is in `packages/spec/api-surface/shared.json`, so
+   * "unreachable in-repo" is not "unreachable": a plain-JS consumer, or any
+   * caller handing over a domain string read from METADATA rather than written
+   * in source, arrives with zero type checking — and metadata-sourced strings
+   * are exactly where `constructor` and `toString` show up. The cast is that
+   * caller, not a way around the type.
+   */
+  const untyped = (domain: string, value: string): unknown =>
+    isValueDomainMember(domain as ValueDomain, value);
+
+  /**
+   * Domain words that are NOT in the vocabulary, grouped by what each one did
+   * before the own-property guard. `DOMAIN_MEMBERSHIP` is an object literal, so
+   * it inherits `Object.prototype`.
+   */
+  const PROTOTYPE_RESOLVABLE = [
+    // Answered TRUTHY — the membership false positives, the reason this is a
+    // bug and not a tidy-up: `toString` gave the string '[object Object]',
+    // `valueOf` and `constructor` gave objects.
+    'toString',
+    'valueOf',
+    'constructor',
+    // Answered a boolean `false` by accident (`hasOwnProperty` called with
+    // `DOMAIN_MEMBERSHIP` as its receiver), which is why a `typeof` assertion
+    // alone is not enough to catch this family.
+    'hasOwnProperty',
+    'isPrototypeOf',
+    'propertyIsEnumerable',
+    // Resolved to `Object.prototype` itself — not callable, so it THREW a
+    // TypeError. `false` now, like every other non-member.
+    '__proto__',
+  ];
+
+  /** No own key and no prototype member either: these threw a TypeError too. */
+  const PLAINLY_ABSENT = ['nope', '', 'iana_timezone', 'iso_8601_date', 'bcp47_locale', 'ZZ'];
+
+  const OFF_VOCABULARY = [...PROTOTYPE_RESOLVABLE, ...PLAINLY_ABSENT];
+
+  // Values spanning all three real domains plus junk, so a leaked definition
+  // would be caught whichever domain it leaked from.
+  const VALUES = ['UTC', 'USD', 'US', '', 'definitely-not-a-member'];
+
+  it('answers exactly `false` for a domain naming an Object.prototype member', () => {
+    for (const domain of PROTOTYPE_RESOLVABLE) {
+      for (const value of VALUES) {
+        const answer = untyped(domain, value);
+        const at = `${JSON.stringify(domain)} / ${JSON.stringify(value)}`;
+        expect(typeof answer, at).toBe('boolean');
+        expect(answer, at).toBe(false);
+      }
+    }
+  });
+
+  it('answers exactly `false` for a plainly absent domain, where it used to throw', () => {
+    for (const domain of PLAINLY_ABSENT) {
+      for (const value of VALUES) {
+        const answer = untyped(domain, value);
+        const at = `${JSON.stringify(domain)} / ${JSON.stringify(value)}`;
+        expect(typeof answer, at).toBe('boolean');
+        expect(answer, at).toBe(false);
+      }
+    }
+  });
+
+  it('holds this population HONEST — every word above is outside the vocabulary', () => {
+    // Without this, a word promoted into `ValueDomainSchema` would leave the
+    // two pins above asserting `false` for a legal domain, and they would go on
+    // passing while meaning the opposite of what they say.
+    for (const domain of OFF_VOCABULARY) {
+      expect(ValueDomainSchema.safeParse(domain).success, domain).toBe(false);
+      expect(ValueDomainSchema.options as readonly string[], domain).not.toContain(domain);
+    }
+  });
+
+  it('still answers the three real members from their own definitions', () => {
+    // The narrowing must stop at the vocabulary edge: the guard refuses more
+    // and accepts nothing new, so every in-vocabulary answer is unmoved.
+    expect(isValueDomainMember('iana_time_zone', 'UTC')).toBe(true);
+    expect(isValueDomainMember('iso_4217_currency', 'USD')).toBe(true);
+    expect(isValueDomainMember('iso_3166_alpha2', 'US')).toBe(true);
   });
 });

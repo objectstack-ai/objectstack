@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1577 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1582 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -23,7 +23,7 @@ counts are sums of the rows they head. Regenerate with
 | [API Protocol](/docs/references/api) | 31 | 437 | REST contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 13 | 73 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Cloud Protocol](/docs/references/cloud) | 11 | 94 | Environments, packages and versions, marketplace, developer portal, tenancy. |
-| [Data Protocol](/docs/references/data) | 29 | 168 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
+| [Data Protocol](/docs/references/data) | 29 | 173 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
 | [Integration Protocol](/docs/references/integration) | 1 | 24 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
 | [Kernel Protocol](/docs/references/kernel) | 30 | 162 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
@@ -33,7 +33,7 @@ counts are sums of the rows they head. Regenerate with
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 33 | 272 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 153 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **198** | **1577** | 14 protocol modules |
+| **Total** | **198** | **1582** | 14 protocol modules |
 
 ---
 
@@ -149,7 +149,7 @@ Environments, packages and versions, marketplace, developer portal, tenancy.
 
 ## Data Protocol
 
-**Source:** `packages/spec/src/data/` · **Import:** `@objectstack/spec/data` · **29 pages, 168 schemas**
+**Source:** `packages/spec/src/data/` · **Import:** `@objectstack/spec/data` · **29 pages, 173 schemas**
 
 Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer.
 
@@ -175,8 +175,8 @@ Objects, fields, queries, filters, datasources and drivers — the ObjectQL laye
 | [`feed.zod.ts`](/docs/references/data/feed) | `FeedFilterMode`, `FeedItemType` |
 | [`field.zod.ts`](/docs/references/data/field) | `CurrencyConfig`, `CurrencyValue`, `Field`, `FieldMaskingKeep`, `FieldMaskingRule`, `FieldType`, `InlineGridColumn`, `LocationCoordinates`, `SelectOption`, `UniqueScope` |
 | [`field-value.zod.ts`](/docs/references/data/field-value) | `Address`, `AddressValue`, `CalendarDateValue`, `ClockTimeValue`, `FileLikeValue`, `FileReferenceIdValue`, `FileValue`, `InstantValue`, `LocationValue`, `ReferenceIdValue` |
-| [`filter.zod.ts`](/docs/references/data/filter) | `EqualityOperator`, `FieldReference`, `FilterArray`, `FilterCondition`, `QueryFilter`, `SetOperator`, `SpecialOperator`, `StringOperator` |
-| [`hook.zod.ts`](/docs/references/data/hook) | `HookContext`, `HookEvent` |
+| [`filter.zod.ts`](/docs/references/data/filter) | `ComparisonOperator`, `EqualityOperator`, `FieldOperators`, `FieldReference`, `FilterArray`, `FilterCondition`, `NormalizedFilter`, `QueryFilter`, `RangeOperator`, `SetOperator`, `SpecialOperator`, `StringOperator` |
+| [`hook.zod.ts`](/docs/references/data/hook) | `Hook`, `HookContext`, `HookEvent` |
 | [`hook-body.zod.ts`](/docs/references/data/hook-body) | `ExpressionBody`, `HookBody`, `HookBodyCapability`, `ScriptBody` |
 | [`mapping.zod.ts`](/docs/references/data/mapping) | `ImportFieldMapping`, `Mapping`, `TransformType` |
 | [`object.zod.ts`](/docs/references/data/object) | `ApiMethod`, `ApiOperation`, `Index`, `Lifecycle`, `LifecycleClass`, `Object`, `ObjectAccessConfig`, `ObjectCapabilities`, `ObjectExtension`, `ObjectExternalBinding`, `ObjectFieldGroup`, `ObjectOwnershipEnum`, `ObjectRequiredPermissions`, `PerOperationRequiredPermissions`, `RowCrudActionOverride`, `TenancyConfig` |

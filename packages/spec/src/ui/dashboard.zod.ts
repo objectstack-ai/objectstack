@@ -78,6 +78,20 @@ const DASHBOARD_HISTORY =
 /**
  * Dashboard Header Action Schema
  * An action button displayed in the dashboard header area.
+ *
+ * Each field carries a JSON Schema `title` (#16458): the ITEM-level authoring
+ * name. A repeater row is not a form field — the Studio property panel renders
+ * `header.actions[]` as a table whose column headers read
+ * `items.properties[k].title ?? k` from the JSON Schema derived by
+ * `z.toJSONSchema(DashboardSchema)`, never from a `FormFieldSpec` label. With
+ * no `title`, the fallback arm runs for every locale, English included, and the
+ * machine key is what the maker sees. The title is the English name; a locale
+ * bundle names the same column through
+ * `metadataForms.dashboard.fields['header.actions.<field>'].label`, which
+ * `resolveMetadataFormSchemaTitles` (`system/i18n-resolver.ts`) overlays onto
+ * the derived schema. `dashboard.form.ts` declares the same four children with
+ * the same labels so the extractor emits those keys; `dashboard.test.ts` pins
+ * the two spellings equal.
  */
 export const DashboardHeaderActionSchema = lazySchema(() => strictObject({
   surface: 'this dashboard header action',
@@ -85,16 +99,16 @@ export const DashboardHeaderActionSchema = lazySchema(() => strictObject({
   aliases: { title: 'label', text: 'label', name: 'label', url: 'actionUrl', href: 'actionUrl', link: 'actionUrl', target: 'actionUrl', type: 'actionType', kind: 'actionType' },
 }, {
   /** Action label */
-  label: I18nLabelSchema.describe('Action button label'),
+  label: I18nLabelSchema.describe('Action button label').meta({ title: 'Label' }),
 
   /** Action URL or target */
-  actionUrl: z.string().describe('URL or target for the action'),
+  actionUrl: z.string().describe('URL or target for the action').meta({ title: 'Action URL' }),
 
   /** Action type */
-  actionType: WidgetActionTypeSchema.optional().describe('Type of action'),
+  actionType: WidgetActionTypeSchema.optional().describe('Type of action').meta({ title: 'Action Type' }),
 
   /** Icon identifier */
-  icon: z.string().optional().describe('Icon identifier for the action button'),
+  icon: z.string().optional().describe('Icon identifier for the action button').meta({ title: 'Icon' }),
 }).describe('Dashboard header action'));
 
 /**
@@ -800,8 +814,29 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
    */
   name: z.string().optional().describe('Stable filter name (variable key); defaults to field'),
 
-  /** Field name to filter on */
-  field: z.string().describe('Field name to filter on'),
+  /**
+   * Field name to filter on — at the authoring layer it resolves against the
+   * object behind each bound widget's dataset (`dataset.object`), not against
+   * that dataset's declared `dimensions`; enforced by the lint rule
+   * `dashboard-filter-field-unknown` (severity error).
+   *
+   * The sibling `object` key does not move this: it names the object a
+   * translator's bundle entry is keyed by and is read for LABEL resolution
+   * only. `dashboard-filter-field-unknown` (exported as
+   * `DASHBOARD_FILTER_FIELD_UNKNOWN`) resolves against the widget's own
+   * dataset — `validateWidgetBindings` seeds its base with
+   * `const datasetObject = typeof dataset.object === 'string'` — and never
+   * reads a filter-level `object`.
+   *
+   * `dimensions` is a separate namespace, the one `widgets[].dimensions[]`
+   * selects from BY NAME (`widget-dimension-unknown`, also severity error).
+   * That separation is a statement about the AUTHORABLE SURFACE only — it is
+   * NOT a claim that an object field can never serve as a dimension: the
+   * analytics query API does accept an object's own field as an ad-hoc
+   * dimension without the dataset declaring it, and `widget-dimension-unknown`
+   * is what holds that line for authored dashboards.
+   */
+  field: z.string().describe('Field name to filter on — at the authoring layer it resolves against the object behind each bound widget\'s dataset (`dataset.object`), not against that dataset\'s declared `dimensions`; enforced by the lint rule `dashboard-filter-field-unknown` (severity error)'),
 
   /**
    * Source object for i18n label resolution (#7804): when set, this filter's

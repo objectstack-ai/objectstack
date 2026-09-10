@@ -61,10 +61,14 @@
  * ## Considered and deliberately NOT members
  *
  * - `summary` / `autonumber` — the other two `COMPUTED_VALUE_TYPES`. They sort
- *   CORRECTLY (`summary` is an engine-maintained `table.float`, `autonumber`
- *   an engine-assigned `table.string`; measured on #6924), which is exactly
- *   why virtuality is judged by the storage predicate and never by the write
- *   contract — widening would refuse the two types that work.
+ *   CORRECTLY (`summary` is an engine-maintained numeric column — `table.float`
+ *   when #6924 measured it, an exact `table.decimal` on new tables since
+ *   #16318's stated representation — and `autonumber` an engine-assigned
+ *   `table.string`), which is exactly why virtuality is judged by the storage
+ *   predicate and never by the write contract — widening would refuse the two
+ *   types that work. ⚠️ The column TYPE is not what makes them sortable —
+ *   having a PROVISIONED column is — which is why #16318's retype of the
+ *   numeric family moved nothing in this projection.
  * - `encrypted` / `secret` / `json` / `vector` and the other heavy or masked
  *   types — every one has a stored column, neither door refuses an ORDER BY
  *   over one, and the drivers execute it. Marking them unsortable here would

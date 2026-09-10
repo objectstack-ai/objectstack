@@ -22,7 +22,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { retryPolicyShape } from '../shared/retry-policy.zod';
 import { strictObject } from '../shared/strict-object';
-import { parseFlowNodeRegions } from './control-flow.zod';
+import { collectFlowGraphs, parseFlowNodeRegions } from './control-flow.zod';
 import { EndConfigSchema } from './builtin-node-config.zod';
 export const FlowNodeAction = z.enum([
   'start',              // Trigger
@@ -927,32 +927,52 @@ export const FlowSchema = lazySchema(() => strictObject(
   // element and naming BOTH positions, so the formatted error points at the
   // one to rename.
   //
-  // Nodes (#15713): every edge's `source` / `target` names a node by id and
-  // the engine picks out-edges by `source`, so two top-level nodes sharing an
-  // id make every edge from that id ambiguous — whichever node wins is decided
-  // by array order, silently. Only region bodies were checked (`analyzeRegion`
-  // in `control-flow.zod.ts`, at `registerFlow()`); the flow's own top-level
-  // `nodes[]` parsed with the collision intact. This pass judges the top-level
-  // array ALONE: a region's nodes are judged by `analyzeRegion`, and whether the
-  // two spaces are one is a separate decision (#16134), not taken here.
-  const firstNodeIndexById = new Map<string, number>();
-  flow.nodes.forEach((node, index) => {
-    const first = firstNodeIndexById.get(node.id);
-    if (first === undefined) {
-      firstNodeIndexById.set(node.id, index);
-      return;
-    }
-    ctx.addIssue({
-      code: 'custom',
-      path: ['nodes', index, 'id'],
-      message:
-        `Duplicate node id \`${node.id}\` — \`nodes[${index}]\` reuses the id already declared by ` +
-        `\`nodes[${first}]\`; every node id in a flow must be unique. Rename one of them: a ` +
-        "node id is the handle every edge's `source`/`target` resolves and a designer, a BPMN " +
-        'export or a flow diff keys on, so a collision routes edges by array order silently ' +
-        'rather than failing loudly.',
+  // Nodes (#15713, one space at every depth since #16134): every edge's
+  // `source` / `target` names a node by id and the engine picks out-edges by
+  // `source`, so two nodes sharing an id make every edge from that id ambiguous
+  // — whichever node wins is decided by array order, silently. A flow has ONE
+  // node-id space: its top-level `nodes[]` and every ADR-0031 region body
+  // (`loop` / `try_catch` / `parallel`, at every depth) share it, so the walk
+  // is `collectFlowGraphs` — the top-level graph first, then each region in
+  // document order, depth first — and "already declared by" is the earlier
+  // position in that walk, named as a top-level index (`nodes[1]`) or a region
+  // path (`loop 'sweep' body → nodes[0]`). This is the one refusal an author
+  // meets at every depth the walk reaches: `collectFlowGraphs` stops at
+  // `MAX_REGION_DEPTH` (the ceiling `parseFlowNodeRegions` shares), so a region
+  // nested beyond it is left raw and stays `validateControlFlow`'s — there
+  // `analyzeRegion`'s own `duplicate node id` line is the only refusal of a
+  // within-region duplicate (a cross-region collision past the ceiling is not
+  // judged), and it also guards `bpmn-mapping`'s raw-region caller. Kept.
+  const firstNodeLocationById = new Map<string, string>();
+  for (const graph of collectFlowGraphs(flow)) {
+    graph.nodes.forEach((node, index) => {
+      // A region its own schema refused stays raw (`parseFlowNodeRegions`), so
+      // an element here may carry no string id at all; the region refusal in
+      // `validateControlFlow` owns that shape, and this rule judges only the ids
+      // an author actually wrote.
+      const id: unknown = (node as { id?: unknown } | null)?.id;
+      if (typeof id !== 'string') return;
+      const location = graph.scope ? `${graph.scope} → nodes[${index}]` : `nodes[${index}]`;
+      const first = firstNodeLocationById.get(id);
+      if (first === undefined) {
+        firstNodeLocationById.set(id, location);
+        return;
+      }
+      ctx.addIssue({
+        code: 'custom',
+        path: [...graph.path, 'nodes', index, 'id'],
+        message:
+          `Duplicate node id \`${id}\` — \`${location}\` reuses the id already declared by ` +
+          `\`${first}\`; every node id in a flow must be unique. Rename one of them: a ` +
+          "node id is the handle every edge's `source`/`target` resolves and a designer, a BPMN " +
+          'export or a flow diff keys on, so a collision routes edges by array order silently ' +
+          'rather than failing loudly. The id space is one across the whole flow — the ' +
+          'top-level `nodes[]` and every region body (`loop` / `try_catch` / `parallel`, at ' +
+          'every depth) share it — so a region node may not reuse an id declared outside its ' +
+          'region either.',
+      });
     });
-  });
+  }
 
   // Edges (#14964): every reader of `edges[].id` assumes the ids are unique —
   // a designer, a BPMN export, a flow diff, any traversal that dedupes by id —

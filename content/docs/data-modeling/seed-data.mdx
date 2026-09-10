@@ -177,6 +177,63 @@ defineSeed(TestUser, {
 
 ---
 
+## Locale Scoping
+
+The `locale` array scopes a dataset to one or more language markets, as BCP-47
+tags. It is a second filter axis alongside `env`, and the two **compose**: a
+dataset loads when it passes `env` *and* `locale`.
+
+Omitting `locale` means **every locale** — unlike `env` there is no default
+array, because locales are open-ended tags with no closed set to spell out.
+
+```typescript
+// Reference data — every market (locale omitted)
+defineSeed(Country, {
+  records: [{ code: 'US', name: 'United States' }],
+});
+
+// The Chinese market's demo plans
+defineSeed(Plan, {
+  locale: ['zh-CN'],
+  records: [{ name: '专业版', price: 99 }],
+});
+
+// The same plans for English-speaking markets
+defineSeed(Plan, {
+  locale: ['en', 'en-GB'],
+  records: [{ name: 'Professional', price: 15 }],
+});
+```
+
+Tags are matched **case-insensitively** (`zh-cn` and `zh-CN` are the same tag)
+and otherwise **exactly** — `['zh']` does not match a loading locale of
+`zh-CN`. List every tag the dataset is for.
+
+The platform does not translate anything. `locale` only selects between record
+sets you authored yourself; both sets stay in your source tree, and the choice
+is made when the seeds load rather than when your config is assembled — so
+switching markets does not mean rebuilding, and the axis is evaluated in the one
+layer that could ever reconcile rows already written for another market.
+
+<Callout type="info">
+  **Where the loading locale comes from.** On the normal boot path your stack
+  supplies it: the runtime reads your app's `i18n.defaultLocale` and passes it to
+  the seed loader, so declaring a locale on a dataset takes effect with no extra
+  wiring. Declare no `i18n` block and no locale is sent at all — which is the
+  unrestricted setting, not a filter.
+</Callout>
+
+<Callout type="warn">
+  The axis is evaluated against the seed loader's `config.locale`. A host that
+  supplies no locale — an app with no declared `i18n.defaultLocale`, or an
+  embedding host that builds its own seed-load request — gets **every** dataset,
+  and the loader warns naming each locale-scoped dataset it let through, so a
+  scope that is not taking effect is one log line to diagnose rather than a
+  silent no-op.
+</Callout>
+
+---
+
 ## Type Safety
 
 `defineSeed()` infers valid field keys from the object definition you pass as the
@@ -443,6 +500,13 @@ Keep demo and test-only records out of production by setting `env: ['dev', 'test
 System bootstrap data that must exist in production should omit `env` (or explicitly
 set `['prod', 'dev', 'test']`).
 
+### Ship one dataset per market, not one build per market
+
+When the same records need different display strings per language, author both
+datasets and scope each with `locale`. Selecting between them in application
+code instead bakes the choice into your build output and leaves the other
+market's rows resident in the database on a switch.
+
 ### Use `upsert` by default
 
 `upsert` is idempotent and the safest default. Only change the mode when the use
@@ -477,6 +541,7 @@ function defineSeed<
     externalId?: string | string[];         // single field, or a composite list (join tables); default: 'name'
     mode?: 'insert' | 'update' | 'upsert' | 'replace' | 'ignore'; // default: 'upsert'
     env?: Array<'prod' | 'dev' | 'test'>;  // default: ['prod','dev','test']
+    locale?: string[];                      // BCP-47 tags; omitted = every locale
     records: Array<Partial<Record<keyof TObj['fields'], unknown>>>;
   }
 ): Seed

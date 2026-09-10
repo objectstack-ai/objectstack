@@ -2601,11 +2601,16 @@ export function selfTest() {
       .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
       .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
       .sort();
-    t('the built-entrypoint population is exactly the four files that spawn bin/run.js',
+    t('the built-entrypoint population is exactly the five files that spawn bin/run.js',
       JSON.stringify(builtFiles) === JSON.stringify([
         'packages/cli/test/serve-mcp-capability-collision.e2e.test.ts',
         'packages/cli/test/serve-mcp-stdio-answers.e2e.test.ts',
         'packages/cli/test/serve-node-env-production-default.e2e.test.ts',
+        // [#16630] Joined the population deliberately: the degraded-boot the
+        // ready line has to report is only reachable in PRODUCTION posture, and
+        // `bin/run-dev.js` sets `NODE_ENV=development` before argv is parsed —
+        // so the tsx shim every `runServe()` caller uses cannot reach it at all.
+        'packages/cli/test/serve-ready-degraded-boot.e2e.test.ts',
         'packages/cli/test/serve-stdio-stdout-purity.e2e.test.ts',
       ]), JSON.stringify(builtFiles));
 

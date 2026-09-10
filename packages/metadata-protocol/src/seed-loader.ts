@@ -269,6 +269,51 @@ function isEnvScopedDataset(dataset: Seed): boolean {
 }
 
 /**
+ * Fold a BCP-47 tag for comparison.
+ *
+ * Tags are case-INSENSITIVE by definition (RFC 5646 §2.1.1: the recommended
+ * casing is a convention, not part of the identity), so `zh-cn` and `zh-CN` are
+ * the same locale and must compare equal. That is normalization of a
+ * case-insensitive identifier, not consumer-side tolerance of a second dialect
+ * of our own contract — nothing else about the tag is rewritten, so `zh` still
+ * does NOT match `zh-CN`.
+ */
+function normalizeLocaleTag(tag: string): string {
+  return tag.trim().toLowerCase();
+}
+
+/**
+ * Does this dataset apply to `locale`?
+ *
+ * A dataset carrying no `locale` at all is unrestricted — and unlike `env`,
+ * that is the SCHEMA's own answer rather than a default array: locales are
+ * open-ended BCP-47 tags with no enumerable universe to default to, so
+ * `SeedSchema.locale` is optional and absence is what carries "every locale".
+ */
+function datasetAllowsLocale(dataset: Seed, locale: string): boolean {
+  const declared = dataset.locale as string[] | undefined;
+  if (!Array.isArray(declared)) return true;
+  const wanted = normalizeLocaleTag(locale);
+  return declared.some(tag => normalizeLocaleTag(tag) === wanted);
+}
+
+/**
+ * True when a dataset declared a locale scope at all — i.e. the only datasets
+ * for which a resolvable locale changes anything, and therefore the only ones
+ * worth warning about when none was supplied. The mirror of
+ * {@link isEnvScopedDataset}, simpler only because absence IS the unrestricted
+ * spelling here.
+ */
+function isLocaleScopedDataset(dataset: Seed): boolean {
+  return Array.isArray(dataset.locale as string[] | undefined);
+}
+
+/** Render a dataset's declared locale scope for a log line. */
+function localeScopeLabel(dataset: Seed): string {
+  return `${dataset.object} (locale: ${(dataset.locale as string[]).join(', ')})`;
+}
+
+/**
  * SeedLoaderService — Runtime implementation of ISeedLoaderService
  *
  * Provides metadata-driven seed data loading with:
@@ -468,6 +513,12 @@ export class SeedLoaderService implements ISeedLoaderService {
     // read at all. Gating at those call sites instead would leave call site
     // seven free to re-open the same hole (framework#4704).
     const config = this.resolveEnvConfig(request.config, request.seeds);
+    // The locale axis has nothing to resolve FROM — there is no `NODE_ENV` of
+    // locales, and minting one would trade a declared-and-unset key for another
+    // — so it is inert unless the host supplies `config.locale`. That is
+    // exactly the shape `Seed.env` was in before framework#4704, which is why
+    // it is signposted here rather than left silent.
+    this.warnOnUnresolvedLocaleScope(config, request.seeds);
     const allErrors: ReferenceResolutionError[] = [];
     const allResults: SeedLoadResultParsed[] = [];
     // Per-load counter — a service instance can be reused across loads.
@@ -486,8 +537,8 @@ export class SeedLoaderService implements ISeedLoaderService {
     this.fallbackOrgId =
       config.organizationId == null ? await this.resolveSoleOrganizationId() : undefined;
 
-    // 1. Filter datasets by environment
-    const datasets = this.filterByEnv(request.seeds, config.env);
+    // 1. Filter datasets by the scope axes (environment AND locale)
+    const datasets = this.filterDatasets(request.seeds, config);
 
     if (datasets.length === 0) {
       return this.buildEmptyResult(config, Date.now() - startTime);
@@ -2486,6 +2537,77 @@ export class SeedLoaderService implements ISeedLoaderService {
       );
     }
     return config;
+  }
+
+  /**
+   * Say so when datasets narrowed their locale scope and no locale was supplied.
+   *
+   * The locale axis is PERMISSIVE when indeterminate, for the same reason the
+   * environment axis is: fail-closed would drop every locale-scoped dataset on
+   * a host that simply does not pass a locale, which is a silent data-loss
+   * regression strictly worse than the over-seeding it prevents.
+   *
+   * What it is not allowed to be is silent. `Seed.env` spent releases
+   * authorable, defaulted, type-checked and completely inert because no call
+   * site ever passed `config.env` (framework#4704) — and an author writing
+   * `locale: ['zh-CN']` who silently receives every dataset is that failure
+   * again, one axis over. Unlike `env` there is no `NODE_ENV` to resolve from,
+   * so the remedy this names is the config key rather than a variable to
+   * export.
+   */
+  private warnOnUnresolvedLocaleScope(config: SeedLoaderConfigParsed, seeds: Seed[]): void {
+    if (config.locale) return;
+
+    const scoped = seeds.filter(isLocaleScopedDataset);
+    if (scoped.length === 0) return;
+
+    this.logger.warn(
+      `[SeedLoader] No locale was supplied — this load carries no \`config.locale\`, so ` +
+        `${scoped.length} locale-scoped dataset(s) were seeded for EVERY locale instead of only ` +
+        `where they are declared: ${scoped.map(localeScopeLabel).join('; ')}. Pass ` +
+        `\`config.locale\` (a BCP-47 tag, e.g. the stack's \`i18n.defaultLocale\`) to make ` +
+        `\`Seed.locale\` take effect.`,
+      { scoped: scoped.map(d => d.object) },
+    );
+  }
+
+  /**
+   * Drop datasets that do not apply to this load, on every scope axis.
+   *
+   * The axes COMPOSE by conjunction: a dataset is kept when it passes `env`
+   * **and** `locale`. They stay separate functions — and separate log lines —
+   * because the two answer different operator questions ("why are my demo rows
+   * missing in production" vs "why did the Chinese dataset load"), and a single
+   * merged message would have to name a reason it did not measure.
+   */
+  private filterDatasets(datasets: Seed[], config: SeedLoaderConfigParsed): Seed[] {
+    return this.filterByLocale(this.filterByEnv(datasets, config.env), config.locale);
+  }
+
+  /**
+   * Drop datasets that do not apply to the resolved locale.
+   *
+   * The mirror of {@link filterByEnv}, down to the reporting posture: skipping
+   * is the declared, intended outcome of `locale: ['zh-CN']`, so it logs at
+   * `info` — but it always NAMES what it dropped.
+   */
+  private filterByLocale(datasets: Seed[], locale?: string): Seed[] {
+    if (!locale) return datasets;
+
+    const kept: Seed[] = [];
+    const skipped: Seed[] = [];
+    for (const dataset of datasets) {
+      (datasetAllowsLocale(dataset, locale) ? kept : skipped).push(dataset);
+    }
+
+    if (skipped.length > 0) {
+      this.logger.info(
+        `[SeedLoader] Locale '${locale}': skipped ${skipped.length} dataset(s) scoped to other ` +
+          `locales: ${skipped.map(localeScopeLabel).join('; ')}`,
+        { locale, skipped: skipped.map(d => d.object) },
+      );
+    }
+    return kept;
   }
 
   /**

@@ -163,7 +163,7 @@ import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automatio
 // driver-sql, driver-mongodb and driver-memory execute. This linter asks it
 // rather than hand-writing a fourth copy; see {@link filterCarriesNoCondition}.
 import { reduceFilterVerdict } from '@objectstack/spec/data';
-import { stripRegions, REGION_SLOTS, MAX_REGION_DEPTH } from './flow-walk.js';
+import { stripRegions, ownRegionKeys, REGION_SLOTS, MAX_REGION_DEPTH } from './flow-walk.js';
 import { recordsOf } from './object-graph.js';
 
 export interface FlowLintFinding {
@@ -447,13 +447,19 @@ function findDataNodeAnywhere(
   edges: AnyRec[],
 ): { readonly node: AnyRec; readonly scope: string } | null {
   // A cast, not a parse — same contract as the main per-graph walk below: the
-  // walk touches only `type` / `config`, and the guarded arrays are passed so a
-  // malformed region cannot make this throw (this module never throws).
+  // walk touches only `type` / `config`, and the arrays handed in are the ones
+  // the caller already coerced through `recordsOf`, so a malformed member
+  // cannot make this throw (this module never throws).
   for (const graph of collectFlowGraphs({
     nodes: nodes as unknown as FlowNodeParsed[],
     edges: edges as unknown as FlowEdgeParsed[],
   })) {
-    for (const node of graph.nodes as unknown as AnyRec[]) {
+    // `recordsOf`, not `as unknown as AnyRec[]` (#16751). The top-level list is
+    // clean by the caller's coercion, but a NESTED region's node list is only
+    // `Array.isArray`-checked by `collectFlowGraphs` before it becomes a graph
+    // — it carries the producer's word about its members, not a check. Same
+    // decision made once more where that guarantee stops, through the one home.
+    for (const node of recordsOf(graph.nodes)) {
       if (DATA_NODE_TYPES.has(typeof node.type === 'string' ? (node.type as string) : '')) {
         return { node, scope: graph.scope };
       }
@@ -1423,7 +1429,16 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
   const findings: FlowLintFinding[] = [];
   for (const flow of recordsOf(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
-    const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
+    // `Array.isArray` proves the LIST, never its MEMBERS. A YAML `nodes:` item
+    // left empty deserialises to `null`, and `nodes.find(n => n.type === …)`
+    // four lines down dereferenced it (#16751). Read through `recordsOf` — the
+    // one home for this coercion (`object-graph.ts`) — and note that THIS array
+    // is also what goes to `collectFlowGraphs` below, never `flow.nodes` raw:
+    // that producer is transparent about members (it forwards the caller's
+    // array and re-exposes the same objects), so coercing only for the local
+    // read relocates the crash into `packages/spec` instead of removing it —
+    // measured on #15793, and measured again here.
+    const nodes = recordsOf(flow.nodes);
     const edges = Array.isArray(flow.edges) ? (flow.edges as AnyRec[]) : [];
 
     // (a) #1874 — date-equality time condition on a record-change start node.
@@ -1519,7 +1534,11 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       edges: edges as unknown as FlowEdgeParsed[],
     })) {
       const at = graph.scope ? `flow '${flowName}' · ${graph.scope}` : `flow '${flowName}'`;
-      const graphNodes = graph.nodes as unknown as AnyRec[];
+      // `recordsOf`, not `as unknown as AnyRec[]` (#16751) — the same reason as
+      // in `findDataNodeAnywhere`: the top-level graph is clean by the coercion
+      // at the call site above, and a nested region's node list arrives here
+      // with only `Array.isArray` behind it.
+      const graphNodes = recordsOf(graph.nodes);
       const graphEdges = graph.edges as unknown as AnyRec[];
 
       // (b) #1315 — wrong interpolation syntax in any node's template values. Flow
@@ -1552,14 +1571,27 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
           }
         }
 
-        // Region-STRIPPED: this scan is recursive and a container's config
-        // physically contains every descendant's, which the walk above already
-        // visits in its own right. Without the strip a `{{ }}` in a loop body
-        // would be reported twice — once here against the `loop`, once against the
-        // node that carries it. With it, the count stays 1 and the finding lands
-        // on the right node (before #5383 it landed only on the container).
+        // Region-STRIPPED, by THIS node type's own slots (#16405). The scan is
+        // recursive and a container's config physically contains every
+        // descendant's, which the walk above already visits in its own right:
+        // without the strip a `{{ }}` in a loop body would be reported twice —
+        // once here against the `loop`, once against the node that carries it.
+        // With it, the count stays 1 and the finding lands on the right node
+        // (before #5383 it landed only on the container).
+        //
+        // `ownRegionKeys(node.type)` rather than the flat union of every region
+        // key on ANY node type, which is what this call site passed until #16405
+        // by taking `stripRegions`' default. That union deleted `body` from every
+        // node's view — and `body` is `loop`'s region slot AND the canonical
+        // request payload on an `http` node, so the whole of an `http` node's
+        // payload was invisible to both rules below. That is the one key where an
+        // uninterpolated token has an outbound consequence: `http-nodes.ts`
+        // interpolates the raw config wholesale, so a `{{ }}` or a bare `$ref.x`
+        // there ships to the endpoint as literal text. Remove fewer than the
+        // node's own slots and the double-count returns; remove more and a key
+        // that was never a region is deleted unread.
         const strings: string[] = [];
-        collectTemplateStrings(stripRegions(node.config), undefined, strings);
+        collectTemplateStrings(stripRegions(node.config, ownRegionKeys(node.type)), undefined, strings);
         for (const str of strings) {
           if (DOUBLE_BRACE.test(str)) {
             findings.push({

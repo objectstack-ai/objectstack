@@ -80,10 +80,16 @@ export const HttpDelivery = ObjectSchema.create({
     },
 
     fields: {
+        /**
+         * ⛔ No `maxLength`: the platform emits this column itself
+         * (`varchar(255)`), so a declared bound is discarded and the SQL driver
+         * says so on every boot (#12015). The clean shape is the one every other
+         * system object already carries after #12131 — declare the honoured half
+         * only.
+         */
         id: Field.text({
             label: 'Delivery ID',
             required: true,
-            maxLength: 64,
             description: 'UUID — also doubles as the receiver-side idempotency key',
         }),
 

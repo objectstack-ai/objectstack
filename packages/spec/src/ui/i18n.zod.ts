@@ -93,9 +93,9 @@ import { strictObject } from '../shared/strict-object';
  * inline locale map the resolver really honours is authorized, and the dead
  * key-reference dialect stays rejected — declared = enforced in both
  * directions, which is exactly the #4667 consistency the ruling asks for.
- * Every inline map authored in this repo (31 of them, across three platform
- * pages) uses `en` / `zh-CN` / `ja-JP` / `es-ES`, so the constraint costs no
- * real authoring surface.
+ * Every inline map authored in this repo (across three platform pages) uses
+ * `en` / `zh-CN` / `ja-JP` / `es-ES`, so the constraint costs no real
+ * authoring surface.
  *
  * The two retired spellings are rejected BY NAME, in any combination
  * (#10492). An earlier revision of this comment argued the opposite — that the
@@ -238,9 +238,9 @@ export const InlineLocaleMapSchema: z.ZodType<
  *     `pages.<page>.components.<id>.label`, …) and resolved by
  *     `system/i18n-resolver.ts`.
  *  2. **An inline locale map** — `{ en: 'Members', 'zh-CN': '成员' }`, picked at
- *     render time. Three published platform pages author 31 of these and
- *     objectui resolves them (`pickLocalized`), so the map is a delivered
- *     capability, not a convention the runtime ignores.
+ *     render time. Three published platform pages author these and objectui
+ *     resolves them (`pickLocalized`), so the map is a delivered capability,
+ *     not a convention the runtime ignores.
  *
  * Form 2 is resolved **on this side too**, since #6765: `resolveI18nLabel` in
  * `./i18n-label-resolver` is the shared `I18nLabel` → `string` resolver, pinned

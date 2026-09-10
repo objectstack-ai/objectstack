@@ -369,6 +369,54 @@ describe('[#15513] tree-scoped absence: nothing inside the declared radius refer
     '.changeset/',
   ];
 
+  /**
+   * Build detritus that lands INSIDE a walked directory, so `SKIPPED_DIRS`
+   * cannot reach it.
+   *
+   * tsup bundles `tsup.config.ts` to `tsup.config.bundled_<random>.mjs` beside
+   * it, loads it, and deletes it. `.gitignore` already declares the class
+   * (`*.bundled_*.mjs`), so it is not an authored source and never was in this
+   * pin's radius — but the walk is a FILESYSTEM walk, not a git walk, so it
+   * enumerated it anyway. That cost two different wrong answers, both
+   * non-deterministic and neither about a retirement:
+   *
+   *  - a CRASH. `test:repo` dependsOn `["^build"]` — UPSTREAM builds only, never
+   *    its own package's — so `@objectstack/spec#build` runs CONCURRENTLY with
+   *    this walk, and `readdirSync` then `readFileSync` is not atomic: the file
+   *    is enumerated, tsup deletes it, the read raises `ENOENT` and the whole
+   *    leg errors. Measured on CI (`Test Core (1/6)`, run 34327949045) as
+   *    `ENOENT ... open 'packages/spec/tsup.config.bundled_8xzodswt4ct.mjs'` at
+   *    the `readFileSync` below.
+   *  - a PHANTOM OFFENDER, had the config ever named a retired symbol: the
+   *    bundle is a copy of `tsup.config.ts`, which this walk ALREADY reads, so
+   *    the copy could only ever report the original twice — under a filename
+   *    that changes every run.
+   *
+   * ⛔ Excluding it removes NO coverage for exactly that reason, and the
+   * anti-vacuity controls below hold the claim rather than asserting it.
+   */
+  const TSUP_BUNDLED_CONFIG = /\.bundled_[^./]+\.mjs$/;
+
+  /**
+   * Read a path the walk enumerated, tolerating ONLY its disappearance.
+   *
+   * A path that no longer exists cannot be a reference that SURVIVES in the
+   * tree, which is the whole of what this pin asserts — so `ENOENT` is the one
+   * fault that is not a finding. ⛔ Every other read failure is re-raised: a
+   * blanket `catch` here would turn an unreadable tree into a silent green,
+   * which is the failure mode this file exists to prevent one level up.
+   */
+  const vanished: string[] = [];
+  const readIfPresent = (full: string, rel: string): string | undefined => {
+    try {
+      return fs.readFileSync(full, 'utf-8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
+      vanished.push(rel);
+      return undefined;
+    }
+  };
+
   it('the matcher recognises a reference and ignores a prose mention (anti-vacuity)', () => {
     expect(REFERENCE.test("import { IncidentResponsePolicySchema } from './incident-response.zod';")).toBe(true);
     expect(REFERENCE.test('const x: TrainingCourse = {};')).toBe(true);
@@ -378,6 +426,41 @@ describe('[#15513] tree-scoped absence: nothing inside the declared radius refer
     expect(REFERENCE.test('the `IncidentResponsePolicySchema` export was removed')).toBe(false);
     expect(REFERENCE.test("title: 'Incident push failed: {record.name}'")).toBe(false);
     expect(REFERENCE.test('MetadataChangeTypeSchema')).toBe(false); // the live near-namesake
+  });
+
+  it('the build-detritus exclusion is NARROW — it names tsup\'s bundle and nothing authored', () => {
+    // The spelling tsup actually writes (the CI failure's own filename), plus
+    // the shape with any other random suffix.
+    expect(TSUP_BUNDLED_CONFIG.test('tsup.config.bundled_8xzodswt4ct.mjs')).toBe(true);
+    expect(TSUP_BUNDLED_CONFIG.test('tsup.config.bundled_abc123.mjs')).toBe(true);
+    // ⛔ NARROWNESS: it must not reach an authored file. If this ever widens,
+    // the walk silently stops covering real sources and this pin goes quiet.
+    expect(TSUP_BUNDLED_CONFIG.test('tsup.config.ts')).toBe(false);
+    expect(TSUP_BUNDLED_CONFIG.test('index.mjs')).toBe(false);
+    expect(TSUP_BUNDLED_CONFIG.test('js-comment-mask.mjs')).toBe(false);
+    expect(TSUP_BUNDLED_CONFIG.test('bundled_thing.mjs')).toBe(false);
+    // …and the ORIGINAL it is a copy of stays in the radius, which is why
+    // excluding the copy costs no coverage.
+    expect(EXCLUDED.has('packages/spec/tsup.config.ts')).toBe(false);
+    expect(EXCLUDED_PREFIXES.some((p) => 'packages/spec/tsup.config.ts'.startsWith(p))).toBe(false);
+  });
+
+  it('a path that VANISHES mid-walk is not a finding, and every other read fault still is', () => {
+    const before = vanished.length;
+    // The exact fault CI hit: enumerated, then gone before the read.
+    const gone = path.join(REPO_ROOT, 'packages/spec/does-not-exist.bundled_probe.mjs');
+    expect(fs.existsSync(gone)).toBe(false);
+    expect(readIfPresent(gone, 'probe/gone')).toBeUndefined();
+    expect(vanished.slice(before)).toEqual(['probe/gone']);
+    // POSITIVE CONTROL: a path that IS there is read, so the guard cannot be
+    // passing by refusing to read anything.
+    const present = fileURLToPath(import.meta.url);
+    expect(readIfPresent(present, THIS_FILE)).toContain('tree-scoped absence');
+    expect(vanished.length).toBe(before + 1);
+    // ⛔ And a NON-ENOENT fault is re-raised, never swallowed: reading a
+    // DIRECTORY raises EISDIR on Linux, so this is a real second fault class.
+    expect(() => readIfPresent(path.join(REPO_ROOT, 'packages/spec'), 'probe/dir')).toThrow();
+    expect(vanished.length).toBe(before + 1);
   });
 
   it('no reference survives inside the declared radius outside the retirement kit', () => {
@@ -397,8 +480,10 @@ describe('[#15513] tree-scoped absence: nothing inside the declared radius refer
         if (!(rel.startsWith('examples/') ? EXAMPLES_EXT : SCANNED_EXT).has(ext)) continue;
         if (entry.name === 'CHANGELOG.md') continue; // release prose records the removal
         if (EXCLUDED.has(rel) || EXCLUDED_PREFIXES.some((p) => rel.startsWith(p))) continue;
+        if (TSUP_BUNDLED_CONFIG.test(entry.name)) continue;
         visited += 1;
-        const text = fs.readFileSync(full, 'utf-8');
+        const text = readIfPresent(full, rel);
+        if (text === undefined) continue;
         const m = REFERENCE.exec(text);
         if (m) offenders.push(`${rel} references \`${m[0].trim()}\``);
       }

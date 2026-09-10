@@ -2018,75 +2018,44 @@ const toolInertAuthoringKeysRemoved: MetadataConversion = {
 };
 
 /**
- * `required: true` gains its explicit `storage.notNull` (protocol 17,
- * ADR-0113).
+ * ⛔ WITHDRAWN — there is deliberately NO `field-required-notnull-explicit`
+ * conversion in this registry, and re-adding one is the mistake this comment
+ * exists to stop (#16693; maintainer ruling, decision batch #85, 2026-09-08,
+ * option A).
  *
- * Before protocol 17, `field.required` bound THREE meanings to one knob: the
- * write-time contract, the physical NOT NULL DDL, and the drift expectation.
- * ADR-0113 splits them: `required` keeps the write contract, and the column
- * constraint becomes the explicit `storage: { notNull: true }`. Under the OLD
- * semantics every required field's column was created NOT NULL, so this
- * conversion preserves each old source's full meaning by WRITING IT DOWN —
- * a pure semantic explicitization, lossless by construction.
+ * It read `required: true` and wrote `storage: { notNull: true }` beside it,
+ * on the argument that pre-17 `field.required` bound three meanings to one
+ * knob — the write contract, the physical NOT NULL, and the drift
+ * expectation — so writing the constraint down preserved an old source's
+ * full meaning. ADR-0113 split those axes, and two facts retired the argument:
  *
- * `retiredFromLoadPath` is load-bearing here in a way it is not for renames:
- * a rename is idempotent on canonical input, but this is a DEFAULT FLIP — a
- * protocol-17-authored `required: true` deliberately means "nullable column,
- * write-gated", and a loader that auto-applied this transform would stamp
- * NOT NULL onto it, silently restoring the tri-binding the ADR removed. Only
- * `os migrate meta --from <16 or lower>` may apply it, where "this source
- * predates the split" is a fact, not a guess.
+ * 1. Adding `storage.notNull` wherever `required: true` appears IS the
+ *    implication ADR-0113 abolished. `required` is the write-time contract;
+ *    `storage.notNull` alone binds the column. A conversion cannot be what
+ *    decides a column constraint — that is the author's explicit act.
+ * 2. `retiredFromLoadPath: true` did NOT hold the transform to
+ *    `os migrate meta`, whatever this entry's docblock used to claim. The
+ *    artifact-ingestion door replays the whole chain with `includeRetired:
+ *    true` (`applyArtifactForwardConversions`, `@objectstack/metadata-core`),
+ *    keyed off the artifact's declared `engines.protocol` FLOOR rather than
+ *    its age — and `^17.0.0` is the range `create-objectstack` stamps. So
+ *    every scaffolded app was handed NOT NULL columns it never asked for, plus
+ *    a boot warning telling its author to write the same tightening into the
+ *    source. On a populated database that instruction is a `tighten_not_null`
+ *    / `severity: error` / `category: destructive` migration, prescribed as
+ *    the remedy for a deprecation notice.
+ *
+ * No migration is owed to anyone: genuinely pre-ADR-0113 artifacts are not
+ * measured to exist, and an app that wants NOT NULL columns declares
+ * `storage.notNull` deliberately. Existing columns are left exactly as they
+ * are.
+ *
+ * ⚠️ Fact 2 is about the MECHANISM, not about this entry, and it outlived the
+ * entry: `retiredFromLoadPath` still holds nothing back at three runtime seams
+ * (#16864). Before setting that flag on a DEFAULT FLIP — as opposed to a
+ * lossless delete or a rename — read that card, because the flag does not mean
+ * what its name and every docblock around it say it means.
  */
-const fieldRequiredNotNullExplicit: MetadataConversion = {
-  id: 'field-required-notnull-explicit',
-  toMajor: 17,
-  retiredFromLoadPath: true,
-  surface: 'object.fields.*.required / object.fields.*.storage.notNull',
-  summary: "required fields gain explicit 'storage.notNull: true' (ADR-0113 — pre-17 'required' implied the column constraint; post-17 it is only the write contract)",
-  apply(stack, emit) {
-    return mapCollection(stack, 'objects', (obj, path) => {
-      const fields = (obj as { fields?: Record<string, Record<string, unknown>> }).fields;
-      if (!fields || typeof fields !== 'object') return obj;
-      let touched = false;
-      const nextFields: Record<string, unknown> = { ...fields };
-      for (const [fieldName, def] of Object.entries(fields)) {
-        if (!def || typeof def !== 'object') continue;
-        if (def.required !== true) continue;
-        if (def.storage !== undefined) continue; // an explicit storage block wins
-        nextFields[fieldName] = { ...def, storage: { notNull: true } };
-        emit({ from: 'required: true (implied NOT NULL)', to: 'storage.notNull: true', path: `${path}.fields.${fieldName}.storage.notNull` });
-        touched = true;
-      }
-      return touched ? { ...obj, fields: nextFields } : obj;
-    });
-  },
-  fixture: {
-    before: {
-      objects: [{
-        name: 'crm_lead',
-        label: 'Lead',
-        fields: {
-          name: { type: 'text', required: true },
-          status: { type: 'select', required: true },
-          notes: { type: 'textarea' },
-        },
-      }],
-    },
-    after: {
-      objects: [{
-        name: 'crm_lead',
-        label: 'Lead',
-        fields: {
-          name: { type: 'text', required: true, storage: { notNull: true } },
-          status: { type: 'select', required: true, storage: { notNull: true } },
-          notes: { type: 'textarea' },
-        },
-      }],
-    },
-    expectedNotices: 2,
-  },
-};
-
 
 /**
  * The #3896 close-out sweep, part 2 (protocol 17): the remaining inert
@@ -9020,7 +8989,6 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     toolInertAuthoringKeysRemoved,
     appDeadAuthoringKeysRemoved,
     appAreaFailOpenGatesRemoved,
-    fieldRequiredNotNullExplicit,
     actionInertKeysRemoved,
     flowInertKeysRemoved,
     viewInertKeysRemoved,

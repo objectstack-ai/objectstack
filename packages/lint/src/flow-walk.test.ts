@@ -194,11 +194,38 @@ describe('walkFlowNodes', () => {
       expect(ownRegionKeys('constructor')).toEqual([]);
     });
 
-    it('treats an empty key list as a real answer, distinct from omitting it', () => {
+    it('treats an empty key list as a real answer: strip nothing, same reference', () => {
       const config = { body: 'payload', try: 'kept' };
       expect(stripRegions(config, [])).toBe(config);
-      // Omitted: the flat-union view its remaining caller was written against.
-      expect(Object.keys(stripRegions(config) ?? {})).toEqual([]);
+    });
+
+    /**
+     * #16405 — `regionKeys` is REQUIRED, and this is the pin that keeps it so.
+     *
+     * It carried the flat union as a DEFAULT until #16405, which meant the
+     * shorter call compiled and answered a different question than the caller
+     * was asking: "every key that holds a region on SOME node type" rather than
+     * "this node's own slots". `lint-flow-patterns.ts` wrote that shorter call
+     * and was silently blind to an `http` node's `body` — its request payload —
+     * for as long as it existed. With no default, the omission does not compile.
+     *
+     * A `@ts-expect-error` rather than a runtime assertion because the trap was
+     * only ever visible to the type checker; `tsconfig.test.json` compiles this
+     * file, so the directive is evaluated (`pnpm --filter @objectstack/lint
+     * check:test-typecheck`) and re-adding a default makes it unused — TS2578.
+     */
+    it('does not compile when the key list is omitted', () => {
+      const config = { body: 'payload', try: 'kept' };
+      // @ts-expect-error — `regionKeys` is required: the flat-union default is gone.
+      expect(stripRegions(config)).toBeDefined();
+    });
+
+    it('keeps a non-region key a node type owns as ordinary config', () => {
+      // `body` on an `http` node is its request payload, not a region.
+      const config = { url: 'https://x.test', body: { text: 'hi' } };
+      expect(stripRegions(config, ownRegionKeys('http'))).toBe(config);
+      // …and is still stripped on the type that owns it as a region.
+      expect(Object.keys(stripRegions(config, ownRegionKeys('loop')) ?? {})).toEqual(['url']);
     });
 
     it('returns undefined for a non-record config, whatever the key list', () => {

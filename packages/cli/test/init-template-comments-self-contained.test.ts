@@ -81,6 +81,23 @@
 // (which owns the canonical-origin constant), for the same reason #10324's
 // version does: an import would widen this suite's declared cross-package
 // read radius to buy six lines.
+//
+// ## The vocabulary is the OTHER pin's, and drifting apart is the failure mode
+//
+// `MONOREPO_ONLY` below is `create-objectstack`'s
+// `starter-comments-self-contained.test.ts` vocabulary, restated rather than
+// imported — same reason as the candidate-route logic above. Restating buys
+// the narrow read radius and costs the guarantee that the two stay equal, and
+// they did NOT: #11022 added a fifth pattern to that file and this one kept
+// four, so the same defect class had two different answers depending on which
+// scaffolder shipped it. #15150 backfills that fifth pattern here and adds a
+// sixth to BOTH files in one change.
+//
+// Both additions are pure regression guardrails: measured on the rendered
+// population this file actually sweeps, each matches zero text today. That is
+// the point — a shape that cannot grow back — and it is also why each carries
+// its own injection control in the PR that landed it, since a pattern matching
+// nothing is indistinguishable from a pattern that is broken.
 
 import { describe, it, expect, afterAll } from 'vitest';
 import fs from 'node:fs';
@@ -202,12 +219,79 @@ function renderAll(): Rendered[] {
  * `starter-comments-self-contained.test.ts` — same defect class, same
  * vocabulary — spelled to match the identifier, not any particular
  * sentence, so the prose around it stays free to change.
+ *
+ * "Verbatim" is an obligation, not a description of how it got here: a
+ * pattern added to either file belongs in both, or this package's scaffolders
+ * and that one's answer the same question differently. See the file header
+ * for the drift #15150 repaired.
  */
 const MONOREPO_ONLY = [
   { label: 'an ADR identifier', re: /\bADR-\d{3,4}\b/ },
   { label: 'a bare issue number', re: /(^|[^\w/])#\d{3,6}\b/ },
   { label: 'a repo build-script path', re: /\bscripts\/[\w.-]+\.(?:mjs|mts|cjs|ts|js)\b/ },
   { label: 'a monorepo package path', re: /\bpackages\/[a-z0-9][\w-]*\//i },
+  // #11022, backfilled here by #15150: `create-objectstack`'s
+  // `blank/README.md` named "the ObjectStack framework repo" as the home of
+  // `skills/`, unlinked — a reader with only their own scaffolded project has
+  // no way to reach it. The four patterns above are syntactic identifiers (an
+  // ADR id, an issue number, a repo-relative path); this one is the same class
+  // of defect in PROSE form, so it is spelled to the FRAMEWORK'S OWN NAME next
+  // to a "repo" word rather than to that one sentence — it survives a reword.
+  // Deliberately narrower than a bare "repo" or "monorepo" match: a scaffolded
+  // project is entitled to call ITSELF a monorepo root, which is a correct,
+  // self-contained, followable statement about a directory the reader has.
+  //
+  // Nothing in this package's rendered output matches it today, and the one
+  // near-hit is deliberately out of population: `create.ts` describes its
+  // `--in-repo` flag as emitting a project that installs only in this
+  // monorepo, and that string is CLI help text — printed to whoever runs the
+  // command, never written into the scaffolded project. This pin reads what
+  // the emitters write to disk, so it does not see it and must not be
+  // "fixed" to.
+  { label: 'a reference to the ObjectStack repo as an unlinked location', re: /\bObjectStack (?:framework )?(?:mono)?repo\b/i },
+  // #15150: the five patterns above are all spelled ABSOLUTELY — a repo-rooted
+  // path, an identifier, or a name. This one is the same class of unfollowable
+  // reference written RELATIVELY, as a path that climbs out of the project the
+  // reader actually has. `os create` shipped exactly that,
+  // `[ObjectStack Documentation](../../content/docs)` in a scaffolded README:
+  // the project has no parent directory to climb into, so the link resolved
+  // nowhere while assertion 1 read the file, matched none of its patterns, and
+  // reported it as a PASSING row.
+  //
+  // Anchored on `../`, deliberately NOT on `./`, and deliberately not on the
+  // depth judgement #15150 proposed (`check:cross-package-test-inputs`-style
+  // "the shallowest point a path reaches"). What makes the bare anchor sound
+  // is a property of THIS population rather than of `../`: the population is
+  // the DEFAULT placement only. `create.ts` renders per `ScaffoldPlacement`,
+  // and `defineTemplate`'s `files` getter — the map `renderAll()` reads below
+  // — is `filesFor(DEFAULT_PLACEMENT)`, i.e. `standalone`, whose emitted
+  // `tsconfig.json` is self-contained. The one legitimate escaping `../` this
+  // package can produce, `rootTsconfigExtends`, is emitted ONLY on the
+  // `in-repo` branch and so is never in this sweep. Measured: `filesFor`
+  // `('in-repo')` yields `"../../../tsconfig.json"`; `template.files` and
+  // `filesFor('standalone')` yield no `../` at all.
+  //
+  // ⚠️ THAT IS THE POPULATION ARGUMENT, NOT A PROPERTY OF THE PATTERN, and the
+  // difference is worth stating plainly rather than leaving for someone to
+  // discover from a red: this matches ANY `../`, including a climb that stays
+  // INSIDE the project. `import { x } from '../config'` in a nested emitted
+  // source file, or a prose "see ../README.md in this project", are both legal
+  // in a scaffolded project and both redden here. Only the population keeps
+  // that from mattering.
+  //
+  // So there are TWO conditions to re-read this on, not one, and the second is
+  // the likelier:
+  //   1. the population widens to the `in-repo` placement, which emits
+  //      `rootTsconfigExtends`; or
+  //   2. a template grows an intra-project relative climb — an emitted source
+  //      file nested deeply enough to reach back up toward its own project
+  //      root. This needs NO placement change at all.
+  //
+  // In EITHER case the red lands on correctly-shaped, legal text, and the fix
+  // is the depth judgement (`check:cross-package-test-inputs`-style, "the
+  // shallowest point a path reaches") — never an exemption, and never a
+  // widened pattern.
+  { label: 'a path that climbs out of the scaffolded project', re: /(?<![\w.])\.\.\/[\w./-]*/ },
 ];
 
 describe('rendered scaffold templates are followable by a stranger', () => {

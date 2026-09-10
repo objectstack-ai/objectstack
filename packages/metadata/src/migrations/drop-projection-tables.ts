@@ -18,6 +18,8 @@
  */
 
 import type { IDataDriver } from '@objectstack/spec/contracts';
+import { operatorFacingErrorText } from '@objectstack/types';
+
 
 import { driverExecRefusal, resolveDriverExec } from './driver-exec.js';
 
@@ -58,7 +60,7 @@ export async function dropProjectionTables(driver: IDataDriver): Promise<DropPro
             results.push({
                 table,
                 status: 'error',
-                error: error instanceof Error ? error.message : String(error),
+                error: operatorFacingErrorText(error),
             });
         }
     }

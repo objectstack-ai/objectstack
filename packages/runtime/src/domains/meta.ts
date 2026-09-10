@@ -35,9 +35,107 @@ import {
     // org-scoped to the caller's own active organization.
     metaWriteCapabilityVerdict,
 } from '@objectstack/metadata-core';
+// [#15238] The DECLARED protocol contracts this domain's request literals are
+// compiled against. Imported, never restated: a second hand-written
+// `getMetaItem(…)` signature here would silently drift from the one the spec
+// declares and `ObjectStackProtocolImplementation` states it `implements` —
+// which is the whole reason `MetaDomainProtocol` below is `Pick`ed rather than
+// written out. Same move `domains/packages.ts` and `domains/mcp.ts` make.
+import type { MetadataProtocol } from '@objectstack/spec/api';
 import { buildApiError } from '../error-envelope.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+
+/**
+ * [#15238] The `protocol` service slot **as this domain reaches it** — one
+ * statement of the handle, replacing nine independent `protocol` seams in this
+ * file, four of which reached a verb through an `any` cast.
+ *
+ * ## What was wrong with the seam
+ *
+ * `deps.resolveService(context, 'protocol')` answers `any`. That is not an
+ * oversight — {@link DomainHandlerDeps.resolveService} types its return from
+ * `ServiceSlotContracts`, and `protocol` is deliberately left unmapped there
+ * ("real services with no written contract, so they keep today's `any` rather
+ * than being given a shape here that nothing verifies"). The `any` is honest
+ * about the SLOT. What it also did, silently, was hand every request literal
+ * downstream of it an unchecked call target: the #11006 series' end state —
+ * "an undeclared key in a request literal is a compile error" — stopped one
+ * seam short here, so a misspelt or undeclared key in these literals compiled,
+ * and so did a misspelt VERB.
+ *
+ * ## Why the type is here and not on the slot
+ *
+ * Mapping `'protocol'` in `ServiceSlotContracts` would type every consumer at
+ * once, but it is a `packages/spec` change that would state that a filled slot
+ * IS a `MetadataProtocol`, whose members are mostly REQUIRED — the shape the
+ * probes below exist to deny — and it would have to answer for the three verbs
+ * in the second group, which no contract declares at all. So the narrowing
+ * happens at the consumer, once, exactly as `domains/packages.ts` (#13598) and
+ * `domains/mcp.ts` (#8726) narrow the same slot for their own seams.
+ *
+ * ## ⛔ Every member is OPTIONAL, and the runtime probes STAY
+ *
+ * A host may occupy this slot with a partial object — that is the documented
+ * reason the `typeof protocol.<verb> === 'function'` probes exist, and every
+ * one of them survives this change unchanged in meaning. `Partial<…>` is what
+ * makes the type agree with them instead of contradicting them: tightening the
+ * type and then deleting a probe would trade a compile-time improvement for a
+ * runtime crash. The type answers "is this key declared?"; the probe answers
+ * "did THIS host bring the verb?". Two different questions, both still asked.
+ *
+ * ## Where the ledger honestly ends
+ *
+ * The first group names shapes someone DECLARES: the spec's `MetadataProtocol`,
+ * whose `GetMetaItemRequest` / `GetMetaItemsRequest` / `SaveMetaItemRequest` /
+ * `GetMetaItemLayeredRequest` are what this file's literals are now compiled
+ * against. The second group has no declared request shape anywhere:
+ * `@objectstack/metadata-protocol` types `listDrafts`, `migrateStoredMetadata`
+ * and `getProjectId` inline on the implementation class and exports nothing for
+ * them. Writing a structural request type for them HERE would be a private
+ * restatement that nothing verifies — the thing #9846 retired one file over. So
+ * their request keeps `any` and the gap stays visible and greppable: declaring
+ * them is producer-side work, not this consumer's to invent. What the entries
+ * still buy is the verb NAME — `protocol.migrateStoredMetadta` is now a compile
+ * error where the `any` handle took any spelling at all.
+ *
+ * `environmentId` is a PROPERTY, not a verb: the scope probe at the object-read
+ * branch reads it as the fallback for a host that brings no `getProjectId`.
+ * `unknown` rather than `string`, for the same reason the verbs above keep
+ * `any` requests — nothing declares its type, and the only thing that branch
+ * asks of it is whether it is `undefined`.
+ */
+export type MetaDomainProtocol =
+    Partial<Pick<MetadataProtocol,
+        'getMetaTypes' | 'getMetaItems' | 'getMetaItem' | 'saveMetaItem' | 'getMetaItemLayered'>>
+    & {
+        /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
+        listDrafts?(request: any): Promise<any>;
+        migrateStoredMetadata?(request: any): Promise<any>;
+        getProjectId?(): unknown;
+        /** ⚠️ Undeclared PROPERTY — the `getProjectId` fallback, read for presence only. */
+        environmentId?: unknown;
+    };
+
+/**
+ * [#15238] Resolve the `protocol` slot as {@link MetaDomainProtocol}.
+ *
+ * THE one narrowing point for this file, mirroring `domains/packages.ts`'s
+ * `resolveProtocol`. `resolveService` answers `any` for this name, so the
+ * widening happens here and nowhere else — every call site downstream holds a
+ * typed handle, and a tenth call site added next month gets the type by
+ * construction rather than by remembering to write one.
+ *
+ * ⛔ Not a guard and not a replacement for one: it neither probes for verbs nor
+ * rejects a partial host. `undefined` still means "no protocol service", and
+ * each caller still asks its own `typeof … === 'function'` capability question.
+ */
+async function resolveProtocol(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<MetaDomainProtocol | undefined> {
+    return await deps.resolveService(context, 'protocol');
+}
 
 /**
  * [#8848] The methods `/metadata/:type/:name` actually serves — the single
@@ -245,7 +343,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // JSON Schemas, allowOrgOverride flags, domain, etc) needed by
         // the metadata admin UI. It internally also merges
         // MetadataService runtime types, so this path is strictly richer.
-        const protocol = await deps.resolveService(_context, 'protocol');
+        const protocol = await resolveProtocol(deps, _context);
         if (protocol && typeof protocol.getMetaTypes === 'function') {
             try {
                 const result = await protocol.getMetaTypes({});
@@ -339,11 +437,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // code-published item resolving to the same bytes it always did. The
         // broader `getMetaItem` would not do: it folds the code layer into its
         // own answer, so this route could no longer tell the two stores apart.
-        const protocol = await deps.resolveService(_context, 'protocol');
-        if (protocol && typeof (protocol as any).getMetaItemLayered === 'function') {
+        const protocol = await resolveProtocol(deps, _context);
+        if (protocol && typeof protocol.getMetaItemLayered === 'function') {
             try {
                 const organizationId = await deps.resolveActiveOrganizationId(_context);
-                const layered = await (protocol as any).getMetaItemLayered({
+                const layered = await protocol.getMetaItemLayered({
                     type,
                     name,
                     ...(organizationId ? { organizationId } : {}),
@@ -494,7 +592,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             const item = body ?? {};
 
             // Try to get the protocol service directly
-            const protocol = await deps.resolveService(_context, 'protocol');
+            const protocol = await resolveProtocol(deps, _context);
 
             if (protocol && typeof protocol.saveMetaItem === 'function') {
                 try {
@@ -682,7 +780,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 // service (which filters sys_metadata by environment_id) in that
                 // case, and fall back to the registry only for the
                 // unscoped (single-kernel / control-plane) path.
-                const protocol = await deps.resolveService(_context, 'protocol') as any;
+                const protocol = await resolveProtocol(deps, _context);
                 const scopedEnv = typeof protocol?.getProjectId === 'function'
                     ? protocol.getProjectId()
                     : protocol?.environmentId;
@@ -697,7 +795,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 // very fan-out.
                 const objectMasker = await resolveObjectMasker(deps, _context);
 
-                if (scoped && typeof protocol.getMetaItem === 'function') {
+                // [#15238] `protocol &&` spelled out, matching the `!scoped` twin
+                // below. Behaviour-identical: `scoped` is derived from
+                // `protocol?.getProjectId` / `protocol?.environmentId`, so it can only
+                // be true when the handle is there. The `any` cast this branch used to
+                // resolve through is what let the two sibling guards drift apart in
+                // spelling — typing the handle is what surfaced it (TS18048).
+                if (scoped && protocol && typeof protocol.getMetaItem === 'function') {
                     try {
                         const organizationId = await deps.resolveActiveOrganizationId(_context);
                         const data = await protocol.getMetaItem({ type: 'object', name, organizationId });
@@ -757,7 +861,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             const singularType = pluralToSingular(type);
 
             // Try Protocol Service First (Preferred)
-            const protocol = await deps.resolveService(_context, 'protocol');
+            const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.getMetaItem === 'function') {
                  try {
                     const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -824,7 +928,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 ),
             };
         }
-        const protocol = await deps.resolveService(_context, 'protocol');
+        const protocol = await resolveProtocol(deps, _context);
         if (protocol && typeof protocol.listDrafts === 'function') {
             try {
                 const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -881,15 +985,15 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             };
         }
 
-        const protocol = await deps.resolveService(_context, 'protocol');
-        if (!protocol || typeof (protocol as any).migrateStoredMetadata !== 'function') {
+        const protocol = await resolveProtocol(deps, _context);
+        if (!protocol || typeof protocol.migrateStoredMetadata !== 'function') {
             return { handled: true, response: deps.error('Stored-metadata migration not supported', 501) };
         }
         const types = Array.isArray(body?.types)
             ? body.types.filter((t: unknown): t is string => typeof t === 'string' && t.length > 0)
             : undefined;
         try {
-            const report = await (protocol as any).migrateStoredMetadata({
+            const report = await protocol.migrateStoredMetadata({
                 apply: body?.apply === true,
                 ...(types && types.length > 0 ? { types } : {}),
                 // Attributed to the caller, not to the route: this writes
@@ -910,7 +1014,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const packageId = query?.package || undefined;
 
         // Try protocol service first for any type
-        const protocol = await deps.resolveService(_context, 'protocol');
+        const protocol = await resolveProtocol(deps, _context);
         if (protocol && typeof protocol.getMetaItems === 'function') {
             try {
                 const organizationId = await deps.resolveActiveOrganizationId(_context);
@@ -987,7 +1091,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     if (parts.length === 0) {
         // Prefer protocol service for the rich `entries` array (with
         // JSON Schemas etc); fall back to MetadataService types-only.
-        const protocol = await deps.resolveService(_context, 'protocol');
+        const protocol = await resolveProtocol(deps, _context);
         if (protocol && typeof protocol.getMetaTypes === 'function') {
             try {
                 const result = await protocol.getMetaTypes({});

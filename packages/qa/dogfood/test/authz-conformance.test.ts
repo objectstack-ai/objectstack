@@ -162,11 +162,24 @@ const PROBES: readonly Probe[] = [
   // never authorization: `sdk` / `server-only` / `public` / `gap` / `mismatch`
   // say nothing about whether a caller is authenticated. Deriving "gated" from
   // source syntax instead was measured and rejected — scanning all 80
-  // `this.routeManager.register(` sites in `rest-server.ts` for `enforceAuth`
-  // reads 50/30 and 22 of the 30 ungated are FALSE (a wrapping
-  // `guardedRouteManager` for 19 of them, a shared handler const for 3), a 73%
-  // false-ungated rate on the largest registrar. What these two probes supply
-  // is the POPULATION; the classification stays a reviewed row.
+  // registration sites in `rest-server.ts` for `enforceAuth` (TWO spellings: 72
+  // direct `this.routeManager.register(` sites plus 8 `registerPerItemRoute(`
+  // calls through the per-item family's switch-carrying helper) reads 51/29 and
+  // 22 of the 29 ungated are FALSE (a wrapping `guardedRouteManager` for 19 of
+  // them, a shared handler const for 3), a 76% false-ungated rate concentrated
+  // on the largest registrar.
+  //
+  // ⚠️ RE-MEASURED 2026-09-08. The 22 = 19 + 3 decomposition did NOT move when
+  // the per-item helper landed — the same 19 routes, 11 still direct and 8 now
+  // helper-routed through the same wrapping registrar — and the population
+  // stayed 80. Only the headline split moved, earlier and unrelatedly: 50/30
+  // became 51/29 when `registerUiEndpoints`, the one route in that file
+  // resolving no identity, was guarded. Recorded so the next reader does not
+  // re-derive a figure that has now been checked; the full reading lives in
+  // `authz-probe-blind-spot.census.ts`, the authority on this population.
+  //
+  // What these two probes supply is the POPULATION; the classification stays a
+  // reviewed row.
   {
     kind: 'ROUTE_ENUMERATION',
     file: 'packages/rest/src/rest-route-ledger.ts',

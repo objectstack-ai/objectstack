@@ -10,6 +10,11 @@ derived from your own metadata:
 - **Authorization** — the cross-owner RLS invariant: *a user who cannot READ a
   record must not be able to WRITE it.*
 
+And, on the same booted stack, an **in-process handle** so an app's own tests
+can run a hook, a validation rule, a flow, an action, a seed or a read against
+the **real** engine and assert on what it did — no HTTP round-trip, no
+hand-rolled `ctx.api`, no copied permission check.
+
 ## Why
 
 Static gates — type-check, unit tests, schema validation — verify each layer in
@@ -67,6 +72,72 @@ expect(rls.summary.holes).toBe(0);
 await stack.stop();
 ```
 
+## The in-process handle (drive the real engine from a test)
+
+Every `VerifyStack` carries it; nothing extra to boot. Each method is a thin
+facade over a door the kernel wired at boot — the ObjectQL engine's own write,
+dry-run and read calls, the runtime's `/automation` and `/actions` routes
+driven in-process, the `SchemaRegistry`, the `tenancy` service — with **zero
+re-implemented semantics**: the handle assembles no execution context, orders
+no hooks, evaluates no permission. What the engine does is what you assert on.
+
+```ts
+import { bootStack } from '@objectstack/verify';
+import myApp from './objectstack.config.js';
+
+const stack = await bootStack(myApp, { automation: true });
+await stack.signIn();                                  // seeds the dev admin
+const rep = await stack.signUp('rep@example.com');     // a plain member
+
+// A hook: one real write as `rep` — before* hooks, validation, the driver,
+// after* hooks, and the permission check the caller is subject to.
+const deal = await stack.hooks.run('crm_opportunity', 'insert',
+  { name: 'Globex', amount: 10_000, stage: 'proposal' }, { as: rep });
+expect(deal.expected_revenue).toBe(6_000);             // the hook derived it
+
+// The same write a member may NOT make rejects with the engine's own error.
+await expect(stack.hooks.run('crm_vault', 'insert', { name: 'x' }, { as: rep }))
+  .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+
+// A validation rule, without writing.
+const verdict = await stack.validate('crm_opportunity', { amount: -1 }, { as: rep });
+expect(verdict.valid).toBe(false);
+
+// A screen flow: trigger, then resume with the screen's input.
+const run = await stack.flows.run('quote_generation', { recordId: deal.id }, { as: rep });
+expect(run.status).toBe('paused');
+await stack.flows.resume(run, { quoteName: 'Q-1', discount: 10 }, { as: rep });
+
+// An action body, through the route that carries its param contract.
+const out = await stack.actions.run('crm_opportunity', 'apply_discount',
+  { as: rep, recordId: deal.id, params: { discount: 10 } });
+
+// Fixtures and reads through the real engine.
+const [acc] = await stack.seed('crm_account', [{ name: 'Globex' }]);
+const mine = await stack.rows('crm_opportunity', { crm_account: acc.id }, { as: rep });
+
+// What the boot actually holds.
+stack.metadata.object('crm_opportunity')?.fields;      // system columns injected
+stack.metadata.items('permission');                    // the registry's singular names
+stack.tenancy().posture;                               // 'single' | 'group' | 'isolated'
+
+await stack.stop();
+```
+
+- `as` is always a bearer token minted by `signIn()` / `signUp()` on the same
+  stack — the handle resolves it through the dispatcher's own identity resolver
+  (`contextFor(token)` exposes that context for services the handle does not
+  cover). There is no way to run as "nobody"; `seed` and the default `rows` run
+  as the system principal, deliberately and by name.
+- A refusal from `flows.*` / `actions.run` is the route's ADR-0112 envelope
+  (`VerifyRefusal`: `code`, `status`, `details`; `isVerifyRefusal(e)`); a
+  refusal from `hooks.run` / `validate` / `rows` is the engine's own error.
+  Assert on `code` (and `status` / `statusCode`), never on a message alone.
+- Many files, one boot: `bootStackOnce(config, opts?)` memoises `bootStack` per
+  `(config, opts)` object identity for the life of the process. Share it from
+  one module, under vitest `isolate: false`, and never `stop()` a stack other
+  files still use.
+
 ## Verdicts
 
 **Data fidelity** (`runCrudVerification`):
@@ -117,13 +188,17 @@ run" must never read like "nothing to find".
 
 ## API
 
-- `bootStack(config, opts?)` → `VerifyStack` (`api` / `raw` / `signIn` / `signUp` / `apiAs` / `stop`).
+- `bootStack(config, opts?)` → `VerifyStack` (`api` / `raw` / `signIn` / `signUp` / `apiAs` / `stop`, plus the handle:
+  `hooks.run` / `validate` / `flows.run` / `flows.resume` / `actions.run` / `seed` / `rows` / `metadata` / `tenancy` / `contextFor`).
+- `bootStackOnce(config, opts?)` → the same, memoised per `(config, opts)` identity for the process.
 - `deriveCrudCases(config)` → the auto-derived round-trip cases (write one, read one, assert) for every object.
 - `runCrudVerification(stack, token, config)` → `VerifyReport`; `formatReport(report)` for a log summary.
 - `runRlsProofs(stack, adminToken, memberToken, config)` → `RlsReport`; `formatRlsReport(report)`.
 
 `bootStack` options: `admin`, `authSecret`, `security` (a custom `SecurityPlugin`
-for owner-scoped fixtures), `multiTenant`.
+for owner-scoped fixtures), `multiTenant` (also what decides the posture
+`tenancy()` reports), `automation` (register the automation service so
+`flows.*` has something to drive), `orgContext`, `databaseFile`, `extraPlugins`.
 
 ## Known limitations
 

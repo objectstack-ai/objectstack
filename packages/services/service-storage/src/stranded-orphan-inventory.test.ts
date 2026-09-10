@@ -513,11 +513,23 @@ describe("[#10950] the sweep cannot nominate a stranded orphan — the card's pr
  * ## Why this file could not have caught the defect before
  *
  * `created_at` is a BUILTIN audit column, so no declared-field coercion
- * reaches it and `SqlDriver#formatOutput` repairs it only inside its
- * `if (this.isSqlite)` arm. The record read door therefore hands it back as
- * canonical ISO-Z TEXT on SQLite and as a JS `Date` on Postgres and MySQL —
- * pinned at that door, per dialect, in driver-sql's
- * `sql-driver-13567-audit-stamp-materialisation.test.ts` (§B0/§B1).
+ * reaches it and `SqlDriver#formatOutput` USED TO repair it only inside its
+ * `if (this.isSqlite)` arm. While that gate stood, the record read door handed
+ * it back as canonical ISO-Z TEXT on SQLite and as a JS `Date` on Postgres and
+ * MySQL. #13973 ([ADR-0053 D-F1]) has since lifted both of `formatOutput`'s
+ * timestamp passes out of that gate — they run on EVERY dialect now — and the
+ * pin that recorded the asymmetry records the canonical-text contract instead
+ * (driver-sql's `sql-driver-13567-audit-stamp-materialisation.test.ts`
+ * §B0/§B1, inverted on purpose).
+ *
+ * ⚠️ The `Date` these cases drive is still a shape `usableCreatedAt` receives,
+ * so they pin a LIVE arm rather than a historical one: `driver-sql` hands an
+ * INVALID `Date` through unchanged ([ADR-0053 D-F3] — the one shape with no
+ * canonical text) and a non-SQL driver materialises its own.
+ * `withPostgresCalendarDayAsText` is untouched by that ruling
+ * ([ADR-0053 D-F2]), so the CLIENT still materialises `timestamptz` /
+ * `DATETIME(3)` as a `Date`; what changed is that the driver folds it at its
+ * own read boundary.
  *
  * ⚠️ This repo's default test backend is SQLite, and every fixture above
  * spells `created_at` as an ISO STRING — the one shape the old

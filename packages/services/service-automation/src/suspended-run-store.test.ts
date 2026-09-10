@@ -1051,3 +1051,116 @@ describe('#14333 ObjectStoreSuspendedRunStore.claimSuspension — the production
         expect(dataEngine.rows.get(runId).node_id).toBe('lv1');
     });
 });
+
+/**
+ * #15223 — the persisted terminal-status distinction.
+ *
+ * `RunRecord.status` declared two members (`'completed' | 'failed'`) while
+ * `recordLog`'s own terminal predicate admitted four and `ExecutionStatus`
+ * (`@objectstack/spec`) declared them all. Both ends of this store folded to
+ * match the narrower declaration — the write mapped everything that was not
+ * `completed` to `failed`, the read mapped everything that was not `failed`
+ * to `completed` — so a cancelled run's distinction was not merely unshown:
+ * it was **destroyed at write time**, and no later fix could recover it for a
+ * row already stored.
+ *
+ * ⭐ The property, and the reason every assertion below reads through a
+ * SECOND store over the same rows: the defect is invisible in-process.
+ * `getRun` prefers the in-memory ring entry, which has always said
+ * `cancelled`; only a restart (or a ring eviction) makes the row answer. An
+ * in-process assertion cannot see this and would have stayed green throughout.
+ *
+ * The three surfaces a restart moved, pinned here together because the fold
+ * lived at one site and surfaced at all three: `getRun`, `listRuns` (including
+ * its wire-exposed `?status=` filter, #7359) and `listHistory`.
+ */
+describe('ObjectStoreSuspendedRunStore — the persisted terminal status distinction (#15223)', () => {
+    /** Land the fire-and-forget `recordTerminal` off the terminal `recordLog`. */
+    const settle = () => new Promise((r) => setImmediate(r));
+
+    it('⭐ a CANCELLED run still reads `cancelled` from a process that never saw the cancel', async () => {
+        const table = createFakeEngine();
+        const freshStore = () => new ObjectStoreSuspendedRunStore(table, createTestLogger());
+
+        // Replica A parks the run, then an operator ends it deliberately
+        // (`cancelRun`, ADR-0044).
+        const a = pausableEngine(freshStore());
+        const paused = await a.execute('approval_flow');
+        const runId = paused.runId!;
+        expect(await a.cancelRun(runId, 'submitter withdrew')).toBe(true);
+        await settle();
+
+        // In-process this has always worked — it is the ring entry answering.
+        expect((await a.getRun(runId))?.status).toBe('cancelled');
+
+        // ⭐ The ROW, which is the whole of what a restart leaves behind. This
+        // said `failed` before the write-side fold was removed, and nothing
+        // downstream could have recovered the cancellation from it.
+        expect(table.rows.get(`run_${runId}`)?.status).toBe('cancelled');
+
+        // ⭐ …and a fresh process over the same rows — empty ring, new store —
+        // now answers what the operator actually did, on both read surfaces.
+        const b = pausableEngine(freshStore());
+        expect((await b.getRun(runId))?.status).toBe('cancelled');
+        expect((await b.listRuns('approval_flow')).find(r => r.id === runId)?.status).toBe('cancelled');
+
+        // The wire's `?status=` filter (#7359) reads the same resolved status,
+        // so it stops answering the opposite of the truth: the cancelled run
+        // used to be what `?status=failed` returned and `?status=cancelled`
+        // could not return at all.
+        expect((await b.listRuns('approval_flow', { status: 'cancelled' })).map(r => r.id)).toEqual([runId]);
+        expect(await b.listRuns('approval_flow', { status: 'failed' })).toEqual([]);
+    });
+
+    it('all four terminal members round-trip through the ROW — and none is filtered out of the history', async () => {
+        const table = createFakeEngine();
+        const writer = new ObjectStoreSuspendedRunStore(table, createTestLogger());
+        // `timed_out` has no engine path producing it today, so the store's own
+        // contract is where it can be measured at all — which is exactly why
+        // the vocabulary is declared once and asserted here rather than
+        // inferred from whatever the engine happens to emit.
+        const members = ['completed', 'failed', 'cancelled', 'timed_out'] as const;
+        for (const [i, status] of members.entries()) {
+            await writer.recordTerminal(terminalRecord(i + 1, { status, flowName: 'four_flow' }));
+        }
+
+        // The stored bytes carry the distinction — one row per member.
+        expect(members.map(s => [...table.rows.values()].filter(r => r.status === s).length)).toEqual([1, 1, 1, 1]);
+
+        // A FRESH store over the same rows reads each one back unchanged. The
+        // read-side fold made this collapse to `completed` for two of them.
+        const reader = new ObjectStoreSuspendedRunStore(table, createTestLogger());
+        for (const [i, status] of members.entries()) {
+            expect((await reader.loadTerminal(`r${i + 1}`))?.status).toBe(status);
+        }
+
+        // ⛔ And the list-side gate admits all four. This filter used to spell
+        // its own two-member list — a SECOND copy of the vocabulary — so
+        // widening only the writer would have replaced a wrong status with a
+        // missing row, which is worse: a cancelled run would have vanished
+        // from the Runs list entirely.
+        const history = await reader.listHistory('four_flow', 10);
+        expect(history.map(r => r.status).sort()).toEqual([...members].sort());
+    });
+
+    it('the refusal ladder answers RUN_CANCELLED to a replica that never saw the cancel', async () => {
+        // The reading triage asked for, and it is only half the story — see the
+        // companion pin in `stranded-run-status.test.ts`, where a replica
+        // holding its OWN stale `failed` ring entry still answers
+        // `NO_CONSUMED_SUSPENSION`. ⛔ The ladder is deliberately unchanged
+        // here; what moved is the row it reads.
+        const table = createFakeEngine();
+        const a = pausableEngine(new ObjectStoreSuspendedRunStore(table, createTestLogger()));
+        const paused = await a.execute('approval_flow');
+        const runId = paused.runId!;
+        expect(await a.cancelRun(runId, 'submitter withdrew')).toBe(true);
+        await settle();
+
+        const b = pausableEngine(new ObjectStoreSuspendedRunStore(table, createTestLogger()));
+        const refused = await b.restoreConsumedSuspension(runId);
+        expect(refused.restored).toBe(false);
+        // Was `NO_CONSUMED_SUSPENSION` — honest, but everything the folded row
+        // could support. The row can support the real reason now.
+        expect(refused.refusal).toBe('RUN_CANCELLED');
+    });
+});

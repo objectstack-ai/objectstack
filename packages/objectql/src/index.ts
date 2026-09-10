@@ -200,6 +200,27 @@ export {
   FIND_HOOK_RESULT_NOT_ARRAY_STATUS,
   describeFindHookResult,
 } from './find-hook-result-shape.js';
+// [#16231] The other three seams, closed on the same terms once their verbs
+// had declarations worth guarding (maintainer ruling, option A, 2026-09-07).
+// Exported for the same reason: the remedy belongs to the HOOK'S AUTHOR, who
+// branches on the code. The three shape predicates ride along because a host
+// that installs `after*` handlers can use them to check its own answer before
+// the engine does — which is cheaper than reading the refusal.
+export {
+  FindOneHookResultNotRecordError,
+  FIND_ONE_HOOK_RESULT_NOT_RECORD_CODE,
+  FIND_ONE_HOOK_RESULT_NOT_RECORD_STATUS,
+  isFindOneResultShape,
+  UpdateHookResultNotWriteShapeError,
+  UPDATE_HOOK_RESULT_NOT_WRITE_SHAPE_CODE,
+  UPDATE_HOOK_RESULT_NOT_WRITE_SHAPE_STATUS,
+  isUpdateResultShape,
+  DeleteHookResultNotWriteShapeError,
+  DELETE_HOOK_RESULT_NOT_WRITE_SHAPE_CODE,
+  DELETE_HOOK_RESULT_NOT_WRITE_SHAPE_STATUS,
+  isDeleteResultShape,
+  describeHookResult,
+} from './verb-hook-result-shape.js';
 // [#14010] `Hook.runAs` — the declared execution identity of a hook's `ctx.api`
 // data operations. The refusal a `runAs: 'user'` hook raises when its trigger
 // resolved no user (ADR-0112 code + status), the api that raises it, and the

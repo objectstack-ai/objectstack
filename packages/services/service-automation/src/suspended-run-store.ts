@@ -9,6 +9,7 @@ import type { Logger } from '@objectstack/spec/contracts';
 // recorder-local re-derivation here was rejected by name (Option B): it would
 // be a third answer to a question the codebase already answered two ways.
 import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
+import { isTerminalRunStatus } from './engine.js';
 import type {
   ConsumedSuspensionDropNotice,
   RunRecord,
@@ -16,6 +17,7 @@ import type {
   SuspendedRunStore,
   SuspensionClaimOutcome,
   SuspensionParkedAt,
+  TerminalRunStatus,
 } from './engine.js';
 
 /**
@@ -127,8 +129,15 @@ const CONSUMED_SUSPENSION_DROPPED_KEY = '$consumedSuspensionDropped';
  *  that closed — so only a pathological flow ever trips it. */
 const MAX_SUMMARY_JSON_BYTES = 16 * 1024;
 
+/**
+ * [#15223] Terminal-row gate, delegating to the ONE vocabulary
+ * ({@link isTerminalRunStatus}). It used to spell its own two-member list, and
+ * so did `listHistory` a second time — which is why widening the writer alone
+ * would have made cancelled runs vanish from the Runs list instead of
+ * appearing correctly in it.
+ */
 function isTerminalStatus(status: unknown): boolean {
-    return status === 'completed' || status === 'failed';
+  return isTerminalRunStatus(status);
 }
 
 /** Deep clone via JSON so a stored snapshot can't alias live engine state. */
@@ -742,32 +751,54 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       where: { id: HISTORY_PREFIX + runId }, limit: 1, context: SYSTEM_CTX,
     });
     const row = Array.isArray(rows) ? rows[0] : null;
-    if (!row || !isTerminalStatus(row.status)) return null;
-    return this.deserializeTerminal(row);
+    // [#15223] Resolved ONCE, and handed on. The gate and the value are the
+    // same reading, so `deserializeTerminal` is given the member rather than
+    // re-deciding it — there is no arm left in which a row can be deserialized
+    // with a status the gate did not admit.
+    const status: unknown = row?.status;
+    if (!row || !isTerminalRunStatus(status)) return null;
+    return this.deserializeTerminal(row, status);
   }
 
-  /** Newest terminal (`completed` / `failed`) run-history rows for one flow. */
+  /** Newest terminal run-history rows for one flow — all four
+   *  {@link TERMINAL_RUN_STATUSES} members. */
   async listHistory(flowName: string, limit: number): Promise<RunRecord[]> {
     // Fetch the flow's rows and filter terminal in memory — avoids depending on
     // IN-clause support in the driver's `where`. Paused rows are excluded.
     const rows = await this.engine.find(TABLE, {
       where: { flow_name: flowName }, limit: Math.max(limit * 4, 200), context: SYSTEM_CTX,
     });
-    return (Array.isArray(rows) ? rows : [])
-      .filter(r => r?.status === 'completed' || r?.status === 'failed')
-      .map(r => this.deserializeTerminal(r))
+    // [#15223] The filter used to spell `'completed' || 'failed'` inline — a
+    // SECOND copy of the vocabulary, and the one that would have silently
+    // dropped every widened row from the Runs list. It asks the shared
+    // predicate now, in the same read that produces the value.
+    const history: RunRecord[] = [];
+    for (const r of Array.isArray(rows) ? rows : []) {
+      const status: unknown = r?.status;
+      if (!isTerminalRunStatus(status)) continue;
+      history.push(this.deserializeTerminal(r, status));
+    }
+    return history
       .sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''))
       .slice(0, limit);
   }
 
-  /** Rebuild a {@link RunRecord} from a terminal `sys_automation_run` row. */
-  private deserializeTerminal(row: any): RunRecord {
+  /**
+   * Rebuild a {@link RunRecord} from a terminal `sys_automation_run` row.
+   *
+   * [#15223] `status` is a PARAMETER, not something this method re-reads. It
+   * used to fold the column (`row.status === 'failed' ? 'failed' : 'completed'`),
+   * the read-side half of a distinction the write side had already destroyed;
+   * taking the member the caller's gate already resolved leaves no arm in which
+   * a fold could come back, and no unreachable fallback pretending to guard one.
+   */
+  private deserializeTerminal(row: any, status: TerminalRunStatus): RunRecord {
     const rawId = String(row.id ?? '');
     return {
       runId: rawId.startsWith(HISTORY_PREFIX) ? rawId.slice(HISTORY_PREFIX.length) : rawId,
       flowName: String(row.flow_name ?? ''),
       flowVersion: typeof row.flow_version === 'number' ? row.flow_version : undefined,
-      status: row.status === 'failed' ? 'failed' : 'completed',
+      status,
       startedAt: row.started_at ?? row.created_at ?? '',
       startTime: typeof row.start_time === 'number' ? row.start_time : undefined,
       finishedAt: row.finished_at ?? undefined,

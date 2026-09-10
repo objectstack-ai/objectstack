@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/client",
-  "version": "17.3.0",
+  "version": "17.4.0",
   "license": "Apache-2.0",
   "description": "Official Client SDK for ObjectStack Protocol",
   "main": "dist/index.js",
@@ -32,6 +32,8 @@
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/objectql": "workspace:*",
+    "@objectstack/platform-objects": "workspace:*",
+    "@objectstack/plugin-auth": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/rest": "workspace:*",
     "@objectstack/runtime": "workspace:*",
@@ -39,7 +41,7 @@
     "@objectstack/service-automation": "workspace:*",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "objectstack",

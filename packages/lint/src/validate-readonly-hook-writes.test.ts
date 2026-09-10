@@ -340,7 +340,9 @@ describe('validateReadonlyHookWrites - GREEN: what a create is NOT judged on', (
   // the runner's test pins its ctx.api surface exhaustively). A body calling
   // `.create()` therefore throws `TypeError: not a function` on its first run —
   // a loud failure, not the silent no-op this rule reports — so a finding would
-  // be false in exactly the way the sudo() hint used to be (#14010).
+  // be false in exactly the way the sudo() hint used to be (#14010). Since
+  // #16249 the shape does not arrive at all: the ledger no longer advertises it
+  // and the build refuses `.create(` at lowering.
   // The engine's create-side strip does not judge a PLATFORM object at all
   // (`staticReadonlyInsertSubject`: `managedBy` set, or a `sys_` name — its
   // own 403 write guard governs it); the UPDATE path applies no such
@@ -359,7 +361,7 @@ describe('validateReadonlyHookWrites - GREEN: what a create is NOT judged on', (
     expect(control[0].rule).toBe(HOOK_API_UPDATE_READONLY_FIELD);
   });
 
-  it('never flags create() — the sandbox has no such leaf, so the call throws rather than silently dropping', () => {
+  it('never flags create() — the shape cannot reach this rule at all since #16249', () => {
     expect(
       validateReadonlyHookWrites(
         crmStack("await ctx.api.object('crm_account').create({ last_activity_date: now });"),
@@ -367,25 +369,49 @@ describe('validateReadonlyHookWrites - GREEN: what a create is NOT judged on', (
     ).toEqual([]);
   });
 
-  it('records the create() silence as a reasoned method exclusion — never as "INSERT is exempt"', () => {
+  // ⭐ [#16249] The exclusion's REASON changed and the exclusion did not, so the
+  // prose is pinned on the NEW fact ("it can no longer get here") and on the
+  // one it replaced NOT coming back. The old reason — "it throws, so reporting
+  // a silent drop would be false" — described a shape that reached this rule
+  // because the ledger advertised it; that route is closed. The sandbox reading
+  // stays in the text as the WHY BEHIND the refusal, so the entry still explains
+  // itself to someone who never reads the CLI.
+  it('records the create() exclusion on its POST-#16249 reason — never as "INSERT is exempt"', () => {
     expect(READONLY_HOOK_METHOD_EXCLUSIONS.map((e) => e.method)).toEqual(['create']);
     const [create] = READONLY_HOOK_METHOD_EXCLUSIONS;
+    // The new primary reason: the build refuses the shape before it can become
+    // a body this rule parses.
+    expect(create.reason).toMatch(/can no longer reach this rule/);
+    expect(create.reason).toMatch(/refuses `\.create\(` at lowering/);
+    expect(create.reason).toMatch(/never becomes a body\.source/);
+    // The sandbox fact behind the refusal is kept, not replaced.
     expect(create.reason).toMatch(/QuickJS/);
     expect(create.reason).toMatch(/TypeError: not a function/);
     expect(create.reason).not.toMatch(/INSERT is exempt|engine exempts INSERT/i);
   });
 
-  it('partitions the extractor\'s ctx.api write verbs exactly — every verb is a subject or a reasoned exclusion', () => {
+  // ⭐ [#16249] This case is the ledger-side pin: a re-added `create` entry in
+  // `HOOK_BODY_WRITE_PATTERNS`' advertised syntax reddens HERE, on the first
+  // assertion, before anything else in the tree notices. Both directions are
+  // held — the ledger's verbs, and the fact that `create` is no longer one of
+  // them while its exclusion record survives.
+  it('partitions the extractor\'s ctx.api write verbs exactly — every ledger verb is a subject (#16249)', () => {
     // The extractor's `API_WRITE_METHODS` is module-local, so its verbs are
     // read off the shared ledger's declared `syntax` line for the shape
-    // ("ctx.api.object('<object>').insert({…}) | .create({…}) | …") instead
-    // of being restated here — a fifth verb added there fails this case until
-    // it is classified.
+    // ("ctx.api.object('<object>').insert({…}) | .update({…}) | …") instead of
+    // being restated here — a verb added there fails this case until it is
+    // classified.
     const apiPattern = HOOK_BODY_WRITE_PATTERNS.find((p) => p.id === 'api-crud-literal')!;
     const verbs = [...apiPattern.syntax.matchAll(/\.(\w+)\(/g)].map((m) => m[1]).filter((v) => v !== 'object').sort();
-    expect(verbs).toEqual(['create', 'insert', 'update', 'updateById']);
-    const classified = [...READONLY_HOOK_STRIP_SUBJECT_METHODS, ...READONLY_HOOK_METHOD_EXCLUSIONS.map((e) => e.method)].sort();
-    expect(classified).toEqual(verbs);
+    expect(verbs).toEqual(['insert', 'update', 'updateById']);
+    // The withdrawal itself, stated as its own assertion so the failure names
+    // it: re-advertising `.create({…})` in the ledger reddens this line.
+    expect(verbs).not.toContain('create');
+    // Every verb the ledger still carries is a subject of this rule.
+    expect([...READONLY_HOOK_STRIP_SUBJECT_METHODS].sort()).toEqual(verbs);
+    // And the one method exclusion is a verb the ledger no longer carries — the
+    // record of the withdrawal, kept on purpose (see the exclusion's comment).
+    expect(READONLY_HOOK_METHOD_EXCLUSIONS.map((e) => e.method)).toEqual(['create']);
     expect(READONLY_HOOK_STRIP_SUBJECT_METHODS.filter((m) => READONLY_HOOK_METHOD_EXCLUSIONS.some((e) => e.method === m))).toEqual([]);
   });
 });

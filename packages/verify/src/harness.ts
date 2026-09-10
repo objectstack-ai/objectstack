@@ -34,6 +34,7 @@ import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 // verification — `@objectstack/organizations` above all — must be resolved from
 // THAT app, not from `packages/verify`'s own realpath inside this workspace.
 import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
+import { createHandle, type VerifyHandle } from './handle.js';
 
 /** A Hono app exposes `.request(path, init)` returning a standard `Response`. */
 interface InjectableApp {
@@ -74,7 +75,13 @@ const DEFAULT_ADMIN_EMAIL = 'admin@objectos.ai';
 const DEFAULT_ADMIN_PASSWORD = 'admin123';
 const DEFAULT_AUTH_SECRET = 'objectstack-verify-secret';
 
-export interface VerifyStack {
+/**
+ * A booted stack: the HTTP surface (`api` / `raw` / `signIn` / `signUp` /
+ * `apiAs`) plus the in-process handle (`hooks` / `validate` / `flows` /
+ * `actions` / `seed` / `rows` / `metadata` / `tenancy` / `contextFor`) on the
+ * same kernel — see `./handle.ts` for what each method is a facade over.
+ */
+export interface VerifyStack extends VerifyHandle {
   /** The booted kernel — for direct service calls when bypassing HTTP is intentional. */
   kernel: ObjectKernel;
   /** Inject an HTTP request through the real Hono app (no socket). Path is relative to `/api/v1`. */
@@ -302,6 +309,25 @@ export interface BootOptions {
    */
   databaseFile?: string;
   /**
+   * The default datasource's driver. Default `'sqlite-wasm'` — the pure-JS
+   * in-memory SQLite this harness has always booted, and the driver a real
+   * `objectstack dev` uses.
+   *
+   * `'memory'` boots `@objectstack/driver-memory` instead, which is the OTHER
+   * half of a two-driver equivalence measurement: the two drivers reach the
+   * analytics service through DIFFERENT strategies (`NativeSQLStrategy` compiles
+   * raw SQL on a SQL driver; the memory driver cannot run raw SQL, so the query
+   * falls through to `ObjectQLStrategy` and the engine's middleware). A gate
+   * that asserts the two doors reach ONE verdict cannot be written against one
+   * driver — asking on `sqlite-wasm` alone is exactly how the strategies were
+   * allowed to disagree about the security boundary.
+   *
+   * ⛔ It is NOT a general "run any fixture on memory" switch. The memory driver
+   * does not implement every SQL behaviour this harness's other gates depend
+   * on; use it where the DRIVER is the variable under test.
+   */
+  databaseDriver?: 'sqlite-wasm' | 'memory';
+  /**
    * Extra plugins to register between the app/service pairs and the
    * SecurityPlugin — the slot where `objectstack dev` auto-loads optional
    * service pairs the lean harness omits (e.g. `StorageServicePlugin` +
@@ -391,11 +417,14 @@ export async function bootStack(
   // §Risk mitigation the ADR promised), not the legacy pre-built DriverPlugin
   // escape hatch.
   await kernel.use(new ObjectQLPlugin());
+  const databaseDriver = opts.databaseDriver ?? 'sqlite-wasm';
   await kernel.use(new DefaultDatasourcePlugin({
-    driver: 'sqlite-wasm',
+    driver: databaseDriver,
     // `opts.databaseFile` makes the database outlive the kernel, so a second
     // boot over the same path is a real cold start (see BootOptions.databaseFile).
-    config: { filename: opts.databaseFile ?? ':memory:' },
+    // The memory driver holds no file — it takes no `filename` and a stray one
+    // would be config the driver silently ignores.
+    config: databaseDriver === 'memory' ? {} : { filename: opts.databaseFile ?? ':memory:' },
   }));
 
   // HTTP server (registers the `http-server` IHttpServer service the REST +
@@ -814,5 +843,54 @@ export async function bootStack(
     restoreTenancyPosture();
   };
 
-  return { kernel, api, raw, signIn, signUp, apiAs, stop };
+  // The in-process handle over the SAME kernel (hotcrm#1579 step 5a). Built
+  // after bootstrap so every service it resolves is the one the boot wired.
+  const handle = await createHandle(kernel, ORIGIN);
+
+  return { kernel, api, raw, signIn, signUp, apiAs, stop, ...handle };
+}
+
+const NO_OPTIONS: unique symbol = Symbol('bootStackOnce:no-options');
+const SHARED_BOOTS = new WeakMap<object, Map<unknown, Promise<VerifyStack>>>();
+
+/**
+ * `bootStack`, memoised per (`config`, `opts`) IDENTITY for the life of the
+ * process — the worker-scoped shared boot `packages/qa/dogfood`'s
+ * `getSharedShowcase()` kept privately, promoted so a suite of many files can
+ * pay one boot per vitest worker instead of one per file (a plain boot costs
+ * seconds; measured at ~7.8s per file on the showcase).
+ *
+ * Both keys are compared by reference: pass the same `config` module export
+ * and the same `opts` object (a module-level constant, or none) from every
+ * file that should share, and the first caller's boot is the one everybody
+ * gets — including its dev-admin sign-in state. A different `opts` object,
+ * even one spelled identically, is a different stack: the memo never guesses
+ * that two `SecurityPlugin` instances mean the same thing.
+ *
+ * Sharing only makes sense under `isolate: false` (files in one worker share
+ * one module registry); under vitest's default isolation every file still
+ * boots its own. The eligibility rules dogfood wrote for its shared stack
+ * apply verbatim: no `stop()` from a sharing file (the worker's teardown
+ * reclaims the in-memory stack; a `stop()` would kill it under the worker's
+ * later files), no writes to shared global surfaces, and no exact-count
+ * assertions over objects other files also write to.
+ */
+export function bootStackOnce(config: any, opts?: BootOptions): Promise<VerifyStack> {
+  if (config === null || typeof config !== 'object') {
+    throw new Error('verify: bootStackOnce(config) memoises by identity, so `config` must be an object');
+  }
+  let byOpts = SHARED_BOOTS.get(config);
+  if (!byOpts) {
+    byOpts = new Map();
+    SHARED_BOOTS.set(config, byOpts);
+  }
+  const key: unknown = opts ?? NO_OPTIONS;
+  let booted = byOpts.get(key);
+  if (!booted) {
+    booted = bootStack(config, opts);
+    byOpts.set(key, booted);
+    // A failed boot must not poison the memo: the next caller boots again.
+    booted.catch(() => byOpts!.delete(key));
+  }
+  return booted;
 }

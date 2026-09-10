@@ -1035,9 +1035,14 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
 
       // Assert — items should be restored into the registry
       const registry = (kernel.getService('objectql') as any).registry;
+      // [#16702] `_provenance: 'org'` is the SERVER's own sentence about every
+      // `sys_metadata` row, stated by the shared hydrator — the same one the
+      // `object` branch has always made. Kept as an exact-shape assertion so an
+      // UNEXPECTED extra key on a restored app still reds this pin.
       expect(registry.getAllApps()).toContainEqual({
         name: 'custom_crm',
         label: 'Custom CRM',
+        _provenance: 'org',
       });
     });
 
@@ -1524,7 +1529,12 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
         findOne: async () => null,
         create: async (_o: string, d: any) => ({ id: 'rec-1', ...d }),
         update: async (_o: string, _i: any, d: any) => ({ id: _i, ...d }),
-        updateMany: async (_o: string, _ast: any, d: any) => { bulkUpdates.push({ ...d }); return [{ ...d }]; },
+        // [#16231] `IDataDriver.updateMany` declares `Promise<number>` — the
+        // affected-row count a predicate write resolves. This double answered an
+        // ARRAY of rows, a shape no driver produces and one the engine used to
+        // hand straight out under `Promise<any>`; the assertions here read the
+        // captured payload, never the return, so the drift was invisible.
+        updateMany: async (_o: string, _ast: any, d: any) => { bulkUpdates.push({ ...d }); return 1; },
         delete: async () => true, syncSchema: async () => {},
       };
       await kernel.use({
@@ -1599,7 +1609,12 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
         findOne: async () => null,
         create: async (_o: string, d: any) => ({ id: 'rec-1', ...d }),
         update: async (_o: string, _i: any, d: any) => ({ id: _i, ...d }),
-        updateMany: async (_o: string, _ast: any, d: any) => { bulkUpdates.push({ ...d }); return [{ ...d }]; },
+        // [#16231] `IDataDriver.updateMany` declares `Promise<number>` — the
+        // affected-row count a predicate write resolves. This double answered an
+        // ARRAY of rows, a shape no driver produces and one the engine used to
+        // hand straight out under `Promise<any>`; the assertions here read the
+        // captured payload, never the return, so the drift was invisible.
+        updateMany: async (_o: string, _ast: any, d: any) => { bulkUpdates.push({ ...d }); return 1; },
         delete: async () => true, syncSchema: async () => {},
       };
       await kernel.use({

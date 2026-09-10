@@ -83,9 +83,15 @@ if (!inRootNav && !onDocsHome) {
 for (const major of releasedMajors()) {
   if (major < FLOOR_MAJOR || KNOWN_MISSING.has(major)) continue;
   const slug = `v${major}`;
-  if (!existsSync(`${RELEASES_DIR}/${slug}.mdx`)) {
+  // Two layouts, both first-class, and this gate owns EXISTENCE only: one flat
+  // `v16.mdx`, or a `v17/` folder whose `index.mdx` is the major's landing page
+  // with one file per minor beside it. Either satisfies "the major has a
+  // curated, navigable page" — the nav entry is the folder name in both cases,
+  // so the `metaPages` check below is unchanged. ⛔ Neither layout is deprecated.
+  if (!existsSync(`${RELEASES_DIR}/${slug}.mdx`) && !existsSync(`${RELEASES_DIR}/${slug}/index.mdx`)) {
     problems.push(
-      `${RELEASES_DIR}/${slug}.mdx is missing — @objectstack/spec shipped a ${major}.x ` +
+      `${RELEASES_DIR}/${slug}.mdx (or ${RELEASES_DIR}/${slug}/index.mdx) is missing — ` +
+        `@objectstack/spec shipped a ${major}.x ` +
         `release but there is no curated release page. Write it (lead with breaking ` +
         `changes + migration), then add "${slug}" to ${META_PATH}.`,
     );

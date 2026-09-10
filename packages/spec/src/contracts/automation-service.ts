@@ -342,10 +342,15 @@ export interface AutomationResult {
      * something to repair. This member is the ruling's contract half; the
      * engine begins stamping it when #13937's services half (the re-arm verb
      * and the catch-arm stamp in `resumeInternal`) lands. plugin-approvals'
-     * `StrandedRunState` (`'missing' | 'failed'`) is a report-only label over
-     * a request's run and is deliberately NOT promoted to this status (same
-     * ruling): it classifies WHY a request's run is unrecoverable, this names
-     * the run's own lifecycle verdict.
+     * `StrandedRunState` is a report-only label over a request's run and is
+     * deliberately NOT promoted to this status (same ruling): it classifies
+     * WHY a request's run is unrecoverable, this names the run's own lifecycle
+     * verdict. ⛔ Its members are deliberately NOT restated here: the union is
+     * plugin-local — declared, and documented member by member, on the type
+     * itself in `plugins/plugin-approvals/src/approval-service.ts` — and
+     * `automation-result-status.pin.test.ts` excludes it from its pins on
+     * purpose, so a member list copied into this file is unpinned prose that
+     * goes stale the next time the plugin splits an arm.
      *
      * `'refused'` names the run that reached an `end` node declaring
      * `outcome: 'refused'` (#14945; maintainer ruling 2026-09-05, option 2′):

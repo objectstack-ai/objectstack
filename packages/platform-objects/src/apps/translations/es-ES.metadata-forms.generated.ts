@@ -950,6 +950,30 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Encabezado",
         helpText: "Configuración de cabecera del panel (title, subtitle, actions)"
       },
+      "header.showTitle": {
+        label: "Mostrar título",
+        helpText: "Mostrar el título del panel en la cabecera"
+      },
+      "header.showDescription": {
+        label: "Mostrar descripción",
+        helpText: "Mostrar la descripción del panel en la cabecera"
+      },
+      "header.actions": {
+        label: "Botones de acción",
+        helpText: "Botones de acción mostrados en la cabecera"
+      },
+      "header.actions.label": {
+        label: "Etiqueta"
+      },
+      "header.actions.actionUrl": {
+        label: "URL de la acción"
+      },
+      "header.actions.actionType": {
+        label: "Tipo de acción"
+      },
+      "header.actions.icon": {
+        label: "Icono"
+      },
       widgets: {
         label: "Widgets del panel",
         helpText: "Widgets del panel con posición y tamaño"
@@ -1460,7 +1484,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "Identidad",
-        description: "Los conjuntos de permisos se apilan sobre un perfil para conceder acceso adicional. Los perfiles son el conjunto base asignado 1:1 a cada usuario."
+        description: "Los conjuntos de permisos son el único contenedor de capacidades: un usuario obtiene la unión de todos los conjuntos que tiene, así que un conjunto solo puede añadir acceso. Las posiciones distribuyen los conjuntos a las personas."
       },
       system_permissions: {
         label: "Permisos del sistema",

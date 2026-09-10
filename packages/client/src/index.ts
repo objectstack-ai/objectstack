@@ -1068,11 +1068,7 @@ export interface AuthWireUser {
     createdAt: string;
     /** ISO-8601. */
     updatedAt: string;
-    /**
-     * `twoFactor` plugin only. ⚠️ On the enrolment lane of `verifyTotp` this
-     * is echoed from the pre-flip snapshot — see
-     * {@link AuthTwoFactorVerificationResult}.
-     */
+    /** `twoFactor` plugin only. */
     twoFactorEnabled?: boolean;
     /**
      * `admin` plugin only. An open string: the vocabulary is the deployment's
@@ -1117,8 +1113,12 @@ export interface AuthPasswordChangeResult {
      * ⚠️ SECRET — an unsigned session token. When `revokeOtherSessions: true`
      * made the server rotate the caller's session this is the NEW session's
      * token (every other session is gone and the cookie the caller held is
-     * dead); `null` otherwise. A bearer-mode caller has to store it itself —
-     * this SDK does not.
+     * dead); `null` otherwise.
+     *
+     * A bearer-mode caller no longer has to store it by hand: `changePassword`
+     * adopts a non-null value into the client's own credential before it
+     * resolves, the way `login()` adopts the token it is handed. The field is
+     * unchanged and still echoed, for a caller that keeps its own store.
      */
     token: string | null;
     /** The caller, as better-auth's session held it when the write ran. */
@@ -1157,13 +1157,21 @@ export interface AuthTwoFactorVerificationResult {
      * `two-factor-rotated-token-echo` repairs the vendor's stale echo).
      * Through this SDK `verifyBackupCode` cannot send `disableSession`, so
      * the token is always present.
+     *
+     * `verifyTotp` adopts it into the client's own credential; `verifyBackupCode`
+     * does NOT, and the asymmetry is the wire fact rather than an omission —
+     * `/two-factor/verify-backup-code` never rotates, so what it echoes is the
+     * session the caller is already presenting.
      */
     token: string;
     /**
-     * ⚠️ On the ENROLMENT lane of `verifyTotp` the vendor echoes the user from
-     * its pre-rotation snapshot, so `twoFactorEnabled` reads `false` here
-     * although the flag has just flipped server-side (measured on a real SQL
-     * driver). Re-read the session for the live value.
+     * The caller, as the row stands when the response is written. The vendor
+     * echoes the user from its PRE-rotation snapshot on the enrolment lane, so
+     * `twoFactorEnabled` used to read `false` here although the flag had just
+     * flipped server-side; plugin-auth's `two-factor-rotated-token-echo`
+     * repairs that member from the row on the same rotating routes it repairs
+     * `token` on, so no second read is needed. The payload's shape is
+     * unchanged — the repair corrects values only.
      */
     user: AuthWireUser;
 }
@@ -1426,6 +1434,89 @@ export interface OrganizationTeamMemberRemovedReceipt {
  * where it can read one.
  */
 const DEFAULT_DATA_PREFIX = '/data';
+
+/**
+ * The conventional metadata prefix — `MetadataEndpointsConfigSchema.prefix`
+ * in `packages/spec` declares `.default('/meta')`, and REST mounts every
+ * metadata route under `${basePath}${metadata.prefix}`.
+ *
+ * The exact sibling of {@link DEFAULT_DATA_PREFIX}, and the same kind of
+ * value: what the SDK falls back to when discovery has not told it otherwise,
+ * NOT a competing source of truth. `_metaPrefix()` prefers the advertised
+ * value in every case where it can read one.
+ */
+const DEFAULT_META_PREFIX = '/meta';
+
+/**
+ * The response header better-auth's `bearer()` plugin puts a freshly installed
+ * session token in — the SIGNED `<token>.<sig>` form, emitted on every response
+ * that stages a session cookie, and added to `Access-Control-Expose-Headers` by
+ * the plugin itself so a cross-origin caller can read it.
+ *
+ * Read on exactly one route (`twoFactor.disable`), for the reason
+ * {@link ObjectStackClient.adoptRotatedSessionToken} states. Not exported: it
+ * names a vendor wire detail, not a capability this SDK offers.
+ */
+const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
+
+/**
+ * Lift better-auth's bare `/get-session` answer into the `SessionResponse`
+ * envelope the two methods that call that route declare (#16760).
+ *
+ * `/api/v1/auth/*` is better-auth's own byte stream — plugin-auth mounts one
+ * catch-all straight onto its handler — and better-auth does not use
+ * ObjectStack's REST envelope. Measured against a real `AuthManager`
+ * (better-auth 1.7.2, organization plugin) over a real driver:
+ *
+ * ```
+ * GET /api/v1/auth/get-session  (signed in) -> 200 {"user":{…},"session":{…,"token":"…"}}
+ * GET /api/v1/auth/get-session  (anonymous) -> 200 null
+ * ```
+ *
+ * `auth.login` has carried the same lift for `/sign-in/email`'s own bare
+ * `{ token, user }` since long before this card; `auth.me` and
+ * `auth.refreshToken` never got it, so every caller writing to the declared
+ * `data.user` read `undefined` while the real payload sat on `.user` — which
+ * did not type-check.
+ *
+ * Three properties this deliberately has:
+ *
+ * - **`success` is filled, not only `data`.** `SessionResponseSchema` is
+ *   `BaseResponseSchema.extend(…)` and that base declares `success` as a
+ *   REQUIRED boolean, so a body carrying `data` alone still does not parse as
+ *   the type the method advertises. A producer that sent its own `success`
+ *   keeps it — the spread below runs after the default.
+ * - **The raw keys are kept, not replaced.** `{ …body, data }`, exactly as
+ *   `login` does. `.user` is the read the field has been using all along while
+ *   the declared `.data.user` was `undefined`, and dropping it would break
+ *   those callers in order to fix a type they were already working around.
+ * - **`data.token` is NOT synthesized from `session.token`.** The declared key
+ *   is optional, and the two spellings are not one string: `session.token` is
+ *   the UNSIGNED session token, while the `token` `login` puts there is the
+ *   SIGNED `token.signature` form `bearer()` hands out. Both authenticate, so
+ *   populating it would file two different credentials under one key depending
+ *   on which method produced the body.
+ *
+ * The `body &&` guard is what carries the anonymous answer: `null` is falsy and
+ * is returned untouched rather than wrapped into a signed-in-looking envelope
+ * that no session backs. That answer stays outside `SessionResponse`; closing
+ * it needs the published return annotation to widen, which is a different card.
+ */
+const normalizeSessionResponse = (raw: unknown): SessionResponse => {
+  const body = raw as { user?: unknown; session?: unknown; data?: unknown } | null;
+  // Already enveloped, or nothing recognisable to lift: hand it back untouched
+  // rather than inventing a `data` this response never carried.
+  if (!body || typeof body !== 'object') return body as unknown as SessionResponse;
+  if (body.data !== undefined) return body as unknown as SessionResponse;
+  if (body.user === undefined && body.session === undefined) {
+    return body as unknown as SessionResponse;
+  }
+  return {
+    success: true,
+    ...body,
+    data: { user: body.user, session: body.session },
+  } as unknown as SessionResponse;
+};
 
 export class ObjectStackClient {
   private baseUrl: string;
@@ -3178,6 +3269,83 @@ export class ObjectStackClient {
   }
 
   /**
+   * @internal The metadata prefix this client's server actually mounts, read
+   * off the advertised routes (#16675).
+   *
+   * The same defect as #14879 one key over, so deliberately the same
+   * derivation shape as {@link ObjectStackClient._dataPrefix}, fallback
+   * discipline included. `metadata.prefix` moves the mounted metadata paths
+   * and the advertised discovery document TOGETHER — REST builds every
+   * metadata route as `${basePath}${metadata.prefix}` and then advertises the
+   * same value as `routes.metadata = ${realBase}${metadata.prefix}`. The SDK
+   * is the third surface that has to describe those same paths, so it must
+   * read the value rather than restate it: a deployment on a non-default
+   * prefix mounts nothing at `/meta`, and a client that assumes `/meta` calls
+   * paths that do not exist.
+   *
+   * The advertised `routes.metadata` is `{realBase}{metadata.prefix}` — ONE
+   * string carrying TWO unknowns, and no discovery key carries either half
+   * alone. The split is recovered in the order below, and where it cannot be
+   * recovered this DECLINES to the conventional `/meta` rather than guess. An
+   * SDK must not become unusable because a server's discovery document is
+   * missing a key:
+   *
+   *   1. If the advertised value already ends with the conventional `/meta`,
+   *      that IS the prefix. Taking this first is what makes the change
+   *      incapable of regressing a deployment that works today: every rule
+   *      below can only run in the branch where the current code — which
+   *      knows the single literal `/meta` — is ALREADY wrong. It is also what
+   *      keeps a DEFAULT deployment free of any new dependency: the answer is
+   *      reached from `routes.metadata` alone, and an unconnected client
+   *      never reaches a rule at all.
+   *   2. Otherwise `routes.data` supplies the missing equation. It is
+   *      `{realBase}{crud.dataPrefix}` over the SAME `realBase` (both are
+   *      substituted from one `realBase` in the same discovery handler), so
+   *      the two advertised routes share exactly `realBase` plus whatever
+   *      their two prefixes happen to share. Cutting their common run back to
+   *      its last `/` therefore lands on the `realBase` boundary, and the
+   *      remainder of `routes.metadata` is the prefix. This is also correct
+   *      when the document was served from the environment-scoped mount,
+   *      where both routes carry the same `/environments/{id}` segment and it
+   *      simply becomes part of the shared run.
+   *
+   * A derived prefix of `/` or empty is not a prefix this understands, so it
+   * declines too, as does the case where the two routes share nothing but the
+   * leading `/` and therefore share no base at all. The one shape that
+   * survives all of it — a deployment that moved `metadata.prefix` off
+   * `/meta` AND whose `routes.data` is not substituted from the same base
+   * (i.e. `api.enableCrud` is off) — is one the SDK cannot serve today
+   * either; it keeps today's answer.
+   */
+  _metaPrefix(): string {
+    const meta = this.discoveryInfo?.routes?.metadata;
+    if (typeof meta !== 'string' || !meta) return DEFAULT_META_PREFIX;
+
+    // (1) The conventional prefix — today's entire rule, kept first.
+    if (meta.endsWith(DEFAULT_META_PREFIX)) return DEFAULT_META_PREFIX;
+
+    // (2) `routes.data` as the second equation over the same `realBase`.
+    const data = this.discoveryInfo?.routes?.data;
+    if (typeof data !== 'string' || !data || data === meta) return DEFAULT_META_PREFIX;
+
+    let shared = 0;
+    while (shared < meta.length && shared < data.length
+           && meta.charCodeAt(shared) === data.charCodeAt(shared)) shared++;
+
+    // `boundary === 0` means the two advertised routes have nothing in common
+    // but the leading `/` — so they do NOT share a `realBase`, and the whole
+    // of `routes.metadata` would be mistaken for the prefix. That happens when
+    // `routes.data` was never substituted from this deployment's base (its
+    // endpoints are off, so it still carries the conventional literal) while
+    // `routes.metadata` was. Decline: a wrong prefix is worse than today's.
+    const boundary = meta.lastIndexOf('/', shared - 1);
+    if (boundary <= 0) return DEFAULT_META_PREFIX;
+
+    const derived = meta.slice(boundary);
+    return derived.length > 1 ? derived : DEFAULT_META_PREFIX;
+  }
+
+  /**
    * @internal The unscoped API base this client's server actually serves,
    * derived from the advertised routes (#6714 face 3).
    *
@@ -3340,12 +3508,34 @@ export class ObjectStackClient {
 
     /**
      * Invite a user to the organization.
+     *
+     * `role` is declared optional and STAYS optional — omitting it sends
+     * `'member'`. better-auth 1.7.2's body schema for
+     * `POST /organization/invite-member` makes `role` REQUIRED, so the shorter
+     * call the declaration advertises was refused before it reached any
+     * ObjectStack code. Measured against a real `AuthManager` (better-auth
+     * 1.7.2, organization plugin, `teams: { enabled: true }`) over a real
+     * `SqlDriver` (better-sqlite3):
+     *
+     * ```
+     * invite({ email, organizationId })                  -> 400 [body.role] Invalid input  (VALIDATION_ERROR)
+     * invite({ email, role: 'member', organizationId })   -> 200 status: 'pending'
+     * ```
+     *
+     * The default is `'member'` because {@link ObjectStackClient.organizations}
+     * `.invitations.resend` already substitutes exactly that over the same
+     * vendor endpoint: one family, one behaviour. It is also the least
+     * privileged name in the closed membership vocabulary (ADR-0108 D1 —
+     * `orgRoleGrade` floors at `member` and raises only for `owner`/`admin`),
+     * so the implicit choice cannot confer more reach than the caller asked
+     * for. Declaring `role` required instead would narrow a published request
+     * type to restate the vendor's requirement, and buy nothing.
      */
     invite: async (req: { email: string; role?: string; organizationId?: string }): Promise<OrganizationInvitationWire<'pending'>> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/invite-member`, {
         method: 'POST',
-        body: JSON.stringify(req),
+        body: JSON.stringify({ ...req, role: req.role ?? 'member' }),
       });
       return res.json();
     },
@@ -3427,25 +3617,93 @@ export class ObjectStackClient {
     },
 
     /**
-     * Look up the calling user's membership row in the ACTIVE organisation.
+     * Look up the calling user's membership row in the GIVEN organisation.
      * Useful for permission checks on the client without having to scan the
      * full member list.
      *
-     * better-auth: GET /organization/get-active-member?organizationId=…
+     * Two requests, because no single better-auth route answers this question:
      *
-     * ⚠️ The server reads only the session's `activeOrganizationId` and
-     * ignores the `organizationId` query this method sends (measured: a query
-     * naming another organization answered the active one's row). Call
-     * `setActive` first if the organisation you mean is not the active one;
-     * with no active organisation the route is a thrown 400
-     * `NO_ACTIVE_ORGANIZATION`.
+     *   1. `GET /get-session` — who is calling. The body is the bare
+     *      `{ user, session }` envelope for a signed-in caller and the literal
+     *      `null` for an anonymous one (measured).
+     *   2. `GET /organization/list-members?organizationId=…&filterField=userId`
+     *      `&filterValue=<the caller>&limit=1` — the row, unwrapped from the
+     *      one-entry page.
+     *
+     * ⚠️ It is deliberately NOT `GET /organization/get-active-member`, which
+     * this method used to call. That handler reads only the session's
+     * `activeOrganizationId` and never looks at `ctx.query`, so it answered the
+     * ACTIVE organisation's row whatever id the caller named — the
+     * wrong-but-plausible answer, silently. `list-members` reads
+     * `ctx.query.organizationId` and its rows carry the identical shape
+     * ({@link OrganizationMemberWithUserWire}), so only the addressing moved.
+     * Measured against better-auth 1.7.2 over a real `AuthManager` + `SqlDriver`.
+     *
+     * What an existing caller sees change, all of it measured on the same drive:
+     *
+     *   - naming a NON-active organisation now answers THAT organisation's row
+     *     instead of the active one's — the defect this method carried;
+     *   - a caller who is not a member of `organizationId` is refused
+     *     `403 YOU_ARE_NOT_A_MEMBER_OF_THIS_ORGANIZATION`. Before, the named
+     *     organisation was never consulted, so the answer was about the
+     *     ACTIVE one: a 200 carrying the active organisation's row, or
+     *     `400 MEMBER_NOT_FOUND` when the caller had no row there either;
+     *   - a caller with no active organisation gets their row rather than
+     *     `400 NO_ACTIVE_ORGANIZATION` — `setActive` is no longer a
+     *     precondition, which is the point of naming the organisation;
+     *   - an anonymous caller still gets `401 UNAUTHORIZED`, thrown from the
+     *     `list-members` request by the same session middleware that guarded
+     *     `get-active-member`;
+     *   - a FALSY `organizationId` is refused here, before the wire. It used to
+     *     answer the ACTIVE organisation's row at 200: better-auth resolves
+     *     `ctx.query.organizationId || session.activeOrganizationId`, so an
+     *     empty string fell through to session state — the same
+     *     wrong-but-plausible answer this method was fixed to stop giving,
+     *     surviving on one input while the contract above says "the GIVEN
+     *     organisation". Naming the active organisation explicitly asks that
+     *     question honestly; `auth.me()` carries the id, on
+     *     `session.activeOrganizationId`.
+     *
+     * @param organizationId the organisation to ask about. Required and
+     *   non-empty; there is no "whichever one is active" spelling, deliberately.
+     * @throws if `organizationId` is falsy, or if the server answers 200 with no
+     *   membership row for the caller.
      */
     getActiveMember: async (organizationId: string): Promise<OrganizationMemberWithUserWire> => {
+      // A falsy id is not "the active organisation", it is a caller bug: the
+      // route would silently substitute session state for the question asked.
+      // Loud beats a plausible answer about the wrong organisation (#16568).
+      if (!organizationId) {
+        throw new Error('[ObjectStack] organizations.getActiveMember: organizationId is required');
+      }
       const route = this.getRoute('auth');
+      // Step 1 — the caller's own user id. Typed to the shape the route really
+      // serves rather than to `SessionResponse`, which declares the REST
+      // `{ success, data }` envelope this better-auth route does not use.
+      const sessionRes = await this.fetch(`${this.baseUrl}${route}/get-session`, {
+        headers: { Origin: this.baseUrl },
+      });
+      const session = (await sessionRes.json()) as { user?: { id?: string } } | null;
+      // Anonymous → `null`, and the request below is then refused 401 by the
+      // session middleware before the filter is ever read. The refusal stays
+      // the SERVER's; nothing is invented here to stand in for it.
+      const userId = session?.user?.id ?? '';
       const res = await this.fetch(
-        `${this.baseUrl}${route}/organization/get-active-member?organizationId=${encodeURIComponent(organizationId)}`,
+        `${this.baseUrl}${route}/organization/list-members`
+          + `?organizationId=${encodeURIComponent(organizationId)}`
+          + `&filterField=userId&filterValue=${encodeURIComponent(userId)}&limit=1`,
       );
-      return res.json();
+      const page = (await res.json()) as OrganizationMembersPage;
+      const [member] = page.members;
+      if (!member) {
+        // Unreachable through the route's own gate — `list-members` refuses a
+        // non-member 403 before it filters, so a 200 with no row means the
+        // membership vanished between the two requests. Loud beats a cast.
+        throw new Error(
+          `[ObjectStack] organizations.getActiveMember: no membership row for the calling user in organization "${organizationId}"`,
+        );
+      }
+      return member;
     },
 
     /**
@@ -3665,10 +3923,47 @@ export class ObjectStackClient {
        *
        * Returns the freshly-issued `client_id` and `client_secret`.
        * The secret is only returned at creation time — store it securely.
+       *
+       * ## Why `name`, `scopes` and `metadata` are NOT declared here (#15447)
+       *
+       * They used to be, and the route silently dropped all three. Its body
+       * schema is `@better-auth/oauth-provider@1.7.2`'s, a zod object with no
+       * `catchall` — so zod's default `strip` — and none of the three is among
+       * its 21 members. A caller who set one got **HTTP 201 and a client that
+       * quietly did not have it**: no error, no receipt, nothing to notice.
+       * Driven end to end (real `betterAuth` + real `oauthProvider` over the
+       * real ObjectQL engine on a real socket, through this very client): each
+       * member came back absent from the response, absent from
+       * `applications.get`, absent from `applications.list`, and `null` in the
+       * `sys_oauth_application` row.
+       *
+       * A second, independent barrier stands behind the strip, so widening the
+       * SDK alone could never have made them arrive: the handler funnels the
+       * rest of the parsed body into the opaque-metadata envelope, and all
+       * three names are in `OPAQUE_METADATA_RESERVED_FIELDS`.
+       *
+       * ## ⚠️ They were the vendor's RECORD vocabulary, not typos
+       *
+       * The two near-misses look like misspellings of `client_name` and
+       * `scope` and are not — they are the names of the DB columns those two
+       * wire members write. Measured: `client_name: 'CTRL-…'` lands in the
+       * column literally named **`name`**, and `scope: 'openid profile email'`
+       * lands in the column literally named **`scopes`**, as a JSON array. So
+       * this type used to offer the record spelling and the wire spelling side
+       * by side, and only the wire one worked. The right prescription is the
+       * wire member, and for `scopes` it is not a rename: `scope` is a single
+       * space-delimited `string`, and posting an array is refused —
+       * `400 [body.scope] Invalid input: expected string, received array`.
+       *
+       * `metadata` has no reachable door at all: only the SERVER_ONLY
+       * `PATCH /admin/oauth2/update-client` honours it, and `better-call`'s
+       * router skips SERVER_ONLY endpoints, so over HTTP it answers 404 with a
+       * zero-byte body.
+       *
+       * Pinned by `oauth-applications-register-request-members.test.ts`.
        */
       register: async (req: {
         client_name?: string;
-        name?: string;
         redirect_uris: string[];
         token_endpoint_auth_method?: 'none' | 'client_secret_basic' | 'client_secret_post';
         grant_types?: string[];
@@ -3676,11 +3971,9 @@ export class ObjectStackClient {
         client_uri?: string;
         logo_uri?: string;
         scope?: string;
-        scopes?: string[];
         contacts?: string[];
         tos_uri?: string;
         policy_uri?: string;
-        metadata?: Record<string, unknown>;
       }): Promise<OAuthApplicationRegistration> => {
         const route = this.getRoute('auth');
         // The new oauth-provider package exposes `/oauth2/create-client`
@@ -3918,13 +4211,24 @@ export class ObjectStackClient {
     /**
      * Get current user session
      * Uses better-auth endpoint: GET /get-session
+     *
+     * The route answers bare (`{ user, session }`), so the answer is lifted
+     * into the declared `SessionResponse` envelope by
+     * {@link normalizeSessionResponse} — the same lift `login` has always
+     * carried. Read the payload off `data.user` / `data.session`; the raw
+     * `.user` / `.session` keys are kept alongside for callers written against
+     * the wire while the declared shape was unreachable.
+     *
+     * ⚠️ Anonymous is the one answer still outside the declared type: the route
+     * serves the literal `null` at 200 and it is returned as-is, because there
+     * is no `SessionResponse` value that means "nobody is signed in".
      */
     me: async (): Promise<SessionResponse> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/get-session`, {
             headers: { Origin: this.baseUrl },
         });
-        return res.json();
+        return normalizeSessionResponse(await res.json());
     },
 
     /**
@@ -3993,6 +4297,30 @@ export class ObjectStackClient {
      * Refresh an authentication token
      * Note: better-auth handles token refresh automatically via /get-session
      * @param _refreshToken - Not used (better-auth handles refresh automatically)
+     *
+     * ## Where the credential really is (#16760)
+     *
+     * This used to assign from `data.data?.token` — a read that could never
+     * resolve, on a route that has no top-level `token` at all. Measured
+     * signed-in against a real `AuthManager` (better-auth 1.7.2) over a real
+     * driver, the body's top level is exactly `user` and `session`, and the
+     * only credential in it is `session.token`:
+     *
+     * ```
+     * -> 200 {"user":{…},"session":{…,"token":"<unsigned>","expiresAt":"…"}}
+     * ```
+     *
+     * So the old read was not a consequence of the envelope being misdeclared
+     * — enveloping the body does not put a token at `data.token` either. It
+     * named a field this route does not produce, and the method returned
+     * successfully having captured nothing, which is the worst way for a
+     * credential call to fail.
+     *
+     * ⚠️ `session.token` is the UNSIGNED spelling, while `bearer()` hands
+     * clients the signed `token.signature` form. Both authenticate — the
+     * server strips the signature on the bearer branch before it looks the
+     * session up (`resolveActor`) — so storing this one keeps the caller
+     * signed in.
      */
     refreshToken: async (_refreshToken: string): Promise<SessionResponse> => {
       const route = this.getRoute('auth');
@@ -4001,9 +4329,10 @@ export class ObjectStackClient {
       const res = await this.fetch(`${this.baseUrl}${route}/get-session`, {
         method: 'GET'
       });
-      const data = await res.json();
-      if (data.data?.token) {
-        this.token = data.data.token;
+      const data = normalizeSessionResponse(await res.json());
+      const token = data?.data?.session?.token;
+      if (token) {
+        this.token = token;
       }
       return data;
     },
@@ -4049,8 +4378,10 @@ export class ObjectStackClient {
      * better-auth: POST /change-password.
      * Set `revokeOtherSessions: true` to invalidate every other session
      * after the change — the server then ROTATES the caller's session too and
-     * answers the new token in `token`; this SDK does not store it, so a
-     * bearer-mode caller must.
+     * answers the new token in `token`, and this SDK ADOPTS it (#16534), so a
+     * bearer-mode caller stays signed in across the change. Without
+     * `revokeOtherSessions` nothing rotates, the field is `null`, and the
+     * stored credential is left exactly as it was.
      */
     changePassword: async (req: {
       currentPassword: string;
@@ -4062,7 +4393,9 @@ export class ObjectStackClient {
         method: 'POST',
         body: JSON.stringify(req),
       });
-      return res.json();
+      const result = (await res.json()) as AuthPasswordChangeResult;
+      this.adoptRotatedSessionToken(result?.token);
+      return result;
     },
 
     /**
@@ -4258,8 +4591,11 @@ export class ObjectStackClient {
        * this browser for the configured trust period.
        *
        * On the enrolment lane the server rotates the session and answers the
-       * LIVE token in `token`; this SDK does not store it — a bearer-mode
-       * caller must, or its next call answers 401.
+       * LIVE token in `token`; this SDK ADOPTS it (#16534), so a bearer-mode
+       * caller stays signed in through enrolment instead of meeting a 401 on
+       * its next call. On the sign-in-challenge lane the same field carries
+       * the session the challenge just completed, and adopting it is how the
+       * SDK finishes signing in.
        */
       verifyTotp: async (req: { code: string; trustDevice?: boolean }): Promise<AuthTwoFactorVerificationResult> => {
         const route = this.getRoute('auth');
@@ -4267,16 +4603,21 @@ export class ObjectStackClient {
           method: 'POST',
           body: JSON.stringify(req),
         });
-        return res.json();
+        const result = (await res.json()) as AuthTwoFactorVerificationResult;
+        this.adoptRotatedSessionToken(result?.token);
+        return result;
       },
 
       /**
        * Disable 2FA for the current user. Requires the password again.
        *
        * ⚠️ The server ROTATES the caller's session on success and echoes only
-       * the receipt (the new token rides the `Set-Cookie` and the bearer
-       * plugin's `set-auth-token` header, neither of which this SDK reads), so
-       * a bearer-mode caller's stored token is dead after this call.
+       * the receipt — the new token rides the `Set-Cookie` and the bearer
+       * plugin's `set-auth-token` header. This SDK READS that header (#16534)
+       * and adopts the rotated session, which is the only route in the family
+       * where the credential is not in the body at all. A cookie-only
+       * deployment sends no such header; there is then nothing to adopt and
+       * the stored credential is left as it was.
        */
       disable: async (req: { password: string }): Promise<AuthStatusReceipt> => {
         const route = this.getRoute('auth');
@@ -4284,6 +4625,7 @@ export class ObjectStackClient {
           method: 'POST',
           body: JSON.stringify(req),
         });
+        this.adoptRotatedSessionToken(res.headers.get(SET_AUTH_TOKEN_HEADER));
         return res.json();
       },
 
@@ -6518,6 +6860,41 @@ export class ObjectStackClient {
     return body as T;
   }
 
+  /**
+   * Adopt a session token the server rotated this client onto mid-request.
+   *
+   * Three better-auth routes ROTATE the caller's session on success: they mint
+   * a new session, install it in `Set-Cookie` (and, through `bearer()`, in the
+   * `set-auth-token` response header), and DELETE the row the caller was
+   * presenting — `changePassword({ revokeOtherSessions: true })`, the enrolment
+   * lane of `twoFactor.verifyTotp`, and `twoFactor.disable`. A browser carries
+   * the cookie across on its own; a bearer caller — this SDK's own mode — kept
+   * presenting the DELETED session's token, so its very next call answered
+   * `401 UNAUTHORIZED` (#16534).
+   *
+   * ⚠️ Called from those three routes ONLY, never from the shared `fetch`
+   * wrapper, and the narrowness is the design rather than an implementation
+   * detail. `set-auth-token` rides EVERY response that stages a session cookie,
+   * rotation or not — `POST /update-user` stages one to carry the updated user
+   * — and it carries the SIGNED `<token>.<sig>` spelling while every JSON
+   * `token` echo carries the UNSIGNED one. A wrapper-level read would therefore
+   * rewrite `this.token` into a different spelling of the SAME session on
+   * ordinary traffic: a stored credential that churns on writes that rotated
+   * nothing. Storing only where the server actually rotated keeps the stored
+   * value equal to the credential the caller was last granted.
+   *
+   * For the same reason `verifyBackupCode` does not call this: its lane never
+   * rotates, so its `token` echo is the session the caller already holds.
+   *
+   * `login()` / `register()` / `refreshToken()` keep their own assignments:
+   * those read a normalized `{ data: { token } }` envelope this SDK builds, and
+   * they establish a session rather than follow a rotation.
+   */
+  private adoptRotatedSessionToken(token: string | null | undefined): void {
+    if (typeof token !== 'string' || token.length === 0) return;
+    this.token = token;
+  }
+
   private async fetch(url: string, options: RequestInit = {}): Promise<Response> {
     this.logger.debug('HTTP request', { 
       method: options.method || 'GET',
@@ -6803,18 +7180,44 @@ export class ScopedEnvironmentClient {
   }
 
   /**
+   * URL for a route mounted under the deployment's metadata prefix (#16675).
+   *
+   * The exact sibling of {@link ScopedEnvironmentClient.dataUrl}, for the
+   * other half of the same defect. Every route reached through here is
+   * mounted by REST as `${metaPath}/...` with
+   * `metaPath = ${basePath}${metadata.prefix}`, so the prefix is deployment
+   * state, not a constant. The unscoped twin of each of these methods already
+   * reads it — it builds `${baseUrl}${getRoute('metadata')}` and
+   * `routes.metadata` IS `{realBase}{metadata.prefix}`. This surface restated
+   * `/meta` as a literal instead, so on a deployment that moved
+   * `metadata.prefix` the scoped half of one SDK called paths the server does
+   * not mount while the unscoped half of the same SDK called the right ones.
+   *
+   * The scoped form cannot consume `routes.metadata` verbatim the way the
+   * unscoped form does: the environment segment goes BETWEEN the API base and
+   * the prefix (`{base}/environments/{id}{metadata.prefix}`), and the id is
+   * this client's, which need not be the one discovery resolved. So the two
+   * halves are taken separately — `_apiBase()` for the base, `_metaPrefix()`
+   * for the prefix — and both decline to today's conventions when the
+   * advertised document does not determine them.
+   */
+  private metaUrl(suffix: string): string {
+    return `${this.parent._baseUrl()}${this.scope()}${this.parent._metaPrefix()}${suffix}`;
+  }
+
+  /**
    * Metadata operations scoped to this project.
    */
   meta = {
     getTypes: async (): Promise<GetMetaTypesResponse> => {
-      const res = await this.parent._fetch(this.url('/meta'));
+      const res = await this.parent._fetch(this.metaUrl(''));
       return this.parent._unwrap<GetMetaTypesResponse>(res);
     },
     getItems: async (type: string, options?: { packageId?: string }): Promise<GetMetaItemsResponse> => {
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
       const qs = params.toString();
-      const res = await this.parent._fetch(this.url(`/meta/${type}${qs ? `?${qs}` : ''}`));
+      const res = await this.parent._fetch(this.metaUrl(`/${type}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemsResponse>(res);
     },
     /** Same `{ type, name, item }` envelope as the unscoped surface (#5563). */
@@ -6822,7 +7225,7 @@ export class ScopedEnvironmentClient {
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
       const qs = params.toString();
-      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`));
+      const res = await this.parent._fetch(this.metaUrl(`/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemResponse>(res);
     },
     /**
@@ -6849,7 +7252,7 @@ export class ScopedEnvironmentClient {
       // Header half of the same bag, through the same one builder the twin
       // calls — see {@link metaSaveHeaders}.
       const headers = metaSaveHeaders(options);
-      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
+      const res = await this.parent._fetch(this.metaUrl(`/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
         method: 'PUT',
         body: JSON.stringify(item),
         ...(headers ? { headers } : {}),
@@ -6884,7 +7287,7 @@ export class ScopedEnvironmentClient {
       // Header half of the same bag, through the same one builder the twin
       // calls — see {@link metaDeleteHeaders}.
       const headers = metaDeleteHeaders(options);
-      const res = await this.parent._fetch(this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
+      const res = await this.parent._fetch(this.metaUrl(`/${encodeURIComponent(type)}/${encodeURIComponent(name)}${query}`), {
         method: 'DELETE',
         ...(headers ? { headers } : {}),
       });
@@ -6916,7 +7319,7 @@ export class ScopedEnvironmentClient {
       if (options?.limit !== undefined) params.set('limit', String(options.limit));
       const qs = params.toString();
       const res = await this.parent._fetch(
-        this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history${qs ? `?${qs}` : ''}`),
+        this.metaUrl(`/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history${qs ? `?${qs}` : ''}`),
       );
       return this.parent._unwrap<HistoryMetaItemResponse>(res);
     },
