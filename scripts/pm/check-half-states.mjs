@@ -120,6 +120,17 @@
  *       as absent left #10063 permanently blocked in silence (#10102). H9's
  *       `Restart-when:` shares that anchor AND, since #10403, this two-channel
  *       read; the history of the closed asymmetry is stated at H9.
+ *       ⭐ Since #17365 the row also says what the missing line WOULD have
+ *       said: a card that states its block in PROSE («blocked on», «HELD by»,
+ *       «解锁条件») has its candidate upstreams read out of that prose and
+ *       their CURRENT STATE printed, so the row reads 「缺行,且上游已关」
+ *       instead of only 「缺行」. That upgrade is what the class costs — three
+ *       cards were measured stalled past a satisfied unlock, one `priority:p1`
+ *       + `security` for four days — and it is the ONLY reading that can reach
+ *       them, because H19 needs a `Blocked-by:` line to exist before it can
+ *       resolve anything. Still report-only, still a CANDIDATE and never a
+ *       verdict; the anchor list and the request bound are stated at
+ *       `PROSE_BLOCKER_ANCHORS`.
  *   H5  `pm:seat` sticker whose title/assignee pair is out of sync — the
  *       seat-sticker protocol makes 标题、assignee、正文 a same-write triple:
  *       a title claiming 🟢 <login> must have that login as assignee; a title
@@ -1386,6 +1397,255 @@ export function commentBlockedByTargets(commentBodies) {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// PROSE BLOCKER CANDIDATES — H4's second half: what the missing line WOULD
+// have said, and whether it has already come true.
+//
+// ## The leak
+//
+// The state model defines `pm:blocked` as a PAIR — the label plus the body
+// line `Blocked-by: #N` — and the unlock scan fires from that line and from
+// nothing else. A seat that states the block in PROSE has written something a
+// human reads perfectly and no machine reads at all, so when the upstream
+// closes there is nothing anywhere that returns the card.
+//
+// H4 already catches the missing line. What it could NOT say is the half that
+// costs: that the condition the prose states has ALREADY BEEN MET. Three cards
+// were measured in exactly that shape on 2026-09-10, each past a satisfied
+// unlock, one of them `priority:p1` + `security` and stalled four days after
+// its own ruling had landed:
+//
+//   #15942  "State: `needs-user-decision` -> `pm:blocked` (blocker: #16293)
+//            ... Unblocks to `pm:queue` when #16293 merges"     #16293 CLOSED
+//   #16674  "解锁条件:PR #16628 合并(或其分支释放)"                #16628 CLOSED
+//   #16545  "解除条件(唯一):PR #16380 合并或关闭"                  #16380 CLOSED
+//
+// ⛔ H19 cannot reach this class and never could: it resolves the target of a
+// `Blocked-by:` line, and the whole defect is that there IS no such line. So
+// the reading has to be bought on H4's side, where the population already is.
+// The lesson the filing card drew is why this is a row and not a discipline
+// note: one of the three specimens had a seat that learned the lesson
+// correctly, added the `pm:blocked` label for exactly the right reason — and
+// still wrote no `Blocked-by:` line. Prose is the natural way to say this;
+// the machine-readable line has to be deliberately remembered.
+//
+// ## The anchors are MEASURED, never imagined
+//
+// `PROSE_BLOCKER_ANCHORS` holds spellings seats actually wrote: the three
+// specimens above, plus every H4-firing card on the 2026-09-10 board (18 rows
+// — "blocked on #16335", "`pm:blocked` behind **#16049**", "HELD by open PR
+// #17438", "held by **eight** open PRs", "Unblock condition (the only one)",
+// "机械解除条件"). ⛔ Never extend this list from imagination: an anchor nobody
+// writes buys a false candidate AND a request, and the clause is worth reading
+// only while every candidate it names is worth reading. Extend it when a new
+// spelling is MEASURED, and record where it was measured.
+//
+// ## A candidate is not a verdict
+//
+// An anchored sentence naming `#N` is a CANDIDATE. The clause names candidates
+// and their state and stops: it never says the card is unblocked, it writes no
+// label, and the remedy stays the one H4 always had — write the line. Same
+// posture H14 holds for `pm:blocking` and H19 for a released block, and the
+// exit code is untouched: a completed sweep still exits 0 whether it found 0
+// or 40 half-states.
+//
+// ## The cost, bounded the way H19's is
+//
+// Only a card ALREADY FIRING H4 is scanned (18 of 496 listed cards at the
+// 2026-09-10 reading), at most `H4_PROSE_CANDIDATE_CAP` distinct candidates
+// per card are resolved, and the resolutions ride H19's own per-target cache —
+// so a candidate some other card already named is free, and an OPEN LOCAL
+// candidate is answered from the exhaustive open listing this sweep already
+// holds for no request at all. What is left to pay for is the population the
+// clause is ABOUT: closed upstreams and cross-repo refs.
+// ---------------------------------------------------------------------------
+
+/**
+ * The prose spellings that introduce a block — matched case-insensitively
+ * against a line whose markdown decoration has been removed, so 「`pm:blocked`
+ * on #15162」 and 「`pm:blocked` behind **#16049**」 read like the bare forms.
+ * That is the same judgement #10102 made for the directive itself: authors
+ * format these lines, and a decorated one means what the bare one means.
+ *
+ * Two shapes are deliberately ABSENT. `Blocked-by` is the DIRECTIVE, and H4
+ * fires only when it is missing from both channels, so it can never be a prose
+ * candidate. Bare `blocking` is the LABEL `pm:blocking` being discussed far
+ * more often than a block being stated — five such lines on #16184 alone at
+ * the measured reading — and admitting it would fill the clause with refs to
+ * cards nobody is waiting on.
+ */
+export const PROSE_BLOCKER_ANCHORS = Object.freeze([
+  'blocked on',
+  'blocked by',
+  'blocked behind',
+  'blocker',
+  'held by',
+  'unblock',
+  '解锁条件',
+  '解除条件',
+]);
+
+/**
+ * How many distinct prose candidates one card resolves.
+ *
+ * A per-card constant rather than a sweep budget, for `H19_TARGET_LIST_CAP`'s
+ * reason: every blocked card measured on this board states one or two
+ * upstreams, so five covers the real population while bounding the
+ * pathological case — a card that names eight held PRs in one sentence
+ * (#15927, measured) resolves five of them and the clause says how many it
+ * held back. It bounds REQUESTS, not just rendering: the resolution is what
+ * costs, so the cap is applied before the fetch, never after it.
+ */
+export const H4_PROSE_CANDIDATE_CAP = 5;
+
+/** Markdown decoration removed, so an anchor and a ref read as the author meant. */
+function undecorateProseLine(line) {
+  return String(line ?? '').replace(/[`*]/g, '');
+}
+
+/**
+ * A `#N`, `PR #N`, `repo#N` or `owner/repo#N` ref anywhere in an anchored line.
+ *
+ * Line-scoped rather than sentence-scoped, and deliberately: real lines carry
+ * their refs in a list after the anchor (「held by eight open PRs — #15889,
+ * #15888, …」), which any sentence splitter would cut in half. Line anchoring
+ * is also what every other directive reader in this file uses.
+ */
+const PROSE_REF_SCAN = /([A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?)?#(\d+)/gu;
+
+/**
+ * Every blocker ref carried by an ANCHORED line of this text, in order.
+ *
+ * Exported for the self-test: the anchor set and the ref shapes are the whole
+ * design, and a spelling that silently stopped matching would cost the clause
+ * without costing a row.
+ *
+ * @param {string} text
+ * @returns {{ repo: string|null, number: number }[]}
+ */
+export function proseBlockerRefs(text) {
+  const out = [];
+  for (const raw of String(text ?? '').split(/\r?\n/)) {
+    const line = undecorateProseLine(raw);
+    const lower = line.toLowerCase();
+    if (!PROSE_BLOCKER_ANCHORS.some((anchor) => lower.includes(anchor))) continue;
+    for (const m of line.matchAll(PROSE_REF_SCAN)) {
+      const hashAt = m.index + (m[1] ? m[1].length : 0);
+      // An HTML numeric entity is not a card number. GitHub bodies carry them
+      // (a zero-width space is spelled ampersand-hash-8203), and reading the
+      // digits as a ref would buy a request against an unrelated card.
+      if (line[hashAt - 1] === '&') continue;
+      const word = m[1] ?? null;
+      // `PR#17438` names this repo's PR, not a repo called `PR`. The spaced
+      // form never reaches here — the group cannot span the space.
+      const repo = word && !/^pr$/iu.test(word) ? word : null;
+      out.push({ repo, number: Number(m[2]) });
+    }
+  }
+  return out;
+}
+
+/**
+ * Every DISTINCT prose blocker candidate one card names, both channels, in the
+ * order written — the input the sweep resolves. Uncapped and pure; the CAP is
+ * applied by the caller, which is where the request is spent.
+ *
+ * Channels are unioned exactly as `blockerTargetsFor` unions them, and
+ * self-references are dropped for the same reason: a card cannot be its own
+ * blocker, and resolving one always answers `open`.
+ *
+ * @param {object} issue
+ * @param {string[]|null|undefined} commentBodies
+ * @param {string} [ownerRepo]
+ * @returns {{ key: string, repo: string, number: number, local: boolean }[]}
+ */
+export function proseBlockerCandidatesFor(issue, commentBodies, ownerRepo = OWNER_REPO) {
+  const texts = [issue?.body ?? '', ...(Array.isArray(commentBodies) ? commentBodies : [])];
+  const out = [];
+  const seenKeys = new Set();
+  for (const text of texts) {
+    for (const ref of proseBlockerRefs(text)) {
+      const target = blockerTargetKey(ref, ownerRepo);
+      if (!Number.isFinite(target.number)) continue;
+      if (target.local && target.number === issue?.number) continue;
+      if (seenKeys.has(target.key)) continue;
+      seenKeys.add(target.key);
+      out.push(target);
+    }
+  }
+  return out;
+}
+
+/** `#N` (or `owner/repo#N`) and its state, one per resolved candidate. */
+function namedProseCandidates(rows) {
+  return rows
+    .map((r) => {
+      const ref = `\`${r.local ? `#${r.number}` : r.key}\``;
+      if (r.state === 'closed') return `${ref} CLOSED${r.closedAt ? ` (${r.closedAt})` : ''}`;
+      if (r.state === 'unresolved') return `${ref} UNRESOLVED${r.detail ? ` (${r.detail})` : ''}`;
+      return `${ref} open`;
+    })
+    .join(', ');
+}
+
+/**
+ * The sentence H4 appends when the card states its block in prose.
+ *
+ * `undefined` (the scan was not run — every caller that does not ask for it,
+ * including every pre-#17365 one) yields the empty string, so the row is
+ * byte-identical to what it always was. An empty array is a real reading:
+ * scanned, nothing anchored, and the row again says nothing about prose. Only
+ * a non-empty array produces a clause.
+ *
+ * @param {{ key: string, repo: string, number: number, local: boolean,
+ *   state: 'open'|'closed'|'unresolved', closedAt?: string|null,
+ *   detail?: string|null }[]|null|undefined} candidates — RESOLVED candidates.
+ * @param {number} [heldBack] — distinct candidates left unresolved by the cap.
+ */
+export function proseBlockerClause(candidates, heldBack = 0) {
+  const rows = Array.isArray(candidates) ? candidates : [];
+  if (rows.length === 0) return '';
+  const closed = rows.filter((r) => r.state === 'closed');
+  const unresolved = rows.filter((r) => r.state === 'unresolved');
+  const more =
+    heldBack > 0
+      ? ` (+${heldBack} more candidate(s) named but NOT resolved — the per-card cap is ` +
+        `${H4_PROSE_CANDIDATE_CAP}, so this list is a lower bound)`
+      : '';
+  const head =
+    ` This card DOES state its block — in PROSE, where no machine reads it. Candidate ` +
+    `upstream(s) read off its anchored prose: ${namedProseCandidates(rows)}${more}.`;
+  let verdict;
+  if (closed.length === rows.length) {
+    verdict =
+      ' Every one of them is ALREADY CLOSED — the condition this card states in words is ' +
+      'already satisfied, nothing is coming to release it, and the card is due back in ' +
+      '`pm:queue`.';
+  } else if (closed.length > 0) {
+    verdict =
+      ` ${closed.length} of ${rows.length} ${closed.length === 1 ? 'is' : 'are'} ALREADY ` +
+      'CLOSED — the block is at least partly expired, and nothing machine-readable is ' +
+      'tracking any of it.';
+  } else if (unresolved.length === rows.length) {
+    verdict =
+      ' None of them could be resolved from this install — a cross-repo target is unjudgeable ' +
+      'per install (each token reads its own repo), so this clause says NOTHING about whether ' +
+      'the block still stands, and ⛔ no re-run resolves them.';
+  } else {
+    verdict =
+      ' They all still read OPEN, so the block itself looks live — what is missing is only the ' +
+      'line that would let a machine see it when they close.';
+  }
+  return (
+    head +
+    verdict +
+    ' ⚠️ A prose sentence is NOT a directive: these are CANDIDATES read off anchored prose ' +
+    '(「blocked on」, 「HELD by」, 「blocker」, 「解锁条件」, 「解除条件」, 「unblock…」), never a ' +
+    'verdict, and ⛔ no label is written from here. Read the card before acting, and fix it by ' +
+    'writing the `Blocked-by: #N` line whatever the states above say.'
+  );
+}
+
 /**
  * H4 — null when clean, else the finding sentence.
  *
@@ -1422,21 +1682,22 @@ export function commentBlockedByTargets(commentBodies) {
  * end. An unreadable reading must surface on the cheap side and must never
  * drive the expensive one.
  */
-export function h4BlockedNoBlockedBy(issue, commentBodies) {
+export function h4BlockedNoBlockedBy(issue, commentBodies, proseCandidates, proseHeldBack = 0) {
   if (!labelNames(issue).includes('pm:blocked')) return null;
   if (hasBlockedByLine(issue.body)) return null;
+  const prose = proseBlockerClause(proseCandidates, proseHeldBack);
   const remedy =
     ' The unlock sweep greps this literal line, so without it in SOME channel nothing can ' +
     'ever return this card to the queue — the block outlives its blocker in silence.';
   if (commentBodies === undefined) {
-    return '`pm:blocked` without a `Blocked-by:` body line.' + remedy;
+    return '`pm:blocked` without a `Blocked-by:` body line.' + remedy + prose;
   }
   if (commentBodies === null) {
     return (
       '`pm:blocked` without a `Blocked-by:` body line, and this card\'s comment thread could ' +
       'NOT be read this sweep — so the second channel (a `Blocked-by:` line parked in a comment, ' +
       'which is how most blocked cards on this board state it) is unjudged, not empty. Read the ' +
-      'thread by hand before acting: an unreadable channel is not an absent one (#4690).' + remedy
+      'thread by hand before acting: an unreadable channel is not an absent one (#4690).' + remedy + prose
     );
   }
   if (commentBodies.some((body) => hasBlockedByLine(body))) return null;
@@ -1445,7 +1706,7 @@ export function h4BlockedNoBlockedBy(issue, commentBodies) {
     'comment on the thread (both were read). Either channel discharges the duty: seats park the ' +
     'line in a comment on purpose, because rewriting a body through the MCP escaping hazard ' +
     '(#8813) is the riskier write. So this is not a formatting nit — no machine reader anywhere ' +
-    'knows what this card is waiting for.' + remedy
+    'knows what this card is waiting for.' + remedy + prose
   );
 }
 
@@ -15335,14 +15596,23 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (twoStates) findings.push([issue, 'H29', twoStates]);
     const rotting = h30QueueRotting(issue);
     if (rotting) findings.push([issue, 'H30', rotting]);
-    // H4 — judged across BOTH channels. The fetch is gated by
+    // H4's GATHERING — judged across BOTH channels. The fetch is gated by
     // `needsBlockedByComments`, so it costs a request only for the body-clean
     // cards whose verdict it can actually change (~2/3 of the blocked
     // population by the 2026-08-19 census); a card whose body already carries
     // the line is answered without touching the network, exactly as before.
+    //
+    // ⚠️ The gathering stays HERE while the row itself is emitted in the
+    // blocker-liveness loop below (#17365). The two halves separated because
+    // H4's prose clause needs `resolveBlockerTarget`, which does not exist
+    // until the open listings are complete — and the gather cannot follow it
+    // down, because the total-shortfall rethrow reads these stats and every
+    // fetch this sweep makes must be counted before that check runs. The
+    // populations are identical (`pm:blocked`, off the same `seen` map) and
+    // H4's answer cannot move between the two points: it returns `null` for
+    // any card whose BODY carries the line, so the only cards it can fire on
+    // are exactly the ones this gate has already fetched comments for.
     if (needsBlockedByComments(issue)) await gatherBlockedByComments(issue);
-    const unblockedByNothing = h4BlockedNoBlockedBy(issue, fallbackFor(issue));
-    if (unblockedByNothing) findings.push([issue, 'H4', unblockedByNothing]);
     // …and the LIVENESS read's own gathering, UNGATED (#11747). H19/H26/H28 ask
     // whether what the line names is still RUNNING, and for that a body line is
     // one channel's targets rather than an answer — so a card whose body line is
@@ -16301,6 +16571,33 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     for (const target of blockerTargetsFor(issue, fallbackFor(issue))) {
       resolutions.push(await resolveBlockerTarget(target));
     }
+    // H4 — the missing-line row, emitted here rather than in the main loop so
+    // its prose clause can ride THIS resolver and THIS cache (#17365). The
+    // populations coincide exactly: `needsBlockerLiveness` is `pm:blocked` and
+    // so is H4's own first line, over the same `seen` map, with the comment
+    // thread already gathered above.
+    //
+    // The two-call shape is the cost gate, not a redundancy: the first call is
+    // the row's own predicate answering "does H4 fire at all", and ONLY a card
+    // it fires on pays for a prose scan or a single resolution. A card with a
+    // `Blocked-by:` line in either channel — the healthy majority — reaches
+    // neither.
+    const h4Fires = h4BlockedNoBlockedBy(issue, fallbackFor(issue)) !== null;
+    const proseCandidates = [];
+    let proseHeldBack = 0;
+    if (h4Fires) {
+      const named = proseBlockerCandidatesFor(issue, fallbackFor(issue));
+      proseHeldBack = Math.max(0, named.length - H4_PROSE_CANDIDATE_CAP);
+      // The cap is applied BEFORE the fetch — it bounds requests, and the
+      // clause states the remainder rather than dropping it in silence.
+      for (const candidate of named.slice(0, H4_PROSE_CANDIDATE_CAP)) {
+        proseCandidates.push(await resolveBlockerTarget(candidate));
+      }
+    }
+    const unblockedByNothing = h4Fires
+      ? h4BlockedNoBlockedBy(issue, fallbackFor(issue), proseCandidates, proseHeldBack)
+      : null;
+    if (unblockedByNothing) findings.push([issue, 'H4', unblockedByNothing]);
     const expired = h19BlockOutlivedBlocker(issue, resolutions);
     if (expired) findings.push([issue, 'H19', expired]);
     // H26 — the same resolutions, asked the OTHER question: not "has the target
@@ -16746,6 +17043,79 @@ async function selfTest() {
   // value character is a backtick, and H4 asks only whether SOMETHING follows
   // the key); pinned so the new "not just decoration" clause cannot take it.
   t('H4: a value wrapped in code still discharges the duty', blocked('Blocked-by: `#9612`'), null);
+
+  // -- H4's PROSE clause (#17365) -----------------------------------------
+  //
+  // The class: a seat states the block in words, the machine-readable line is
+  // never written, the upstream closes and nothing returns the card. Three
+  // measured specimens, each past a satisfied unlock — one `priority:p1` +
+  // `security` for four days — are the fixture population here, VERBATIM, so a
+  // relaxed anchor set cannot quietly stop reading the shapes it was built for.
+  const REPO4 = 'objectstack-ai/objectstack';
+  const proseNums = (text) => proseBlockerRefs(text).map((r) => r.number).join(',');
+  const cand = (number, state, extra = {}) => ({
+    ...blockerTargetKey({ repo: null, number }, REPO4),
+    state,
+    closedAt: null,
+    detail: null,
+    ...extra,
+  });
+  const SPECIMEN_15942 =
+    'State: `needs-user-decision` → `pm:blocked` (blocker: #16293) … Unblocks to `pm:queue` when #16293 merges';
+  const SPECIMEN_16674 = '解锁条件:PR #16628 合并(或其分支释放)';
+  const SPECIMEN_16545 = '解除条件(唯一):PR #16380 合并或关闭';
+  t('H4 prose: the #15942 specimen names its blocker', proseNums(SPECIMEN_15942), '16293,16293');
+  t('H4 prose: the #16674 specimen names its blocker', proseNums(SPECIMEN_16674), '16628');
+  t('H4 prose: the #16545 specimen names its blocker', proseNums(SPECIMEN_16545), '16380');
+  // The live H4 population on 2026-09-10 — the other half of the measured
+  // corpus. Each of these is a card that WAS firing H4 with a bare row.
+  t('H4 prose: a decorated `pm:blocked` on #N (#15610)', proseNums('⇒ `pm:blocked` on #15162 / PR #15434, unblocking automatically on that merge.'), '15162,15434');
+  t('H4 prose: `pm:blocked` behind a bolded ref (#15638)', proseNums('This card is `pm:blocked` behind **#16049**, and #16049 is still **open**'), '16049,16049');
+  t('H4 prose: HELD by an open PR (#17069)', proseNums('packages/cli/src/commands/lint.ts       HELD by open PR #17438'), '17438');
+  t('H4 prose: an Unblock condition line (#17069)', proseNums('**Unblock condition (the only one): PR #17438 merges or closes.**'), '17438');
+  t('H4 prose: a run of held PRs on one line (#15927)', proseNums('that page is `merge=os-regen` routed and currently held by **eight** open PRs — #15889, #15888, #15879'), '15889,15888,15879');
+  t('H4 prose: 机械解除条件 (#17193)', proseNums('⭐ **机械解除条件**:#16194 的 PR 合并后转 `pm:queue`'), '16194');
+  // Negatives — the anchors are a measured list, so what they must NOT read is
+  // as load-bearing as what they read.
+  t('H4 prose: an unanchored line naming a card is not a candidate', proseNums('Related: #16183 (same round, same ADR)'), '');
+  t('H4 prose: the DIRECTIVE is not prose — its hyphen is not a space', proseNums('Blocked-by: #9612'), '');
+  t('H4 prose: `pm:blocking` being discussed is not a block being stated (#16184)', proseNums('- 建议保持 `priority:p2`;`pm:blocking` 我倾向**也撤**,理由见 #16183'), '');
+  t('H4 prose: an HTML numeric entity is not a card number', proseNums('blocked on the same page&#8203;'), '');
+  t('H4 prose: a cross-repo ref keeps its qualifier', proseBlockerRefs('blocked on objectstack-ai/objectui#4356')[0].repo, 'objectstack-ai/objectui');
+  t('H4 prose: `PR#N` names this repo, not a repo called PR', proseBlockerRefs('blocked on PR#17438')[0].repo, null);
+  // Candidate gathering — both channels, deduped, self-reference dropped.
+  const proseCard = { number: 17069, labels: [{ name: 'pm:blocked' }], body: 'blocked on #17438' };
+  t('H4 prose: the union of both channels, deduped', proseBlockerCandidatesFor(proseCard, ['also blocked on #17438 and #16049'], REPO4).map((c) => c.number).join(','), '17438,16049');
+  t('H4 prose: a card is never its own candidate', proseBlockerCandidatesFor({ number: 17438, body: 'blocked on #17438' }, [], REPO4).length, 0);
+  t('H4 prose: an unconsulted comment channel contributes nothing', proseBlockerCandidatesFor(proseCard, undefined, REPO4).map((c) => c.number).join(','), '17438');
+  t('H4 prose: an UNREADABLE comment channel contributes nothing either', proseBlockerCandidatesFor(proseCard, null, REPO4).map((c) => c.number).join(','), '17438');
+  t('H4 prose: the gatherer is UNCAPPED — the cap is the caller’s, where the request is', proseBlockerCandidatesFor({ number: 1, body: 'held by #2, #3, #4, #5, #6, #7, #8, #9' }, [], REPO4).length, 8);
+  // The clause itself, in every direction the row can read.
+  const proseRow = (comments, candidates, held) =>
+    h4row(issue(['pm:blocked'], [], 'the block is stated in prose'), comments, candidates, held);
+  t('H4 prose: a CLOSED upstream — the row says the block already expired', proseRow(['nothing'], [cand(16293, 'closed')]).includes('ALREADY CLOSED'), true);
+  t('H4 prose: …and names the candidate it read', proseRow(['nothing'], [cand(16293, 'closed')]).includes('`#16293` CLOSED'), true);
+  t('H4 prose: …and says where the card is due back', proseRow(['nothing'], [cand(16293, 'closed')]).includes('due back in `pm:queue`'), true);
+  t('H4 prose: …and still carries the original missing-line finding', proseRow(['nothing'], [cand(16293, 'closed')]).includes('NEITHER channel'), true);
+  t('H4 prose: …and still names the unlock sweep as the stake', proseRow(['nothing'], [cand(16293, 'closed')]).includes('unlock sweep greps'), true);
+  t('H4 prose: a closed candidate renders its closure date when the resolver has one', proseRow(['nothing'], [cand(16293, 'closed', { closedAt: '2026-09-06T00:00:00Z' })]).includes('CLOSED (2026-09-06T00:00:00Z)'), true);
+  t('H4 prose: an OPEN upstream — the row says the block still looks live', proseRow(['nothing'], [cand(17438, 'open')]).includes('still read OPEN'), true);
+  t('H4 prose: …and never claims an expiry', proseRow(['nothing'], [cand(17438, 'open')]).includes('ALREADY CLOSED'), false);
+  t('H4 prose: a MIXED reading counts the closed half', proseRow(['nothing'], [cand(16293, 'closed'), cand(17438, 'open')]).includes('1 of 2 is ALREADY CLOSED'), true);
+  t('H4 prose: an UNRESOLVED cross-repo candidate claims nothing about the block', proseRow(['nothing'], [{ ...blockerTargetKey({ repo: 'objectstack-ai/objectui', number: 4356 }, REPO4), state: 'unresolved', closedAt: null, detail: 'HTTP 404' }]).includes('says NOTHING about whether'), true);
+  t('H4 prose: …and renders the cross-repo address, not a bare number', proseRow(['nothing'], [{ ...blockerTargetKey({ repo: 'objectstack-ai/objectui', number: 4356 }, REPO4), state: 'unresolved', closedAt: null, detail: 'HTTP 404' }]).includes('`objectstack-ai/objectui#4356` UNRESOLVED'), true);
+  t('H4 prose: the cap is DECLARED, never silent', proseRow(['nothing'], [cand(2, 'closed')], 3).includes('+3 more candidate(s) named but NOT resolved'), true);
+  t('H4 prose: the clause never reads as a verdict', proseRow(['nothing'], [cand(16293, 'closed')]).includes('CANDIDATES read off anchored prose'), true);
+  t('H4 prose: …and says no label is written from here', proseRow(['nothing'], [cand(16293, 'closed')]).includes('no label is written from here'), true);
+  // The three shapes that must leave the row EXACTLY as it was.
+  t('H4 prose: no candidates -> the row is byte-identical to the pre-clause sentence', proseRow(['nothing'], []), h4row(issue(['pm:blocked'], [], 'the block is stated in prose'), ['nothing']));
+  t('H4 prose: an unrun scan -> byte-identical too', proseRow(['nothing'], undefined), h4row(issue(['pm:blocked'], [], 'the block is stated in prose'), ['nothing']));
+  t('H4 prose: the clause rides the body-only sentence as well', proseRow(undefined, [cand(16293, 'closed')]).includes('ALREADY CLOSED'), true);
+  t('H4 prose: …and the unreadable-thread sentence', proseRow(null, [cand(16293, 'closed')]).includes('ALREADY CLOSED'), true);
+  t('H4 prose: a proper `Blocked-by:` line still clears the row, candidates or not', h4BlockedNoBlockedBy(issue(['pm:blocked'], [], 'Blocked-by: #123'), ['nothing'], [cand(16293, 'closed')]), null);
+  t('H4 prose: the label gate still outranks everything', h4BlockedNoBlockedBy(issue(['pm:queue'], [], 'blocked on #16293'), ['nothing'], [cand(16293, 'closed')]), null);
+  t('H4 prose: an empty clause is the empty string, not the word undefined', proseBlockerClause(undefined), '');
+  t('H4 prose: …and so is a scan that found nothing', proseBlockerClause([]), '');
 
   // The index side of the same lines — H4 asking "is there a line" and the
   // index asking "which card" must agree about what a line IS.
