@@ -841,10 +841,14 @@ export function selfTest() {
     'a checkout one commit off the pin is refused, not recorded',
     recKinds(judgeRecordability({ head: PIN_B, livePin: PIN_A })) === 'head-off-pin',
   );
+  // `?? ''` rather than `[0].includes(...)`: with the guard ablated the array is
+  // EMPTY, and an uncaught TypeError there is a crash where a named failure
+  // belongs — the self-test would red for the right reason with the wrong words.
+  const offPinText = judgeRecordability({ head: PIN_B, livePin: PIN_A })[0] ?? '';
   check(
     'the refusal names BOTH revisions, so the operator can see which way to move',
-    judgeRecordability({ head: PIN_B, livePin: PIN_A })[0].includes(PIN_B.slice(0, 12))
-      && judgeRecordability({ head: PIN_B, livePin: PIN_A })[0].includes(PIN_A.slice(0, 12)),
+    offPinText.includes(PIN_B.slice(0, 12)) && offPinText.includes(PIN_A.slice(0, 12)),
+    offPinText || '(no finding at all)',
   );
   // Absence and malformation are loud here too, and they are DISTINGUISHED: a
   // pin that cannot be compared must not read as a checkout off the pin.
@@ -910,27 +914,28 @@ export function selfTest() {
     'the plain literal is still spelled too, so the file the gate opens is named as written',
     inCode.includes(`'${PIN_FILE}'`),
   );
-  // The guard is only worth anything if `--update` actually consults it. A
-  // `judgeRecordability` that nothing calls is a phantom check: every case above
-  // stays green while the generator records from any tree it likes.
+  // ⚠️ The two cases below are scoped to `update()`'s OWN BODY, never to the
+  // whole file. Measured: a whole-file scan for `judgeRecordability({ head:`
+  // matches the battery above, so deleting the generator's call left the
+  // self-test GREEN — the assertion was pinning its own test code. Every
+  // "is it wired" case has that shape; the slice is what makes it real.
+  const updateOpen = inCode.indexOf('\nfunction update() {');
+  const updateClose = inCode.indexOf('\n}\n', updateOpen);
   check(
-    'the generator CALLS the recordability judge, so the cases above are not phantom',
-    /judgeRecordability\(\{\s*head:/.test(inCode),
+    "the generator's body is still addressable, so the cases below are not vacuous",
+    updateOpen !== -1 && updateClose > updateOpen && updateClose - updateOpen > 1000,
+    `open ${updateOpen}, close ${updateClose}`,
   );
-  // Scoped to the record literal itself — a whole-file scan for the forbidden
-  // spelling would match THIS assertion's own pattern and never be able to pass.
-  // The bounds are asserted, so a rename cannot make the case vacuously green.
-  const recordOpen = inCode.indexOf('\n  const record = {');
-  const recordClose = inCode.indexOf('\n  writeFileSync(join(ROOT, RECORD_FILE)');
+  const updateSrc = inCode.slice(updateOpen, updateClose);
+  // A `judgeRecordability` nothing calls is a phantom check: every case in the
+  // battery above stays green while the generator records from any tree it likes.
   check(
-    "the generator's record literal is still addressable, so the case below is not vacuous",
-    recordOpen !== -1 && recordClose > recordOpen,
-    `open ${recordOpen}, close ${recordClose}`,
+    'the generator CALLS the recordability judge, so that battery is not phantom',
+    /judgeRecordability\(/.test(updateSrc),
   );
-  const recordLiteral = inCode.slice(recordOpen, recordClose);
   check(
     'and it stamps `recordedAgainstPin` from the value it compared, not from a second read',
-    /recordedAgainstPin: livePin,/.test(recordLiteral) && !/readFileSync/.test(recordLiteral),
+    /recordedAgainstPin: livePin,/.test(updateSrc) && !/recordedAgainstPin: readFileSync/.test(updateSrc),
   );
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
