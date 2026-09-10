@@ -217,8 +217,15 @@ describe('filter → where folds on every engine method (#4346)', () => {
         const repo = ctx.object('task');
         const viaWhere = await repo.findOne({ where: { status: 'done' } });
         const viaFilter = await repo.findOne({ filter: { status: 'done' } });
-        expect(viaFilter.status).toBe('done');
-        expect(viaWhere.status).toBe('done');
+        // [#16786] `repo.findOne` declares `Record<string, any> | null`, so the
+        // null both spellings could return is asserted away rather than read
+        // through — the same `expect(row).not.toBeNull()` / `row!` idiom this
+        // file already uses above. Under the old `Promise<any>` this pair
+        // agreed vacuously if BOTH lookups came back null.
+        expect(viaFilter).not.toBeNull();
+        expect(viaWhere).not.toBeNull();
+        expect(viaFilter!.status).toBe('done');
+        expect(viaWhere!.status).toBe('done');
     });
 
     it('a cleanup hook calling repo.delete({filter, multi}) no longer empties the object', async () => {
