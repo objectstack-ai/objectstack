@@ -58,8 +58,8 @@ describe('BackupConfigSchema', () => {
   it('should accept full backup config with encryption', () => {
     const config = BackupConfigSchema.parse({
       strategy: 'full',
-      // `schedule` is a retiredKey() tombstone (#16320) — the refusal is
-      // pinned in `cron-typed-positions-retirement.test.ts`.
+      // `schedule` was deleted outright (#16320) — the strip is pinned in
+      // `cron-typed-positions-retirement.test.ts`.
       retention: { days: 365, minCopies: 12 },
       destination: { type: 'gcs', bucket: 'backups', region: 'us-central1' },
       encryption: { enabled: true, algorithm: 'AES-256-GCM', keyId: 'kms-key-123' },

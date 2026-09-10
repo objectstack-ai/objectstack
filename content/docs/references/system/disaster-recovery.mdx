@@ -30,7 +30,6 @@ Backup configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'full' \| 'incremental' \| 'differential'>` | optional (default: `"incremental"`) | Backup strategy |
-| **schedule** | `never` | optional | [REMOVED] `BackupConfig.schedule` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no backup engine exists on the platform, so an automated backup never ran on it. Delete the key. The one cron slot the platform evaluates is `Job.schedule.expression` (`system/job.zod.ts`): a backup on a cadence is a job whose handler you write. |
 | **retention** | `{ days: number; minCopies: number; maxCopies?: number }` | ✅ | Backup retention policy |
 | **destination** | `{ type: Enum<'s3' \| 'gcs' \| 'azure_blob' \| 'local'>; bucket?: string; path?: string; region?: string }` | ✅ | Backup storage destination |
 | **encryption** | `{ enabled: boolean; algorithm: Enum<'AES-256-GCM' \| 'AES-256-CBC' \| 'ChaCha20-Poly1305'>; keyId?: string }` | optional | Backup encryption settings |
@@ -137,7 +136,6 @@ Complete disaster recovery plan configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'full' \| 'incremental' \| 'differential'>` | optional (default: `"incremental"`) | Backup strategy |
-| **schedule** | `never` | optional | [REMOVED] `BackupConfig.schedule` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no backup engine exists on the platform, so an automated backup never ran on it. Delete the key. The one cron slot the platform evaluates is `Job.schedule.expression` (`system/job.zod.ts`): a backup on a cadence is a job whose handler you write. |
 | **retention** | `{ days: number; minCopies: number; maxCopies?: number }` | ✅ | Backup retention policy |
 | **destination** | `{ type: Enum<'s3' \| 'gcs' \| 'azure_blob' \| 'local'>; bucket?: string; path?: string; region?: string }` | ✅ | Backup storage destination |
 | **encryption** | `{ enabled: boolean; algorithm: Enum<'AES-256-GCM' \| 'AES-256-CBC' \| 'ChaCha20-Poly1305'>; keyId?: string }` | optional | Backup encryption settings |
@@ -170,7 +168,6 @@ Complete disaster recovery plan configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable automated DR testing |
-| **schedule** | `never` | optional | [REMOVED] `DisasterRecoveryPlan.testing.schedule` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no disaster-recovery test runner exists on the platform, so a periodic DR test never ran. Delete the key. The one cron slot the platform evaluates is `Job.schedule.expression` (`system/job.zod.ts`): a DR test on a cadence is a job whose handler you write. |
 | **notificationChannel** | `string` | optional | Notification channel for DR test results |
 
 ### Nested Shape: `DisasterRecoveryPlan.contacts[number]`

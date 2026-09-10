@@ -386,18 +386,18 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
   // `ScheduleStateSchema.cronExpression`, `integration/connector.zod.ts`
   // `DataSyncConfigSchema.schedule`, `system/cache.zod.ts` `CacheWarmupSchema.schedule`,
   // and `system/disaster-recovery.zod.ts` `BackupConfigSchema.schedule` /
-  // `DisasterRecoveryPlanSchema.schedule` (the DR `testing` block). Each is a
-  // `retiredKey()` tombstone now — no `CronExpressionInputSchema` member left at
-  // any of the seven — so discovery (by roster name) no longer sees them and
-  // every cover would read STALE; the row is deleted rather than re-pointed,
-  // the `mapping.zod.ts:expression` (#5552) / `element:form.onSubmit` (#9249)
-  // way. What the row recorded — PARSE ONLY, no evaluator found for any of the
-  // five keys, `failPolicy: 'unevaluated'` — became the retirement's reason,
-  // stated at each tombstone and in the ADR-0087 entries
-  // (`export-schedule-cron-retired`, `schedule-state-cron-expression-retired`,
-  // `connector-sync-schedule-removed`, `cache-warmup-schedule-retired`,
-  // `disaster-recovery-schedules-retired`). The two cron rows above are the
-  // whole cron dialect now: one evaluated slot, one experimental-by-design.
+  // `DisasterRecoveryPlanSchema.schedule` (the DR `testing` block). Each key was
+  // DELETED OUTRIGHT — no `retiredKey()` tombstone, no D2 conversion and no D3
+  // semantic entry (maintainer ruling 2026-09-10 on the retirement PR) — so there is
+  // no `CronExpressionInputSchema` member left at any of the seven, discovery (by
+  // roster name) no longer sees them and every cover would read STALE; the row is
+  // deleted rather than re-pointed, the `mapping.zod.ts:expression` (#5552) /
+  // `element:form.onSubmit` (#9249) way. What the row recorded — PARSE ONLY, no
+  // evaluator found for any of the five keys, `failPolicy: 'unevaluated'` — became
+  // the retirement's reason, stated at each deletion site in the schema source; it
+  // reaches no ADR-0087 entry, because the ruling registered none. The two cron rows
+  // above are the whole cron dialect now: one evaluated slot, one
+  // experimental-by-design.
 
   // ── TEMPLATE dialect (#15027) ─────────────────────────────────────────────
   {

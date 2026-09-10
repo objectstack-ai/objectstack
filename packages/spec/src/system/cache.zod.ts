@@ -168,26 +168,6 @@ export type CacheAvalanchePrevention = z.input<typeof CacheAvalanchePreventionSc
 export type CacheAvalanchePreventionParsed = z.infer<typeof CacheAvalanchePreventionSchema>;
 
 /**
- * `CacheWarmup.schedule` — RETIRED (ADR-0049 enforce-or-remove; maintainer
- * ruling 2026-09-06, option A per family, #15954 / #16320). Declared, parsed
- * into the cron envelope and read by NOTHING: `CacheWarmupSchema` has no
- * consumer outside `packages/spec`, so no warmup ever ran on a schedule. Not
- * `.strict()`, so a bare deletion would be a silent strip (ADR-0104); the
- * tombstone makes the removal audible in `tsc` and at parse. Registered as
- * `system/CacheWarmup:schedule` in `RETIRED_KEYS_BY_MAJOR[18]`; D3 semantic
- * entry `cache-warmup-schedule-retired`; no D2 conversion — a cache config is
- * plugin TS configuration, not a stack collection member. The `strategy` enum
- * keeps its `scheduled` member: it is a value, not a position this ruling
- * names, and it was exactly as inert before (nothing reads the def).
- */
-const CACHE_WARMUP_SCHEDULE_RETIRED =
-  '`CacheWarmup.schedule` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
-  + 'nothing ever read it: no cache-warmup engine exists on the platform, so a scheduled warmup '
-  + 'never ran. Delete the key. The one cron slot the platform evaluates is '
-  + '`Job.schedule.expression` (`system/job.zod.ts`): a warmup on a cadence is a job whose handler '
-  + 'you write.';
-
-/**
  * Cache Warmup Strategy Schema
  *
  * Defines how cache is pre-populated on startup or after cache flush.
@@ -198,8 +178,17 @@ export const CacheWarmupSchema = lazySchema(() => z.object({
   /** Warmup strategy */
   strategy: z.enum(['eager', 'lazy', 'scheduled']).default('lazy')
     .describe('Warmup strategy: eager (at startup), lazy (on first access), scheduled (cron)'),
-  /** Tombstone (ADR-0049, #16320) — see `CACHE_WARMUP_SCHEDULE_RETIRED`. */
-  schedule: retiredKey(CACHE_WARMUP_SCHEDULE_RETIRED),
+  /*
+   * `CacheWarmup.schedule` was DELETED here in @objectstack/spec 18 (ADR-0049
+   * enforce-or-remove, #16320): declared, parsed into the cron envelope and read by
+   * nothing — `CacheWarmupSchema` has no consumer outside `packages/spec`, so no
+   * warmup ever ran on a schedule. Deleted outright — no `retiredKey()` tombstone, no
+   * D2 conversion, no D3 semantic entry (maintainer ruling 2026-09-10 on the
+   * retirement PR). The `strategy` enum keeps its `scheduled` member: it is a value,
+   * not a position this ruling names, and it was exactly as inert before. The one cron
+   * slot the platform evaluates is `Job.schedule.expression` (`system/job.zod.ts`): a
+   * warmup on a cadence is a job whose handler you write.
+   */
   /** Keys/patterns to warm up */
   patterns: z.array(z.string()).optional().describe('Key patterns to warm up (e.g., "user:*", "config:*")'),
   /** Maximum concurrent warmup operations */

@@ -47,41 +47,20 @@ export type BackupRetention = z.input<typeof BackupRetentionSchema>;
 export type BackupRetentionParsed = z.infer<typeof BackupRetentionSchema>;
 
 /**
- * The two disaster-recovery cron positions — RETIRED (ADR-0049
- * enforce-or-remove; maintainer ruling 2026-09-06, option A per family,
- * #15954 / #16320). `BackupConfig.schedule` and
- * `DisasterRecoveryPlan.testing.schedule` were declared, parsed into the cron
- * envelope and read by NOTHING: neither schema has a consumer outside
- * `packages/spec`, so no backup and no DR test ever ran on a schedule. Neither
- * is `.strict()`, so a bare deletion would be a silent strip (ADR-0104); the
- * tombstones make the removal audible in `tsc` and at parse. Registered as
- * `system/BackupConfig:schedule` and, by its nested spelling (no
- * authorable-surface row of its own), `system/DisasterRecoveryPlan:testing.schedule`
- * in `RETIRED_KEYS_BY_MAJOR[18]`; D3 semantic entry
- * `disaster-recovery-schedules-retired`; no D2 conversion — a DR plan is
- * plugin/operator configuration, not a stack collection member.
- */
-const BACKUP_SCHEDULE_RETIRED =
-  '`BackupConfig.schedule` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
-  + 'nothing ever read it: no backup engine exists on the platform, so an automated backup never '
-  + 'ran on it. Delete the key. The one cron slot the platform evaluates is '
-  + '`Job.schedule.expression` (`system/job.zod.ts`): a backup on a cadence is a job whose handler '
-  + 'you write.';
-const DR_TESTING_SCHEDULE_RETIRED =
-  '`DisasterRecoveryPlan.testing.schedule` was removed in @objectstack/spec 17 (ADR-0049 '
-  + 'enforce-or-remove) — nothing ever read it: no disaster-recovery test runner exists on the '
-  + 'platform, so a periodic DR test never ran. Delete the key. The one cron slot the platform '
-  + 'evaluates is `Job.schedule.expression` (`system/job.zod.ts`): a DR test on a cadence is a '
-  + 'job whose handler you write.';
-
-/**
  * Backup Configuration Schema
  */
 export const BackupConfigSchema = lazySchema(() => z.object({
   /** Backup strategy */
   strategy: BackupStrategySchema.default('incremental').describe('Backup strategy'),
-  /** Tombstone (ADR-0049, #16320) — see `BACKUP_SCHEDULE_RETIRED`. */
-  schedule: retiredKey(BACKUP_SCHEDULE_RETIRED),
+  /*
+   * `BackupConfig.schedule` was DELETED here in @objectstack/spec 18 (ADR-0049
+   * enforce-or-remove, #16320): declared, parsed into the cron envelope and read by
+   * nothing — no backup engine exists on the platform, so an automated backup never
+   * ran on it. Deleted outright — no `retiredKey()` tombstone, no D2 conversion, no D3
+   * semantic entry (maintainer ruling 2026-09-10 on the retirement PR). The one cron
+   * slot the platform evaluates is `Job.schedule.expression` (`system/job.zod.ts`): a
+   * backup on a cadence is a job whose handler you write.
+   */
   /** Retention policy */
   retention: BackupRetentionSchema.describe('Backup retention policy'),
   /** Storage destination */
@@ -276,8 +255,15 @@ export const DisasterRecoveryPlanSchema = lazySchema(() => z.object({
   testing: z.object({
     /** Enable periodic DR testing */
     enabled: z.boolean().default(false).describe('Enable automated DR testing'),
-    /** Tombstone (ADR-0049, #16320) — see `DR_TESTING_SCHEDULE_RETIRED`. */
-    schedule: retiredKey(DR_TESTING_SCHEDULE_RETIRED),
+    /*
+     * `DisasterRecoveryPlan.testing.schedule` was DELETED here in @objectstack/spec 18
+     * (ADR-0049 enforce-or-remove, #16320): declared, parsed into the cron envelope and
+     * read by nothing — no disaster-recovery test runner exists on the platform, so a
+     * periodic DR test never ran. Deleted outright — no `retiredKey()` tombstone, no D2
+     * conversion, no D3 semantic entry (maintainer ruling 2026-09-10 on the retirement
+     * PR). The one cron slot the platform evaluates is `Job.schedule.expression`
+     * (`system/job.zod.ts`): a DR test on a cadence is a job whose handler you write.
+     */
     /** Notification channel for test results */
     notificationChannel: z.string().optional().describe('Notification channel for DR test results'),
   }).optional().describe('Automated disaster recovery testing'),

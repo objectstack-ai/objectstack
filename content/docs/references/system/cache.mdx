@@ -198,7 +198,6 @@ Cache warmup strategy
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable cache warmup |
 | **strategy** | `Enum<'eager' \| 'lazy' \| 'scheduled'>` | optional (default: `"lazy"`) | Warmup strategy: eager (at startup), lazy (on first access), scheduled (cron) |
-| **schedule** | `never` | optional | [REMOVED] `CacheWarmup.schedule` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no cache-warmup engine exists on the platform, so a scheduled warmup never ran. Delete the key. The one cron slot the platform evaluates is `Job.schedule.expression` (`system/job.zod.ts`): a warmup on a cadence is a job whose handler you write. |
 | **patterns** | `string[]` | optional | Key patterns to warm up (e.g., "user:*", "config:*") |
 | **concurrency** | `number` | optional (default: `10`) | Maximum concurrent warmup operations |
 
@@ -262,7 +261,6 @@ Rule defining when and how cached entries are invalidated
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable cache warmup |
 | **strategy** | `Enum<'eager' \| 'lazy' \| 'scheduled'>` | optional (default: `"lazy"`) | Warmup strategy: eager (at startup), lazy (on first access), scheduled (cron) |
-| **schedule** | `never` | optional | [REMOVED] `CacheWarmup.schedule` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no cache-warmup engine exists on the platform, so a scheduled warmup never ran. Delete the key. The one cron slot the platform evaluates is `Job.schedule.expression` (`system/job.zod.ts`): a warmup on a cadence is a job whose handler you write. |
 | **patterns** | `string[]` | optional | Key patterns to warm up (e.g., "user:*", "config:*") |
 | **concurrency** | `number` | optional (default: `10`) | Maximum concurrent warmup operations |
 

@@ -725,8 +725,8 @@ describe('ScheduleStateSchema', () => {
     const state = ScheduleStateSchema.parse({
       id: 'sched_001',
       flowName: 'daily_report',
-      // `cronExpression` is a retiredKey() tombstone (#16320) — the refusal is
-      // pinned in `cron-typed-positions-retirement.test.ts`.
+      // `cronExpression` was deleted outright (#16320) — the strip is pinned in
+      // `cron-typed-positions-retirement.test.ts`.
       timezone: 'America/New_York',
       status: 'active',
       nextRunAt: '2026-02-03T14:00:00Z',
@@ -784,11 +784,11 @@ describe('ScheduleStateSchema', () => {
       createdAt: '2026-01-01T00:00:00Z',
     })).toThrow(); // missing flowName
 
-    // `cronExpression` was the third required key until #16320 retired it
-    // (retiredKey() accepts only absence, so the requiredness left with the
-    // key): a state without it now PARSES. The positive half lives here so the
-    // former "missing cronExpression" refusal cannot quietly come back; the
-    // authored-value refusal is pinned in `cron-typed-positions-retirement.test.ts`.
+    // `cronExpression` was the third required key until #16320 deleted it, so
+    // the requiredness left with the key: a state without it now PARSES. The
+    // positive half lives here so the former "missing cronExpression" refusal
+    // cannot quietly come back; the authored-value strip is pinned in
+    // `cron-typed-positions-retirement.test.ts`.
     expect(() => ScheduleStateSchema.parse({
       id: 'sched_004',
       flowName: 'test',

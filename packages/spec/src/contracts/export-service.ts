@@ -132,11 +132,11 @@ export interface ScheduleExportInput {
   /** Export template ID */
   templateId?: string;
   /**
-   * Schedule timing configuration. `cronExpression` left this block with the
-   * spec positions it mirrored (`ScheduleExportRequest.schedule.cronExpression`
-   * / `ScheduledExport.schedule.cronExpression`, retiredKey() tombstones under
-   * ADR-0049, #16320): the return type below refuses the key, so an input that
-   * still demanded it would ask the provider for a cadence it cannot store.
+   * Schedule timing configuration. `cronExpression` left this block with the spec
+   * positions it mirrored (`ScheduleExportRequest.schedule.cronExpression` /
+   * `ScheduledExport.schedule.cronExpression`, both DELETED under ADR-0049, #16320):
+   * the return type below no longer carries the key, so an input that still demanded
+   * it would ask the provider for a cadence it cannot store.
    */
   schedule: {
     timezone?: string;

@@ -758,7 +758,6 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **cronExpression** | `never` | optional | [REMOVED] `ScheduleExportRequest.schedule.cronExpression` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no export scheduler exists on the platform (`POST /api/v1/data/export/schedules` is a declared contract no server route implements, and `IExportService` has no provider), so the cron never fired. Delete the key; there is no replacement until an export scheduler exists. The one cron slot the platform evaluates is `Job.schedule.expression` (`system/job.zod.ts`): a recurring export is a job whose handler you write. |
 | **timezone** | `string` | optional (default: `"UTC"`) | IANA timezone |
 
 ### Nested Shape: `ScheduleExportRequest.delivery`
@@ -837,7 +836,6 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **cronExpression** | `never` | optional | [REMOVED] `ScheduledExport.schedule.cronExpression` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no export scheduler exists on the platform (`POST /api/v1/data/export/schedules` is a declared contract no server route implements, and `IExportService` has no provider), so the cron never fired. Delete the key; there is no replacement until an export scheduler exists. The one cron slot the platform evaluates is `Job.schedule.expression` (`system/job.zod.ts`): a recurring export is a job whose handler you write. |
 | **timezone** | `string` | optional (default: `"UTC"`) | IANA timezone |
 
 ### Nested Shape: `ScheduledExport.delivery`

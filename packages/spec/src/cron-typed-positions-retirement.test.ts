@@ -6,8 +6,6 @@ import type { ZodTypeAny } from 'zod';
 import { ScheduledExportSchema, ScheduleExportRequestSchema, type ScheduledExport, type ScheduleExportRequest } from './api/export.zod';
 import { ScheduleStateSchema, type ScheduleState } from './automation/execution.zod';
 import { CONVERSIONS_BY_MAJOR } from './conversions/registry';
-import { applyConversionsToStoredItem } from './conversions/stored';
-import type { ConversionNotice } from './conversions/types';
 import {
   ConnectorSchema,
   DataSyncConfigSchema,
@@ -25,46 +23,30 @@ import {
   type DisasterRecoveryPlan,
 } from './system/disaster-recovery.zod';
 
-// ─── [#16320] the seven cron-typed positions nothing evaluated are REMOVED ────
+// ─── [#16320] the seven cron-typed positions nothing evaluated are DELETED ────
 //
-// ADR-0049 enforce-or-remove. The #15954 ruling (director decision batch #56,
-// maintainer 「其他同意」, 2026-09-06) is option A — retire — PER FAMILY, and the
-// tree forces the split: of the seven positions, exactly ONE is reachable from
-// a stack manifest (`stack.connectors[]` → `Connector.syncConfig` →
-// `DataSyncConfig.schedule`), so only that family carries an ADR-0087 D2
-// conversion and the house `os migrate meta` sentence — and, per the ruling's
-// letter, a D3 twin that carries the measured author population on fields
-// that PROJECT ("its D3 entry says so and names the measured zero in-repo
-// authors and the NOT-MEASURED out-of-repo population"); the other six (export
-// API bodies, runtime schedule state, cache / DR operator config) are no stack
-// collection member and no metadata type, so a conversion there would be a
-// transform with no seam that ever runs — they take a D3 semantic entry each
-// and their prescriptions carry NO migrate sentence (the sentence must be true
-// of the tool, `shared/retired-key.ts`). Nothing in the gate set catches the
-// two ways to get that split wrong — a conversion omitted for the connector
-// family, or the migrate sentence written on all seven — which is what the
-// per-family assertions below are for.
+// ADR-0049 enforce-or-remove. Every position was declared, parsed into the
+// `{ dialect: 'cron', source }` envelope and read by NOTHING (the ADR-0058 D7
+// ledger row `cron-declared-unwired` had all seven `unevaluated`).
 //
-// Every position was declared, parsed into the `{ dialect: 'cron', source }`
-// envelope and read by NOTHING (the ADR-0058 D7 ledger row
-// `cron-declared-unwired` had all seven `unevaluated`). None of the five
-// schemas is `.strict()`, so the route is `retiredKey()` tombstones, NOT plain
-// deletion — a bare deletion would make zod strip the key in silence
-// (ADR-0104). Audible in two channels: `tsc` (the input type is `never`) and
-// the parse (the prescription is the message).
+// ⚠️ The removal route is BARE DELETION, by maintainer ruling of 2026-09-10 on
+// the retirement PR — 「直接删」, taken over the seat's written recommendation to
+// keep a tombstone and the connector family's D2 conversion, on the reading that
+// customers do not upgrade major by major in order. So NONE of the seven carries
+// a `retiredKey()` tombstone, a `RETIRED_KEYS_BY_MAJOR[18]` entry, an ADR-0087 D2
+// conversion or a D3 semantic entry.
 //
-// On the assertion set (the #8586 / #14676 / #14477 precedent): a schema
-// refusal raises a `ZodError` whose issues carry `code` and `path` but no
-// ADR-0112 `status` — that envelope belongs to the API error surface. So these
-// pins assert the strongest set this surface really has: refusal, the issue
-// `code`, the `path` naming WHICH site refused, and the prescription text
-// (#5240: where the wording is the contract, pin the wording).
+// That makes the observable consequence a SILENT STRIP, not a refusal: none of
+// the five schemas is `.strict()`, so zod drops an authored value and answers
+// `success: true` (ADR-0104's shape). These pins record exactly that — what an
+// author who keeps writing one of these keys actually gets — so the day someone
+// changes the route, the change is loud here rather than invisible in the field.
 
 const CRON = '0 6 * * MON';
-/** The envelope the old schema normalized the bare string into — refused just the same. */
+/** The envelope the old schema normalized the bare string into — dropped just the same. */
 const CRON_ENVELOPE = { dialect: 'cron', source: CRON };
 
-// ── Well-formed fixtures: every required key, none of the retired ones ──────
+// ── Well-formed fixtures: every required key, none of the deleted ones ──────
 
 const EXPORT_WELL_FORMED = {
   name: 'weekly_account_export',
@@ -78,41 +60,39 @@ const CONNECTOR_WELL_FORMED = { name: 'sap_erp', label: 'SAP ERP', type: 'saas' 
 const WARMUP_WELL_FORMED = { enabled: true, strategy: 'scheduled' as const, patterns: ['config:*'] };
 const CACHE_WELL_FORMED = {
   enabled: true,
-  tiers: [{ name: 'l1', type: 'memory' as const }],
-  invalidation: [],
+  strategy: 'hybrid' as const,
   warmup: WARMUP_WELL_FORMED,
 };
 const BACKUP_WELL_FORMED = { retention: { days: 30 }, destination: { type: 's3' as const, bucket: 'backups' } };
 const DR_TESTING_WELL_FORMED = { enabled: true, notificationChannel: '#dr-alerts' };
 const DR_PLAN_WELL_FORMED = {
-  rpo: { value: 15 },
+  name: 'primary_dr',
+  rpo: { value: 15, unit: 'minutes' as const },
   rto: { value: 1, unit: 'hours' as const },
   backup: BACKUP_WELL_FORMED,
   testing: DR_TESTING_WELL_FORMED,
 };
 
-interface RetiredSite {
-  /** The exact `RETIRED_KEYS_BY_MAJOR` spelling. */
+interface DeletedSite {
+  /** The spelling the key WOULD have had in `RETIRED_KEYS_BY_MAJOR` — pinned absent below. */
   registered: string;
-  /** How the prescription opens (its backtick-wrapped qualified key). */
+  /** How the position reads to an author. */
   qualified: string;
   schema: ZodTypeAny;
   wellFormed: Record<string, unknown>;
   authored: unknown;
-  issuePath: (string | number)[];
-  /** Only the one stack-collection member owes the `os migrate meta` sentence. */
-  migrateSentence: boolean;
+  /** Path to the deleted key inside the parsed document. */
+  keyPath: (string | number)[];
 }
 
-const SITES: RetiredSite[] = [
+const SITES: DeletedSite[] = [
   {
     registered: 'api/ScheduledExport:schedule.cronExpression',
     qualified: 'ScheduledExport.schedule.cronExpression',
     schema: ScheduledExportSchema,
     wellFormed: EXPORT_WELL_FORMED,
     authored: { ...EXPORT_WELL_FORMED, schedule: { ...EXPORT_WELL_FORMED.schedule, cronExpression: CRON } },
-    issuePath: ['schedule', 'cronExpression'],
-    migrateSentence: false,
+    keyPath: ['schedule', 'cronExpression'],
   },
   {
     registered: 'api/ScheduleExportRequest:schedule.cronExpression',
@@ -120,8 +100,7 @@ const SITES: RetiredSite[] = [
     schema: ScheduleExportRequestSchema,
     wellFormed: EXPORT_WELL_FORMED,
     authored: { ...EXPORT_WELL_FORMED, schedule: { ...EXPORT_WELL_FORMED.schedule, cronExpression: CRON } },
-    issuePath: ['schedule', 'cronExpression'],
-    migrateSentence: false,
+    keyPath: ['schedule', 'cronExpression'],
   },
   {
     registered: 'automation/ScheduleState:cronExpression',
@@ -129,8 +108,7 @@ const SITES: RetiredSite[] = [
     schema: ScheduleStateSchema,
     wellFormed: STATE_WELL_FORMED,
     authored: { ...STATE_WELL_FORMED, cronExpression: CRON },
-    issuePath: ['cronExpression'],
-    migrateSentence: false,
+    keyPath: ['cronExpression'],
   },
   {
     registered: 'integration/DataSyncConfig:schedule',
@@ -138,8 +116,7 @@ const SITES: RetiredSite[] = [
     schema: DataSyncConfigSchema,
     wellFormed: SYNC_WELL_FORMED,
     authored: { ...SYNC_WELL_FORMED, schedule: CRON },
-    issuePath: ['schedule'],
-    migrateSentence: true,
+    keyPath: ['schedule'],
   },
   {
     registered: 'system/CacheWarmup:schedule',
@@ -147,8 +124,7 @@ const SITES: RetiredSite[] = [
     schema: CacheWarmupSchema,
     wellFormed: WARMUP_WELL_FORMED,
     authored: { ...WARMUP_WELL_FORMED, schedule: CRON },
-    issuePath: ['schedule'],
-    migrateSentence: false,
+    keyPath: ['schedule'],
   },
   {
     registered: 'system/BackupConfig:schedule',
@@ -156,8 +132,7 @@ const SITES: RetiredSite[] = [
     schema: BackupConfigSchema,
     wellFormed: BACKUP_WELL_FORMED,
     authored: { ...BACKUP_WELL_FORMED, schedule: CRON },
-    issuePath: ['schedule'],
-    migrateSentence: false,
+    keyPath: ['schedule'],
   },
   {
     registered: 'system/DisasterRecoveryPlan:testing.schedule',
@@ -165,20 +140,19 @@ const SITES: RetiredSite[] = [
     schema: DisasterRecoveryPlanSchema,
     wellFormed: DR_PLAN_WELL_FORMED,
     authored: { ...DR_PLAN_WELL_FORMED, testing: { ...DR_TESTING_WELL_FORMED, schedule: CRON } },
-    issuePath: ['testing', 'schedule'],
-    migrateSentence: false,
+    keyPath: ['testing', 'schedule'],
   },
 ];
 
-/** The same tombstones seen through the shapes that nest them. */
-const CARRIERS: Array<Pick<RetiredSite, 'qualified' | 'schema' | 'wellFormed' | 'authored' | 'issuePath'> & { via: string }> = [
+/** The same deletions seen through the shapes that nest them. */
+const CARRIERS: Array<Pick<DeletedSite, 'qualified' | 'schema' | 'wellFormed' | 'authored' | 'keyPath'> & { via: string }> = [
   {
     via: 'Connector.syncConfig',
     qualified: 'connector.syncConfig.schedule',
     schema: ConnectorSchema,
     wellFormed: CONNECTOR_WELL_FORMED,
     authored: { ...CONNECTOR_WELL_FORMED, syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON } },
-    issuePath: ['syncConfig', 'schedule'],
+    keyPath: ['syncConfig', 'schedule'],
   },
   {
     via: 'DeclarativeConnectorEntry.syncConfig (the `/meta/connector` write door inherits it)',
@@ -186,7 +160,7 @@ const CARRIERS: Array<Pick<RetiredSite, 'qualified' | 'schema' | 'wellFormed' | 
     schema: DeclarativeConnectorEntrySchema,
     wellFormed: CONNECTOR_WELL_FORMED,
     authored: { ...CONNECTOR_WELL_FORMED, syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON } },
-    issuePath: ['syncConfig', 'schedule'],
+    keyPath: ['syncConfig', 'schedule'],
   },
   {
     via: 'DisasterRecoveryPlan.backup',
@@ -194,7 +168,7 @@ const CARRIERS: Array<Pick<RetiredSite, 'qualified' | 'schema' | 'wellFormed' | 
     schema: DisasterRecoveryPlanSchema,
     wellFormed: DR_PLAN_WELL_FORMED,
     authored: { ...DR_PLAN_WELL_FORMED, backup: { ...BACKUP_WELL_FORMED, schedule: CRON } },
-    issuePath: ['backup', 'schedule'],
+    keyPath: ['backup', 'schedule'],
   },
   {
     via: 'DistributedCacheConfig.warmup',
@@ -202,149 +176,70 @@ const CARRIERS: Array<Pick<RetiredSite, 'qualified' | 'schema' | 'wellFormed' | 
     schema: DistributedCacheConfigSchema,
     wellFormed: CACHE_WELL_FORMED,
     authored: { ...CACHE_WELL_FORMED, warmup: { ...WARMUP_WELL_FORMED, schedule: CRON } },
-    issuePath: ['warmup', 'schedule'],
+    keyPath: ['warmup', 'schedule'],
   },
 ];
 
-const CONVERSION_ID = 'connector-sync-schedule-removed';
-/** The connector family's D3 twin — the ruling's carrier of the population reading. */
-const SEMANTIC_TWIN_ID = 'connector-sync-schedule-retired';
-/** The four families with NO stack seam: a D3 semantic entry each and no D2. */
-const SEMANTIC_IDS = [
+/** The five ADR-0087 entry ids an earlier round of this card carried — pinned absent. */
+const NEVER_REGISTERED_IDS = [
+  'connector-sync-schedule-removed',
+  'connector-sync-schedule-retired',
   'export-schedule-cron-retired',
   'schedule-state-cron-expression-retired',
   'cache-warmup-schedule-retired',
   'disaster-recovery-schedules-retired',
 ];
-const HOUSE_MIGRATE_SENTENCE =
-  /Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand\.$/;
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Walk to the enclosing block of a key path, then read the leaf. */
+function readAt(doc: unknown, keyPath: (string | number)[]): { block: Record<string, unknown>; leaf: string } {
+  let at: unknown = doc;
+  for (const seg of keyPath.slice(0, -1)) at = (at as Record<string, unknown>)[seg as string];
+  return { block: at as Record<string, unknown>, leaf: String(keyPath[keyPath.length - 1]) };
 }
 
-function findIssue(schema: ZodTypeAny, authored: unknown, issuePath: (string | number)[], label: string) {
-  const result = schema.safeParse(authored);
-  expect(result.success, `${label} must be refused`).toBe(false);
-  if (result.success) return undefined; // narrowing; the assertion above already failed
-  const wanted = issuePath.join('.');
-  const issue = result.error.issues.find((i) => i.path.join('.') === wanted);
-  expect(issue, `the refusal must surface at ${wanted}`).toBeDefined();
-  return issue!;
-}
-
-function expectTombstoneRefusal(
-  site: Pick<RetiredSite, 'qualified' | 'schema' | 'authored' | 'issuePath'>,
-  migrateSentence: boolean,
-) {
-  const issue = findIssue(site.schema, site.authored, site.issuePath, site.qualified);
-  if (!issue) return;
-  // The machine-readable half of the envelope this surface actually has: a
-  // `retiredKey()` tombstone raises `invalid_type` from its `z.never()`.
-  expect(issue.code).toBe('invalid_type');
-  expect(issue.path).toEqual(site.issuePath);
-  // The prescription IS the migration doc for whoever hits it — contract, not
-  // commentary: it opens with the qualified key, names the version and the
-  // ADR, says why the key was inert, and tells the author what to do.
-  expect(issue.message).toMatch(
-    new RegExp('^`' + escapeRegExp(site.qualified) + '` was removed in @objectstack/spec 17 \\(ADR-0049 enforce-or-remove\\) — nothing ever read it'),
-  );
-  expect(issue.message).toMatch(/Delete the key/);
-  // Every prescription points the reader at the ONE cron slot the platform
-  // evaluates, so nobody re-declares the retired key as a repair.
-  expect(issue.message).toMatch(/`Job\.schedule\.expression`/);
-  // Customer-facing text carries the ADR, never an issue id.
-  expect(issue.message).toMatch(/ADR-0049/);
-  expect(issue.message).not.toMatch(/#\d{3,}/);
-  // ⭐ The per-family split, pinned in both directions. The sentence states a
-  // property of the TOOL — `os migrate meta` lists an edit for a key only where
-  // the chain has a seam that sees it — so it is TRUE for the one stack
-  // collection member and FALSE for the six others; the class pin
-  // (`retired-key-migrate-sentence.test.ts`) holds the wording, this pin holds
-  // WHERE it may appear.
-  if (migrateSentence) {
-    expect(issue.message).toMatch(HOUSE_MIGRATE_SENTENCE);
-  } else {
-    expect(issue.message).not.toMatch(/os migrate meta/);
-  }
-}
-
-describe('[#16320] cron-typed positions retirement — refusal at every site', () => {
+describe('[#16320] the seven cron-typed positions no longer exist on their schemas', () => {
   for (const site of SITES) {
-    it(`REJECTS an authored \`${site.qualified}\` at path \`${site.issuePath.join('.')}\`, carrying the prescription`, () => {
-      expectTombstoneRefusal(site, site.migrateSentence);
-      // Attribution control: the same document WITHOUT the key is accepted, so
-      // the refusal above is attributable to the retired key and nothing else.
+    it(`\`${site.qualified}\` is gone — an authored value is accepted and STRIPPED, never materialized`, () => {
+      const parsed = site.schema.safeParse(site.authored);
+      // Bare deletion on a non-strict schema: no refusal, the value is dropped.
+      expect(parsed.success, `${site.qualified}: a non-strict schema strips, it does not refuse`).toBe(true);
+      if (!parsed.success) return;
+      const { block, leaf } = readAt(parsed.data, site.keyPath);
+      expect(block, `${site.qualified}: the enclosing block must still parse`).toBeDefined();
+      expect(block).not.toHaveProperty(leaf);
+      // Attribution control: the same document WITHOUT the key parses too, so
+      // the absence above is the deletion and not a broken parse.
       expect(site.schema.safeParse(site.wellFormed).success, `${site.qualified}: well-formed control must parse`).toBe(true);
     });
   }
 
-  it('refuses the envelope spelling too — both shapes the old schema accepted are gone', () => {
-    // One site per shape of the old input: the bare string (above, all seven)
-    // and the `{ dialect, source }` envelope the parse used to normalize to.
-    const envelopeSites: Array<[RetiredSite, unknown]> = [
+  it('the envelope spelling is dropped too — both shapes the old schema accepted are gone', () => {
+    const envelopeSites: Array<[DeletedSite, unknown]> = [
       [SITES[3]!, { ...SYNC_WELL_FORMED, schedule: CRON_ENVELOPE }],
       [SITES[0]!, { ...EXPORT_WELL_FORMED, schedule: { ...EXPORT_WELL_FORMED.schedule, cronExpression: CRON_ENVELOPE } }],
     ];
     for (const [site, authored] of envelopeSites) {
-      const issue = findIssue(site.schema, authored, site.issuePath, `${site.qualified} (envelope)`);
-      expect(issue?.code).toBe('invalid_type');
+      const parsed = site.schema.safeParse(authored);
+      expect(parsed.success, `${site.qualified} (envelope)`).toBe(true);
+      if (!parsed.success) continue;
+      const { block, leaf } = readAt(parsed.data, site.keyPath);
+      expect(block).not.toHaveProperty(leaf);
     }
   });
 
   for (const carrier of CARRIERS) {
-    it(`REJECTS \`${carrier.qualified}\` through \`${carrier.via}\`, at path \`${carrier.issuePath.join('.')}\``, () => {
-      expectTombstoneRefusal(carrier, carrier.qualified === 'connector.syncConfig.schedule');
+    it(`\`${carrier.qualified}\` is gone through \`${carrier.via}\` as well`, () => {
+      const parsed = carrier.schema.safeParse(carrier.authored);
+      expect(parsed.success, carrier.via).toBe(true);
+      if (!parsed.success) return;
+      const { block, leaf } = readAt(parsed.data, carrier.keyPath);
+      expect(block, `${carrier.via}: the enclosing block must still parse`).toBeDefined();
+      expect(block).not.toHaveProperty(leaf);
       expect(carrier.schema.safeParse(carrier.wellFormed).success, `${carrier.via}: well-formed control must parse`).toBe(true);
     });
   }
 
-  it('REJECTS `connector.syncConfig.schedule` through the registry-bound `/meta/connector` schema', () => {
-    // The registry lookup is the real `/meta` entry point — a future rebinding
-    // that pointed `connector` at some third shape would pass the carrier pin
-    // above and still accept the key in production.
-    const schema = getMetadataTypeSchema('connector');
-    expect(schema, 'no schema bound for `connector`').toBeDefined();
-    const authored = { ...CONNECTOR_WELL_FORMED, syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON } };
-    // The same envelope the carriers get — path, code and the prescription
-    // with its migrate sentence — so a rebinding to a shape that refuses for
-    // some OTHER reason (a strict unknown-key verdict, say) reads red here.
-    const issue = findIssue(schema!, authored, ['syncConfig', 'schedule'], 'connector via /meta/connector');
-    expect(issue?.code).toBe('invalid_type');
-    expect(issue?.path).toEqual(['syncConfig', 'schedule']);
-    expect(issue?.message).toMatch(/^`connector\.syncConfig\.schedule` was removed in @objectstack\/spec 17/);
-    expect(issue?.message).toMatch(HOUSE_MIGRATE_SENTENCE);
-    expect(schema!.safeParse(CONNECTOR_WELL_FORMED).success).toBe(true);
-  });
-
-  it('REJECTS it in `stack.connectors[]` — the real authoring path, and the reason this family converts', async () => {
-    const { ObjectStackSchema } = await import('./stack.zod');
-    const rejected = ObjectStackSchema.safeParse({
-      connectors: [{ ...CONNECTOR_WELL_FORMED, syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON } }],
-    });
-    expect(rejected.success).toBe(false);
-    if (rejected.success) return;
-    const issue = rejected.error.issues.find((i) => i.path.join('.') === 'connectors.0.syncConfig.schedule');
-    expect(issue, 'the refusal must surface through `connectors[]`').toBeDefined();
-    expect(issue!.code).toBe('invalid_type');
-    expect(issue!.path).toEqual(['connectors', 0, 'syncConfig', 'schedule']);
-    expect(issue!.message).toMatch(HOUSE_MIGRATE_SENTENCE);
-    // Positive control: the identical stack minus the retired key parses.
-    expect(ObjectStackSchema.safeParse({ connectors: [CONNECTOR_WELL_FORMED] }).success).toBe(true);
-  });
-});
-
-describe('[#16320] no-materialize: parsed documents carry none of the seven keys', () => {
-  it('on every base schema', () => {
-    for (const site of SITES) {
-      const parsed = site.schema.parse(site.wellFormed) as Record<string, unknown>;
-      let at: unknown = parsed;
-      for (const seg of site.issuePath.slice(0, -1)) at = (at as Record<string, unknown>)[seg as string];
-      expect(at, `${site.qualified}: the enclosing block must still parse`).toBeDefined();
-      expect(at).not.toHaveProperty(String(site.issuePath[site.issuePath.length - 1]));
-    }
-    // Attribution: the surviving defaults still materialize, so the absences
-    // above are the tombstones' doing and not a broken parse.
+  it('the surviving keys still materialize — the absences above are the deletions, not a dead parse', () => {
     expect(ScheduledExportSchema.parse(EXPORT_WELL_FORMED).schedule.timezone).toBe('America/New_York');
     expect(ScheduleExportRequestSchema.parse({ ...EXPORT_WELL_FORMED, schedule: {} }).schedule.timezone).toBe('UTC');
     expect(ScheduleStateSchema.parse(STATE_WELL_FORMED).timezone).toBe('UTC');
@@ -354,163 +249,160 @@ describe('[#16320] no-materialize: parsed documents carry none of the seven keys
   });
 
   it('`ScheduleState.cronExpression` was REQUIRED — the requiredness left with the key', () => {
-    // A tombstone accepts only absence, so a state that never declares a cron
-    // now parses; `timezone` / `status` / `nextRunAt` stay by the ruling (it
-    // retires the cron position, not the def) and keep their defaults.
     const parsed = ScheduleStateSchema.parse(STATE_WELL_FORMED);
     expect(parsed.status).toBe('active');
     expect(parsed.timezone).toBe('UTC');
-    // The other required keys are still required — the requiredness that
-    // left is exactly the retired key's.
+    // The other required keys are still required — the requiredness that left
+    // is exactly the deleted key's.
     expect(ScheduleStateSchema.safeParse({ id: 'sched_002', createdAt: '2026-01-01T00:00:00Z' }).success).toBe(false);
   });
 });
 
-describe('[#16320] the tsc channel: the input type of all seven keys is `never`', () => {
+describe('[#16320] the one manifest-reachable position — what an upgrading stack actually gets', () => {
+  it('`/meta/connector` (the registry-bound door) accepts the key and strips it', () => {
+    // The registry lookup is the real `/meta` entry point — a future rebinding
+    // that pointed `connector` at some third shape would pass the carrier pins
+    // above and still behave differently in production.
+    const schema = getMetadataTypeSchema('connector');
+    expect(schema, 'no schema bound for `connector`').toBeDefined();
+    const parsed = schema!.safeParse({ ...CONNECTOR_WELL_FORMED, syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON } });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect((parsed.data as { syncConfig: Record<string, unknown> }).syncConfig).not.toHaveProperty('schedule');
+    expect((parsed.data as { syncConfig: Record<string, unknown> }).syncConfig.batchSize).toBe(500);
+  });
+
+  it('`stack.connectors[]` — the real authoring path — accepts the key and strips it', async () => {
+    // ⚠️ THE CONSEQUENCE OF THE 直接删 RULING, pinned. `DataSyncConfig.schedule`
+    // is the only one of the seven a stack manifest reaches (`stack.zod.ts`
+    // `connectors[]` → `connector.zod.ts` `syncConfig` → `schedule`). With no
+    // tombstone the manifest still LOADS, and the cadence the author wrote is
+    // discarded without a word — the ADR-0104 silent-strip shape, accepted
+    // deliberately by the ruling.
+    const { ObjectStackSchema } = await import('./stack.zod');
+    const parsed = ObjectStackSchema.safeParse({
+      connectors: [{ ...CONNECTOR_WELL_FORMED, syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON } }],
+    });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    const connectors = (parsed.data as { connectors: Array<{ syncConfig: Record<string, unknown> }> }).connectors;
+    expect(connectors[0]!.syncConfig).not.toHaveProperty('schedule');
+    expect(connectors[0]!.syncConfig.strategy).toBe('incremental');
+    // Positive control: the identical stack minus the deleted key parses too.
+    expect(ObjectStackSchema.safeParse({ connectors: [CONNECTOR_WELL_FORMED] }).success).toBe(true);
+  });
+});
+
+describe('[#16320] the tsc channel: the seven keys are not in their input types', () => {
   it('fails tsc at every authoring site', () => {
     const sched: ScheduledExport = {
       ...EXPORT_WELL_FORMED,
-      // @ts-expect-error — `schedule.cronExpression` is a retiredKey() tombstone: its input type is `never`.
+      // @ts-expect-error — `schedule.cronExpression` was deleted; it is not a key of this type.
       schedule: { ...EXPORT_WELL_FORMED.schedule, cronExpression: CRON },
     };
     const request: ScheduleExportRequest = {
       ...EXPORT_WELL_FORMED,
-      // @ts-expect-error — the request body's twin tombstone.
+      // @ts-expect-error — the request body's twin position, deleted with it.
       schedule: { ...EXPORT_WELL_FORMED.schedule, cronExpression: CRON },
     };
     const state: ScheduleState = {
       ...STATE_WELL_FORMED,
-      // @ts-expect-error — `cronExpression` is a retiredKey() tombstone (and no longer required).
+      // @ts-expect-error — `cronExpression` was deleted (and was required before).
       cronExpression: CRON,
     };
     const sync: DataSyncConfig = {
       ...SYNC_WELL_FORMED,
-      // @ts-expect-error — `schedule` is a retiredKey() tombstone.
+      // @ts-expect-error — `schedule` was deleted.
       schedule: CRON,
     };
     const connector: Connector = {
       ...CONNECTOR_WELL_FORMED,
-      // @ts-expect-error — the tombstone reaches through the carrier.
+      // @ts-expect-error — the deletion reaches through the carrier.
       syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON },
     };
     const warmup: CacheWarmup = {
       ...WARMUP_WELL_FORMED,
-      // @ts-expect-error — `schedule` is a retiredKey() tombstone.
+      // @ts-expect-error — `schedule` was deleted.
       schedule: CRON,
     };
     const cache: DistributedCacheConfig = {
       ...CACHE_WELL_FORMED,
-      // @ts-expect-error — the tombstone reaches through the carrier.
+      // @ts-expect-error — the deletion reaches through the carrier.
       warmup: { ...WARMUP_WELL_FORMED, schedule: CRON },
     };
     const backup: BackupConfig = {
       ...BACKUP_WELL_FORMED,
-      // @ts-expect-error — `schedule` is a retiredKey() tombstone.
+      // @ts-expect-error — `schedule` was deleted.
       schedule: CRON,
     };
     const plan: DisasterRecoveryPlan = {
       ...DR_PLAN_WELL_FORMED,
-      // @ts-expect-error — `testing.schedule` is a retiredKey() tombstone.
+      // @ts-expect-error — `testing.schedule` was deleted.
       testing: { ...DR_TESTING_WELL_FORMED, schedule: CRON },
     };
-    // The literals above are typed, so tsc is the assertion; at runtime the
-    // same values are refused, which keeps this case from being vacuous.
-    for (const [schema, value] of [
-      [ScheduledExportSchema, sched],
-      [ScheduleExportRequestSchema, request],
-      [ScheduleStateSchema, state],
-      [DataSyncConfigSchema, sync],
-      [ConnectorSchema, connector],
-      [CacheWarmupSchema, warmup],
-      [DistributedCacheConfigSchema, cache],
-      [BackupConfigSchema, backup],
-      [DisasterRecoveryPlanSchema, plan],
-    ] as Array<[ZodTypeAny, unknown]>) {
-      expect(schema.safeParse(value).success).toBe(false);
+    // tsc is the assertion above. At runtime the same values parse and lose the
+    // key, which is what keeps this case from being vacuous — and is precisely
+    // why the tsc channel is the ONLY loud one the bare deletion leaves.
+    for (const [schema, value, keyPath] of [
+      [ScheduledExportSchema, sched, ['schedule', 'cronExpression']],
+      [ScheduleExportRequestSchema, request, ['schedule', 'cronExpression']],
+      [ScheduleStateSchema, state, ['cronExpression']],
+      [DataSyncConfigSchema, sync, ['schedule']],
+      [ConnectorSchema, connector, ['syncConfig', 'schedule']],
+      [CacheWarmupSchema, warmup, ['schedule']],
+      [DistributedCacheConfigSchema, cache, ['warmup', 'schedule']],
+      [BackupConfigSchema, backup, ['schedule']],
+      [DisasterRecoveryPlanSchema, plan, ['testing', 'schedule']],
+    ] as Array<[ZodTypeAny, unknown, (string | number)[]]>) {
+      const parsed = schema.safeParse(value);
+      expect(parsed.success).toBe(true);
+      if (!parsed.success) continue;
+      const { block, leaf } = readAt(parsed.data, keyPath);
+      expect(block).not.toHaveProperty(leaf);
     }
   });
 });
 
-describe('[#16320] ADR-0087 registration — one shape per family', () => {
-  it('declares all seven sites under major 18', () => {
-    for (const site of SITES) {
-      expect(RETIRED_KEYS_BY_MAJOR[18], `${site.registered} must be declared`).toContain(site.registered);
+describe('[#16320] 直接删 — the ADR-0087 surfaces carry NOTHING for these seven', () => {
+  const registered = new Set(Object.values(RETIRED_KEYS_BY_MAJOR).flatMap((keys) => [...keys]));
+
+  it('no `RETIRED_KEYS_BY_MAJOR` entry names any of the seven, at any major', () => {
+    for (const site of SITES) expect(registered.has(site.registered), site.registered).toBe(false);
+    // Lit control — the table is populated and this reader can see it. A key
+    // retired the tombstone way on the very same connector schema.
+    expect(registered.has('integration/Connector:errorMapping')).toBe(true);
+    // Dark control — a fabricated spelling must read absent, so the assertions
+    // above are membership readings and not a broken lookup.
+    expect(registered.has('integration/DataSyncConfig:noSuchKeyEverExisted')).toBe(false);
+  });
+
+  it('no D2 conversion covers them — not by id, and not by surface', () => {
+    const conversions = Object.values(CONVERSIONS_BY_MAJOR).flatMap((entries) => [...entries]);
+    const ids = new Set(conversions.map((c) => c.id));
+    for (const id of NEVER_REGISTERED_IDS) expect(ids.has(id), id).toBe(false);
+    const surfaces = conversions.map((c) => c.surface);
+    expect(surfaces.some((s) => s.includes('syncConfig.schedule'))).toBe(false);
+    expect(surfaces.some((s) => s.includes('cronExpression'))).toBe(false);
+    // Lit control — the registry really is loaded and its surfaces really are
+    // readable: the sibling connector retirement that DID convert is here.
+    expect(ids.has('connector-error-mapping-removed')).toBe(true);
+    expect(surfaces.some((s) => s.includes('errorMapping'))).toBe(true);
+    // Dark control.
+    expect(ids.has('no-such-conversion-ever-existed')).toBe(false);
+  });
+
+  it('no D3 semantic entry and no step-18 chain reference survives', () => {
+    const step18 = MIGRATIONS_BY_MAJOR[18];
+    expect(step18, 'step 18 must exist').toBeDefined();
+    for (const id of NEVER_REGISTERED_IDS) {
+      expect(step18!.conversionIds.includes(id), `step18.conversionIds must not name ${id}`).toBe(false);
     }
-  });
-
-  it('the connector family converts (D2, retired from the load path) and is wired into the step-18 chain', () => {
-    const conversion = CONVERSIONS_BY_MAJOR[18]!.find((c) => c.id === CONVERSION_ID);
-    expect(conversion, `${CONVERSION_ID} must exist`).toBeDefined();
-    expect(conversion!.toMajor).toBe(18);
-    // The tombstone owns the live refusal; the conversion replays stored rows
-    // and feeds `os migrate meta` — which is what makes the migrate sentence on
-    // the connector prescription TRUE of the tool.
-    expect(conversion!.retiredFromLoadPath).toBe(true);
-    expect(conversion!.surface).toBe('connector.syncConfig.schedule');
-    // One notice per connector that authored the key — the fixture carries
-    // exactly one such connector beside two that keep their identity.
-    expect(conversion!.fixture.expectedNotices).toBe(1);
-    const step = MIGRATIONS_BY_MAJOR[18];
-    expect(step).toBeDefined();
-    expect(step!.conversionIds, `${CONVERSION_ID} must be graduated into the step-18 chain`).toContain(CONVERSION_ID);
-  });
-
-  it('the connector family ALSO carries the D3 twin the ruling names, with the population reading on projecting fields', () => {
-    // #15954, literally: "`connectors[].syncConfig.schedule` is the one
-    // stack-collection member: its D3 entry says so and names the measured
-    // zero in-repo authors and the NOT-MEASURED out-of-repo population." The
-    // strip is the D2's; what no conversion can carry — the population this
-    // repo could not measure — lives on `reason` / `acceptanceCriteria`, the
-    // fields `spec-changes.json`, the upgrade guide and `os migrate meta`
-    // project. A first cut of this pin asserted the twin's ABSENCE (mechanical
-    // strip ⇒ no residue, the `connector-error-mapping-removed` shape); that
-    // was a deviation from the ruling's letter, and it inverts here.
-    const step = MIGRATIONS_BY_MAJOR[18]!;
-    const twin = step.semantic.find((s) => s.id === SEMANTIC_TWIN_ID);
-    expect(twin, `${SEMANTIC_TWIN_ID} must be wired into the step-18 chain`).toBeDefined();
-    expect(twin!.surface).toMatch(/connectors\[\]\.syncConfig\.schedule/);
-    // The wording IS the contract here — the ruling names what the entry says.
-    expect(twin!.reason).toMatch(/ZERO in-repo authors/);
-    expect(twin!.reason).toMatch(/NOT MEASURED/);
-    expect(twin!.acceptanceCriteria).toMatch(/by hand/);
-    // It names its D2 half, so a reader of either finds the other.
-    expect(twin!.replacement).toContain(CONVERSION_ID);
-    // Exactly one twin — the filter that once asserted emptiness now asserts the singleton.
-    expect(step.semantic.filter((s) => /sync-schedule|connector-sync/.test(s.id)).map((s) => s.id)).toEqual([SEMANTIC_TWIN_ID]);
-  });
-
-  it('replays the connector strip over a stored 17.x `connector` row — the seam `retiredFromLoadPath` exists for', () => {
-    // The live parse refuses (the tombstone); a row at rest has no author to
-    // teach, so the stored seam replays the FULL chain, retired entries
-    // included (ADR-0087 addendum). This is the family's own evidence for
-    // that seam, beside the object / action rows `stored.test.ts` pins.
-    const row = { ...CONNECTOR_WELL_FORMED, syncConfig: { ...SYNC_WELL_FORMED, schedule: CRON } };
-    const notices: ConversionNotice[] = [];
-    const out = applyConversionsToStoredItem('connector', row, { onNotice: (n) => notices.push(n) });
-    expect(out.syncConfig).toEqual(SYNC_WELL_FORMED);
-    expect(out).not.toHaveProperty(['syncConfig', 'schedule']);
-    expect(notices.map((n) => n.conversionId)).toContain(CONVERSION_ID);
-    // The converted row is what the door now accepts — the seam hands the live schema a clean row.
-    expect(DeclarativeConnectorEntrySchema.safeParse(out).success).toBe(true);
-    // A row that never authored the key keeps its identity (copy-on-write).
-    expect(applyConversionsToStoredItem('connector', CONNECTOR_WELL_FORMED)).toEqual(CONNECTOR_WELL_FORMED);
-  });
-
-  it('the other four families take a D3 semantic entry each, and NO D2 conversion', () => {
-    const step = MIGRATIONS_BY_MAJOR[18]!;
-    for (const id of SEMANTIC_IDS) {
-      const entry = step.semantic.find((s) => s.id === id);
-      expect(entry, `${id} must be wired into the step-18 chain`).toBeDefined();
-      expect(entry!.reason.length).toBeGreaterThan(0);
-      expect(entry!.acceptanceCriteria.length).toBeGreaterThan(0);
-      // The route is stated where the next reader looks: why D3 semantic and
-      // not D2 — no stack seam (the additionalTypes precedent).
-      expect(entry!.reason).toMatch(/not a D2 conversion/);
-    }
-    // Deliberately no mechanical conversion for any of them — a transform
-    // with no seam that ever runs is the predicted failure this pin closes.
-    const strayConversions = step.conversionIds.filter((id) => /export|schedule-state|warmup|backup|disaster/.test(id));
-    expect(strayConversions).toEqual([]);
-    expect(CONVERSIONS_BY_MAJOR[18]!.filter((c) => /export|schedule-state|warmup|backup|disaster/.test(c.id))).toEqual([]);
+    const semanticIds = new Set(Object.values(MIGRATIONS_BY_MAJOR).flatMap((step) => step.semantic.map((s) => s.id)));
+    for (const id of NEVER_REGISTERED_IDS) expect(semanticIds.has(id), id).toBe(false);
+    // Lit control — the semantic table is loaded and this reader sees it.
+    expect(semanticIds.has('connector-error-mapping-removed') || semanticIds.size > 0).toBe(true);
+    expect(step18!.conversionIds.includes('connector-error-mapping-removed')).toBe(true);
+    // Dark control.
+    expect(semanticIds.has('no-such-semantic-entry-ever-existed')).toBe(false);
   });
 });

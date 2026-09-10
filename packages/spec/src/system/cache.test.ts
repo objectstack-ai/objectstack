@@ -239,7 +239,7 @@ describe('CacheWarmupSchema', () => {
   });
 
   it('still accepts the `scheduled` strategy value — the `schedule` cron key beside it is retired', () => {
-    // `schedule` is a retiredKey() tombstone (#16320); the refusal is pinned in
+    // `schedule` was deleted outright (#16320); the strip is pinned in
     // `cron-typed-positions-retirement.test.ts`. The enum member is a value the
     // ruling did not name and stays exactly as inert as it was.
     const result = CacheWarmupSchema.parse({

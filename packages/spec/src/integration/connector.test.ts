@@ -235,8 +235,8 @@ describe('DataSyncConfigSchema', () => {
     const config: DataSyncConfig = {
       strategy: 'incremental',
       direction: 'bidirectional',
-      // `schedule` is a retiredKey() tombstone (#16320) — the refusal is
-      // pinned in `cron-typed-positions-retirement.test.ts`.
+      // `schedule` was deleted outright (#16320) — the strip is pinned in
+      // `cron-typed-positions-retirement.test.ts`.
       realtimeSync: true,
       conflictResolution: 'latest_wins',
       batchSize: 1000,

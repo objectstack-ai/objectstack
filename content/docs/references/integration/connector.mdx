@@ -282,7 +282,6 @@ Circuit breaker configuration
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>` | optional (default: `"incremental"`) | Synchronization strategy |
 | **direction** | `Enum<'import' \| 'export' \| 'bidirectional'>` | optional (default: `"import"`) | Sync direction |
-| **schedule** | `never` | optional | [REMOVED] `connector.syncConfig.schedule` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no engine schedules a connector sync, so the cron was parsed and never fired. Delete the key; sync on a cadence is a `job` (`Job.schedule.expression`, the one cron slot the platform evaluates) whose handler drives the connector, and `realtimeSync` is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **realtimeSync** | `boolean` | optional (default: `false`) | Enable real-time sync |
 | **timestampField** | `string` | optional | Field to track last modification time |
 | **conflictResolution** | `Enum<'source_wins' \| 'target_wins' \| 'latest_wins' \| 'manual'>` | optional (default: `"latest_wins"`) | Conflict resolution strategy |
@@ -630,7 +629,6 @@ Connector type
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>` | optional (default: `"incremental"`) | Synchronization strategy |
 | **direction** | `Enum<'import' \| 'export' \| 'bidirectional'>` | optional (default: `"import"`) | Sync direction |
-| **schedule** | `never` | optional | [REMOVED] `connector.syncConfig.schedule` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no engine schedules a connector sync, so the cron was parsed and never fired. Delete the key; sync on a cadence is a `job` (`Job.schedule.expression`, the one cron slot the platform evaluates) whose handler drives the connector, and `realtimeSync` is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **realtimeSync** | `boolean` | optional (default: `false`) | Enable real-time sync |
 | **timestampField** | `string` | optional | Field to track last modification time |
 | **conflictResolution** | `Enum<'source_wins' \| 'target_wins' \| 'latest_wins' \| 'manual'>` | optional (default: `"latest_wins"`) | Conflict resolution strategy |
@@ -768,7 +766,6 @@ Connector type
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>` | optional (default: `"incremental"`) | Synchronization strategy |
 | **direction** | `Enum<'import' \| 'export' \| 'bidirectional'>` | optional (default: `"import"`) | Sync direction |
-| **schedule** | `never` | optional | [REMOVED] `connector.syncConfig.schedule` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no engine schedules a connector sync, so the cron was parsed and never fired. Delete the key; sync on a cadence is a `job` (`Job.schedule.expression`, the one cron slot the platform evaluates) whose handler drives the connector, and `realtimeSync` is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **realtimeSync** | `boolean` | optional (default: `false`) | Enable real-time sync |
 | **timestampField** | `string` | optional | Field to track last modification time |
 | **conflictResolution** | `Enum<'source_wins' \| 'target_wins' \| 'latest_wins' \| 'manual'>` | optional (default: `"latest_wins"`) | Conflict resolution strategy |

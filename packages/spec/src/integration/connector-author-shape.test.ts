@@ -435,8 +435,8 @@ describe('[#5515] the bare `Connector` is the author shape; `ConnectorParsed` is
   // The literal used to carry `syncConfig: { schedule: '*/15 * * * *' }` as
   // well — the one key whose TYPE differed between the sides (a bare cron
   // string in, the `{ dialect, source }` envelope out), and the half of this
-  // block that asserted `dialect`. #16320 retired that key (ADR-0049; its
-  // refusal is owned by `cron-typed-positions-retirement.test.ts`), and no
+  // block that asserted `dialect`. #16320 deleted that key (ADR-0049; its
+  // absence is owned by `cron-typed-positions-retirement.test.ts`), and no
   // other key on `Connector` transforms its type at parse — so the flip is
   // measured on the defaults alone, which were always the larger half.
   const literal = `{

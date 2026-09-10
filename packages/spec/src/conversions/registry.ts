@@ -8968,117 +8968,6 @@ const tursoConfigTimeoutToTimeoutMs: MetadataConversion = {
   },
 };
 
-/**
- * `connector.syncConfig.schedule` — RETIRED (ADR-0049 enforce-or-remove;
- * maintainer ruling 2026-09-06 on #15954, decision batch #56, option A — retire
- * — per family; executed by #16320). The cron slot on connector-attached sync
- * was declared, parsed into the `{ dialect: 'cron', source }` envelope and read
- * by NOTHING: `syncConfig` has no reader outside `packages/spec`, no engine
- * schedules a connector sync, and `@objectstack/formula`'s cronEngine has zero
- * consumers outside its own package (the ADR-0058 D7 ledger row
- * `cron-declared-unwired` recorded it `unevaluated`). An author who wrote
- * `schedule: '0 *\/15 * * *'` held a fifteen-minute sync the platform never ran.
- *
- * A pure lossless delete: the key never had an effect to preserve. The
- * `DataSyncConfig` def and every other key on it stay.
- *
- * WHY THIS ONE OF THE SEVEN cron-typed positions on the card gets a D2
- * conversion and its six siblings do not: it is the only one a stack manifest
- * reaches — `stack.zod.ts` `connectors: z.array(DeclarativeConnectorEntrySchema)`
- * → `connector.zod.ts` `syncConfig: DataSyncConfigSchema` — and a published
- * connector row lands whole in `sys_metadata`, so the chain has a seam that
- * sees the key (the `connector-error-mapping-removed` precedent). The other
- * six (export API bodies, runtime schedule state, cache / DR operator config)
- * are no stack collection member and no metadata type; a conversion there
- * would be a transform with no seam that ever runs, so they take D3 semantic
- * entries and their prescriptions carry no `os migrate meta` sentence.
- *
- * This family carries a D3 twin as well, `connector-sync-schedule-retired`,
- * per the #15954 ruling's letter ("its D3 entry says so and names the
- * measured zero in-repo authors and the NOT-MEASURED out-of-repo
- * population"): the strip below is mechanical, but the cadence the author
- * meant has no mechanical destination, and the author population outside
- * this repo is NOT MEASURED — the twin carries both on the fields the upgrade
- * guide, `spec-changes.json` and `os migrate meta` project; this comment
- * projects nowhere.
- *
- * `retiredFromLoadPath`: `DataSyncConfigSchema` tombstones the key
- * (`retiredKey`, tsc `never` + the parse-time prescription — the
- * `errorMapping` posture on the same connector), so a live parse refuses
- * loudly rather than absorbing a cadence the author believes is configured.
- * This entry exists so stored 17.x rows replay clean
- * (`applyConversionsToStoredItem`) and `os migrate meta --from 17` lists the
- * mechanical edits for author sources. One notice per connector that authored
- * the key; a connector whose `syncConfig` never carried it, or that has no
- * `syncConfig` at all, keeps its identity (copy-on-write).
- */
-const connectorSyncScheduleRemoved: MetadataConversion = {
-  id: 'connector-sync-schedule-removed',
-  toMajor: 18,
-  retiredFromLoadPath: true,
-  surface: 'connector.syncConfig.schedule',
-  summary:
-    "connector key 'syncConfig.schedule' removed (#16320, ADR-0049 — the cron slot on "
-    + 'connector-attached sync was parsed and never evaluated: no engine schedules a connector '
-    + "sync, so the cadence an author declared never fired. The `DataSyncConfig` def and every "
-    + 'other key on it stay; a sync on a cadence is a `job` whose handler drives the connector. '
-    + 'The residue — the cadence you meant, and the out-of-repo author population this repo '
-    + 'could not measure — is the D3 twin `connector-sync-schedule-retired`)',
-  apply(stack, emit) {
-    return mapCollection(stack, 'connectors', (c, path) => {
-      const syncConfig = c.syncConfig;
-      if (!isDict(syncConfig)) return c;
-      const stripped = stripKeys(syncConfig, ['schedule'], emit, `${path}.syncConfig`);
-      return stripped === syncConfig ? c : { ...c, syncConfig: stripped };
-    });
-  },
-  fixture: {
-    before: {
-      connectors: [
-        {
-          name: 'sap_erp',
-          label: 'SAP ERP',
-          type: 'saas',
-          // The measured author shape: the bare cron string the schema used to
-          // wrap into the envelope, beside keys that stay.
-          syncConfig: {
-            strategy: 'incremental',
-            direction: 'bidirectional',
-            schedule: '0 */15 * * *',
-            realtimeSync: true,
-            batchSize: 500,
-          },
-        },
-        // A connector whose syncConfig never authored the key keeps its
-        // identity — the copy-on-write contract `stripKeys` / `mapCollection`
-        // are built on.
-        { name: 'warehouse_sync', label: 'Warehouse Sync', type: 'saas', syncConfig: { direction: 'import' } },
-        // And one with no syncConfig at all.
-        { name: 'payments_api', label: 'Payments API', type: 'api' },
-      ],
-    },
-    after: {
-      connectors: [
-        {
-          name: 'sap_erp',
-          label: 'SAP ERP',
-          type: 'saas',
-          syncConfig: {
-            strategy: 'incremental',
-            direction: 'bidirectional',
-            realtimeSync: true,
-            batchSize: 500,
-          },
-        },
-        { name: 'warehouse_sync', label: 'Warehouse Sync', type: 'saas', syncConfig: { direction: 'import' } },
-        { name: 'payments_api', label: 'Payments API', type: 'api' },
-      ],
-    },
-    // One notice: the one connector that authored the key.
-    expectedNotices: 1,
-  },
-};
-
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -9174,7 +9063,6 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     connectorHealthAndTriggerDurationsUnitInKey,
     memoryPersistenceAutoSaveIntervalToMs,
     tursoConfigTimeoutToTimeoutMs,
-    connectorSyncScheduleRemoved,
   ],
 };
 

@@ -283,7 +283,6 @@
     "automation/ScheduleState:consecutiveFailures",
     "automation/ScheduleState:createdAt",
     "automation/ScheduleState:createdBy",
-    "automation/ScheduleState:cronExpression [RETIRED]",
     "automation/ScheduleState:endDate",
     "automation/ScheduleState:flowName",
     "automation/ScheduleState:id",

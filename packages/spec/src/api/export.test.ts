@@ -435,8 +435,8 @@ describe('ScheduledExportSchema', () => {
       format: 'csv',
       fields: ['name', 'email', 'status'],
       filter: { status: 'active' },
-      // `schedule.cronExpression` is a retiredKey() tombstone (#16320) — the
-      // refusal is pinned in `cron-typed-positions-retirement.test.ts`.
+      // `schedule.cronExpression` was deleted outright (#16320) — the strip is
+      // pinned in `cron-typed-positions-retirement.test.ts`.
       schedule: {
         timezone: 'America/New_York',
       },
@@ -632,8 +632,8 @@ describe('ScheduleExportRequestSchema', () => {
       object: 'account',
       format: 'csv',
       fields: ['name', 'email'],
-      // `schedule.cronExpression` is a retiredKey() tombstone (#16320) — the
-      // refusal is pinned in `cron-typed-positions-retirement.test.ts`.
+      // `schedule.cronExpression` was deleted outright (#16320) — the strip is
+      // pinned in `cron-typed-positions-retirement.test.ts`.
       schedule: {
         timezone: 'America/New_York',
       },
