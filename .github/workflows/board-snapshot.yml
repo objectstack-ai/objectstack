@@ -1,0 +1,250 @@
+name: Board Snapshot
+
+# The standing caller for `scripts/pm/board-snapshot.mjs` (#17390).
+#
+# ## Why a scheduled backup, and why it lands on a branch
+#
+# Three fleet accounts were suspended in two months and the appeals are
+# unanswered. #17374 F3 measured what a suspension destroys: every issue, pull
+# request and comment the account authored — while every branch and commit
+# survives, because those belong to the repository rather than to a user. The
+# board IS the fleet's state by rule (pm-dispatch SKILL.md, 全体座位的不变量:
+# 「GitHub 之外永不维护任何跟踪状态」), so today one suspension erases state that
+# nothing else holds; six cards, one of them a p1 security decision, are gone.
+#
+# The maintainer's answer, verbatim and untranslated, in chat on 2026-09-10:
+# 「或者用 ci 写个定时任务备份？」 — this file is that scheduled task. It runs as
+# `github-actions[bot]`, which is not a fleet account and cannot be suspended
+# with one, and it writes to an ORPHAN BRANCH of this same repository: no second
+# repo, no second credential, and a branch is precisely the thing a suspension
+# leaves standing.
+#
+# ## An archive is not a tracker — the one-board rule still holds
+#
+# ⛔ Nothing reads `board-archive` for state. Not a seat, not a patrol, not a
+# gate, not a query; every reading of the board still goes to GitHub. The
+# archive answers exactly one question, after a loss: what did the record say?
+# The script it runs has NO write path to GitHub in any mode — two of its
+# self-test cases read its own source and hold that structurally — and
+# `--restore` PRINTS a recreate payload for a seat to post, or for nobody to.
+#
+# ## Budget, and why a run may stop before it is finished
+#
+# `GITHUB_TOKEN` is limited to 1,000 requests per hour PER REPOSITORY, and this
+# job is not that budget's only caller (the half-state patrol and the closed-card
+# sweep share it). A first full snapshot of this board — several thousand
+# numbers, each with a comment thread — does not fit one run and must not try, so
+# the script stops at its own `--max-requests` ceiling, writes a resume cursor
+# into the manifest and exits 0. The next scheduled run continues from that
+# cursor. Four runs a day walk the backlog in a few days without ever exceeding
+# the budget, and a steady-state incremental run costs a few hundred requests.
+#
+# ⛔ On a real rate-limit refusal the script does NOT retry: it stops, writes the
+# cursor and exits non-zero with the reset time. A loop against a spent budget
+# starves every other automated caller in the repository for the rest of the hour.
+#
+# ## The `pull_request` trigger, and what it is allowed to do
+#
+# Every patrol in this tree exercises itself on the pull requests that change
+# it, and that is not a style preference: `check:pm-dispatch-gates` pins that NO
+# discovered gate family is reachable only through a schedule, so a workflow
+# whose script CI never runs at PR time reddens that gate by existing. A first
+# draft of this file omitted the trigger to keep PR-time cost at zero and was
+# refused by exactly that pin.
+#
+# So a pull_request run DOES execute the snapshot on a real runner — the
+# transport, the flags, the page walk and the rendering, proven where they will
+# actually run — and it writes NOTHING: no archive branch is checked out, the
+# run is `--dry-run` into the runner's temp dir, and the commit step is skipped.
+# It is also capped hard (`--limit`, `--max-requests` below), because the
+# repository's request budget is shared with the half-state patrol and the
+# closed-card sweep and must not be spent per push. ⛔ A pull request must never
+# write to the board OR to the archive.
+#
+# The offline half is held for free beside it: `check:pm-board-snapshot` runs the
+# script's 70-case `--self-test` inside the required `Lint & Repo Gates` job,
+# which has no paths filter (`check:self-test-wired` is what requires that step
+# to exist). This job runs the same self-test again before it touches the
+# archive, so a broken tool fails loudly instead of committing a broken backup.
+#
+# ## Adopting this in a sibling repo
+#
+# Copy FOUR files, unchanged: `scripts/pm/board-snapshot.mjs`,
+# `scripts/pm/check-half-states.mjs` (the archiver imports its proxy-re-exec plan
+# and its repo resolver), `scripts/invoked-as.mjs` (imported by both) and this
+# file. A repo that has already adopted the half-state patrol has the middle two.
+# ⛔ Do not shorten this list from memory — the imports decide it, not this
+# comment, and the patrol's own adopt list was wrong for months in exactly that
+# way, which installed a dead sweeper that failed before its first predicate.
+#
+# There is nothing to configure. The board archived is `github.repository`,
+# passed explicitly below, and the script REFUSES its resolver's default rather
+# than falling back to one: a copy of this file quietly archiving the repo it was
+# copied FROM would produce a complete, well-formed, green archive of the wrong
+# board.
+
+on:
+  schedule:
+    # The half-state patrol's cadence, deliberately: four times a day, six hours
+    # apart, at :37 past the hour — offset from the top of the hour where the
+    # hourly triage Routine runs, so the two do not contend for the same minute
+    # of the shared request budget. Six-hourly is the loss window this accepts:
+    # a card created and destroyed inside one interval was never archived, and
+    # nothing cheaper than a webhook closes that, which is a different card.
+    - cron: '37 1,7,13,19 * * *'
+  workflow_dispatch: {}
+  # Changes to the archiver itself get exercised before they merge. The paths
+  # name every file the run actually loads — the archiver, the module it imports
+  # its proxy plan and repo resolver from, the entry-guard helper both import,
+  # and this file. An undeclared dependency is one a change can break without
+  # this trigger firing, which is the same defect the adopt list above warns
+  # about, one layer along.
+  pull_request:
+    paths:
+      - 'scripts/pm/board-snapshot.mjs'
+      - 'scripts/pm/check-half-states.mjs'
+      - 'scripts/invoked-as.mjs'
+      - '.github/workflows/board-snapshot.yml'
+
+# Least privilege. `contents: write` is for the archive BRANCH and nothing else;
+# the two read scopes are what the snapshot reads. ⛔ This job never writes to
+# `main` and never writes to any issue, pull request, label or comment — there is
+# no scope here that would let it, which is the mechanical half of the one-board
+# rule stated above.
+permissions:
+  contents: write
+  issues: read
+  pull-requests: read
+
+# One archiver at a time. Two runs racing the same branch would have the loser
+# push a snapshot built from a stale checkout, silently discarding the winner's.
+concurrency:
+  group: board-snapshot
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    name: Snapshot the board to the archive branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # No `pnpm install`: the archiver imports only `node:` builtins, global
+      # `fetch`, and two repo-local modules — no npm dependency, so installing
+      # the workspace here would buy nothing and would give a scheduled backup a
+      # lockfile it could fail on.
+      - name: The tool's own cases, before it touches the archive
+        run: node scripts/pm/board-snapshot.mjs --self-test
+
+      # The archive branch is an ORPHAN: it shares no history with `main`, so a
+      # checkout of it carries the archive and nothing else. First run creates it
+      # locally; the push below is what publishes it.
+      - name: Check out or create the archive branch
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin '+refs/heads/board-archive:refs/remotes/origin/board-archive' || true
+          if git rev-parse --verify --quiet refs/remotes/origin/board-archive > /dev/null; then
+            git worktree add archive -b board-archive refs/remotes/origin/board-archive
+            echo "archive branch exists; checked out at $(git -C archive rev-parse --short HEAD)"
+          else
+            git worktree add --detach archive HEAD
+            git -C archive checkout --orphan board-archive
+            git -C archive rm -rf --quiet .
+            # An orphan that still carries main's tree would commit the whole
+            # repository into the archive branch on its first run, so this is
+            # asserted rather than assumed.
+            tracked=$(git -C archive ls-files | wc -l)
+            if [ "$tracked" != "0" ]; then
+              echo "::error::the new orphan branch still tracks $tracked file(s) from main; refusing to seed the archive with them."
+              exit 1
+            fi
+            echo "archive branch created as an orphan (first run)"
+          fi
+
+      - name: Run the snapshot
+        id: snapshot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # WHICH board this run archives: the repo this workflow is installed
+          # in, always. A copy of this file cannot end up archiving the repo it
+          # was copied FROM, and the script refuses to guess when this is unset.
+          PM_SWEEP_REPO: ${{ github.repository }}
+          # A pull_request run PROVES the tool on a runner and writes nothing:
+          # the temp dir has no manifest, so it is a full read, capped to a
+          # handful of numbers and a budget the shared quota will not notice.
+          # ⛔ The two spellings differ in WHERE they write and in nothing else,
+          # so what a PR exercises is the path a schedule takes.
+          SNAPSHOT_ARGS: ${{ github.event_name == 'pull_request' && '--out=board --dry-run --limit=5 --max-requests=25' || '--out=archive/board' }}
+        run: |
+          set +e
+          node scripts/pm/board-snapshot.mjs $SNAPSHOT_ARGS \
+            > "$RUNNER_TEMP/snapshot.md" 2> "$RUNNER_TEMP/snapshot.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between. `cmd | tail` reports the PIPE's
+          # status — `tail` essentially never fails, so a clean snapshot and a
+          # failed count check would both read as 0, and this script's exit
+          # register (0 / 2 / 3 / 4) is the whole point of having one.
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "board-snapshot exited $code"
+          cat "$RUNNER_TEMP/snapshot.md" || true
+          cat "$RUNNER_TEMP/snapshot.err" >&2 || true
+
+      # Land the truth, THEN raise the alarm: whatever the snapshot managed to
+      # read is committed before the run is allowed to go red, so a failing count
+      # check never costs the records the same run archived.
+      - name: Commit and push the archive
+        id: commit
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          if [ -z "$(git -C archive status --porcelain)" ]; then
+            echo "committed=none" >> "$GITHUB_OUTPUT"
+            echo "no change on the board since the last run — nothing committed."
+            exit 0
+          fi
+          git -C archive add -A
+          files=$(git -C archive diff --cached --name-only | wc -l)
+          git -C archive \
+            -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -m "board snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                     -m "run ${{ github.run_id }} · ${files} file(s) changed"
+          git -C archive push origin board-archive
+          echo "committed=${files}" >> "$GITHUB_OUTPUT"
+          echo "pushed ${files} changed file(s) to board-archive"
+
+      - name: Publish the run to the summary
+        if: always()
+        run: |
+          {
+            echo "### Board snapshot — exit ${{ steps.snapshot.outputs.exit_code }}"
+            echo
+            echo "Committed: ${{ steps.commit.outputs.committed || 'nothing (the run stopped before the commit step)' }}"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/snapshot.md" 2>/dev/null || echo '(no report produced)'
+            echo '```'
+            echo
+            echo '<details><summary>stderr</summary>'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/snapshot.err" 2>/dev/null || true
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail the run if the snapshot did not read the board
+        if: steps.snapshot.outputs.exit_code != '0'
+        run: |
+          echo "::error::board-snapshot exited ${{ steps.snapshot.outputs.exit_code }} — 2 is a failed count check (the archive and the board disagree about how many open issues exist), 3 is a prerequisite the runner did not meet, 4 is a rate-limit stop with a resume cursor written. Whatever was read HAS been committed; see this run's summary."
+          exit 1
