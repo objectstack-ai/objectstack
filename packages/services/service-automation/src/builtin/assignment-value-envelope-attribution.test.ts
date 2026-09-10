@@ -248,7 +248,7 @@ describe('the refusal is the SHARED one — registration and evaluation stay one
     engine.registerFlow('assign_null', flow as any);
     const result = await engine.execute('assign_null', {} as any);
     expect(result.success).toBe(true);
-    expect(result.output?.digest ?? null).toBeNull();
+    expect((result.output as Record<string, unknown> | undefined)?.digest ?? null).toBeNull();
   });
 });
 
