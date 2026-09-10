@@ -2036,6 +2036,112 @@ describe('GroupingFieldSchema', () => {
 
     expect(() => GroupingFieldSchema.parse(field)).not.toThrow();
   });
+
+  // ==========================================================================
+  // [#17360] A padded `field` is REFUSED, not trimmed
+  // (objectui#7347 ruling C, decision batch #110 item 5 — refuse at the producer)
+  // ==========================================================================
+  //
+  // The defect: `field` was a bare `z.string()`, so `'  business_unit  '` was
+  // valid authored metadata. objectui measured that its projection harvester
+  // TRIMS the name for `$select` while three renderers bucket rows by the RAW
+  // name (plugin-grid `usableGroupingFields`, plugin-list
+  // `ObjectGallery.groupedItems`, plugin-kanban `effectiveSwimlaneField`), so
+  // the server answers under `business_unit`, every per-row lookup reads
+  // `undefined`, and the view shows ONE `(empty)` group / `Uncategorized` lane
+  // holding every record — a wrong answer that reads as a true statement.
+
+  it('refuses a padded grouping field name BY NAME at `grouping.fields[N].field`', () => {
+    const result = ListViewSchema.safeParse({
+      columns: ['name', 'business_unit'],
+      grouping: { fields: [{ field: 'status' }, { field: '  business_unit  ' }] },
+    });
+
+    expect(result.success).toBe(false);
+    const issues = result.error!.issues;
+
+    // BY NAME: the issue is addressed to the offending element's own `field`
+    // key, not to the view or to the array — index 1, the padded one.
+    expect(issues.map((i) => i.path.join('.'))).toContain('grouping.fields.1.field');
+
+    // ...and the refusal names the offending spelling, so the author can see
+    // the whitespace they cannot see in their editor.
+    const issue = issues.find((i) => i.path.join('.') === 'grouping.fields.1.field')!;
+    expect(issue.message).toContain('"  business_unit  "');
+    expect(issue.message).toContain('grouping.fields[].field');
+  });
+
+  it.each([
+    ['leading', ' business_unit'],
+    ['trailing', 'business_unit '],
+    ['both', '  business_unit  '],
+    ['a tab', '\tbusiness_unit'],
+    ['a newline', 'business_unit\n'],
+    ['whitespace only', ' '],
+  ])('refuses %s whitespace', (_label, spelling) => {
+    expect(GroupingFieldSchema.safeParse({ field: spelling }).success).toBe(false);
+  });
+
+  // ⛔ NOT a `.trim()`. A trimming schema would make `'  a  '` and `'a'`
+  // silently equivalent — the consumer-tolerance direction AGENTS.md #0.1
+  // refuses. This arm is what tells the two designs apart: a trimming schema
+  // passes the refusal pins above only by NOT refusing, so it would fail there
+  // first; this arm additionally pins that nothing normalises the value on the
+  // way through for the names that ARE accepted.
+  it('does not trim — an accepted name arrives byte-identical', () => {
+    expect(GroupingFieldSchema.parse({ field: 'business_unit' }).field).toBe('business_unit');
+    expect(GroupingFieldSchema.safeParse({ field: '  business_unit  ' }).success).toBe(false);
+  });
+
+  // ==========================================================================
+  // [#17360] The narrowing reddens NO existing grouping fixture in the repo
+  // ==========================================================================
+  //
+  // Every DISTINCT `grouping.fields[].field` spelling harvested from the repo
+  // with the TypeScript parser (50 literal occurrences under a `grouping:` key
+  // across 19 files; cross-checked against a deliberately over-approximating
+  // second pass over 906 shape-exact `{ field, order?, collapsed? }` literals
+  // in `packages/**`). Exactly one harvested spelling is refused by this
+  // narrowing — `' '` at `view-grouping-query.test.ts:507` — and that one is a
+  // NEGATIVE fixture handed straight to `compileListViewGroupQuery` with no
+  // Zod parse anywhere on its path, pinning the consumer's own
+  // `grouping_field_blank` refusal. It is therefore not a fixture that has to
+  // parse, and the producer now refuses it one layer earlier for the same
+  // reason. So: zero reddened fixtures, and it is recorded here rather than
+  // used as a reason to widen the pattern to fit.
+  //
+  // `owner.name` is the load-bearing member: a grouping level is authored as a
+  // field REFERENCE and a dotted relationship path is an in-tree spelling of
+  // one, which is why this key does NOT take the snake_case machine-name
+  // grammar (`/^[a-z_][a-z0-9_]*$/`) the rest of `packages/spec` spells inline
+  // for object/field/tool NAMES.
+  const IN_TREE_GROUPING_FIELD_SPELLINGS = [
+    'A7_no_such_field', 'a', 'actor_id', 'b', 'business_unit', 'category',
+    'count', 'count_notes', 'department', 'kind', 'namespace', 'object_name',
+    'organization_id', 'owner.name', 'priority', 'provider_id', 'status',
+    'sum_amount', 'topic', 'user_id',
+  ] as const;
+
+  it.each(IN_TREE_GROUPING_FIELD_SPELLINGS)('still parses the in-tree spelling %s', (spelling) => {
+    expect(GroupingFieldSchema.safeParse({ field: spelling }).success).toBe(true);
+  });
+
+  it('the in-tree enumeration is non-vacuous — lit and dark controls', () => {
+    // LIT: the two spellings the harvest is anchored on are actually in the
+    // list, so the `it.each` above cannot be passing over an empty table.
+    expect(IN_TREE_GROUPING_FIELD_SPELLINGS).toContain('business_unit');
+    expect(IN_TREE_GROUPING_FIELD_SPELLINGS).toContain('owner.name');
+    expect(IN_TREE_GROUPING_FIELD_SPELLINGS.length).toBeGreaterThan(15);
+
+    // DARK: a spelling the repo does not carry is absent — the list is a
+    // harvest, not a wish-list that would pass no matter what was measured.
+    expect(IN_TREE_GROUPING_FIELD_SPELLINGS).not.toContain('zz_no_such_grouping_field');
+
+    // And the discriminator: the accepting arm above would pass just as well
+    // against the OLD bare `z.string()`, so pin that this schema is genuinely
+    // narrower than the one it replaces.
+    expect(GroupingFieldSchema.safeParse({ field: ' owner.name' }).success).toBe(false);
+  });
 });
 
 describe('GalleryConfigSchema', () => {

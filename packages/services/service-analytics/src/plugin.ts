@@ -12,6 +12,9 @@ import type { AnalyticsDriverCapabilities } from './strategies/types.js';
 import { pickDisplayField, type DimensionLabelDeps } from './dimension-labels.js';
 import { assertReadScopeCannotVacate } from './read-scope-sql.js';
 import { readScopeUnresolvedError } from './read-scope-refusal.js';
+// [#16206] The narrowing from a driver's FOUR-name `dialectName` to the THREE
+// this package's config hook declares — see the bridge below.
+import { asAcceptedSqlDialect, type AcceptedSqlDialect } from './text-match-sql.js';
 
 /**
  * The slice of the DECLARED engine contracts this plugin's auto-bridges
@@ -998,13 +1001,24 @@ export class AnalyticsServicePlugin implements Plugin {
      * `undefined` on every tier that cannot answer — no data engine, a driver
      * that names no dialect (memory, mongo), a throw — and `undefined` keeps
      * the plain `LIKE`, which is exactly the pre-#15684 behaviour.
+     *
+     * [#16206] ⭐ A FIFTH tier that cannot answer, and the reason this is not a
+     * verbatim pass-through: `SqlDriver.dialectName` is a FOUR-name vocabulary
+     * whose fourth name is `'unknown'` — that driver's own "I cannot say", which
+     * is what it returns for a client it does not model (`'mariadb'`, left
+     * unrecognised on purpose by #11756). The config hook's accept set is the
+     * other THREE, so handing `'unknown'` on verbatim would present a driver
+     * behaving correctly as a host answering out of contract, and every such
+     * deployment would carry a warning about itself. ⇒ The residue is
+     * translated to this hook's own spelling for the same thing, `undefined`.
+     * The dialect the compilers end up with is unchanged either way.
      */
-    const sqlDialect = (objectName: string): string | undefined => {
+    const sqlDialect = (objectName: string): AcceptedSqlDialect | undefined => {
       try {
         const svc = ctx.getService<DataEngineLike>('data');
         const driver = svc?.getDriverForObject?.(objectName) as DialectNamingDriver | undefined;
         const named = driver?.dialectName;
-        return typeof named === 'string' ? named : undefined;
+        return asAcceptedSqlDialect(typeof named === 'string' ? named : undefined);
       } catch {
         // Same tiering as the temporal hooks: an unresolvable driver keeps the
         // dialect-blind construct, which is today's behaviour.
