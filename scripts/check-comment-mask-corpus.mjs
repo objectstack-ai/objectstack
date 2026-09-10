@@ -125,6 +125,7 @@
 
 // dispatch-gates: whole-tree-population -- `collectSources` walks every authored JS/TS file from the repo root, so the corpus is the whole tree; the one literal below names the masker this gate exercises, not the files it reads.
 
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
@@ -355,6 +356,26 @@ export function sweep({ root = REPO_ROOT, files = collectSources(root), parse, s
 
 const ROW_LIMIT = 25;
 
+/**
+ * The rest of `argv` after `--masker <path>` is consumed -- `argv` ITSELF
+ * (same reference, not a filtered copy) when `--masker` is absent (#16540).
+ *
+ * `argv.indexOf('--masker')` returns `-1` for "absent", and `-1 + 1 === 0`:
+ * a filter written as `index !== maskerFlag && index !== maskerFlag + 1`
+ * therefore excluded index 0 even with no `--masker` in sight -- dropping
+ * `argv[0]`, the very argument the unknown-option check below reads. An
+ * unknown option in first position was silently removed from the list it
+ * was about to be checked against, so the script fell through to the full
+ * sweep instead of refusing with a usage error.
+ *
+ * @param {string[]} argv
+ * @param {number} maskerFlag  `argv.indexOf('--masker')`
+ * @returns {string[]}
+ */
+export function argvAfterMasker(argv, maskerFlag) {
+  return maskerFlag === -1 ? argv : argv.filter((arg, index) => index !== maskerFlag && index !== maskerFlag + 1);
+}
+
 async function main(argv) {
   const maskerFlag = argv.indexOf('--masker');
   let maskerPath = null;
@@ -365,7 +386,7 @@ async function main(argv) {
       process.exit(EXIT_USAGE);
     }
   }
-  const rest = argv.filter((arg, index) => index !== maskerFlag && index !== maskerFlag + 1);
+  const rest = argvAfterMasker(argv, maskerFlag);
   const unknown = rest.filter((arg) => arg.startsWith('--'));
   if (unknown.length) {
     console.error(`unknown option(s): ${unknown.join(', ')}`);
@@ -480,7 +501,8 @@ async function main(argv) {
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-comment-mask-corpus self-test': 17,
+  // #16540 added 9 cases pinning the argv[0]-drop fix (direct + spawned).
+  'check-comment-mask-corpus self-test': 26,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -641,6 +663,70 @@ async function runSelfTestCases(parse) {
 
   ok(`the corpus walk finds at least ${CORPUS_FLOOR} files in this tree`, collectSources().length >= CORPUS_FLOOR);
   ok('...and every path it returns carries a known source extension', collectSources().every((file) => SOURCE_EXTENSIONS.has(extname(file))));
+
+  // ── #16540: an unknown FIRST option must not vanish from `rest` ───────────
+  //
+  // `indexOf('--masker')` returns `-1` when it is absent, and `-1 + 1 === 0`:
+  // the un-guarded filter treated that as "drop index 0" regardless of
+  // whether `--masker` was ever seen. Cases below pin the fix at two levels:
+  // `argvAfterMasker()` directly (fast, no process), and a REAL spawned
+  // process (the objectui port's approach) so the exit code is pinned as an
+  // actual NUMBER coming back from the OS, not a value this file made up.
+  const noSuchFlagArgv = Object.freeze(['--no-such-flag']);
+  ok(
+    '#16540 -- with --masker absent, rest is argv ITSELF (same reference), not a copy missing argv[0]',
+    argvAfterMasker(noSuchFlagArgv, -1) === noSuchFlagArgv,
+  );
+  ok(
+    '#16540 regression -- --masker in FIRST position still drops exactly its flag and value',
+    JSON.stringify(argvAfterMasker(['--masker', 'x', 'extra'], 0)) === JSON.stringify(['extra']),
+  );
+  ok(
+    '#16540 -- an unknown option is read from argv[0] when --masker is absent',
+    argvAfterMasker(noSuchFlagArgv, -1).filter((arg) => arg.startsWith('--')).length === 1,
+  );
+  ok(
+    '#16540 -- an unknown option is read from a MIDDLE position, no --masker',
+    argvAfterMasker(['ok', '--no-such-flag', 'ok'], -1).filter((arg) => arg.startsWith('--')).length === 1,
+  );
+  ok(
+    '#16540 -- an unknown option is read from the LAST position, after --masker consumed its two slots',
+    argvAfterMasker(['--masker', 'x', '--no-such-flag'], 0).filter((arg) => arg.startsWith('--')).length === 1,
+  );
+
+  // Real spawned processes -- proves the fix end to end, through the actual
+  // CLI dispatch, not just the extracted helper. `status` below is `number |
+  // null`; the assertion is on `typeof`, never just truthiness, so a future
+  // regression to `null` (the child never really exited) cannot read as a
+  // number by accident.
+  const SELF = fileURLToPath(import.meta.url);
+  const spawnCheck = (args) => spawnSync(process.execPath, [SELF, ...args], { encoding: 'utf8' });
+
+  const spawnStarted = Date.now();
+  const firstPosition = spawnCheck(['--no-such-flag']);
+  const firstPositionMs = Date.now() - spawnStarted;
+  ok(
+    '#16540 spawned -- --no-such-flag at argv[0] exits EXIT_USAGE as a NUMBER (not a full sweep)',
+    typeof firstPosition.status === 'number' && firstPosition.status === EXIT_USAGE,
+  );
+  ok(
+    '...and the usage error names the unknown flag',
+    (firstPosition.stderr ?? '').includes('unknown option(s): --no-such-flag'),
+  );
+  ok(
+    // Generous bound -- the point is "milliseconds", not the tree's real sweep
+    // time (tens of SECONDS, per this file's own header). A regression back to
+    // the pre-#16540 shape would run the full corpus here and blow past it.
+    '...and it answers in well under a second -- it never reaches the sweep',
+    firstPositionMs < 5000,
+  );
+
+  const afterMasker = spawnCheck(['--masker', 'scripts/js-comment-mask.mjs', '--no-such-flag']);
+  ok(
+    '#16540 spawned -- an unknown option AFTER --masker also exits EXIT_USAGE as a NUMBER',
+    typeof afterMasker.status === 'number' && afterMasker.status === EXIT_USAGE
+      && (afterMasker.stderr ?? '').includes('unknown option(s): --no-such-flag'),
+  );
 
   // ── The walk's exclusions, on a REAL tree, in both directions ─────────────
   //
