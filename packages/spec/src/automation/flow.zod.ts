@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { ExpressionInputSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 
 /**
  * Flow Node Types — **built-in seed set** (ADR-0018).
@@ -563,8 +563,27 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
   source: z.string().describe('Source Node ID'),
   target: z.string().describe('Target Node ID'),
   
-  /** Condition for this path (only for decision/branch nodes) */
-  condition: ExpressionInputSchema.optional().describe('Predicate (CEL) returning boolean used for branching.'),
+  /**
+   * Condition for this path (only for decision/branch nodes).
+   *
+   * An EVALUATED slot (#15807): `AutomationEngine.evaluateCondition` runs it
+   * at every traversal, reading `source` and nothing else, so it composes
+   * `EvaluatedExpressionInputSchema` rather than `ExpressionInputSchema` —
+   * the bare-string shorthand still normalizes to `{ dialect: 'cel', source }`,
+   * but the string must be non-blank after trimming and an envelope must carry
+   * a non-blank `source`. Under the persistence contract an `ast`-only
+   * envelope, and a whitespace-only `source`, both parsed here, registered,
+   * passed `objectstack validate`, and then landed in the evaluator's
+   * empty-source arm and answered a SILENT `false`: a branch that quietly
+   * never fired. Both are refused at authoring now, with
+   * `EVALUATED_EXPRESSION_SOURCE_REQUIRED`.
+   */
+  condition: EvaluatedExpressionInputSchema.optional().describe(
+    'Predicate (CEL) returning boolean used for branching. An evaluated slot: a bare non-blank CEL string, or an '
+    + 'envelope carrying a non-blank `source` — an `ast`-only envelope, and a `source` that is blank after '
+    + 'trimming, are refused at authoring because the engine evaluates `source` alone and would otherwise answer '
+    + 'a silent `false`.',
+  ),
   
   type: z.enum(['default', 'fault', 'conditional', 'back'])
     .default('default')

@@ -148,8 +148,9 @@ describe('runImport — bulk create batching (framework#2678)', () => {
     }));
     const updateData = vi.fn(async (args: { id: string }) => ({ id: args.id }));
     // Row 1 ('existing') matches an existing record → update; the rest are creates.
-    const findData = vi.fn(async (args: { query?: { $filter?: { name?: string } } }) =>
-      (args.query?.$filter?.name === 'existing' ? [{ id: 'existing_id', name: 'existing' }] : []));
+    // [#16638] Reads the CANONICAL `where` the runner sends, not `$filter`.
+    const findData = vi.fn(async (args: { query: { where: { name?: string } } }) =>
+      (args.query.where.name === 'existing' ? [{ id: 'existing_id', name: 'existing' }] : []));
     const p: ImportProtocolLike = { findData, createData: vi.fn(), updateData, createManyData };
 
     const summary = await runImport({

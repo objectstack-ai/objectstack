@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { coerceRow, type RefResolver, type RefMatch } from './import-coerce.js';
 import type { ExportFieldMeta } from './export-format.js';
 import type { ValidationMessageTranslator } from '@objectstack/spec/system';
-import type { ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
+import type { FindDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from '@objectstack/core';
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 import { isEngineDuplicateRecordEnvelope } from './error-response.js';
@@ -357,9 +357,29 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       : Array.isArray(r?.data) ? r.data
         : Array.isArray(r?.rows) ? r.rows
           : Array.isArray(r) ? r : [];
-  const findArgsBase = (query: any) => ({
-    object: '',
-    query,
+  // [#16638] The server-scoped envelope for this file's `findData` calls, and
+  // the reason its parameter is TYPED. It used to be `query: any`, so the three
+  // call sites below were type-checked by nothing at all and their undeclared
+  // `$filter` / `$top` wire spellings cost no diagnostic — the same erasure
+  // #16337 found on `loadImportJob`'s `p: any` handle in `rest-server.ts`,
+  // whose signpost prescribes exactly this rewrite. Compiled against
+  // `FindDataRequest` every member is now held to the contract
+  // `FindDataRequestSchema` declares (`QuerySchema`: `where` / `limit` /
+  // `offset` / `fields` / `orderBy` / `expand`), so a wire alias is a compile
+  // error at the call site instead of a payload no schema has seen. It also
+  // retires the `object: ''` placeholder every caller had to override.
+  //
+  // ⚠️ The rewrite is a SPELLING change only: `@objectstack/metadata-protocol`
+  // folds `$filter`→`where` and `$top`→`limit` by the spec's own
+  // `RPC_QUERY_ALIAS_SLOTS` with the value moved verbatim, so all three calls
+  // reach `engine.find` with the same option bag as before —
+  // `rest-server-canonical-query-ast.test.ts` §3 measures that pair by pair.
+  //
+  // ⛔ Server-built means server-built: the wire aliases stay accepted at the
+  // HTTP door for CALLERS. Declaring them there is #16066's spec half and is
+  // not this file's business.
+  const findArgsBase = (request: FindDataRequest) => ({
+    ...request,
     ...(environmentId ? { environmentId } : {}),
     ...(context ? { context } : {}),
   });
@@ -385,10 +405,10 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       let match: RefMatch = {};
       for (const f of candidates) {
         try {
-          const r = await p.findData({
-            ...findArgsBase({ $filter: { [f]: display }, $top: 2 }),
+          const r = await p.findData(findArgsBase({
             object: referenceObject,
-          });
+            query: { object: referenceObject, where: { [f]: display }, limit: 2 },
+          }));
           const recs = findRows(r);
           if (recs.length === 0) continue;
           if (recs.length > 1) { match = { ambiguous: true, matchedField: f }; break; }
@@ -428,7 +448,10 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       if (v === undefined || v === null || v === '') return 'blank';
       filter[f] = v;
     }
-    const r = await p.findData({ ...findArgsBase({ $filter: filter, $top: 2 }), object: objectName });
+    const r = await p.findData(findArgsBase({
+      object: objectName,
+      query: { object: objectName, where: filter, limit: 2 },
+    }));
     const recs = findRows(r);
     if (recs.length === 0) return 'none';
     if (recs.length > 1) return 'ambiguous';
@@ -548,10 +571,10 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
   const recheckByIds = async (chunk: Array<Record<string, any>>): Promise<Map<string, any>> => {
     const ids = chunk.map((r) => r.id).filter((v) => v != null && v !== '');
     if (ids.length === 0) return new Map();
-    const r = await p.findData({
-      ...findArgsBase({ $filter: { id: { $in: ids } }, $top: ids.length }),
+    const r = await p.findData(findArgsBase({
       object: objectName,
-    });
+      query: { object: objectName, where: { id: { $in: ids } }, limit: ids.length },
+    }));
     return new Map(findRows(r).map((rec: any) => [String(rec.id), rec]));
   };
   const flushPendingCreates = async (): Promise<void> => {

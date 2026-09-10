@@ -104,6 +104,7 @@
 - `/rate_limit` 照答 200,兼任不了探针;403 后凭据形态判别见 `rest-channel.md`。
 - 门态逐会话变,同窗顶层席可分裂成两 403 一 200 ⇒ ⛔ 不据他席、他日读数推本席。
 - 门开会话实测通道宽于标签:issue POST 201、评论写、卡与评论读同通,加法 POST 200。
+- 标签事件流 `GET /issues/{n}/events` 归门态:200 带 labeled/unlabeled 名与时刻,三容器两通一 403。
 - 门关着时的降级梯 ①:git 先行,走下方零成本等价物。
 - 降级梯 ②:公开仓 payload 档。③:MCP —— search 定向一击、单标签读全加求交。④:等重置。
 - CCR 容器的 GitHub 出口是代理加凭据的:无 header 的 REST 读回 200 带会话身份,core 上限 15000。
@@ -259,6 +260,7 @@
 - ③:裸名 grep 被幸存家族当子串命中 —— 退役核验带引号精确名。
 - 更硬判据是查声明式 `^(export )?(const|type|interface) <Name>\b` 而非查提及。
 - ④:浅检出上的历史读数不可信 —— `merge-base --is-ancestor` 假非祖先、`rev-list --count` 截断。
+- ④ 里最静默的是窗口式 `git log --grep`:回 0 结果、exit 0、无警告,读作该提交从不存在。
 - 同族 `branch -r --contains` 零输出;先 `--deepen` 再判,或走 REST `compare`。
 - ⑤:容器里没有 `gh`,于是 `gh … || echo "none"` 是不可证伪的否定。
 - 127 命令不存在与 grep 没命中输出同值 ⇒ 回退分支照打印安心结论而一次都没检查。
@@ -379,6 +381,7 @@
 - corepack 下载 pnpm 可在检查体开跑前崩 undici(`assert(!this.paused)`)⇒ 是基础设施红。
 - 落地探针除命名代码形外,还必须在落地前的 tip 上读出不同值,否则它分不开两棵树。
 - `check-governed-merges` 浅克隆上拒答而非少报,并报未审计仓数;补救 `git fetch --shallow-since=`。
+- ⛔ 不越过该拒答自行枚举:短清单读作合规;加深日期取窗口起点之前,不猜深度。
 - 前台 `sleep` 被 harness 拒 ⇒ 等待写成带 until 条件的前台阻塞等待,⛔ 不写 sleep 轮询循环。
 - `check:pm-dispatch-gates` 逾容器 600 秒前台上限 ⇒ detach 加 `tail --pid` 前台等;超时不是读数。
 - 分支删除被拒有第二形态:代理回 403,与既有 send-pack 断连同处置 ⇒ 不可删,⛔ 不重试。

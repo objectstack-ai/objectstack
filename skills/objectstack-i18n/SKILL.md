@@ -277,9 +277,10 @@ os i18n check --strict --threshold=95  # CI gate: locale parity + minimum covera
 
 It compares registered bundles against source metadata and reports missing keys
 per locale for every surface the extractor walks — objects and their sub-keys,
-global actions, apps, dashboards, pages, flow screens, metadata forms. Gaps in
-the default locale are errors, `--strict` promotes the rest, `--show-keys` lists
-them all; `os lint --i18n-strict` folds the same gate into lint.
+global actions, apps, dashboards, pages, flow screens. The platform's metadata
+forms count only for a stack that ships their translations (`--include-platform`
+audits them anyway). Gaps in the default locale are errors, `--strict` promotes
+the rest, `--show-keys` lists them all; `os lint --i18n-strict` folds it in.
 
 ### `os i18n extract --check` — freshness, not coverage
 

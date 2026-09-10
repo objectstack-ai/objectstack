@@ -149,6 +149,13 @@ export const EVALUATED_EXPRESSION_SOURCE_REQUIRED =
  * shape, and narrows the TYPE too (`source: string`) — the same move
  * `AssignmentExpressionValueSchema` makes for `dialect`, so an `ast`-only
  * envelope is a compile error before it is a parse error.
+ *
+ * That promise is scoped to a DIRECT caller of this schema (#15807). Composed
+ * through {@link EvaluatedExpressionInputSchema}, only the blank-`source`
+ * envelope still surfaces from here, at `source`; an `ast`-only envelope and a
+ * blank bare string abort BOTH arms of that union and surface as one
+ * `invalid_union` at the SLOT instead, carrying this same sentence from
+ * `evaluatedExpressionInputRefusal` — see that map's docblock for why.
  */
 export const EvaluatedExpressionSchema = ExpressionSchema.safeExtend({
   /**
@@ -173,6 +180,72 @@ export const ExpressionInputSchema = z.union([
   ExpressionSchema,
 ]);
 export type ExpressionInput = z.input<typeof ExpressionInputSchema>;
+
+/**
+ * Why an EVALUATED input slot refused a value, in the union's own words — the
+ * one place the sentence for a refused union input lives (#15807).
+ *
+ * A union reports the one arm that did not abort, else `invalid_union` at the
+ * slot (zod 4.4, measured): here BOTH arms abort on the two shapes this slot
+ * exists to refuse — the string arm's refine is inside a pipe whose transform
+ * aborts the arm, and the envelope arm's missing `source` is an aborting
+ * `invalid_type` — so an `ast`-only envelope and a blank bare string each
+ * surface as ONE `invalid_union` at the slot, and this map is where its message
+ * comes from. A blank `source` INSIDE an envelope is the one shape the envelope
+ * arm refuses without aborting (a `custom` refine), so that one surfaces from
+ * the arm itself, at `source`, and never reaches this map.
+ *
+ * It answers {@link EVALUATED_EXPRESSION_SOURCE_REQUIRED} exactly when the
+ * refusal IS the evaluated-slot rule — a string input (only a blank one gets
+ * here), or an object input carrying no string `source` — and `undefined` for
+ * everything else (a number, an envelope naming a dialect outside the enum),
+ * which lets zod's default message stand rather than blaming `source` for a
+ * refusal that is not about it.
+ */
+function evaluatedExpressionInputRefusal(input: unknown): string | undefined {
+  if (typeof input === 'string') return EVALUATED_EXPRESSION_SOURCE_REQUIRED;
+  if (input && typeof input === 'object' && !Array.isArray(input)
+    && typeof (input as { source?: unknown }).source !== 'string') {
+    return EVALUATED_EXPRESSION_SOURCE_REQUIRED;
+  }
+  return undefined;
+}
+
+/**
+ * Author-time input shape of an EVALUATED slot — the sibling of
+ * {@link ExpressionInputSchema} for a slot whose value the expression engine
+ * runs (#15807; the rule is {@link EvaluatedExpressionSchema}'s, #15430).
+ *
+ * The same two arms as `ExpressionInputSchema`, each held to the evaluated
+ * rule: a bare string is still shorthand for `{ dialect: 'cel', source }`, but
+ * it must be non-blank after trimming (a blank string would normalize to an
+ * envelope carrying exactly the blank `source` the envelope arm refuses — one
+ * seam, two keys, one rule); and the envelope arm composes
+ * `EvaluatedExpressionSchema` instead of `ExpressionSchema`, so `source` is
+ * required and non-blank there too. `ExpressionSchema` / `ExpressionInputSchema`
+ * are NOT narrowed: they remain the persistence contract (`source` OR `ast`).
+ *
+ * The first slot to compose it is `FlowEdgeSchema.condition`, the branch
+ * predicate `evaluateCondition` runs: an `ast`-only envelope authored there
+ * used to parse, register, pass `objectstack validate`, and then land in the
+ * evaluator's empty-source arm and answer a SILENT `false` — a branch that
+ * quietly never fires — and a whitespace-only `source` did the same through
+ * the other key. Both are refused at authoring now, with the published
+ * sentence: an `ast`-only envelope and a blank bare string as one
+ * `invalid_union` at the slot (see {@link evaluatedExpressionInputRefusal} for
+ * why), a blank `source` inside an envelope as one `custom` issue at `source`.
+ *
+ * The string arm's transform returns the narrowed `{ dialect: 'cel', source }`
+ * as an `EvaluatedExpression`, so the parsed value of an evaluated slot stays
+ * assignable to its own input type — the same move the typed arms make.
+ */
+export const EvaluatedExpressionInputSchema = z.union([
+  z.string()
+    .refine((source) => source.trim().length > 0, { message: EVALUATED_EXPRESSION_SOURCE_REQUIRED })
+    .transform((source): EvaluatedExpression => ({ dialect: 'cel', source })),
+  EvaluatedExpressionSchema,
+], { error: (issue) => evaluatedExpressionInputRefusal(issue.input) });
+export type EvaluatedExpressionInput = z.input<typeof EvaluatedExpressionInputSchema>;
 
 /**
  * The dialects that have a TYPED input schema below. On a typed slot the bare
