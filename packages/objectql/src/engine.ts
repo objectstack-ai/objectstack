@@ -14791,7 +14791,23 @@ export class ObjectRepository implements IScopedObjectRepository {
     });
   }
 
-  async findOne(query: any = {}): Promise<any> {
+  /**
+   * [#16786] Declared `Promise<Record<string, any> | null>`, not `Promise<any>`.
+   *
+   * `IScopedObjectRepository.findOne` has declared that shape since #16231's
+   * ruling A landed (PR #16783), and `IDataEngine.findOne` — the call this
+   * method forwards to, one line down — declares it too. This method sat
+   * between two narrow declarations and re-widened the value back to `any` on
+   * the way out, so `implements IScopedObjectRepository` stayed satisfied (a
+   * wider return always satisfies a narrower one) while every call site that
+   * reaches a repository through the CLASS rather than the interface kept
+   * reading `any` — `ObjectQL.createContext(…).object(n).findOne(…)` among
+   * them, which is exported.
+   *
+   * ⛔ Not a narrowing of the contract: the contract already said this. This
+   * is the implementation coming back to the declaration it published.
+   */
+  async findOne(query: any = {}): Promise<Record<string, any> | null> {
     return this.engine.findOne(this.objectName, {
       ...query,
       context: this.context,
@@ -14809,7 +14825,18 @@ export class ObjectRepository implements IScopedObjectRepository {
     return this.insert(data);
   }
 
-  async update(data: any, options: any = {}): Promise<any> {
+  /**
+   * [#16786] Declared `Promise<Record<string, any> | number | null>`, the same
+   * re-widening as {@link findOne} and repaired the same way: the record for
+   * the single-record form, the affected-row count for the predicate form
+   * (`{ where, multi: true }`), `null` when the write matched nothing.
+   *
+   * ⛔ `updateById` is deliberately NOT touched here. Its `Promise<any>` is
+   * what `IScopedObjectRepository.updateById` itself declares, so the class
+   * matches its contract and there is no drift to repair on this side; that
+   * member is `packages/spec`'s to narrow and stays open on #16786.
+   */
+  async update(data: any, options: any = {}): Promise<Record<string, any> | number | null> {
     return this.engine.update(this.objectName, data, {
       ...options,
       context: this.context,
