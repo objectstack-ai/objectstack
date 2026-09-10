@@ -34,11 +34,16 @@
  * its arms classified, resolving named arms through the tree's own declarations
  * and through `lazySchema()` / `strictObject()`; a site qualifies when one arm
  * resolves to `z.string()` and another to an object schema. On `origin/main`
- * `ad715aca57`: 166 `z.union([...])` sites, of which **31 are string-or-object**
- * (plus 7 in test fixtures, excluded). The scan's own control — sites with any
- * arm it could not resolve, each of which could hide a match — went 46 → 0 as
- * the resolver learned `lazySchema`, `strictObject` and function declarations,
- * so the final zero is a measured absence rather than a scan that saw nothing.
+ * `ad715aca57` (this branch's point of departure): 166 `z.union([...])` sites,
+ * of which **31 are string-or-object** (plus 7 in test fixtures, excluded) —
+ * re-derived byte-for-byte unchanged on each of the two later merges of `main`,
+ * so the reading is not an artifact of one snapshot.
+ *
+ * The scan's own control — sites with any arm it could not resolve, each of
+ * which could hide a match — went **46 → 0** as the resolver learned
+ * `lazySchema`, `strictObject` and function declarations. That is what makes
+ * the final zero a measured absence rather than a scan that saw nothing: the
+ * control was demonstrably lit before it was cleared.
  *
  * Those 31 split into three classes by what their OBJECT arm does with an
  * undeclared key, which is what decides whether there is an author-visible
