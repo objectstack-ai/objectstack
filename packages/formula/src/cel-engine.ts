@@ -65,11 +65,20 @@ export function buildEnv(now: () => Date, timezone = 'UTC'): Environment {
 
 /**
  * Namespace roots that a `record`-scoped CEL site may legitimately reference.
- * Declared as `map` (dyn values) so member access (`record.foo`) and any
- * arithmetic/comparison on it defers to runtime — the strict env faults ONLY on
- * an *undeclared* top-level identifier, i.e. a bare field reference. Generous on
- * purpose: an unknown root is a missed catch, a missing root is a false positive
- * that would break the build, so we err toward declaring more.
+ * Declared so that member access (`record.foo`) and any arithmetic/comparison on
+ * a root both defer to runtime — the strict env faults ONLY on an *undeclared*
+ * top-level identifier, i.e. a bare field reference. Generous on purpose: an
+ * unknown root is a missed catch, a missing root is a false positive that would
+ * break the build, so we err toward declaring more.
+ *
+ * ⚠️ The CEL type each env declares them AS is not uniform, and the difference is
+ * load-bearing rather than incidental. {@link buildScopedEnv} — the declaredness
+ * oracle — declares them `dyn`, because only `dyn` delivers BOTH halves of the
+ * sentence above; `map` delivered member access and faulted the comparison, and
+ * #16412 measured what that cost (see {@link firstUndeclaredReference}). The
+ * type-soundness envs keep them `map`: there a root is a container the check
+ * deliberately declines to reason through, and the typed struct on
+ * `record`/`previous`/`input` is what carries the field types.
  *
  * ## Why this list is PUBLISHED (#6713)
  *
@@ -152,8 +161,28 @@ function buildScopedEnv(knownFields: readonly string[]): Environment {
     limits: DEFAULT_LIMITS,
   });
   registerStdLib(env, () => new Date(0));
+  // Roots are `dyn`, NOT `map`, for exactly the reason `knownFields` are (below)
+  // and the doc-comment on {@link SCOPE_ROOTS} already claims: member access,
+  // arithmetic and comparison on a root must all defer to runtime, so that the
+  // ONLY thing this env faults on is an undeclared top-level identifier.
+  //
+  // `map` delivered the member half and not the other two (#16412): `map` has no
+  // `==` / `<` / `+` overload, so `data == 'x'` — a root, or an object field
+  // sharing a root's name, in an ordinary comparison — faulted `no such
+  // overload` HERE while compiling clean in the permissive env, where the same
+  // names are `dyn`. Because cel-js's checker reports exactly ONE error, that
+  // fault took the first slot and every undeclared reference behind it in the
+  // same source went unjudged: `firstUndeclaredReference` answered `null`, the
+  // value that also means "every reference is rooted", and four consuming rules
+  // published the source clean. The two environments now agree about these
+  // names, so the class cannot arise rather than being compensated for
+  // downstream.
+  //
+  // ⛔ This does NOT weaken the check: `dyn` is undeclared-identifier-neutral —
+  // it changes what is legal ON a declared root, never whether an UNdeclared
+  // name faults. The `knownFields` loop below has always relied on that.
   for (const root of SCOPE_ROOTS) {
-    try { env.registerVariable(root, 'map'); } catch { /* duplicate — ignore */ }
+    try { env.registerVariable(root, 'dyn'); } catch { /* duplicate — ignore */ }
   }
   // `knownFields` are declared as `dyn` so they (and member/arith/compare on
   // them) never fault — only a genuinely-undeclared top-level identifier does.
@@ -194,35 +223,48 @@ let recordScopeEnv: Environment | undefined;
  *
  * The masking is POSITIONAL, not name-keyed: the masked name is not the one
  * that triggered the first error, so excluding the trigger's own name does not
- * reach it. Measured on this env:
- *
- *     data == 'x' && status == 'q'   -> null       first error `no such
- *                                                  overload: map<dyn, dyn> ==
- *                                                  string`; `status` unjudged
- *     status == 'q' && data == 'x'   -> "status"   first error `Unknown
- *                                                  variable: status`
+ * reach it.
  *
  * ⚠️ {@link celEngine.compile} is not a gate against this, so a caller that
  * only reaches here on a clean compile is not protected by that gate. `compile`
  * type-checks in the PERMISSIVE env ({@link CEL_ENV_OPTIONS},
- * `unlistedVariablesAreDyn: true`), and the two error classes that reach the
- * first slot from ordinary authored input fault only HERE:
+ * `unlistedVariablesAreDyn: true`), so a source can compile clean and still
+ * fault HERE.
  *
- *  - a {@link SCOPE_ROOTS} member -- or an object field sharing one of those
- *    names (`data`, `config`, `result`, `item`, `event`, `input`, `user`, …) --
- *    as the operand of an operator with no `map` overload, because this env
- *    declares those roots `map` while the permissive one leaves them `dyn`;
- *  - a CEL TYPE name (`type`, `string`, `int`, …) in the same position, already
- *    pinned as a blind spot by `@objectstack/lint`'s `visibility-bare-identifier`
- *    suite -- pinned there per NAME, while the masking it causes is source-wide.
+ * ## What is CLOSED, and what is still open (#16412)
  *
- * ⛔ Do not close this by widening the regex onto the overload message: that
- * false positive is precisely what the narrowing buys off (`type(record.x) ==
- * string` is legitimate CEL). Reporting past the first error needs a re-check
- * loop over a neutralised source, or a checker entry that returns more than one
- * error -- cel-js 8.0.0 has none, its `TypeCheckResult` carries a single
- * `error` -- and either one changes what every consuming rule reports. That is
- * a design decision, not a patch.
+ * ⭐ CLOSED — the {@link SCOPE_ROOTS} class. It was by far the wider of the two
+ * reachable ones: a root, or an object field sharing a root's name (`data`,
+ * `config`, `result`, `item`, `event`, `input`, `user`, …), used as the operand
+ * of an operator with no `map` overload. {@link buildScopedEnv} declared those
+ * roots `map` while the permissive env left them `dyn`, and that DISAGREEMENT
+ * was the whole mechanism; the roots are now `dyn` in both, so the class cannot
+ * arise. Measured on this env, before → after:
+ *
+ *     data == 'x' && status == 'q'   null -> "status"    the class, closed
+ *     status == 'q' && data == 'x'   "status"            unchanged, the control
+ *
+ * ⛔ STILL OPEN — every OTHER first-error class, and the mechanism above is
+ * untouched for them. Two are reachable from authored input:
+ *
+ *  - a CEL TYPE name (`type`, `string`, `int`, …) in that same position. CEL
+ *    itself declares those names, so no declaration this package controls can
+ *    move them; `type == 'grid' && status == 'q'` still answers `null`. Pinned
+ *    per NAME by `@objectstack/lint`'s `visibility-bare-identifier` suite, while
+ *    the masking it causes is source-wide.
+ *  - `has()` handed a non-select argument (`has(status) && other == 'x'`), which
+ *    faults `has() invalid argument`. `@objectstack/lint`'s
+ *    `validate-visibility-predicates` masks `has(…)` spans at its own call site
+ *    (#16118) and that mask stays load-bearing; no other consumer has one.
+ *
+ * ⇒ A `null` from this helper is still "nothing was reported", never "the
+ * source is clean". ⛔ Do not close the remaining classes by widening the regex
+ * onto the overload message: that false positive is precisely what the
+ * narrowing buys off (`type(record.x) == string` is legitimate CEL). Reporting
+ * past the first error needs a re-check loop over a neutralised source, or a
+ * checker entry that returns more than one error -- cel-js 8.0.0 has none, its
+ * `TypeCheckResult` carries a single `error` -- and either one changes what
+ * every consuming rule reports. That is a design decision, not a patch.
  */
 export function firstUndeclaredReference(
   source: string,
@@ -598,10 +640,10 @@ export function parseCelToAstWithReason(
  * expression — its raw CEL type name (`'int'`, `'double'`, `'string'`, `'bool'`,
  * `'google.protobuf.Timestamp'`, `'dyn'`, …) — or `null` when the expression does
  * not type-check. Reuses the SAME record-scoped, stdlib-registered env as
- * {@link firstUndeclaredReference}: namespace roots (`record`, `previous`, …) are
- * declared `map` and `knownFields` are declared `dyn`, so both `record.<field>`
- * and bare `<field>` references resolve while every stdlib call carries its
- * declared return type.
+ * {@link firstUndeclaredReference}: namespace roots (`record`, `previous`, …) and
+ * `knownFields` are both declared `dyn`, so both `record.<field>` and bare
+ * `<field>` references resolve while every stdlib call carries its declared
+ * return type.
  *
  * Deliberately conservative. A member access (`record.amount`) or a bare field is
  * `dyn`, and an operator over two `dyn` operands stays `dyn` (cel-js cannot prove
