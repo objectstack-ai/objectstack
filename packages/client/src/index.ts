@@ -1459,6 +1459,65 @@ const DEFAULT_META_PREFIX = '/meta';
  */
 const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
 
+/**
+ * Lift better-auth's bare `/get-session` answer into the `SessionResponse`
+ * envelope the two methods that call that route declare (#16760).
+ *
+ * `/api/v1/auth/*` is better-auth's own byte stream — plugin-auth mounts one
+ * catch-all straight onto its handler — and better-auth does not use
+ * ObjectStack's REST envelope. Measured against a real `AuthManager`
+ * (better-auth 1.7.2, organization plugin) over a real driver:
+ *
+ * ```
+ * GET /api/v1/auth/get-session  (signed in) -> 200 {"user":{…},"session":{…,"token":"…"}}
+ * GET /api/v1/auth/get-session  (anonymous) -> 200 null
+ * ```
+ *
+ * `auth.login` has carried the same lift for `/sign-in/email`'s own bare
+ * `{ token, user }` since long before this card; `auth.me` and
+ * `auth.refreshToken` never got it, so every caller writing to the declared
+ * `data.user` read `undefined` while the real payload sat on `.user` — which
+ * did not type-check.
+ *
+ * Three properties this deliberately has:
+ *
+ * - **`success` is filled, not only `data`.** `SessionResponseSchema` is
+ *   `BaseResponseSchema.extend(…)` and that base declares `success` as a
+ *   REQUIRED boolean, so a body carrying `data` alone still does not parse as
+ *   the type the method advertises. A producer that sent its own `success`
+ *   keeps it — the spread below runs after the default.
+ * - **The raw keys are kept, not replaced.** `{ …body, data }`, exactly as
+ *   `login` does. `.user` is the read the field has been using all along while
+ *   the declared `.data.user` was `undefined`, and dropping it would break
+ *   those callers in order to fix a type they were already working around.
+ * - **`data.token` is NOT synthesized from `session.token`.** The declared key
+ *   is optional, and the two spellings are not one string: `session.token` is
+ *   the UNSIGNED session token, while the `token` `login` puts there is the
+ *   SIGNED `token.signature` form `bearer()` hands out. Both authenticate, so
+ *   populating it would file two different credentials under one key depending
+ *   on which method produced the body.
+ *
+ * The `body &&` guard is what carries the anonymous answer: `null` is falsy and
+ * is returned untouched rather than wrapped into a signed-in-looking envelope
+ * that no session backs. That answer stays outside `SessionResponse`; closing
+ * it needs the published return annotation to widen, which is a different card.
+ */
+const normalizeSessionResponse = (raw: unknown): SessionResponse => {
+  const body = raw as { user?: unknown; session?: unknown; data?: unknown } | null;
+  // Already enveloped, or nothing recognisable to lift: hand it back untouched
+  // rather than inventing a `data` this response never carried.
+  if (!body || typeof body !== 'object') return body as unknown as SessionResponse;
+  if (body.data !== undefined) return body as unknown as SessionResponse;
+  if (body.user === undefined && body.session === undefined) {
+    return body as unknown as SessionResponse;
+  }
+  return {
+    success: true,
+    ...body,
+    data: { user: body.user, session: body.session },
+  } as unknown as SessionResponse;
+};
+
 export class ObjectStackClient {
   private baseUrl: string;
   private token?: string;
@@ -3842,10 +3901,47 @@ export class ObjectStackClient {
        *
        * Returns the freshly-issued `client_id` and `client_secret`.
        * The secret is only returned at creation time — store it securely.
+       *
+       * ## Why `name`, `scopes` and `metadata` are NOT declared here (#15447)
+       *
+       * They used to be, and the route silently dropped all three. Its body
+       * schema is `@better-auth/oauth-provider@1.7.2`'s, a zod object with no
+       * `catchall` — so zod's default `strip` — and none of the three is among
+       * its 21 members. A caller who set one got **HTTP 201 and a client that
+       * quietly did not have it**: no error, no receipt, nothing to notice.
+       * Driven end to end (real `betterAuth` + real `oauthProvider` over the
+       * real ObjectQL engine on a real socket, through this very client): each
+       * member came back absent from the response, absent from
+       * `applications.get`, absent from `applications.list`, and `null` in the
+       * `sys_oauth_application` row.
+       *
+       * A second, independent barrier stands behind the strip, so widening the
+       * SDK alone could never have made them arrive: the handler funnels the
+       * rest of the parsed body into the opaque-metadata envelope, and all
+       * three names are in `OPAQUE_METADATA_RESERVED_FIELDS`.
+       *
+       * ## ⚠️ They were the vendor's RECORD vocabulary, not typos
+       *
+       * The two near-misses look like misspellings of `client_name` and
+       * `scope` and are not — they are the names of the DB columns those two
+       * wire members write. Measured: `client_name: 'CTRL-…'` lands in the
+       * column literally named **`name`**, and `scope: 'openid profile email'`
+       * lands in the column literally named **`scopes`**, as a JSON array. So
+       * this type used to offer the record spelling and the wire spelling side
+       * by side, and only the wire one worked. The right prescription is the
+       * wire member, and for `scopes` it is not a rename: `scope` is a single
+       * space-delimited `string`, and posting an array is refused —
+       * `400 [body.scope] Invalid input: expected string, received array`.
+       *
+       * `metadata` has no reachable door at all: only the SERVER_ONLY
+       * `PATCH /admin/oauth2/update-client` honours it, and `better-call`'s
+       * router skips SERVER_ONLY endpoints, so over HTTP it answers 404 with a
+       * zero-byte body.
+       *
+       * Pinned by `oauth-applications-register-request-members.test.ts`.
        */
       register: async (req: {
         client_name?: string;
-        name?: string;
         redirect_uris: string[];
         token_endpoint_auth_method?: 'none' | 'client_secret_basic' | 'client_secret_post';
         grant_types?: string[];
@@ -3853,11 +3949,9 @@ export class ObjectStackClient {
         client_uri?: string;
         logo_uri?: string;
         scope?: string;
-        scopes?: string[];
         contacts?: string[];
         tos_uri?: string;
         policy_uri?: string;
-        metadata?: Record<string, unknown>;
       }): Promise<OAuthApplicationRegistration> => {
         const route = this.getRoute('auth');
         // The new oauth-provider package exposes `/oauth2/create-client`
@@ -4095,13 +4189,24 @@ export class ObjectStackClient {
     /**
      * Get current user session
      * Uses better-auth endpoint: GET /get-session
+     *
+     * The route answers bare (`{ user, session }`), so the answer is lifted
+     * into the declared `SessionResponse` envelope by
+     * {@link normalizeSessionResponse} — the same lift `login` has always
+     * carried. Read the payload off `data.user` / `data.session`; the raw
+     * `.user` / `.session` keys are kept alongside for callers written against
+     * the wire while the declared shape was unreachable.
+     *
+     * ⚠️ Anonymous is the one answer still outside the declared type: the route
+     * serves the literal `null` at 200 and it is returned as-is, because there
+     * is no `SessionResponse` value that means "nobody is signed in".
      */
     me: async (): Promise<SessionResponse> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/get-session`, {
             headers: { Origin: this.baseUrl },
         });
-        return res.json();
+        return normalizeSessionResponse(await res.json());
     },
 
     /**
@@ -4170,6 +4275,30 @@ export class ObjectStackClient {
      * Refresh an authentication token
      * Note: better-auth handles token refresh automatically via /get-session
      * @param _refreshToken - Not used (better-auth handles refresh automatically)
+     *
+     * ## Where the credential really is (#16760)
+     *
+     * This used to assign from `data.data?.token` — a read that could never
+     * resolve, on a route that has no top-level `token` at all. Measured
+     * signed-in against a real `AuthManager` (better-auth 1.7.2) over a real
+     * driver, the body's top level is exactly `user` and `session`, and the
+     * only credential in it is `session.token`:
+     *
+     * ```
+     * -> 200 {"user":{…},"session":{…,"token":"<unsigned>","expiresAt":"…"}}
+     * ```
+     *
+     * So the old read was not a consequence of the envelope being misdeclared
+     * — enveloping the body does not put a token at `data.token` either. It
+     * named a field this route does not produce, and the method returned
+     * successfully having captured nothing, which is the worst way for a
+     * credential call to fail.
+     *
+     * ⚠️ `session.token` is the UNSIGNED spelling, while `bearer()` hands
+     * clients the signed `token.signature` form. Both authenticate — the
+     * server strips the signature on the bearer branch before it looks the
+     * session up (`resolveActor`) — so storing this one keeps the caller
+     * signed in.
      */
     refreshToken: async (_refreshToken: string): Promise<SessionResponse> => {
       const route = this.getRoute('auth');
@@ -4178,9 +4307,10 @@ export class ObjectStackClient {
       const res = await this.fetch(`${this.baseUrl}${route}/get-session`, {
         method: 'GET'
       });
-      const data = await res.json();
-      if (data.data?.token) {
-        this.token = data.data.token;
+      const data = normalizeSessionResponse(await res.json());
+      const token = data?.data?.session?.token;
+      if (token) {
+        this.token = token;
       }
       return data;
     },

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import {
   ApiErrorSchema,
   makeApiErrorSchema,
@@ -75,6 +76,89 @@ describe('ApiErrorSchema', () => {
       message: 'refused',
       userMessage: true,
     }).success).toBe(false);
+  });
+
+  // [#16335] The producer-side REFUSAL declaration (director ruling, decision
+  // batch #58, option C): presence says the 5xx's `message` is authored for
+  // the caller and boundaries keep it; absence keeps the #5811 withhold — the
+  // default is a fault. The measured producer is the `/references` door's
+  // ADR-0110 D3 `501`, which reached the wire as "Internal server error".
+  const REFERENCES_REFUSAL =
+    'References to a `field` item cannot be computed. Ask the owning object instead: '
+    + 'GET /api/v1/meta/object/account/references';
+
+  it('carries a producer-declared `refusal` beside the message it keeps', () => {
+    const error = ApiErrorSchema.parse({
+      code: 'NOT_IMPLEMENTED',
+      message: REFERENCES_REFUSAL,
+      httpStatus: 501,
+      refusal: true,
+    });
+
+    expect(error.refusal).toBe(true);
+    // The declaration rides BESIDE `message`; it never replaces or carries it.
+    expect(error.message).toBe(REFERENCES_REFUSAL);
+  });
+
+  it('a declared 5xx that says nothing parses with the key ABSENT — the default is a fault', () => {
+    const error = ApiErrorSchema.parse({
+      code: 'NOT_IMPLEMENTED',
+      message: REFERENCES_REFUSAL,
+      httpStatus: 501,
+    });
+    expect('refusal' in error).toBe(false);
+  });
+
+  it('refuses `refusal: false` — presence is the declaration, and a fault has its own spelling', () => {
+    const result = ApiErrorSchema.safeParse({
+      code: 'NOT_IMPLEMENTED',
+      message: REFERENCES_REFUSAL,
+      httpStatus: 501,
+      refusal: false,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['refusal']);
+    expect(result.error?.issues[0]?.code).toBe('invalid_value');
+  });
+
+  it('refuses a non-boolean declaration — the flag is not a text channel', () => {
+    const result = ApiErrorSchema.safeParse({
+      code: 'NOT_IMPLEMENTED',
+      message: REFERENCES_REFUSAL,
+      refusal: 'yes',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['refusal']);
+  });
+
+  it('`userMessage` and `refusal` are orthogonal — both ride one envelope, neither replaces `message`', () => {
+    const error = ApiErrorSchema.parse({
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'service-messaging is not installed on this deployment',
+      httpStatus: 503,
+      refusal: true,
+      userMessage: '此部署未安装消息服务。',
+    });
+    expect(error.refusal).toBe(true);
+    expect(error.userMessage).toBe('此部署未安装消息服务。');
+    expect(error.message).toBe('service-messaging is not installed on this deployment');
+  });
+
+  // [#16335] The value rule as the tarball ships it. `json-schema/api/ApiError.json`
+  // is built from this schema by `scripts/build-schemas.ts` with
+  // `z.toJSONSchema(schema, { target: 'draft-2020-12' })`, and `build-docs.ts`
+  // renders each generated reference row's type column from `prop.const` — so
+  // the shipped JSON and the checked-in reference rows both carry `true`, and
+  // `check:docs` (a required check with no paths filter) compares the rows.
+  // This pin reads the JSON directly, on the generator's own options.
+  it('ships `refusal` as `{ type: boolean, const: true }` in the JSON Schema the tarball carries', () => {
+    const json = z.toJSONSchema(ApiErrorSchema, { target: 'draft-2020-12' }) as {
+      properties?: Record<string, { type?: unknown; const?: unknown }>;
+    };
+    expect(json.properties?.refusal).toMatchObject({ type: 'boolean', const: true });
+    // Lit control on a neighbour: a plain string key carries no `const`.
+    expect(json.properties?.userMessage).toMatchObject({ type: 'string' });
+    expect(json.properties?.userMessage?.const).toBeUndefined();
   });
 });
 
@@ -664,6 +748,27 @@ describe('makeApiErrorSchema (federated ledger, #4805)', () => {
     });
     expect(parsed.httpStatus).toBe(402);
     expect(parsed.requestId).toBe('req_1');
+  });
+
+  // [#16335] The docblock's promise, pinned: "a field added to the base
+  // envelope reaches every downstream ledger with it" — the refusal
+  // declaration parses through the factory with the base's own value rule.
+  it('a field added to the base envelope reaches the downstream ledger with it', () => {
+    const parsed = DownstreamApiError.parse({
+      code: 'CONTACT_SALES_PLAN',
+      message: 'Upgrade required',
+      httpStatus: 501,
+      refusal: true,
+    });
+    expect(parsed.refusal).toBe(true);
+
+    const rejected = DownstreamApiError.safeParse({
+      code: 'CONTACT_SALES_PLAN',
+      message: 'Upgrade required',
+      refusal: false,
+    });
+    expect(rejected.success).toBe(false);
+    expect(rejected.error?.issues[0]?.path).toEqual(['refusal']);
   });
 });
 

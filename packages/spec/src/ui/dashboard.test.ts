@@ -15,6 +15,7 @@ import {
   DATE_RANGE_PRESETS,
   DATE_RANGE_DEFAULT_RANGES,
 } from './dashboard.zod';
+import { dashboardForm } from './dashboard.form';
 
 /**
  * ADR-0021 single-form: every dashboard widget binds a `dataset` and selects
@@ -731,5 +732,67 @@ describe('dashboard.refreshInterval carries its unit (#15680)', () => {
       // shape refuses — the one failure this rename could introduce silently.
       expect(message).not.toMatch(/`refreshInterval`(?!Seconds)/);
     }
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// #16458 — item-level property names: the header-action row schema carries a
+// `title` per field, and the form declares the same children with the same
+// labels
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('#16458 — DashboardHeaderAction fields carry an item-level `title`', () => {
+  const ROW_TITLES: Record<string, string> = {
+    label: 'Label',
+    actionUrl: 'Action URL',
+    actionType: 'Action Type',
+    icon: 'Icon',
+  };
+
+  // The console derives the panel schema with `io: 'input'`; `GET /meta`
+  // derives it in output mode. The name must survive both.
+  for (const io of ['input', 'output'] as const) {
+    it(`z.toJSONSchema(DashboardSchema, { io: '${io}' }) names every header.actions[] column`, () => {
+      const js = z.toJSONSchema(DashboardSchema, { io, unrepresentable: 'any' }) as any;
+      const props = js.properties.header.properties.actions.items.properties;
+      expect(Object.keys(props).sort()).toEqual(Object.keys(ROW_TITLES).sort());
+      for (const [key, title] of Object.entries(ROW_TITLES)) {
+        expect(props[key].title, `items.properties.${key}.title`).toBe(title);
+        // The title is an annotation beside the existing description, not in
+        // place of it.
+        expect(typeof props[key].description).toBe('string');
+      }
+      // Control — a sibling item property with no authored title has none:
+      // the pin above is reading a title, not a default the emitter invents.
+      const widgetProps = js.properties.widgets.items.properties;
+      expect(widgetProps.id.title).toBeUndefined();
+    });
+  }
+
+  it('dashboardForm enumerates the header children and labels the row properties as the schema titles', () => {
+    const header = (dashboardForm.sections as any[])
+      .flatMap((s) => s.fields ?? [])
+      .find((f: any) => f?.field === 'header');
+    expect(header?.type).toBe('composite');
+    // ALL of the composite's children — the panel prefers a declared list over
+    // the schema-derived one, so a partial enumeration would drop a child.
+    const headerKeys = Object.keys(
+      (z.toJSONSchema(DashboardHeaderSchema, { io: 'input', unrepresentable: 'any' }) as any).properties,
+    ).sort();
+    expect((header.fields as any[]).map((f) => f.field).sort()).toEqual(headerKeys);
+    const actions = (header.fields as any[]).find((f) => f.field === 'actions');
+    expect(actions.type).toBe('repeater');
+    // The extractor takes the English source from these labels; the panel
+    // reads the schema `title`. One name, two spellings, pinned equal.
+    const declared = Object.fromEntries((actions.fields as any[]).map((f) => [f.field, f.label]));
+    expect(declared).toEqual(ROW_TITLES);
+  });
+
+  it('control — `columns` still declares no default and parses to undefined when absent (#16458 item ④ deliberately not landed)', () => {
+    const js = z.toJSONSchema(DashboardSchema, { io: 'input', unrepresentable: 'any' }) as any;
+    expect(js.properties.columns.default).toBeUndefined();
+    const parsed = DashboardSchema.parse({ name: 'dash_x', label: 'D', widgets: [] });
+    expect(parsed.columns).toBeUndefined();
+    expect('columns' in parsed).toBe(false);
   });
 });

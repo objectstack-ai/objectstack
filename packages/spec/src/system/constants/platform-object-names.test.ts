@@ -167,4 +167,21 @@ describe('platform-object predicates', () => {
     expect(isPlatformProvidedObjectName('sys_license')).toBe(true);
     expect(CLOUD_PROVIDED_OBJECT_NAMES).toContain('sys_license');
   });
+
+  it('resolves the middle table of the cloud package family', () => {
+    // `sys_package` and `sys_package_installation` were registered; the
+    // release-snapshot table between them was not, although this repo declares
+    // its row schema (`cloud/package-version.zod.ts`) and ships a platform
+    // object that looks it up (`sys_metadata.package_version_id` in
+    // `@objectstack/metadata-core`). While it was absent the object-reference
+    // ladder classed that shipped lookup target as a platform-prefixed name
+    // nothing registers. Pinned by name, beside `sys_license`, for the same
+    // reason. The other half of the contract — that the cloud runtime really
+    // registers the table — is owned by the cloud repository, per the list's
+    // header, and is not asserted here.
+    for (const name of ['sys_package', 'sys_package_version', 'sys_package_installation']) {
+      expect(isPlatformProvidedObjectName(name), name).toBe(true);
+      expect(CLOUD_PROVIDED_OBJECT_NAMES, name).toContain(name);
+    }
+  });
 });

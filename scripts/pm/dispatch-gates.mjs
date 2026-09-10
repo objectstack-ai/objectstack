@@ -3223,8 +3223,9 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
     'scripts/symbol-anchors.mjs --self-test',
     'a shared grammar-and-extractor LIBRARY, invoked by CI only as its own self-test; its `git ls-files` runs over a '
       + 'corpus its caller passes in. The corpus walk it lends is exercised by its registrations — '
-      + 'check-adr-symbol-anchors.mjs, which declares ROOT_DIR_WATCH_HINTS = [docs/adr/**], and '
-      + 'check-scripts-symbol-anchors.mjs, which declares [scripts/**] — and each is placed by its own.',
+      + 'check-adr-symbol-anchors.mjs, which declares ROOT_DIR_WATCH_HINTS = [docs/adr/**], '
+      + 'check-scripts-symbol-anchors.mjs, which declares [scripts/**], and '
+      + 'check-spec-docblock-symbol-anchors.mjs, which declares [packages/spec/src/**] — and each is placed by its own.',
   ],
 ];
 
