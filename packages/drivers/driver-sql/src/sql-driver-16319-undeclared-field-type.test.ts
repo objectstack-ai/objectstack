@@ -29,6 +29,7 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
 
 describe('#16319 — `createColumn` refuses a field that declares no `type`', () => {
@@ -80,8 +81,11 @@ describe('#16319 — `createColumn` refuses a field that declares no `type`', ()
     ] as any)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
 
     // The object is not left half-built: nothing that names it survives as a
-    // usable table. (SQLite answers a missing table by throwing.)
-    await expect(driver.find('probe_object', {} as any)).rejects.toBeTruthy();
+    // usable table. (SQLite answers a missing table by throwing.) The options bag
+    // is TYPED rather than erased — `pnpm check:query-options-erasure` counts an
+    // `any`-shaped one on a `find` call, tests included.
+    const all: EngineQueryOptions = {};
+    await expect(driver.find('probe_object', all)).rejects.toBeTruthy();
   });
 
   it('⭐ BOUNDARY PIN — presence is refused here; MEMBERSHIP is not, and is refused at the registry', async () => {

@@ -30,6 +30,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { hashSpec } from '@objectstack/metadata-core';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { SchemaRegistry, objectFieldTypeRefusal, OBJECT_FIELD_TYPE_REFUSED_CODE } from './registry.js';
 
@@ -383,7 +384,10 @@ describe('#16319 §4 — a refused row stays REACHABLE through the metadata API'
         const receipt = await protocol.deleteMetaItem({ type: 'object', name: 'refusal_probe' });
         expect(receipt.success).toBe(true);
 
-        const left = await engine.find('sys_metadata', { where: { type: 'object', name: 'refusal_probe' } });
+        // Typed rather than erased — `pnpm check:query-options-erasure` counts an
+        // `any`-shaped options bag on a `find` call, tests included.
+        const leftovers: EngineQueryOptions = { where: { type: 'object', name: 'refusal_probe' } };
+        const left = await engine.find('sys_metadata', leftovers);
         expect(left).toEqual([]);
     });
 
