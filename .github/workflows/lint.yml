@@ -1123,6 +1123,27 @@ jobs:
       - name: Stamped-post helper self-test
         run: pnpm check:pm-post-stamped
 
+      # Board-snapshot archiver self-test (#17390) — same family and the same
+      # split as every step around it. The LIVE run reads the whole board over
+      # REST and commits the result to an orphan branch, so it is not a thing
+      # CI runs on a pull request; the offline half is what CI can hold, and
+      # `.github/workflows/board-snapshot.yml` is the only caller of the other.
+      #
+      # What the self-test instruments is the set of rules a clean tree cannot
+      # exercise: the page walk's value re-anchor (blind `page += 1` skips a row
+      # that shifted forward mid-walk, permanently and with no symptom), the
+      # resume cursor an interrupted run leaves, the idempotence that keeps a
+      # no-op run from committing, the count check's three verdicts — including
+      # `pending`, which exists so "could not check" never renders as "checked
+      # and clean" — and the provenance sentence a rebuilt record must carry.
+      # Two of its cases are STRUCTURAL and read this file's own source: that
+      # the archiver has no write path to GitHub in any mode (the one-board
+      # rule, mechanically) and that it carries no retry loop against a spent
+      # rate limit. Weakening any of them leaves every ordinary run just as
+      # green, which is the shape `check:self-test-wired` requires this step for.
+      - name: Board-snapshot archiver self-test
+        run: pnpm check:pm-board-snapshot
+
       # Changeset-deadline census self-test (#16850) — same family and the same
       # split as every step around it. The LIVE census reads the shared board
       # over the API and is REPORT-ONLY by ruling: #16850 takes option 1 (detect
