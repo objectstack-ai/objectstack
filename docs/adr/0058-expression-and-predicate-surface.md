@@ -455,7 +455,8 @@
 > **What the rule now is.** On a predicate write (`multi: true`), per-row
 > `previous` is supplied so a guard can REFUSE (throw) **and** so a `before*`
 > hook can make a **row-invariant-in-effect** rewrite: one whose written KEY
-> SET is the same on every matched row. The shape that ships is the worked
+> SET is the same on every matched row AND is assigned IN PLACE
+> (`ctx.input.data.customized = true`). The shape that ships is the worked
 > example — a provenance stamp writing `customized: true` on every row whose
 > `previous.managed_by` is package-seeded. D3's merge rule is untouched: the
 > payload stays BATCH-scoped, so what "row-invariant in effect" buys is the
@@ -463,15 +464,20 @@
 >
 > **The mechanism that makes it safe is the ENGINE, not the hook.** The
 > dispatch's `MULTI_UPDATE_HOOK_KEY_DIVERGENCE` refusal (#14099) records, per
-> row, the payload keys that row's hook chain assigned, and if any two rows
-> disagree it refuses the WHOLE batch BEFORE any write — nothing is written,
-> not the first row. To an operator that refusal is an ADR-0112 envelope,
-> `status: 400`, carrying `keys` (the sorted keys some rows' hooks wrote and
-> other rows' did not) and `rows` (how many rows the predicate matched). So an
+> row, the payload keys that row's hook chain assigned IN PLACE, and if any two
+> rows disagree it refuses the WHOLE batch BEFORE any write — nothing is
+> written, not the first row. In-place is the condition the refusal rests on,
+> which is why the admitted shape carries it: a hook that REPLACES
+> `ctx.input.data` hands the dispatch a fresh object whose keys it cannot
+> attribute, the recording yields nothing, and the comparison is SKIPPED — the
+> batch is not judged at all. To an operator that refusal is an ADR-0112
+> envelope, `status: 400`, carrying `keys` (the sorted keys some rows' hooks
+> wrote and other rows' did not) and `rows` (how many rows the predicate
+> matched). So an
 > author does not have to be TRUSTED to be row-invariant; a hook that is not
 > gets a loud, whole-batch 400 instead of a half-stamped table.
 >
-> **The two shapes the rule does NOT admit.**
+> **The three shapes the rule does NOT admit.**
 >
 > - A rewrite whose written KEY SET differs across rows. That IS the refusal
 >   above: out of contract, and the engine says so before anything is written.
@@ -479,6 +485,11 @@
 >   never values — the clock-reading audit stamp has to pass — so this shape
 >   CLEARS the divergence check and applies the LAST dispatch's value to every
 >   matched row. It stays out of contract and stays unenforced.
+> - A row-conditioned REPLACEMENT of `ctx.input.data`. The recording cannot
+>   attribute a replacement's keys, so the batch ABSTAINS and no refusal fires
+>   at all. It stays out of contract and stays unenforced, for the same reason
+>   as the shape above: what admits the new shape is the refusal, and the
+>   refusal does not reach here.
 >
 > **Why option 2 (change the three stamps) was not adopted.** #15302 measured
 > the cost of the alternative: a stamp that DECLINES on a predicate write
