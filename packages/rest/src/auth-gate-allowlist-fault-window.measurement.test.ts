@@ -187,8 +187,11 @@ async function drive(rest: RestServer, path: string, method = 'GET'): Promise<Dr
 }
 
 // The allow-list's four reachable path SHAPES, read off `auth-gate.ts` rather
-// than invented here: an `ALLOW_PREFIXES` entry, the dispatcher path shape, an
-// embedded `/auth/` segment, and an `ALLOW_SUFFIXES` entry.
+// than invented here: a REST-mounted `/auth/` route, the dispatcher path shape,
+// an environment-scoped `/auth/` route, and an exact bootstrap route.
+// (#16839 renamed the constants these were read off — `ALLOW_PREFIXES` and
+// `ALLOW_SUFFIXES` became `MOUNT_BASES` + `ALLOW_ROUTES` when the allow-list
+// was anchored — but every SHAPE below is still allow-listed, which §0 drives.)
 const ALLOWLISTED_PATHS = [
   '/api/v1/auth/change-password',
   '/auth/two-factor/enable',
