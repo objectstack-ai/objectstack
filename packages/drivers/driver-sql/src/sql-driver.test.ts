@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, assert } from 'vitest';
 import { SqlDriver } from '../src/index.js';
 
 describe('SqlDriver (SQLite Integration)', () => {
@@ -85,6 +85,7 @@ describe('SqlDriver (SQLite Integration)', () => {
     expect(alice).toBeDefined();
 
     const fetched = await driver.findOne('users', { where: { id: alice.id } });
+    assert(fetched !== null, 'findOne answered the not-found arm for a seeded id');
     expect(fetched).toBeDefined();
     expect(fetched.name).toBe('Alice');
   });
@@ -102,6 +103,7 @@ describe('SqlDriver (SQLite Integration)', () => {
     await driver.update('users', bob.id, { age: 18 });
 
     const updated = await driver.findOne('users', { where: { id: bob.id } });
+    assert(updated !== null, 'findOne answered the not-found arm for a seeded id');
     expect(updated.age).toBe(18);
   });
 
@@ -123,6 +125,7 @@ describe('SqlDriver (SQLite Integration)', () => {
 
     expect(created.id).toBe('custom-id');
     const fetched = await driver.findOne('users', { where: { id: 'custom-id' } });
+    assert(fetched !== null, 'findOne answered the not-found arm for a seeded id');
     expect(fetched).toBeDefined();
     expect(fetched.name).toBe('Frank');
   });

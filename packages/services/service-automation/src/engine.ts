@@ -8964,10 +8964,18 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * Why an envelope-shaped `value`-role slot is malformed — the SINGLE notion
-     * of "malformed" this package has (#15137), composed of the two published
-     * primitives and nothing of its own:
+     * Why a `value`-role envelope argument is malformed — the SINGLE notion of
+     * "malformed" this package has (#15137), composed of the two published
+     * primitives plus the one presence rule neither of them can state:
      *
+     *  0. **Presence** (#16439) — a `null` / `undefined` argument. Neither
+     *     primitive judges it: the shape rule is a no-op on anything not
+     *     `isExpressionEnvelopeShaped` (neither shape is), and
+     *     `validateExpression` reads an absent `source` as "not authored"
+     *     (`ok: true`). Both therefore returned NO findings, and
+     *     {@link evaluateValueEnvelope} went on to read `envelope.source` off
+     *     nothing — a bare `TypeError` with no `where`, no source and no rule,
+     *     the one shape in that method's sweep that failed unattributed.
      *  1. **Shape** — `AssignmentValueSchema` (spec, #14149). It is a no-op on
      *     anything not `isExpressionEnvelopeShaped`, and on an envelope it
      *     requires `ExpressionSchema` narrowed to `dialect: 'cel'`: a `template`
@@ -8991,6 +8999,40 @@ export class AutomationEngine implements IAutomationService {
      * executor would have run.
      */
     private valueEnvelopeRefusals(value: unknown): { message: string; source: string }[] {
+        // [#16439] Presence, asked before either primitive, because neither can
+        // answer it (see rule 0 above). It is stated HERE and not as a guard in
+        // {@link evaluateValueEnvelope} deliberately: a reject reason living
+        // only on the evaluation side would end the property this method exists
+        // for — registration and evaluation refuse ONE set, derived by one call
+        // — and the docblock that says so would stop being true.
+        //
+        // REFUSED rather than admitted, and the asymmetry with the predicate
+        // side is deliberate, not an oversight to harmonise away:
+        // `structuralConditionRefusal` admits `null` / `undefined` because the
+        // condition FIELD is optional, so absence there means "the author wrote
+        // no predicate". A value slot's envelope IS the value, so an absent one
+        // is a caller handing nothing where a value was required: there is
+        // nothing to compute, and — per this method's own ADR-0032 §1c
+        // argument — no falsy default for it to hide behind.
+        //
+        // Measured, so the registration half is not an assumption: the
+        // value-role feeder (`resolveFlowNodeExpressions`) emits ONLY
+        // envelope-shaped objects and `isExpressionEnvelopeShaped` is false for
+        // both shapes, so `registerFlow` never presents a nullish value here.
+        // An authored `null` in an `assignments` slot stays what it always was
+        // — a literal that parses (`FlowSchema.parse` accepts it) and still
+        // registers. This adds nothing to the registration reject set.
+        if (value == null) {
+            return [{
+                message:
+                    `${ASSIGNMENT_VALUE_ENVELOPE_REFUSAL} no envelope was passed: the argument is `
+                    + `\`${value === null ? 'null' : 'undefined'}\`, so there is nothing to evaluate. An absent `
+                    + 'envelope is not "not authored" — the predicate side admits absence because the condition '
+                    + "field is optional, but a value slot's envelope IS the value. Write "
+                    + "`{ dialect: 'cel', source: '…' }`.",
+                source: '',
+            }];
+        }
         const source = (value as { source?: unknown })?.source;
         const sourceText = typeof source === 'string' ? source : '';
         const shape = AssignmentValueSchema.safeParse(value);
@@ -9016,6 +9058,11 @@ export class AutomationEngine implements IAutomationService {
      * "source":"…"}` as JSON into a message body. The whole declared CEL stdlib
      * (`joinNonEmpty`, …) was unreachable from metadata because CEL was only
      * ever asked for a boolean.
+     *
+     * A `null` / `undefined` envelope is refused here too, attributed like every
+     * other malformed shape, and by the same shared call (#16439) — it used to
+     * be the one argument that reached `envelope.source` unjudged and threw a
+     * bare `TypeError` carrying neither `where` nor the rule.
      *
      * Refusals are thrown, never swallowed to a value: ADR-0032 §1c's rule for
      * predicates holds at least as hard here, since a value that failed to

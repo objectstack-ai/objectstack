@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, assert } from 'vitest';
 import { SqliteWasmDriver } from '../src/index.js';
 
 /**
@@ -71,12 +71,14 @@ describe('SqliteWasmDriver tenant scope (organization_id)', () => {
       // org_b tries to update org_a's a1 → no-op
       await driver.update('account', 'a1', { tier: 'compromised' }, { tenantId: 'org_b' });
       const a1 = await driver.findOne('account', { where: { id: 'a1' } });
+      assert(a1 !== null, 'findOne answered the not-found arm for a seeded id');
       expect(a1.tier).toBe('gold');
     });
 
     it('updates own rows fine', async () => {
       await driver.update('account', 'a1', { tier: 'platinum' }, { tenantId: 'org_a' });
       const a1 = await driver.findOne('account', { where: { id: 'a1' } });
+      assert(a1 !== null, 'findOne answered the not-found arm for a seeded id');
       expect(a1.tier).toBe('platinum');
     });
   });
