@@ -49,6 +49,7 @@ import {
     MetadataLockSchema,
     type MetadataLock,
 } from '../kernel/metadata-protection.zod';
+import { strictObject } from './strict-object';
 
 /**
  * Public protection block authored by package developers. Optional on
@@ -60,7 +61,90 @@ import {
  * (provenance, packageId, packageVersion) is auto-populated by the
  * loader and must not be supplied here.
  */
-export const ProtectionSchema = z.object({
+export const ProtectionSchema = strictObject({
+    // ⚠️ ONE declaring schema, reached from every mount — so the surface name
+    // cannot be per-mount-context the way every neighbouring `strictObject`
+    // adoption's is. `protection:` is mounted on very nearly every authorable
+    // metadata type in the platform, and the mount list moves; transcribing it
+    // into this string would mint exactly the second copy of the truth this
+    // helper exists to delete, and a stale copy here would be published as a
+    // confident sentence in a rejection. So the surface names the BLOCK, which
+    // is what the author actually wrote and what the error path already shows
+    // (`protection.lock`), and is true at every mount without naming one.
+    surface: 'the `protection` block of this metadata item',
+    history:
+        'This block has refused unknown keys since it was introduced, but through zod\'s own '
+        + 'bare message: a one-keystroke `lockk` was echoed back and nothing else — no surface, '
+        + 'no declared-key list, no rename — while every neighbouring block on the same item '
+        + 'named all three. It is mounted on very nearly every authorable metadata type in the '
+        + 'platform (objects, views, dashboards, datasets, reports, apps, flows, webhooks, '
+        + 'permissions, positions, email templates, agents, tools, skills), so that bare message '
+        + 'was what an author saw wherever a protection key was misspelled. The declared keys '
+        + 'are `lock`, `reason` and `docsUrl`.',
+    aliases: {
+        // ── prose slot ────────────────────────────────────────────────────
+        // `description` is declared on the mounting metadata types themselves,
+        // one line up from this block, so an author reaching for prose inside
+        // `protection` writes it by reflex. `message` and `explanation` are the
+        // words this file's own docblock uses for the value ("user-visible
+        // explanation surfaced in `403 ITEM_LOCKED` errors").
+        description: 'reason',
+        message: 'reason',
+        explanation: 'reason',
+        // The private envelope's public counterparts, written without the
+        // underscore. Distance cannot reach them (`lockReason` → `reason` is 4
+        // edits against a length-relative budget of 3); the underscored
+        // spellings are answered by the guidance set below instead.
+        lockReason: 'reason',
+        lockDocsUrl: 'docsUrl',
+        // ── docs slot ─────────────────────────────────────────────────────
+        // ⚠️ `docs` and `link` are not merely unreached — measured on the
+        // pre-fix build, the edit-distance fallback answered BOTH of them with
+        // `lock` (`docs`/`link` are each 2 edits from `lock`, inside the budget
+        // of 2 for a four-character key), i.e. it pointed an author who meant
+        // the documentation URL at the lock policy. That is ledger finding 7's
+        // shape — the campaign's own fix signposting into a second rejection —
+        // and it is why these two entries carry judgement rather than typing.
+        docs: 'docsUrl',
+        link: 'docsUrl',
+        url: 'docsUrl',
+        href: 'docsUrl',
+        helpUrl: 'docsUrl',
+        documentationUrl: 'docsUrl',
+    },
+    guidance: {
+        // Wrong-layer, and a bare rename would misinform about the VALUE: both
+        // spellings are real boolean keys on neighbouring surfaces
+        // (`data/field.zod.ts` `readonly`, `ui/component.zod.ts` `readOnly`),
+        // whereas this block's equivalent is an enum, so `lock: true` would be
+        // the author's next rejection.
+        readonly:
+            '`readonly` is a field/component-level boolean; this block expresses the same intent '
+            + 'as a policy — write `lock: \'no-overlay\'` (save blocked, delete still allowed) or '
+            + '`lock: \'full\'` (both blocked).',
+        readOnly:
+            '`readOnly` is a field/component-level boolean; this block expresses the same intent '
+            + 'as a policy — write `lock: \'no-overlay\'` (save blocked, delete still allowed) or '
+            + '`lock: \'full\'` (both blocked).',
+    },
+    guidanceSets: [
+        {
+            // The `_lock` envelope is the RUNTIME form of this block
+            // (`kernel/metadata-protection.zod.ts`), stamped by
+            // `applyProtection` below at registration time. An author who has
+            // read the stored row writes its keys here; one prescription
+            // answers the whole family, once per message.
+            name: 'PRIVATE_LOCK_ENVELOPE_KEYS',
+            keys: /^_lock/,
+            examples: ['_lock', '_lockReason', '_lockDocsUrl', '_lockSource'],
+            prescription:
+                'The `_lock*` keys are the runtime\'s PRIVATE envelope, stamped by the loader from '
+                + 'this block — never authored. Write the public keys instead: `_lock` → `lock`, '
+                + '`_lockReason` → `reason`, `_lockDocsUrl` → `docsUrl`; `_lockSource` is derived '
+                + 'and has no author-facing counterpart.',
+        },
+    ],
+}, {
     /**
      * Lock policy for this item. See {@link MetadataLockSchema} for
      * the full semantics table.
@@ -101,7 +185,7 @@ export const ProtectionSchema = z.object({
     docsUrl: z.string().url().optional().describe(
         'Optional URL the Studio banner links to for more context.',
     ),
-}).strict();
+});
 
 export type Protection = z.input<typeof ProtectionSchema>;
 
