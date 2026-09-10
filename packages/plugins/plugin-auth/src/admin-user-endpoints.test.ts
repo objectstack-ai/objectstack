@@ -53,6 +53,18 @@ function makeDeps(overrides: Partial<Record<string, any>> = {}) {
 }
 
 /**
+ * Read a mock's recorded calls at their real arity.
+ *
+ * `vi.fn(async () => ({}))` infers a ZERO-length parameter tuple, so `c[0]` on
+ * `mock.calls` is a type error (`TS2493`) even though every recorded call has
+ * two arguments — the shape `scripts/check-test-typecheck.mts` ledgers for this
+ * file. New assertions go through here so the ledger keeps ratcheting DOWN.
+ */
+function callsOf(fn: { mock: { calls: unknown[][] } }): Array<[string, any]> {
+  return fn.mock.calls as unknown as Array<[string, any]>;
+}
+
+/**
  * Security red line (#2766): no mock the endpoint touched may ever have seen
  * the plaintext password outside the better-auth hashing surface.
  */
@@ -488,7 +500,7 @@ describe('runAdminCreateUser', () => {
     expect(data.user.id).toBe('user-9');
     expect(data.membershipCreated).toBe(false);
     expect(data.organizationId).toBeUndefined();
-    expect(m.engineInsert.mock.calls.some((c) => c[0] === 'sys_member')).toBe(false);
+    expect(callsOf(m.engineInsert).some((c) => c[0] === 'sys_member')).toBe(false);
 
     // `policy-skip` is decided BEFORE any target-org resolution, so the org
     // lookup never runs. This separates "policy said no" from "no target org
@@ -497,7 +509,8 @@ describe('runAdminCreateUser', () => {
 
     // The audit row records the refusal, so the trail shows the account was
     // created member-less on purpose rather than by a failed bind.
-    const auditRow = m.engineInsert.mock.calls.find((c) => c[0] === 'sys_audit_log')![1];
+    const auditRow = callsOf(m.engineInsert).find((c) => c[0] === 'sys_audit_log')?.[1];
+    expect(auditRow).toBeTruthy();
     const meta = JSON.parse(auditRow.metadata);
     expect(meta.membershipCreated).toBe(false);
     expect(meta.organizationId).toBeUndefined();
@@ -518,7 +531,7 @@ describe('runAdminCreateUser', () => {
     const data = res.body.data as any;
     expect(data.membershipCreated).toBe(false);
     expect(data.organizationId).toBeUndefined();
-    expect(m.engineInsert.mock.calls.some((c) => c[0] === 'sys_member')).toBe(false);
+    expect(callsOf(m.engineInsert).some((c) => c[0] === 'sys_member')).toBe(false);
   });
 
   it('auto (explicit): still binds — the default posture is untouched', async () => {
@@ -533,7 +546,7 @@ describe('runAdminCreateUser', () => {
     const data = res.body.data as any;
     expect(data.organizationId).toBe('org_only');
     expect(data.membershipCreated).toBe(true);
-    expect(m.engineInsert.mock.calls.some((c) => c[0] === 'sys_member')).toBe(true);
+    expect(callsOf(m.engineInsert).some((c) => c[0] === 'sys_member')).toBe(true);
   });
 
   /**
@@ -562,9 +575,9 @@ describe('runAdminCreateUser', () => {
       makeRequest({ email: 'a@b.co', password: 'Sup3rSecret!x' }),
       ACTOR,
     );
-    const writes = m.engineInsert.mock.calls.map(([object, doc]: any[]) => [
+    const writes = callsOf(m.engineInsert).map(([object, doc]) => [
       object,
-      object === 'sys_member' ? { ...doc, id: '<generated>' } : doc,
+      object === 'sys_member' ? { ...doc, id: '(generated)' } : doc,
     ]);
     return { body: JSON.stringify(res.body), writes: JSON.stringify(writes) };
   }
