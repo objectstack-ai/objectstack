@@ -30,4 +30,11 @@ The agent read `own` scope where the human read `viewAllRecords`, so any profile
 
 Purely additive on every published surface: two new optional members, one new exported type (`DelegationNarrowing`), and one new evaluator method. No existing member changed shape, and the only behavioural change is on the delegated path with a ceiling that declares no depth.
 
-`DelegationNarrowing` is a **discriminated union** on `narrowed`, not one shape with three optional fields, because the two are not symmetric under permanence: shipping optional and later tightening to required is **breaking**, while shipping discriminated and later loosening — a new union member, or an optional field on the `true` arm — is **non-breaking**. The loose shape buys nothing and forecloses the tightening. It also removes the very failure mode the method exists to prevent: `statement` is the sentence an AI consumer renders, so left optional, a consumer that forgets the `narrowed` check silently renders `undefined` — the same silence the table above measures. The five-member scope ladder it reports names the alias that already exists for it, `ObjectAccessScope` (ADR-0057 D1, `@objectstack/spec/security`), rather than minting a second declaration of one ladder; `resolveWriteScope` now names it too, so the union is spelled once instead of three times and no export is added beyond `DelegationNarrowing` itself.
+`DelegationNarrowing` is a **discriminated union** on `narrowed`, not one shape with three optional fields, because the two shapes are not symmetric once released:
+
+| direction, after release | consumer cost |
+|:--|:--|
+| ship optional fields, later tighten them to required | a compile break |
+| ship discriminated, later loosen it (a new union member, or an optional field on the `true` arm) | none |
+
+The loose shape buys nothing and forecloses the tightening. It also removes the very failure mode the method exists to prevent: `statement` is the sentence an AI consumer renders, so left optional, a consumer that forgets the `narrowed` check silently renders `undefined` — the same silence the table above measures. The five-member scope ladder it reports names the alias that already exists for it, `ObjectAccessScope` (ADR-0057 D1, `@objectstack/spec/security`), rather than minting a second declaration of one ladder; `resolveWriteScope` now names it too, so the union is spelled once instead of three times and no export is added beyond `DelegationNarrowing` itself.
