@@ -44,7 +44,6 @@
 - 该命令 0 = 双肢一致且无放宽 tell,4 = 任一不成立,3 = 环境答不了;⛔ 3 不作干净。
 - 放宽 tell 由 `scripts/pm/check-widening-tells.mjs` 判,`no` 撞新键/成员/导出/登记即拒,附 file:line。
 - ③ PR 全部 check 全绿,⛔ 非 required 子集;受管面不适用,draft-only 终局不变。
-- 外部评审链是可选事后审计:分诊定时轮与总监席召唤 ⛔ 不是放行必要条件。
 
 ## 降档保险丝(机读)
 
@@ -54,6 +53,7 @@
 - 保险丝只测座位自会话:`mode:subagent` 里 `get_session` 量的是派发会话,⛔ 不作互证。
 - 传参只是配置 ⛔ 不作达档读数;条款②的 `mode:subagent` 派发恒保留标至席内复核完成。
 - 转录档位核验:采信或清标前 grep 子代理 transcript 中 harness 逐消息盖章的 `model` 字段。
+- 施工档只取 harness `model` 盖章或认领 Container & model 行;`Co-Authored-By` = 署名常量 ⛔ 非证据。
 - 产出裁决的每轮都须读到契约复审档位,见回退证据 ⇒ 裁决整体作废。
 - 父会话只有两个合法动作:逐字采纳,或整体作废(核验失败、越范围、格式不完整)。
 - ⛔ 永不改写、删节或润色子代理裁决。

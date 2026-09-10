@@ -210,7 +210,7 @@ describe('os explain — every catalog entry swept against its spec schema (#148
     ...specAutomation,
   };
 
-  type ParseResult = { success: boolean; error?: { issues: unknown[] } };
+  type ParseResult = { success: boolean; data?: unknown; error?: { issues: unknown[] } };
   type ZodLike = { safeParse: (value: unknown) => ParseResult };
 
   // The catalog stores examples as authored source, so evaluate the literal —
@@ -291,6 +291,102 @@ describe('os explain — every catalog entry swept against its spec schema (#148
         `os explain ${key} — example does NOT parse as ${bound.schema} `
           + `(known-broken, filed as #${bound.card}; promote to a plain assertion once fixed)`,
         parses,
+      );
+    }
+  }
+
+  // ── Key RETENTION: an example must SURVIVE its parse, not merely pass it ────
+  //
+  // The sweep above asserts `safeParse(...).success === true` — and that stays
+  // green over a key the schema SILENTLY STRIPS, because a plain `z.object`
+  // drops what it does not declare and still reports success. The `query` entry
+  // shipped teaching `filters` and `sort`, neither of them a `QuerySchema` key,
+  // and every run of the sweep above was green on it (#16925). "Parses" is
+  // therefore not the property worth asserting on its own; "parses AND comes
+  // back whole" is, and only the second one can see this failure mode.
+  //
+  // ⭐ This is a RATCHET, not a patch over a large hole. All nine bound entries
+  // were read back to spec on the day it landed: eight refuse an unknown key
+  // outright — seven `strictObject`, plus `object`, whose docblock states the
+  // "No silent strip (ADR-0032 / #1535)" contract explicitly — and `query` alone
+  // had an open top level, deliberately so and already owned (`query.zod.ts`:
+  // "Deliberately NOT taken here: `BaseQuerySchema`'s own top level stays
+  // non-strict. That is #4001's to schedule."). So it is green across the whole
+  // catalog the day it lands. What it defends is the day a bound entry resolves
+  // to an open top level again: the direction of travel is *closing*, and this
+  // is what notices if that reverses — with the entry named, instead of a green
+  // sweep over a silently emptied example.
+  //
+  // ⛔ It reads the EXAMPLE face only — the one face `evaluate` reads. The
+  // `optional` / `required` tables carry key names too, and no assertion in this
+  // file has ever looked at them; a row naming a key the schema does not have is
+  // the same defect on the other face (this card's own `filters` / `sort` lived
+  // on BOTH). Covering it is not a stricter version of this assertion but a
+  // different one: a table row is prose, not a key — `view`'s required row is
+  // spelled `list | form | listViews | formViews` — so it needs a way to tell a
+  // key name from a description before it can judge anything. Declared as a gap
+  // here rather than half-built.
+  //
+  // The walk is deliberately conservative — it reports a key present in the
+  // INPUT and absent from the OUTPUT, and nothing else. Keys a schema ADDS
+  // (defaults) are not drift; a value a schema TRANSFORMS to a non-object is not
+  // a dropped key, so the walk stops rather than guessing. Arrays are matched
+  // positionally, which is what every schema in this catalog does today.
+  const isWalkable = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !(value instanceof Date);
+
+  const droppedKeys = (
+    input: unknown,
+    output: unknown,
+    path: string[] = [],
+    out: string[] = [],
+  ): string[] => {
+    if (Array.isArray(input)) {
+      if (!Array.isArray(output)) return out;
+      input.forEach((item, i) => droppedKeys(item, output[i], [...path, String(i)], out));
+      return out;
+    }
+    if (!isWalkable(input) || Array.isArray(output) || !isWalkable(output)) return out;
+    for (const key of Object.keys(input)) {
+      if (!Object.prototype.hasOwnProperty.call(output, key)) out.push([...path, key].join('.'));
+      else droppedKeys(input[key], output[key], [...path, key], out);
+    }
+    return out;
+  };
+
+  for (const [key, bound] of Object.entries(BOUND)) {
+    if (bound.card === undefined) {
+      it(`os explain ${key} — example survives ${bound.schema} with every declared key intact`, () => {
+        const schema = specSurface[bound.schema] as ZodLike;
+        const example = evaluate(key);
+        const result = schema.safeParse(example);
+        // Retention is only a question about a parse that succeeded — stated,
+        // so a failure here reads as "the parse broke" and not as a drop.
+        expect(
+          result.success,
+          `os explain ${key}: its example must parse before retention can be judged`,
+        ).toBe(true);
+        expect(
+          droppedKeys(example, result.data),
+          `os explain ${key}: ${bound.schema} SILENTLY DROPPED key(s) its example declares. `
+            + 'The example teaches keys the schema does not have, so an author who copies it '
+            + 'gets a parse that succeeds and a value with those keys gone — no error, no '
+            + 'warning. Correct the example to the schema\'s own spellings (⛔ do not relax '
+            + 'the schema to accept them). The `parses` assertion above cannot see this: a '
+            + 'non-strict object reports success and strips.',
+        ).toEqual([]);
+      });
+    } else {
+      // Asserted, never skipped: an entry whose example does not parse cannot be
+      // judged for retention, and that reason is a property of this file rather
+      // than an omission the reader has to notice.
+      it(
+        `os explain ${key} — retention NOT judged: its example does not parse yet `
+          + `(known-broken, filed as #${bound.card})`,
+        () => {
+          const schema = specSurface[bound.schema] as ZodLike;
+          expect(schema.safeParse(evaluate(key)).success).toBe(false);
+        },
       );
     }
   }

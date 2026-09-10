@@ -34,6 +34,7 @@ import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 // verification — `@objectstack/organizations` above all — must be resolved from
 // THAT app, not from `packages/verify`'s own realpath inside this workspace.
 import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
+import { createHandle, type VerifyHandle } from './handle.js';
 
 /** A Hono app exposes `.request(path, init)` returning a standard `Response`. */
 interface InjectableApp {
@@ -74,7 +75,13 @@ const DEFAULT_ADMIN_EMAIL = 'admin@objectos.ai';
 const DEFAULT_ADMIN_PASSWORD = 'admin123';
 const DEFAULT_AUTH_SECRET = 'objectstack-verify-secret';
 
-export interface VerifyStack {
+/**
+ * A booted stack: the HTTP surface (`api` / `raw` / `signIn` / `signUp` /
+ * `apiAs`) plus the in-process handle (`hooks` / `validate` / `flows` /
+ * `actions` / `seed` / `rows` / `metadata` / `tenancy` / `contextFor`) on the
+ * same kernel — see `./handle.ts` for what each method is a facade over.
+ */
+export interface VerifyStack extends VerifyHandle {
   /** The booted kernel — for direct service calls when bypassing HTTP is intentional. */
   kernel: ObjectKernel;
   /** Inject an HTTP request through the real Hono app (no socket). Path is relative to `/api/v1`. */
@@ -836,5 +843,54 @@ export async function bootStack(
     restoreTenancyPosture();
   };
 
-  return { kernel, api, raw, signIn, signUp, apiAs, stop };
+  // The in-process handle over the SAME kernel (hotcrm#1579 step 5a). Built
+  // after bootstrap so every service it resolves is the one the boot wired.
+  const handle = await createHandle(kernel, ORIGIN);
+
+  return { kernel, api, raw, signIn, signUp, apiAs, stop, ...handle };
+}
+
+const NO_OPTIONS: unique symbol = Symbol('bootStackOnce:no-options');
+const SHARED_BOOTS = new WeakMap<object, Map<unknown, Promise<VerifyStack>>>();
+
+/**
+ * `bootStack`, memoised per (`config`, `opts`) IDENTITY for the life of the
+ * process — the worker-scoped shared boot `packages/qa/dogfood`'s
+ * `getSharedShowcase()` kept privately, promoted so a suite of many files can
+ * pay one boot per vitest worker instead of one per file (a plain boot costs
+ * seconds; measured at ~7.8s per file on the showcase).
+ *
+ * Both keys are compared by reference: pass the same `config` module export
+ * and the same `opts` object (a module-level constant, or none) from every
+ * file that should share, and the first caller's boot is the one everybody
+ * gets — including its dev-admin sign-in state. A different `opts` object,
+ * even one spelled identically, is a different stack: the memo never guesses
+ * that two `SecurityPlugin` instances mean the same thing.
+ *
+ * Sharing only makes sense under `isolate: false` (files in one worker share
+ * one module registry); under vitest's default isolation every file still
+ * boots its own. The eligibility rules dogfood wrote for its shared stack
+ * apply verbatim: no `stop()` from a sharing file (the worker's teardown
+ * reclaims the in-memory stack; a `stop()` would kill it under the worker's
+ * later files), no writes to shared global surfaces, and no exact-count
+ * assertions over objects other files also write to.
+ */
+export function bootStackOnce(config: any, opts?: BootOptions): Promise<VerifyStack> {
+  if (config === null || typeof config !== 'object') {
+    throw new Error('verify: bootStackOnce(config) memoises by identity, so `config` must be an object');
+  }
+  let byOpts = SHARED_BOOTS.get(config);
+  if (!byOpts) {
+    byOpts = new Map();
+    SHARED_BOOTS.set(config, byOpts);
+  }
+  const key: unknown = opts ?? NO_OPTIONS;
+  let booted = byOpts.get(key);
+  if (!booted) {
+    booted = bootStack(config, opts);
+    byOpts.set(key, booted);
+    // A failed boot must not poison the memo: the next caller boots again.
+    booted.catch(() => byOpts!.delete(key));
+  }
+  return booted;
 }

@@ -52,15 +52,21 @@
  * `MetadataEventSchema` itself (`@objectstack/metadata-core`), not a
  * hand-rolled regex standing in for it.
  *
- * §C is the #14078 NEUTRALITY pin: an Invalid `Date` must reach the consumer
- * UNCHANGED, exactly as this cast passes it through today. #14078 has since
- * ruled (option B, 2026-09-02) and `canonicalIsoInstant` in this same file is
- * now TOTAL — it answers `undefined` for that shape rather than raising
- * `RangeError: Invalid time value`. The two helpers still differ across the
- * REST of the input domain, so §C keeps its job unchanged: it goes red the
- * moment someone swaps the other spelling into this site, which is now the
- * separately-tracked consolidation decision #16422 rather than an open
- * ruling.
+ * §C WAS the #14078 neutrality pin — "an Invalid `Date` must reach the
+ * consumer UNCHANGED, exactly as this cast passes it through" — written to go
+ * red the moment anyone swapped the shared spelling into this site. #16422
+ * made that swap DELIBERATELY, so §C is rewritten as the RULED pin rather
+ * than kept or deleted: it now asserts the terminal value the ruling chose,
+ * and it still goes red if anyone reverts to the pass-through, because the
+ * shape that reaches `MetadataEvent.ts` under that spelling is a `Date`
+ * object in a field declared `z.string()`.
+ *
+ * ⚠️ The rewrite is the point, not a formality. The neutrality pin existed so
+ * the swap could not happen by accident; its evidence — the seven-input
+ * before/after matrix in #16422's PR — is what discharges it. `rowToEvent`
+ * now reads `canonicalIsoInstant(row.recorded_at) ?? new Date(0).toISOString()`,
+ * the same spelling and the same terminal value `history()` already used for
+ * `authoredAt` off this very column.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -250,29 +256,57 @@ describe('#14037 — MetadataEvent.ts is canonical ISO text, whatever the dialec
     });
   });
 
-  describe('§C #14078 neutrality — an Invalid Date is NOT converted here', () => {
+  describe('§C [#16422] RULED — an Invalid Date takes the epoch, the branch an absent column takes', () => {
     /**
-     * ⛔ This card does not decide #14078. An Invalid `Date` is measured
-     * reachable on both live dialects (a MySQL zero datetime; any Postgres
-     * year in 275760..294276), and whether the shared canonical-ISO spelling
-     * should throw on it (option A) or fall back to a rendering (option B) is
-     * a maintainer call across four packages. Until it is ruled, this site
-     * hands that one shape through exactly as it does today — no new throw,
-     * no invented rendering.
+     * This section was the #14078 NEUTRALITY pin: it asserted that this site
+     * hands an Invalid `Date` through UNCHANGED, and it was written to go red
+     * on exactly the swap #16422 then performed. It is rewritten, not
+     * deleted, because the swap was deliberate and now has its own evidence.
+     *
+     * What the ruling decided, per call site: `rowToEvent` reads
+     * `canonicalIsoInstant(row.recorded_at) ?? new Date(0).toISOString()`. An
+     * Invalid `Date` folds to `undefined` — #14078's own total `Date` arm —
+     * and therefore takes the `??` branch an ABSENT column already took (§B),
+     * which is also the answer `history()` gives for `authoredAt` off this
+     * same column.
+     *
+     * ⛔ Why the old behaviour could not stay: `MetadataEvent.ts` is declared
+     * `z.string()` (`@objectstack/metadata-core`) and its one in-repo reader
+     * forwards it to `MetadataWatchEvent.timestamp`, a `z.string().datetime()`.
+     * The pass-through put a `Date` OBJECT in that field, so
+     * `MetadataEventSchema` refused the event this adapter produced — asserted
+     * below rather than described, by parsing the same fixture both ways.
      */
-    it('hands the value through unchanged instead of raising RangeError', async () => {
+    it('answers the epoch and produces an event the declared schema accepts', async () => {
       const invalid = new Date(NaN);
       expect(Number.isNaN(invalid.getTime())).toBe(true);
-      // The contested spelling's `Date` arm, on this input, for contrast.
+      // Non-vacuity: the shape really is the one with no canonical text.
       expect(() => invalid.toISOString()).toThrow(RangeError);
 
       engine.historyRows[0]!.recorded_at = invalid;
 
       const evt = await firstEvent();
 
-      // Unchanged — and specifically NOT the `??` fallback, which would mean
-      // this card had quietly chosen a rendering for the contested shape.
-      expect(evt!.ts).toBe(invalid as unknown as string);
+      // The ruled terminal value — the same one §B's absent column takes.
+      expect(evt!.ts).toBe(new Date(0).toISOString());
+      expect(typeof evt!.ts).toBe('string');
+
+      // ⛔ And specifically NOT the retired pass-through, which is what the
+      // neutrality version of this section asserted.
+      expect(evt!.ts).not.toBe(invalid as unknown as string);
+      expect(evt!.ts).not.toBeInstanceOf(Date);
+
+      // The declared contract, which the pass-through could not satisfy.
+      const parsed = MetadataEventSchema.safeParse(evt);
+      expect(parsed.success, JSON.stringify((parsed as { error?: { issues: unknown } }).error?.issues)).toBe(true);
+    });
+
+    it('rejects the retired shape, so a revert to pass-through cannot pass silently', () => {
+      // The exact object the pass-through used to emit, checked against the
+      // declared schema in isolation. This is why the swap was not cosmetic.
+      const passThrough = { seq: 1, op: 'update', ref, hash: null, parentHash: null,
+        actor: null, ts: new Date(NaN), source: 'sys-metadata-repo' };
+      expect(MetadataEventSchema.safeParse(passThrough).success).toBe(false);
     });
   });
 });

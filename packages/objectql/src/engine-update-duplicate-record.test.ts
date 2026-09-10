@@ -194,17 +194,32 @@ function makeDriver(opts: DriverOpts = {}) {
   return driver as IDataDriver & { update: any; updateMany: any };
 }
 
-/** A logger that records what the door's `Update operation failed` line carried. */
+/**
+ * A logger that records what the door's `Update operation failed` line carried.
+ *
+ * [#17052] The line is emitted at `warn` now (the catch rethrows — the caller
+ * was told), so the recorder listens there. `warn` has no `Error` slot, so the
+ * driver's error arrives as `meta.error = { message, stack }`; `err` below is
+ * lifted back out of it, which keeps every assertion in section (7) reading the
+ * same two fields #14095 pinned. `errors` also captures anything still emitted
+ * at `error`, so a regression that puts the line back would be visible rather
+ * than silently unmatched.
+ */
 function recordingLogger() {
-  const errors: Array<{ msg: string; err: unknown; meta: unknown }> = [];
+  const errors: Array<{ msg: string; err: unknown; meta: unknown; level: string }> = [];
+  const record = (level: string) => (msg: string, a?: unknown, b?: unknown) => {
+    const meta = (level === 'warn' ? a : b) as Record<string, any> | undefined;
+    const err = level === 'warn'
+      ? (meta?.error as unknown)
+      : a;
+    errors.push({ msg, err, meta, level });
+  };
   const logger = {
     info: vi.fn(),
     debug: vi.fn(),
-    warn: vi.fn(),
+    warn: vi.fn(record('warn')),
     trace: vi.fn(),
-    error: vi.fn((msg: string, err?: unknown, meta?: unknown) => {
-      errors.push({ msg, err, meta });
-    }),
+    error: vi.fn(record('error')),
   };
   return { logger, errors };
 }
@@ -603,14 +618,19 @@ describe('engine.update — a driver unique violation is a DUPLICATE_RECORD enve
 
       const line = errors.find((e) => e.msg === 'Update operation failed');
       expect(line).toBeDefined();
-      const logged = line!.err as Error;
-      expect(logged).toBeInstanceOf(Error);
+      // [#17052] …at `warn`: the catch rethrows, so the caller was told and
+      // this entry is the operator's copy, not a degradation report.
+      expect(line!.level).toBe('warn');
+      const logged = line!.err as { message: string; stack: string };
       expect(logged.message).toContain('UNIQUE constraint failed: doc.email');
       expect(logged.message).not.toContain('Duplicate record refused');
       // …and the redaction still holds: no statement, no bound value.
       expect(logged.message).not.toMatch(/update `doc` set/i);
       expect(logged.message).not.toContain('a@b.example');
-      expect(line!.meta).toEqual({ object: 'doc' });
+      // The `cause` reached the log with its FRAMES, which is the other half of
+      // what the platform logger serializes.
+      expect(typeof logged.stack).toBe('string');
+      expect(line!.meta).toEqual({ object: 'doc', error: logged });
     });
 
     it('logs the same way on the predicate door', async () => {
@@ -622,8 +642,9 @@ describe('engine.update — a driver unique violation is a DUPLICATE_RECORD enve
 
       const line = errors.find((e) => e.msg === 'Update operation failed');
       expect(line).toBeDefined();
-      expect((line!.err as Error).message).toContain('violates unique constraint');
-      expect((line!.err as Error).message).not.toContain('Duplicate record refused');
+      expect(line!.level).toBe('warn');
+      expect((line!.err as { message: string }).message).toContain('violates unique constraint');
+      expect((line!.err as { message: string }).message).not.toContain('Duplicate record refused');
     });
 
     it('a non-enveloped failure is logged exactly as before — the driver error itself', async () => {
@@ -635,7 +656,14 @@ describe('engine.update — a driver unique violation is a DUPLICATE_RECORD enve
 
       const line = errors.find((e) => e.msg === 'Update operation failed');
       expect(line).toBeDefined();
-      expect(line!.err).toBe(raw);
+      // [#17052] The identity check this used to make (`err === raw`) was a
+      // check on the SLOT, which `warn` does not have. What it was there to
+      // prove — nothing rewrites a failure that is not a duplicate envelope —
+      // is asserted on the two fields the platform logger has ever serialized,
+      // byte for byte against the driver's own error.
+      expect(line!.err).toEqual({ message: raw.message, stack: raw.stack });
+      // …and the caller still receives that very object, unwrapped.
+      expect(line!.level).toBe('warn');
     });
   });
 });

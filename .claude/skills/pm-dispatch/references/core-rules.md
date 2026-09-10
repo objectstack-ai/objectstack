@@ -27,13 +27,12 @@
 - 一座位一车道双射,每个域恰好一个 PM;与 AGENTS.md 冲突时以 AGENTS.md 为准。
 ## 状态模型
 - 可派发等于 open 加队列标签加无 assignee 且不带 `pm:retriage`,已设 assignee 即 ⛔ 永不碰。
-- `pm:dispatched` 与摘 `pm:queue` 恒在同一次标签写入里成对落地。
 - `pm:on-hold` 仅当带机器可读 `Restart-when:` 行才合法,触发文件走 `Restart-touch:` 行。
 - hold 放行须双查:只放最近一次转换评论的条件,其后有更新的 merged PR 即拒。
 - 没有可点火出口的卡 ⛔ 不 hold,直接关 not planned 并把理由与出处写进关单评论。
 - 缺陷卡 ⛔ 不可自行关闭或藏进 hold:可复现回队列、未兑现走 enforce-or-remove、余下进箱。
 - `pm:blocked` 配正文行 `Blocked-by:`,工已完而卡在门禁的同用此态并写 `Unlock-action:` 行。
-- `pm:awaiting-maintainer` 只剩站外人工动作;`pm:blocking` 是反向索引推导的缓存 ⛔ 不手工挂。
+- `pm:awaiting-maintainer` 只剩站外人工动作,恒带 `Maintainer-action:` 行;`pm:blocking` ⛔ 不手工挂。
 - `pm:retriage` 并存 ⛔ 不摘原标且跳过派发;`finding` 恒等于待首次定级、定级即离标。
 - 插队标签可超 `batch` 立即派发,⛔ 不豁免同文件串行、深度等待与认领协议。
 - 五个 pm 状态标签加 `needs-user-decision` 共六态互斥,转换恒一笔 replace,队列卡逾三天欠转换。
@@ -135,6 +134,7 @@
 - 升级只有两条门槛:公开契约或产品语义真实分歧且规范定不了,或动作破坏性难回滚。
 - 其余都是 PM 的裁量,给维护者的是否决窗口而不是许可门。
 - 具名不升级类:恢复不变量的修复、技术任务之间的顺序与依赖、验证策略、说明书脱节。
+- 记账事不升级(无产品可见行为变化):去重并卡、台账整理、纯文档措辞、门禁盲区加强。
 - 带前提的裁决三件缺一不可:选路线、挂具名可证伪前提、前提不成立必须报分叉。
 - 同族近似单默认并入既有拒收集;两个实现不一致时带治理的一侧胜出并删另一侧。
 - 落卡先刷新前提,每条前提行自带一条 re-check 命令;决策默认锚在所属 issue。

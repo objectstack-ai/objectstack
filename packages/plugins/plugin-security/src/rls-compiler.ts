@@ -62,6 +62,29 @@ interface RLSUserContext {
    */
   org_user_ids?: string[];
   /**
+   * [ADR-0105 D2] Every organization the caller holds a valid membership in —
+   * the `group` posture's union org scope. RLS expressions reference it as
+   * `<org column> IN (current_user.accessible_org_ids)`, whether that column is
+   * `organization_id` or an app's own (`employer_org`, say).
+   *
+   * Sourced from `ExecutionContext.accessible_org_ids`, which the runtime
+   * already computes for the Layer 0 tenancy wall. Like {@link org_user_ids}
+   * this set is CORE-resolved and PRE-resolved — pre-resolved precisely so the
+   * compiler needs no subquery support — and for the same reason it is
+   * reserved: `RESERVED_RLS_MEMBERSHIP_KEYS` refuses it from an app's
+   * `rlsMembership` bag, because a wall an app could redefine would not be a
+   * wall.
+   *
+   * ⚠️ Reserving a key obliges someone to FILL it. Until #16518 nobody did:
+   * `packages/spec` declared the key's SHAPE (`accessible_org_ids?: string[]`)
+   * and named core as its resolver, an app was refused from supplying it, and
+   * this interface did not carry it — so every predicate naming it dropped out
+   * and `RLS_DENY_FILTER` returned zero rows with no error raised. An empty
+   * list is indistinguishable from "this user really has no data", which is how
+   * that shape survived three green static gates.
+   */
+  accessible_org_ids?: string[];
+  /**
    * The caller's unique, auth-enforced email. RLS expressions reference it as
    * `current_user.email` for human-readable, *seedable* owner scoping
    * (`owner = current_user.email`). Email is exposed because it is UNIQUE; the
@@ -428,6 +451,13 @@ export class RLSCompiler {
       organization_id: executionContext?.tenantId,
       positions: executionContext?.positions,
       org_user_ids: (executionContext as any)?.org_user_ids,
+      // [ADR-0105 D2 / #16518] The caller's union org scope, copied from the
+      // execution context exactly as `org_user_ids` is. Both are core-resolved
+      // membership sets the runtime pre-resolves so this compiler never has to
+      // issue a subquery; the ONLY reason this line was missing is that nobody
+      // wrote it, and its absence made every predicate naming the key fail
+      // closed to zero rows in silence.
+      accessible_org_ids: (executionContext as any)?.accessible_org_ids,
       // Unique identifier — safe for ownership predicates (see RLSUserContext).
       email: (executionContext as any)?.email,
     };
