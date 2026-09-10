@@ -957,7 +957,13 @@ export class TursoDriver extends SqlDriver {
     return super.find(object, query, options);
   }
 
-  override async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
+  // [#15267] The override declares the contract's type, as both of its branches
+  // already do: `RemoteTransport.findOne()` answers
+  // `Record<string, unknown> | null` and `formatRemoteRow` is a generic
+  // pass-through; the local branch forwards to `super.findOne` (narrowed
+  // alongside). The explicit `Promise<any>` was this package's own `.d.ts`
+  // re-erasing the door, which no driver-sql fix reaches.
+  override async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     if (this.isRemote) return this.formatRemoteRow(object, await this.remoteTransport!.findOne(object, this.toRemoteReadQuery(object, query, { singleRowLookup: true })));
     return super.findOne(object, query, options);
   }
@@ -1077,7 +1083,12 @@ export class TursoDriver extends SqlDriver {
     );
   }
 
-  override async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<any> {
+  // [#15267] The override declares the contract's type, as both of its branches
+  // already do: `RemoteTransport.create()` answers `Record<string, unknown>`
+  // through the generic `formatRemoteRow`, and the local branch forwards to
+  // `super.create` (narrowed alongside). Same shape the `update()` override
+  // above took with #14438.
+  override async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
     if (this.isRemote) {
       this.refuseUngeneratableRemoteAutonumber(object, [data], 'create');
       return this.formatRemoteRow(object, await this.remoteTransport!.create(object, this.toRemoteWriteForms(object, data)));
@@ -1554,7 +1565,11 @@ export class TursoDriver extends SqlDriver {
   // Bulk Operations (remote mode overrides)
   // ===================================
 
-  override async bulkCreate(object: string, data: any[], options?: DriverOptions): Promise<any> {
+  // [#15267] The override declares the contract's type: `RemoteTransport
+  // .bulkCreate()` answers `Record<string, unknown>[]` through the generic
+  // `formatRemoteRows`, and the local branch forwards to `super.bulkCreate`
+  // (narrowed alongside).
+  override async bulkCreate(object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
     if (this.isRemote) {
       // [#6944] Same refusal as `create`, and it has to be stated here rather
       // than inherited: `RemoteTransport.bulkCreate` loops its OWN `create`, not
@@ -1600,7 +1615,11 @@ export class TursoDriver extends SqlDriver {
   // Raw Execution (remote mode override)
   // ===================================
 
-  override async execute(command: any, params?: any[], options?: DriverOptions): Promise<any> {
+  // [#15267] The override declares the contract's `unknown`:
+  // `RemoteTransport.execute()` already answers `unknown`, and the local branch
+  // forwards to `super.execute` (narrowed alongside). The explicit
+  // `Promise<any>` erased the contract's `unknown` on this package's `.d.ts`.
+  override async execute(command: any, params?: any[], options?: DriverOptions): Promise<unknown> {
     if (this.isRemote) {
       // [#16019] The remote transport hands the libsql client's error back
       // whole — `SQLITE_ERROR: no such function: translate`: no statement, no
