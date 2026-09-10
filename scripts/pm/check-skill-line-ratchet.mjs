@@ -892,7 +892,7 @@ export const CEILINGS = new Map([
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 38],
+  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 36],
   // Lowered 35 → 33 by the rules-only rewrite (maintainer 2026-09-04:
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
