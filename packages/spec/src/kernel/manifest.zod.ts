@@ -48,11 +48,19 @@ export const PluginPermissionsSchema = strictObject({
     + 'and this block decides which services, hooks, network hosts and filesystem paths the '
     + 'plugin may touch. The declared keys are `services`, `hooks`, `network` and `fs`.',
   aliases: {
-    // Edit distance cannot reach a two-letter abbreviation from the word it
-    // abbreviates, and `fs` is the one key here an author is most likely to
-    // spell out in full.
+    // These two are the unreachable case: edit distance cannot reach a
+    // two-letter abbreviation from the word it abbreviates, and `fs` is the
+    // one key here an author is most likely to spell out in full.
     filesystem: 'fs',
     paths: 'fs',
+    // `hosts` is the opposite case, and the stronger reason to curate an
+    // entry: it IS within budget of `hooks`. The fallback budget is
+    // `Math.max(2, Math.floor(key.length / 3))` (`shared/suggestions.zod.ts`),
+    // so a 5-character key gets 2, and `hosts`/`hooks` differ by exactly 2.
+    // Without this line the fallback answers `hosts` -> `hooks`, pointing the
+    // author at lifecycle hooks on the one block that also grants network
+    // access. This alias overrides a confident WRONG suggestion rather than
+    // filling a silent gap, and `manifest-unknown-keys.test.ts` pins that.
     hosts: 'network',
   },
 }, {
