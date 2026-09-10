@@ -9473,7 +9473,7 @@ export class SqlDriver implements IDataDriver {
     // Column-sync every retained shard (creates the current one; adds any
     // newly declared columns to older shards so the UNION stays uniform).
     for (const shard of retained) {
-      await this.ensureShardTable(shard, obj);
+      await this.ensureShardTable(shard, obj, tableName);
       this.aliasShardBookkeeping(tableName, shard);
     }
 
@@ -9589,10 +9589,16 @@ export class SqlDriver implements IDataDriver {
    * two links above still narrowing the same value, so a caller spelling
    * `indexes` in a fresh literal to `rotateShards` would still be refused by a
    * type while the driver read the key regardless.
+   *
+   * `baseTable` is the table the shard belongs to — the key its tenancy record
+   * is held under until {@link aliasShardBookkeeping} copies it across. It
+   * defaults to `shardName` so an existing override or external caller keeps
+   * today's behaviour, and the one in-tree call site names the base.
    */
   protected async ensureShardTable(
     shardName: string,
     obj: { fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
+    baseTable: string = shardName,
   ): Promise<void> {
     const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
     // [#12015] Both branches below drop a declared field named after a builtin
@@ -9641,11 +9647,26 @@ export class SqlDriver implements IDataDriver {
         ...idx,
         name: typeof idx?.name === 'string' && idx.name.trim() ? `${shardName}__${idx.name.trim()}` : undefined,
       }));
-      // Shard bookkeeping is aliased AFTER this method runs, so resolve the
-      // tenant column from the object schema itself — a declared
-      // `unique: 'organization'` index (ADR-0120 D1) must scope identically on
-      // every shard of the base table.
-      await this.syncDeclaredIndexes(shardName, perShard, new Set(Object.keys(colInfo)), this.computeTenantField(obj));
+      // Shard bookkeeping is aliased AFTER this method runs, so `shardName` has
+      // no entry of its own yet — a declared `unique: 'organization'` index
+      // (ADR-0120 D1) must scope identically on every shard of the base table,
+      // so the answer has to come from the base.
+      //
+      // [#16729] Keyed by `baseTable`, and through the RECORDING resolver, not
+      // the bare `computeTenantField`. The bare one reads this call's schema
+      // alone, so a shard synced from a partial re-registration — one carrying
+      // no `tenancy` block — fell through to the implicit `organization_id`
+      // heuristic and gave the shard an organization key part the base table's
+      // own index does not have. `tenantOptOutByTable` already holds the base's
+      // explicit opt-out (`initObjects` recorded it under exactly this key, and
+      // `aliasShardBookkeeping` propagates it to the shard afterwards), so
+      // consulting it here is what makes the two paths answer the same.
+      await this.syncDeclaredIndexes(
+        shardName,
+        perShard,
+        new Set(Object.keys(colInfo)),
+        this.computeAndRecordTenantField(baseTable, obj),
+      );
     }
   }
 
