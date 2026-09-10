@@ -127,3 +127,5 @@ examples/app-crm/storage/
 # Local agent tooling
 .codex/
 .claude/worktrees/
+# an agent worktree is git plumbing, never repo content: a `.git` FILE reading `gitdir:` plus a whole second checkout
+.worktrees/
