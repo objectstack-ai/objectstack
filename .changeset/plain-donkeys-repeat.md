@@ -19,11 +19,26 @@ authoring one — `@objectstack/spec/api` gains two exports:
 over the two whole closed stage declarations. `ListInstalledPackagesResponseSchema`
 and `GetInstalledPackageResponseSchema` are bound to the union.
 
-This is additive at runtime: every payload that parsed before still parses, and
-payloads that were refused for their manifest stage now parse. `ManifestSchema`
-is unchanged. A row belonging to neither stage — an `objects` array mixing globs
-with definitions — is still refused. Consumers holding a value typed as one of
-these two responses now see a union at `manifest` and narrow at the point of use.
+This is additive at runtime, and the runtime parse is where the gain is: every
+payload that parsed before still parses, payloads that were refused for their
+manifest stage now parse, and a row belonging to neither stage — an `objects`
+array mixing globs with definitions — is still refused. `ManifestSchema` is
+unchanged.
+
+The STATIC gain is one-sided, and smaller than a union normally implies.
+`AssembledPackageBodySchema` is annotated `z.ZodType<Record<string, unknown>, …>`
+in `stack.zod.ts` — deliberately, for the declaration-size reasons recorded
+there, and untouched by this change — so the assembled branch carries no field
+typing. Measured against the built `.d.ts`: a plain `.manifest.version` read off
+one of these two response types now yields `unknown` where it used to yield
+`string`; narrowing toward the AUTHORING branch restores the whole of
+`ManifestSchema` (`version: string`, `objects: string[]`), while narrowing away
+from it yields `Record<string, unknown>` — every manifest field `unknown`. In the
+assignment direction the assembled branch admits any object at `manifest`, so a
+garbage manifest and the mixed-stage row named above both typecheck clean even
+though the runtime union refuses both. So: narrow at the point of use for the
+authoring stage, and treat an assembled manifest as a record the runtime — not
+the compiler — has checked.
 
 `@objectstack/spec/api` also gains a `browser` export condition. Declaring the
 assembled stage makes this entry's module graph reach the datasource
