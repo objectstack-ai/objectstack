@@ -34,10 +34,18 @@
  * ## The control is load-bearing
  *
  * A refusal that fires on everything would satisfy every assertion about
- * `foo.bar` and would be a worse command than the broken one. `order-line`
+ * `foo.bar` and would be a worse command than the broken one. `order_line`
  * runs the whole path — writes the scaffold, writes the barrel — and both of
  * its files are re-read and re-parsed here, so "still works" is a reading
  * rather than an exit code.
+ *
+ * ⚠️ The control was spelled `order-line` until #16726 put a charset gate in
+ * front of this check, and kebab-case is outside the charset spec declares for
+ * an object `name` — so that spelling now stops one layer earlier and would
+ * have made this control measure the OTHER refusal. The two spellings derive
+ * the same everything (`order_line.object.ts`, `orderLine`), so every
+ * assertion below is the one #16541 wrote, byte for byte; only the authored
+ * input moved to a name this command still accepts.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -124,7 +132,7 @@ beforeAll(async () => {
   // A second generator, to show the refusal is not one patched call site.
   refusedAgain = await runTsx([CLI, 'generate', 'flow', 'foo.bar'], refusedDir);
   dryRun = await runTsx([CLI, 'generate', 'object', 'foo.bar', '--dry-run'], dryRunDir);
-  control = await runTsx([CLI, 'generate', 'object', 'order-line'], controlDir);
+  control = await runTsx([CLI, 'generate', 'object', 'order_line'], controlDir);
 }, RUN_TIMEOUT_MS);
 
 afterAll(() => {
