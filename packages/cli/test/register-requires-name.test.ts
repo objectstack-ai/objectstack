@@ -92,7 +92,7 @@ async function runRegister(argv: string[]): Promise<{ output: string; threw: unk
 }
 
 describe('os register — the prompt, the payload and the route agree about `name`', () => {
-  let exitCode: number | undefined;
+  let exitCode: typeof process.exitCode;
 
   beforeEach(() => {
     answers = [];
