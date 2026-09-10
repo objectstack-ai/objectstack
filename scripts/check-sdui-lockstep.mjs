@@ -54,6 +54,18 @@
  * (`packages/spec/react-declaration-parity.baseline.json` records a diff and
  * ratchets it); this record holds ONE SIDE, so there is no diff in it to bless.
  *
+ * ## And why `--update` REFUSES off the pin
+ *
+ * `--update` reads the objectui checkout at HEAD but stamps `recordedAgainstPin`
+ * from `PIN_FILE`, so those two used to be joined by nothing: a checkout not
+ * sitting on the pin wrote a record that NAMED THE PIN WHILE DESCRIBING A
+ * DIFFERENT TREE, silently, at exit 0. The record was self-certifying — stamped
+ * with the identity of something other than what it described, with the only
+ * check that compared anything (`judge()`'s `pin-moved`) comparing the STAMP
+ * against the pin file, two values from one file. So the generator now refuses
+ * unless HEAD is the pin; see `judgeRecordability`, which carries the
+ * measurement and the reason the resolve-it-for-them alternative was declined.
+ *
  * ## Why the pin is read (`.objectui-sha`)
  *
  * `.objectui-sha` is the objectui commit whose `@object-ui/console` build this
@@ -95,8 +107,9 @@
  *
  * Every input this gate needs is asserted before any verdict: the record file,
  * its shape, the region delimiter in this tree, a non-empty code set, a
- * resolvable identifier at every code position, and the pin. A missing one exits
- * 1 saying which — never a `⚠` and exit 0. A guard whose success condition and
+ * resolvable identifier at every code position, and the pin. `--update` asserts
+ * the same way before any RECORD: a readable pin, a HEAD that parses, and the
+ * two being equal. A missing one exits 1 saying which — never a `⚠` and exit 0. A guard whose success condition and
  * whose total-failure condition are the same exit code is worse than no guard
  * (#13014, and #4690 for the incident that named the class).
  */
@@ -403,6 +416,69 @@ export function resolveObjectui(env = process.env) {
   return { root: candidate, why: null };
 }
 
+/**
+ * Whether an objectui checkout may be RECORDED FROM: its `HEAD` must be the
+ * commit `.objectui-sha` names. Empty means it may; otherwise one `[tag]`
+ * finding per reason, in `judge()`'s shape so both are read the same way.
+ *
+ * ## Why the generator needs this and the checker cannot supply it
+ *
+ * The record's CONTENT is read from whatever the objectui checkout has at HEAD,
+ * while `recordedAgainstPin` is stamped from `PIN_FILE`. Nothing joined those
+ * two, so a checkout not sitting on the pin wrote a record that NAMED THE PIN
+ * WHILE DESCRIBING A DIFFERENT TREE — silently, at exit 0.
+ *
+ * ⚠️ And `judge()`'s `pin-moved` clause cannot catch it, which is the whole
+ * point: that clause compares `record.recordedAgainstPin` against the live pin,
+ * i.e. the STAMPED side against the pin file — two values that came from the
+ * same file and therefore agree by construction. The record was self-certifying:
+ * it was stamped with the identity of something other than what it described,
+ * and the one check comparing anything compared the stamp. The join has to
+ * happen HERE, at the only moment both the tree and the pin are in hand.
+ *
+ * ⛔ Never repair that by stamping HEAD instead. It would make the field honest
+ * and useless — the field exists to say WHICH PIN the description belongs to —
+ * and it would make `judge()`'s comparison pass forever, destroying a working
+ * check along with the record.
+ *
+ * Measured, deterministically, on the `a472b07167a3` → `53ded82bf7a4` bump: read
+ * at objectui tip the record carried 25 diagnostic codes, read at the pin it
+ * carried 24. ⚠️ `parse.ts` is byte-identical between those two revisions while
+ * the `PARSER_SRC` tree is not, and that is exactly where the difference lives —
+ * so a reader checking the obvious file sees nothing wrong, and an equality
+ * assertion is the only thing that does.
+ *
+ * Refusing rather than resolving the checkout to the pin ourselves is deliberate:
+ * a read from the pin's tree needs git WRITES inside somebody else's checkout,
+ * whose behaviour over uncommitted work there would have to be defined. The
+ * operator parking their own checkout needs no new machinery.
+ */
+export function judgeRecordability({ head, livePin }) {
+  const findings = [];
+  if (typeof livePin !== 'string' || !/^[0-9a-f]{40}$/.test(livePin)) {
+    findings.push(
+      `[pin-unusable] ${PIN_FILE} does not hold a 40-character commit id, so nothing can be checked\n`
+      + `    against it. It reads: ${JSON.stringify(livePin)}.`,
+    );
+    return findings;
+  }
+  if (typeof head !== 'string' || !/^[0-9a-f]{40}$/.test(head)) {
+    findings.push(
+      `[head-unusable] \`git rev-parse HEAD\` in the objectui checkout did not yield a 40-character\n`
+      + `    commit id, so it cannot be compared with the pin. It yielded: ${JSON.stringify(head)}.`,
+    );
+    return findings;
+  }
+  if (head !== livePin) {
+    findings.push(
+      `[head-off-pin] the objectui checkout is at ${head.slice(0, 12)}, and ${PIN_FILE} names\n`
+      + `    ${livePin.slice(0, 12)}. Recording now would write a record stamped with the pin while\n`
+      + '    describing a different tree — the exact silent-wrong-record this refusal exists to prevent.',
+    );
+  }
+  return findings;
+}
+
 function update() {
   const { root: objectui, why } = resolveObjectui();
   if (objectui === null) {
@@ -417,6 +493,36 @@ function update() {
   }
 
   const git = (...args) => execFileSync('git', ['-C', objectui, ...args], { encoding: 'utf8' }).trim();
+
+  // The HEAD-vs-pin join, BEFORE anything is read or written. It comes first
+  // because on the wrong revision every later reading is a reading of the wrong
+  // tree, and a dirty-tree or missing-delimiter complaint about it is noise.
+  let livePin = null;
+  try {
+    livePin = readFileSync(join(ROOT, PIN_FILE), 'utf8').trim();
+  } catch (error) {
+    console.error(
+      `\ncheck-sdui-lockstep --update: REFUSED — ${PIN_FILE} could not be read (${error.message}).\n`
+      + '  Nothing was recorded. The pin is what the record is stamped against, so a record taken\n'
+      + '  without it would name no revision at all.\n',
+    );
+    process.exit(1);
+  }
+  const recordability = judgeRecordability({ head: git('rev-parse', 'HEAD'), livePin });
+  if (recordability.length > 0) {
+    console.error('\ncheck-sdui-lockstep --update: REFUSED — nothing was recorded.\n');
+    for (const finding of recordability) console.error(`  ${finding}\n`);
+    console.error(
+      `  Park the checkout on the pin and re-run, from ${objectui}:\n\n`
+      + `    git -C ${objectui} fetch origin && git -C ${objectui} checkout ${livePin}\n`
+      + '    pnpm gen:sdui-lockstep\n\n'
+      + '  Or, if you meant to record a DIFFERENT revision, move the pin to it first — that is a\n'
+      + `  decision recorded in an issue, never a side effect of this generator:\n\n`
+      + '    scripts/bump-objectui.sh <sha>\n',
+    );
+    process.exit(1);
+  }
+
   const dirty = git('status', '--porcelain', '--', PARSER_SRC);
   if (dirty !== '') {
     console.error(
@@ -461,7 +567,9 @@ function update() {
       source: PARSER_SRC,
       files: theirs.files,
     },
-    recordedAgainstPin: readFileSync(join(ROOT, PIN_FILE), 'utf8').trim(),
+    // The same bytes the refusal above compared HEAD against — re-reading the file here
+    // would reopen the gap between what was CHECKED and what is STAMPED.
+    recordedAgainstPin: livePin,
     grammarRegion: {
       file: REGION_FILE,
       delimiter: REGION_DELIMITER,
@@ -535,12 +643,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The region reader': 7,
   'The verdict': 4,
   'Absence is loud: every degraded input REFUSES rather than passing': 8,
-  'The wiring this gate needs to be reachable at all': 9,
+  'The generator will not record a tree the pin does not name': 7,
+  'The wiring this gate needs to be reachable at all': 12,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 5;
+const SELF_TEST_BATTERY_FLOOR = 6;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -712,6 +821,50 @@ export function selfTest() {
       === 'code-set-empty',
   );
 
+  // ── The generator will not record a tree the pin does not name ───────────
+  //
+  // `judge()`'s `pin-moved` clause cannot reach this: it compares the STAMPED
+  // side against the pin file, two values from the same file. So the agreeing
+  // case below is asserted alongside the firing ones — a guard that fires on
+  // everything is as useless as one that fires on nothing, and the REVERSE
+  // direction is what says the good path still records.
+  battery('The generator will not record a tree the pin does not name');
+  const PIN_A = '5'.repeat(40);
+  const PIN_B = '7'.repeat(40);
+  const recKinds = (f) => f.map((x) => x.slice(1, x.indexOf(']'))).join(',');
+  check(
+    '⭐ REVERSE: a checkout sitting ON the pin is recordable — no finding, so recording proceeds',
+    judgeRecordability({ head: PIN_A, livePin: PIN_A }).length === 0,
+    recKinds(judgeRecordability({ head: PIN_A, livePin: PIN_A })),
+  );
+  check(
+    'a checkout one commit off the pin is refused, not recorded',
+    recKinds(judgeRecordability({ head: PIN_B, livePin: PIN_A })) === 'head-off-pin',
+  );
+  check(
+    'the refusal names BOTH revisions, so the operator can see which way to move',
+    judgeRecordability({ head: PIN_B, livePin: PIN_A })[0].includes(PIN_B.slice(0, 12))
+      && judgeRecordability({ head: PIN_B, livePin: PIN_A })[0].includes(PIN_A.slice(0, 12)),
+  );
+  // Absence and malformation are loud here too, and they are DISTINGUISHED: a
+  // pin that cannot be compared must not read as a checkout off the pin.
+  for (const [label, pin] of [
+    ['empty', ''],
+    ['a short sha', PIN_A.slice(0, 12)],
+    ['undefined', undefined],
+  ]) {
+    check(
+      `a pin that is ${label} refuses as pin-unusable, never as head-off-pin`,
+      recKinds(judgeRecordability({ head: PIN_A, livePin: pin })) === 'pin-unusable',
+      recKinds(judgeRecordability({ head: PIN_A, livePin: pin })),
+    );
+  }
+  check(
+    'a HEAD that did not parse to a commit id refuses as head-unusable, never as head-off-pin',
+    recKinds(judgeRecordability({ head: 'HEAD', livePin: PIN_A })) === 'head-unusable',
+    recKinds(judgeRecordability({ head: 'HEAD', livePin: PIN_A })),
+  );
+
   // ── The wiring this gate needs to be reachable at all ────────────────────
   battery('The wiring this gate needs to be reachable at all');
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
@@ -756,6 +909,28 @@ export function selfTest() {
   check(
     'the plain literal is still spelled too, so the file the gate opens is named as written',
     inCode.includes(`'${PIN_FILE}'`),
+  );
+  // The guard is only worth anything if `--update` actually consults it. A
+  // `judgeRecordability` that nothing calls is a phantom check: every case above
+  // stays green while the generator records from any tree it likes.
+  check(
+    'the generator CALLS the recordability judge, so the cases above are not phantom',
+    /judgeRecordability\(\{\s*head:/.test(inCode),
+  );
+  // Scoped to the record literal itself — a whole-file scan for the forbidden
+  // spelling would match THIS assertion's own pattern and never be able to pass.
+  // The bounds are asserted, so a rename cannot make the case vacuously green.
+  const recordOpen = inCode.indexOf('\n  const record = {');
+  const recordClose = inCode.indexOf('\n  writeFileSync(join(ROOT, RECORD_FILE)');
+  check(
+    "the generator's record literal is still addressable, so the case below is not vacuous",
+    recordOpen !== -1 && recordClose > recordOpen,
+    `open ${recordOpen}, close ${recordClose}`,
+  );
+  const recordLiteral = inCode.slice(recordOpen, recordClose);
+  check(
+    'and it stamps `recordedAgainstPin` from the value it compared, not from a second read',
+    /recordedAgainstPin: livePin,/.test(recordLiteral) && !/readFileSync/.test(recordLiteral),
   );
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
@@ -810,7 +985,8 @@ export function selfTest() {
   }
   console.log(
     'check:sdui-lockstep --self-test passed (the constant-vs-literal decomposition and its unresolvable '
-    + 'direction, the region reader in both drift directions, all four refusal classes, and the CI wiring)',
+    + 'direction, the region reader in both drift directions, all four refusal classes, the generator\'s '
+    + 'HEAD-vs-pin refusal in both directions, and the CI wiring)',
   );
 
   return SELF_TEST_VERDICT;
