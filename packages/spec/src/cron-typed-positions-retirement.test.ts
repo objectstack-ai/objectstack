@@ -60,14 +60,14 @@ const CONNECTOR_WELL_FORMED = { name: 'sap_erp', label: 'SAP ERP', type: 'saas' 
 const WARMUP_WELL_FORMED = { enabled: true, strategy: 'scheduled' as const, patterns: ['config:*'] };
 const CACHE_WELL_FORMED = {
   enabled: true,
-  strategy: 'hybrid' as const,
+  tiers: [{ name: 'l1', type: 'memory' as const }],
+  invalidation: [],
   warmup: WARMUP_WELL_FORMED,
 };
 const BACKUP_WELL_FORMED = { retention: { days: 30 }, destination: { type: 's3' as const, bucket: 'backups' } };
 const DR_TESTING_WELL_FORMED = { enabled: true, notificationChannel: '#dr-alerts' };
 const DR_PLAN_WELL_FORMED = {
-  name: 'primary_dr',
-  rpo: { value: 15, unit: 'minutes' as const },
+  rpo: { value: 15 },
   rto: { value: 1, unit: 'hours' as const },
   backup: BACKUP_WELL_FORMED,
   testing: DR_TESTING_WELL_FORMED,
