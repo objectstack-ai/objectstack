@@ -328,6 +328,7 @@ import {
     sandboxBusinessMessage,
     classifiedRefusalAnswer,
     boundedDeclaredUserMessage,
+    boundedDeclaredRefusalMessage,
     declaredHttpStatus,
     declaredServerFaultAnswer,
     sendThrownError,
@@ -1457,9 +1458,37 @@ async function wiredEngineOrLoud<T>(
  *    SECOND refusal code on this route would fall back to the flat fault answer
  *    until whoever adds it comes here. That is a visible, one-line extension,
  *    not a silent gap.
- *  - **A non-empty message.** This arm exists to relay PROSE; with none
- *    declared there is nothing to relay, and inventing one is the half
- *    {@link declaredServerFaultAnswer} refuses to invent too.
+ *  - **A DECLARED refusal.** [#16146] This was "a non-empty message", and it
+ *    was this arm's own opinion about which producer-declared 5xx keeps its
+ *    prose — the very question the relay could not answer when this was
+ *    written. It can now: the director seat ruled the distinction a
+ *    producer-side declaration on the published ADR-0112 envelope (decision
+ *    batch #58, 2026-09-06, option C) and the producer sets it
+ *    (`findReferencesToMeta`, `metadata-protocol`). So the condition is
+ *    {@link boundedDeclaredRefusalMessage} — the shared relay's own answer,
+ *    bound and all — and this route holds no refusal/fault opinion of its own
+ *    any more.
+ *
+ * ## [#16146] What was RETIRED here, and the one half that could not be
+ *
+ * The ruling says to retire this route-local patch once the relay handles
+ * `/references`, and its PROSE half is retired exactly as ruled: the sentence
+ * now reaches the wire because the relay keeps it at EVERY door, the bound is
+ * the shared one rather than this arm's unbounded pass-through, and deleting
+ * the call below would change no message on this route.
+ *
+ * ⚠️ What deleting it WOULD change is the ENVELOPE, and that is a different
+ * decision. This function also re-dresses the answer into the NESTED ADR-0112
+ * envelope this door's B exit publishes; the relay is flat
+ * (`{ error, code }` through `handleRouteError`), so removing this arm would
+ * put `body.error.code` back to `undefined` on the A exit and re-open the
+ * SECOND half of the defect #15685 measured and pinned positionally in
+ * `rest-server-meta-references-refusal-envelope.test.ts`. Envelope POSITION is
+ * owned by the `check:route-envelope` ratchet and is explicitly a separate
+ * line from vocabulary (ADR-0112's #9232 amendment says so in as many words),
+ * so it is not folded into a prose ruling. What remains here is therefore a
+ * pure position adapter over the shared answer — ⛔ not a second withhold arm,
+ * and ⛔ not a place to add a refusal rule.
  *
  * ⛔ And it does not re-derive `REFERENCE_SITES.unanswerableTargetTypes` to
  * decide whether the target was answerable. That set, its canonical-type fold
@@ -1473,8 +1502,8 @@ function notImplementedRefusalAnswer(
 ): { status: number; body: { error: { code: string; message: string } } } | undefined {
     if (declaredHttpStatus(error) !== 501) return undefined;
     if (error?.code !== 'NOT_IMPLEMENTED') return undefined;
-    const message = typeof error?.message === 'string' ? error.message : '';
-    if (message.length === 0) return undefined;
+    const message = boundedDeclaredRefusalMessage(error);
+    if (message === undefined) return undefined;
     return { status: 501, body: { error: { code: 'NOT_IMPLEMENTED', message } } };
 }
 

@@ -21968,6 +21968,21 @@ export class ObjectStackProtocolImplementation implements
             );
             (err as any).code = 'NOT_IMPLEMENTED';
             (err as any).status = 501;
+            // [#16146] The producer-side declaration ruled by decision batch #58
+            // (2026-09-06, option C): `ApiErrorSchema.refusal` says "the 5xx I
+            // declared is a deliberate REFUSAL whose `message` is authored for
+            // the caller", so the boundary keeps that message instead of
+            // withholding it as a fault. THIS is the throw the ruling names —
+            // the sentence three lines up is prescriptive per ADR-0110 D3 and
+            // reached the wire as "Internal server error" until a route-local
+            // patch caught it one route down. Setting it here is what retires
+            // that patch's refusal/fault opinion: the transport now reads what
+            // the protocol DECLARED instead of matching this route's literals.
+            //
+            // ⛔ Platform and driver code never sets this on a fault, and no
+            // rewrap in this file carries it — a refusal crossing the
+            // overlay-delete rewraps is withheld as a fault, deliberately.
+            (err as any).refusal = true;
             throw err;
         }
 
