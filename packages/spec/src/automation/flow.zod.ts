@@ -158,16 +158,17 @@ export const FlowVariableSchema = lazySchema(() => strictObject(
       'mis-declared input/output contract shipped without a diagnostic.',
   },
   {
-  name: z.string().describe('Variable name'),
-  type: z.string().describe('Data type (text, number, boolean, object, list)'),
-  isInput: z.boolean().default(false).describe('Is input parameter'),
-  isOutput: z.boolean().default(false).describe('Is output parameter'),
+  name: z.string().describe('Variable name').meta({ title: 'Name' }),
+  type: z.string().describe('Data type (text, number, boolean, object, list)').meta({ title: 'Type' }),
+  isInput: z.boolean().default(false).describe('Is input parameter').meta({ title: 'Input' }),
+  isOutput: z.boolean().default(false).describe('Is output parameter').meta({ title: 'Output' }),
   defaultValue: z.unknown().optional()
     .describe(
       'Value bound at run start when no parameter supplies one — this is what makes a ' +
       'declared variable always bound. An explicitly supplied param wins, including ' +
       '`false` and `null`; the boundary is `params[name] !== undefined`.',
-    ),
+    )
+    .meta({ title: 'Default Value' }),
 }));
 
 /**
@@ -301,15 +302,15 @@ function flowNodeObject() { return strictObject(
       'config shipped as a step that quietly ignored it.',
   },
   {
-  id: z.string().describe('Node unique ID'),
+  id: z.string().describe('Node unique ID').meta({ title: 'ID' }),
   type: z.string().min(1).describe(
     'Action type — a built-in FlowNodeAction id or a plugin-registered node type. ' +
     'Validated against the live action registry at registerFlow() (ADR-0018), not by a closed enum.',
-  ),
-  label: z.string().describe('Node label'),
+  ).meta({ title: 'Node Type' }),
+  label: z.string().describe('Node label').meta({ title: 'Label' }),
   
   /** Node Configuration Options (Specific to type) */
-  config: z.record(z.string(), z.unknown()).optional().describe('Node configuration'),
+  config: z.record(z.string(), z.unknown()).optional().describe('Node configuration').meta({ title: 'Configuration' }),
   
   /**
    * Connector Action Configuration
@@ -347,7 +348,7 @@ function flowNodeObject() { return strictObject(
       actionId: z.string().describe('Action key declared by the connector'),
       input: z.record(z.string(), z.unknown()).optional().describe('Mapped inputs for the action'),
     },
-  ).optional(),
+  ).optional().meta({ title: 'Connector Action' }),
 
   /**
    * UI Position (for the canvas).
@@ -367,10 +368,11 @@ function flowNodeObject() { return strictObject(
         'ever been written.',
     },
     { x: z.number(), y: z.number() },
-  ).optional(),
+  ).optional().meta({ title: 'Canvas Position' }),
 
   /** Node-level execution timeout */
-  timeoutMs: z.number().int().min(0).optional().describe('Maximum execution time for this node in milliseconds'),
+  timeoutMs: z.number().int().min(0).optional().describe('Maximum execution time for this node in milliseconds')
+    .meta({ title: 'Timeout (ms)' }),
 
   /** Node input schema declaration for Studio form generation and runtime validation */
   inputSchema: z.record(z.string(), strictObject(
@@ -398,7 +400,7 @@ function flowNodeObject() { return strictObject(
       required: z.boolean().default(false).describe('Whether the parameter is required'),
       description: z.string().optional().describe('Parameter description'),
     },
-  )).optional().describe('Input parameter schema for this node'),
+  )).optional().describe('Input parameter schema for this node').meta({ title: 'Input Schema' }),
 
   // `outputSchema` REMOVED (#3896 audit close-out): declared, never validated —
   // no engine path checked node outputs against it (ledger: dead).
@@ -491,7 +493,7 @@ function flowNodeObject() { return strictObject(
       + 'Run `os migrate meta --from 16` to list the mechanical edits for existing '
       + 'sources; apply them by hand.',
     ),
-  }).optional().describe('Configuration for wait node event resumption'),
+  }).optional().describe('Configuration for wait node event resumption').meta({ title: 'Wait Event' }),
 
   /**
    * Boundary Event Configuration (for 'boundary_event' nodes)
@@ -534,7 +536,7 @@ function flowNodeObject() { return strictObject(
     timerDuration: z.string().optional().describe('ISO 8601 duration for timer boundary events'),
     /** Signal name — only for signal boundary events */
     signalName: z.string().optional().describe('Named signal to catch'),
-  }).optional().describe('Configuration for boundary events attached to host nodes'),
+  }).optional().describe('Configuration for boundary events attached to host nodes').meta({ title: 'Boundary Event' }),
 }); }
 
 /**
@@ -559,9 +561,9 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
       'predicate or endpoint the author wrote was quietly ignored.',
   },
   {
-  id: z.string().describe('Edge unique ID'),
-  source: z.string().describe('Source Node ID'),
-  target: z.string().describe('Target Node ID'),
+  id: z.string().describe('Edge unique ID').meta({ title: 'ID' }),
+  source: z.string().describe('Source Node ID').meta({ title: 'From Node' }),
+  target: z.string().describe('Target Node ID').meta({ title: 'To Node' }),
   
   /**
    * Condition for this path (only for decision/branch nodes).
@@ -583,7 +585,7 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
     + 'envelope carrying a non-blank `source` — an `ast`-only envelope, and a `source` that is blank after '
     + 'trimming, are refused at authoring because the engine evaluates `source` alone and would otherwise answer '
     + 'a silent `false`.',
-  ),
+  ).meta({ title: 'Condition' }),
   
   type: z.enum(['default', 'fault', 'conditional', 'back'])
     .default('default')
@@ -591,8 +593,9 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
       'Connection type: default (normal flow), fault (error path), conditional (expression-guarded), '
       + 'or back (ADR-0044 declared back-edge — traversed normally at run time, but excluded from DAG '
       + 'cycle validation so a revise/rework loop can re-enter an earlier node)',
-    ),
-  label: z.string().optional().describe('Label on the connector'),
+    )
+    .meta({ title: 'Connection Type' }),
+  label: z.string().optional().describe('Label on the connector').meta({ title: 'Label' }),
 
   /**
    * Default Sequence Flow marker (BPMN Default Flow semantics).
@@ -614,7 +617,8 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
     .describe(
       'BPMN default flow: traverse this edge only when no sibling conditional edge of the same '
       + 'source node matched. Mutually exclusive with `condition`; at most one per source node.',
-    ),
+    )
+    .meta({ title: 'Default Path' }),
 }));
 
 /**

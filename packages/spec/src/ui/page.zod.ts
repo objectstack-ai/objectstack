@@ -43,9 +43,9 @@ export const PageRegionSchema = lazySchema(() => strictObject({
   history: PAGE_HISTORY,
   aliases: { id: 'name', region: 'name', children: 'components', items: 'components', content: 'components', size: 'width', span: 'width' },
 }, {
-  name: z.string().describe('Region name (e.g. "sidebar", "main", "header")'),
-  width: z.enum(['small', 'medium', 'large', 'full']).optional(),
-  components: z.array(z.lazy(() => PageComponentSchema)).describe('Components in this region')
+  name: z.string().describe('Region name (e.g. "sidebar", "main", "header")').meta({ title: 'Region' }),
+  width: z.enum(['small', 'medium', 'large', 'full']).optional().meta({ title: 'Width' }),
+  components: z.array(z.lazy(() => PageComponentSchema)).describe('Components in this region').meta({ title: 'Components' })
 }));
 
 // Page-component TYPES retired by name → the prescription an author who still
@@ -405,13 +405,15 @@ export const PageVariableSchema = lazySchema(() => strictObject({
     bindTo: 'the binding names the WRITER, not a target — `source` is the id of the component that writes this variable; readers reference it as `page.<name>`',
   },
 }, {
-  name: z.string().describe('Variable name. Exposed to expressions as `page.<name>`.'),
-  type: z.enum(['string', 'number', 'boolean', 'object', 'array', 'record_id']).default('string'),
+  name: z.string().describe('Variable name. Exposed to expressions as `page.<name>`.').meta({ title: 'Name' }),
+  type: z.enum(['string', 'number', 'boolean', 'object', 'array', 'record_id']).default('string').meta({ title: 'Type' }),
   defaultValue: z.unknown().optional()
-    .describe('Initial value. Defaults to a type-appropriate empty value when omitted.'),
+    .describe('Initial value. Defaults to a type-appropriate empty value when omitted.')
+    .meta({ title: 'Default Value' }),
   /** Source element binding — the component id that writes this variable. */
   source: z.string().optional()
-    .describe('Component id that writes this variable (e.g. an element:record_picker whose `id` matches).'),
+    .describe('Component id that writes this variable (e.g. an element:record_picker whose `id` matches).')
+    .meta({ title: 'Written By' }),
 }));
 
 // BlankPageLayoutItemSchema / BlankPageLayoutSchema removed — the `blank` page
