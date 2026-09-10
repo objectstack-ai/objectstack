@@ -60,7 +60,9 @@ import {
 // the bare `Connector` is now `z.input` — the shape the document annotates with
 // — and `ConnectorParsed` carries the parse result. The pinned FACT is
 // unchanged; the two names swapped sides, which is what the last describe block
-// in this file now measures.
+// in this file now measures. #16320 then retired `syncConfig.schedule` itself
+// (ADR-0049 — nothing evaluated it), the one key whose TYPE differed between
+// the two sides, so that block now measures the flip on the defaults alone.
 
 const SPEC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const SYNC_ARCHITECTURE = resolve(SPEC_DIR, 'docs/SYNC_ARCHITECTURE.md');
@@ -425,16 +427,23 @@ describe('[#5515] the bare `Connector` is the author shape; `ConnectorParsed` is
   // The fourth diagnostic, pinned as an ANNOTATION fact rather than fixed by
   // renaming this file's aliases. Direction stated before running: the SAME
   // literal is green under the bare `Connector` and red under `ConnectorParsed`,
-  // because `z.infer` is the post-parse shape — `syncConfig.schedule` becomes the
-  // `{ dialect, source }` envelope and every `.default()` key becomes required.
-  // Before ADR-0122 phase 2 these two probes read `ConnectorInput` and
-  // `Connector`. The literal and both verdicts are unchanged; only which name
-  // sits on which side moved, which is the whole claim of the flip as a test.
+  // because `z.infer` is the post-parse shape — every `.default()` key becomes
+  // required. Before ADR-0122 phase 2 these two probes read `ConnectorInput`
+  // and `Connector`; only which name sits on which side moved, which is the
+  // whole claim of the flip as a test.
+  //
+  // The literal used to carry `syncConfig: { schedule: '*/15 * * * *' }` as
+  // well — the one key whose TYPE differed between the sides (a bare cron
+  // string in, the `{ dialect, source }` envelope out), and the half of this
+  // block that asserted `dialect`. #16320 deleted that key (ADR-0049; its
+  // absence is owned by `cron-typed-positions-retirement.test.ts`), and no
+  // other key on `Connector` transforms its type at parse — so the flip is
+  // measured on the defaults alone, which were always the larger half.
   const literal = `{
     name: 'sap_erp_connector',
     label: 'SAP ERP Integration',
     type: 'saas',
-    syncConfig: { schedule: '*/15 * * * *' },
+    syncConfig: { strategy: 'incremental' },
   }`;
   const probes = {
     'author-connector': `
@@ -451,14 +460,19 @@ describe('[#5515] the bare `Connector` is the author shape; `ConnectorParsed` is
 
   const results = compileProbes(probes);
 
-  it('accepts the bare cron string and the omitted defaults under the bare `Connector`', () => {
+  it('accepts the omitted defaults under the bare `Connector`', () => {
     expect(render(results.get('author-connector')!)).toBe('');
   });
 
-  it('rejects the same literal under `ConnectorParsed`, on the cron envelope and the defaults', () => {
+  it('rejects the same literal under `ConnectorParsed`, on the defaults it left out', () => {
     const message = render(results.get('parsed-connector')!);
-    expect(message).toContain("Type 'string' is not assignable");
-    expect(message).toContain('dialect');
+    // TS2739 on the innermost mismatch first: the parse supplies `direction`,
+    // `realtimeSync`, `conflictResolution`, `batchSize`, `deleteMode` under
+    // `syncConfig` (and `enabled` / `status` one level up); `z.infer` demands
+    // them all of the author.
+    expect(message).toMatch(/TS2739: .* is missing the following properties/);
+    expect(message).toContain('direction');
+    expect(message).toContain('realtimeSync');
   });
 
   it('a parse turns the one into the other — the annotation is the only difference', () => {
@@ -466,13 +480,14 @@ describe('[#5515] the bare `Connector` is the author shape; `ConnectorParsed` is
       name: 'sap_erp_connector',
       label: 'SAP ERP Integration',
       type: 'saas',
-      syncConfig: { schedule: '*/15 * * * *' },
+      syncConfig: { strategy: 'incremental' },
     });
-    expect(parsed.syncConfig!.schedule).toEqual({ dialect: 'cron', source: '*/15 * * * *' });
     // The defaults the author left out, supplied by the parse. This is what
     // makes annotating the example with the parsed alias wrong rather than
     // merely inconvenient: it would demand the author write them all out.
     expect(parsed.syncConfig!.strategy).toBe('incremental');
+    expect(parsed.syncConfig!.direction).toBe('import');
+    expect(parsed.syncConfig).not.toHaveProperty('schedule');
     expect(parsed.enabled).toBe(true);
     expect(parsed.status).toBe('inactive');
   });

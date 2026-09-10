@@ -18,7 +18,7 @@ describe('Export Service Contract', () => {
       scheduleExport: async () => ({
         name: 'test_schedule',
         object: 'account',
-        schedule: { cronExpression: '0 0 * * *', timezone: 'UTC' },
+        schedule: { timezone: 'UTC' },
         delivery: { method: 'storage' },
         enabled: true,
       }),
@@ -83,7 +83,7 @@ describe('Export Service Contract', () => {
       scheduleExport: async () => ({
         name: 'test',
         object: 'account',
-        schedule: { cronExpression: '0 0 * * *', timezone: 'UTC' },
+        schedule: { timezone: 'UTC' },
         delivery: { method: 'storage' },
         enabled: true,
       }),
@@ -125,7 +125,7 @@ describe('Export Service Contract', () => {
       scheduleExport: async () => ({
         name: 'test',
         object: 'account',
-        schedule: { cronExpression: '0 0 * * *', timezone: 'UTC' },
+        schedule: { timezone: 'UTC' },
         delivery: { method: 'storage' },
         enabled: true,
       }),
