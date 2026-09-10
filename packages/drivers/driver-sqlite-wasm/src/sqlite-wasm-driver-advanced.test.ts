@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, assert } from 'vitest';
 import { SqliteWasmDriver } from '../src/index.js';
 
 describe('SqliteWasmDriver Advanced Operations (SQLite)', () => {
@@ -187,6 +187,7 @@ describe('SqliteWasmDriver Advanced Operations (SQLite)', () => {
         await driver.commitTransaction(trx);
 
         const result = await driver.findOne('orders', { where: { id: 'trx1' } });
+        assert(result !== null, 'findOne answered the not-found arm for a seeded id');
         expect(result).toBeDefined();
         expect(result.customer).toBe('TxUser');
       } catch (e) {
@@ -249,6 +250,7 @@ describe('SqliteWasmDriver Advanced Operations (SQLite)', () => {
         expect(created).toBeDefined();
 
         const updated = await driver.findOne('orders', { where: { id: '1' } });
+        assert(updated !== null, 'findOne answered the not-found arm for a seeded id');
         expect(updated.status).toBe('shipped');
 
         const deleted = await driver.findOne('orders', { where: { id: '5' } });
@@ -281,6 +283,7 @@ describe('SqliteWasmDriver Advanced Operations (SQLite)', () => {
       await driver.create('nullable_test', { id: '1', name: null, value: null });
 
       const result = await driver.findOne('nullable_test', { where: { id: '1' } });
+      assert(result !== null, 'findOne answered the not-found arm for a seeded id');
       expect(result).toBeDefined();
       expect(result.name).toBeNull();
       expect(result.value).toBeNull();
@@ -349,6 +352,7 @@ describe('SqliteWasmDriver Advanced Operations (SQLite)', () => {
 
     it('should handle findOne with query parameter', async () => {
       const result = await driver.findOne('orders', { where: { customer: 'Charlie' } });
+      assert(result !== null, 'findOne answered the not-found arm for a seeded id');
 
       expect(result).toBeDefined();
       expect(result.customer).toBe('Charlie');
